@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 5c7bcd121d3a6c042a719da08a1ef6cb
+timeCreated: 1505906284
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/Resources/RuntimeInspector/ColorPicker.prefab
+  uploadId: 744571

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 412232a98a56d684a9350a77ef21058d
+timeCreated: 1429510354
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/ExternalResources/ColorWheel/Visuals/ColorWheelMaterial.mat
+  uploadId: 744571

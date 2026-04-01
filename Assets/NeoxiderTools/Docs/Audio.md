@@ -1,0 +1,113 @@
+# Аудиосистема (Audio)
+
+**Что это:** модуль звука: AM (воспроизведение эффектов и музыки), AMSettings (громкость, мьют), AudioControl (слайдеры/тоглы), PlayAudio, PlayAudioBtn, RandomMusicController, SettingMixer. Скрипты в `Scripts/Audio/`.
+
+**Оглавление:** см. [Audio/README.md](Audio/README.md) и ссылки на классы ниже.
+
+---
+
+## Основные классы
+
+### `AM`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/AudioSimple/AM.cs`
+
+Центральный аудиоменеджер. Это синглтон, отвечающий за воспроизведение звуковых эффектов и музыкальных треков. Он управляет двумя компонентами `AudioSource`: одним для эффектов (Efx) и одним для музыки.
+
+**Публичные свойства:**
+- `Efx` (`AudioSource`): Компонент `AudioSource` для звуковых эффектов.
+- `Music` (`AudioSource`): Компонент `AudioSource` для музыки.
+- `startVolumeEfx` (`float`): Начальная громкость для звуковых эффектов.
+- `startVolumeMusic` (`float`): Начальная громкость для музыки.
+
+**Публичные методы:**
+- `Play(int id)`: Воспроизводит звуковой эффект из массива `_sounds` по его индексу.
+- `Play(int id, float volume)`: Воспроизводит звуковой эффект с указанной громкостью.
+- `PlayMusic(int id)`: Воспроизводит музыкальный трек из массива `_musicClips` по его индексу.
+- `PlayMusic(int id, float volume)`: Воспроизводит музыкальный трек с указанной громкостью.
+- `SetVolume(float volume, bool efx)`: Устанавливает громкость для `AudioSource` эффектов или музыки.
+- `ApplyStartVolumes()`: Применяет стартовые громкости к `AudioSource`.
+
+### `AMSettings`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/AMSettings.cs`
+
+Синглтон для управления глобальными настройками звука. Он предоставляет интерфейс для управления громкостью и состоянием отключения звука для музыки и эффектов, и может быть связан с `AudioMixer`.
+
+**Публичные поля:**
+- `audioMixer` (`AudioMixer`): Опциональный `AudioMixer` для управления громкостью.
+- `MasterVolume` (`string`): Имя параметра общей громкости в микшере.
+- `MusicVolume` (`string`): Имя параметра громкости музыки в микшере.
+- `EfxVolume` (`string`): Имя параметра громкости эффектов в микшере.
+- `OnMuteEfx` (`UnityEvent<bool>`): Событие, вызываемое при изменении состояния отключения звука эффектов.
+- `OnMuteMusic` (`UnityEvent<bool>`): Событие, вызываемое при изменении состояния отключения звука музыки.
+- `startEfxVolume` (`float`): Начальная громкость для эффектов.
+- `startMusicVolume` (`float`): Начальная громкость для музыки.
+
+**Публичные свойства:**
+- `efx` (`AudioSource`): `AudioSource` эффектов из `AM`.
+- `music` (`AudioSource`): `AudioSource` музыки из `AM`.
+- `IsActiveEfx` (`bool`): Возвращает `true`, если звук эффектов не отключен.
+- `IsActiveMusic` (`bool`): Возвращает `true`, если звук музыки не отключен.
+
+**Публичные методы:**
+- `SetEfx(bool active)`: Включает или отключает звук у `AudioSource` эффектов.
+- `SetMusic(bool active)`: Включает или отключает звук у `AudioSource` музыки.
+- `SetMusicAndEfx(bool active)`: Устанавливает состояние отключения звука как для музыки, так и для эффектов.
+- `SetMusicVolume(float percent)`: Устанавливает громкость музыки (от 0 до 1).
+- `SetEfxVolume(float percent)`: Устанавливает громкость эффектов (от 0 до 1).
+- `SetMasterVolume(float percent)`: Устанавливает общую громкость в `AudioMixer`.
+- `SetMusicAndEfxVolume(float percent)`: Устанавливает громкость как для музыки, так и для эффектов.
+- `ToggleMusic()`: Переключает состояние отключения звука музыки.
+- `ToggleEfx()`: Переключает состояние отключения звука эффектов.
+- `ToggleMusicAndEfx()`: Переключает состояние отключения звука как для музыки, так и для эффектов.
+
+## Компоненты пользовательского интерфейса
+
+### `AudioControl`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/View/AudioControl.cs`
+
+Универсальный компонент пользовательского интерфейса, который связывает `Slider` или `Toggle` с `AMSettings` для управления звуком.
+
+**Публичные перечисления:**
+- `ControlType`: `Master`, `Music`, `Efx`
+- `UIType`: `Auto`, `Toggle`, `Slider`
+
+### `PlayAudioBtn`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/AudioSimple/PlayAudioBtn.cs`
+
+Простой компонент для воспроизведения звукового эффекта из `AM` при нажатии на кнопку пользовательского интерфейса `Button`.
+
+**Публичные методы:**
+- `AudioPlay()`: Воспроизводит звуковой эффект, указанный в `_idClip`.
+
+## Другие компоненты
+
+### `PlayAudio`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/AudioSimple/PlayAudio.cs`
+
+Компонент для воспроизведения звука из `AM` по его идентификатору. Позволяет настроить ID клипа, громкость и воспроизведение при старте сцены.
+
+**Публичные методы:**
+- `AudioPlay()`: Воспроизводит звуковой эффект с заданными в компоненте параметрами.
+
+### `SettingMixer`
+**Пространство имен:** `Neo.Audio`
+**Путь:** `Scripts/Audio/SettingMixer.cs`
+
+Компонент для управления одним параметром экспозиции в `AudioMixer`. Три режима ввода: дБ (−80…20), нормализованный 0–1, bool (вкл/выкл).
+
+**Публичные поля:**
+- `parameterName` (`string`): Имя параметра экспозиции в микшере (например MasterVolume, MusicVolume, EfxVolume).
+- `audioMixer` (`AudioMixer`): Ссылка на AudioMixer.
+- `readonly float MaxDb = 20`, `MinDb = -80`: Диапазон громкости в дБ.
+
+**Публичные методы (три режима):**
+- `SetVolumeDb(float volumeDb)`: Громкость в дБ (−80…20) для `parameterName`.
+- `SetVolumeDb(string name, float volumeDb)`: То же для произвольного параметра.
+- `SetVolume(float normalizedVolume)`: Нормализованная громкость 0–1; ноль гарантированно ставит mute.
+- `SetVolumeEnabled(bool enabled)`: Вкл/выкл по флагу (true = полная громкость, false = mute).
+- `GetVolume()`: Возвращает текущую нормализованную громкость (0–1).

@@ -1,0 +1,20 @@
+{
+    "enableAttributeSearch": true,
+    "rootFolder": "_source",
+    "folders": [
+        "Audio",
+        "Prefabs",
+        "Scripts",
+        "Animations",
+        "Sprites",
+        "Materials",
+        "Textures",
+        "Models",
+        "Scenes",
+        "Resources",
+        "Settings",
+        "Editor",
+        "TTF"
+    ],
+    "validateFoldersOnStart": true
+}

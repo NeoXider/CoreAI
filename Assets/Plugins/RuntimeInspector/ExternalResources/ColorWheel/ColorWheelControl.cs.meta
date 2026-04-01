@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: ed2c6afe74ecb7548b7c676d57a2373c
+timeCreated: 1429517417
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/ExternalResources/ColorWheel/ColorWheelControl.cs
+  uploadId: 744571

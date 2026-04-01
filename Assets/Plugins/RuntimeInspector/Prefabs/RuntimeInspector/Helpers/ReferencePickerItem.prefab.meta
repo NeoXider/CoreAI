@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 6b872b53ee02cdc42845642c1b152390
+timeCreated: 1506440063
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/Prefabs/RuntimeInspector/Helpers/ReferencePickerItem.prefab
+  uploadId: 744571

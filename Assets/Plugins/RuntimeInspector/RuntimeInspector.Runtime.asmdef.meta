@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 5350fc5f2dee5894c94015dbe725cf05
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/RuntimeInspector.Runtime.asmdef
+  uploadId: 744571

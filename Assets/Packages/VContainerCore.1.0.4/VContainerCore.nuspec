@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>VContainerCore</id>
+    <version>1.0.4</version>
+    <title>VContainerCore</title>
+    <authors>nazgul30</authors>
+    <license type="file">LICENSE</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>icon.png</icon>
+    <readme>README.md</readme>
+    <description>VContainerCore description.</description>
+    <releaseNotes>VContainerCore release.</releaseNotes>
+    <copyright>© 2025 nazgul30</copyright>
+    <repository type="git" url="https://github.com/nazgull30/VContainerCore" commit="5d54c197eae0df13b8b42001c53a61a97d5feb2c" />
+    <dependencies>
+      <group targetFramework="net7.0">
+        <dependency id="GodotSharp" version="4.3.0" exclude="Build,Analyzers" />
+        <dependency id="PdEventBus" version="1.0.2" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

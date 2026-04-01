@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: b7340ba69c557ad44a95011249f11829
+timeCreated: 1505737703
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/Prefabs/RuntimeInspector/Fields/Vector4Field.prefab
+  uploadId: 744571

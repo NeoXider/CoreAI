@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 58feae853e7be46429c9eb218ce89d38
+timeCreated: 1505739889
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 111349
+  packageName: Runtime Inspector & Hierarchy
+  packageVersion: 1.7.4
+  assetPath: Assets/Plugins/RuntimeInspector/Prefabs/RuntimeInspector/Fields/NumberField.prefab
+  uploadId: 744571
