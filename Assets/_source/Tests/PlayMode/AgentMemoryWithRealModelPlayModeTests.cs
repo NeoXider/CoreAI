@@ -65,7 +65,8 @@ namespace CoreAI.Tests.PlayMode
 
             // Диалог 1: просим модель записать память через директиву.
             var sink1 = new ListSink();
-            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, policy);
+            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, policy,
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             var t1 = orch1.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -79,7 +80,8 @@ namespace CoreAI.Tests.PlayMode
 
             // Диалог 2: новый оркестратор (как отдельная сессия).
             var sink2 = new ListSink();
-            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, policy);
+            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, policy,
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             var t2 = orch2.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -125,7 +127,8 @@ namespace CoreAI.Tests.PlayMode
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
 
             var sink1 = new ListSink();
-            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, policy);
+            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, policy,
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             var t1 = orch1.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -138,7 +141,8 @@ namespace CoreAI.Tests.PlayMode
             Assert.AreEqual("remember: apples", st.Memory.Trim(), "Память должна быть строго 'remember: apples' для стабильности теста.");
 
             var sink2 = new ListSink();
-            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, policy);
+            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, policy,
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             var t2 = orch2.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,

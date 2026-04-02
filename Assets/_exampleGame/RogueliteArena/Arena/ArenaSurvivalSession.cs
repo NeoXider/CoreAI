@@ -21,13 +21,20 @@ namespace CoreAI.ExampleGame.Arena
 
         public event System.Action<int> AliveEnemiesChanged;
 
+        /// <summary>Вызывается при смене номера волны (для вспомогательных LLM-задач в примере).</summary>
+        public event System.Action<int> CurrentWaveChanged;
+
         public void RegisterPrimaryPlayer(Transform playerTransform, ArenaPlayerHealth health)
         {
             PrimaryPlayerTransform = playerTransform;
             PrimaryPlayerHealth = health;
         }
 
-        public void SetCurrentWave(int wave) => CurrentWave = wave;
+        public void SetCurrentWave(int wave)
+        {
+            CurrentWave = wave;
+            CurrentWaveChanged?.Invoke(wave);
+        }
 
         public void NotifyEnemySpawned()
         {

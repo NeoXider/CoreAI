@@ -80,7 +80,8 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
             var store = new InMemoryStore();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "remember_this=1" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
@@ -97,7 +98,8 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
             var store = new InMemoryStore();
             store.Save(BuiltInAgentRoleIds.Analyzer, new AgentMemoryState { Memory = "should_not_be_seen" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Analyzer, Hint = "x" });
 
@@ -117,7 +119,8 @@ namespace CoreAI.Tests.EditMode
             var telemetry = new SessionTelemetryCollector();
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
             var store = new InMemoryStore();
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
@@ -139,7 +142,8 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
             var store = new InMemoryStore();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "A" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
@@ -157,7 +161,8 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider());
             var store = new InMemoryStore();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "A" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
@@ -174,14 +179,16 @@ namespace CoreAI.Tests.EditMode
 
             // Диалог 1: модель сама записывает память.
             var sink1 = new ListSink();
-            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             await orch1.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "store something" });
             Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out var st));
             Assert.AreEqual("remember: apples", st.Memory);
 
             // Диалог 2: новый оркестратор (как новая сессия), но то же хранилище памяти.
             var sink2 = new ListSink();
-            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, new AgentMemoryPolicy());
+            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
             await orch2.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "what do you remember?" });
 
             StringAssert.Contains("## Memory", llm.SecondCallSystemPrompt);

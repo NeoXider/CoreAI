@@ -1,6 +1,8 @@
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
+using Unity.AI.Navigation;
 using VContainer;
 using CoreAI.Session;
 
@@ -35,10 +37,19 @@ namespace CoreAI.ExampleGame.Arena
         [SerializeField]
         private bool spawnCompanionBot = true;
 
+        [Header("NavMesh")]
+        [Tooltip("Печь NavMesh по полу (если bake не успел — враги падают на прямое движение).")]
+        [SerializeField]
+        private bool buildNavMeshAtRuntime = true;
+
         [Header("Отладка")]
         [Tooltip("Один раз при сборке арены: какие роли LLM реально вызываются в примере.")]
         [SerializeField]
         private bool logOnStartRoles = true;
+
+        [Tooltip("Опционально: пресеты волн для сравнения (read-only, не подключается автоматически).")]
+        [SerializeField]
+        private ArenaWavePresetLibrary wavePresetLibrary;
 
         private void Start()
         {
@@ -58,6 +69,12 @@ namespace CoreAI.ExampleGame.Arena
                 var scale = arenaHalfSize / 5f;
                 floor.transform.localScale = new Vector3(scale, 1f, scale);
                 ApplyLitColor(floor.GetComponent<Renderer>(), new Color(0.22f, 0.28f, 0.22f));
+                if (buildNavMeshAtRuntime)
+                {
+                    var surface = floor.AddComponent<NavMeshSurface>();
+                    surface.collectObjects = CollectObjects.All;
+                    surface.BuildNavMesh();
+                }
             }
 
             var sessionGo = new GameObject("ArenaSurvivalSession");
@@ -110,7 +127,6 @@ namespace CoreAI.ExampleGame.Arena
             var hudRoot = new GameObject("ArenaHUD");
             hudRoot.transform.SetParent(root.transform, false);
             var hud = hudRoot.AddComponent<ArenaSurvivalHud>();
-            hud.Bind(session, health);
 
             if (spawnCompanionBot)
             {
@@ -123,15 +139,23 @@ namespace CoreAI.ExampleGame.Arena
             enemyTemplate.transform.SetParent(root.transform, false);
 
             ArenaCreatorWavePlanner planner = null;
+            ArenaAuxLlmEveryNWaves auxLlm = null;
             if (creatorPlansWaves)
             {
                 var scope = scopeForTelemetry;
                 if (scope != null)
                 {
                     planner = root.AddComponent<ArenaCreatorWavePlanner>();
-                    planner.Init(scope.Container.Resolve<CoreAI.Ai.IAiOrchestrationService>(), session);
+                    planner.Init(
+                        scope.Container.Resolve<CoreAI.Ai.IAiOrchestrationService>(),
+                        session,
+                        telemetryCollector);
+                    auxLlm = root.AddComponent<ArenaAuxLlmEveryNWaves>();
+                    auxLlm.Init(scope.Container.Resolve<CoreAI.Ai.IAiOrchestrationService>(), session);
                 }
             }
+
+            hud.Bind(session, health, planner, auxLlm);
 
             var dirGo = new GameObject("ArenaSurvivalDirector");
             dirGo.transform.SetParent(root.transform, false);
@@ -140,10 +164,14 @@ namespace CoreAI.ExampleGame.Arena
 
             if (logOnStartRoles)
             {
+                var presetInfo = wavePresetLibrary != null
+                    ? $" Пресеты волн в ассете: {wavePresetLibrary.Presets.Count}."
+                    : "";
                 Debug.Log(
-                    "[CoreAI.ExampleGame] Роли LLM: Creator — план волны (ArenaCreatorWavePlanner), один запрос на волну; " +
-                    "Programmer — только F9 (CoreAiLuaHotkey); AINpc / PlayerChat ареной не вызываются. " +
-                    "Один LLMUnity на сцене = одна GGUF на все роли (разные system prompt). Компаньон — бот без LLM.");
+                    "[CoreAI.ExampleGame] Роли LLM: Creator — план волны; раз в N волн — Analyzer и AINpc (ArenaAuxLlmEveryNWaves); " +
+                    "Programmer — F9 (CoreAiLuaHotkey). Маршрутизация по ролям — LlmRoutingManifest на CoreAILifetimeScope." +
+                    presetInfo +
+                    " Компаньон — бот без LLM.");
             }
         }
 
@@ -195,6 +223,10 @@ namespace CoreAI.ExampleGame.Arena
             box.size = new Vector3(0.8f, 1.2f, 0.8f);
 
             go.AddComponent<ArenaEnemyBrain>();
+            var nav = go.AddComponent<NavMeshAgent>();
+            nav.height = 1.2f;
+            nav.radius = 0.35f;
+            nav.baseOffset = 0.6f;
             return go;
         }
 

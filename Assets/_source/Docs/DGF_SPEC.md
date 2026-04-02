@@ -54,26 +54,26 @@
 - **MCPForUnity** (`com.coplaydev.unity-mcp`) — автоматизация редактора; **обязательный** путь запуска тестов для агента/CI в связке с Cursor — см. **§11–12**.
 - **LLM for Unity** ([LLMUnity](https://github.com/undreamai/LLMUnity), пакет `ai.undream.llm` в manifest) — локальный/удалённый инференс (llama.cpp), `LLM` / `LLMAgent`, grammar/RAG по документации пакета. В ядре по-прежнему вводится **`ILlmClient`**; **эталонная** реализация — тонкий адаптер над LLMUnity + режим **stub** (§5.2).
 
-### 3.2 Сборка `CoreAI.Core` (`Assets/_source/Core/CoreAI.Core.asmdef`)
+### 3.2 Сборка `CoreAI.Core` (`Packages/com.coreai.core/Runtime/Core/CoreAI.Core.asmdef`)
 
 - `noEngineReferences: true`; ссылки: **VContainer**, **MoonSharp.Interpreter** (имя asmdef UPM MoonSharp).
 - Портативная логика: контракты ИИ, оркестратор MVP, песочница Lua, DTO снимка сессии.
 
-### 3.3 Сборка `CoreAI.Source` (`Assets/_source/Runtime/CoreAI.Source.asmdef`)
+### 3.3 Сборка `CoreAI.Source` (`Packages/com.coreai.core/Runtime/Source/CoreAI.Source.asmdef`)
 
 - Ссылки: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**, **undream.llmunity.Runtime** (LLMUnity).
 - **R3**, **UniTask** — в manifest есть; в asmdef подключать по мере использования в коде.
 
 ### 3.4 Композиция и сцена
 
-- **`CoreAILifetimeScope`**: `RegisterCore()` — логгер, MessagePipe, брокер **`ApplyAiGameCommand`**, `IAiGameCommandSink`; при необходимости **OpenAI HTTP** (`OpenAiHttpLlmSettings`); затем **`ILlmClient`** как **`LoggingLlmClientDecorator`** вокруг фактической реализации (**OpenAiChatLlmClient** / **LlmUnityLlmClient** / **StubLlmClient** в зависимости от сцены и флагов; символ **`COREAI_NO_LLM`** — без LLMUnity-адаптера). Декоратор: лог **`GameLogFeature.Llm`**, **`TraceId`** в запросе (проставляет оркестратор), **таймаут** одного вызова (**Llm Request Timeout Seconds**, **0** = выкл). **`RegisterCorePortable()`** — песочница, **`LuaAiEnvelopeProcessor`**, оркестратор, снимок сессии, авторитет solo; **`IGameLuaRuntimeBindings`** / **`ILuaExecutionObserver`**. **`ApplyAiGameCommand`** несёт **`TraceId`**; ремонт Lua сохраняет его в **`AiTaskRequest`**. Entry points: сначала **`AiGameCommandRouter`**, затем **`CoreAIGameEntryPoint`**. Игровые feature-scope'ы — с **Parent** на этот корень.
+- **`CoreAILifetimeScope`**: `RegisterCore()` — логгер, MessagePipe, брокер **`ApplyAiGameCommand`**, `IAiGameCommandSink`; **опционально** **`LlmRoutingManifest`** + **`LlmClientRegistry`** / **`ILlmRoutingController`**, иначе legacy **OpenAI HTTP** (`OpenAiHttpLlmSettings`) + LLMUnity; затем **`ILlmClient`** как **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или напрямую **OpenAiChatLlmClient** / **LlmUnityLlmClient** / **StubLlmClient** при выключенной маршрутизации; символ **`COREAI_NO_LLM`** — без LLMUnity-адаптера). Декоратор: лог **`GameLogFeature.Llm`**, в логе бэкенд **`RoutingLlmClient→…`**, **`TraceId`**, **таймаут** (**Llm Request Timeout Seconds**, **0** = выкл). Перед **`RegisterCorePortable()`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null или **`LoggingAiOrchestrationMetrics`** при **`GameLogFeature.Metrics`**). **`RegisterCorePortable()`** — песочница, **`LuaAiEnvelopeProcessor`**, **`AiOrchestrator`** + **`QueuedAiOrchestrator`** как **`IAiOrchestrationService`** (лимит параллелизма, **`AiTaskRequest.Priority`**, **`CancellationScope`**), **`IRoleStructuredResponsePolicy`** (по умолчанию no-op), снимок сессии, авторитет solo; **`IGameLuaRuntimeBindings`** / **`ILuaExecutionObserver`**. **`ApplyAiGameCommand`** несёт **`TraceId`**; ремонт Lua сохраняет его в **`AiTaskRequest`**. Entry points: сначала **`AiGameCommandRouter`**, затем **`CoreAIGameEntryPoint`**. Игровые feature-scope'ы — с **Parent** на этот корень.
 - **`CoreAIGameEntryPoint`**: старт + тестовый вызов оркестратора (bootstrap).
 - Сцена ядра: **`Assets/_source/Scenes/_mainCoreAI.unity`** (имя в редакторе может отображаться как `_mainCoreAI`; в Build Settings при необходимости сделать **стартовой** для разработки шаблона).
 - **Game Log Settings** (опционально): `Resources/GameLogSettings.asset` или свой asset на scope.
 
 ---
 
-## 4. Целевая архитектура модулей (`_source/Runtime`)
+## 4. Целевая архитектура модулей (`Packages/com.coreai.core/Runtime/Source`)
 
 Рекомендуемое разбиение (папки наращивать по мере реализации):
 
@@ -344,16 +344,16 @@ flowchart LR
 
 | Id | Критерий |
 |----|----------|
-| **F0** | **Сделано:** в репозитории есть **`Packages/com.coreai.core/package.json`** — имя **`com.coreai.core`**, версия (**semver** в поле `version`), зависимости: **AI Navigation** (`com.unity.ai.navigation`), Input System, uGUI, VContainer, MessagePipe (+ VContainer), UniTask, R3, LLMUnity, MoonSharp. Подробности — **`Packages/com.coreai.core/README.md`**. |
-| F1 | Подключить пакет в корневой **`Packages/manifest.json`** как `"com.coreai.core": "file:com.coreai.core"` **после** переноса (или дублирования) asmdef/исходников ядра под структуру UPM, чтобы не было двойного разрешения одних и тех же зависимостей. |
-| F2 | Перенос **`Assets/_source`** (и при необходимости тестов) в **`Runtime/`** / **`Editor/`** внутри пакета; samples — **`_exampleGame`** или отдельный **`com.coreai.examples`**. |
+| **F0** | **Сделано:** **`Packages/com.coreai.core/package.json`** — **`com.coreai.core`**, зависимости: VContainer, MessagePipe (+ VContainer), MoonSharp, LLMUnity. |
+| **F1** | **Сделано:** в корневом **`Packages/manifest.json`** — **`"com.coreai.core": "file:com.coreai.core"`**. |
+| **F2** | **Сделано:** **`CoreAI.Core`** и **`CoreAI.Source`** перенесены в **`Packages/com.coreai.core/Runtime/Core`** и **`…/Runtime/Source`**; тесты и **`Assets/_source/Resources`** остаются в проекте. |
 | F3 | Публикация: git URL, теги под `version`, опционально OpenUPM; синхронизация версии в `package.json` с релизами. |
 
 ---
 
 ## 14. Саммари для вставки в контекст (копипаст)
 
-**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** VContainer + MessagePipe + R3 + UniTask + MoonSharp + **[LLMUnity](https://github.com/undreamai/LLMUnity)** (`ai.undream.llm`) + MCPForUnity в manifest; **`CoreAI.Core`** (контракты `ILlmClient`, **`LlmCompletionRequest`/`Result`** с токенами и **`TraceId`**, **`ApplyAiGameCommand.TraceId`**, stub, оркестратор MVP, песочница Lua, **`LuaAiEnvelopeProcessor`**) + **`CoreAI.Source`** (DI, декоратор LLM с логом и таймаутом, LLMUnity + OpenAI HTTP, MessagePipe, роутер команд с **traceId** в логе); сцены **`_mainCoreAI`**, пример **`RogueliteArena`**. **Сборка:** `CoreAI.Core` + `CoreAI.Source`. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`, MCP §11.2. **Define:** `COREAI_NO_LLM` — без LLMUnity-адаптера (§5.2). **Референс:** Last-War (`LuaBehaviour`, DI).
+**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** UPM **`com.coreai.core`** (`Packages/com.coreai.core`): **`CoreAI.Core`** + **`CoreAI.Source`** (маршрутизация LLM **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, метрики **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity в manifest проекта; сцены **`Assets/_source/Scenes/_mainCoreAI`**, пример **`RogueliteArena`**. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`. **Define:** `COREAI_NO_LLM` (§5.2).
 
 ---
 
@@ -377,3 +377,4 @@ flowchart LR
 | 0.14 | §3.4: `LoggingLlmClientDecorator`, таймаут LLM, `TraceId` в запросе/команде, `GameLogFeature.Llm`, §14 саммари |
 | 0.15 | §Фаза F: UPM `com.coreai.core` (`package.json`, зависимости включая AI Navigation); план F1–F3 |
 | 0.16 | Шапка: автор репозитория Neoxider (ссылка на GitHub) |
+| 0.17 | §3.4: маршрутизация LLM, очередь оркестратора, метрики; фаза F1–F2 (UPM перенос Core/Source в пакет) |

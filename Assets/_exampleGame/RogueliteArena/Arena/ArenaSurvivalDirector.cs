@@ -4,6 +4,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Session;
 using UnityEngine;
+using UnityEngine.AI;
 using VContainer;
 using VContainer.Unity;
 
@@ -67,6 +68,7 @@ namespace CoreAI.ExampleGame.Arena
             {
                 if (_session.RunEnded)
                     yield break;
+                var waveStartRt = Time.realtimeSinceStartup;
                 PushWaveTelemetry(wave);
                 _session.SetCurrentWave(wave);
                 ArenaWavePlan plan = null;
@@ -74,7 +76,7 @@ namespace CoreAI.ExampleGame.Arena
                 {
                     plan = ArenaLocalWavePlanner.CreatePlan(wave, _session, _waveSchedule);
                 }
-                else if (_creatorPlanner != null)
+                else if (_creatorPlanner != null && !_creatorPlanner.ForceLinearWavePlans)
                 {
                     // Запрос Creator (асинхронно) — ждём ответ LLM до creatorPlanWaitSeconds, иначе запасной план.
                     _creatorPlanner.RequestWavePlan(wave);
@@ -83,7 +85,7 @@ namespace CoreAI.ExampleGame.Arena
                     {
                         if (_creatorPlanner.TryConsumeLatestPlan(wave, out plan))
                             break;
-                        t += Time.deltaTime;
+                        t += Time.unscaledDeltaTime;
                         yield return null;
                     }
                 }
@@ -106,7 +108,8 @@ namespace CoreAI.ExampleGame.Arena
                     yield return null;
                 if (_session.RunEnded)
                     yield break;
-                yield return new WaitForSeconds(pauseBetweenWaves);
+                PushLastWaveDurationTelemetry(Time.realtimeSinceStartup - waveStartRt);
+                yield return new WaitForSecondsRealtime(pauseBetweenWaves);
             }
 
             if (!_session.RunEnded)
@@ -121,7 +124,21 @@ namespace CoreAI.ExampleGame.Arena
             if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp))
                 return;
             if (tp is SessionTelemetryCollector collector)
+            {
                 collector.SetTelemetry("wave", wave);
+                collector.SetTelemetry("arena.wave", wave);
+            }
+        }
+
+        private void PushLastWaveDurationTelemetry(float seconds)
+        {
+            var scope = LifetimeScope.Find<CoreAILifetimeScope>();
+            if (scope == null)
+                return;
+            if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp))
+                return;
+            if (tp is SessionTelemetryCollector collector)
+                collector.SetTelemetry("arena.last_wave_duration_sec", seconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private void SpawnOne(float hpMult, float dmgMult, float moveSpeedMult, float radius)
@@ -135,7 +152,22 @@ namespace CoreAI.ExampleGame.Arena
                 brain.Configure(_session);
                 brain.ApplyWaveStats(hpMult, dmgMult, moveSpeedMult);
             }
+
+            var agent = e.GetComponent<NavMeshAgent>();
+            var enableNav = false;
+            if (agent != null)
+            {
+                agent.enabled = false;
+                if (NavMesh.SamplePosition(pos, out var hit, 12f, NavMesh.AllAreas))
+                {
+                    e.transform.position = hit.position;
+                    enableNav = true;
+                }
+            }
+
             e.SetActive(true);
+            if (agent != null && enableNav)
+                agent.enabled = true;
         }
     }
 }

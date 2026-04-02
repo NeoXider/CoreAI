@@ -2,7 +2,7 @@
 
 **Актуальная карта кода:** [DEVELOPER_GUIDE.md §3](../DEVELOPER_GUIDE.md) (поток `RunTaskAsync` → `ILlmClient` → `ApplyAiGameCommand` → Lua).
 
-**Норматив:** [DGF_SPEC.md §6](../DGF_SPEC.md) — очередь, приоритеты, таймауты, лимит параллелизма (целевое состояние; в MVP — один **`AiOrchestrator`** без очереди).
+**Норматив:** [DGF_SPEC.md §3.4](../DGF_SPEC.md) — **`QueuedAiOrchestrator`**, приоритеты (**`AiTaskRequest.Priority`**), **`CancellationScope`**, таймаут LLM, **`LlmRoutingManifest`**, метрики (**`GameLogFeature.Metrics`**).
 
 **Точки расширения в коде сейчас:**
 

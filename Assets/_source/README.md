@@ -8,26 +8,26 @@
 
 **Автор библиотеки:** **Neoxider** (ник **neoxider**) — [GitHub @NeoXider](https://github.com/NeoXider); также [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools) для Unity.
 
-## UPM-пакет (манифест зависимостей)
+## UPM-пакет `com.coreai.core`
 
-В **`Packages/com.coreai.core/`** лежат **`package.json`** (имя **`com.coreai.core`**, версия **0.1.0**, зависимости в т.ч. **com.unity.ai.navigation**) и **`README.md`**. Подключение в проект через `manifest.json` и перенос исходников из `Assets/_source` в пакет — **в плане** (см. **[Docs/DGF_SPEC.md](Docs/DGF_SPEC.md)** фаза **F**).
+Исходники **CoreAI.Core** и **CoreAI.Source** лежат в **`Packages/com.coreai.core/Runtime/`**; в корне пакета — **`package.json`**. Проект подключает пакет через **`Packages/manifest.json`**: `"com.coreai.core": "file:com.coreai.core"`.
 
 ## Сборки и папки
 
 | Путь | Сборка | Назначение |
 |------|--------|------------|
-| `Core/` | **CoreAI.Core** (`noEngineReferences`) | Портатив: `ILlmClient`, оркестратор, снимок сессии, песочница MoonSharp |
-| `Runtime/` | **CoreAI.Source** | Unity: DI, LLMUnity-адаптер, MessagePipe, лог, UI MVP |
+| `Packages/com.coreai.core/Runtime/Core/` | **CoreAI.Core** (`noEngineReferences`) | Портатив: `ILlmClient`, оркестратор, очередь, снимок сессии, MoonSharp |
+| `Packages/com.coreai.core/Runtime/Source/` | **CoreAI.Source** | Unity: DI, маршрутизация LLM, LLMUnity/OpenAI HTTP, MessagePipe, лог |
 | `Tests/EditMode/` | **CoreAI.Tests** (Editor) | EditMode NUnit: промпты, Lua, парсер конверта, песочница |
 | `Tests/PlayMode/` | **CoreAI.PlayModeTests** (Editor) | Play Mode: оркестратор, опционально HTTP к LM Studio (env) |
 | `Editor/` | **CoreAI.Editor** | Меню (Build Settings, открыть `_mainCoreAI`) |
 
-### `Runtime` (детальнее)
+### `Packages/com.coreai.core/Runtime/Source` (детальнее)
 
 | Путь | Назначение |
 |------|------------|
 | `Composition/` | `CoreAILifetimeScope`, `RegisterCore` + `RegisterCorePortable`, entry points |
-| `Infrastructure/` | Логирование, `ApplyAiGameCommand` → MessagePipe, LLM-адаптеры, `LuaAiEnvelopeProcessor` через `AiGameCommandRouter`, биндинги Lua |
+| `Infrastructure/` | Логирование, маршрутизация LLM, `ApplyAiGameCommand` → MessagePipe, LLM-адаптеры, `LuaAiEnvelopeProcessor`, биндинги Lua |
 | `Presentation/AiDashboard/` | `AiDashboardPresenter` (IMGUI), `AiPermissionsAsset` |
 | `Features/` | Узкие фичи ядра по мере роста |
 

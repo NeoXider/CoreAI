@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace CoreAI.ExampleGame.Arena
 {
@@ -14,12 +15,20 @@ namespace CoreAI.ExampleGame.Arena
         private int _contactDamageRuntime;
         private float _nextContact;
         private IArenaSessionAuthority _session;
+        private NavMeshAgent _nav;
 
         private void Awake()
         {
             _hp = maxHp;
             _moveSpeedRuntime = moveSpeed;
             _contactDamageRuntime = contactDamage;
+            _nav = GetComponent<NavMeshAgent>();
+            if (_nav != null)
+            {
+                _nav.speed = _moveSpeedRuntime;
+                _nav.stoppingDistance = 1f;
+                _nav.updateRotation = true;
+            }
         }
 
         /// <summary>Вызывать до <c>SetActive(true)</c> на экземпляре врага (спавн с шаблона).</summary>
@@ -33,6 +42,8 @@ namespace CoreAI.ExampleGame.Arena
             _hp = Mathf.Max(1, Mathf.RoundToInt(maxHp * Mathf.Max(0.01f, hpMult)));
             _contactDamageRuntime = Mathf.Max(1, Mathf.RoundToInt(contactDamage * Mathf.Max(0.01f, damageMult)));
             _moveSpeedRuntime = Mathf.Max(0.1f, moveSpeed * Mathf.Max(0.01f, moveSpeedMult));
+            if (_nav != null)
+                _nav.speed = _moveSpeedRuntime;
         }
 
         private void OnEnable()
@@ -49,10 +60,15 @@ namespace CoreAI.ExampleGame.Arena
                 return;
             var p = _session.PrimaryPlayerTransform.position;
             var flat = new Vector3(p.x, transform.position.y, p.z);
-            var dir = (flat - transform.position).normalized;
-            if (dir.sqrMagnitude > 0.01f)
-                transform.position += dir * (_moveSpeedRuntime * Time.deltaTime);
-            transform.forward = dir;
+            if (_nav != null && _nav.isOnNavMesh)
+                _nav.SetDestination(flat);
+            else
+            {
+                var dir = (flat - transform.position).normalized;
+                if (dir.sqrMagnitude > 0.01f)
+                    transform.position += dir * (_moveSpeedRuntime * Time.deltaTime);
+                transform.forward = dir;
+            }
 
             if (Time.time < _nextContact)
                 return;

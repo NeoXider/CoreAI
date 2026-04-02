@@ -24,8 +24,8 @@
 
 | Сборка | Папка | Ограничение |
 |--------|-------|-------------|
-| **CoreAI.Core** | `Assets/_source/Core/` | **Без Unity** (`noEngineReferences`). Контракты ИИ, оркестратор, снимок сессии, песочница MoonSharp, парсинг Lua из ответа LLM, процессор конверта. |
-| **CoreAI.Source** | `Assets/_source/Runtime/` | Unity: VContainer, MessagePipe, LLMUnity/OpenAI HTTP, логирование, роутер команд, биндинги Lua (`report` / `add`). |
+| **CoreAI.Core** | `Packages/com.coreai.core/Runtime/Core/` | **Без Unity** (`noEngineReferences`). Контракты ИИ, оркестратор, очередь **`QueuedAiOrchestrator`**, снимок сессии, песочница MoonSharp, парсинг Lua, процессор конверта. |
+| **CoreAI.Source** | `Packages/com.coreai.core/Runtime/Source/` | Unity: VContainer, MessagePipe, маршрутизация LLM (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, логирование, роутер команд, биндинги Lua (`report` / `add`). |
 | **CoreAI.Tests** | `Assets/_source/Tests/EditMode/` | EditMode NUnit, без Play Mode. |
 | **CoreAI.PlayModeTests** | `Assets/_source/Tests/PlayMode/` | Play Mode (оркестратор, опционально LM Studio через env). |
 | **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Демо-арена; зависит от Source. |
@@ -56,9 +56,9 @@ flowchart LR
   LuaP -->|"ошибка + Programmer"| Orch
 ```
 
-1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, опционально поля ремонта Lua и **`TraceId`** для продолжения цепочки — ремонт Lua).
-2. **`AiOrchestrator`** назначает **`TraceId`** (новый GUID или из **`AiTaskRequest`**), кладёт его в **`LlmCompletionRequest`**, собирает промпты через **`AiPromptComposer`**, вызывает **`ILlmClient.CompleteAsync`**, публикует **`ApplyAiGameCommand`** с **`CommandTypeId = AiEnvelope`**, **`JsonPayload`**, **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`**.
-3. В DI зарегистрированный **`ILlmClient`** — это **`LoggingLlmClientDecorator`** вокруг **`LlmUnityLlmClient`** / **`OpenAiChatLlmClient`** / **`StubLlmClient`**: лог **`[Llm]`** (`LLM ▶` / `LLM ◀` / таймаут `LLM ⏱`), **`wallMs`**, токены для HTTP при наличии `usage`, связанный **`CancellationToken`** и **таймаут** с **`CoreAILifetimeScope`** (**Llm Request Timeout Seconds**, **0** = без лимита). Для проверки «это stub?» используйте **`LoggingLlmClientDecorator.Unwrap(client)`**.
+1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, **`Priority`**, **`CancellationScope`**, опционально поля ремонта Lua и **`TraceId`**).
+2. Реализация по умолчанию — **`QueuedAiOrchestrator`** (лимит параллелизма, приоритет, отмена предыдущей задачи с тем же **`CancellationScope`**) вокруг **`AiOrchestrator`**. **`AiOrchestrator`** назначает **`TraceId`**, собирает промпты, вызывает **`ILlmClient.CompleteAsync`**; при **`IRoleStructuredResponsePolicy`** для роли возможен **один** повтор с подсказкой **`structured_retry:`** в user/hint. Затем публикуется **`ApplyAiGameCommand`** (**`AiEnvelope`**, **`TraceId`**, …). Метрики — **`IAiOrchestrationMetrics`** (лог при **`GameLogFeature.Metrics`**).
+3. В DI **`ILlmClient`** — **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или legacy один клиент): внутри — **`OpenAiChatLlmClient`** / **`LlmUnityLlmClient`** / **`StubLlmClient`** по **`LlmRoutingManifest`** и роли. Лог **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), строка бэкенда **`RoutingLlmClient→OpenAiHttp`** и т.п. Для «это stub?» — **`LoggingLlmClientDecorator.Unwrap(client)`**.
 4. Подписчик **`AiGameCommandRouter`** сначала вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
 5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (лимит поколений см. **`LuaAiEnvelopeProcessor`**).
 
@@ -75,7 +75,7 @@ flowchart LR
 
 Символ **`COREAI_NO_LLM`**: в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
 
-**Наблюдаемость:** категория логов **`GameLogFeature.Llm`**; старые **Game Log Settings** без этого бита дополняются при **`OnValidate`** ассета. Фильтр консоли по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
+**Наблюдаемость:** **`GameLogFeature.Llm`** (запросы LLM); **`GameLogFeature.Metrics`** (метрики оркестратора, не входит в **`AllBuiltIn`** — включите вручную в ассете). Старые **Game Log Settings** без бита **Llm** дополняются при **`OnValidate`**. Фильтр по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
 
 ---
 

@@ -3,6 +3,7 @@
   "rootNamespace": "CoreAI.Tests",
   "references": [
     "CoreAI.Core",
+    "CoreAI.Source",
     "MoonSharp.Interpreter"
   ],
   "optionalUnityReferences": [

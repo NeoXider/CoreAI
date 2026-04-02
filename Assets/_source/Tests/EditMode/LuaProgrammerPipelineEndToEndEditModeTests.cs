@@ -96,7 +96,8 @@ namespace CoreAI.Tests.EditMode
                 new NullLuaExecutionObserver());
 
             var sink = new EnvelopeDispatchSink(proc, events);
-            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy());
+            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -151,7 +152,8 @@ namespace CoreAI.Tests.EditMode
                 new NullLuaExecutionObserver());
 
             var sink = new EnvelopeDispatchSink(proc, events);
-            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), capturingLlm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy());
+            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), capturingLlm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
