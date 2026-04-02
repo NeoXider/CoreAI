@@ -168,10 +168,10 @@ namespace CoreAI.ExampleGame.Arena
                     ? $" Пресеты волн в ассете: {wavePresetLibrary.Presets.Count}."
                     : "";
                 Debug.Log(
-                    "[CoreAI.ExampleGame] Роли LLM: Creator — план волны; раз в N волн — Analyzer и AINpc (ArenaAuxLlmEveryNWaves); " +
-                    "Programmer — F9 (CoreAiLuaHotkey). Маршрутизация по ролям — LlmRoutingManifest на CoreAILifetimeScope." +
+                    "[CoreAI.ExampleGame] Роли LLM: Creator — план волны; F1 — ручной Creator; раз в N волн — Analyzer и AINpc (ArenaAuxLlmEveryNWaves); " +
+                    "F2 — AINpc меняет стойку зелёного компаньона; Programmer — F9 (CoreAiLuaHotkey). Маршрутизация — LlmRoutingManifest на CoreAILifetimeScope." +
                     presetInfo +
-                    " Компаньон — бот без LLM.");
+                    " Компаньон — простой ИИ без LLM в Update, поведение меняется после F2.");
             }
         }
 
@@ -247,7 +247,9 @@ namespace CoreAI.ExampleGame.Arena
             DestroyCollider(vis);
             ApplyLitColor(vis.GetComponent<Renderer>(), new Color(0.2f, 0.95f, 0.6f));
 
-            return go.AddComponent<ArenaCompanionBot>();
+            var bot = go.AddComponent<ArenaCompanionBot>();
+            go.AddComponent<ArenaCompanionAiListener>();
+            return bot;
         }
 
         private static void DestroyCollider(GameObject go)

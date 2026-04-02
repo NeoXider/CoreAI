@@ -2,9 +2,9 @@
 
 **Автор шаблона CoreAI:** **Neoxider** (ник **neoxider**) — [github.com/NeoXider](https://github.com/NeoXider).
 
-Пример игры в **`Assets/_exampleGame`** подключает **ядро** из **`Assets/_source`**: процедурная арена с волнами, DI (**`CoreAILifetimeScope`**), вызов **Creator** на каждую волну (**`ArenaCreatorWavePlanner`**), демо **Programmer** по **F9** (**`CoreAiLuaHotkey`**). Логи ядра: **`[Llm]`** + **`traceId`** в **`ApplyAiGameCommand`** — см. [LLMUNITY_SETUP_AND_MODELS.md](../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md).
+Пример игры в **`Assets/_exampleGame`** использует **UPM** **`com.nexoider.coreai`** (код в **`Assets/CoreAI`**) и хост **`Assets/CoreAiUnity`** (доки, **`Resources/AgentPrompts`**): процедурная арена с волнами, DI (**`CoreAILifetimeScope`**), вызов **Creator** на каждую волну (**`ArenaCreatorWavePlanner`**), демо **Programmer** по **F9** (**`CoreAiLuaHotkey`**). Логи ядра: **`[Llm]`** + **`traceId`** в **`ApplyAiGameCommand`** — см. [LLMUNITY_SETUP_AND_MODELS.md](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md).
 
-**Пошаговая настройка в Unity (сцена, LLM, HTTP):** [`Docs/UNITY_SETUP.md`](Docs/UNITY_SETUP.md). **Архитектура арены, мультиплеер, ИИ (волны / анализ игрока):** [`Docs/ARENA_ARCHITECTURE_AND_AI.md`](Docs/ARENA_ARCHITECTURE_AND_AI.md). В меню редактора: **CoreAI → Development → Example Game → Open RogueliteArena scene** (и опция сделать сцену первой в Build Settings). Общий быстрый старт по репозиторию: [`../_source/Docs/QUICK_START.md`](../_source/Docs/QUICK_START.md). Онбординг по коду шаблона: [`../_source/Docs/DEVELOPER_GUIDE.md`](../_source/Docs/DEVELOPER_GUIDE.md).
+**Пошаговая настройка в Unity (сцена, LLM, HTTP):** [`Docs/UNITY_SETUP.md`](Docs/UNITY_SETUP.md). **Архитектура арены, мультиплеер, ИИ (волны / анализ игрока):** [`Docs/ARENA_ARCHITECTURE_AND_AI.md`](Docs/ARENA_ARCHITECTURE_AND_AI.md). В меню редактора: **CoreAI → Development → Example Game → Open RogueliteArena scene** (и опция сделать сцену первой в Build Settings). Общий быстрый старт по репозиторию: [`../CoreAiUnity/Docs/QUICK_START.md`](../CoreAiUnity/Docs/QUICK_START.md). Онбординг по коду шаблона: [`../CoreAiUnity/Docs/DEVELOPER_GUIDE.md`](../CoreAiUnity/Docs/DEVELOPER_GUIDE.md).
 
 Подробный геймплейный концепт забега и меты: [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGUELITE_PLAYBOOK.md).
 
@@ -38,28 +38,28 @@
 | **MessagePipe** + **MessagePipe.VContainer** | Шина сообщений + регистрация в контейнере |
 | **R3** (`com.cysharp.r3`) | Реактивность для UI и состояния |
 | **UniTask** | Асинхронность без лишних аллокаций |
-| **MoonSharp** (`org.moonsharp.moonsharp`) | Песочница Lua под сценарии / use case (в связке с ядром `_source`) |
+| **MoonSharp** (`org.moonsharp.moonsharp`) | Песочница Lua под сценарии / use case (в связке с **CoreAI**) |
 | **AI Navigation** | Агенты на сетке/навмешах (по мере надобности) |
 | **UGUI / UI Toolkit** (через модули Unity) | Интерфейсы хаба и забега |
 | **Test Framework** | Тесты |
 
 Плагины в `Assets/Plugins` (например отладочные утилиты) — по факту репозитория; в README ядра они не считаются обязательной частью **шаблона**.
 
-### Ядро `Assets/_source` (реализовано в репозитории)
+### Пакет **`Assets/CoreAI`** и хост **`Assets/CoreAiUnity`** (в этом репозитории)
 
 | Компонент | Назначение |
 |-----------|------------|
-| **LLMUnity** + **OpenAI-compatible HTTP** | Реализации **`ILlmClient`**; см. [`LLMUNITY_SETUP_AND_MODELS.md`](../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md) |
+| **LLMUnity** + **OpenAI-compatible HTTP** | Реализации **`ILlmClient`**; см. [`LLMUNITY_SETUP_AND_MODELS.md`](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md) |
 | **Оркестрация** | **`IAiOrchestrationService`** / **`AiOrchestrator`**, роли из **`BuiltInAgentRoleIds`** |
 | **Lua** | **`LuaAiEnvelopeProcessor`**, песочница MoonSharp, ремонт Programmer при ошибке |
 
-Пример игры **зависит** от публичного API `_source`, а не наоборот: в `_exampleGame` — только геймспецифичные сцены, префабы, презентеры и use case’ы режима «арена + хаб».
+Пример игры **зависит** от публичного API **CoreAI** (**`com.nexoider.coreai`**), а не наоборот: в `_exampleGame` — только геймспецифичные сцены, префабы, презентеры и use case’ы режима «арена + хаб».
 
 ---
 
 ## SPEC шаблона CoreAI (сжатая выжимка)
 
-Нормативный документ по мере готовности: **`Assets/_source/Docs/DGF_SPEC.md`** (если папки ещё нет — этот раздел задаёт договорённости до его появления).
+Нормативный документ: **`Assets/CoreAiUnity/Docs/DGF_SPEC.md`**.
 
 1. **Границы:** ядро даёт DI, события, песочницу Lua, фасад LLM и оркестратор; игра даёт контент, префабы, баланс и правила режима.
 2. **Безопасность:** Lua только через whitelist API, лимиты инструкций/времени, dry-run при необходимости; клиент не исполняет сырой вывод LLM как истину в мультиплеере.
@@ -91,6 +91,6 @@
 | `RogueliteArena/Features/` | Фичи **примера** (волны, хаб, UI забега) — свои установщики / дочерний `LifetimeScope` |
 | `Docs/` | Игровой концепт и заметки (`ROGUELITE_PLAYBOOK.md`) |
 
-Точка входа: `RogueliteArena/Bootstrap/ExampleRogueliteEntry.cs` (арена + **`CoreAiLuaHotkey`**). Сцена **`RogueliteArena`**: на **`CompositionRoot`** — **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Состояние забега: **`ArenaSurvivalSession`** (без синглтона), волны — **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, роль узла — **`ArenaSimulationRole`**. См. [`../_source/README.md`](../_source/README.md).
+Точка входа: `RogueliteArena/Bootstrap/ExampleRogueliteEntry.cs` (арена + **`CoreAiLuaHotkey`**). Сцена **`RogueliteArena`**: на **`CompositionRoot`** — **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Состояние забега: **`ArenaSurvivalSession`** (без синглтона), волны — **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, роль узла — **`ArenaSimulationRole`**. См. [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) и [`../CoreAI/README.md`](../CoreAI/README.md) (UPM).
 
 Паттерн: корневой `CoreAILifetimeScope` (ядро CoreAI) + при необходимости дочерний `LifetimeScope` в этой папке только для кода roguelite-примера.

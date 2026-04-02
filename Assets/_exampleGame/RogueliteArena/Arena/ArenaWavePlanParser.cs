@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Ai;
 using UnityEngine;
 
 namespace CoreAI.ExampleGame.Arena
@@ -13,8 +14,8 @@ namespace CoreAI.ExampleGame.Arena
             if (string.IsNullOrWhiteSpace(raw))
                 return false;
 
-            var json = TryExtractFirstJsonObject(raw);
-            if (string.IsNullOrWhiteSpace(json))
+            if (!LlmResponseSanitizer.TryPrepareJsonObject(raw, out var json) ||
+                string.IsNullOrWhiteSpace(json))
                 return false;
 
             try
@@ -31,29 +32,6 @@ namespace CoreAI.ExampleGame.Arena
             {
                 return false;
             }
-        }
-
-        private static string TryExtractFirstJsonObject(string s)
-        {
-            // Ищем первый JSON-объект { ... } в ответе LLM (если там есть пояснения/markdown).
-            var start = s.IndexOf('{');
-            if (start < 0)
-                return null;
-            var depth = 0;
-            for (var i = start; i < s.Length; i++)
-            {
-                var c = s[i];
-                if (c == '{')
-                    depth++;
-                else if (c == '}')
-                {
-                    depth--;
-                    if (depth == 0)
-                        return s.Substring(start, i - start + 1);
-                }
-            }
-
-            return null;
         }
     }
 }

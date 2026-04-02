@@ -2,7 +2,20 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.Arena
 {
-    /// <summary>Простой бот-компаньон: следует за игроком, бьёт ближайшего врага.</summary>
+    /// <summary>Боевой темп компаньона после ответа AINpc (F2): заметно меняет скорость и радиусы.</summary>
+    public enum CompanionCombatStance
+    {
+        /// <summary>Базовые параметры из инспектора.</summary>
+        Balanced = 0,
+
+        /// <summary>Дальше лезет к врагам, выше скорость, уже «хвост» у игрока.</summary>
+        Aggressive = 1,
+
+        /// <summary>Ближе к игроку, меньше агро-радиус, медленнее.</summary>
+        Defensive = 2
+    }
+
+    /// <summary>Простой бот-компаньон: следует за игроком, бьёт ближайшего врага. F2 + AINpc меняет <see cref="CompanionCombatStance"/>.</summary>
     [RequireComponent(typeof(CharacterController))]
     public sealed class ArenaCompanionBot : MonoBehaviour
     {
@@ -19,11 +32,57 @@ namespace CoreAI.ExampleGame.Arena
         private float _nextAttack;
         private IArenaSessionView _session;
 
+        private CompanionCombatStance _stance = CompanionCombatStance.Balanced;
+        private float _baseMoveSpeed;
+        private float _baseFollowDistance;
+        private float _baseEnemyAcquireRadius;
+
+        /// <summary>Текущая стойка после последнего применения (в т.ч. с F2).</summary>
+        public CompanionCombatStance CurrentStance => _stance;
+
         public void Init(IArenaSessionView session) => _session = session;
+
+        /// <summary>
+        /// Применяет множители к скорости, дистанции следования и радиусу поиска врагов (видно в игре и в логе).
+        /// </summary>
+        /// <param name="logChange">Ложь при инициализации из Awake.</param>
+        public void ApplyCombatStance(CompanionCombatStance stance, bool logChange = true)
+        {
+            _stance = stance;
+            switch (stance)
+            {
+                case CompanionCombatStance.Aggressive:
+                    moveSpeed = _baseMoveSpeed * 1.38f;
+                    followDistance = _baseFollowDistance * 0.78f;
+                    enemyAcquireRadius = _baseEnemyAcquireRadius * 1.5f;
+                    break;
+                case CompanionCombatStance.Defensive:
+                    moveSpeed = _baseMoveSpeed * 0.8f;
+                    followDistance = _baseFollowDistance * 1.42f;
+                    enemyAcquireRadius = _baseEnemyAcquireRadius * 0.58f;
+                    break;
+                default:
+                    moveSpeed = _baseMoveSpeed;
+                    followDistance = _baseFollowDistance;
+                    enemyAcquireRadius = _baseEnemyAcquireRadius;
+                    break;
+            }
+
+            if (logChange)
+            {
+                Debug.Log(
+                    "[CoreAI.ExampleGame] Компаньон: стойка " + stance +
+                    $" → speed={moveSpeed:F1}, follow={followDistance:F1}, acquireRadius={enemyAcquireRadius:F1}");
+            }
+        }
 
         private void Awake()
         {
             _cc = GetComponent<CharacterController>();
+            _baseMoveSpeed = moveSpeed;
+            _baseFollowDistance = followDistance;
+            _baseEnemyAcquireRadius = enemyAcquireRadius;
+            ApplyCombatStance(CompanionCombatStance.Balanced, logChange: false);
         }
 
         private void Update()

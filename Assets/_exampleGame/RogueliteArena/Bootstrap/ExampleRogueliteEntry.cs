@@ -24,6 +24,8 @@ namespace CoreAI.ExampleGame.Bootstrap
         {
             if (gameObject.GetComponent<CoreAiLuaHotkey>() == null)
                 gameObject.AddComponent<CoreAiLuaHotkey>();
+            if (gameObject.GetComponent<CoreAiArenaLlmHotkeys>() == null)
+                gameObject.AddComponent<CoreAiArenaLlmHotkeys>();
         }
 
         private void Start()

@@ -1,6 +1,6 @@
 {
     "enableAttributeSearch": true,
-    "rootFolder": "_source",
+    "rootFolder": "CoreAiUnity",
     "folders": [
         "Audio",
         "Prefabs",

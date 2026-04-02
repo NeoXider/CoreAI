@@ -24,7 +24,7 @@
 
 ## Следующие шаги в репозитории CoreAI
 
-1. Завести `Assets/_source` (ядро): оркестрация ИИ, песочница Lua, события.
+1. Подключить **CoreAI**: UPM **`com.nexoider.coreai`** (`Assets/CoreAI`) — оркестрация ИИ, песочница Lua, события; при необходимости скопировать хост **`CoreAiUnity`** (тесты, промпты в **Resources**, сцена **`_mainCoreAI`**).
 2. Подключить **VContainer + MessagePipe + R3** в пример (как в Last-War, но минимальный набор).
 3. Сцена `RogueliteBootstrap` с `ExampleRogueliteEntry` + позже `LifetimeScope`.
 4. Прототип петли: спавн волны → урон → лут-валюта забега → экран смерти → хаб с разблокировками (без сети).

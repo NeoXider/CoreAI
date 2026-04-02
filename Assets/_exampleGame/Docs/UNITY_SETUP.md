@@ -67,7 +67,7 @@
 
 5. **Play.** Дождитесь загрузки модели (первый раз может занять время). В консоли не должно быть ошибок инициализации **LLM**.
 
-Дополнительно: рекомендации по размерам Qwen и билду — **[LLMUNITY_SETUP_AND_MODELS.md](../../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2.
+Дополнительно: рекомендации по размерам Qwen и билду — **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2.
 
 ---
 
@@ -85,7 +85,7 @@
 
 После этого **`ILlmClient`** = **OpenAiChatLlmClient**; компоненты **LLM** / **LLMAgent** для вызовов ядра **не используются** (их можно оставить на сцене выключенными или для других целей).
 
-Подробности: **[LLMUNITY_SETUP_AND_MODELS.md](../../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §4.
+Подробности: **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §4.
 
 ---
 
@@ -111,7 +111,7 @@
 Если при **F9** нет реального ответа модели:
 
 - Проверьте режим **A** или **B** выше.
-- Убедитесь, что не остался активным только **StubLlmClient** (в DI снаружи — декоратор: смотрите разрешённый **`ILlmClient`** и при необходимости лог **`backend=StubLlmClient`**; см. [LLMUNITY_SETUP_AND_MODELS.md](../../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
+- Убедитесь, что не остался активным только **StubLlmClient** (в DI снаружи — декоратор: смотрите разрешённый **`ILlmClient`** и при необходимости лог **`backend=StubLlmClient`**; см. [LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
 
 ---
 
@@ -119,14 +119,14 @@
 
 1. **File → Build Settings** — добавьте **RogueliteArena** (уже может быть в списке).
 2. Для воспроизводимого **Play** из редактора: **CoreAI → Development → Example Game → Set RogueliteArena as first build scene**.
-3. Для локальной модели в релизе: в LLMUnity у нужной GGUF включите **Build** и политику доставки модели (StreamingAssets и т.д.) — см. **[LLMUNITY_SETUP_AND_MODELS.md](../../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2 и §6.
+3. Для локальной модели в релизе: в LLMUnity у нужной GGUF включите **Build** и политику доставки модели (StreamingAssets и т.д.) — см. **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2 и §6.
 
 ---
 
 ## Связанные документы
 
-- **[QUICK_START.md](../../_source/Docs/QUICK_START.md)** — общий быстрый старт по репозиторию.
-- **[DEVELOPER_GUIDE.md](../../_source/Docs/DEVELOPER_GUIDE.md)** — поток данных и расширение ядра.
+- **[QUICK_START.md](../../CoreAiUnity/Docs/QUICK_START.md)** — общий быстрый старт по репозиторию.
+- **[DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md)** — поток данных и расширение ядра.
 - **[README.md](../README.md)** — обзор Example Game.
 
 **Версия:** 1.1 (апрель 2026) — таймаут LLM, логи Llm/traceId, декоратор ILlmClient.
