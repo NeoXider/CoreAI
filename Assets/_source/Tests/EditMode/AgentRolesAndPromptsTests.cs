@@ -85,6 +85,16 @@ namespace CoreAI.Tests.EditMode
             {
                 StringAssert.StartsWith("[stub]", r.Content);
             }
+            else if (roleId == BuiltInAgentRoleIds.Programmer)
+            {
+                StringAssert.Contains("```lua", r.Content, roleId);
+                StringAssert.Contains("report('stub:", r.Content, roleId);
+            }
+            else if (roleId == BuiltInAgentRoleIds.Creator)
+            {
+                StringAssert.Contains("\"commandType\":\"ArenaWavePlan\"", r.Content, roleId);
+                StringAssert.Contains("\"enemyCount\":", r.Content, roleId);
+            }
             else
             {
                 StringAssert.Contains("ApplyWaveModifier", r.Content);

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace CoreAI.ExampleGame.Arena
 {
@@ -26,8 +27,17 @@ namespace CoreAI.ExampleGame.Arena
             forward.Normalize();
             right.Normalize();
 
-            var x = Input.GetAxisRaw("Horizontal");
-            var z = Input.GetAxisRaw("Vertical");
+            var kb = Keyboard.current;
+            var x = 0f;
+            var z = 0f;
+            if (kb != null)
+            {
+                if (kb.aKey.isPressed) x = -1f;
+                else if (kb.dKey.isPressed) x = 1f;
+
+                if (kb.wKey.isPressed) z = 1f;
+                else if (kb.sKey.isPressed) z = -1f;
+            }
             var dir = (forward * z + right * x).normalized;
             var move = dir * (moveSpeed * Time.deltaTime);
 

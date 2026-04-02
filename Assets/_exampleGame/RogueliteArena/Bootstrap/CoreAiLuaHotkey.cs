@@ -1,6 +1,7 @@
 using CoreAI.Ai;
 using CoreAI.Composition;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using VContainer;
 
 namespace CoreAI.ExampleGame.Bootstrap
@@ -12,7 +13,8 @@ namespace CoreAI.ExampleGame.Bootstrap
     {
         private void Update()
         {
-            if (!Input.GetKeyDown(KeyCode.F9))
+            var kb = Keyboard.current;
+            if (kb == null || !kb.f9Key.wasPressedThisFrame)
                 return;
             var scope = GetComponentInParent<CoreAILifetimeScope>();
             if (scope == null)

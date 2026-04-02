@@ -138,8 +138,7 @@ namespace CoreAI.Tests.EditMode
                 new CoreDefaultLuaRuntimeBindings(),
                 sink,
                 () => spy,
-                new NullLuaExecutionObserver(),
-                maxLuaRepairGenerationOnEnvelope: 4);
+                new NullLuaExecutionObserver());
 
             proc.Process(new ApplyAiGameCommand
             {

@@ -21,8 +21,8 @@ namespace CoreAI.Tests.EditMode
             var task = client.CompleteAsync(new LlmCompletionRequest { UserPayload = "x" });
             var result = task.GetAwaiter().GetResult();
             Assert.IsTrue(result.Ok);
-            StringAssert.Contains("ApplyWaveModifier", result.Content);
-            StringAssert.Contains("\"agentRole\":\"Creator\"", result.Content);
+            StringAssert.Contains("\"commandType\":\"ArenaWavePlan\"", result.Content);
+            StringAssert.Contains("\"waveIndex1Based\":", result.Content);
         }
 
         [Test]

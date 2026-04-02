@@ -38,7 +38,7 @@ namespace CoreAI.Ai
                     .Replace("{hint}", task.Hint ?? "");
             }
             else
-                body = $"wave={snap.WaveIndex}; mode={snap.ModeId}; party={snap.PartySize}; hint={task.Hint}";
+                body = $"wave={snap.WaveIndex}; mode={snap.ModeId}; party={snap.PartySize}; hp_current={snap.PlayerHpCurrent}; hp_max={snap.PlayerHpMax}; alive_enemies={snap.AliveEnemies}; hint={task.Hint}";
 
             return AppendLuaRepairContext(body, task);
         }

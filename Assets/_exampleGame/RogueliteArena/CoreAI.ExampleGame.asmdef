@@ -6,7 +6,8 @@
     "CoreAI.Source",
     "R3.Unity",
     "UniTask",
-    "VContainer"
+    "VContainer",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

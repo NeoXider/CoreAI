@@ -25,15 +25,15 @@ namespace CoreAI.Ai
             IGameLuaRuntimeBindings bindings,
             IAiGameCommandSink sink,
             Func<IAiOrchestrationService> resolveOrchestrator,
-            ILuaExecutionObserver observer,
-            int maxLuaRepairGenerationOnEnvelope = DefaultMaxLuaRepairGenerations)
+            ILuaExecutionObserver observer)
         {
             _sandbox = sandbox ?? throw new ArgumentNullException(nameof(sandbox));
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _sink = sink ?? throw new ArgumentNullException(nameof(sink));
             _resolveOrchestrator = resolveOrchestrator ?? throw new ArgumentNullException(nameof(resolveOrchestrator));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
-            _maxLuaRepairGenerationOnEnvelope = maxLuaRepairGenerationOnEnvelope;
+            // Важно: VContainer плохо резолвит optional-примитивы. Поэтому лимит не передаём через DI.
+            _maxLuaRepairGenerationOnEnvelope = DefaultMaxLuaRepairGenerations;
         }
 
         public void Process(ApplyAiGameCommand cmd)

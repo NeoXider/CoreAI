@@ -58,7 +58,16 @@ namespace CoreAI.Composition
             return new StubLlmClient();
 #else
             var agent = Object.FindFirstObjectByType<LLMAgent>();
-            return agent != null ? new LlmUnityLlmClient(agent) : new StubLlmClient();
+            if (agent == null)
+                return new StubLlmClient();
+
+            // Если LLMUnity в сцене оставили без модели (GGUF путь пуст), она пишет ошибку и не поднимется.
+            // Тогда безопаснее использовать stub и не пытаться дергать LLMUnity.
+            var llm = agent.GetComponent<LLM>();
+            if (llm != null && string.IsNullOrWhiteSpace(llm.model))
+                return new StubLlmClient();
+
+            return new LlmUnityLlmClient(agent);
 #endif
         }
     }

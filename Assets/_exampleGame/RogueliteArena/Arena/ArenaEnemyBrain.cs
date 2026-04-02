@@ -10,18 +10,29 @@ namespace CoreAI.ExampleGame.Arena
         [SerializeField] private int contactDamage = 8;
 
         private int _hp;
+        private float _moveSpeedRuntime;
+        private int _contactDamageRuntime;
         private float _nextContact;
         private IArenaSessionAuthority _session;
 
         private void Awake()
         {
             _hp = maxHp;
+            _moveSpeedRuntime = moveSpeed;
+            _contactDamageRuntime = contactDamage;
         }
 
         /// <summary>Вызывать до <c>SetActive(true)</c> на экземпляре врага (спавн с шаблона).</summary>
         public void Configure(IArenaSessionAuthority session)
         {
             _session = session;
+        }
+
+        public void ApplyWaveStats(float hpMult, float damageMult, float moveSpeedMult)
+        {
+            _hp = Mathf.Max(1, Mathf.RoundToInt(maxHp * Mathf.Max(0.01f, hpMult)));
+            _contactDamageRuntime = Mathf.Max(1, Mathf.RoundToInt(contactDamage * Mathf.Max(0.01f, damageMult)));
+            _moveSpeedRuntime = Mathf.Max(0.1f, moveSpeed * Mathf.Max(0.01f, moveSpeedMult));
         }
 
         private void OnEnable()
@@ -40,7 +51,7 @@ namespace CoreAI.ExampleGame.Arena
             var flat = new Vector3(p.x, transform.position.y, p.z);
             var dir = (flat - transform.position).normalized;
             if (dir.sqrMagnitude > 0.01f)
-                transform.position += dir * (moveSpeed * Time.deltaTime);
+                transform.position += dir * (_moveSpeedRuntime * Time.deltaTime);
             transform.forward = dir;
 
             if (Time.time < _nextContact)
@@ -51,7 +62,7 @@ namespace CoreAI.ExampleGame.Arena
             var ph = _session.PrimaryPlayerHealth;
             if (ph != null && ph.Current > 0)
             {
-                ph.ApplyDamage(contactDamage);
+                ph.ApplyDamage(_contactDamageRuntime);
                 _nextContact = Time.time + contactTick;
             }
         }

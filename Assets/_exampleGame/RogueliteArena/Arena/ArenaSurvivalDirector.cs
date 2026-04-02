@@ -21,13 +21,20 @@ namespace CoreAI.ExampleGame.Arena
         private IArenaSessionAuthority _session;
         private GameObject _enemyTemplate;
         private IArenaWaveSchedule _waveSchedule;
+        private ArenaCreatorWavePlanner _creatorPlanner;
         private bool _started;
 
-        public void Init(IArenaSessionAuthority session, GameObject enemyTemplate, IArenaWaveSchedule waveSchedule, int winWaves)
+        public void Init(
+            IArenaSessionAuthority session,
+            GameObject enemyTemplate,
+            IArenaWaveSchedule waveSchedule,
+            ArenaCreatorWavePlanner creatorPlanner,
+            int winWaves)
         {
             _session = session;
             _enemyTemplate = enemyTemplate;
             _waveSchedule = waveSchedule;
+            _creatorPlanner = creatorPlanner;
             wavesToWin = winWaves;
         }
 
@@ -49,13 +56,34 @@ namespace CoreAI.ExampleGame.Arena
                     yield break;
                 PushWaveTelemetry(wave);
                 _session.SetCurrentWave(wave);
-                var count = _waveSchedule.GetEnemyCountForWave(wave);
+                // Запрос Creator (асинхронно) — даём короткое окно, чтобы получить план перед спавном.
+                _creatorPlanner?.RequestWavePlan(wave);
+
+                ArenaWavePlan plan = null;
+                if (_creatorPlanner != null)
+                {
+                    var t = 0f;
+                    while (t < 0.35f && !_session.RunEnded)
+                    {
+                        if (_creatorPlanner.TryConsumeLatestPlan(wave, out plan))
+                            break;
+                        t += Time.deltaTime;
+                        yield return null;
+                    }
+                }
+
+                var count = plan != null ? plan.enemyCount : _waveSchedule.GetEnemyCountForWave(wave);
+                var hpMult = plan != null ? plan.enemyHpMult : 1f;
+                var dmgMult = plan != null ? plan.enemyDamageMult : 1f;
+                var msMult = plan != null ? plan.enemyMoveSpeedMult : 1f;
+                var interval = plan != null ? plan.spawnIntervalSeconds : spawnInterval;
+                var radius = plan != null ? plan.spawnRadius : spawnRadius;
                 for (var i = 0; i < count; i++)
                 {
                     if (_session.RunEnded)
                         yield break;
-                    SpawnOne();
-                    yield return new WaitForSeconds(spawnInterval);
+                    SpawnOne(hpMult, dmgMult, msMult, radius);
+                    yield return new WaitForSeconds(interval);
                 }
 
                 while (_session.AliveEnemies > 0 && !_session.RunEnded)
@@ -80,14 +108,17 @@ namespace CoreAI.ExampleGame.Arena
                 collector.SetWave(wave);
         }
 
-        private void SpawnOne()
+        private void SpawnOne(float hpMult, float dmgMult, float moveSpeedMult, float radius)
         {
             var angle = Random.Range(0f, Mathf.PI * 2f);
-            var pos = new Vector3(Mathf.Cos(angle) * spawnRadius, 0.6f, Mathf.Sin(angle) * spawnRadius);
+            var pos = new Vector3(Mathf.Cos(angle) * radius, 0.6f, Mathf.Sin(angle) * radius);
             var e = Instantiate(_enemyTemplate, pos, Quaternion.identity);
             var brain = e.GetComponent<ArenaEnemyBrain>();
             if (brain != null)
+            {
                 brain.Configure(_session);
+                brain.ApplyWaveStats(hpMult, dmgMult, moveSpeedMult);
+            }
             e.SetActive(true);
         }
     }

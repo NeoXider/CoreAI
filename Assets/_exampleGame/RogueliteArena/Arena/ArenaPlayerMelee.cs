@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace CoreAI.ExampleGame.Arena
 {
@@ -13,7 +14,13 @@ namespace CoreAI.ExampleGame.Arena
 
         private void Update()
         {
-            if (!Input.GetKeyDown(KeyCode.Space) && !Input.GetMouseButtonDown(0))
+            var kb = Keyboard.current;
+            var mouse = Mouse.current;
+            var wantHit =
+                (kb != null && kb.spaceKey.wasPressedThisFrame) ||
+                (mouse != null && mouse.leftButton.wasPressedThisFrame);
+
+            if (!wantHit)
                 return;
             if (Time.time < _nextHit)
                 return;

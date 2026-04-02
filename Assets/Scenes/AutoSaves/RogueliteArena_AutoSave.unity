@@ -692,7 +692,6 @@ GameObject:
   - component: {fileID: 813461308}
   - component: {fileID: 813461309}
   - component: {fileID: 813461310}
-  - component: {fileID: 813461311}
   m_Layer: 0
   m_Name: CompositionRoot
   m_TagString: Untagged
@@ -750,18 +749,6 @@ MonoBehaviour:
   logOnStart: 1
   sceneArenaBootstrap: {fileID: 2000010102}
   startWaveArenaPrototype: 0
---- !u!114 &813461311
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 813461307}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ff4616ee72d115543a497c231a6aa5f1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.LlmUnityAutoDisableIfNoModel
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0
@@ -927,8 +914,6 @@ MonoBehaviour:
     extraPerWave: 2
   skipRuntimeFloor: 1
   playerSpawnAnchor: {fileID: 2000010121}
-  creatorPlansWaves: 1
-  spawnCompanionBot: 1
 --- !u!1 &2000010110
 GameObject:
   m_ObjectHideFlags: 0
@@ -1086,16 +1071,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: CoreAI.ExampleGame::CoreAI.ExampleGame.Arena.ArenaFollowCamera
   target: {fileID: 0}
-  distance: 7.5
-  height: 2.2
-  yawDegrees: 0
-  pitchDegrees: 18
-  rotationSpeed: 0.12
-  minPitch: -20
-  maxPitch: 65
-  positionSmooth: 10
-  lookSmooth: 12
-  rotateWhileRightMouseHeld: 1
+  offset: {x: 0, y: 4.2, z: -7.5}
+  smooth: 8
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

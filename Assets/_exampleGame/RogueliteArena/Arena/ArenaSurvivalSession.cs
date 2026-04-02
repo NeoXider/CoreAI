@@ -19,6 +19,8 @@ namespace CoreAI.ExampleGame.Arena
         public bool RunEnded { get; private set; }
         public bool PlayerWon { get; private set; }
 
+        public event System.Action<int> AliveEnemiesChanged;
+
         public void RegisterPrimaryPlayer(Transform playerTransform, ArenaPlayerHealth health)
         {
             PrimaryPlayerTransform = playerTransform;
@@ -27,9 +29,17 @@ namespace CoreAI.ExampleGame.Arena
 
         public void SetCurrentWave(int wave) => CurrentWave = wave;
 
-        public void NotifyEnemySpawned() => AliveEnemies++;
+        public void NotifyEnemySpawned()
+        {
+            AliveEnemies++;
+            AliveEnemiesChanged?.Invoke(AliveEnemies);
+        }
 
-        public void NotifyEnemyDied() => AliveEnemies = Mathf.Max(0, AliveEnemies - 1);
+        public void NotifyEnemyDied()
+        {
+            AliveEnemies = Mathf.Max(0, AliveEnemies - 1);
+            AliveEnemiesChanged?.Invoke(AliveEnemies);
+        }
 
         public void EndRun(bool playerWon)
         {
