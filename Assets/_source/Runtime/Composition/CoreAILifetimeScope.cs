@@ -45,7 +45,8 @@ namespace CoreAI.Composition
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
 
             var openAi = openAiHttpLlmSettings;
-            builder.Register<ILlmClient>(_ => ResolveLlmClient(openAi), Lifetime.Singleton);
+            builder.Register<ILlmClient>(c =>
+                new LoggingLlmClientDecorator(ResolveLlmClient(openAi), c.Resolve<IGameLogger>()), Lifetime.Singleton);
             builder.RegisterCorePortable();
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();

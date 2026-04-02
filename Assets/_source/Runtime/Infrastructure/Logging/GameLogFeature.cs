@@ -14,9 +14,11 @@ namespace CoreAI.Infrastructure.Logging
         Composition = 1 << 1,
         MessagePipe = 1 << 2,
         ExampleRoguelite = 1 << 3,
+        /// <summary>Запросы/ответы LLM (декоратор в CoreAI.Infrastructure.Llm).</summary>
+        Llm = 1 << 4,
 
         /// <summary>Все встроенные категории (для дефолтного asset).</summary>
-        AllBuiltIn = Core | Composition | MessagePipe | ExampleRoguelite,
+        AllBuiltIn = Core | Composition | MessagePipe | ExampleRoguelite | Llm,
 
         /// <summary>Зарезервировано под пользовательские биты в asset (или расширяйте enum).</summary>
         CustomA = 1 << 8,

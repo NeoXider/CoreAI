@@ -30,6 +30,8 @@
 
 **Логи LLMUnity:** на компоненте **LLM** выставьте **Log Level = All** на время отладки (как на вашем скриншоте).
 
+**Логи CoreAI (запрос и ответ модели, роль агента):** `CoreAILifetimeScope` регистрирует `ILlmClient` через **`LoggingLlmClientDecorator`**. В консоли ищите **`[Llm]`** внутри префикса **`[CoreAI]`**: строки **«Запрос LLM»** (роль, `backend=…`, превью system/user) и **«Ответ LLM»** (превью `content`). Длинные тексты обрезаются — лимиты в `LoggingLlmClientDecorator.cs` (`SystemPreviewChars`, `UserPreviewChars`, `ResponsePreviewChars`). Чтобы отключить шум: asset **Game Log Settings** на scope → снимите флаг **Llm** (или поднимите **Minimum Level** выше Info). Итоговая команда игре всё ещё логируется отдельно в **`AiGameCommandRouter`** (`ApplyAiGameCommand`); если сработал парсер памяти, JSON в роутере может отличаться от сырого ответа в строке «Ответ LLM».
+
 ---
 
 ## 2. Рекомендации по моделям (Qwen 3.5 GGUF)
@@ -91,6 +93,8 @@
 ---
 
 ## 7. Play Mode тесты (рантайм в редакторе)
+
+**Как тестировать поведение end-to-end:** (1) **Игра:** Play Mode, фильтр консоли по `[Llm]` — видно, что ушло в модель и что она вернула; по `[MessagePipe]` — что опубликовано в игру. (2) **Без железа/модели:** EditMode-тесты оркестратора и парсеров (`AgentMemoryEditModeTests`, `AgentRolesAndPromptsTests`, …) со **Stub**. (3) **Реальная модель:** Play Mode + сцена с **LLMAgent** → `AgentMemoryWithRealModelPlayModeTests.LlmUnity_…` (или HTTP → env + `OpenAiHttp_…`). (4) **Регрессия промптов:** после смены system/user шаблонов прогоните соответствующие EditMode-тесты.
 
 Сборка **`CoreAI.PlayModeTests`** (в текущей конфигурации Unity часть тестов с `[UnityTest]` также видна в **EditMode**-прогоне Test Runner — ориентируйтесь на полное имя класса):
 
