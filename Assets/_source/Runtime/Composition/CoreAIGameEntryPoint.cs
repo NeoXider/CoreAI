@@ -1,3 +1,5 @@
+using System;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using VContainer.Unity;
 
@@ -9,16 +11,35 @@ namespace CoreAI.Composition
     public sealed class CoreAIGameEntryPoint : IStartable
     {
         private readonly IGameLogger _logger;
+        private readonly IAiOrchestrationService _orchestrator;
 
-        public CoreAIGameEntryPoint(IGameLogger logger)
+        public CoreAIGameEntryPoint(IGameLogger logger, IAiOrchestrationService orchestrator)
         {
             _logger = logger;
+            _orchestrator = orchestrator;
         }
 
         public void Start()
         {
             _logger.LogInfo(GameLogFeature.Composition,
                 "VContainer + MessagePipe (GlobalMessagePipe) + IGameLogger с фильтром по фичам готовы.");
+            FireBootstrapAiTask();
+        }
+
+        private async void FireBootstrapAiTask()
+        {
+            try
+            {
+                await _orchestrator.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.Creator,
+                    Hint = "bootstrap"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(GameLogFeature.Composition, $"Ai bootstrap: {ex.Message}");
+            }
         }
     }
 }

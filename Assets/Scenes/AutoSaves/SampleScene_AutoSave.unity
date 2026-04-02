@@ -612,7 +612,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fc5be6cfa146e9741b21d50f89fc7125, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.GameLifetimeScope
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAILifetimeScope
   parentReference:
     TypeName: 
   autoRun: 1

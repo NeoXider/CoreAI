@@ -150,6 +150,117 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &265009547
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 265009548}
+  - component: {fileID: 265009550}
+  - component: {fileID: 265009549}
+  m_Layer: 0
+  m_Name: LLM
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &265009548
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 265009547}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 813461308}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &265009549
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 265009547}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a50e3140c3ecaaf1c848dbf141cc2074, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: undream.llmunity.Runtime::LLMUnity.LLM
+  advancedOptions: 0
+  _remote: 0
+  _port: 13333
+  _APIKey: 
+  _SSLCert: 
+  _SSLKey: 
+  _numThreads: -1
+  _numGPULayers: 0
+  _parallelPrompts: 1
+  _contextSize: 8192
+  _batchSize: 512
+  _model: Qwen3.5-0.8B-Q4_K_M.gguf
+  _flashAttention: 0
+  _reasoning: 0
+  _lora: 
+  _loraWeights: 
+  dontDestroyOnLoad: 1
+  _embeddingsOnly: 0
+  _embeddingLength: 1024
+  minContextLength: 0
+  maxContextLength: 262144
+--- !u!114 &265009550
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 265009547}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4326d5ae3b03ff55847035351559f4e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: undream.llmunity.Runtime::LLMUnity.LLMAgent
+  advancedOptions: 0
+  _remote: 0
+  _llm: {fileID: 265009549}
+  _APIKey: 
+  _host: localhost
+  _port: 13333
+  numRetries: 5
+  _grammar: 
+  numPredict: -1
+  cachePrompt: 1
+  seed: 0
+  temperature: 0.2
+  topK: 40
+  topP: 0.9
+  minP: 0.05
+  repeatPenalty: 1.1
+  presencePenalty: 0
+  frequencyPenalty: 0
+  typicalP: 1
+  repeatLastN: 64
+  mirostat: 0
+  mirostatTau: 5
+  mirostatEta: 0.1
+  nProbs: 0
+  ignoreEos: 0
+  save: 
+  debugPrompt: 0
+  overflowStrategy: 1
+  overflowTargetRatio: 0.5
+  overflowSummarizePrompt: 
+  _slot: -1
+  _systemPrompt: A chat between a curious human and an artificial intelligence assistant.
+    The assistant gives helpful, detailed, and polite answers to the human's questions.
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
@@ -598,7 +709,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 265009548}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &813461309
@@ -612,12 +724,14 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fc5be6cfa146e9741b21d50f89fc7125, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.GameLifetimeScope
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Composition.CoreAILifetimeScope
   parentReference:
     TypeName: 
   autoRun: 1
   autoInjectGameObjects: []
   gameLogSettings: {fileID: 11400000, guid: 3ac91d868ba7d3e4b9a80217e205b9bc, type: 2}
+  agentPromptsManifest: {fileID: 0}
+  openAiHttpLlmSettings: {fileID: 0}
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

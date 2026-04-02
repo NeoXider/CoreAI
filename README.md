@@ -31,7 +31,9 @@
 
 ## Технологический контур (Unity)
 
-Проект собирается на **Unity** с упором на чистую сборку модулей: **VContainer**, реактивность (**R3**), шина событий (**MessagePipe**), **UniTask**, **MoonSharp**, **LLMUnity**. Детальная архитектура, контракты и политика безопасности будут жить в документации внутри репозитория (`Assets/_source/Docs/`), когда каркас будет развёрнут.
+Проект собирается на **Unity** с упором на чистую сборку модулей: **VContainer**, реактивность (**R3**), шина событий (**MessagePipe**), **UniTask**, **MoonSharp**, **LLMUnity**. **Быстрый старт:** **[`Assets/_source/Docs/QUICK_START.md`](Assets/_source/Docs/QUICK_START.md)**. Настройка демо-сцены в редакторе: **[`Assets/_exampleGame/Docs/UNITY_SETUP.md`](Assets/_exampleGame/Docs/UNITY_SETUP.md)**. Оглавление документов: **[`Assets/_source/Docs/DOCS_INDEX.md`](Assets/_source/Docs/DOCS_INDEX.md)**.
+
+Архитектура ядра, потоки LLM/Lua и гайд для разработчиков: **[`Assets/_source/Docs/DEVELOPER_GUIDE.md`](Assets/_source/Docs/DEVELOPER_GUIDE.md)** (и **[`DGF_SPEC.md`](Assets/_source/Docs/DGF_SPEC.md)**).
 
 ---
 
@@ -39,6 +41,7 @@
 
 Во многих сервисных играх ключевые повороты сессии всё ещё проектирует **человек** по графику и таблицам. Здесь идея другая: **доверить инициативу ИИ** в рамках жёстких правил и авторитета хоста, чтобы каждая партия ощущалась **своей**, а не копией вчерашней миссии — при этом вы остаётесь хозяином периметра безопасности и качества.
 
+image.png
 ---
 
 ## Лицензия и статус

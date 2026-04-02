@@ -2,6 +2,7 @@
   "name": "CoreAI.ExampleGame",
   "rootNamespace": "CoreAI.ExampleGame",
   "references": [
+    "CoreAI.Core",
     "CoreAI.Source",
     "R3.Unity",
     "UniTask",

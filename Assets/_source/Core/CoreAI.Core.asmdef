@@ -1,0 +1,17 @@
+{
+  "name": "CoreAI.Core",
+  "rootNamespace": "CoreAI",
+  "references": [
+    "VContainer",
+    "MoonSharp.Interpreter"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

@@ -1,0 +1,18 @@
+{
+  "name": "CoreAI.Editor",
+  "rootNamespace": "CoreAI.Editor",
+  "references": [
+    "CoreAI.Source"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,6 +1,8 @@
 # Example Game — демо на шаблоне CoreAI
 
-Пример игры в **`Assets/_exampleGame`** показывает, как использовать **ядро шаблона** из **`Assets/_source`** (когда оно появится): процедурная логика, ИИ под хостом, песочница скриптов. Сейчас в репозитории — каркас сцены и документация; геймплей наращивается итеративно.
+Пример игры в **`Assets/_exampleGame`** подключает **ядро** из **`Assets/_source`**: процедурная арена с волнами, DI (**`CoreAILifetimeScope`**), демо вызова **Programmer** (Lua + **`report`**) по **F9** (**`CoreAiLuaHotkey`**).
+
+**Пошаговая настройка в Unity (сцена, LLM, HTTP):** [`Docs/UNITY_SETUP.md`](Docs/UNITY_SETUP.md). **Архитектура арены, мультиплеер, ИИ (волны / анализ игрока):** [`Docs/ARENA_ARCHITECTURE_AND_AI.md`](Docs/ARENA_ARCHITECTURE_AND_AI.md). В меню редактора: **CoreAI → Development → Example Game → Open RogueliteArena scene** (и опция сделать сцену первой в Build Settings). Общий быстрый старт по репозиторию: [`../_source/Docs/QUICK_START.md`](../_source/Docs/QUICK_START.md). Онбординг по коду шаблона: [`../_source/Docs/DEVELOPER_GUIDE.md`](../_source/Docs/DEVELOPER_GUIDE.md).
 
 Подробный геймплейный концепт забега и меты: [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGUELITE_PLAYBOOK.md).
 
@@ -41,16 +43,13 @@
 
 Плагины в `Assets/Plugins` (например отладочные утилиты) — по факту репозитория; в README ядра они не считаются обязательной частью **шаблона**.
 
-### Планируемое ядро шаблона `Assets/_source` (DGF)
-
-Пакеты **VContainer / MessagePipe / R3** уже в `manifest.json` (как в GameDev-Last-War). В коде ядро появится в `Assets/_source`.
-
-Дальше по плану:
+### Ядро `Assets/_source` (реализовано в репозитории)
 
 | Компонент | Назначение |
 |-----------|------------|
-| **LLMUnity** | Локальные/удалённые LLM, промпты |
-| **Оркестрация ИИ** | Очередь, приоритеты, роли агентов (мир / персонаж / мета) |
+| **LLMUnity** + **OpenAI-compatible HTTP** | Реализации **`ILlmClient`**; см. [`LLMUNITY_SETUP_AND_MODELS.md`](../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md) |
+| **Оркестрация** | **`IAiOrchestrationService`** / **`AiOrchestrator`**, роли из **`BuiltInAgentRoleIds`** |
+| **Lua** | **`LuaAiEnvelopeProcessor`**, песочница MoonSharp, ремонт Programmer при ошибке |
 
 Пример игры **зависит** от публичного API `_source`, а не наоборот: в `_exampleGame` — только геймспецифичные сцены, префабы, презентеры и use case’ы режима «арена + хаб».
 
@@ -90,6 +89,6 @@
 | `RogueliteArena/Features/` | Фичи **примера** (волны, хаб, UI забега) — свои установщики / дочерний `LifetimeScope` |
 | `Docs/` | Игровой концепт и заметки (`ROGUELITE_PLAYBOOK.md`) |
 
-Точка входа в коде: `RogueliteArena/Bootstrap/ExampleRogueliteEntry.cs` (заглушка). **VContainer:** на сцену вешается `GameLifetimeScope` из [`Assets/_source`](../_source/README.md).
+Точка входа: `RogueliteArena/Bootstrap/ExampleRogueliteEntry.cs` (арена + **`CoreAiLuaHotkey`**). Сцена **`RogueliteArena`**: на **`CompositionRoot`** — **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Состояние забега: **`ArenaSurvivalSession`** (без синглтона), волны — **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, роль узла — **`ArenaSimulationRole`**. См. [`../_source/README.md`](../_source/README.md).
 
-Паттерн: корневой `GameLifetimeScope` (ядро) + при необходимости дочерний `LifetimeScope` в этой папке только для кода roguelite-примера.
+Паттерн: корневой `CoreAILifetimeScope` (ядро CoreAI) + при необходимости дочерний `LifetimeScope` в этой папке только для кода roguelite-примера.

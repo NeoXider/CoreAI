@@ -14,6 +14,8 @@
 - **Аффиксы, волны, «недельные» модификаторы** — данные + процедурная логика; позже — LLM под хостом.
 - Телеметрия для ИИ: волна, DPS, смерти, выбранные апгрейды, время сессии.
 
+**Код и роли ИИ (волны, анализ игрока, мультиплеер):** см. [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md).
+
 ## Уроки из GameDev-Last-War (референс-архитектура)
 
 Проект `D:\Git\GameDev-Last-War` — крупный продакшен: **Clean Architecture**, **VContainer**, **MessagePipe**, **R3**, **UniTask**, **ECS (Entities)** для тяжёлых визуальных частей, **gRPC / MagicOnion**, **PlayFab**, **SQLite**, логирование **Serilog/ZLogger**, тесты на **NSubstitute**.

@@ -1,0 +1,22 @@
+{
+  "name": "CoreAI.PlayModeTests",
+  "rootNamespace": "CoreAI.Tests.PlayMode",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

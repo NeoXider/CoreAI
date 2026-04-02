@@ -1,4 +1,6 @@
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Messaging;
+using CoreAI.Messaging;
 using MessagePipe;
 using MessagePipe.VContainer;
 using VContainer;
@@ -16,7 +18,9 @@ namespace CoreAI.Composition
             builder.Register<UnityGameLogSink>(Lifetime.Singleton);
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
-            builder.RegisterMessagePipe();
+            var opts = builder.RegisterMessagePipe();
+            builder.RegisterMessageBroker<ApplyAiGameCommand>(opts);
+            builder.Register<MessagePipeAiCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
 
             builder.RegisterBuildCallback(static resolver =>
             {

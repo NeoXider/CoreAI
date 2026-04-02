@@ -2,8 +2,11 @@
   "name": "CoreAI.Source",
   "rootNamespace": "CoreAI",
   "references": [
+    "CoreAI.Core",
     "MessagePipe",
     "MessagePipe.VContainer",
+    "undream.llmunity.Runtime",
+    "UniTask",
     "VContainer"
   ],
   "includePlatforms": [],

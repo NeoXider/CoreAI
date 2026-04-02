@@ -2,9 +2,9 @@
 
 **Назначение:** единый словарь **типов агентов** (поведений ИИ), их целей, типичных входов/выходов и правил **размещения** (хост / локально / гибрид). Игра на шаблоне **включает только нужные роли**; оркестратор не обязан поднимать всех. Рекомендации по **размеру/типу модели** (локально vs API) — §6.
 
-**Версия документа:** 1.2
+**Версия документа:** 1.3
 
-**Связанные документы:** [DGF_SPEC.md](DGF_SPEC.md) (сеть, авторитет, NGO по умолчанию).
+**Связанные документы:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (сеть, авторитет, NGO по умолчанию), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (карта кода, Lua, тесты), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (настройка демо-сцены).
 
 ---
 
@@ -213,6 +213,13 @@ flowchart TB
 | Персональные данные в промпте | Локально или свой хостинг |
 | Нужен одинаковый ответ у всех клиентов (кооп) | Авторитет хоста + одна модель/endpoint на сессию |
 
+### 6.6 Стек Qwen 3.5 (0.8B / 4B / 9B) в LLMUnity
+
+- **0.8B** — дефолт для широкой аудитории и малого размера билда; достаточно для строгого JSON и коротких задач (**CoreMechanicAI**, батч **Analyzer**) при хорошем системном промпте.
+- **4B** — разумный шаг вверх для **AINpc** и отчётов без огромного прироста веса.
+- **9B** — «качество» для **Creator** / **Programmer** на машинах с запасом VRAM/RAM; поднимайте **GPU layers** в инспекторе **LLM**.
+- Переключение **локально ↔ OpenAI-compatible HTTP** — через `OpenAiHttpLlmSettings` на `CoreAILifetimeScope` (см. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
+
 ---
 
 ## 7. NGO и смена стека
@@ -228,3 +235,4 @@ flowchart TB
 | 1.0 | Первый каталог: Creator, Analyzer, Programmer, AINpc, CoreMechanicAI; placement; доп. роли; телеметрия |
 | 1.1 | §6 рекомендации по моделям (локально/API) по ролям; классы Tiny–XL; очереди fast/slow |
 | 1.2 | §1.4 + правка HostAuthoritative: LLM или заглушка; ссылка на DGF_SPEC §5.2 |
+| 1.3 | §6.6 Qwen 3.5 0.8B/4B/9B и OpenAI-compatible через CoreAI |
