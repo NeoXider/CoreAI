@@ -1,4 +1,5 @@
 using CoreAI.Ai;
+using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Lua;
@@ -46,6 +47,8 @@ namespace CoreAI.Composition
             var openAi = openAiHttpLlmSettings;
             builder.Register<ILlmClient>(_ => ResolveLlmClient(openAi), Lifetime.Singleton);
             builder.RegisterCorePortable();
+            // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
+            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
         }

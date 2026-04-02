@@ -73,8 +73,9 @@ namespace CoreAI.ExampleGame.Arena
                 tp is SessionTelemetryCollector sc)
             {
                 telemetryCollector = sc;
-                telemetryCollector.SetPlayerHp(health.Current, health.Max);
-                telemetryCollector.SetAliveEnemies(session.AliveEnemies);
+                telemetryCollector.SetTelemetry("player.hp.current", health.Current);
+                telemetryCollector.SetTelemetry("player.hp.max", health.Max);
+                telemetryCollector.SetTelemetry("arena.alive_enemies", session.AliveEnemies);
             }
 
             health.Died += () =>
@@ -85,12 +86,13 @@ namespace CoreAI.ExampleGame.Arena
 
             health.Changed += (cur, max) =>
             {
-                telemetryCollector?.SetPlayerHp(cur, max);
+                telemetryCollector?.SetTelemetry("player.hp.current", cur);
+                telemetryCollector?.SetTelemetry("player.hp.max", max);
             };
 
             session.AliveEnemiesChanged += alive =>
             {
-                telemetryCollector?.SetAliveEnemies(alive);
+                telemetryCollector?.SetTelemetry("arena.alive_enemies", alive);
             };
 
             var cam = Camera.main;

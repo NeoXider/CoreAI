@@ -10,29 +10,25 @@ namespace CoreAI.Session
     /// </summary>
     public sealed class SessionTelemetryCollector : ISessionTelemetryProvider
     {
-        private GameSessionSnapshot _snapshot = new GameSessionSnapshot();
+        private readonly GameSessionSnapshot _snapshot = new GameSessionSnapshot();
 
-        public void SetWave(int wave) => _snapshot.WaveIndex = wave;
-
-        public void SetPlayerHp(int current, int max)
+        public void SetTelemetry(string key, string value)
         {
-            _snapshot.PlayerHpCurrent = current;
-            _snapshot.PlayerHpMax = max;
+            if (string.IsNullOrWhiteSpace(key))
+                return;
+            _snapshot.Telemetry[key.Trim()] = value ?? "";
         }
 
-        public void SetAliveEnemies(int aliveEnemies)
-        {
-            _snapshot.AliveEnemies = aliveEnemies;
-        }
+        public void SetTelemetry(string key, int value) => SetTelemetry(key, value.ToString());
+        public void SetTelemetry(string key, float value) => SetTelemetry(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        public void SetTelemetry(string key, bool value) => SetTelemetry(key, value ? "true" : "false");
 
-        public GameSessionSnapshot BuildSnapshot() => new GameSessionSnapshot
+        public GameSessionSnapshot BuildSnapshot()
         {
-            WaveIndex = _snapshot.WaveIndex,
-            ModeId = _snapshot.ModeId,
-            PartySize = _snapshot.PartySize,
-            PlayerHpCurrent = _snapshot.PlayerHpCurrent,
-            PlayerHpMax = _snapshot.PlayerHpMax,
-            AliveEnemies = _snapshot.AliveEnemies
-        };
+            var copy = new GameSessionSnapshot();
+            foreach (var kv in _snapshot.Telemetry)
+                copy.Telemetry[kv.Key] = kv.Value;
+            return copy;
+        }
     }
 }

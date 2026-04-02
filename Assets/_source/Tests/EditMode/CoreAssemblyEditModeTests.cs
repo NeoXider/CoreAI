@@ -21,8 +21,8 @@ namespace CoreAI.Tests.EditMode
             var task = client.CompleteAsync(new LlmCompletionRequest { UserPayload = "x" });
             var result = task.GetAwaiter().GetResult();
             Assert.IsTrue(result.Ok);
-            StringAssert.Contains("\"commandType\":\"ArenaWavePlan\"", result.Content);
-            StringAssert.Contains("\"waveIndex1Based\":", result.Content);
+            StringAssert.Contains("ApplyWaveModifier", result.Content);
+            StringAssert.Contains("\"agentRole\":\"Creator\"", result.Content);
         }
 
         [Test]
@@ -46,10 +46,11 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(sys, user);
             var s = composer.GetSystemPrompt(BuiltInAgentRoleIds.Programmer);
             StringAssert.Contains("Programmer", s);
-            var snap = new CoreAI.Session.GameSessionSnapshot { WaveIndex = 2, ModeId = "m", PartySize = 3 };
+            var snap = new CoreAI.Session.GameSessionSnapshot();
+            snap.Telemetry["wave"] = "2";
             var u = composer.BuildUserPayload(snap, new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "h" });
-            StringAssert.Contains("wave=2", u);
-            StringAssert.Contains("hint=h", u);
+            StringAssert.Contains("\"wave\":\"2\"", u);
+            StringAssert.Contains("\"hint\":\"h\"", u);
         }
 
         [Test]

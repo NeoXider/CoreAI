@@ -1,4 +1,5 @@
 using CoreAI.Session;
+using System.Text;
 
 namespace CoreAI.Ai
 {
@@ -31,16 +32,53 @@ namespace CoreAI.Ai
             string body;
             if (_userTemplates.TryGetUserTemplate(roleId, out var tmpl))
             {
+                // Шаблоны должны быть игронезависимыми: Core не знает про wave/mode/party и т.п.
+                // Игра сама определяет ключи телеметрии; Core подставляет только общий JSON и hint.
+                var telemetryJson = BuildTelemetryJsonObject(snap);
                 body = tmpl
-                    .Replace("{wave}", snap.WaveIndex.ToString())
-                    .Replace("{mode}", snap.ModeId ?? "")
-                    .Replace("{party}", snap.PartySize.ToString())
+                    .Replace("{telemetry}", telemetryJson)
                     .Replace("{hint}", task.Hint ?? "");
             }
             else
-                body = $"wave={snap.WaveIndex}; mode={snap.ModeId}; party={snap.PartySize}; hp_current={snap.PlayerHpCurrent}; hp_max={snap.PlayerHpMax}; alive_enemies={snap.AliveEnemies}; hint={task.Hint}";
+                body = BuildDefaultJsonPayload(snap, task);
 
             return AppendLuaRepairContext(body, task);
+        }
+
+        private static string BuildTelemetryJsonObject(GameSessionSnapshot snap)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            var first = true;
+            foreach (var kv in snap.Telemetry)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append('\"').Append(EscapeJson(kv.Key)).Append("\":\"").Append(EscapeJson(kv.Value)).Append('\"');
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildDefaultJsonPayload(GameSessionSnapshot snap, AiTaskRequest task)
+        {
+            // Игронезависимый payload: игра сама выбирает ключи телеметрии и обновляет их в Core;
+            // Core только хранит и отдаёт их модели как JSON-словарь.
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            sb.Append("\"telemetry\":");
+            sb.Append(BuildTelemetryJsonObject(snap));
+            sb.Append(',');
+            sb.Append("\"hint\":\"").Append(EscapeJson(task.Hint ?? "")).Append("\"");
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+                return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private static string AppendLuaRepairContext(string body, AiTaskRequest task)
@@ -49,6 +87,8 @@ namespace CoreAI.Ai
                 return body;
             var err = ShortenForPrompt(task.LuaRepairErrorMessage, 500);
             var code = ShortenForPrompt(task.LuaRepairPreviousCode ?? "", 1200);
+            // repair контекст оставляем строкой-хвостом (универсально и читаемо для LLM),
+            // но он не содержит game-specific телеметрии.
             return $"{body}; lua_repair_generation={task.LuaRepairGeneration}; lua_error={err}; fix_this_lua={code}";
         }
 

@@ -26,6 +26,8 @@ namespace CoreAI.Composition
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<CodeRefinerStub>(Lifetime.Singleton).As<ICodeRefiner>();
+            builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+            builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<AiOrchestrator>(Lifetime.Singleton).As<IAiOrchestrationService>();
             builder.Register<InGameLlmChatService>(Lifetime.Singleton).As<IInGameLlmChatService>();
         }

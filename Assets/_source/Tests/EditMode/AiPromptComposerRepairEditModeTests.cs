@@ -12,7 +12,7 @@ namespace CoreAI.Tests.EditMode
             var composer = new AiPromptComposer(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider());
-            var snap = new GameSessionSnapshot { WaveIndex = 1, ModeId = "m", PartySize = 1 };
+            var snap = new GameSessionSnapshot();
             var task = new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Programmer,

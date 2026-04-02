@@ -32,7 +32,7 @@ namespace CoreAI.Tests.PlayMode
             var composer = new AiPromptComposer(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider());
-            var orch = new AiOrchestrator(host, new StubLlmClient(), sink, telemetry, composer);
+            var orch = new AiOrchestrator(host, new StubLlmClient(), sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy());
 
             foreach (var role in BuiltInAgentRoleIds.AllBuiltInRoles)
             {

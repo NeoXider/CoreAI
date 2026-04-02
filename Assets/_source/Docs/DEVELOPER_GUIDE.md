@@ -80,7 +80,13 @@ flowchart LR
 
 - **Цепочка системного промпта:** манифест (опционально) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → встроенный fallback (**`BuiltInAgentSystemPromptTexts`**).
 - **Встроенные роли:** см. **`BuiltInAgentRoleIds`** и тесты **`AgentRolesAndPromptsTests`**.
-- **User payload:** шаблоны с `{wave}`, `{mode}`, `{party}`, `{hint}` или строка по умолчанию; при ремонте Lua добавляются **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
+- **User payload:** по умолчанию — JSON вида `{"telemetry":{...},"hint":"..."}` из **`GameSessionSnapshot.Telemetry`**; при ремонте Lua добавляются поля **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
+- **Память агента (опционально):** агент может сам сохранять “память” через блоки в ответе:
+  - fenced `memory` — перезаписать память
+  - fenced `memory_append` — дописать
+  - fenced `memory_clear` — очистить
+  
+  По умолчанию память **выключена у всех ролей**, кроме **Creator** (см. `AgentMemoryPolicy`). В рантайме Unity память хранится в `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`.
 
 ---
 

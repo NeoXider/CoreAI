@@ -1,4 +1,5 @@
 using System.Collections;
+using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Session;
 using UnityEngine;
@@ -22,6 +23,7 @@ namespace CoreAI.ExampleGame.Arena
         private GameObject _enemyTemplate;
         private IArenaWaveSchedule _waveSchedule;
         private ArenaCreatorWavePlanner _creatorPlanner;
+        private bool _useLocalCreator;
         private bool _started;
 
         public void Init(
@@ -36,6 +38,12 @@ namespace CoreAI.ExampleGame.Arena
             _waveSchedule = waveSchedule;
             _creatorPlanner = creatorPlanner;
             wavesToWin = winWaves;
+
+            // Если ILlmClient = StubLlmClient — используем локальный планировщик (пример),
+            // чтобы Core оставался игронезависимым.
+            var scope = LifetimeScope.Find<CoreAILifetimeScope>();
+            if (scope != null && scope.Container.TryResolve<ILlmClient>(out var llm))
+                _useLocalCreator = llm is StubLlmClient;
         }
 
         private void Start()
@@ -56,12 +64,15 @@ namespace CoreAI.ExampleGame.Arena
                     yield break;
                 PushWaveTelemetry(wave);
                 _session.SetCurrentWave(wave);
-                // Запрос Creator (асинхронно) — даём короткое окно, чтобы получить план перед спавном.
-                _creatorPlanner?.RequestWavePlan(wave);
-
                 ArenaWavePlan plan = null;
-                if (_creatorPlanner != null)
+                if (_useLocalCreator)
                 {
+                    plan = ArenaLocalWavePlanner.CreatePlan(wave, _session, _waveSchedule);
+                }
+                else if (_creatorPlanner != null)
+                {
+                    // Запрос Creator (асинхронно) — даём короткое окно, чтобы получить план перед спавном.
+                    _creatorPlanner.RequestWavePlan(wave);
                     var t = 0f;
                     while (t < 0.35f && !_session.RunEnded)
                     {
@@ -105,7 +116,7 @@ namespace CoreAI.ExampleGame.Arena
             if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp))
                 return;
             if (tp is SessionTelemetryCollector collector)
-                collector.SetWave(wave);
+                collector.SetTelemetry("wave", wave);
         }
 
         private void SpawnOne(float hpMult, float dmgMult, float moveSpeedMult, float radius)

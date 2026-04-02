@@ -58,12 +58,18 @@ namespace CoreAI.Tests.EditMode
             var provider = new BuiltInDefaultAgentSystemPromptProvider();
             var noUser = new NoAgentUserPromptTemplateProvider();
             var composer = new AiPromptComposer(provider, noUser);
-            var snap = new GameSessionSnapshot { WaveIndex = 3, ModeId = "arena", PartySize = 2 };
+            var snap = new GameSessionSnapshot();
+            snap.Telemetry["wave"] = "3";
+            snap.Telemetry["mode"] = "arena";
+            snap.Telemetry["party"] = "2";
             foreach (var role in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 var u = composer.BuildUserPayload(snap, new AiTaskRequest { RoleId = role, Hint = "test" });
-                StringAssert.Contains("wave=3", u);
-                StringAssert.Contains("hint=test", u);
+                StringAssert.Contains("\"telemetry\":{", u);
+                StringAssert.Contains("\"wave\":\"3\"", u);
+                StringAssert.Contains("\"mode\":\"arena\"", u);
+                StringAssert.Contains("\"party\":\"2\"", u);
+                StringAssert.Contains("\"hint\":\"test\"", u);
             }
         }
 
@@ -89,11 +95,6 @@ namespace CoreAI.Tests.EditMode
             {
                 StringAssert.Contains("```lua", r.Content, roleId);
                 StringAssert.Contains("report('stub:", r.Content, roleId);
-            }
-            else if (roleId == BuiltInAgentRoleIds.Creator)
-            {
-                StringAssert.Contains("\"commandType\":\"ArenaWavePlan\"", r.Content, roleId);
-                StringAssert.Contains("\"enemyCount\":", r.Content, roleId);
             }
             else
             {
