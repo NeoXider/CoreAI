@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -64,7 +65,8 @@ namespace CoreAI.Ai
                 {
                     AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
                     SystemPrompt = system,
-                    UserPayload = transcript
+                    UserPayload = transcript,
+                    TraceId = Guid.NewGuid().ToString("N")
                 },
                 cancellationToken).ConfigureAwait(false);
 

@@ -16,6 +16,16 @@ namespace CoreAI.Infrastructure.Logging
         [SerializeField]
         private GameLogLevel minimumLevel = GameLogLevel.Debug;
 
+        private void OnValidate()
+        {
+            // До добавления Llm в enum «все встроенные» давали маску без бита Llm — дополняем при открытии asset.
+            const GameLogFeature legacyAllBuiltIn =
+                GameLogFeature.Core | GameLogFeature.Composition | GameLogFeature.MessagePipe |
+                GameLogFeature.ExampleRoguelite;
+            if (enabledFeatures == legacyAllBuiltIn)
+                enabledFeatures = GameLogFeature.AllBuiltIn;
+        }
+
         public bool ShouldLog(GameLogFeature feature, GameLogLevel level)
         {
             if (feature == GameLogFeature.None)

@@ -1,6 +1,7 @@
 using System.Collections;
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Session;
 using UnityEngine;
 using VContainer;
@@ -18,6 +19,10 @@ namespace CoreAI.ExampleGame.Arena
         [SerializeField] private float spawnInterval = 0.45f;
         [SerializeField] private float pauseBetweenWaves = 2f;
         [SerializeField] private float spawnRadius = 17.5f;
+
+        [Tooltip("Сколько секунд ждать ответ Creator (LLM) перед запасным планом из линейного расписания.")]
+        [SerializeField]
+        private float creatorPlanWaitSeconds = 14f;
 
         private IArenaSessionAuthority _session;
         private GameObject _enemyTemplate;
@@ -43,7 +48,7 @@ namespace CoreAI.ExampleGame.Arena
             // чтобы Core оставался игронезависимым.
             var scope = LifetimeScope.Find<CoreAILifetimeScope>();
             if (scope != null && scope.Container.TryResolve<ILlmClient>(out var llm))
-                _useLocalCreator = llm is StubLlmClient;
+                _useLocalCreator = LoggingLlmClientDecorator.Unwrap(llm) is StubLlmClient;
         }
 
         private void Start()
@@ -71,10 +76,10 @@ namespace CoreAI.ExampleGame.Arena
                 }
                 else if (_creatorPlanner != null)
                 {
-                    // Запрос Creator (асинхронно) — даём короткое окно, чтобы получить план перед спавном.
+                    // Запрос Creator (асинхронно) — ждём ответ LLM до creatorPlanWaitSeconds, иначе запасной план.
                     _creatorPlanner.RequestWavePlan(wave);
                     var t = 0f;
-                    while (t < 0.35f && !_session.RunEnded)
+                    while (t < creatorPlanWaitSeconds && !_session.RunEnded)
                     {
                         if (_creatorPlanner.TryConsumeLatestPlan(wave, out plan))
                             break;

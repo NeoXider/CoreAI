@@ -56,12 +56,13 @@ flowchart LR
   LuaP -->|"ошибка + Programmer"| Orch
 ```
 
-1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, опционально поля ремонта Lua).
-2. **`AiOrchestrator`** собирает системный/user промпт через **`AiPromptComposer`**, вызывает **`ILlmClient.CompleteAsync`**, публикует **`ApplyAiGameCommand`** с **`CommandTypeId = AiEnvelope`**, **`JsonPayload`** = сырой текст модели, плюс **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**.
-3. Подписчик **`AiGameCommandRouter`** сначала вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**.
-4. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`**. Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом **`lua_error`** / **`fix_this_lua`** в user payload (лимит поколений см. **`LuaAiEnvelopeProcessor`**).
+1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, опционально поля ремонта Lua и **`TraceId`** для продолжения цепочки — ремонт Lua).
+2. **`AiOrchestrator`** назначает **`TraceId`** (новый GUID или из **`AiTaskRequest`**), кладёт его в **`LlmCompletionRequest`**, собирает промпты через **`AiPromptComposer`**, вызывает **`ILlmClient.CompleteAsync`**, публикует **`ApplyAiGameCommand`** с **`CommandTypeId = AiEnvelope`**, **`JsonPayload`**, **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`**.
+3. В DI зарегистрированный **`ILlmClient`** — это **`LoggingLlmClientDecorator`** вокруг **`LlmUnityLlmClient`** / **`OpenAiChatLlmClient`** / **`StubLlmClient`**: лог **`[Llm]`** (`LLM ▶` / `LLM ◀` / таймаут `LLM ⏱`), **`wallMs`**, токены для HTTP при наличии `usage`, связанный **`CancellationToken`** и **таймаут** с **`CoreAILifetimeScope`** (**Llm Request Timeout Seconds**, **0** = без лимита). Для проверки «это stub?» используйте **`LoggingLlmClientDecorator.Unwrap(client)`**.
+4. Подписчик **`AiGameCommandRouter`** сначала вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
+5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (лимит поколений см. **`LuaAiEnvelopeProcessor`**).
 
-**Важно:** геймплейные системы могут подписываться на **`ApplyAiGameCommand`** и реагировать на типы команд; не парсить сырой текст LLM вне общего конвейера, если хотите единообразия.
+**Важно:** геймплейные системы могут подписываться на **`ApplyAiGameCommand`** и реагировать на типы команд; не парсить сырой текст LLM вне общего конвейера, если хотите единообразия. Подробнее логи и таймаут: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1 (блок про CoreAI) и таймаут.
 
 ---
 
@@ -69,10 +70,12 @@ flowchart LR
 
 | Режим | Где настраивается | Когда выбирается |
 |--------|-------------------|------------------|
-| **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если на **`CoreAILifetimeScope`** не включён OpenAI HTTP asset или он выключен. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
-| **OpenAI-compatible HTTP** | Asset **CoreAI → LLM → OpenAI-compatible HTTP**, поле на **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — тогда **`ILlmClient`** = **`OpenAiChatLlmClient`** (эндпоинт `.../v1/chat/completions`). |
+| **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если HTTP выключен: фактический клиент — **`LlmUnityLlmClient`**, в контейнере обёрнут в **`LoggingLlmClientDecorator`**. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
+| **OpenAI-compatible HTTP** | Asset **CoreAI → LLM → OpenAI-compatible HTTP**, поле на **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — тогда внутри декоратора реализация — **`OpenAiChatLlmClient`**. |
 
 Символ **`COREAI_NO_LLM`**: в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
+
+**Наблюдаемость:** категория логов **`GameLogFeature.Llm`**; старые **Game Log Settings** без этого бита дополняются при **`OnValidate`** ассета. Фильтр консоли по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
 
 ---
 
@@ -145,4 +148,4 @@ flowchart LR
 
 Крупные изменения контрактов фиксируйте в **DGF_SPEC** (версия в шапке). **DEVELOPER_GUIDE** описывает текущую карту кода; при расхождении с кодом приоритет у репозитория — обновите гайд в том же PR.
 
-**Версия этого гайда:** 1.2 (апрель 2026) — ссылки на QUICK_START, DOCS_INDEX, UNITY_SETUP для Example Game.
+**Версия этого гайда:** 1.3 (апрель 2026) — TraceId, декоратор LLM, таймаут запроса, логи Llm/MessagePipe, Unwrap(stub).

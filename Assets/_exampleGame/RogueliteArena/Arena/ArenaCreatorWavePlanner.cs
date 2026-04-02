@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Messaging;
@@ -17,7 +18,9 @@ namespace CoreAI.ExampleGame.Arena
         private IAiOrchestrationService _orchestrator;
         private IArenaSessionView _session;
         private int _lastRequestedWave;
-        private ArenaWavePlan _lastPlan;
+
+        /// <summary>Планы по номеру волны (ответ LLM может прийти позже окна ожидания директора).</summary>
+        private readonly Dictionary<int, ArenaWavePlan> _plansByWave = new Dictionary<int, ArenaWavePlan>();
 
         public void Init(IAiOrchestrationService orchestrator, IArenaSessionView session)
         {
@@ -53,15 +56,7 @@ namespace CoreAI.ExampleGame.Arena
 
         public bool TryConsumeLatestPlan(int waveIndex1Based, out ArenaWavePlan plan)
         {
-            plan = null;
-            if (_lastPlan == null)
-                return false;
-            if (_lastRequestedWave != waveIndex1Based)
-                return false;
-
-            plan = _lastPlan;
-            _lastPlan = null;
-            return true;
+            return _plansByWave.Remove(waveIndex1Based, out plan);
         }
 
         private void OnCommand(ApplyAiGameCommand cmd)
@@ -76,11 +71,14 @@ namespace CoreAI.ExampleGame.Arena
             if (!ArenaWavePlanParser.TryParse(cmd.JsonPayload, out var plan))
                 return;
 
-            if (!ArenaWavePlanValidator.TryValidate(plan, _lastRequestedWave, out _))
+            var waveKey = plan.waveIndex1Based > 0 ? plan.waveIndex1Based : _lastRequestedWave;
+            if (!ArenaWavePlanValidator.TryValidate(plan, waveKey, out var fail))
+            {
+                Debug.LogWarning($"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: план волны {waveKey} отклонён: {fail}");
                 return;
+            }
 
-            _lastPlan = plan;
+            _plansByWave[waveKey] = plan;
         }
     }
 }
-

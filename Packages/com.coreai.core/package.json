@@ -1,0 +1,31 @@
+{
+  "name": "com.coreai.core",
+  "version": "0.1.0",
+  "displayName": "CoreAI",
+  "description": "Ядро CoreAI: оркестрация ИИ, ILlmClient (LLMUnity / OpenAI HTTP), Lua (MoonSharp), MessagePipe, VContainer. Исходники сейчас в Assets/_source; манифест задаёт версию и зависимости для будущего переноса в UPM и установки в другие проекты.",
+  "unity": "6000.3",
+  "author": {
+    "name": "Neoxider",
+    "url": "https://github.com/NeoXider"
+  },
+  "dependencies": {
+    "com.unity.ai.navigation": "2.0.12",
+    "com.unity.inputsystem": "1.18.0",
+    "com.unity.ugui": "2.0.0",
+    "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
+    "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
+    "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+    "com.cysharp.r3": "https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity",
+    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
+    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "orchestration",
+    "lua",
+    "messagepipe",
+    "navigation"
+  ]
+}

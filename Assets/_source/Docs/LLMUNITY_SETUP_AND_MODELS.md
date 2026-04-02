@@ -30,7 +30,16 @@
 
 **Логи LLMUnity:** на компоненте **LLM** выставьте **Log Level = All** на время отладки (как на вашем скриншоте).
 
-**Логи CoreAI (запрос и ответ модели, роль агента):** `CoreAILifetimeScope` регистрирует `ILlmClient` через **`LoggingLlmClientDecorator`**. В консоли ищите **`[Llm]`** внутри префикса **`[CoreAI]`**: строки **«Запрос LLM»** (роль, `backend=…`, превью system/user) и **«Ответ LLM»** (превью `content`). Длинные тексты обрезаются — лимиты в `LoggingLlmClientDecorator.cs` (`SystemPreviewChars`, `UserPreviewChars`, `ResponsePreviewChars`). Чтобы отключить шум: asset **Game Log Settings** на scope → снимите флаг **Llm** (или поднимите **Minimum Level** выше Info). Итоговая команда игре всё ещё логируется отдельно в **`AiGameCommandRouter`** (`ApplyAiGameCommand`); если сработал парсер памяти, JSON в роутере может отличаться от сырого ответа в строке «Ответ LLM».
+**Логи CoreAI (запрос и ответ модели, роль агента):** `CoreAILifetimeScope` регистрирует `ILlmClient` через **`LoggingLlmClientDecorator`**. В консоли ищите **`[Llm]`** внутри **`[CoreAI]`**:
+- **`LLM ▶`** — `traceId`, роль, `backend`, превью **system** / **user** (длины в символах);
+- **`LLM ◀`** — тот же `traceId`, **`wallMs`** (время вызова), токены и **tok/s** для OpenAI-compatible HTTP (если в JSON есть `usage`); у **LLMUnity** счётчики токенов в `Chat()` недоступны — в логе будет «tokens н/д»;
+- следующая строка **`ApplyAiGameCommand`** в **`[MessagePipe]`** содержит **тот же `traceId`** — так видно «модель → команда в игру».
+
+Длинные тексты обрезаются — лимиты в `LoggingLlmClientDecorator.cs`. Старый **Game Log Settings** без бита **Llm**: при открытии asset в инспекторе сработает миграция `OnValidate` (добавится **Llm**), либо включите вручную.
+
+Итог: если сработал парсер памяти, `JsonPayload` в роутере может отличаться от сырого блока «LLM ◀».
+
+**Таймаут запроса к модели:** на **`CoreAILifetimeScope`** поле **Llm Request Timeout Seconds** (по умолчанию **15**). **0** — отключить. Декоратор передаёт связанный `CancellationToken`; OpenAI HTTP отменяет запрос; LLMUnity отменяет ожидание там, где в коде проверяется токен — полный «обрыв» зависшего нативного вызова без поддержки отмены пакетом не гарантируется.
 
 ---
 
@@ -121,8 +130,10 @@ $env:COREAI_OPENAI_TEST_MODEL = "<id из GET http://<LM_STUDIO_HOST>:1234/v1/mo
 
 ## 8. Programmer и Lua (исполнение в рантайме)
 
-- Оркестратор публикует **`AiEnvelope`** с **`JsonPayload`** = сырой ответ LLM и полями **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**.
+- Оркестратор публикует **`AiEnvelope`** с **`JsonPayload`** = сырой ответ LLM и полями **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`** (сквозной id для логов и ремонта Lua).
 - **`LuaAiEnvelopeProcessor`** (Core) + **`AiGameCommandRouter`**: из конверта извлекается Lua (fenced-блок lua или JSON **ExecuteLua**) и выполняется в **`SecureLuaEnvironment`** с API **`report`**, **`add`** (см. `LoggingLuaRuntimeBindings`).
 - Успех / ошибка публикуются как **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`**. При ошибке и роли **Programmer** оркестратор вызывается снова с **`lua_error`** / **`fix_this_lua`** в user payload (до **4** поколений ремонта).
 - **EditMode:** `LuaAiEnvelopeProcessorEditModeTests`, `AiLuaPayloadParserEditModeTests`, `ProgrammerLuaPipelineEditModeTests`.
 - В примере игры: **`CoreAiLuaHotkey`** на объекте с **`ExampleRogueliteEntry`** — клавиша **F9** ставит задачу Programmer.
+
+**Версия этого файла:** синхронизирована с ядром (апрель 2026): TraceId, таймаут, `GameLogFeature.Llm`, пример арены (Creator по волнам).

@@ -31,6 +31,10 @@ namespace CoreAI.Composition
         [SerializeField]
         private OpenAiHttpLlmSettings openAiHttpLlmSettings;
 
+        [Tooltip("Автоотмена одного вызова ILlmClient.CompleteAsync, если модель «зависла». 0 — без ограничения.")]
+        [SerializeField]
+        private float llmRequestTimeoutSeconds = 15f;
+
         protected override void Configure(IContainerBuilder builder)
         {
             if (gameLogSettings != null)
@@ -45,8 +49,9 @@ namespace CoreAI.Composition
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
 
             var openAi = openAiHttpLlmSettings;
+            var llmTimeout = llmRequestTimeoutSeconds;
             builder.Register<ILlmClient>(c =>
-                new LoggingLlmClientDecorator(ResolveLlmClient(openAi), c.Resolve<IGameLogger>()), Lifetime.Singleton);
+                new LoggingLlmClientDecorator(ResolveLlmClient(openAi), c.Resolve<IGameLogger>(), llmTimeout), Lifetime.Singleton);
             builder.RegisterCorePortable();
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();

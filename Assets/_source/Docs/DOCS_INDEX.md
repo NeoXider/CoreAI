@@ -1,6 +1,6 @@
 # Оглавление документации CoreAI (`Assets/_source/Docs`)
 
-Краткий указатель файлов. Начните с **[QUICK_START.md](QUICK_START.md)**.
+Краткий указатель файлов. Начните с **[QUICK_START.md](QUICK_START.md)**. **UPM-манифест ядра (версия, зависимости):** [../../Packages/com.coreai.core/package.json](../../Packages/com.coreai.core/package.json) и [README](../../Packages/com.coreai.core/README.md).
 
 | Документ | Назначение |
 |----------|------------|
@@ -8,7 +8,7 @@
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Карта кода, поток LLM → команды → Lua, сборки, чеклист PR. |
 | [DGF_SPEC.md](DGF_SPEC.md) | Нормативный SPEC шаблона (версия в шапке). |
 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли (Creator, Programmer, …), placement, размеры моделей. |
-| [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, GGUF, OpenAI-compatible HTTP, PlayMode-тесты, Lua-конвейер. |
+| [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, GGUF, OpenAI HTTP, логи **`[Llm]`** / **traceId**, таймаут запроса, PlayMode-тесты, Lua-конвейер. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Короткие гайды под тайтл (сеть, оркестрация, роли, пример игры). |
 
 **Пример игры** (`Assets/_exampleGame`):

@@ -15,5 +15,8 @@ namespace CoreAI.Ai
 
         /// <summary>Сообщение об ошибке MoonSharp / выполнения.</summary>
         public string LuaRepairErrorMessage { get; set; } = "";
+
+        /// <summary>Продолжить цепочку логов (ремонт Lua); если пусто — оркестратор создаст новый.</summary>
+        public string TraceId { get; set; } = "";
     }
 }

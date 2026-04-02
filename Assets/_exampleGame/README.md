@@ -1,6 +1,8 @@
 # Example Game — демо на шаблоне CoreAI
 
-Пример игры в **`Assets/_exampleGame`** подключает **ядро** из **`Assets/_source`**: процедурная арена с волнами, DI (**`CoreAILifetimeScope`**), демо вызова **Programmer** (Lua + **`report`**) по **F9** (**`CoreAiLuaHotkey`**).
+**Автор шаблона CoreAI:** **Neoxider** (ник **neoxider**) — [github.com/NeoXider](https://github.com/NeoXider).
+
+Пример игры в **`Assets/_exampleGame`** подключает **ядро** из **`Assets/_source`**: процедурная арена с волнами, DI (**`CoreAILifetimeScope`**), вызов **Creator** на каждую волну (**`ArenaCreatorWavePlanner`**), демо **Programmer** по **F9** (**`CoreAiLuaHotkey`**). Логи ядра: **`[Llm]`** + **`traceId`** в **`ApplyAiGameCommand`** — см. [LLMUNITY_SETUP_AND_MODELS.md](../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md).
 
 **Пошаговая настройка в Unity (сцена, LLM, HTTP):** [`Docs/UNITY_SETUP.md`](Docs/UNITY_SETUP.md). **Архитектура арены, мультиплеер, ИИ (волны / анализ игрока):** [`Docs/ARENA_ARCHITECTURE_AND_AI.md`](Docs/ARENA_ARCHITECTURE_AND_AI.md). В меню редактора: **CoreAI → Development → Example Game → Open RogueliteArena scene** (и опция сделать сцену первой в Build Settings). Общий быстрый старт по репозиторию: [`../_source/Docs/QUICK_START.md`](../_source/Docs/QUICK_START.md). Онбординг по коду шаблона: [`../_source/Docs/DEVELOPER_GUIDE.md`](../_source/Docs/DEVELOPER_GUIDE.md).
 

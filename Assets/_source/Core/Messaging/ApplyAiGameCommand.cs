@@ -1,3 +1,5 @@
+using CoreAI.Ai;
+
 namespace CoreAI.Messaging
 {
     /// <summary>
@@ -17,6 +19,9 @@ namespace CoreAI.Messaging
 
         /// <summary>0 — первый ответ модели; увеличивается при каждом ремонте Lua.</summary>
         public int LuaRepairGeneration { get; set; }
+
+        /// <summary>Совпадает с TraceId в <see cref="LlmCompletionRequest"/> одного вызова оркестратора.</summary>
+        public string TraceId { get; set; } = "";
     }
 
     /// <summary>

@@ -32,7 +32,7 @@
 
 | Компонент | Роль |
 |-----------|------|
-| **CoreAILifetimeScope** | Корень DI ядра: лог, MessagePipe, **`ILlmClient`**, оркестратор, роутер **`ApplyAiGameCommand`**, Lua-процессор. **Auto Run** должен быть включён. |
+| **CoreAILifetimeScope** | Корень DI ядра: лог, MessagePipe, **`ILlmClient`** (в рантайме — **`LoggingLlmClientDecorator`** + реализация), оркестратор, роутер **`ApplyAiGameCommand`**, Lua-процессор. Поля: **Llm Request Timeout Seconds** (по умолчанию 15, 0 = без лимита), **Game Log Settings**. **Auto Run** включён. |
 | **ExampleRogueliteEntry** | Старт прототипа арены (волны). В **Awake** добавляет **`CoreAiLuaHotkey`** (клавиша **F9**). |
 
 **Дочерний** объект **`LLM`** (под `CompositionRoot`):
@@ -93,10 +93,11 @@
 
 | Поле CoreAILifetimeScope | Назначение |
 |--------------------------|------------|
-| **Game Log Settings** | Asset **Create → CoreAI → Logging → Game Log Settings** — фильтр категорий/уровней. Если пусто — используется дефолт ядра. |
+| **Game Log Settings** | Asset **Create → CoreAI → Logging → Game Log Settings** — фильтр категорий/уровней. Включите **Llm** для логов **`LLM ▶` / `LLM ◀`** и **traceId** в **`ApplyAiGameCommand`**. Старый ассет без **Llm** обновится при открытии в инспекторе. |
+| **Llm Request Timeout Seconds** | Автоотмена одного вызова модели (секунды). **0** — без ограничения. |
 | **Agent Prompts Manifest** | **Create → CoreAI → Agent Prompts Manifest** — переопределения системных/user промптов и кастомные роли. |
 
-Без них ядро работает на встроенных промптах и дефолтном логе.
+Без них ядро работает на встроенных промптах и дефолтном логе (и таймауте **15** с).
 
 ---
 
@@ -110,7 +111,7 @@
 Если при **F9** нет реального ответа модели:
 
 - Проверьте режим **A** или **B** выше.
-- Убедитесь, что не остался активным только **StubLlmClient** (нет ни рабочего **LLMAgent**, ни HTTP с **Use Open Ai Compatible Http**).
+- Убедитесь, что не остался активным только **StubLlmClient** (в DI снаружи — декоратор: смотрите разрешённый **`ILlmClient`** и при необходимости лог **`backend=StubLlmClient`**; см. [LLMUNITY_SETUP_AND_MODELS.md](../../_source/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
 
 ---
 
@@ -128,4 +129,4 @@
 - **[DEVELOPER_GUIDE.md](../../_source/Docs/DEVELOPER_GUIDE.md)** — поток данных и расширение ядра.
 - **[README.md](../README.md)** — обзор Example Game.
 
-**Версия:** 1.0 (апрель 2026).
+**Версия:** 1.1 (апрель 2026) — таймаут LLM, логи Llm/traceId, декоратор ILlmClient.

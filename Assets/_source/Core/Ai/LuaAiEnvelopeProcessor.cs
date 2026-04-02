@@ -56,7 +56,8 @@ namespace CoreAI.Ai
                     JsonPayload = summary,
                     SourceRoleId = cmd.SourceRoleId,
                     SourceTaskHint = cmd.SourceTaskHint,
-                    LuaRepairGeneration = cmd.LuaRepairGeneration
+                    LuaRepairGeneration = cmd.LuaRepairGeneration,
+                    TraceId = cmd.TraceId ?? ""
                 });
                 _observer.OnLuaSuccess(summary);
             }
@@ -69,7 +70,8 @@ namespace CoreAI.Ai
                     JsonPayload = msg,
                     SourceRoleId = cmd.SourceRoleId,
                     SourceTaskHint = cmd.SourceTaskHint,
-                    LuaRepairGeneration = cmd.LuaRepairGeneration
+                    LuaRepairGeneration = cmd.LuaRepairGeneration,
+                    TraceId = cmd.TraceId ?? ""
                 });
                 _observer.OnLuaFailure(msg);
 
@@ -93,7 +95,8 @@ namespace CoreAI.Ai
                     Hint = string.IsNullOrEmpty(cmd.SourceTaskHint) ? "fix_lua" : cmd.SourceTaskHint,
                     LuaRepairGeneration = nextGeneration,
                     LuaRepairPreviousCode = failedLua,
-                    LuaRepairErrorMessage = error
+                    LuaRepairErrorMessage = error,
+                    TraceId = cmd.TraceId ?? ""
                 });
             }
             catch (Exception ex)

@@ -12,9 +12,11 @@
 |-----------|------------|
 | **`IArenaSessionView` / `IArenaSessionAuthority`** | Контракт состояния забега: волна, живые враги, конец рана. UI и директор зависят от **интерфейса**, не от синглтона. |
 | **`ArenaSurvivalSession`** | Реализация сессии на сцене. Поле **`ArenaSimulationRole`**: **AuthoritativeHost** (соло / listen server) или **ClientPresentationOnly** (клиент без симуляции волн и ИИ врагов). |
-| **`ArenaSurvivalDirector`** | Запускает корутину волн **только** если `IsAuthoritativeSimulation`. Спавн: `Instantiate` → `ArenaEnemyBrain.Configure(session)` → `SetActive(true)`. |
+| **`ArenaSurvivalDirector`** | Запускает корутину волн **только** если `IsAuthoritativeSimulation`. Спавн: `Instantiate` → `ArenaEnemyBrain.Configure(session)` → `SetActive(true)`. Ожидание плана **Creator** — до **`creatorPlanWaitSeconds`** (инспектор), иначе запасной план из **`ArenaLinearWaveSchedule`**. Режим «только локальный планировщик» если **`LoggingLlmClientDecorator.Unwrap(ILlmClient)`** — **`StubLlmClient`**. |
 | **`ArenaEnemyBrain`** | Движение, урон игроку, смерть — только при **авторитете**. Без `Find*`. |
 | **`IArenaWaveSchedule` / `ArenaLinearWaveSchedule`** | Правило «сколько врагов на волне». Линейка — дефолт; дальше подменяется **валидированным** дескриптором от ИИ (или таблицей с сервера). |
+| **`ArenaCreatorWavePlanner`** | Перед волной вызывает **`RunTaskAsync`** с ролью **Creator**; ответ парсится в **`ArenaWavePlan`**; планы хранятся **по номеру волны** (ответ LLM может прийти с задержкой). Невалидный план — предупреждение в консоль. |
+| **`ArenaSurvivalProceduralSetup`** | Опция **`logOnStartRoles`**: одноразовый лог, какие роли LLM в примере реально вызываются (Creator по волнам, Programmer по F9; **AINpc** не подключён; компаньон — бот без LLM). |
 
 ### Встраивание Netcode for GameObjects (NGO) или аналога
 
@@ -90,4 +92,4 @@
 
 **Связанные документы:** [../../_source/Docs/DEVELOPER_GUIDE.md](../../_source/Docs/DEVELOPER_GUIDE.md), [../../_source/Docs/AI_AGENT_ROLES.md](../../_source/Docs/AI_AGENT_ROLES.md), [../../_source/Docs/DGF_SPEC.md](../../_source/Docs/DGF_SPEC.md).
 
-**Версия:** 1.0 (апрель 2026).
+**Версия:** 1.1 (апрель 2026) — Creator-планировщик, ожидание LLM, unwrap stub, лог ролей.

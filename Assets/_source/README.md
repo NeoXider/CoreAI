@@ -6,6 +6,12 @@
 **Роли ИИ и оркестрация:** [`Docs/AI_AGENT_ROLES.md`](Docs/AI_AGENT_ROLES.md) (Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, placement).  
 **LLMUnity / OpenAI HTTP / Lua в игре:** [`Docs/LLMUNITY_SETUP_AND_MODELS.md`](Docs/LLMUNITY_SETUP_AND_MODELS.md).
 
+**Автор библиотеки:** **Neoxider** (ник **neoxider**) — [GitHub @NeoXider](https://github.com/NeoXider); также [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools) для Unity.
+
+## UPM-пакет (манифест зависимостей)
+
+В **`Packages/com.coreai.core/`** лежат **`package.json`** (имя **`com.coreai.core`**, версия **0.1.0**, зависимости в т.ч. **com.unity.ai.navigation**) и **`README.md`**. Подключение в проект через `manifest.json` и перенос исходников из `Assets/_source` в пакет — **в плане** (см. **[Docs/DGF_SPEC.md](Docs/DGF_SPEC.md)** фаза **F**).
+
 ## Сборки и папки
 
 | Путь | Сборка | Назначение |
@@ -28,8 +34,9 @@
 ## Запуск DI в сцене
 
 1. Создайте пустой объект, например `CompositionRoot`.
-2. Добавьте **`CoreAILifetimeScope`** (корень DI ядра; не путать с игровым `LifetimeScope` тайтла). При необходимости создайте asset **CoreAI → Logging → Game Log Settings** и назначьте в поле **Game Log Settings** (иначе — все категории и уровни через `DefaultGameLogSettings`).
-3. **Auto Run** включён — в консоли сообщение от `CoreAIGameEntryPoint`.
+2. Добавьте **`CoreAILifetimeScope`** (корень DI ядра; не путать с игровым `LifetimeScope` тайтла). При необходимости создайте asset **CoreAI → Logging → Game Log Settings** и назначьте в поле **Game Log Settings** (иначе — все категории и уровни через `DefaultGameLogSettings`). Включите категорию **`Llm`** для логов запроса/ответа модели (**`LoggingLlmClientDecorator`**); у старых ассетов бит **Llm** добавляется при открытии инспектора (**`OnValidate`**).
+3. Опционально: **Llm Request Timeout Seconds** на том же компоненте (**15** по умолчанию, **0** = без автоотмены зависшего вызова).
+4. **Auto Run** включён — в консоли сообщение от `CoreAIGameEntryPoint`.
 
 ## Фичи (паттерн как в Last-War)
 
@@ -38,14 +45,15 @@
 
 ## Логирование по фичам (как идея в GameDev-Last-War)
 
-- Вызовы: `IGameLogger.Log*(GameLogFeature.XXX, "…")` — категории в `GameLogFeature` (расширяйте enum).
+- Вызовы: `IGameLogger.Log*(GameLogFeature.XXX, "…")` — категории в `GameLogFeature` (в т.ч. **`Llm`** для трассировки вызовов модели).
 - Фильтр: **`GameLogSettingsAsset`** — флаги **Enabled Features** и **Minimum Level**.
+- **LLM:** оркестратор задаёт **`TraceId`** на задачу; он же в **`ApplyAiGameCommand`** и в логах **`AiGameCommandRouter`** — удобно фильтровать консоль по одному id.
 - Замена бэкенда: новый приёмник вместо `UnityGameLogSink` или новая реализация `IGameLogger` в `RegisterCore`.
 
 ## Промпты агентов (системный + user)
 
 - **Системный промпт** задаётся для каждого `roleId` (Creator, Programmer, `PlayerChat`, свой id): цепочка **манифест** (опционально) → **Resources** `AgentPrompts/System/<RoleId>.txt` → встроенный fallback в `CoreAI.Core`.
-- **User-шаблон** (опционально): манифест или `Resources/AgentPrompts/User/<RoleId>.txt` с плейсхолдерами `{wave}`, `{mode}`, `{party}`, `{hint}`.
+- **User-шаблон** (опционально): манифест или `Resources/AgentPrompts/User/<RoleId>.txt` с плейсхолдерами **`{telemetry}`** и **`{hint}`** (игронезависимый JSON телеметрии и подсказка задачи).
 - **Create → CoreAI → Agent Prompts Manifest** — переопределения и блок **custom agents** для своих ролей.
 - **Игровой чат:** `IInGameLlmChatService` (роль `PlayerChat`), UI-пример `Presentation/PlayerChat/InGameChatPanel`.
 
@@ -53,7 +61,7 @@
 
 `RegisterMessagePipe()` + `RegisterBuildCallback` с `GlobalMessagePipe.SetProvider(resolver.AsServiceProvider())` в `CoreServicesInstaller` — глобальный доступ к шине и регистрация обработчиков через VContainer.
 
-Типы **`ApplyAiGameCommand`**: **`AiEnvelope`** (сырой ответ LLM), **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** — см. `AiGameCommandTypeIds`. Разбор и запуск Lua: **`LuaAiEnvelopeProcessor`** (Core) + подписка в **`AiGameCommandRouter`** (Source). Подробнее — [DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md) §3.
+Типы **`ApplyAiGameCommand`**: **`AiEnvelope`** (сырой ответ LLM), **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** — см. `AiGameCommandTypeIds`; у команд есть **`TraceId`**. Разбор и запуск Lua: **`LuaAiEnvelopeProcessor`** (Core) + подписка в **`AiGameCommandRouter`** (Source). Реальный **`ILlmClient`** в рантайме оборачивается в **`LoggingLlmClientDecorator`** (лог, таймаут, unwrap для проверки stub). Подробнее — [DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md) §3–4 и [LLMUNITY_SETUP_AND_MODELS.md](Docs/LLMUNITY_SETUP_AND_MODELS.md).
 
 ## Референс: Lua в GameDev-Last-War
 

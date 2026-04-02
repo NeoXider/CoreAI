@@ -35,6 +35,11 @@ namespace CoreAI.ExampleGame.Arena
         [SerializeField]
         private bool spawnCompanionBot = true;
 
+        [Header("Отладка")]
+        [Tooltip("Один раз при сборке арены: какие роли LLM реально вызываются в примере.")]
+        [SerializeField]
+        private bool logOnStartRoles = true;
+
         private void Start()
         {
             Build();
@@ -132,6 +137,14 @@ namespace CoreAI.ExampleGame.Arena
             dirGo.transform.SetParent(root.transform, false);
             var director = dirGo.AddComponent<ArenaSurvivalDirector>();
             director.Init(session, enemyTemplate, waveSchedule, planner, wavesToWin);
+
+            if (logOnStartRoles)
+            {
+                Debug.Log(
+                    "[CoreAI.ExampleGame] Роли LLM: Creator — план волны (ArenaCreatorWavePlanner), один запрос на волну; " +
+                    "Programmer — только F9 (CoreAiLuaHotkey); AINpc / PlayerChat ареной не вызываются. " +
+                    "Один LLMUnity на сцене = одна GGUF на все роли (разные system prompt). Компаньон — бот без LLM.");
+            }
         }
 
         private GameObject CreatePlayer(Transform parent)

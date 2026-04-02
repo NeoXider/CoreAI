@@ -70,11 +70,21 @@ namespace CoreAI.Infrastructure.Llm
                         return;
                     }
 
-                    var content = TryParseAssistantContent(text);
-                    if (content == null)
+                    var parsed = TryParseChatResponse(text);
+                    if (parsed.Content == null)
                         tcs.TrySetResult(new LlmCompletionResult { Ok = false, Error = "Bad chat/completions JSON: " + text });
                     else
-                        tcs.TrySetResult(new LlmCompletionResult { Ok = true, Content = content });
+                    {
+                        var ok = new LlmCompletionResult { Ok = true, Content = parsed.Content };
+                        if (parsed.Usage != null)
+                        {
+                            ok.PromptTokens = parsed.Usage.prompt_tokens;
+                            ok.CompletionTokens = parsed.Usage.completion_tokens;
+                            ok.TotalTokens = parsed.Usage.total_tokens;
+                        }
+
+                        tcs.TrySetResult(ok);
+                    }
                 }
                 finally
                 {
@@ -134,21 +144,22 @@ namespace CoreAI.Infrastructure.Llm
             return sb.ToString();
         }
 
-        private static string TryParseAssistantContent(string json)
+        private static (string Content, OaiUsage Usage) TryParseChatResponse(string json)
         {
             if (string.IsNullOrEmpty(json))
-                return null;
+                return (null, null);
             try
             {
                 var dto = JsonUtility.FromJson<OaiChatResponse>(json);
                 if (dto?.choices == null || dto.choices.Length == 0)
-                    return null;
+                    return (null, null);
                 var m = dto.choices[0].message;
-                return m?.content ?? "";
+                var content = m?.content ?? "";
+                return (content, dto.usage);
             }
             catch
             {
-                return null;
+                return (null, null);
             }
         }
 
@@ -156,6 +167,15 @@ namespace CoreAI.Infrastructure.Llm
         private class OaiChatResponse
         {
             public OaiChoice[] choices;
+            public OaiUsage usage;
+        }
+
+        [Serializable]
+        private class OaiUsage
+        {
+            public int prompt_tokens;
+            public int completion_tokens;
+            public int total_tokens;
         }
 
         [Serializable]

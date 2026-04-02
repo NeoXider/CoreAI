@@ -2,9 +2,9 @@
 
 **Назначение:** единый словарь **типов агентов** (поведений ИИ), их целей, типичных входов/выходов и правил **размещения** (хост / локально / гибрид). Игра на шаблоне **включает только нужные роли**; оркестратор не обязан поднимать всех. Рекомендации по **размеру/типу модели** (локально vs API) — §6.
 
-**Версия документа:** 1.3
+**Версия документа:** 1.4
 
-**Связанные документы:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (сеть, авторитет, NGO по умолчанию), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (карта кода, Lua, тесты), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (настройка демо-сцены).
+**Связанные документы:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (сеть, авторитет, NGO по умолчанию), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (карта кода, Lua, тесты, **traceId** / лог **Llm**), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, таймаут запроса), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (настройка демо-сцены).
 
 ---
 

@@ -8,6 +8,9 @@ namespace CoreAI.Ai
         public string AgentRoleId { get; set; } = "";
         public string SystemPrompt { get; set; } = "";
         public string UserPayload { get; set; } = "";
+
+        /// <summary>Сквозной id для логов (оркестратор / декоратор LLM / роутер команд).</summary>
+        public string TraceId { get; set; } = "";
     }
 
     public sealed class LlmCompletionResult
@@ -15,6 +18,12 @@ namespace CoreAI.Ai
         public bool Ok { get; set; }
         public string Content { get; set; } = "";
         public string Error { get; set; } = "";
+
+        /// <summary>Заполняется OpenAI-compatible HTTP при наличии <c>usage</c> в JSON.</summary>
+        public int? PromptTokens { get; set; }
+
+        public int? CompletionTokens { get; set; }
+        public int? TotalTokens { get; set; }
     }
 
     /// <summary>

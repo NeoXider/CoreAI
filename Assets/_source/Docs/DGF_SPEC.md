@@ -1,7 +1,7 @@
 # CoreAI — SPEC ядра (Dynamic Game Framework)
 
-**Версия документа:** 0.13  
-**Репозиторий:** CoreAI  
+**Версия документа:** 0.16  
+**Репозиторий:** CoreAI · **Автор:** Neoxider (ник neoxider) — [github.com/NeoXider](https://github.com/NeoXider)  
 **Код ядра:** `Assets/_source` — сборки **`CoreAI.Core`** (`Core/`, без Unity) и **`CoreAI.Source`** (`Runtime/`)  
 **Пример игры:** `Assets/_exampleGame` (см. также `Docs/ROGUELITE_PLAYBOOK.md` в примере)  
 **Референс-архитектура (не копировать целиком):** `D:\Git\GameDev-Last-War`  
@@ -66,7 +66,7 @@
 
 ### 3.4 Композиция и сцена
 
-- **`CoreAILifetimeScope`**: `RegisterCore()` — логгер, MessagePipe, брокер **`ApplyAiGameCommand`**, `IAiGameCommandSink`; при необходимости **OpenAI HTTP** (`OpenAiHttpLlmSettings`); затем **`ILlmClient`** (OpenAI / stub / LLMUnity при `LLMAgent` в сцене; символ **`COREAI_NO_LLM`** — без LLMUnity-адаптера); **`RegisterCorePortable()`** — песочница, **`LuaAiEnvelopeProcessor`**, оркестратор, снимок сессии, авторитет solo; **`IGameLuaRuntimeBindings`** / **`ILuaExecutionObserver`** (логирующие реализации в Source). Entry points: сначала **`AiGameCommandRouter`** (подписка + Lua), затем **`CoreAIGameEntryPoint`** (bootstrap LLM). Игровые feature-scope'ы вешать отдельно с **Parent** на этот корень ядра.
+- **`CoreAILifetimeScope`**: `RegisterCore()` — логгер, MessagePipe, брокер **`ApplyAiGameCommand`**, `IAiGameCommandSink`; при необходимости **OpenAI HTTP** (`OpenAiHttpLlmSettings`); затем **`ILlmClient`** как **`LoggingLlmClientDecorator`** вокруг фактической реализации (**OpenAiChatLlmClient** / **LlmUnityLlmClient** / **StubLlmClient** в зависимости от сцены и флагов; символ **`COREAI_NO_LLM`** — без LLMUnity-адаптера). Декоратор: лог **`GameLogFeature.Llm`**, **`TraceId`** в запросе (проставляет оркестратор), **таймаут** одного вызова (**Llm Request Timeout Seconds**, **0** = выкл). **`RegisterCorePortable()`** — песочница, **`LuaAiEnvelopeProcessor`**, оркестратор, снимок сессии, авторитет solo; **`IGameLuaRuntimeBindings`** / **`ILuaExecutionObserver`**. **`ApplyAiGameCommand`** несёт **`TraceId`**; ремонт Lua сохраняет его в **`AiTaskRequest`**. Entry points: сначала **`AiGameCommandRouter`**, затем **`CoreAIGameEntryPoint`**. Игровые feature-scope'ы — с **Parent** на этот корень.
 - **`CoreAIGameEntryPoint`**: старт + тестовый вызов оркестратора (bootstrap).
 - Сцена ядра: **`Assets/_source/Scenes/_mainCoreAI.unity`** (имя в редакторе может отображаться как `_mainCoreAI`; в Build Settings при необходимости сделать **стартовой** для разработки шаблона).
 - **Game Log Settings** (опционально): `Resources/GameLogSettings.asset` или свой asset на scope.
@@ -340,11 +340,20 @@ flowchart LR
 | E2 | Модель хост/клиент для ИИ и правил |
 | E3 | Расширение сценариев MCPForUnity под регрессию |
 
+### Фаза F — UPM-пакет `com.coreai.core`
+
+| Id | Критерий |
+|----|----------|
+| **F0** | **Сделано:** в репозитории есть **`Packages/com.coreai.core/package.json`** — имя **`com.coreai.core`**, версия (**semver** в поле `version`), зависимости: **AI Navigation** (`com.unity.ai.navigation`), Input System, uGUI, VContainer, MessagePipe (+ VContainer), UniTask, R3, LLMUnity, MoonSharp. Подробности — **`Packages/com.coreai.core/README.md`**. |
+| F1 | Подключить пакет в корневой **`Packages/manifest.json`** как `"com.coreai.core": "file:com.coreai.core"` **после** переноса (или дублирования) asmdef/исходников ядра под структуру UPM, чтобы не было двойного разрешения одних и тех же зависимостей. |
+| F2 | Перенос **`Assets/_source`** (и при необходимости тестов) в **`Runtime/`** / **`Editor/`** внутри пакета; samples — **`_exampleGame`** или отдельный **`com.coreai.examples`**. |
+| F3 | Публикация: git URL, теги под `version`, опционально OpenUPM; синхронизация версии в `package.json` с релизами. |
+
 ---
 
 ## 14. Саммари для вставки в контекст (копипаст)
 
-**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** VContainer + MessagePipe + R3 + UniTask + MoonSharp + **[LLMUnity](https://github.com/undreamai/LLMUnity)** (`ai.undream.llm`) + MCPForUnity в manifest; **`CoreAI.Core`** (портатив: `ILlmClient`, stub, оркестратор MVP, песочница Lua, **`LuaAiEnvelopeProcessor`**) + **`CoreAI.Source`** (DI, LLMUnity + OpenAI HTTP, MessagePipe, лог, роутер команд); сцены **`_mainCoreAI`**, пример **`RogueliteArena`**. **Сборка:** `CoreAI.Core` + `CoreAI.Source`. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд разработчика:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`, MCP §11.2. **Define:** `COREAI_NO_LLM` — без LLMUnity-адаптера (§5.2). **Референс:** Last-War (`LuaBehaviour`, DI).
+**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** VContainer + MessagePipe + R3 + UniTask + MoonSharp + **[LLMUnity](https://github.com/undreamai/LLMUnity)** (`ai.undream.llm`) + MCPForUnity в manifest; **`CoreAI.Core`** (контракты `ILlmClient`, **`LlmCompletionRequest`/`Result`** с токенами и **`TraceId`**, **`ApplyAiGameCommand.TraceId`**, stub, оркестратор MVP, песочница Lua, **`LuaAiEnvelopeProcessor`**) + **`CoreAI.Source`** (DI, декоратор LLM с логом и таймаутом, LLMUnity + OpenAI HTTP, MessagePipe, роутер команд с **traceId** в логе); сцены **`_mainCoreAI`**, пример **`RogueliteArena`**. **Сборка:** `CoreAI.Core` + `CoreAI.Source`. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`, MCP §11.2. **Define:** `COREAI_NO_LLM` — без LLMUnity-адаптера (§5.2). **Референс:** Last-War (`LuaBehaviour`, DI).
 
 ---
 
@@ -365,3 +374,6 @@ flowchart LR
 | 0.11 | §4.1–4.2: MoonSharp явно как зависимость Core (без Unity) |
 | 0.12 | §9 ADR-9.1–9.3; в коде: сборка `CoreAI.Core`, `ILlmClient` + stub + LLMUnity в Source, оркестратор MVP, `ApplyAiGameCommand` + MessagePipe, песочница MoonSharp, `CoreAI.Tests`, `COREAI_NO_LLM` |
 | 0.13 | Ссылка на [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md); §3.4: OpenAI HTTP, `LuaAiEnvelopeProcessor`, порядок entry points, биндинги Lua |
+| 0.14 | §3.4: `LoggingLlmClientDecorator`, таймаут LLM, `TraceId` в запросе/команде, `GameLogFeature.Llm`, §14 саммари |
+| 0.15 | §Фаза F: UPM `com.coreai.core` (`package.json`, зависимости включая AI Navigation); план F1–F3 |
+| 0.16 | Шапка: автор репозитория Neoxider (ссылка на GitHub) |

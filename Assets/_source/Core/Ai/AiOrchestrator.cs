@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Authority;
@@ -41,6 +42,7 @@ namespace CoreAI.Ai
                 return;
 
             var roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+            var traceId = string.IsNullOrWhiteSpace(task.TraceId) ? Guid.NewGuid().ToString("N") : task.TraceId.Trim();
             var snap = _telemetry.BuildSnapshot();
             var systemBase = _promptComposer.GetSystemPrompt(roleId);
             var system = systemBase;
@@ -57,7 +59,8 @@ namespace CoreAI.Ai
                 {
                     AgentRoleId = roleId,
                     SystemPrompt = system,
-                    UserPayload = user
+                    UserPayload = user,
+                    TraceId = traceId
                 },
                 cancellationToken).ConfigureAwait(false);
 
@@ -97,7 +100,8 @@ namespace CoreAI.Ai
                 JsonPayload = content,
                 SourceRoleId = roleId,
                 SourceTaskHint = task.Hint ?? "",
-                LuaRepairGeneration = task.LuaRepairGeneration
+                LuaRepairGeneration = task.LuaRepairGeneration,
+                TraceId = traceId
             });
         }
     }

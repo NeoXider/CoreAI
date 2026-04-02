@@ -38,8 +38,9 @@ namespace CoreAI.Infrastructure.Messaging
                 CommandReceived?.Invoke(cmd);
                 var pay = cmd.JsonPayload ?? "";
                 var shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "…" : pay;
+                var trace = string.IsNullOrWhiteSpace(cmd.TraceId) ? "—" : cmd.TraceId;
                 _logger.LogInfo(GameLogFeature.MessagePipe,
-                    $"ApplyAiGameCommand type={cmd.CommandTypeId} role={cmd.SourceRoleId} gen={cmd.LuaRepairGeneration} payload={shortPay}");
+                    $"ApplyAiGameCommand traceId={trace} type={cmd.CommandTypeId} role={cmd.SourceRoleId} gen={cmd.LuaRepairGeneration} payload={shortPay}");
             });
         }
 
