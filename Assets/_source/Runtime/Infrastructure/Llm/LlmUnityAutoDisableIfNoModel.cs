@@ -8,6 +8,9 @@ namespace CoreAI.Infrastructure.Llm
     /// LLMUnity при этом пишет в консоль ошибку "No model file provided!" и может ломать smoke-check.
     ///
     /// Этот guard отключает компонент <see cref="LLM"/> (и сам <see cref="LLMAgent"/>), если <see cref="LLM.model"/> пустой.
+    /// Соответствует рекомендациям LLMUnity: модель задаётся через Model Manager (Download / Load) и выбор радиокнопкой,
+    /// иначе при старте будет ошибка «No model file provided!» — см. официальный Quick start и раздел «LLM model management»
+    /// в репозитории пакета и на <see href="https://undream.ai/LLMUnity"/>.
     /// За счёт <see cref="DefaultExecutionOrderAttribute"/> выполняется раньше большинства Awake.
     /// </summary>
     [DefaultExecutionOrder(-1000)]
@@ -16,9 +19,13 @@ namespace CoreAI.Infrastructure.Llm
     {
         private void Awake()
         {
-            var llm = FindFirstObjectByType<LLM>();
+            // Сначала LLM, привязанный к LLMAgent на сцене (избегаем «первого попавшегося» пустого LLM).
+            var agent = UnityEngine.Object.FindFirstObjectByType<LLMAgent>();
+            var llm = agent != null ? agent.GetComponent<LLM>() : UnityEngine.Object.FindFirstObjectByType<LLM>();
             if (llm == null)
                 return;
+
+            LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm);
 
             if (!string.IsNullOrWhiteSpace(llm.model))
                 return;
@@ -26,15 +33,14 @@ namespace CoreAI.Infrastructure.Llm
             // Отключаем сервер и агент до того, как он начнёт стартовать.
             llm.enabled = false;
 
-            var agent = FindFirstObjectByType<LLMAgent>();
             if (agent != null)
                 agent.enabled = false;
 
-            Debug.LogWarning("[CoreAI] LLMUnity LLM.model пустой — отключаем LLMUnity, используем StubLlmClient.");
+            Debug.LogWarning(
+                "[CoreAI] LLMUnity: поле LLM.model пусто в сохранённой сцене. В инспекторе нажмите радиокнопку у нужной модели " +
+                "(или «Load model») и сохраните сцену. Если в Model Manager несколько моделей — оставьте одну с реальным .gguf " +
+                "или явно выберите модель. Отключаем LLMUnity → StubLlmClient.");
         }
-
-        private static T FindFirstObjectByType<T>() where T : Object
-            => Object.FindFirstObjectByType<T>();
     }
 }
 

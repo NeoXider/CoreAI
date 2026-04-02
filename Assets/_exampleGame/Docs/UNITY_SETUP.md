@@ -50,12 +50,16 @@
 
 Подходит для офлайн-разработки и соответствует дефолту сцены (**Open Ai Http Llm Settings** = *None*).
 
+По официальному **Quick start** LLMUnity: на объекте **LLM** скачайте или загрузите `.gguf` (**Download model** / **Load model**), затем **обязательно нажмите радиокнопку** слева от нужной строки в списке Model Manager — так в компонент записывается поле **model** (путь к файлу). **Сохраните сцену (Ctrl+S).** Без этого в YAML сцены `_model` остаётся пустым, CoreAI отключает LLMUnity и берёт **StubLlmClient**.
+
 1. Выберите объект **`LLM`** в Hierarchy.
 2. Компонент **LLM (Script)**:
-   - **Model:** назначьте **GGUF** (через список моделей LLMUnity / **Download** / drag-and-drop ассета модели — как принято в вашей версии LLMUnity).
+   - В **Model Settings**: **Download model** или **Load model** → выберите строку модели **радиокнопкой** → **Ctrl+S**.
+   - Колонка **Build**: для релиза обычно одна основная модель с галочкой (см. README пакета, раздел *LLM model management*).
    - При наличии GPU увеличьте **Num GPU Layers** (начните с части слоёв, при нехватке VRAM уменьшите).
    - **Remote** на **LLM** — выключен для чисто локального режима.
    - Для отладки: **Log Level = All** (если поле есть в вашей версии пакета).
+   - Если включён **Download on Start**, при первом запуске дождитесь загрузки; в коде LLMUnity рекомендует `await LLM.WaitUntilModelSetup()` — адаптер CoreAI **LlmUnityLlmClient** ждёт готовности перед **Chat**.
 3. Компонент **LLM Agent (Script)**:
    - **LLM** — ссылка на компонент **LLM** на том же GameObject (в репозитории уже проставлена).
    - **Remote** — выключен.

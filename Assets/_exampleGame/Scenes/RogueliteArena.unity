@@ -206,16 +206,16 @@ MonoBehaviour:
   _parallelPrompts: 1
   _contextSize: 8192
   _batchSize: 512
-  _model: 
+  _model: Qwen3.5-0.8B-Q4_K_M.gguf
   _flashAttention: 0
   _reasoning: 0
   _lora: 
   _loraWeights: 
   dontDestroyOnLoad: 1
   _embeddingsOnly: 0
-  _embeddingLength: 0
+  _embeddingLength: 1024
   minContextLength: 0
-  maxContextLength: 0
+  maxContextLength: 262144
 --- !u!114 &265009550
 MonoBehaviour:
   m_ObjectHideFlags: 0

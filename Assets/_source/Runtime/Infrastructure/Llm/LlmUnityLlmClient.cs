@@ -1,13 +1,18 @@
 #if !COREAI_NO_LLM
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using LLMUnity;
+using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Адаптер <see cref="ILlmClient"/> к компоненту <see cref="LLMUnity.LLMAgent"/> в сцене.
+    /// Адаптер <see cref="ILlmClient"/> к <see cref="LLMUnity.LLMAgent"/> по контракту LLMUnity:
+    /// дождаться <see cref="LLM.WaitUntilModelSetup"/> (скачивание/подготовка моделей, см. README),
+    /// затем готовности локального <see cref="LLM"/> (сервер inference), затем <see cref="LLMAgent.Chat"/>.
+    /// Вызовы должны идти с главного потока Unity — не используем <c>ConfigureAwait(false)</c>.
     /// </summary>
     public sealed class LlmUnityLlmClient : ILlmClient
     {
@@ -22,20 +27,79 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
-            var prevSystem = _unityAgent.systemPrompt;
+            if (_unityAgent == null)
+                return new LlmCompletionResult { Ok = false, Error = "LLMAgent is null" };
+
+            var llm = _unityAgent.llm != null ? _unityAgent.llm : _unityAgent.GetComponent<LLM>();
+            if (llm == null)
+            {
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "LLMAgent: не назначен компонент LLM (Inspector → LLM Agent → Llm)."
+                };
+            }
+
             try
             {
-                if (!string.IsNullOrEmpty(request.SystemPrompt))
-                    _unityAgent.systemPrompt = request.SystemPrompt;
+                var setupTask = LLM.WaitUntilModelSetup();
+                while (!setupTask.IsCompleted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Yield();
+                }
 
-                var text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: false)
-                    .ConfigureAwait(false);
+                if (!await setupTask)
+                {
+                    return new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "LLMUnity: не удалась подготовка моделей (LLMManager / скачивание). См. консоль LLMUnity."
+                    };
+                }
+
+                var readyTask = llm.WaitUntilReady();
+                while (!readyTask.IsCompleted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Yield();
+                }
+
+                await readyTask;
                 cancellationToken.ThrowIfCancellationRequested();
-                return new LlmCompletionResult { Ok = true, Content = text ?? "" };
+
+                if (llm.failed)
+                {
+                    return new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "LLMUnity: сервер LLM не поднялся (failed). Проверьте model, логи компонента LLM."
+                    };
+                }
+
+                var prevSystem = _unityAgent.systemPrompt;
+                try
+                {
+                    if (!string.IsNullOrEmpty(request.SystemPrompt))
+                        _unityAgent.systemPrompt = request.SystemPrompt;
+
+                    var text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return new LlmCompletionResult { Ok = true, Content = text ?? "" };
+                }
+                finally
+                {
+                    _unityAgent.systemPrompt = prevSystem;
+                }
             }
-            finally
+            catch (OperationCanceledException)
             {
-                _unityAgent.systemPrompt = prevSystem;
+                return new LlmCompletionResult { Ok = false, Error = "Cancelled" };
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[CoreAI] LlmUnityLlmClient: " + ex.Message);
+                return new LlmCompletionResult { Ok = false, Error = ex.Message };
             }
         }
     }

@@ -6,6 +6,18 @@
 
 Связанные документы: [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (общий поток ядра), [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) (роли и размеры моделей), `CoreAILifetimeScope` (выбор бэкенда LLM).
 
+### Официальная документация LLMUnity (Undream AI)
+
+- Обзор и API: [undream.ai/LLMUnity](https://undream.ai/LLMUnity)  
+- Репозиторий (README, Quick start, **LLM model management**): [github.com/undreamai/LLMUnity](https://github.com/undreamai/LLMUnity)  
+
+**Quick start (кратко):** GameObject → компонент **LLM** → **Download model** или **Load model** (.gguf) → отдельный (или тот же) объект → **LLMAgent** → в инспекторе ссылка **LLM** на сервер → в коде `await llmAgent.Chat("...")`.  
+Перед первым запросом в билдах с **Download on Start** в документации рекомендуется `await LLM.WaitUntilModelSetup();` — **LlmUnityLlmClient** в CoreAI дожидается завершения глобальной подготовки моделей и поднятия сервера **LLM** перед вызовом **Chat**.
+
+**Model Manager (инспектор LLM):** список моделей копируется в билд; галочка **Build** отключает включение конкретной модели в сборку; выбор **радиокнопкой** записывает путь в поле **`LLM.model`** (его нужно **сохранить в сцене**). Если в списке несколько моделей с файлами на диске, а `model` пустой, CoreAI может **автовыбрать** одну (см. `LlmUnityModelBootstrap`: приоритет у записей с **Build**).
+
+**CoreAI поверх LLMUnity:** при пустом `LLM.model` ранний guard **`LlmUnityAutoDisableIfNoModel`** отключает LLMUnity, чтобы не заспамить консоль «No model file provided!»; DI тогда использует **`StubLlmClient`**.
+
 ---
 
 ## 1. Что должно быть на сцене (локальный LLMUnity)
@@ -80,12 +92,13 @@
 
 ## 7. Play Mode тесты (рантайм в редакторе)
 
-Сборка **`CoreAI.PlayModeTests`**:
+Сборка **`CoreAI.PlayModeTests`** (в текущей конфигурации Unity часть тестов с `[UnityTest]` также видна в **EditMode**-прогоне Test Runner — ориентируйтесь на полное имя класса):
 
 | Тест | Смысл |
 |------|--------|
 | `AiOrchestratorAllRolesPlayModeTests` | Для **каждой** встроенной роли оркестратор с **StubLlmClient** публикует `ApplyAiGameCommand` (контур без реальной модели). |
 | `OpenAiLmStudioPlayModeTests` | Один реальный вызов `OpenAiChatLlmClient` к вашему серверу. Без переменных окружения помечается **Ignored**. |
+| `AgentMemoryWithRealModelPlayModeTests` | Память Creator: HTTP (env) или **LLMUnity** при открытой сцене с **LLMAgent** и настроенной моделью; иначе **Ignored**. |
 
 **LM Studio / OpenAI-compatible (PowerShell, перед запуском Play Mode Tests):**
 
