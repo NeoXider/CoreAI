@@ -43,6 +43,10 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Для <see cref="LlmBackendKind.LlmUnity"/>: имя GameObject на сцене с <c>LLMAgent</c> (пусто — первый по типу).</summary>
         [Tooltip("Для LlmUnity: имя GameObject с LLMAgent (пусто = первый FindFirstObjectByType).")]
         public string unityAgentGameObjectName = "";
+
+        [Min(256)]
+        [Tooltip("Контекстное окно (токены) для профиля. По умолчанию 8192.")]
+        public int contextWindowTokens = 8192;
     }
 
     /// <summary>

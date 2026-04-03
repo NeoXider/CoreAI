@@ -2,7 +2,8 @@
   "name": "CoreAI.Editor",
   "rootNamespace": "CoreAI.Editor",
   "references": [
-    "CoreAI.Source"
+    "CoreAI.Source",
+    "VContainer"
   ],
   "includePlatforms": [
     "Editor"

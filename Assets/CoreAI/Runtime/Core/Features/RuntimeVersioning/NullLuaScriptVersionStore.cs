@@ -23,6 +23,10 @@ namespace CoreAI.Ai
         {
         }
 
+        public void ResetToRevision(string scriptKey, int revisionIndex)
+        {
+        }
+
         public void ResetAllToOriginal()
         {
         }

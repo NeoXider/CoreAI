@@ -15,9 +15,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
 
             var setupTask = LLMUnity.LLM.WaitUntilModelSetup();
-            yield return new WaitUntil(() => setupTask.IsCompleted);
-            if (setupTask.IsFaulted)
-                Assert.Fail(setupTask.Exception?.GetBaseException().Message ?? "LLM.WaitUntilModelSetup faulted");
+            yield return PlayModeTestAwait.WaitTask(setupTask, 45f, "LLMUnity model setup");
             Assert.IsTrue(setupTask.Result, "LLMUnity: model setup failed (см. консоль LLMUnity).");
 #else
             yield break;

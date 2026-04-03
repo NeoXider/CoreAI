@@ -22,6 +22,10 @@ namespace CoreAI.Ai
         {
         }
 
+        public void ResetToRevision(string overlayKey, int revisionIndex)
+        {
+        }
+
         public void ResetAllToOriginal()
         {
         }

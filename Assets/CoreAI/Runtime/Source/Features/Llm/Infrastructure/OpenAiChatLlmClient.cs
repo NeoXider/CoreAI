@@ -102,8 +102,11 @@ namespace CoreAI.Infrastructure.Llm
             var sys = JsonEscape(request.SystemPrompt ?? "");
             var user = JsonEscape(request.UserPayload ?? "");
             var model = JsonEscape(_settings.Model);
+            var maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault(
+                Math.Max(128, Math.Min(2048, request.ContextWindowTokens / 4)));
             return "{\"model\":\"" + model + "\",\"temperature\":" +
                    _settings.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                   ",\"max_tokens\":" + maxOutputTokens +
                    ",\"messages\":[" +
                    "{\"role\":\"system\",\"content\":\"" + sys + "\"}," +
                    "{\"role\":\"user\",\"content\":\"" + user + "\"}" +

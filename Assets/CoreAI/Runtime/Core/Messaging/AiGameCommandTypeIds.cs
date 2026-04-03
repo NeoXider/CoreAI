@@ -17,5 +17,8 @@ namespace CoreAI.Messaging
         /// Обрабатывается Unity-слоем (Source) на главном потоке.
         /// </summary>
         public const string WorldCommand = "WorldCommand";
+
+        /// <summary>Событие после успешного применения data overlay (например из Lua).</summary>
+        public const string DataOverlayApplied = "DataOverlayApplied";
     }
 }

@@ -26,6 +26,12 @@ namespace CoreAI.Ai
         /// <summary>Текущий код = исходный; история сокращается до одной ревизии-оригинала.</summary>
         void ResetToOriginal(string scriptKey);
 
+        /// <summary>
+        /// Откатить current на указанную ревизию (по <see cref="LuaScriptRevision.Index"/>).
+        /// Если ревизия не найдена — no-op.
+        /// </summary>
+        void ResetToRevision(string scriptKey, int revisionIndex);
+
         /// <summary>Сброс всех слотов к baseline (как <see cref="ResetToOriginal"/> по каждому известному ключу).</summary>
         void ResetAllToOriginal();
 

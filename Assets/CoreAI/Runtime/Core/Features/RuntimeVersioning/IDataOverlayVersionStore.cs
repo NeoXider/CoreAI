@@ -16,6 +16,12 @@ namespace CoreAI.Ai
 
         void ResetToOriginal(string overlayKey);
 
+        /// <summary>
+        /// Откатить current на указанную ревизию (по <see cref="LuaScriptRevision.Index"/>).
+        /// Если ревизия не найдена — no-op.
+        /// </summary>
+        void ResetToRevision(string overlayKey, int revisionIndex);
+
         /// <summary>Сбросить все известные ключи к их baseline (или удалить слоты без baseline — см. реализацию).</summary>
         void ResetAllToOriginal();
 

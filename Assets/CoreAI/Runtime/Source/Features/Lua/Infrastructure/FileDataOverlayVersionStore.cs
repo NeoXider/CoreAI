@@ -51,6 +51,12 @@ namespace CoreAI.Infrastructure.Lua
             SaveToDisk();
         }
 
+        public void ResetToRevision(string overlayKey, int revisionIndex)
+        {
+            _memory.ResetToRevision(overlayKey, revisionIndex);
+            SaveToDisk();
+        }
+
         public void ResetAllToOriginal()
         {
             _memory.ResetAllToOriginal();

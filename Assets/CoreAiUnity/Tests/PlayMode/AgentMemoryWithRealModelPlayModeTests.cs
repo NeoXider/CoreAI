@@ -33,12 +33,14 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>Рекомендуемый сценарий: Auto = HTTP при наличии env, иначе LLMUnity (как <see cref="CoreAI.Composition.CoreAILifetimeScope"/>).</summary>
         [UnityTest]
+        [Explicit("Real-model integration can hang without prepared backend/model.")]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaProductionLikeBackend_Auto()
         {
             return RunCreatorMemoryWithBackendPreference(null);
         }
 
         [UnityTest]
+        [Explicit("Requires configured OpenAI-compatible endpoint.")]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaOpenAiHttpOnly()
         {
             return RunCreatorMemoryWithBackendPreference(PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp);
@@ -46,6 +48,7 @@ namespace CoreAI.Tests.PlayMode
 
 #if !COREAI_NO_LLM
         [UnityTest]
+        [Explicit("Requires local LLMUnity model prepared in editor.")]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaLlmUnityOnly()
         {
             return RunCreatorMemoryWithBackendPreference(PlayModeProductionLikeLlmBackend.LlmUnity);
@@ -86,7 +89,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint =
                         "IMPORTANT: Reply with ONLY a fenced ```memory``` block containing exactly the single line: remember: apples"
                 });
-                yield return new WaitUntil(() => t1.IsCompleted);
+                yield return PlayModeTestAwait.WaitTask(t1, 35f, "creator memory write");
 
                 Assert.IsTrue(
                     store.TryLoad(BuiltInAgentRoleIds.Creator, out var st) && !string.IsNullOrWhiteSpace(st.Memory),
@@ -112,7 +115,7 @@ namespace CoreAI.Tests.PlayMode
                     RoleId = BuiltInAgentRoleIds.Creator,
                     Hint = "What is your available memory? Reply with exactly: I remember: apples"
                 });
-                yield return new WaitUntil(() => t2.IsCompleted);
+                yield return PlayModeTestAwait.WaitTask(t2, 35f, "creator memory recall");
 
                 Assert.AreEqual(1, sink2.Items.Count);
                 StringAssert.Contains("I remember: apples", sink2.Items[0].JsonPayload);

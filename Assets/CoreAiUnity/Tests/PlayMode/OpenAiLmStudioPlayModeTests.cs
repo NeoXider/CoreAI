@@ -12,6 +12,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class OpenAiLmStudioPlayModeTests
     {
         [UnityTest]
+        [Explicit("Real HTTP LLM integration. Run manually when environment is configured.")]
         public IEnumerator OpenAiChatLlmClient_Completes_WhenEnvConfigured()
         {
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
@@ -33,10 +34,7 @@ namespace CoreAI.Tests.PlayMode
                         UserPayload = "ping"
                     });
 
-                yield return new WaitUntil(() => task.IsCompleted);
-
-                if (task.IsFaulted)
-                    Assert.Fail(task.Exception?.GetBaseException().Message ?? "Task faulted");
+                yield return PlayModeTestAwait.WaitTask(task, 30f, "OpenAI completion");
 
                 var result = task.Result;
                 Assert.IsTrue(result.Ok, result.Error ?? "(no error text)");

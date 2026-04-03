@@ -9,6 +9,9 @@ namespace CoreAI.Infrastructure.Llm
     {
         /// <summary>Внутренний клиент для роли (без декораторов логирования снаружи).</summary>
         ILlmClient ResolveClientForRole(string roleId);
+
+        /// <summary>Контекстное окно (токены) для роли с учетом профиля маршрутизации (default: 8192).</summary>
+        int ResolveContextWindowForRole(string roleId);
     }
 
     /// <summary>Смена маршрутизации без пересоздания VContainer scope.</summary>

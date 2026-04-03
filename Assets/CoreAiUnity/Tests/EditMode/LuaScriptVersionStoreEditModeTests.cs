@@ -87,9 +87,22 @@ namespace CoreAI.Tests.EditMode
                 Hint = "h",
                 LuaScriptVersionKey = "ui_logic"
             });
-            StringAssert.Contains("Lua_script_versioning", u);
+            StringAssert.Contains("Mutation_state", u);
             StringAssert.Contains("print(1)", u);
             StringAssert.Contains("print(2)", u);
+        }
+
+        [Test]
+        public void Memory_ResetToRevision_RollsBackCurrentAndTrimsHistory()
+        {
+            var s = new MemoryLuaScriptVersionStore();
+            s.RecordSuccessfulExecution("rev", "v0");
+            s.RecordSuccessfulExecution("rev", "v1");
+            s.RecordSuccessfulExecution("rev", "v2");
+            s.ResetToRevision("rev", 1);
+            Assert.IsTrue(s.TryGetSnapshot("rev", out var snap));
+            Assert.AreEqual("v1", snap.CurrentLua);
+            Assert.AreEqual(2, snap.History.Count);
         }
 
         [Test]

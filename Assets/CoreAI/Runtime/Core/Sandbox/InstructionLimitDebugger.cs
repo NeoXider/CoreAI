@@ -1,8 +1,9 @@
 using System;
-using System.Diagnostics;
 using System.Collections.Generic;
+using System.Diagnostics;
 using MoonSharp.Interpreter;
 using MoonSharp.Interpreter.Debugging;
+using MoonSharp.Interpreter.Tree.Expressions;
 
 namespace CoreAI.Sandbox
 {
@@ -54,17 +55,15 @@ namespace CoreAI.Sandbox
             return new DebuggerAction { Action = DebuggerAction.ActionType.Run };
         }
 
-        public void SignalRuntimeException(ScriptRuntimeException ex)
-        {
-        }
+        public bool SignalRuntimeException(ScriptRuntimeException ex) => false;
 
         public void SignalExecutionEnded()
         {
         }
 
-        public WatchItem[] GetWatchItems() => Array.Empty<WatchItem>();
+        public List<DynamicExpression> GetWatchItems() => new List<DynamicExpression>();
 
-        public void Update(WatchType watchType)
+        public void Update(WatchType watchType, IEnumerable<WatchItem> items, int stackFrameIndex)
         {
         }
     }

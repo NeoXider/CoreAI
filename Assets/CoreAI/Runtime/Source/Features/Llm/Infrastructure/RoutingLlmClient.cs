@@ -24,6 +24,7 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             var inner = _registry.ResolveClientForRole(request.AgentRoleId);
             request.RoutingProfileId = DescribeInner(inner);
+            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
         }
 
         /// <inheritdoc />
@@ -36,6 +37,7 @@ namespace CoreAI.Infrastructure.Llm
 
             var inner = _registry.ResolveClientForRole(request.AgentRoleId);
             request.RoutingProfileId = DescribeInner(inner);
+            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
             return inner.CompleteAsync(request, cancellationToken);
         }
 

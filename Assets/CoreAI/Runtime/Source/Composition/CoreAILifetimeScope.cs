@@ -69,6 +69,7 @@ namespace CoreAI.Composition
             if (worldPrefabRegistry != null)
                 builder.RegisterInstance(worldPrefabRegistry);
 
+            builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton).As<IDataOverlayPayloadValidator>();
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();

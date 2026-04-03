@@ -59,50 +59,52 @@ namespace CoreAI.Ai
             else
                 body = BuildDefaultJsonPayload(snap, task);
 
-            body = AppendDataOverlayVersioningContext(body, roleId, task);
-            body = AppendLuaVersioningContext(body, roleId, task);
+            body = AppendMutationStateContext(body, roleId, task);
             return AppendLuaRepairContext(body, task);
         }
 
-        private string AppendDataOverlayVersioningContext(string body, string roleId, AiTaskRequest task)
+        private string AppendMutationStateContext(string body, string roleId, AiTaskRequest task)
         {
-            if (_dataOverlayVersions == null || string.IsNullOrWhiteSpace(task.DataOverlayVersionKeysCsv))
-                return body;
             if (!string.Equals(roleId, BuiltInAgentRoleIds.Programmer, StringComparison.Ordinal))
                 return body;
-            foreach (var key in SplitVersionKeysCsv(task.DataOverlayVersionKeysCsv))
+            var hasLua = _luaScriptVersions != null && !string.IsNullOrWhiteSpace(task.LuaScriptVersionKey);
+            var dataKeys = CollectVersionKeys(task.DataOverlayVersionKeysCsv);
+            var hasData = _dataOverlayVersions != null && dataKeys.Count > 0;
+            if (!hasLua && !hasData)
+                return body;
+
+            LuaScriptVersionRecord luaSnapshot = null;
+            if (hasLua)
+                _luaScriptVersions.TryGetSnapshot(task.LuaScriptVersionKey, out luaSnapshot);
+
+            List<DataOverlayVersionRecord> dataSnaps = null;
+            if (hasData)
             {
-                var section = _dataOverlayVersions.BuildProgrammerPromptSection(key);
-                if (!string.IsNullOrEmpty(section))
-                    body = body + "\n\n" + section;
+                dataSnaps = new List<DataOverlayVersionRecord>(dataKeys.Count);
+                for (int i = 0; i < dataKeys.Count; i++)
+                {
+                    _dataOverlayVersions.TryGetSnapshot(dataKeys[i], out var s);
+                    dataSnaps.Add(s);
+                }
             }
 
-            return body;
+            var section = MutationStatePromptFormatter.Format(task.LuaScriptVersionKey, luaSnapshot, dataKeys, dataSnaps);
+            return string.IsNullOrEmpty(section) ? body : body + "\n\n" + section;
         }
 
-        private static IEnumerable<string> SplitVersionKeysCsv(string csv)
+        private static List<string> CollectVersionKeys(string csv)
         {
+            var list = new List<string>();
             if (string.IsNullOrWhiteSpace(csv))
-                yield break;
+                return list;
             var parts = csv.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < parts.Length; i++)
             {
                 var k = parts[i].Trim();
                 if (k.Length > 0)
-                    yield return k;
+                    list.Add(k);
             }
-        }
-
-        private string AppendLuaVersioningContext(string body, string roleId, AiTaskRequest task)
-        {
-            if (_luaScriptVersions == null || string.IsNullOrWhiteSpace(task.LuaScriptVersionKey))
-                return body;
-            if (!string.Equals(roleId, BuiltInAgentRoleIds.Programmer, StringComparison.Ordinal))
-                return body;
-            var section = _luaScriptVersions.BuildProgrammerPromptSection(task.LuaScriptVersionKey);
-            if (string.IsNullOrEmpty(section))
-                return body;
-            return body + "\n\n" + section;
+            return list;
         }
 
         private static string BuildTelemetryJsonObject(GameSessionSnapshot snap)

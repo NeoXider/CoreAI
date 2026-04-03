@@ -108,6 +108,26 @@ namespace CoreAI.Ai
             }
         }
 
+        public void ResetToRevision(string overlayKey, int revisionIndex)
+        {
+            if (string.IsNullOrWhiteSpace(overlayKey))
+                return;
+            if (revisionIndex < 0)
+                return;
+            var key = overlayKey.Trim();
+            lock (_lock)
+            {
+                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                    return;
+                if (revisionIndex >= slot.History.Count)
+                    return;
+                var rev = slot.History[revisionIndex];
+                slot.CurrentPayload = rev.Source ?? "";
+                if (slot.History.Count > revisionIndex + 1)
+                    slot.History.RemoveRange(revisionIndex + 1, slot.History.Count - revisionIndex - 1);
+            }
+        }
+
         public void ResetAllToOriginal()
         {
             List<string> keys;

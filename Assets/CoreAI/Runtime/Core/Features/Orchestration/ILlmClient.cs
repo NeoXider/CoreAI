@@ -20,6 +20,12 @@ namespace CoreAI.Ai
 
         /// <summary>Краткая метка выбранного бэкенда после маршрутизации по роли (для логов LLM).</summary>
         public string RoutingProfileId { get; set; } = "";
+
+        /// <summary>Бюджет контекста в токенах для роли (по умолчанию 8192, может быть переопределен маршрутизацией).</summary>
+        public int ContextWindowTokens { get; set; } = 8192;
+
+        /// <summary>Опциональный лимит токенов ответа модели.</summary>
+        public int? MaxOutputTokens { get; set; }
     }
 
     /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>

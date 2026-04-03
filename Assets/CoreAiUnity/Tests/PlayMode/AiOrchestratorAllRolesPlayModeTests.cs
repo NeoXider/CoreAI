@@ -34,6 +34,7 @@ namespace CoreAI.Tests.PlayMode
         /// Модель должна вернуть непустой текст; при пустом/ошибке команда не публикуется — тест упадёт по счётчику.
         /// </summary>
         [UnityTest]
+        [Explicit("Real-model integration can be slow/unreliable in default runs.")]
         public IEnumerator Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto()
         {
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.15f, 300, out var handle, out var ignore))
@@ -79,7 +80,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint =
                         "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
                 });
-                yield return new WaitUntil(() => task.IsCompleted);
+                yield return PlayModeTestAwait.WaitTask(task, 25f, $"orchestrator role '{role}'");
                 Assert.AreEqual(1, sink.Commands.Count, role);
                 Assert.AreEqual(Envelope, sink.Commands[0].CommandTypeId);
                 Assert.IsFalse(string.IsNullOrEmpty(sink.Commands[0].JsonPayload), role);
