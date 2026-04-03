@@ -11,5 +11,11 @@ namespace CoreAI.Messaging
 
         /// <summary>Ошибка выполнения Lua; может запустить цикл ремонта Programmer.</summary>
         public const string LuaExecutionFailed = "LuaExecutionFailed";
+
+        /// <summary>
+        /// Команда «из Lua в игру»: безопасный контракт (whitelist) для спавна/движения/сцен и т.п.
+        /// Обрабатывается Unity-слоем (Source) на главном потоке.
+        /// </summary>
+        public const string WorldCommand = "WorldCommand";
     }
 }

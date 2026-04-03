@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
+using CoreAI.Infrastructure.World;
 using LLMUnity;
 using UnityEngine;
 using VContainer;
@@ -49,6 +50,11 @@ namespace CoreAI.Composition
         [SerializeField]
         private bool logAiOrchestrationMetrics;
 
+        [Header("World Commands (Lua → MessagePipe → main thread)")]
+        [Tooltip("Whitelist префабов, которые разрешено спавнить из Lua.")]
+        [SerializeField]
+        private CoreAiPrefabRegistryAsset worldPrefabRegistry;
+
         /// <summary>Регистрирует лог, промпты, LLM (маршрутизация + таймаут), оркестратор, Lua, память и entry points.</summary>
         protected override void Configure(IContainerBuilder builder)
         {
@@ -60,7 +66,11 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
+            if (worldPrefabRegistry != null)
+                builder.RegisterInstance(worldPrefabRegistry);
+
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
+            builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
 
@@ -101,6 +111,7 @@ namespace CoreAI.Composition
             builder.Register<FileDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
+            builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton).As<ICoreAiWorldCommandExecutor>();
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
         }

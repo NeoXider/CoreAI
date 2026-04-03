@@ -124,6 +124,11 @@ namespace CoreAI.Tests.PlayMode
             };
         }
 
+        private sealed class NullWorldExecutor : CoreAI.Infrastructure.World.ICoreAiWorldCommandExecutor
+        {
+            public bool TryExecute(ApplyAiGameCommand cmd) => false;
+        }
+
         [UnityTest]
         public IEnumerator Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool()
         {
@@ -139,7 +144,7 @@ namespace CoreAI.Tests.PlayMode
                 () => null,
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
-            var router = new AiGameCommandRouter(subscriber, new NoOpGameLogger(), lua);
+            var router = new AiGameCommandRouter(subscriber, new NoOpGameLogger(), lua, new NullWorldExecutor());
 
             var received = false;
             var receivedThreadId = -1;
@@ -206,7 +211,7 @@ namespace CoreAI.Tests.PlayMode
                 () => queued,
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
-            var router = new AiGameCommandRouter(bus, new NoOpGameLogger(), lua);
+            var router = new AiGameCommandRouter(bus, new NoOpGameLogger(), lua, new NullWorldExecutor());
 
             var received = false;
             var receivedThreadId = -1;

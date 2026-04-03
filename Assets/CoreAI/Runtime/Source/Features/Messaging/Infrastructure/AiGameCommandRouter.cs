@@ -5,6 +5,7 @@ using CoreAI.Messaging;
 using Cysharp.Threading.Tasks;
 using MessagePipe;
 using VContainer.Unity;
+using CoreAI.Infrastructure.World;
 
 namespace CoreAI.Infrastructure.Messaging
 {
@@ -24,6 +25,7 @@ namespace CoreAI.Infrastructure.Messaging
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;
         private readonly LuaAiEnvelopeProcessor _luaProcessor;
+        private readonly ICoreAiWorldCommandExecutor _worldExecutor;
         private IDisposable _subscription;
         private volatile bool _disposed;
 
@@ -31,11 +33,13 @@ namespace CoreAI.Infrastructure.Messaging
         public AiGameCommandRouter(
             ISubscriber<ApplyAiGameCommand> subscriber,
             IGameLogger logger,
-            LuaAiEnvelopeProcessor luaProcessor)
+            LuaAiEnvelopeProcessor luaProcessor,
+            ICoreAiWorldCommandExecutor worldExecutor)
         {
             _subscriber = subscriber;
             _logger = logger;
             _luaProcessor = luaProcessor;
+            _worldExecutor = worldExecutor;
         }
 
         public void Start()
@@ -53,6 +57,7 @@ namespace CoreAI.Infrastructure.Messaging
                     try
                     {
                         _luaProcessor.Process(captured);
+                        _worldExecutor?.TryExecute(captured);
                         CommandReceived?.Invoke(captured);
                         var pay = captured.JsonPayload ?? "";
                         var shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "…" : pay;
