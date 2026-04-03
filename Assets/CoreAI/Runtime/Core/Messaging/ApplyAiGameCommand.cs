@@ -19,11 +19,20 @@ namespace CoreAI.Messaging
         /// <summary>Исходный hint задачи (для цикла исправления Programmer).</summary>
         public string SourceTaskHint { get; set; } = "";
 
+        /// <summary>Совпадает с <see cref="AiTaskRequest.SourceTag"/> у вызвавшей задачи (пусто — не задано).</summary>
+        public string SourceTag { get; set; } = "";
+
         /// <summary>0 — первый ответ модели; увеличивается при каждом ремонте Lua.</summary>
         public int LuaRepairGeneration { get; set; }
 
         /// <summary>Совпадает с TraceId в <see cref="LlmCompletionRequest"/> одного вызова оркестратора.</summary>
         public string TraceId { get; set; } = "";
+
+        /// <summary>Совпадает с <see cref="AiTaskRequest.LuaScriptVersionKey"/> (пусто — не задано).</summary>
+        public string LuaScriptVersionKey { get; set; } = "";
+
+        /// <summary>Совпадает с <see cref="AiTaskRequest.DataOverlayVersionKeysCsv"/>.</summary>
+        public string DataOverlayVersionKeysCsv { get; set; } = "";
     }
 
     /// <summary>

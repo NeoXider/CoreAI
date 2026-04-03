@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
+    "MessagePipe",
     "undream.llmunity.Runtime"
   ],
   "includePlatforms": [

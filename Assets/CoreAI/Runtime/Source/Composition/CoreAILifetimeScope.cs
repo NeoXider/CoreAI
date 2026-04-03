@@ -60,7 +60,8 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            builder.Register<LoggingLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
+            builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
+            builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
 
             var openAi = openAiHttpLlmSettings;
@@ -95,12 +96,16 @@ namespace CoreAI.Composition
             }
 
             builder.RegisterCorePortable();
+            // Runtime override: версии Lua Programmer на диск (оригинал / история / сброс).
+            builder.Register<FileLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+            builder.Register<FileDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
         }
 
+        /// <summary>Порядок выбора дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.</summary>
         private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi)
         {
             if (openAi != null && openAi.UseOpenAiCompatibleHttp)

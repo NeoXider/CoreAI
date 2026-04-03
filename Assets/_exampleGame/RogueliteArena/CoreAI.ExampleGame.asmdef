@@ -4,8 +4,13 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
+    "Neo.Progression",
+    "Neo.Save",
+    "Neo.Tools.Random",
     "R3.Unity",
     "UniTask",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI",
     "VContainer",
     "Unity.AI.Navigation",
     "Unity.InputSystem"

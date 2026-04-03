@@ -1,6 +1,6 @@
 # CoreAI — SPEC ядра (Dynamic Game Framework)
 
-**Версия документа:** 0.19  
+**Версия документа:** 0.20  
 **Репозиторий:** CoreAI · **Автор:** Neoxider (ник neoxider) — [github.com/NeoXider](https://github.com/NeoXider)  
 **UPM-пакет:** `Assets/CoreAI` — сборки **`CoreAI.Core`** и **`CoreAI.Source`** в `Runtime/`. **Хост шаблона:** `Assets/CoreAiUnity` — `Docs/`, `Tests/`, `Editor/`, `Resources/`, сцена **`_mainCoreAI`**.  
 **Пример игры:** `Assets/_exampleGame` (см. также `Docs/ROGUELITE_PLAYBOOK.md` в примере)  
@@ -73,19 +73,23 @@
 
 ---
 
-## 4. Целевая архитектура модулей (`Assets/CoreAI/Runtime/Source`)
+## 4. Целевая архитектура модулей (`Assets/CoreAI/Runtime`)
 
-Рекомендуемое разбиение (папки наращивать по мере реализации):
+**Портативное ядро (`Runtime/Core/`, сборка `CoreAI.Core`):** `Composition/`, `Authority/`, `Session/`, `Messaging/`, `Sandbox/`, а также срезы **`Features/<имя>/`** — память агента, промпты, оркестрация/LLM-контракты, конвейер Lua, версионирование скриптов и data overlay.
 
-| Область | Ответственность |
-|---------|-----------------|
-| `Composition/` | `CoreAILifetimeScope`, installers, регистрация подсистем |
-| `Infrastructure/` | Логирование, время, опции, общие утилиты |
-| `Infrastructure/Messaging/` | Политики публикации, адаптеры (в т.ч. мост Lua → MessagePipe, см. §8) |
-| `Session/` | Снимок сессии, сбор телеметрии, версия правил |
-| `Ai/` | Оркестратор, очередь, роли, `ILlmClient`, валидация схем ответа |
-| `Sandbox/` | Фабрика `Script`, whitelist API, лимиты, dry-run |
-| `Features/` | Узкие фичи ядра, не раздувая корень |
+**Unity-слой (`Runtime/Source/`, сборка `CoreAI.Source`):** `Composition/` (DI, entry points) и **`Features/<имя>/(Infrastructure|Presentation)/`** — лог, LLM-адаптеры, Lua/MessagePipe, промпты из манифеста/Resources, файловые store’ы, UI (дашборд, чат, планировщик).
+
+| Область (пример) | Ответственность |
+|------------------|-----------------|
+| `Source/Composition/` | `CoreAILifetimeScope`, installers, регистрация подсистем |
+| `Source/Features/Logging/Infrastructure/` | `IGameLogger`, sink, настройки лога |
+| `Source/Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity, маршрутизация, декораторы |
+| `Source/Features/Lua/Infrastructure/` | Файловые версии Lua/data overlay, агрегирующие биндинги |
+| `Source/Features/Messaging/Infrastructure/` | Мост `ApplyAiGameCommand` → MessagePipe, см. §8 |
+| `Source/Features/Prompts/Infrastructure/` | Манифест и Resources-провайдеры промптов |
+| `Source/Features/Dashboard/Presentation/` | IMGUI-дашборд, permissions asset |
+| `Source/Features/PlayerChat/Presentation/` | Панель внутриигрового чата |
+| `Source/Features/Scheduling/Presentation/` | Триггеры задач по расписанию |
 
 **Поток данных (норматив):**
 
@@ -257,6 +261,27 @@ flowchart LR
 
 Сборка **`CoreAI.Core`** не ссылается на Unity; маршалинг на main thread обеспечивается в **`CoreAI.Source`** (bootstrap, entry points, подписчики MessagePipe). Песочница в Core остаётся потоково-нейтральной — вызывать из игры с учётом ADR-9.1.
 
+### ADR-9.4 — Инструкция для Unity: LLM → команды → сцена (главный поток)
+
+**Зачем отдельный подпункт:** цепочка async после оркестратора **не гарантирует** выполнение на главном потоке Unity; без явного маршалинга подписчики могут «молча» не применять эффекты (или вести себя недетерминированно).
+
+1. **Откуда берётся фоновый поток**  
+   Реализация **`IAiOrchestrationService`** по умолчанию — **`QueuedAiOrchestrator`** вокруг **`AiOrchestrator`**. Внутри очереди продолжение после `await _inner.RunTaskAsync(...)` использует **`ConfigureAwait(false)`**, поэтому после ответа **`ILlmClient.CompleteAsync`** код **`AiOrchestrator`** (валидация, память, **`IAiGameCommandSink.Publish`**) часто выполняется **на пуле потоков**, а не на main thread.
+
+2. **Что считать «Unity-кодом»**  
+   Любые вызовы **`UnityEngine.*`**, работа с **`GameObject` / `Component` / `Transform`**, **`Object.FindObjectsByType`**, **`Instantiate`**, изменение состояния сцены, а также типичные игровые структуры (`Dictionary` + объекты сцены в одном сценарии) **должны** выполняться на **главном потоке** редактора/плеера.
+
+3. **Что делает шаблон в репозитории**  
+   Подписчик **`AiGameCommandRouter`** на **`ApplyAiGameCommand`** после доставки из MessagePipe **не** обрабатывает команду на текущем потоке сразу: он планирует работу через **`UniTask.SwitchToMainThread()`**, и уже **на main thread** вызывает **`LuaAiEnvelopeProcessor.Process`**, статическое событие **`CommandReceived`** и лог **`GameLogFeature.MessagePipe`**. Таким образом, слушатели вроде **`ArenaCompanionAiListener`**, **`ArenaCreatorWavePlanner`** и UI, подписанные на **`CommandReceived`**, получают колбэк в безопасном для Unity контексте.
+
+4. **Что делать при своих подписчиках**  
+   - **Предпочтительно:** подписываться на **`AiGameCommandRouter.CommandReceived`** (после маршалинга в роутере) **или** дублировать тот же паттерн (`await UniTask.SwitchToMainThread()` в начале handler).  
+   - **Если** подписываетесь **напрямую** на **`ISubscriber<ApplyAiGameCommand>`** (параллельно роутеру): **обязаны** сами переносить тело обработчика на main thread тем же способом или через очередь + **`Update()`** на `MonoBehaviour`.  
+   - **Без UniTask:** очередь команд (`ConcurrentQueue<ApplyAiGameCommand>`) и сброс в **`Update`/`LateUpdate`** — допустимый и явный вариант.
+
+5. **Альтернатива «сразу на main thread»**  
+   Теоретически можно было бы убрать `ConfigureAwait(false)` в очереди или **перед** `Publish` в оркестраторе делать `SwitchToMainThread` — это меняет модель нагрузки на главный поток и контракт **`CoreAI.Core`** (там нет UniTask). Текущий **канон шаблона**: маршалинг **на границе Unity-слоя** в **`AiGameCommandRouter`** (см. исходник `Assets/CoreAI/Runtime/Source/Features/Messaging/Infrastructure/AiGameCommandRouter.cs`).
+
 ---
 
 ## 10. Интеграция с примером `_exampleGame`
@@ -380,3 +405,4 @@ flowchart LR
 | 0.17 | §3.4: маршрутизация LLM, очередь оркестратора, метрики; фаза F1–F2 (UPM перенос Core/Source в пакет) |
 | 0.18 | Пакет **`com.nexoider.coreai`**, код в **`Assets/CoreAI`**, manifest **`file:../Assets/CoreAI`**; Git UPM **`?path=Assets/CoreAI`** (как NeoxiderTools) |
 | 0.19 | Папка хоста шаблона переименована в **`Assets/CoreAiUnity`** (вместо `_source`); обновлены пути в документации и **NeoxiderSettings** |
+| 0.20 | §9 **ADR-9.4**: явная инструкция по главному потоку после LLM (`QueuedAiOrchestrator` + `ConfigureAwait(false)`), роль **`AiGameCommandRouter`** и **`UniTask.SwitchToMainThread`**, чеклист для своих подписчиков MessagePipe |

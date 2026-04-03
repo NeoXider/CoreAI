@@ -27,6 +27,8 @@ namespace CoreAI.Composition
 
             builder.Register<SoloAuthorityHost>(Lifetime.Singleton).As<IAuthorityHost>();
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();
+            builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+            builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<CodeRefinerStub>(Lifetime.Singleton).As<ICodeRefiner>();
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);

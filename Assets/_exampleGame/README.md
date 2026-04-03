@@ -91,6 +91,6 @@
 | `RogueliteArena/Features/` | Фичи **примера** (волны, хаб, UI забега) — свои установщики / дочерний `LifetimeScope` |
 | `Docs/` | Игровой концепт и заметки (`ROGUELITE_PLAYBOOK.md`) |
 
-Точка входа: `RogueliteArena/Bootstrap/ExampleRogueliteEntry.cs` (арена + **`CoreAiLuaHotkey`**). Сцена **`RogueliteArena`**: на **`CompositionRoot`** — **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Состояние забега: **`ArenaSurvivalSession`** (без синглтона), волны — **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, роль узла — **`ArenaSimulationRole`**. См. [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) и [`../CoreAI/README.md`](../CoreAI/README.md) (UPM).
+Точка входа: `RogueliteArena/Features/ArenaBootstrap/ExampleRogueliteEntry.cs` (арена + **`CoreAiLuaHotkey`**). Сцена **`RogueliteArena`**: на **`CompositionRoot`** — **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Состояние забега: **`ArenaSurvivalSession`** (без синглтона), волны — **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, роль узла — **`ArenaSimulationRole`**. См. [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) и [`../CoreAI/README.md`](../CoreAI/README.md) (UPM).
 
 Паттерн: корневой `CoreAILifetimeScope` (ядро CoreAI) + при необходимости дочерний `LifetimeScope` в этой папке только для кода roguelite-примера.

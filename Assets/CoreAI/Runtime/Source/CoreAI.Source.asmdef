@@ -5,6 +5,7 @@
     "CoreAI.Core",
     "MessagePipe",
     "MessagePipe.VContainer",
+    "Unity.TextMeshPro",
     "undream.llmunity.Runtime",
     "UniTask",
     "VContainer"

@@ -1,0 +1,20 @@
+{
+  "name": "CoreAI.ExampleGame.Editor",
+  "rootNamespace": "CoreAI.ExampleGame.Editor",
+  "references": [
+    "CoreAI.ExampleGame",
+    "Neo.Progression",
+    "Neo.Tools.Random"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

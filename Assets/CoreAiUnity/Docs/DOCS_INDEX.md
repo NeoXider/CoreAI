@@ -6,7 +6,7 @@
 |----------|------------|
 | [QUICK_START.md](QUICK_START.md) | Минимальные шаги: Unity, сцена, LLM, Play, тесты. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Карта кода, поток LLM → команды → Lua, сборки, чеклист PR. |
-| [DGF_SPEC.md](DGF_SPEC.md) | Нормативный SPEC шаблона (версия в шапке). |
+| [DGF_SPEC.md](DGF_SPEC.md) | Нормативный SPEC шаблона (версия в шапке); **§9.4** — главный поток Unity после LLM / MessagePipe. |
 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли (Creator, Programmer, …), placement, размеры моделей. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, GGUF, OpenAI HTTP, логи **`[Llm]`** / **traceId**, таймаут запроса, PlayMode-тесты, Lua-конвейер. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Короткие гайды под тайтл (сеть, оркестрация, роли, пример игры). |

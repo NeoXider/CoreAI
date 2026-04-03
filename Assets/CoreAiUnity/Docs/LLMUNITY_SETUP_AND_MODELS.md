@@ -103,23 +103,39 @@
 
 ## 7. Play Mode тесты (рантайм в редакторе)
 
-**Как тестировать поведение end-to-end:** (1) **Игра:** Play Mode, фильтр консоли по `[Llm]` — видно, что ушло в модель и что она вернула; по `[MessagePipe]` — что опубликовано в игру. (2) **Без железа/модели:** EditMode-тесты оркестратора и парсеров (`AgentMemoryEditModeTests`, `AgentRolesAndPromptsTests`, …) со **Stub**. (3) **Реальная модель:** Play Mode + сцена с **LLMAgent** → `AgentMemoryWithRealModelPlayModeTests.LlmUnity_…` (или HTTP → env + `OpenAiHttp_…`). (4) **Регрессия промптов:** после смены system/user шаблонов прогоните соответствующие EditMode-тесты.
+**Как тестировать поведение end-to-end:** (1) **Игра:** Play Mode, фильтр консоли по `[Llm]` — видно, что ушло в модель и что она вернула; по `[MessagePipe]` — что опубликовано в игру. (2) **Без железа/модели:** EditMode-тесты оркестратора и парсеров (`AgentMemoryEditModeTests`, `AgentRolesAndPromptsTests`, …) со **Stub**. (3) **Реальная модель в Play Mode:** общая заготовка **`PlayModeProductionLikeLlmFactory.TryCreate`** — тот же порядок, что у **`CoreAILifetimeScope`**: при настроенном OpenAI-compatible **HTTP** (env, см. ниже) берётся **`OpenAiChatLlmClient`**, иначе **LLMUnity** (рантайм **LLM + LLMAgent**, GGUF из Model Manager: предпочтение **qwen** + **0.8** в имени файла, иначе `LlmUnityModelBootstrap`). Опционально **`COREAI_PLAYMODE_LLM_BACKEND`** = `auto` | `http` | `llmunity` переопределяет выбор для всех тестов, которые передают в фабрику `preference: null`. (4) **Регрессия промптов:** после смены system/user шаблонов прогоните соответствующие EditMode-тесты.
 
 Сборка **`CoreAI.PlayModeTests`** (в текущей конфигурации Unity часть тестов с `[UnityTest]` также видна в **EditMode**-прогоне Test Runner — ориентируйтесь на полное имя класса):
 
 | Тест | Смысл |
 |------|--------|
-| `AiOrchestratorAllRolesPlayModeTests` | Для **каждой** встроенной роли оркестратор с **StubLlmClient** публикует `ApplyAiGameCommand` (контур без реальной модели). |
-| `OpenAiLmStudioPlayModeTests` | Один реальный вызов `OpenAiChatLlmClient` к вашему серверу. Без переменных окружения помечается **Ignored**. |
-| `AgentMemoryWithRealModelPlayModeTests` | Память Creator: HTTP (env) или **LLMUnity** при открытой сцене с **LLMAgent** и настроенной моделью; иначе **Ignored**. |
+| `AiOrchestratorAllRolesPlayModeTests` | **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub`** — **StubLlmClient**. **`Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`** — тот же сценарий через **`PlayModeProductionLikeLlmFactory`** (HTTP или LLMUnity). |
+| `OpenAiLmStudioPlayModeTests` | Дымовой **`CompleteAsync`** через фабрику с принудительным **HTTP**; без env — **Ignored**. |
+| `AgentMemoryWithRealModelPlayModeTests` | **`…_ViaProductionLikeBackend_Auto`** — память Creator через фабрику (**Auto**). Отдельно **только HTTP** / **только LLMUnity** для узкой отладки. |
 
 **LM Studio / OpenAI-compatible (PowerShell, перед запуском Play Mode Tests):**
+
+Явные переменные:
 
 ```powershell
 $env:COREAI_OPENAI_TEST_BASE = "http://<LM_STUDIO_HOST>:1234/v1"
 $env:COREAI_OPENAI_TEST_MODEL = "<id из GET http://<LM_STUDIO_HOST>:1234/v1/models>"
 # при необходимости:
 # $env:COREAI_OPENAI_TEST_API_KEY = "..."
+```
+
+Либо один флаг (удобно для фиксированной машины разработчика; **не включайте в CI без осознанной сетевой политики**):
+
+```powershell
+$env:COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS = "1"
+```
+
+Тогда подставляются константы из `PlayModeOpenAiTestConfig` в сборке **CoreAI.PlayModeTests** (пример: `http://192.168.56.1:1234/v1` и модель `qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive`). При необходимости измените константы в коде под свой LM Studio.
+
+Принудительно выбрать ветку для тестов с `TryCreate(preference: null)`:
+
+```powershell
+$env:COREAI_PLAYMODE_LLM_BACKEND = "http"    # или llmunity, auto
 ```
 
 Затем **Window → General → Test Runner → PlayMode** → запуск сборки **CoreAI.PlayModeTests**.

@@ -6,8 +6,8 @@ UPM-пакет с кодом в **`Assets/CoreAI`** (как **`com.neoxider.tool
 
 | Путь | asmdef | Назначение |
 |------|--------|------------|
-| `Runtime/Core/` | **CoreAI.Core** | Портативное ядро (`noEngineReferences`) |
-| `Runtime/Source/` | **CoreAI.Source** | Unity: DI, LLM, MessagePipe, лог |
+| `Runtime/Core/` | **CoreAI.Core** | Портативное ядро (`noEngineReferences`): `Composition`, `Authority`, `Session`, `Messaging`, `Sandbox`, **`Features/*`** (оркестрация, промпты, Lua-конвейер, версионирование, память агента) |
+| `Runtime/Source/` | **CoreAI.Source** | Unity: **`Composition`** и **`Features/*`** (слои **Infrastructure** / **Presentation**) — лог, LLM, Lua, MessagePipe, промпты, UI |
 
 Тесты, **`Assets/CoreAiUnity/Resources`** (промпты и т.п.) и документация хоста остаются в **`Assets/CoreAiUnity`** (не входят в UPM-пакет).
 

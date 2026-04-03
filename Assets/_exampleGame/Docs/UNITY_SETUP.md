@@ -22,7 +22,7 @@
 
 | Объект | Компоненты |
 |--------|------------|
-| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** — волны, игрок, HUD (поле **Skip Runtime Floor** включено: пол сцены — **ArenaGroundPlane**). |
+| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** — волны, игрок, HUD (поле **Skip Runtime Floor** включено: пол сцены — **ArenaGroundPlane**). Прогрессия VS-style: назначьте **Arena Progression Content** + **Arena Unit Baseline** и сгенерируйте ассеты меню **CoreAI Example → Arena → Generate Progression Assets** — см. **[ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)**. |
 | **ArenaGroundPlane** | Mesh (Plane), **MeshCollider**, материал — видимое игровое поле ~44×44 м. |
 | **PlayerSpawn** | Пустой Transform — стартовая позиция игрока (**Player Spawn Anchor** в сетапе). |
 
@@ -33,7 +33,9 @@
 | Компонент | Роль |
 |-----------|------|
 | **CoreAILifetimeScope** | Корень DI ядра: лог, MessagePipe, **`ILlmClient`** (в рантайме — **`LoggingLlmClientDecorator`** + реализация), оркестратор, роутер **`ApplyAiGameCommand`**, Lua-процессор. Поля: **Llm Request Timeout Seconds** (по умолчанию 15, 0 = без лимита), **Game Log Settings**. **Auto Run** включён. |
-| **ExampleRogueliteEntry** | Старт прототипа арены (волны). В **Awake** добавляет **`CoreAiLuaHotkey`** (клавиша **F9**). |
+| **ExampleRogueliteEntry** | Старт прототипа арены (волны). В **Awake** добавляет **`CoreAiLuaHotkey`** (**F9**) и демо **`CoreAiArenaLlmHotkeys`** (**F1/F2** → **`ArenaAiTaskBus`** на сгенерированной арене). |
+
+События арены (волна, низкое HP, босс, триггер комнаты) идут через **`ArenaAiTaskBus`**; контекст Creator для планов волн — **[CREATOR_WAVE_CONTEXT.md](CREATOR_WAVE_CONTEXT.md)**.
 
 **Дочерний** объект **`LLM`** (под `CompositionRoot`):
 

@@ -16,9 +16,10 @@
 
 | Путь | Сборка | Назначение |
 |------|--------|------------|
-| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** (`noEngineReferences`) | Портатив: `ILlmClient`, оркестратор, очередь, снимок сессии, MoonSharp |
+| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** (`noEngineReferences`) | Портатив: `ILlmClient`, оркестратор, очередь, снимок сессии, MoonSharp; срезы в **`Features/*`** |
 | `Assets/CoreAI/Runtime/Source/` | **CoreAI.Source** | Unity: DI, маршрутизация LLM, LLMUnity/OpenAI HTTP, MessagePipe, лог |
-| `Assets/CoreAiUnity/Tests/EditMode/` | **CoreAI.Tests** (Editor) | EditMode NUnit: промпты, Lua, парсер конверта, песочница |
+| `Assets/CoreAiUnity/Tests/EditMode/Core/` | **CoreAI.Tests** (Editor) | EditMode: ядро (промпты, Lua, оркестратор, версии) |
+| `Assets/CoreAiUnity/Tests/EditMode/ExampleGame/` | **CoreAI.Tests** (Editor) | EditMode: тесты, завязанные на пример игры (арена и т.п.) |
 | `Assets/CoreAiUnity/Tests/PlayMode/` | **CoreAI.PlayModeTests** (Editor) | Play Mode: оркестратор, опционально HTTP к LM Studio (env) |
 | `Assets/CoreAiUnity/Editor/` | **CoreAI.Editor** | Меню (Build Settings, открыть `_mainCoreAI`) |
 
@@ -27,9 +28,16 @@
 | Путь | Назначение |
 |------|------------|
 | `Composition/` | `CoreAILifetimeScope`, `RegisterCore` + `RegisterCorePortable`, entry points |
-| `Infrastructure/` | Логирование, маршрутизация LLM, `ApplyAiGameCommand` → MessagePipe, LLM-адаптеры, `LuaAiEnvelopeProcessor`, биндинги Lua |
-| `Presentation/AiDashboard/` | `AiDashboardPresenter` (IMGUI), `AiPermissionsAsset` |
-| `Features/` | Узкие фичи ядра по мере роста |
+| `Features/Logging/Infrastructure/` | Логирование по фичам |
+| `Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity, маршрутизация, таймауты |
+| `Features/Lua/Infrastructure/` | Файловые store версий, агрегация биндингов Lua |
+| `Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe, маршалинг на main thread |
+| `Features/Prompts/Infrastructure/` | Манифест и Resources для системных/user промптов |
+| `Features/AgentMemory/Infrastructure/` | Файловое хранилище памяти агента |
+| `Features/OrchestrationMetrics/Infrastructure/` | Метрики оркестратора в лог |
+| `Features/Dashboard/Presentation/` | `AiDashboardPresenter` (IMGUI), `AiPermissionsAsset` |
+| `Features/PlayerChat/Presentation/` | `InGameChatPanel` |
+| `Features/Scheduling/Presentation/` | `AiScheduledTaskTrigger` |
 
 ## Запуск DI в сцене
 
@@ -55,7 +63,7 @@
 - **Системный промпт** задаётся для каждого `roleId` (Creator, Programmer, `PlayerChat`, свой id): цепочка **манифест** (опционально) → **Resources** `AgentPrompts/System/<RoleId>.txt` → встроенный fallback в `CoreAI.Core`.
 - **User-шаблон** (опционально): манифест или `Resources/AgentPrompts/User/<RoleId>.txt` с плейсхолдерами **`{telemetry}`** и **`{hint}`** (игронезависимый JSON телеметрии и подсказка задачи).
 - **Create → CoreAI → Agent Prompts Manifest** — переопределения и блок **custom agents** для своих ролей.
-- **Игровой чат:** `IInGameLlmChatService` (роль `PlayerChat`), UI-пример `Presentation/PlayerChat/InGameChatPanel`.
+- **Игровой чат:** `IInGameLlmChatService` (роль `PlayerChat`), UI-пример `Features/PlayerChat/Presentation/InGameChatPanel`.
 
 ## MessagePipe и команды ИИ
 

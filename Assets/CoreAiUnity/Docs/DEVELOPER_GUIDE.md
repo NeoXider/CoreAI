@@ -11,7 +11,7 @@
 | Шаг | Документ / место | Зачем |
 |-----|------------------|--------|
 | 0 | [QUICK_START.md](QUICK_START.md), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) | Быстрый старт и пошаговая настройка Example Game в Unity |
-| 1 | [DGF_SPEC.md](DGF_SPEC.md) §1–5, §8–9 | Цели ядра, LLM/stub, Lua, потоки |
+| 1 | [DGF_SPEC.md](DGF_SPEC.md) §1–5, §8–9 (**§9.4** — главный поток Unity после LLM) | Цели ядра, LLM/stub, Lua, потоки |
 | 2 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли агентов, placement, выбор модели |
 | 3 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, LM Studio / OpenAI HTTP, PlayMode-тесты, Lua-пайплайн |
 | 4 | [../README.md](../README.md) (хост **`CoreAiUnity`**) | Сборки, папки, DI, промпты, MessagePipe |
@@ -59,10 +59,12 @@ flowchart LR
 1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, **`Priority`**, **`CancellationScope`**, опционально поля ремонта Lua и **`TraceId`**).
 2. Реализация по умолчанию — **`QueuedAiOrchestrator`** (лимит параллелизма, приоритет, отмена предыдущей задачи с тем же **`CancellationScope`**) вокруг **`AiOrchestrator`**. **`AiOrchestrator`** назначает **`TraceId`**, собирает промпты, вызывает **`ILlmClient.CompleteAsync`**; при **`IRoleStructuredResponsePolicy`** для роли возможен **один** повтор с подсказкой **`structured_retry:`** в user/hint. Затем публикуется **`ApplyAiGameCommand`** (**`AiEnvelope`**, **`TraceId`**, …). Метрики — **`IAiOrchestrationMetrics`** (лог при **`GameLogFeature.Metrics`**).
 3. В DI **`ILlmClient`** — **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или legacy один клиент): внутри — **`OpenAiChatLlmClient`** / **`LlmUnityLlmClient`** / **`StubLlmClient`** по **`LlmRoutingManifest`** и роли. Лог **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), строка бэкенда **`RoutingLlmClient→OpenAiHttp`** и т.п. Для «это stub?» — **`LoggingLlmClientDecorator.Unwrap(client)`**.
-4. Подписчик **`AiGameCommandRouter`** сначала вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
+4. Подписчик **`AiGameCommandRouter`** получает **`ApplyAiGameCommand`** из MessagePipe и **переносит обработку на главный поток Unity** (`UniTask.SwitchToMainThread`), затем вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
 5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (лимит поколений см. **`LuaAiEnvelopeProcessor`**).
 
 **Важно:** геймплейные системы могут подписываться на **`ApplyAiGameCommand`** и реагировать на типы команд; не парсить сырой текст LLM вне общего конвейера, если хотите единообразия. Подробнее логи и таймаут: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1 (блок про CoreAI) и таймаут.
+
+**Unity — главный поток (кратко):** после **`QueuedAiOrchestrator`** продолжение async часто выполняется **не** на main thread; **`Publish`** из оркестратора может прийти с пула. Любой код с **`UnityEngine`**, **`FindObjectsByType`**, сценой и UI — только на главном потоке **или** после явного маршалинга. Шаблон делает маршалинг в **`AiGameCommandRouter`**; свои подписчики на MessagePipe должны повторять тот же принцип. Нормативно и с чеклистом: **[DGF_SPEC.md](DGF_SPEC.md) §9.4**.
 
 ---
 
