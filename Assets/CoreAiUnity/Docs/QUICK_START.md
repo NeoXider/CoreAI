@@ -8,7 +8,7 @@
 
 | Что | Значение |
 |-----|----------|
-| **Unity** | Как в `ProjectSettings/ProjectVersion.txt` (сейчас **6000.3.x**). |
+| **Unity** | Как в `ProjectSettings/ProjectVersion.txt` (сейчас **6000.4.x**). |
 | **Диск / сеть** | Для локальной модели LLMUnity — место под GGUF и время на первую загрузку. |
 | **Опционально** | LM Studio, OpenAI или другой **OpenAI-compatible** сервер для HTTP-режима. |
 
@@ -58,6 +58,8 @@
 2. В консоли — старт **`CoreAIGameEntryPoint`** (без критических ошибок DI).
 3. На **RogueliteArena**: прототип волновой арены; **F9** — задача **Programmer** (Lua + `report` в лог). **R** — перезапуск сцены.
 4. **Логи ядра:** **`[Llm]`** — запрос/ответ модели (**`LLM ▶`**, **`LLM ◀`**, при зависании — **`LLM ⏱`**); **`[MessagePipe]`** — **`ApplyAiGameCommand`** с тем же **`traceId`**. На **`CoreAILifetimeScope`**: **Llm Request Timeout Seconds** (по умолчанию **15**, **0** = без лимита). Категория **`Llm`** в **Game Log Settings** должна быть включена (или откройте asset в инспекторе — сработает миграция).
+
+Если используете **World Commands** (управление миром из Lua): создайте `CoreAiPrefabRegistryAsset` и назначьте в `CoreAILifetimeScope → World Prefab Registry`, затем Lua сможет безопасно публиковать команды спавна/движения/сцен. Детали: **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
 
 Если **`ILlmClient`** не находит **LLMAgent** и HTTP выключен — подставится **StubLlmClient** (ответы-заглушки); для реального текста от модели настройте §4A или §4B.
 

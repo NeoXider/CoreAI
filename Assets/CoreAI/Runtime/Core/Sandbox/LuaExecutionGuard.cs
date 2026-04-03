@@ -10,11 +10,14 @@ namespace CoreAI.Sandbox
     public sealed class LuaExecutionGuard
     {
         private readonly int _timeoutMs;
+        private readonly long _maxSteps;
 
         /// <param name="timeoutMs">Мягкий лимит длительности вызова Lua (после исполнения).</param>
-        public LuaExecutionGuard(int timeoutMs = 2000)
+        /// <param name="maxSteps">Best-effort лимит «шагов» Lua (через debugger callbacks).</param>
+        public LuaExecutionGuard(int timeoutMs = 2000, long maxSteps = 200_000)
         {
             _timeoutMs = timeoutMs;
+            _maxSteps = maxSteps;
         }
 
         /// <summary>Вызвать Lua-функцию с проверкой таймаута по wall-clock.</summary>
@@ -26,6 +29,9 @@ namespace CoreAI.Sandbox
             var sw = Stopwatch.StartNew();
             try
             {
+                // MoonSharp: без debugger бесконечный цикл может зависнуть навсегда.
+                // Подключаем минимальный debugger, который ограничивает шаги и wall-clock (best-effort).
+                script.AttachDebugger(new InstructionLimitDebugger(_maxSteps, _timeoutMs));
                 var result = script.Call(function, args);
                 if (sw.ElapsedMilliseconds > _timeoutMs)
                     throw new TimeoutException($"Lua exceeded {_timeoutMs} ms (elapsed {sw.ElapsedMilliseconds} ms).");
@@ -34,6 +40,10 @@ namespace CoreAI.Sandbox
             catch (InterpreterException)
             {
                 throw;
+            }
+            finally
+            {
+                try { script.DetachDebugger(); } catch { /* ignore */ }
             }
         }
     }

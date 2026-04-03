@@ -57,6 +57,28 @@ namespace CoreAI.Infrastructure.World
                     return;
                 Publish(CoreAiWorldCommandEnvelope.LoadScene(name));
             }));
+
+            registry.Register("coreai_world_reload_scene", new Action(() =>
+            {
+                Publish(CoreAiWorldCommandEnvelope.ReloadScene());
+            }));
+
+            registry.Register("coreai_world_bind_by_name", new Action<string, string>((targetName, instanceId) =>
+            {
+                var name = (targetName ?? "").Trim();
+                var id = (instanceId ?? "").Trim();
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id))
+                    return;
+                Publish(CoreAiWorldCommandEnvelope.BindByName(name, id));
+            }));
+
+            registry.Register("coreai_world_set_active", new Action<string, bool>((instanceId, active) =>
+            {
+                var id = (instanceId ?? "").Trim();
+                if (string.IsNullOrEmpty(id))
+                    return;
+                Publish(CoreAiWorldCommandEnvelope.SetActive(id, active));
+            }));
         }
 
         private void Publish(CoreAiWorldCommandEnvelope env)

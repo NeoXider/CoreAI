@@ -9,6 +9,7 @@
 | [DGF_SPEC.md](DGF_SPEC.md) | Нормативный SPEC шаблона (версия в шапке); **§9.4** — главный поток Unity после LLM / MessagePipe. |
 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли (Creator, Programmer, …), placement, размеры моделей. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, GGUF, OpenAI HTTP, логи **`[Llm]`** / **traceId**, таймаут запроса, PlayMode-тесты, Lua-конвейер. |
+| [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | World Commands: управление миром из Lua через whitelist API → MessagePipe → main thread. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Короткие гайды под тайтл (сеть, оркестрация, роли, пример игры). |
 
 **Пример игры** (`Assets/_exampleGame`):

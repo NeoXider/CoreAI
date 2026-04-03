@@ -9,3 +9,6 @@
 | [03_AgentRolesAndProfiles.md](03_AgentRolesAndProfiles.md) | черновик | Ссылки на AI_AGENT_ROLES, промпты, BuiltInAgentRoleIds |
 | [04_SingleVsMultiplayer.md](04_SingleVsMultiplayer.md) | черновик | Единый пайплайн ядра, DGF §5 |
 | [05_ReferenceGame.md](05_ReferenceGame.md) | черновик | DEVELOPER_GUIDE §8, `_exampleGame`, playbook |
+
+Дополнительно:
+- [WORLD_COMMANDS.md](../WORLD_COMMANDS.md) — безопасное управление миром из Lua (whitelist → MessagePipe → main thread).

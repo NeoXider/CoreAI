@@ -34,6 +34,31 @@
 
 ---
 
+## 2.1 Дефолтное поведение (из коробки) и точки настройки
+
+Шаблон задуман так, чтобы **по умолчанию работал “разумно”**, но при необходимости позволял точечную настройку без переписывания ядра.
+
+### Что работает “из коробки”
+
+- **DI + MessagePipe + лог**: `CoreAILifetimeScope` регистрирует `IGameLogger`, брокер `ApplyAiGameCommand`, `IAiGameCommandSink`.
+- **Оркестрация**: `IAiOrchestrationService` по умолчанию — `QueuedAiOrchestrator` вокруг `AiOrchestrator`.
+- **Lua‑конвейер**: `AiGameCommandRouter` переносит обработку на main thread и запускает `LuaAiEnvelopeProcessor`.
+- **Лимиты Lua**: `LuaExecutionGuard` ограничивает wall‑clock и “шаги” (best‑effort).
+- **Prompts**: цепочка system/user по манифесту → Resources → встроенный fallback.
+- **Версии Programmer (Lua + data overlays)**: в Unity‑слое по умолчанию сохраняются на диск (File* store).
+- **World Commands**: Lua API `coreai_world_*` публикует команды мира в шину, выполнение — на main thread (см. [WORLD_COMMANDS.md](WORLD_COMMANDS.md)).
+
+### Что настраивается в инспекторе `CoreAILifetimeScope`
+
+- **LLM backend**: `OpenAiHttpLlmSettings` (OpenAI‑compatible HTTP) и `LlmRoutingManifest` (маршрутизация по ролям).
+- **Промпты**: `AgentPromptsManifest` (переопределения system/user и кастомные роли).
+- **Логи**: `GameLogSettingsAsset` (фильтр по фичам и уровню).
+- **World Commands**: `World Prefab Registry` (whitelist префабов для спавна).
+
+Рекомендация для тайтла: держать настройки в 1‑2 ScriptableObject‑ассетах и версионировать их в git (без секретов).
+
+---
+
 ## 3. Поток данных (как всё связано)
 
 Упрощённая схема рантайма:
@@ -99,8 +124,10 @@ flowchart LR
 
 - Парсинг: **`AiLuaPayloadParser`** (markdown → JSON **`ExecuteLua`**).
 - Исполнение: **`SecureLuaEnvironment`**, **`LuaExecutionGuard`**, **`LuaApiRegistry`**.
+- Лимиты: `LuaExecutionGuard` включает best-effort ограничение **wall-clock** и **шагов** (см. `InstructionLimitDebugger`), чтобы бесконечные циклы Lua не могли зависнуть навсегда.
 - Дефолтные игровые вызовы в шаблоне: **`LoggingLuaRuntimeBindings`** — **`report(string)`**, **`add(a,b)`**.
 - Расширение: зарегистрируйте свою реализацию **`IGameLuaRuntimeBindings`** в **`CoreAILifetimeScope`** (вместо или поверх дефолтной — по политике проекта; избегайте дублирования интерфейса в контейнере без явной замены).
+- Управление миром (рантайм): встроенная фича **World Commands** добавляет Lua‑API `coreai_world_*` и выполняет команды на главном потоке Unity через MessagePipe. См. **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
 
 ---
 
@@ -132,8 +159,67 @@ flowchart LR
 | Новая роль агента | Константа или строковый id; промпт в Resources или манифесте; при необходимости тест в **`AgentRolesAndPromptsTests`**. |
 | Новый тип команды ИИ | Расширить обработку **`ApplyAiGameCommand.CommandTypeId`** (новый подписчик или ветка в игре); не смешивать с сырым текстом LLM без парсера. |
 | Новые функции для Lua от LLM | Реализовать **`IGameLuaRuntimeBindings`**; регистрация делегатов в **`LuaApiRegistry`** (whitelist). |
+| Управление миром из Lua | Использовать **World Commands** (`coreai_world_*`), настроить `CoreAiPrefabRegistryAsset` и назначить в `CoreAILifetimeScope`. См. **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**. |
 | Смена модели / облако | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md); для продакшена не коммить API-ключи. |
 | Мультиплеер | DGF_SPEC, **AI_AGENT_ROLES** (placement); авторитет LLM на хосте — ответственность игры. |
+
+---
+
+## 9.1 Где CoreAI обычно “сложный” и как упростить пайплайн (рекомендации)
+
+Ниже — практические “узкие места” при интеграции и способы сделать CoreAI более автоматичным, но настраиваемым.
+
+### 1) Сборка сцены и ассетов “по умолчанию”
+
+**Проблема:** легко забыть настроить `CoreAILifetimeScope` (LLM backend, промпты, лог‑настройки, реестр префабов мира).
+
+**Упростить:**
+- Добавить Editor‑меню “CoreAI → Setup → Create Default Assets”:
+  - `GameLogSettingsAsset` (с включенным `Llm` и нужными фичами)
+  - `OpenAiHttpLlmSettings` (пустой шаблон)
+  - `AgentPromptsManifest` (опционально)
+  - `CoreAiPrefabRegistryAsset` (пустой whitelist)
+- Добавить “CoreAI → Setup → Validate Scene” (проверка: есть `CoreAILifetimeScope`, корректные ссылки, предупреждения).
+
+### 2) Дефолтный выбор LLM backend и деградация в stub
+
+**Проблема:** «почему молчит модель?» — потому что `LLMAgent` не найден или HTTP не включен, а ядро ушло в stub.
+
+**Упростить:**
+- В логах старта писать явное резюме: backend=stub/llmunity/http, почему выбран.
+- В UI/дашборде показывать текущий backend и `traceId` последних запросов.
+
+### 3) Main thread vs background thread (Unity)
+
+**Проблема:** команды могут приходить с пула потоков.
+
+**Упростить:**
+- Канонизировать одну точку “apply to Unity” (как сейчас `AiGameCommandRouter`) и запрещать прямую обработку из `ISubscriber<T>` без маршалинга.
+- Добавить небольшой util/шаблон `MainThreadCommandQueue` для проектов без UniTask.
+
+### 4) Lua безопасность и предсказуемость
+
+**Проблема:** бесконечные циклы, расширение API, ошибки в Lua.
+
+**Упростить:**
+- Держать Lua API в виде **малых фич** (Versioning, World Commands, game‑bindings) и документировать каждую.
+- По умолчанию включать лимиты (`LuaExecutionGuard`) и логировать превышение лимитов как отдельный сигнал.
+
+### 5) Версионирование “скрипты + конфиги”
+
+**Проблема:** Programmer меняет и код, и данные; нужен быстрый rollback.
+
+**Упростить:**
+- Стабильные ключи (usecase id / overlay key) и единый UI “Versions” в дашборде (показ original/current/history + reset).
+- “Reset All” для аварийного восстановления.
+
+### 6) Повторяемый CI/QA
+
+**Проблема:** PlayMode тесты могут зависеть от модели/сети.
+
+**Упростить:**
+- Для CI: дефолт `COREAI_NO_LLM` или stub‑профиль, обязательный EditMode прогон.
+- Для “integration” ветки: отдельный ручной job с env для HTTP и ограничением времени.
 
 ---
 

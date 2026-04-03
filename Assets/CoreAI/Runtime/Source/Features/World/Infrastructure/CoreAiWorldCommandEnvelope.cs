@@ -11,6 +11,8 @@ namespace CoreAI.Infrastructure.World
 
         // Общие поля
         public string instanceId = "";
+        public string targetName = "";
+        public int boolValue;
 
         // Spawn
         public string prefabKeyOrName = "";
@@ -66,6 +68,34 @@ namespace CoreAI.Infrastructure.World
             {
                 action = "load_scene",
                 sceneName = sceneName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope ReloadScene()
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "reload_scene"
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope BindByName(string targetName, string instanceId)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "bind_by_name",
+                targetName = targetName ?? "",
+                instanceId = instanceId ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetActive(string instanceId, bool active)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_active",
+                instanceId = instanceId ?? "",
+                boolValue = active ? 1 : 0
             };
         }
     }

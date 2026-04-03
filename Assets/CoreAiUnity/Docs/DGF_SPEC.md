@@ -20,6 +20,7 @@
 - **Оркестрация** нескольких запросов к моделям и сценариев: очередь, приоритеты, таймауты, бюджет.
 - **Безопасное исполнение** необязательного кода (Lua / MoonSharp) в **песочнице** с whitelist и лимитами.
 - **Применение решений ИИ** только через явные **команды и типизированные события** (в первую очередь **MessagePipe**), без прямого «разбора текста» в геймплейных системах.
+- **Дефолтный пайплайн “из коробки”**: минимальная сцена и `CoreAILifetimeScope` должны поднимать рабочий контур (LLM/stub → оркестратор → MessagePipe → Lua sandbox → команды), а игра при необходимости переопределяет конкретные точки (промпты, роутинг LLM, whitelist API, политики).
 
 ### 1.2 Нецели (v1)
 
@@ -90,6 +91,19 @@
 | `Source/Features/Dashboard/Presentation/` | IMGUI-дашборд, permissions asset |
 | `Source/Features/PlayerChat/Presentation/` | Панель внутриигрового чата |
 | `Source/Features/Scheduling/Presentation/` | Триггеры задач по расписанию |
+
+### 4.1 “По умолчанию работает так”
+
+Шаблон задаёт дефолты:
+- **LLM backend**: если HTTP выключен и `LLMAgent` не найден — безопасный `StubLlmClient`.
+- **Маршалинг в Unity**: обработка команд шины переносится на main thread в `AiGameCommandRouter`.
+- **Lua sandbox**: только whitelist API, опасные globals отключены, лимиты на выполнение.
+- **Персистенция**: Lua‑версии Programmer и data overlay по умолчанию сохраняются на диск в Unity‑слое.
+
+При необходимости игра может:
+- заменить `ILlmClient` / включить `LlmRoutingManifest`
+- заменить/расширить `IGameLuaRuntimeBindings`
+- подписаться на `ApplyAiGameCommand` или `AiGameCommandRouter.CommandReceived` своей логикой
 
 **Поток данных (норматив):**
 
@@ -228,7 +242,7 @@ flowchart LR
 
 ### 8.2 Лимиты
 
-- **MaxInstructions** (или эквивалент в используемой версии MoonSharp).
+- **MaxInstructions** (или эквивалент в используемой версии MoonSharp). В шаблоне это реализовано через подключаемый debugger-хук (`InstructionLimitDebugger`) в `LuaExecutionGuard` (best-effort лимит шагов + wall-clock).
 - Политика **таймаута** на выполнение чанка Lua согласованная с §10 (главный поток).
 
 ### 8.3 Мост к MessagePipe (мотив Last-War)
@@ -239,9 +253,12 @@ flowchart LR
 - Публикация из Lua → **один** C# делегат, который маппит на `IPublisher<T>` с проверкой типа.
 - Запрет произвольных типов и рефлексии из Lua.
 
+**Встроенный пример моста:** World Commands (`AiGameCommandTypeIds.WorldCommand`) — Lua публикует команду через whitelist `coreai_world_*`, Unity‑слой обрабатывает на main thread и применяет изменения к сцене. См. `Docs/WORLD_COMMANDS.md`.
+
 ### 8.4 Тесты
 
 - EditMode: вызов запрещённого API, превышение инструкций, неверный тип события — ожидаемые ошибки.
+- EditMode: World Commands — Lua публикует `WorldCommand`, проверка JSON envelope (см. `WorldCommandLuaBindingsEditModeTests`).
 
 ---
 
@@ -281,6 +298,15 @@ flowchart LR
 
 5. **Альтернатива «сразу на main thread»**  
    Теоретически можно было бы убрать `ConfigureAwait(false)` в очереди или **перед** `Publish` в оркестраторе делать `SwitchToMainThread` — это меняет модель нагрузки на главный поток и контракт **`CoreAI.Core`** (там нет UniTask). Текущий **канон шаблона**: маршалинг **на границе Unity-слоя** в **`AiGameCommandRouter`** (см. исходник `Assets/CoreAI/Runtime/Source/Features/Messaging/Infrastructure/AiGameCommandRouter.cs`).
+
+### ADR-9.5 — “Автоматический пайплайн по умолчанию” (принцип)
+
+Шаблон придерживается принципа:
+- **минимальная сцена** + `CoreAILifetimeScope` должны поднимать рабочий контур без ручной сборки DI в коде
+- **поведение безопасно по умолчанию** (stub вместо падения, whitelist вместо рефлексии, лимиты Lua)
+- настройка — через **ScriptableObject‑ассеты** и/или явные интерфейсы в DI
+
+Это упрощает онбординг и снижает шанс “случайно” нарушить main thread/безопасность.
 
 ---
 

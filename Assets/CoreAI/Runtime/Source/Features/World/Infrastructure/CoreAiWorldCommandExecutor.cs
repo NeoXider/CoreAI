@@ -50,8 +50,14 @@ namespace CoreAI.Infrastructure.World
                     return TryMove(env);
                 case "destroy":
                     return TryDestroy(env);
+                case "bind_by_name":
+                    return TryBindByName(env);
+                case "set_active":
+                    return TrySetActive(env);
                 case "load_scene":
                     return TryLoadScene(env);
+                case "reload_scene":
+                    return TryReloadScene();
                 default:
                     _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] unknown action '{env.action}'");
                     return false;
@@ -119,6 +125,39 @@ namespace CoreAI.Infrastructure.World
             if (string.IsNullOrEmpty(name))
                 return false;
             SceneManager.LoadScene(name);
+            return true;
+        }
+
+        private bool TryReloadScene()
+        {
+            var scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid())
+                return false;
+            SceneManager.LoadScene(scene.name);
+            return true;
+        }
+
+        private bool TryBindByName(CoreAiWorldCommandEnvelope env)
+        {
+            var name = (env.targetName ?? "").Trim();
+            var id = (env.instanceId ?? "").Trim();
+            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id))
+                return false;
+            var go = GameObject.Find(name);
+            if (go == null)
+                return false;
+            _instances[id] = go;
+            return true;
+        }
+
+        private bool TrySetActive(CoreAiWorldCommandEnvelope env)
+        {
+            var id = (env.instanceId ?? "").Trim();
+            if (string.IsNullOrEmpty(id))
+                return false;
+            if (!_instances.TryGetValue(id, out var go) || go == null)
+                return false;
+            go.SetActive(env.boolValue != 0);
             return true;
         }
     }
