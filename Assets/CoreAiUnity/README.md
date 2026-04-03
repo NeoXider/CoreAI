@@ -1,6 +1,6 @@
 # CoreAI — Unity-хост (`com.nexoider.coreaiunity`)
 
-Документация, **EditMode / PlayMode** тесты и **Editor**-меню для репозитория [CoreAI](https://github.com/NeoXider/CoreAI). Зависит от **`com.nexoider.coreai`** (версия зафиксирована в `package.json`). См. **`CHANGELOG.md`**.
+Сборка **`CoreAI.Source`** (Unity-рантайм: DI, LLM, MessagePipe, логи) в **`Runtime/Source/`**, плюс документация, **EditMode / PlayMode** тесты и **Editor**-меню. Зависит от **`com.nexoider.coreai`** (портативное **CoreAI.Core**). См. **`CHANGELOG.md`**.
 
 | Куда смотреть | Что |
 |---------------|-----|
@@ -23,7 +23,7 @@
 1. **`com.nexoider.coreai`** — [`https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI`](https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI)  
 2. **`com.nexoider.coreaiunity`** — [`https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity`](https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity)
 
-Подробности, пин версии, локальный `file:` и использование без Unity — в **[`../CoreAI/README.md`](../CoreAI/README.md)** (канонический пакетный README).
+Подробности, пин версии — в **[`../CoreAI/README.md`](../CoreAI/README.md)** (пакет **`com.nexoider.coreai`** — только **CoreAI.Core** без Unity).
 
 ---
 
@@ -31,13 +31,13 @@
 
 | Путь | Сборка | Назначение |
 |------|--------|------------|
-| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** | Портативное ядро (`noEngineReferences`) |
-| `Assets/CoreAI/Runtime/Source/` | **CoreAI.Source** | Unity: DI, LLM, Lua, MessagePipe, лог |
+| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** | Портативное ядро (`noEngineReferences`), пакет **`com.nexoider.coreai`** |
+| `Assets/CoreAiUnity/Runtime/Source/` | **CoreAI.Source** | Unity: DI, LLM, Lua, MessagePipe, лог (этот пакет) |
 | `Tests/EditMode/Core/` и др. | **CoreAI.Tests** (Editor) | EditMode NUnit |
 | `Tests/PlayMode/` | **CoreAI.PlayModeTests** (Editor) | Play Mode, опционально LM Studio по env |
 | `Editor/` | **CoreAI.Editor** | Меню (Build Settings, открыть `_mainCoreAI`) |
 
-### `Assets/CoreAI/Runtime/Source` (детальнее)
+### `Assets/CoreAiUnity/Runtime/Source` (детальнее)
 
 | Путь | Назначение |
 |------|------------|

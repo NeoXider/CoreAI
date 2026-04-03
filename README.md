@@ -4,6 +4,18 @@
 
 ---
 
+## Две части системы
+
+Репозиторий устроен **из двух UPM-пакетов**:
+
+1. **`com.nexoider.coreai`** (`Assets/CoreAI`) — **только портативное ядро `CoreAI.Core`**: C# **без** `UnityEngine` (`noEngineReferences`) — оркестрация, песочница Lua, контракты ИИ. Зависимости UPM: **VContainer**, **MoonSharp**. **Unity в этом пакете не используется.**
+
+2. **`com.nexoider.coreaiunity`** (`Assets/CoreAiUnity`) — **всё, что завязано на Unity**: сборка **`CoreAI.Source`** (`Runtime/Source/` — DI, LLMUnity/OpenAI HTTP, MessagePipe, логирование, сцена), плюс **документация** (`Docs/`), **Editor**, **`Resources`**, **тесты**. **Зависит** от `com.nexoider.coreai` и тянет MessagePipe, UniTask, LLMUnity и т.д. Без Unity пакет не нужен.
+
+Подключение обоих пакетов в Unity-проект описано **ниже** и в **[`Assets/CoreAI/README.md`](Assets/CoreAI/README.md)**.
+
+---
+
 ## О чём этот проект
 
 Шаблон даёт **инфраструктуру ядра**, а не «одну готовую игру»: телеметрия, вызовы моделей, оркестрация ролей ИИ и применение результатов в движке — то, из чего и складывается **процедурная логика**: решения, которые в другом проекте писали бы вручную на каждую волну или миссию, здесь могут **порождаться и уточняться во время игры** (в том числе с короткими Lua-сценариями в песочнице). Представьте игру, которая **подстраивается не только цифрами в таблице лута**, а **логикой и ситуациями**: другой набор угроз, другой темп, другой «характер» мира — и при этом всё остаётся **управляемым и честным** для игроков. CoreAI как раз про инфраструктуру для такого опыта: сбор состояния игры, вызовы языковых моделей, **оркестрация нескольких разных «ролей» ИИ** (мир, персонажи, механики, атмосфера) и применение результатов так, чтобы движок оставался стабильным.
@@ -33,7 +45,7 @@
 
 Проект собирается на **Unity** с упором на чистую сборку модулей: **VContainer**, реактивность (**R3**), шина событий (**MessagePipe**), **UniTask**, **MoonSharp**, **LLMUnity**. **Быстрый старт:** **[`Assets/CoreAiUnity/Docs/QUICK_START.md`](Assets/CoreAiUnity/Docs/QUICK_START.md)**. Настройка демо-сцены в редакторе: **[`Assets/_exampleGame/Docs/UNITY_SETUP.md`](Assets/_exampleGame/Docs/UNITY_SETUP.md)**. Оглавление документов: **[`Assets/CoreAiUnity/Docs/DOCS_INDEX.md`](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)**.
 
-**Языковые модели:** можно подключать **внешние API** сторонних провайдеров (в т.ч. OpenAI‑совместимый HTTP — LM Studio, облако и т.д.) и/или использовать **локальные модели**, встроенные в билд **благодаря [LLMUnity](https://undream.ai/LLMUnity)** (GGUF в рантайме без обязательного сетевого вызова). Маршрутизация и настройка — в ядре и в **[`LLMUNITY_SETUP_AND_MODELS.md`](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)**.
+**Языковые модели:** можно подключать **внешние API** сторонних провайдеров (в т.ч. OpenAI‑совместимый HTTP — LM Studio, облако и т.д.) и/или использовать **локальные модели**, встроенные в билд **благодаря [LLMUnity](https://undream.ai/LLMUnity)** (GGUF в рантайме без обязательного сетевого вызова). Маршрутизация и настройка — в **`CoreAI.Source`** (пакет **`com.nexoider.coreaiunity`**) и в **[`LLMUNITY_SETUP_AND_MODELS.md`](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)**.
 
 Архитектура ядра, потоки LLM/Lua и гайд для разработчиков: **[`Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md`](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md)** (и **[`DGF_SPEC.md`](Assets/CoreAiUnity/Docs/DGF_SPEC.md)**). Наблюдаемость LLM: **`traceId`**, лог **`[Llm]`**, таймаут запроса на **`CoreAILifetimeScope`** — в **[`LLMUNITY_SETUP_AND_MODELS.md`](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** и DEVELOPER_GUIDE §3–4.
 

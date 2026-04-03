@@ -1,8 +1,8 @@
 # CoreAI — SPEC ядра (Dynamic Game Framework)
 
-**Версия документа:** 0.20  
+**Версия документа:** 0.21  
 **Репозиторий:** CoreAI · **Автор:** Neoxider (ник neoxider) — [github.com/NeoXider](https://github.com/NeoXider)  
-**UPM-пакет:** `Assets/CoreAI` — сборки **`CoreAI.Core`** и **`CoreAI.Source`** в `Runtime/`. **Хост шаблона:** `Assets/CoreAiUnity` — `Docs/`, `Tests/`, `Editor/`, `Resources/`, сцена **`_mainCoreAI`**.  
+**UPM:** **`com.nexoider.coreai`** (`Assets/CoreAI`) — только портативное **`CoreAI.Core`**: чистый **C# без движка** (`noEngineReferences`). **`com.nexoider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (реализация для **Unity**), плюс `Docs/`, `Tests/`, `Editor/`, `Resources/`, сцена **`_mainCoreAI`**.  
 **Пример игры:** `Assets/_exampleGame` (см. также `Docs/ROGUELITE_PLAYBOOK.md` в примере)  
 **Референс-архитектура (не копировать целиком):** `D:\Git\GameDev-Last-War`  
 **Каталог ролей ИИ (оркестрация, placement, модели):** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md)  
@@ -47,6 +47,15 @@
 
 ## 3. Текущее состояние репозитория (зафиксировано)
 
+### 3.0 Граница CoreAI и CoreAIUnity (нормативно)
+
+| Слой | Пакет / сборка | Содержание |
+|------|----------------|------------|
+| **Ядро без движка** | **`com.nexoider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Чистый **C#**: контракты (`ILlmClient`, оркестратор, очередь задач), песочница **MoonSharp**, типизированные команды и точки расширения. **Нет** `UnityEngine`, **нет** явной реализации под Unity, Unreal, Godot и т.д. — только переносимая логика и абстракции; привязка к «миру игры» делается снаружи через реализации интерфейсов и инъекцию. |
+| **Реализация под Unity** | **`com.nexoider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Конкретная **реализация для Unity**: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), логирование в консоль Unity, файловые store, маршалинг на main thread, UI-обвязка. Зависит от **`com.nexoider.coreai`**. |
+
+Инвариант: **весь код с `UnityEngine` и сценарная интеграция Unity** живут в **`CoreAI.Source`** / пакете **`coreaiunity`**; **в `CoreAI.Core` допускается только переносимый .NET/C#** (плюс MoonSharp/VContainer согласно asmdef).
+
 ### 3.1 Пакеты (`Packages/manifest.json`)
 
 - **VContainer**, **MessagePipe** + **MessagePipe.VContainer**
@@ -60,7 +69,7 @@
 - `noEngineReferences: true`; ссылки: **VContainer**, **MoonSharp.Interpreter** (имя asmdef UPM MoonSharp).
 - Портативная логика: контракты ИИ, оркестратор MVP, песочница Lua, DTO снимка сессии.
 
-### 3.3 Сборка `CoreAI.Source` (`Assets/CoreAI/Runtime/Source/CoreAI.Source.asmdef`)
+### 3.3 Сборка `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)
 
 - Ссылки: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**, **undream.llmunity.Runtime** (LLMUnity).
 - **R3**, **UniTask** — в manifest есть; в asmdef подключать по мере использования в коде.
@@ -74,11 +83,11 @@
 
 ---
 
-## 4. Целевая архитектура модулей (`Assets/CoreAI/Runtime`)
+## 4. Целевая архитектура модулей (`Assets/CoreAI/Runtime/Core`, `Assets/CoreAiUnity/Runtime/Source`)
 
 **Портативное ядро (`Runtime/Core/`, сборка `CoreAI.Core`):** `Composition/`, `Authority/`, `Session/`, `Messaging/`, `Sandbox/`, а также срезы **`Features/<имя>/`** — память агента, промпты, оркестрация/LLM-контракты, конвейер Lua, версионирование скриптов и data overlay.
 
-**Unity-слой (`Runtime/Source/`, сборка `CoreAI.Source`):** `Composition/` (DI, entry points) и **`Features/<имя>/(Infrastructure|Presentation)/`** — лог, LLM-адаптеры, Lua/MessagePipe, промпты из манифеста/Resources, файловые store’ы, UI (дашборд, чат, планировщик).
+**Unity-слой (`Assets/CoreAiUnity/Runtime/Source/`, сборка `CoreAI.Source`):** `Composition/` (DI, entry points) и **`Features/<имя>/(Infrastructure|Presentation)/`** — лог, LLM-адаптеры, Lua/MessagePipe, промпты из манифеста/Resources, файловые store’ы, UI (дашборд, чат, планировщик).
 
 | Область (пример) | Ответственность |
 |------------------|-----------------|
@@ -297,7 +306,7 @@ flowchart LR
    - **Без UniTask:** очередь команд (`ConcurrentQueue<ApplyAiGameCommand>`) и сброс в **`Update`/`LateUpdate`** — допустимый и явный вариант.
 
 5. **Альтернатива «сразу на main thread»**  
-   Теоретически можно было бы убрать `ConfigureAwait(false)` в очереди или **перед** `Publish` в оркестраторе делать `SwitchToMainThread` — это меняет модель нагрузки на главный поток и контракт **`CoreAI.Core`** (там нет UniTask). Текущий **канон шаблона**: маршалинг **на границе Unity-слоя** в **`AiGameCommandRouter`** (см. исходник `Assets/CoreAI/Runtime/Source/Features/Messaging/Infrastructure/AiGameCommandRouter.cs`).
+   Теоретически можно было бы убрать `ConfigureAwait(false)` в очереди или **перед** `Publish` в оркестраторе делать `SwitchToMainThread` — это меняет модель нагрузки на главный поток и контракт **`CoreAI.Core`** (там нет UniTask). Текущий **канон шаблона**: маршалинг **на границе Unity-слоя** в **`AiGameCommandRouter`** (см. исходник `Assets/CoreAiUnity/Runtime/Source/Features/Messaging/Infrastructure/AiGameCommandRouter.cs`).
 
 ### ADR-9.5 — “Автоматический пайплайн по умолчанию” (принцип)
 
@@ -395,16 +404,16 @@ flowchart LR
 
 | Id | Критерий |
 |----|----------|
-| **F0** | **Сделано:** **`Assets/CoreAI/package.json`** — **`com.nexoider.coreai`**, зависимости: VContainer, MessagePipe (+ VContainer), MoonSharp, LLMUnity. |
-| **F1** | **Сделано:** в **`Packages/manifest.json`** — **`"com.nexoider.coreai": "file:../Assets/CoreAI"`** (встраиваемая папка в `Assets`, как **`com.neoxider.tools`** с **`?path=Assets/Neoxider`**). |
-| **F2** | **Сделано:** **`CoreAI.Core`** и **`CoreAI.Source`** в **`Assets/CoreAI/Runtime/…`**; тесты, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — в папке **`CoreAiUnity`**. |
+| **F0** | **Сделано:** **`Assets/CoreAI/package.json`** — **`com.nexoider.coreai`**, зависимости: **VContainer**, **MoonSharp**; **`Assets/CoreAiUnity/package.json`** — **`com.nexoider.coreaiunity`**, зависимости: **`com.nexoider.coreai`**, MessagePipe, UniTask, LLMUnity и т.д. |
+| **F1** | **Сделано:** монорепозиторий — исходники в **`Assets/CoreAI`** и **`Assets/CoreAiUnity`**; **не** регистрировать их в **`manifest.json`** через **`file:`** на путь внутри **`Assets/`** (Unity UPM отклоняет). Внешний проект: Git UPM **`?path=Assets/CoreAI`** / **`?path=Assets/CoreAiUnity`**. |
+| **F2** | **Сделано:** **`CoreAI.Core`** в **`Assets/CoreAI/Runtime/Core/`**; **`CoreAI.Source`** в **`Assets/CoreAiUnity/Runtime/Source/`**; тесты, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — в пакете **`CoreAiUnity`**. |
 | F3 | Публикация: git URL с **`?path=Assets/CoreAI`**, теги под `version`, опционально OpenUPM; синхронизация версии в `package.json` с релизами. |
 
 ---
 
 ## 14. Саммари для вставки в контекст (копипаст)
 
-**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** UPM **`com.nexoider.coreai`** (`Assets/CoreAI`): **`CoreAI.Core`** + **`CoreAI.Source`** (маршрутизация LLM **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, метрики **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity в manifest проекта; хост **`Assets/CoreAiUnity`** (сцена **`Scenes/_mainCoreAI`**, промпты в **`Resources`**); пример **`RogueliteArena`**. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`. **Define:** `COREAI_NO_LLM` (§5.2).
+**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** **`CoreAI.Core`** в **`Assets/CoreAI`**, **`CoreAI.Source`** в **`Assets/CoreAiUnity`** (маршрутизация LLM **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, метрики **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity в manifest проекта; хост **`Assets/CoreAiUnity`** (сцена **`Scenes/_mainCoreAI`**, промпты в **`Resources`**); пример **`RogueliteArena`**. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`. **Define:** `COREAI_NO_LLM` (§5.2).
 
 ---
 
@@ -429,6 +438,7 @@ flowchart LR
 | 0.15 | §Фаза F: UPM ядра (`package.json`, зависимости включая AI Navigation); план F1–F3 |
 | 0.16 | Шапка: автор репозитория Neoxider (ссылка на GitHub) |
 | 0.17 | §3.4: маршрутизация LLM, очередь оркестратора, метрики; фаза F1–F2 (UPM перенос Core/Source в пакет) |
-| 0.18 | Пакет **`com.nexoider.coreai`**, код в **`Assets/CoreAI`**, manifest **`file:../Assets/CoreAI`**; Git UPM **`?path=Assets/CoreAI`** (как NeoxiderTools) |
+| 0.18 | Пакет **`com.nexoider.coreai`**, код в **`Assets/CoreAI`**; Git UPM **`?path=Assets/CoreAI`** (как NeoxiderTools); в монорепозитории без **`file:`** в manifest |
 | 0.19 | Папка хоста шаблона переименована в **`Assets/CoreAiUnity`** (вместо `_source`); обновлены пути в документации и **NeoxiderSettings** |
 | 0.20 | §9 **ADR-9.4**: явная инструкция по главному потоку после LLM (`QueuedAiOrchestrator` + `ConfigureAwait(false)`), роль **`AiGameCommandRouter`** и **`UniTask.SwitchToMainThread`**, чеклист для своих подписчиков MessagePipe |
+| 0.21 | Исходники только в **`Assets/CoreAI`** и **`Assets/CoreAiUnity`**; убраны дубликаты в **`Packages/`**; **`manifest`**: без **`file:`** на `Assets/` |

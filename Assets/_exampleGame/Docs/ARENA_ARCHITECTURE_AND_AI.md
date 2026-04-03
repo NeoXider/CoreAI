@@ -90,6 +90,6 @@
 3. Добавить **Analyzer** с 3–5 метриками из `ArenaSurvivalSession` + таймеры волн.
 4. Потом NGO: репликация дескриптора волны и `NetworkObject` на врагов.
 
-**Связанные документы:** [../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md), [../../CoreAiUnity/Docs/AI_AGENT_ROLES.md](../../CoreAiUnity/Docs/AI_AGENT_ROLES.md), [../../CoreAiUnity/Docs/DGF_SPEC.md](../../CoreAiUnity/Docs/DGF_SPEC.md).
+**Связанные документы:** [../../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md](../../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md), [../../../CoreAiUnity/Docs/AI_AGENT_ROLES.md](../../../CoreAiUnity/Docs/AI_AGENT_ROLES.md), [../../../CoreAiUnity/Docs/DGF_SPEC.md](../../../CoreAiUnity/Docs/DGF_SPEC.md).
 
 **Версия:** 1.1 (апрель 2026) — Creator-планировщик, ожидание LLM, unwrap stub, лог ролей.

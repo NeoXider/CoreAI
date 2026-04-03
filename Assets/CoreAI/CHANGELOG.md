@@ -16,6 +16,11 @@
 
 - Мелкие правки композиции DI (**`CoreAILifetimeScope`**, **`LlmClientRegistry`**) под передачу логгера.
 
+### Разделение пакетов (только `CoreAI.Core` в `com.nexoider.coreai`)
+
+- Пакет **`com.nexoider.coreai`** содержит **только** `Assets/CoreAI/Runtime/Core/` — сборка **CoreAI.Core** без `UnityEngine`. Зависимости UPM: **VContainer**, **MoonSharp**.
+- Сборка **CoreAI.Source** (Unity) перенесена в **`com.nexoider.coreaiunity`** → `Assets/CoreAiUnity/Runtime/Source/`.
+
 ## [0.1.2] - ранее
 
-Базовая линия пакета (CoreAI.Core + CoreAI.Source, VContainer, MessagePipe, LLM, оркестратор). См. историю git для деталей.
+Базовая линия: CoreAI.Core + CoreAI.Source в одном пакете. См. историю git для деталей.

@@ -22,10 +22,12 @@
 
 ## 2. Сборки и границы ответственности
 
+**Принцип:** **`CoreAI.Core`** — переносимый **C#** без реализации под конкретный движок; **`CoreAI.Source`** — слой **Unity** (DI, сцена, LLM-адаптеры). Нормативно зафиксировано в **[DGF_SPEC §3.0](DGF_SPEC.md)**.
+
 | Сборка | Папка | Ограничение |
 |--------|-------|-------------|
 | **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **Без Unity** (`noEngineReferences`). Контракты ИИ, оркестратор, очередь **`QueuedAiOrchestrator`**, снимок сессии, песочница MoonSharp, парсинг Lua, процессор конверта. |
-| **CoreAI.Source** | `Assets/CoreAI/Runtime/Source/` | Unity: VContainer, MessagePipe, маршрутизация LLM (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, логирование, роутер команд, биндинги Lua (`report` / `add`). |
+| **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, маршрутизация LLM (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, логирование, роутер команд, биндинги Lua (`report` / `add`). Пакет **`com.nexoider.coreaiunity`**. |
 | **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | EditMode NUnit, без Play Mode. |
 | **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (оркестратор, опционально LM Studio через env). |
 | **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Демо-арена; зависит от Source. |

@@ -60,26 +60,6 @@
       },
       "hash": "be466fdce4c8cd5e85e4d84b86643db2afbd2afb"
     },
-    "com.nexoider.coreai": {
-      "version": "file:../Assets/CoreAI",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {
-        "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
-        "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
-        "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
-        "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
-        "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git"
-      }
-    },
-    "com.nexoider.coreaiunity": {
-      "version": "file:../Assets/CoreAiUnity",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {
-        "com.nexoider.coreai": "0.1.3"
-      }
-    },
     "com.unity.ai.navigation": {
       "version": "2.0.12",
       "depth": 0,
