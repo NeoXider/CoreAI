@@ -1,0 +1,10 @@
+{
+  "name": "com.nexoider.coreaiunity",
+  "version": "0.1.3",
+  "displayName": "CoreAI Unity",
+  "unity": "6000.0",
+  "description": "Unity host for CoreAI: EditMode/PlayMode tests, Editor menu, docs. Depends on com.nexoider.coreai (embedded folder Assets/CoreAiUnity).",
+  "dependencies": {
+    "com.nexoider.coreai": "0.1.3"
+  }
+}

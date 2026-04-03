@@ -30,6 +30,8 @@
 | **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (оркестратор, опционально LM Studio через env). |
 | **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Демо-арена; зависит от Source. |
 
+**Проверка:** компиляция — `dotnet build` по сгенерированным `*.csproj` (Unity/Rider) или сборка из IDE; **NUnit EditMode / Play Mode** — в **Unity Test Runner** (`Window → General → Test Runner`). Источник истины для сценариев с `UnityEngine` и тестовыми ассетами — Test Runner, а не «голый» `dotnet test` без Unity.
+
 **Правило:** игровая логика тайтла не должна «протекать» в Core без необходимости. Новые **игровые** API для Lua — через реализацию **`IGameLuaRuntimeBindings`** в Source (или в сборке игры), а не правки песочницы в обход whitelist.
 
 ---
@@ -56,6 +58,13 @@
 - **World Commands**: `World Prefab Registry` (whitelist префабов для спавна).
 
 Рекомендация для тайтла: держать настройки в 1‑2 ScriptableObject‑ассетах и версионировать их в git (без секретов).
+
+### 2.2 Логирование: `IGameLogger`, теги/фичи и внешние библиотеки (Serilog и т.п.)
+
+- **В ядре CoreAI** используйте **`IGameLogger`** и **`GameLogFeature`** — это встроенные «теги» подсистем и фильтр по уровню через **`GameLogSettingsAsset`** (аналог структурированных категорий без отдельного NuGet). Вывод в консоль Unity идёт через **`FilteringGameLogger` → `UnityGameLogSink`**; не разбрасывайте **`Debug.Log`** по бизнес-коду.
+- **Serilog / NLog / Microsoft.Extensions.Logging** в Unity подключают отдельно, если нужен вывод в файлы, Seq, Elasticsearch и т.д. Для кода **ядра** они не требуются: достаточно реализовать свой **`IGameLogger`** или заменить sink, чтобы дублировать записи в Serilog, не смешивая два стиля логирования в одном слое.
+- **Фильтрация в консоли Unity:** по префиксу сообщения (категория из **`GameLogFeature`**), по **`TraceId`** в цепочке оркестратора/команд (см. README хоста), плюс настройки минимального уровня в ассете логов.
+- **Editor** (меню, setup без DI): **`CoreAIEditorLog`** — единая точка сообщений редактора.
 
 ---
 

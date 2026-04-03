@@ -1,6 +1,6 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "displayName": "CoreAI",
   "unity": "6000.0",
   "description": "CoreAI portable (CoreAI.Core) and Unity runtime (CoreAI.Source): VContainer, MessagePipe, LLM routing, orchestrator. Embedded UPM folder: Assets/CoreAI (same pattern as com.neoxider.tools → Assets/Neoxider).",

@@ -1,83 +1,99 @@
-# CoreAI — хост Unity (`CoreAiUnity`)
+# CoreAI — Unity-хост (`com.nexoider.coreaiunity`)
 
-**Быстрый старт:** [`Docs/QUICK_START.md`](Docs/QUICK_START.md) · **оглавление Docs:** [`Docs/DOCS_INDEX.md`](Docs/DOCS_INDEX.md) · **Example Game в Unity:** [`../_exampleGame/Docs/UNITY_SETUP.md`](../_exampleGame/Docs/UNITY_SETUP.md).  
-**Старт для разработчиков:** [`Docs/DEVELOPER_GUIDE.md`](Docs/DEVELOPER_GUIDE.md) — карта кода, потоки LLM/Lua, тесты, типичные задачи.  
-**Нормативный SPEC:** [`Docs/DGF_SPEC.md`](Docs/DGF_SPEC.md) (§4.1–4.2 портативное **CoreAI.Core** vs Unity **CoreAI.Source**, зависимости, LLMUnity, MCP).  
-**Роли ИИ и оркестрация:** [`Docs/AI_AGENT_ROLES.md`](Docs/AI_AGENT_ROLES.md) (Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, placement).  
-**LLMUnity / OpenAI HTTP / Lua в игре:** [`Docs/LLMUNITY_SETUP_AND_MODELS.md`](Docs/LLMUNITY_SETUP_AND_MODELS.md).
+Документация, **EditMode / PlayMode** тесты и **Editor**-меню для репозитория [CoreAI](https://github.com/NeoXider/CoreAI). Зависит от **`com.nexoider.coreai`** (версия зафиксирована в `package.json`). См. **`CHANGELOG.md`**.
 
-**Автор библиотеки:** **Neoxider** (ник **neoxider**) — [GitHub @NeoXider](https://github.com/NeoXider); также [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools) для Unity.
+| Куда смотреть | Что |
+|---------------|-----|
+| Быстрый старт и сцена | [`Docs/QUICK_START.md`](Docs/QUICK_START.md) |
+| Карта кода, LLM/Lua, логи | [`Docs/DEVELOPER_GUIDE.md`](Docs/DEVELOPER_GUIDE.md) |
+| Нормативный SPEC | [`Docs/DGF_SPEC.md`](Docs/DGF_SPEC.md) |
+| Роли агентов | [`Docs/AI_AGENT_ROLES.md`](Docs/AI_AGENT_ROLES.md) |
+| LLMUnity / OpenAI / Lua | [`Docs/LLMUNITY_SETUP_AND_MODELS.md`](Docs/LLMUNITY_SETUP_AND_MODELS.md) |
+| Оглавление | [`Docs/DOCS_INDEX.md`](Docs/DOCS_INDEX.md) |
+| Example Game | [`../_exampleGame/Docs/UNITY_SETUP.md`](../_exampleGame/Docs/UNITY_SETUP.md) |
 
-## UPM-пакет `com.nexoider.coreai`
+**Автор:** Neoxider — [@NeoXider](https://github.com/NeoXider); экосистема [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools).
 
-Исходники **CoreAI.Core** и **CoreAI.Source** лежат в **`Assets/CoreAI/Runtime/`** (папка пакета в проекте — **`Assets/CoreAI`**, по аналогии с **`com.neoxider.tools`** → **`Assets/Neoxider`**). В корне — **`package.json`**. Локальное подключение: **`Packages/manifest.json`** → `"com.nexoider.coreai": "file:../Assets/CoreAI"`. Из другого репозитория: Git UPM с **`?path=Assets/CoreAI`**.
+---
 
-## Сборки и папки
+## Установка (вместе с ядром)
+
+Рекомендуемый способ — **UPM → Add package from git URL** (как в [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools/blob/master/README.md#installation)), **два** URL из одного репозитория:
+
+1. **`com.nexoider.coreai`** — [`https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI`](https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI)  
+2. **`com.nexoider.coreaiunity`** — [`https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity`](https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity)
+
+Подробности, пин версии, локальный `file:` и использование без Unity — в **[`../CoreAI/README.md`](../CoreAI/README.md)** (канонический пакетный README).
+
+---
+
+## Сборки в этом репозитории
 
 | Путь | Сборка | Назначение |
 |------|--------|------------|
-| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** (`noEngineReferences`) | Портатив: `ILlmClient`, оркестратор, очередь, снимок сессии, MoonSharp; срезы в **`Features/*`** |
-| `Assets/CoreAI/Runtime/Source/` | **CoreAI.Source** | Unity: DI, маршрутизация LLM, LLMUnity/OpenAI HTTP, MessagePipe, лог |
-| `Assets/CoreAiUnity/Tests/EditMode/Core/` | **CoreAI.Tests** (Editor) | EditMode: ядро (промпты, Lua, оркестратор, версии) |
-| `Assets/CoreAiUnity/Tests/EditMode/ExampleGame/` | **CoreAI.Tests** (Editor) | EditMode: тесты, завязанные на пример игры (арена и т.п.) |
-| `Assets/CoreAiUnity/Tests/PlayMode/` | **CoreAI.PlayModeTests** (Editor) | Play Mode: оркестратор, опционально HTTP к LM Studio (env) |
-| `Assets/CoreAiUnity/Editor/` | **CoreAI.Editor** | Меню (Build Settings, открыть `_mainCoreAI`) |
+| `Assets/CoreAI/Runtime/Core/` | **CoreAI.Core** | Портативное ядро (`noEngineReferences`) |
+| `Assets/CoreAI/Runtime/Source/` | **CoreAI.Source** | Unity: DI, LLM, Lua, MessagePipe, лог |
+| `Tests/EditMode/Core/` и др. | **CoreAI.Tests** (Editor) | EditMode NUnit |
+| `Tests/PlayMode/` | **CoreAI.PlayModeTests** (Editor) | Play Mode, опционально LM Studio по env |
+| `Editor/` | **CoreAI.Editor** | Меню (Build Settings, открыть `_mainCoreAI`) |
 
 ### `Assets/CoreAI/Runtime/Source` (детальнее)
 
 | Путь | Назначение |
 |------|------------|
-| `Composition/` | `CoreAILifetimeScope`, `RegisterCore` + `RegisterCorePortable`, entry points |
-| `Features/Logging/Infrastructure/` | Логирование по фичам |
+| `Composition/` | `CoreAILifetimeScope`, `RegisterCore` + `RegisterCorePortable` |
+| `Features/Logging/Infrastructure/` | `IGameLogger`, `GameLogFeature`, `GameLogSettingsAsset` |
 | `Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity, маршрутизация, таймауты |
 | `Features/Lua/Infrastructure/` | Файловые store версий, агрегация биндингов Lua |
-| `Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe, маршалинг на main thread |
-| `Features/Prompts/Infrastructure/` | Манифест и Resources для системных/user промптов |
+| `Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe, main thread |
+| `Features/Prompts/Infrastructure/` | Манифест и Resources для промптов |
 | `Features/AgentMemory/Infrastructure/` | Файловое хранилище памяти агента |
-| `Features/OrchestrationMetrics/Infrastructure/` | Метрики оркестратора в лог |
-| `Features/Dashboard/Presentation/` | `AiDashboardPresenter` (IMGUI), `AiPermissionsAsset` |
+| `Features/OrchestrationMetrics/Infrastructure/` | Метрики оркестратора |
+| `Features/Dashboard/Presentation/` | `AiDashboardPresenter`, `AiPermissionsAsset` |
 | `Features/PlayerChat/Presentation/` | `InGameChatPanel` |
 | `Features/Scheduling/Presentation/` | `AiScheduledTaskTrigger` |
 
-## Запуск DI в сцене
+---
 
-1. Создайте пустой объект, например `CompositionRoot`.
-2. Добавьте **`CoreAILifetimeScope`** (корень DI ядра; не путать с игровым `LifetimeScope` тайтла). При необходимости создайте asset **CoreAI → Logging → Game Log Settings** и назначьте в поле **Game Log Settings** (иначе — все категории и уровни через `DefaultGameLogSettings`). Включите категорию **`Llm`** для логов запроса/ответа модели (**`LoggingLlmClientDecorator`**); у старых ассетов бит **Llm** добавляется при открытии инспектора (**`OnValidate`**).
-3. Опционально: **Llm Request Timeout Seconds** на том же компоненте (**15** по умолчанию, **0** = без автоотмены зависшего вызова).
-4. **Auto Run** включён — в консоли сообщение от `CoreAIGameEntryPoint`.
+## Тесты и логи
 
-## Фичи (паттерн как в Last-War)
+- **Запуск:** Unity **Window → General → Test Runner** (EditMode / PlayMode). Сборки `CoreAI.Tests` / `CoreAI.PlayModeTests` не обязаны полностью воспроизводиться через `dotnet test` без Unity; для CI ориентируйтесь на **Unity Test Framework** в редакторе.
+- **Логи в рантайме:** только через **`IGameLogger`** и категории **`GameLogFeature`**; фильтр — **`GameLogSettingsAsset`**. Подробнее — [DEVELOPER_GUIDE §2.2](Docs/DEVELOPER_GUIDE.md), раздел «Логирование» в [README пакета ядра](../CoreAI/README.md).
 
-- **Корень ядра:** один `CoreAILifetimeScope` на сцену шаблона (или на игровую сессию, если ядро грузится так).
-- **Подфичи игры:** свои `LifetimeScope` с **Parent** = объект с `CoreAILifetimeScope` (или родительский игровой scope — по архитектуре тайтла).
+---
 
-## Логирование по фичам (как идея в GameDev-Last-War)
+## Запуск DI в сцене (кратко)
 
-- Вызовы: `IGameLogger.Log*(GameLogFeature.XXX, "…")` — категории в `GameLogFeature` (в т.ч. **`Llm`** для трассировки вызовов модели).
-- Фильтр: **`GameLogSettingsAsset`** — флаги **Enabled Features** и **Minimum Level**.
-- **LLM:** оркестратор задаёт **`TraceId`** на задачу; он же в **`ApplyAiGameCommand`** и в логах **`AiGameCommandRouter`** — удобно фильтровать консоль по одному id.
-- Замена бэкенда: новый приёмник вместо `UnityGameLogSink` или новая реализация `IGameLogger` в `RegisterCore`.
+1. Пустой объект, например `CompositionRoot`.
+2. Компонент **`CoreAILifetimeScope`**. При необходимости asset **CoreAI → Logging → Game Log Settings** и поле **Game Log Settings** (иначе — `DefaultGameLogSettings`). Для трассировки LLM включите фичу **`Llm`** в ассете.
+3. Опционально **Llm Request Timeout Seconds** на том же компоненте (**0** = без таймаута).
+4. При **Auto Run** — сообщение от `CoreAIGameEntryPoint`.
 
-## Промпты агентов (системный + user)
+---
 
-- **Системный промпт** задаётся для каждого `roleId` (Creator, Programmer, `PlayerChat`, свой id): цепочка **манифест** (опционально) → **Resources** `AgentPrompts/System/<RoleId>.txt` → встроенный fallback в `CoreAI.Core`.
-- **User-шаблон** (опционально): манифест или `Resources/AgentPrompts/User/<RoleId>.txt` с плейсхолдерами **`{telemetry}`** и **`{hint}`** (игронезависимый JSON телеметрии и подсказка задачи).
-- **Create → CoreAI → Agent Prompts Manifest** — переопределения и блок **custom agents** для своих ролей.
-- **Игровой чат:** `IInGameLlmChatService` (роль `PlayerChat`), UI-пример `Features/PlayerChat/Presentation/InGameChatPanel`.
+## Фичи и паттерны
+
+- **Корень ядра:** один `CoreAILifetimeScope` на сцену шаблона (или на сессию).
+- **Подфичи** — свой `LifetimeScope` с **Parent** = `CoreAILifetimeScope` (или родительский игровой scope).
+
+## Логирование по фичам
+
+- Вызовы: `IGameLogger.Log*(GameLogFeature.XXX, "…")`.
+- Фильтр: **`GameLogSettingsAsset`** — **Enabled Features** и **Minimum Level**.
+- **TraceId** в задачах оркестратора и в **`ApplyAiGameCommand`** — удобно искать в консоли по одному id.
+
+## Промпты агентов
+
+Системный и user: манифест → Resources `AgentPrompts/...` → встроенный fallback. **Create → CoreAI → Agent Prompts Manifest** для переопределений.
 
 ## MessagePipe и команды ИИ
 
-`RegisterMessagePipe()` + `RegisterBuildCallback` с `GlobalMessagePipe.SetProvider(resolver.AsServiceProvider())` в `CoreServicesInstaller` — глобальный доступ к шине и регистрация обработчиков через VContainer.
+`ApplyAiGameCommand` с типами `AiEnvelope`, `LuaExecutionSucceeded` / `LuaExecutionFailed` — см. `AiGameCommandTypeIds`; разбор Lua — **`LuaAiEnvelopeProcessor`** + **`AiGameCommandRouter`**. Реальный **`ILlmClient`** в рантайме оборачивается в **`LoggingLlmClientDecorator`**.
 
-Типы **`ApplyAiGameCommand`**: **`AiEnvelope`** (сырой ответ LLM), **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** — см. `AiGameCommandTypeIds`; у команд есть **`TraceId`**. Разбор и запуск Lua: **`LuaAiEnvelopeProcessor`** (Core) + подписка в **`AiGameCommandRouter`** (Source). Реальный **`ILlmClient`** в рантайме оборачивается в **`LoggingLlmClientDecorator`** (лог, таймаут, unwrap для проверки stub). Подробнее — [DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md) §3–4 и [LLMUNITY_SETUP_AND_MODELS.md](Docs/LLMUNITY_SETUP_AND_MODELS.md).
+Подробнее — [DEVELOPER_GUIDE.md](Docs/DEVELOPER_GUIDE.md) §3–4 и [LLMUNITY_SETUP_AND_MODELS.md](Docs/LLMUNITY_SETUP_AND_MODELS.md).
+
+---
 
 ## Референс: Lua в GameDev-Last-War
 
-В репозитории **GameDev-Last-War** (`Assets/Scripts/LuaBehaviour/`) уже есть основа под **MoonSharp**:
-
-- **Core:** менеджер/исполнитель скриптов, экземпляры, глобальные функции, **`LuaAsyncRunner`** (корутины + **UniTask**).
-- **Infrastructure:** **`LuaMessagePipeAdapter`** — публикация и подписка на **MessagePipe** из Lua по имени типа DTO, userdata-объекты, интеграция с **VContainer**.
-
-Используется в геймплее (туториал, отдельные use case’ы). Это **не** готовая «ИИ-песочница»: там шире доступ к игре, чем обычно допустимо для **ненадёжного кода от LLM**. Для CoreAI имеет смысл смотреть на **паттерны** (шина, DI, async), а слой безопасности (whitelist, лимиты, dry-run) проектировать отдельно.
-
-**Переиспользование:** при необходимости допустимо **подтягивать или копировать адаптированные фрагменты** из `LuaBehaviour` Last-War, сужая API под песочницу. В приоритете — готовое решение, затем форк идей, затем свой код (как в политике `_exampleGame/README.md`).
+В репозитории **GameDev-Last-War** (`Assets/Scripts/LuaBehaviour/`) — паттерны MoonSharp + MessagePipe + async; для CoreAI смотреть **идеи**, а границы безопасности LLM — отдельно.

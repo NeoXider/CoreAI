@@ -72,6 +72,14 @@
         "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git"
       }
     },
+    "com.nexoider.coreaiunity": {
+      "version": "file:../Assets/CoreAiUnity",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.nexoider.coreai": "0.1.3"
+      }
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.12",
       "depth": 0,
