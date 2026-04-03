@@ -5,6 +5,7 @@ using CoreAI.ExampleGame.ArenaProgression.Infrastructure;
 using CoreAI.ExampleGame.ArenaSurvival.Domain;
 using CoreAI.ExampleGame.ArenaSurvival.UseCases;
 using CoreAI.ExampleGame.ArenaSurvival.View;
+using System;
 using CoreAI.ExampleGame.ArenaWaves.Infrastructure;
 using CoreAI.Session;
 using Unity.AI.Navigation;
@@ -46,9 +47,17 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         private bool spawnCompanionBot = true;
 
         [Header("NavMesh")]
-        [Tooltip("Печь NavMesh по полу (если bake не успел — враги падают на прямое движение).")]
+        [Tooltip("Автосоздание NavMeshSurface на полу и запекание (по умолчанию включено). Если данных нет — выполняется BuildNavMesh.")]
         [SerializeField]
         private bool buildNavMeshAtRuntime = true;
+
+        [Tooltip("Перед запеканием временно отключить NavMeshAgent и CharacterController (игроки/боты), чтобы не ломать bake.")]
+        [SerializeField]
+        private bool suspendAgentsDuringNavMeshBake = true;
+
+        [Tooltip("Всегда пересобирать NavMesh (дороже). Иначе — только если navMeshData пуст.")]
+        [SerializeField]
+        private bool forceFullNavMeshRebuild;
 
         [Header("Отладка")]
         [Tooltip("Один раз при сборке арены: какие роли LLM реально вызываются в примере.")]
@@ -81,6 +90,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             var root = new GameObject("ArenaGenerated");
             root.transform.SetParent(transform, false);
 
+            NavMeshSurface navSurface = null;
+
             if (!skipRuntimeFloor)
             {
                 var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
@@ -91,9 +102,27 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                 ApplyLitColor(floor.GetComponent<Renderer>(), new Color(0.22f, 0.28f, 0.22f));
                 if (buildNavMeshAtRuntime)
                 {
-                    var surface = floor.AddComponent<NavMeshSurface>();
-                    surface.collectObjects = CollectObjects.All;
-                    surface.BuildNavMesh();
+                    navSurface = floor.GetComponent<NavMeshSurface>() ?? floor.AddComponent<NavMeshSurface>();
+                    navSurface.collectObjects = CollectObjects.All;
+                }
+            }
+            else if (buildNavMeshAtRuntime)
+            {
+                navSurface = UnityEngine.Object.FindAnyObjectByType<NavMeshSurface>(FindObjectsInactive.Include);
+            }
+
+            if (buildNavMeshAtRuntime && navSurface != null)
+            {
+                IDisposable suspend = null;
+                if (suspendAgentsDuringNavMeshBake)
+                    suspend = ArenaNavMeshRuntimeBake.SuspendAgentsForNavMeshBake(true);
+                try
+                {
+                    ArenaNavMeshRuntimeBake.EnsureNavMeshBuilt(navSurface, forceFullNavMeshRebuild);
+                }
+                finally
+                {
+                    suspend?.Dispose();
                 }
             }
 

@@ -11,4 +11,5 @@
 | [05_ReferenceGame.md](05_ReferenceGame.md) | черновик | DEVELOPER_GUIDE §8, `_exampleGame`, playbook |
 
 Дополнительно:
+- [MULTIPLAYER_AI.md](../MULTIPLAYER_AI.md) — политика Host / клиенты / все узлы, `CoreAiNetworkPeerBehaviour`.
 - [WORLD_COMMANDS.md](../WORLD_COMMANDS.md) — безопасное управление миром из Lua (whitelist → MessagePipe → main thread).

@@ -25,7 +25,6 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton);
             builder.Register<LuaAiEnvelopeProcessor>(Lifetime.Singleton);
 
-            builder.Register<SoloAuthorityHost>(Lifetime.Singleton).As<IAuthorityHost>();
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();
             builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
             builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();

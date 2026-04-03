@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
 using LLMUnity;
 using UnityEngine;
@@ -54,6 +55,15 @@ namespace CoreAI.Composition
         [Tooltip("Whitelist префабов, которые разрешено спавнить из Lua.")]
         [SerializeField]
         private CoreAiPrefabRegistryAsset worldPrefabRegistry;
+
+        [Header("Network / AI authority")]
+        [Tooltip("Где разрешён запуск LLM и оркестратора: все узлы, только хост или только чистые клиенты.")]
+        [SerializeField]
+        private AiNetworkExecutionPolicy aiNetworkExecutionPolicy = AiNetworkExecutionPolicy.AllPeers;
+
+        [Tooltip("Опционально: компонент с ролью узла в сети (Netcode и т.д.). Пусто — одиночный хост.")]
+        [SerializeField]
+        private CoreAiNetworkPeerBehaviour networkPeerBehaviour;
 
         /// <summary>Регистрирует лог, промпты, LLM (маршрутизация + таймаут), оркестратор, Lua, память и entry points.</summary>
         protected override void Configure(IContainerBuilder builder)
@@ -105,6 +115,15 @@ namespace CoreAI.Composition
             {
                 builder.Register<IAiOrchestrationMetrics, NullAiOrchestrationMetrics>(Lifetime.Singleton);
             }
+
+            if (networkPeerBehaviour != null)
+                builder.RegisterInstance<IAiNetworkPeer>(networkPeerBehaviour);
+            else
+                builder.Register<DefaultSoloNetworkPeer>(Lifetime.Singleton).As<IAiNetworkPeer>();
+
+            builder.Register<IAuthorityHost>(c =>
+                    new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), aiNetworkExecutionPolicy),
+                Lifetime.Singleton);
 
             builder.RegisterCorePortable();
             // Runtime override: версии Lua Programmer на диск (оригинал / история / сброс).
