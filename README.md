@@ -33,6 +33,8 @@
 
 Проект собирается на **Unity** с упором на чистую сборку модулей: **VContainer**, реактивность (**R3**), шина событий (**MessagePipe**), **UniTask**, **MoonSharp**, **LLMUnity**. **Быстрый старт:** **[`Assets/CoreAiUnity/Docs/QUICK_START.md`](Assets/CoreAiUnity/Docs/QUICK_START.md)**. Настройка демо-сцены в редакторе: **[`Assets/_exampleGame/Docs/UNITY_SETUP.md`](Assets/_exampleGame/Docs/UNITY_SETUP.md)**. Оглавление документов: **[`Assets/CoreAiUnity/Docs/DOCS_INDEX.md`](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)**.
 
+**Языковые модели:** можно подключать **внешние API** сторонних провайдеров (в т.ч. OpenAI‑совместимый HTTP — LM Studio, облако и т.д.) и/или использовать **локальные модели**, встроенные в билд **благодаря [LLMUnity](https://undream.ai/LLMUnity)** (GGUF в рантайме без обязательного сетевого вызова). Маршрутизация и настройка — в ядре и в **[`LLMUNITY_SETUP_AND_MODELS.md`](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)**.
+
 Архитектура ядра, потоки LLM/Lua и гайд для разработчиков: **[`Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md`](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md)** (и **[`DGF_SPEC.md`](Assets/CoreAiUnity/Docs/DGF_SPEC.md)**). Наблюдаемость LLM: **`traceId`**, лог **`[Llm]`**, таймаут запроса на **`CoreAILifetimeScope`** — в **[`LLMUNITY_SETUP_AND_MODELS.md`](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** и DEVELOPER_GUIDE §3–4.
 
 ---
