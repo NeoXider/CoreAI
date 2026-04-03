@@ -1,5 +1,6 @@
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Logging;
 using UnityEngine;
 using VContainer;
 
@@ -80,15 +81,22 @@ namespace CoreAI.Presentation
             var scope = lifetimeScope != null ? lifetimeScope : GetComponentInParent<CoreAILifetimeScope>();
             if (scope == null)
                 scope = FindAnyObjectByType<CoreAILifetimeScope>();
+
+            var log = GameLoggerUnscopedFallback.Instance;
+            if (scope != null && scope.Container != null && scope.Container.TryResolve<IGameLogger>(out var lg))
+                log = lg;
+
             if (scope == null)
             {
-                Debug.LogWarning("[CoreAI] AiScheduledTaskTrigger: CoreAILifetimeScope не найден.");
+                log.LogWarning(GameLogFeature.Composition, "AiScheduledTaskTrigger: CoreAILifetimeScope не найден.");
                 return;
             }
 
             if (!scope.Container.TryResolve<IAiOrchestrationService>(out var orch))
             {
-                Debug.LogWarning("[CoreAI] AiScheduledTaskTrigger: IAiOrchestrationService не зарегистрирован.");
+                log.LogWarning(
+                    GameLogFeature.Composition,
+                    "AiScheduledTaskTrigger: IAiOrchestrationService не зарегистрирован.");
                 return;
             }
 

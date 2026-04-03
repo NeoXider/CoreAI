@@ -1,5 +1,6 @@
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Session;
 using NUnit.Framework;
@@ -144,18 +145,18 @@ namespace CoreAI.Tests.EditMode
                 Directory.Delete(dir, true);
 
             {
-                var a = new FileLuaScriptVersionStore(path);
+                var a = new FileLuaScriptVersionStore(new NullGameLogger(), path);
                 a.RecordSuccessfulExecution("k", "one");
                 a.RecordSuccessfulExecution("k", "two");
             }
 
-            var b = new FileLuaScriptVersionStore(path);
+            var b = new FileLuaScriptVersionStore(new NullGameLogger(), path);
             Assert.IsTrue(b.TryGetSnapshot("k", out var snap));
             Assert.AreEqual("one", snap.OriginalLua);
             Assert.AreEqual("two", snap.CurrentLua);
             b.ResetToOriginal("k");
 
-            var c = new FileLuaScriptVersionStore(path);
+            var c = new FileLuaScriptVersionStore(new NullGameLogger(), path);
             Assert.IsTrue(c.TryGetSnapshot("k", out var snap2));
             Assert.AreEqual("one", snap2.CurrentLua);
         }
@@ -171,14 +172,14 @@ namespace CoreAI.Tests.EditMode
                 Directory.Delete(dir, true);
 
             {
-                var a = new FileLuaScriptVersionStore(path);
+                var a = new FileLuaScriptVersionStore(new NullGameLogger(), path);
                 a.RecordSuccessfulExecution("x", "v1");
                 a.RecordSuccessfulExecution("x", "v2");
                 a.RecordSuccessfulExecution("y", "y0");
                 a.ResetAllToOriginal();
             }
 
-            var b = new FileLuaScriptVersionStore(path);
+            var b = new FileLuaScriptVersionStore(new NullGameLogger(), path);
             Assert.IsTrue(b.TryGetSnapshot("x", out var sx));
             Assert.AreEqual("v1", sx.CurrentLua);
             Assert.IsTrue(b.TryGetSnapshot("y", out var sy));

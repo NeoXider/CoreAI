@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 using UnityEngine;
 
@@ -20,8 +21,10 @@ namespace CoreAI.Infrastructure.Llm
         /// Если <see cref="LLM.model"/> пусто, подставляет первую подходящую модель из Model Manager (файл на диске).
         /// </summary>
         /// <returns><c>true</c>, если модель уже была или успешно назначена; иначе <c>false</c>.</returns>
-        public static bool TryAutoAssignResolvableModel(LLM llm)
+        public static bool TryAutoAssignResolvableModel(LLM llm, IGameLogger logger)
         {
+            if (logger == null)
+                throw new ArgumentNullException(nameof(logger));
             if (llm == null || !string.IsNullOrWhiteSpace(llm.model))
                 return true;
 
@@ -44,20 +47,23 @@ namespace CoreAI.Infrastructure.Llm
 
             if (candidates.Count > 1)
             {
-                Debug.LogWarning(
-                    "[CoreAI] LLMUnity: в Model Manager несколько .gguf с файлами, а LLM.model в сцене пусто — " +
+                logger.LogWarning(
+                    GameLogFeature.Llm,
+                    "LLMUnity: в Model Manager несколько .gguf с файлами, а LLM.model в сцене пусто — " +
                     "временно выбрано: «" + chosen.filename + "». Нажмите радиокнопку у нужной модели и сохраните сцену.");
             }
 
-            return TrySetModelFromEntry(llm, chosen);
+            return TrySetModelFromEntry(llm, chosen, logger);
         }
 
         /// <summary>
         /// Назначает модель из Model Manager, если имя файла .gguf (без учёта регистра) содержит все непустые токены.
         /// Удобно для Play Mode тестов (например Qwen3.5 0.8B: токены «qwen», «0.8»).
         /// </summary>
-        public static bool TryAssignModelMatchingFilename(LLM llm, params string[] filenameSubstringsMustContainAll)
+        public static bool TryAssignModelMatchingFilename(LLM llm, IGameLogger logger, params string[] filenameSubstringsMustContainAll)
         {
+            if (logger == null)
+                throw new ArgumentNullException(nameof(logger));
             if (llm == null || filenameSubstringsMustContainAll == null || filenameSubstringsMustContainAll.Length == 0)
                 return false;
             if (!string.IsNullOrWhiteSpace(llm.model))
@@ -107,7 +113,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             chosen ??= matched[0];
-            return TrySetModelFromEntry(llm, chosen);
+            return TrySetModelFromEntry(llm, chosen, logger);
         }
 
         private static List<ModelEntry> CollectResolvableNonLoraEntries()
@@ -136,7 +142,7 @@ namespace CoreAI.Infrastructure.Llm
             return candidates;
         }
 
-        private static bool TrySetModelFromEntry(LLM llm, ModelEntry chosen)
+        private static bool TrySetModelFromEntry(LLM llm, ModelEntry chosen, IGameLogger logger)
         {
             try
             {
@@ -144,15 +150,16 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                Debug.LogWarning("[CoreAI] LLMUnity: SetModel не удался: " + ex.Message);
+                logger.LogWarning(GameLogFeature.Llm, "LLMUnity: SetModel не удался: " + ex.Message);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(llm.model))
                 return false;
 
-            Debug.Log(
-                "[CoreAI] LLMUnity: поле model было пусто — назначена модель из Model Manager: " + llm.model);
+            logger.LogInfo(
+                GameLogFeature.Llm,
+                "LLMUnity: поле model было пусто — назначена модель из Model Manager: " + llm.model);
             return true;
         }
 

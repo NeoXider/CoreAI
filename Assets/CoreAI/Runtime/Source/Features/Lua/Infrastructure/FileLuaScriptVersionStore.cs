@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
@@ -11,12 +12,14 @@ namespace CoreAI.Infrastructure.Lua
     /// </summary>
     public sealed class FileLuaScriptVersionStore : ILuaScriptVersionStore
     {
+        private readonly IGameLogger _logger;
         private readonly MemoryLuaScriptVersionStore _memory = new();
         private readonly string _filePath;
         private readonly object _ioLock = new();
 
-        public FileLuaScriptVersionStore()
+        public FileLuaScriptVersionStore(IGameLogger logger)
         {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var dir = Path.Combine(Application.persistentDataPath, "CoreAI", "LuaScriptVersions");
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "lua_script_versions.json");
@@ -24,8 +27,9 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>Для тестов редактора: явный путь к файлу.</summary>
-        public FileLuaScriptVersionStore(string jsonFilePath)
+        public FileLuaScriptVersionStore(IGameLogger logger, string jsonFilePath)
         {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
             var dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
@@ -113,7 +117,9 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAI] Lua script versions load failed, starting empty: {ex.Message}");
+                    _logger.LogWarning(
+                        GameLogFeature.Core,
+                        $"Lua script versions load failed, starting empty: {ex.Message}");
                     _memory.ClearAll();
                 }
             }
@@ -159,7 +165,7 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAI] Lua script versions save failed: {ex.Message}");
+                    _logger.LogError(GameLogFeature.Core, $"Lua script versions save failed: {ex.Message}");
                 }
             }
         }

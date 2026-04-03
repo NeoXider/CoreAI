@@ -1,4 +1,5 @@
 #if !COREAI_NO_LLM
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using LLMUnity;
 using UnityEngine;
@@ -24,8 +25,9 @@ namespace CoreAI.Tests.PlayMode
             agent.remote = false;
             agent.llm = llm;
 
-            var assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, "qwen", "0.8")
-                           || LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm);
+            var log = GameLoggerUnscopedFallback.Instance;
+            var assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "0.8")
+                           || LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
 
             if (!assigned || string.IsNullOrWhiteSpace(llm.model))
             {

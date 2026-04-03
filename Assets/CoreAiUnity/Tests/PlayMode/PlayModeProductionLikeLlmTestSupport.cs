@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using UnityEngine;
 
@@ -180,7 +181,7 @@ namespace CoreAI.Tests.PlayMode
                 return false;
             }
 
-            var client = new LlmUnityLlmClient(agent);
+            var client = new LlmUnityLlmClient(agent, GameLoggerUnscopedFallback.Instance);
             handle = new PlayModeProductionLikeLlmHandle(client, PlayModeProductionLikeLlmBackend.LlmUnity, null, go);
             ignoreReason = null;
             return true;

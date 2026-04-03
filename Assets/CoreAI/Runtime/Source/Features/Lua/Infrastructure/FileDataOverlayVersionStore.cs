@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
@@ -9,20 +10,23 @@ namespace CoreAI.Infrastructure.Lua
     /// <summary>Персистентные оверлеи данных под <see cref="Application.persistentDataPath"/>/CoreAI/DataOverlayVersions/.</summary>
     public sealed class FileDataOverlayVersionStore : IDataOverlayVersionStore
     {
+        private readonly IGameLogger _logger;
         private readonly MemoryDataOverlayVersionStore _memory = new();
         private readonly string _filePath;
         private readonly object _ioLock = new();
 
-        public FileDataOverlayVersionStore()
+        public FileDataOverlayVersionStore(IGameLogger logger)
         {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var dir = Path.Combine(Application.persistentDataPath, "CoreAI", "DataOverlayVersions");
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "data_overlays.json");
             LoadFromDisk();
         }
 
-        public FileDataOverlayVersionStore(string jsonFilePath)
+        public FileDataOverlayVersionStore(IGameLogger logger, string jsonFilePath)
         {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
             var dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
@@ -113,7 +117,9 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAI] Data overlay versions load failed, starting empty: {ex.Message}");
+                    _logger.LogWarning(
+                        GameLogFeature.Core,
+                        $"Data overlay versions load failed, starting empty: {ex.Message}");
                     _memory.ClearAll();
                 }
             }
@@ -159,7 +165,7 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAI] Data overlay versions save failed: {ex.Message}");
+                    _logger.LogError(GameLogFeature.Core, $"Data overlay versions save failed: {ex.Message}");
                 }
             }
         }

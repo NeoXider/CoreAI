@@ -54,7 +54,7 @@ namespace CoreAI.Editor
             TryAssignToScope(logSettings, openAi, prompts, prefabs);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log("[CoreAI] Default assets are created and assigned (if CoreAILifetimeScope exists).");
+            CoreAIEditorLog.Log("Default assets are created and assigned (if CoreAILifetimeScope exists).");
         }
 
         [MenuItem("CoreAI/Setup/Validate Scene")]
@@ -63,7 +63,7 @@ namespace CoreAI.Editor
             var scope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (scope == null)
             {
-                Debug.LogError("[CoreAI] Validate Scene: CoreAILifetimeScope is missing in scene.");
+                CoreAIEditorLog.LogError("Validate Scene: CoreAILifetimeScope is missing in scene.");
                 return;
             }
 
@@ -74,14 +74,14 @@ namespace CoreAI.Editor
             if (log == null || log.objectReferenceValue == null)
             {
                 issues++;
-                Debug.LogWarning("[CoreAI] Validate Scene: Game Log Settings not assigned.");
+                CoreAIEditorLog.LogWarning("Validate Scene: Game Log Settings not assigned.");
             }
 
             var world = so.FindProperty("worldPrefabRegistry");
             if (world == null || world.objectReferenceValue == null)
             {
                 issues++;
-                Debug.LogWarning("[CoreAI] Validate Scene: World Prefab Registry not assigned.");
+                CoreAIEditorLog.LogWarning("Validate Scene: World Prefab Registry not assigned.");
             }
 
             var openAiRef = so.FindProperty("openAiHttpLlmSettings");
@@ -89,13 +89,15 @@ namespace CoreAI.Editor
             if ((openAiRef == null || openAiRef.objectReferenceValue == null) && !hasLlmUnityAgent)
             {
                 issues++;
-                Debug.LogWarning("[CoreAI] Validate Scene: neither OpenAI HTTP settings nor LLMAgent found (will fallback to StubLlmClient).");
+                CoreAIEditorLog.LogWarning(
+                    "Validate Scene: neither OpenAI HTTP settings nor LLMAgent found (will fallback to StubLlmClient).");
             }
 
             if (issues == 0)
-                Debug.Log("[CoreAI] Validate Scene: OK. CoreAILifetimeScope configuration looks good.");
+                CoreAIEditorLog.Log("Validate Scene: OK. CoreAILifetimeScope configuration looks good.");
             else
-                Debug.LogWarning($"[CoreAI] Validate Scene: found {issues} issue(s). Use CoreAI/Setup/Create Default Assets.");
+                CoreAIEditorLog.LogWarning(
+                    $"Validate Scene: found {issues} issue(s). Use CoreAI/Setup/Create Default Assets.");
         }
 
         static void MoveSceneFirstInBuild(string path, string labelForLog)
@@ -109,7 +111,7 @@ namespace CoreAI.Editor
                 found = true;
                 if (i == 0)
                 {
-                    Debug.Log($"[CoreAI] {labelForLog} уже первая в Build Settings.");
+                    CoreAIEditorLog.Log($"{labelForLog} уже первая в Build Settings.");
                     return;
                 }
 
@@ -129,7 +131,7 @@ namespace CoreAI.Editor
             }
 
             EditorBuildSettings.scenes = scenes;
-            Debug.Log($"[CoreAI] Build Settings: первая сцена — {labelForLog}.");
+            CoreAIEditorLog.Log($"Build Settings: первая сцена — {labelForLog}.");
         }
 
         static void EnsureFolder(string folderPath)

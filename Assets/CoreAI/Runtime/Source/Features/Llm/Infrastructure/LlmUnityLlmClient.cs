@@ -3,6 +3,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 using UnityEngine;
 
@@ -17,11 +18,13 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class LlmUnityLlmClient : ILlmClient
     {
         private readonly LLMAgent _unityAgent;
+        private readonly IGameLogger _logger;
 
         /// <param name="unityAgent">Агент LLMUnity на сцене (с привязанным <c>LLM</c>).</param>
-        public LlmUnityLlmClient(LLMAgent unityAgent)
+        public LlmUnityLlmClient(LLMAgent unityAgent, IGameLogger logger)
         {
             _unityAgent = unityAgent;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <inheritdoc />
@@ -100,7 +103,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                Debug.LogWarning("[CoreAI] LlmUnityLlmClient: " + ex.Message);
+                _logger.LogWarning(GameLogFeature.Llm, "LlmUnityLlmClient: " + ex.Message);
                 return new LlmCompletionResult { Ok = false, Error = ex.Message };
             }
         }

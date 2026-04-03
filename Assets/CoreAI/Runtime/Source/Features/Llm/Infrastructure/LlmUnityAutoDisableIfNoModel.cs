@@ -1,5 +1,8 @@
+using CoreAI.Composition;
+using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 using UnityEngine;
+using VContainer;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -19,13 +22,15 @@ namespace CoreAI.Infrastructure.Llm
     {
         private void Awake()
         {
+            var log = ResolveLogger();
+
             // Сначала LLM, привязанный к LLMAgent на сцене (избегаем «первого попавшегося» пустого LLM).
             var agent = UnityEngine.Object.FindFirstObjectByType<LLMAgent>();
             var llm = agent != null ? agent.GetComponent<LLM>() : UnityEngine.Object.FindFirstObjectByType<LLM>();
             if (llm == null)
                 return;
 
-            LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm);
+            LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
 
             if (!string.IsNullOrWhiteSpace(llm.model))
                 return;
@@ -36,10 +41,19 @@ namespace CoreAI.Infrastructure.Llm
             if (agent != null)
                 agent.enabled = false;
 
-            Debug.LogWarning(
-                "[CoreAI] LLMUnity: поле LLM.model пусто в сохранённой сцене. В инспекторе нажмите радиокнопку у нужной модели " +
+            log.LogWarning(
+                GameLogFeature.Llm,
+                "LLMUnity: поле LLM.model пусто в сохранённой сцене. В инспекторе нажмите радиокнопку у нужной модели " +
                 "(или «Load model») и сохраните сцену. Если в Model Manager несколько моделей — оставьте одну с реальным .gguf " +
                 "или явно выберите модель. Отключаем LLMUnity → StubLlmClient.");
+        }
+
+        private static IGameLogger ResolveLogger()
+        {
+            var scope = UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>();
+            if (scope != null && scope.Container != null && scope.Container.TryResolve<IGameLogger>(out var log))
+                return log;
+            return GameLoggerUnscopedFallback.Instance;
         }
     }
 }

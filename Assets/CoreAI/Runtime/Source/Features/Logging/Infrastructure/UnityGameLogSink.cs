@@ -4,6 +4,7 @@ namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
     /// Низкоуровневый вывод в Unity Console без фильтрации по фичам.
+    /// Единственный класс рантайма CoreAI, который вызывает <see cref="UnityEngine.Debug"/> напрямую.
     /// </summary>
     public sealed class UnityGameLogSink
     {

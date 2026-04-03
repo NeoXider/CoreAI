@@ -1,5 +1,6 @@
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Messaging;
 using CoreAI.Session;
@@ -54,12 +55,12 @@ namespace CoreAI.Tests.EditMode
                 Directory.Delete(dir, true);
 
             {
-                var a = new FileDataOverlayVersionStore(path);
+                var a = new FileDataOverlayVersionStore(new NullGameLogger(), path);
                 a.RecordSuccessfulApply("k", "{\"n\":1}");
                 a.RecordSuccessfulApply("k", "{\"n\":2}");
             }
 
-            var b = new FileDataOverlayVersionStore(path);
+            var b = new FileDataOverlayVersionStore(new NullGameLogger(), path);
             Assert.IsTrue(b.TryGetSnapshot("k", out var snap));
             Assert.AreEqual("{\"n\":1}", snap.OriginalPayload);
             Assert.AreEqual("{\"n\":2}", snap.CurrentPayload);

@@ -90,8 +90,8 @@ namespace CoreAI.Composition
             var llmTimeout = llmRequestTimeoutSeconds;
             builder.Register(c =>
             {
-                var reg = new LlmClientRegistry();
-                reg.SetLegacyFallback(ResolveLlmClient(openAi));
+                var reg = new LlmClientRegistry(c.Resolve<IGameLogger>());
+                reg.SetLegacyFallback(ResolveLlmClient(openAi, c.Resolve<IGameLogger>()));
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
@@ -127,8 +127,10 @@ namespace CoreAI.Composition
 
             builder.RegisterCorePortable();
             // Runtime override: версии Lua Programmer на диск (оригинал / история / сброс).
-            builder.Register<FileLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
-            builder.Register<FileDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+            builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
+                .As<ILuaScriptVersionStore>();
+            builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
+                .As<IDataOverlayVersionStore>();
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton).As<ICoreAiWorldCommandExecutor>();
@@ -137,7 +139,7 @@ namespace CoreAI.Composition
         }
 
         /// <summary>Порядок выбора дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.</summary>
-        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi)
+        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger)
         {
             if (openAi != null && openAi.UseOpenAiCompatibleHttp)
                 return new OpenAiChatLlmClient(openAi);
@@ -152,11 +154,11 @@ namespace CoreAI.Composition
             // Тогда безопаснее использовать stub и не пытаться дергать LLMUnity.
             var llm = agent.GetComponent<LLM>();
             if (llm != null)
-                LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm);
+                LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, logger);
             if (llm != null && string.IsNullOrWhiteSpace(llm.model))
                 return new StubLlmClient();
 
-            return new LlmUnityLlmClient(agent);
+            return new LlmUnityLlmClient(agent, logger);
 #endif
         }
     }

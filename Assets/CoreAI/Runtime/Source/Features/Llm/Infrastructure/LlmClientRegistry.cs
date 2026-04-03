@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 #if !COREAI_NO_LLM
 using LLMUnity;
 #endif
@@ -14,12 +15,17 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class LlmClientRegistry : ILlmClientRegistry, ILlmRoutingController
     {
+        private readonly IGameLogger _logger;
         private readonly object _gate = new object();
         private ILlmClient _legacyFallback = new StubLlmClient();
         private Dictionary<string, ILlmClient> _byProfileId = new Dictionary<string, ILlmClient>(StringComparer.Ordinal);
         private Dictionary<string, int> _contextByProfileId = new Dictionary<string, int>(StringComparer.Ordinal);
         private List<(string pattern, string profileId, int order)> _routes = new List<(string, string, int)>();
         private bool _useManifestRouting;
+
+        /// <param name="logger">Логи конфигурации маршрутизации (без прямого Unity Debug).</param>
+        public LlmClientRegistry(IGameLogger logger) =>
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         /// <summary>Клиент по умолчанию, если маршрутизация выключена или нет совпадения.</summary>
         public void SetLegacyFallback(ILlmClient legacy) =>
@@ -117,7 +123,7 @@ namespace CoreAI.Infrastructure.Llm
             return string.Equals(pattern, roleId, StringComparison.Ordinal);
         }
 
-        private static ILlmClient BuildProfileClient(LlmBackendProfileEntry p)
+        private ILlmClient BuildProfileClient(LlmBackendProfileEntry p)
         {
             switch (p.kind)
             {
@@ -126,7 +132,9 @@ namespace CoreAI.Infrastructure.Llm
                 case LlmBackendKind.OpenAiHttp:
                     if (p.httpSettings == null || !p.httpSettings.UseOpenAiCompatibleHttp)
                     {
-                        Debug.LogWarning($"[CoreAI] LlmClientRegistry: профиль '{p.profileId}' OpenAiHttp без валидного httpSettings.");
+                        _logger.LogWarning(
+                            GameLogFeature.Llm,
+                            $"LlmClientRegistry: профиль '{p.profileId}' OpenAiHttp без валидного httpSettings.");
                         return new StubLlmClient();
                     }
 
@@ -148,10 +156,10 @@ namespace CoreAI.Infrastructure.Llm
                         return new StubLlmClient();
                     var llm = agent.GetComponent<LLM>();
                     if (llm != null)
-                        LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm);
+                        LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, _logger);
                     if (llm != null && string.IsNullOrWhiteSpace(llm.model))
                         return new StubLlmClient();
-                    return new LlmUnityLlmClient(agent);
+                    return new LlmUnityLlmClient(agent, _logger);
 #endif
                 default:
                     return new StubLlmClient();
