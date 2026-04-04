@@ -1,61 +1,57 @@
 #if !COREAI_NO_MEAI
+#pragma warning disable CS8600, CS8602, CS8603, CS8625
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.AI;
+using MEAI = Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
 {
-    public sealed class MeaiChatClientAdapter : IChatClient
+    /// <summary>
+    /// Адаптер нашего <see cref="ILlmClient"/> к интерфейсу <see cref="MEAI.IChatClient"/> от Microsoft.Extensions.AI.
+    /// Позволяет использовать MEAI function calling поверх любого LLM-бэкенда.
+    /// </summary>
+    public sealed class MeaiChatClientAdapter : MEAI.IChatClient
     {
         private readonly ILlmClient _innerClient;
-        private readonly List<AIFunction> _tools = new();
+        private readonly List<MEAI.AIFunction> _tools = new();
 
         public MeaiChatClientAdapter(ILlmClient innerClient)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
         }
 
-        public void RegisterTool(AIFunction tool)
+        public void RegisterTool(MEAI.AIFunction tool)
         {
-            if (tool == null)
-            {
-                throw new ArgumentNullException(nameof(tool));
-            }
-
+            if (tool == null) throw new ArgumentNullException(nameof(tool));
             _tools.Add(tool);
         }
 
-        public IReadOnlyList<AIFunction> GetTools()
-        {
-            return _tools.AsReadOnly();
-        }
+        public IReadOnlyList<MEAI.AIFunction> GetTools() => _tools.AsReadOnly();
 
-        public async Task<ChatResponse> GetResponseAsync(
-            IEnumerable<ChatMessage> chatMessages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
+        async Task<MEAI.ChatResponse> MEAI.IChatClient.GetResponseAsync(
+            IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions options,
+            CancellationToken cancellationToken)
         {
-            if (chatMessages == null)
-            {
-                throw new ArgumentNullException(nameof(chatMessages));
-            }
+            if (chatMessages == null) throw new ArgumentNullException(nameof(chatMessages));
 
-            List<ChatMessage> messagesList = new(chatMessages);
+            var messagesList = chatMessages.ToList();
             string systemMessage = "";
             string userMessage = "";
 
-            foreach (ChatMessage msg in messagesList)
+            foreach (var msg in messagesList)
             {
-                if (msg.Role == ChatRole.System)
+                if (msg.Role == MEAI.ChatRole.System)
                 {
-                    systemMessage += msg.Text + "\n";
+                    systemMessage += string.Join("", msg.Contents.OfType<MEAI.TextContent>()) + "\n";
                 }
-                else if (msg.Role == ChatRole.User)
+                else if (msg.Role == MEAI.ChatRole.User)
                 {
-                    userMessage += msg.Text + "\n";
+                    userMessage += string.Join("", msg.Contents.OfType<MEAI.TextContent>()) + "\n";
                 }
             }
 
@@ -67,12 +63,12 @@ namespace CoreAI.Ai
                 TraceId = options?.ConversationId ?? ""
             };
 
-            if (options?.Tools != null && options.Tools.Count > 0)
+            if (_tools.Count > 0)
             {
                 request.SystemPrompt += "\n\n## Available Tools\n" +
-                                        "You have access to tools. When you need to use a tool, output ONLY a JSON object:\n" +
-                                        "{\"tool\": \"tool_name\", \"action\": \"action_name\", \"content\": \"data\"}\n" +
-                                        "Do not output anything else when using tools.";
+                    "You have access to the following tools. When you need to use a tool, output ONLY a JSON object:\n" +
+                    "{\"tool\": \"tool_name\", \"arguments\": {...}}\n" +
+                    "Do not output anything else when calling a tool.";
             }
 
             LlmCompletionResult result =
@@ -83,24 +79,26 @@ namespace CoreAI.Ai
                 throw new InvalidOperationException(result?.Error ?? "LLM request failed");
             }
 
-            ChatMessage responseMessage = new(ChatRole.Assistant, result.Content);
-            ChatResponse response = new(responseMessage)
+            var responseMessage = new MEAI.ChatMessage(
+                MEAI.ChatRole.Assistant,
+                result.Content);
+
+            return new MEAI.ChatResponse(responseMessage)
             {
                 ModelId = options?.ModelId,
-                FinishReason = ChatFinishReason.Stop
+                FinishReason = MEAI.ChatFinishReason.Stop
             };
-            return response;
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> chatMessages,
-            ChatOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        async IAsyncEnumerable<MEAI.ChatResponseUpdate> MEAI.IChatClient.GetStreamingResponseAsync(
+            IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions options,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            ChatResponse response = await GetResponseAsync(chatMessages, options, cancellationToken);
-            foreach (ChatMessage message in response.Messages)
+            var response = await ((MEAI.IChatClient)this).GetResponseAsync(chatMessages, options, cancellationToken);
+            foreach (var message in response.Messages)
             {
-                yield return new ChatResponseUpdate
+                yield return new MEAI.ChatResponseUpdate
                 {
                     Role = message.Role,
                     Contents = message.Contents
@@ -110,21 +108,17 @@ namespace CoreAI.Ai
 
         public void Dispose()
         {
-            if (_innerClient is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
         }
 
-        public object? GetService(Type serviceKey, object? key = null)
+        object MEAI.IChatClient.GetService(Type serviceType, object key)
         {
-            if (serviceKey == typeof(ILlmClient))
+            if (serviceType == typeof(ILlmClient))
             {
                 return _innerClient;
             }
-
             return null;
         }
     }
 }
+#pragma warning restore CS8600, CS8602, CS8603, CS8625
 #endif

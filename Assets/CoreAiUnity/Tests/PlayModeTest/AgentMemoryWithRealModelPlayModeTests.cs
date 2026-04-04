@@ -35,6 +35,9 @@ namespace CoreAI.Tests.PlayMode
             {
                 States.Remove(roleId);
             }
+
+            public void AppendChatMessage(string roleId, string role, string content) { }
+            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
         }
 
         private sealed class ListSink : IAiGameCommandSink

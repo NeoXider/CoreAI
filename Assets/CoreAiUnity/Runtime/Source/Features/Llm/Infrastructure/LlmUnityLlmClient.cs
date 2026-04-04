@@ -13,21 +13,40 @@ namespace CoreAI.Infrastructure.Llm
     /// Адаптер <see cref="ILlmClient"/> к <see cref="LLMUnity.LLMAgent"/> по контракту LLMUnity:
     /// дождаться <see cref="LLM.WaitUntilModelSetup"/> (скачивание/подготовка моделей, см. README),
     /// затем готовности локального <see cref="LLM"/> (сервер inference), затем <see cref="LLMAgent.Chat"/>.
+    /// Поддерживает 2 режима:
+    /// 1) Stateless (addToHistory: false) — каждый вызов независим, память через MemoryTool
+    /// 2) ChatHistory (addToHistory: true) — LLMAgent сохраняет полный контекст диалога
     /// Вызовы должны идти с главного потока Unity — не используем <c>ConfigureAwait(false)</c>.
     /// </summary>
     public sealed class LlmUnityLlmClient : ILlmClient
     {
         private readonly LLMAgent _unityAgent;
         private readonly IGameLogger _logger;
+        private readonly IAgentMemoryStore _memoryStore;
+        private readonly AgentMemoryPolicy _memoryPolicy;
+        private readonly bool _useChatHistory;
+        private string _currentRoleId;
 
         public LLMAgent UnityAgent => _unityAgent;
         public LLM LLM => _unityAgent?.llm ?? _unityAgent?.GetComponent<LLM>();
 
         /// <param name="unityAgent">Агент LLMUnity на сцене (с привязанным <c>LLM</c>).</param>
-        public LlmUnityLlmClient(LLMAgent unityAgent, IGameLogger logger)
+        /// <param name="logger">Логгер.</param>
+        /// <param name="memoryStore">Хранилище памяти (null = без сохранения истории).</param>
+        /// <param name="memoryPolicy">Политика памяти (null = default).</param>
+        /// <param name="useChatHistory">true = Тип 2: LLMAgent сохраняет контекст, false = Тип 1: MemoryTool.</param>
+        public LlmUnityLlmClient(
+            LLMAgent unityAgent,
+            IGameLogger logger,
+            IAgentMemoryStore memoryStore = null,
+            AgentMemoryPolicy memoryPolicy = null,
+            bool useChatHistory = false)
         {
             _unityAgent = unityAgent;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memoryStore = memoryStore;
+            _memoryPolicy = memoryPolicy;
+            _useChatHistory = useChatHistory;
         }
 
         /// <inheritdoc />
@@ -96,8 +115,22 @@ namespace CoreAI.Infrastructure.Llm
                         _unityAgent.systemPrompt = request.SystemPrompt;
                     }
 
-                    string text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: false);
+                    _currentRoleId = request.AgentRoleId ?? "Unknown";
+
+                    // addToHistory: true = LLMAgent сохраняет контекст (Тип 2)
+                    // addToHistory: false = каждый вызов независим (Тип 1: MemoryTool)
+                    bool addToHistory = _useChatHistory;
+
+                    string text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: addToHistory);
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    // ===== ТИП 2: Сохраняем диалог в хранилище =====
+                    if (_useChatHistory && _memoryStore != null && !string.IsNullOrEmpty(text))
+                    {
+                        _memoryStore.AppendChatMessage(_currentRoleId, "user", request.UserPayload ?? "");
+                        _memoryStore.AppendChatMessage(_currentRoleId, "assistant", text);
+                    }
+
                     return new LlmCompletionResult { Ok = true, Content = text ?? "" };
                 }
                 finally
@@ -115,6 +148,7 @@ namespace CoreAI.Infrastructure.Llm
                 return new LlmCompletionResult { Ok = false, Error = ex.Message };
             }
         }
+
     }
 }
 #endif

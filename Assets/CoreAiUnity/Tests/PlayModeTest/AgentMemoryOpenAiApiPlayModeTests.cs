@@ -23,6 +23,8 @@ namespace CoreAI.Tests.PlayMode
             public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
             public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
             public void Clear(string roleId) => States.Remove(roleId);
+            public void AppendChatMessage(string roleId, string role, string content) { }
+            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
         }
 
         private sealed class ListSink : IAiGameCommandSink

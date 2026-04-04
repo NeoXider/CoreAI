@@ -9,7 +9,7 @@ namespace CoreAI.Tests.PlayMode
     internal static class PlayModeOpenAiTestConfig
     {
         public const string DefaultLmStudioBaseUrl = "http://192.168.56.1:1234/v1";
-        public const string DefaultLmStudioModelId = "qwen3.5-4b";
+        public const string DefaultLmStudioModelId = "qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive@iq4_xs";
 
         private const string EnvUseProjectDefaults = "COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS";
 

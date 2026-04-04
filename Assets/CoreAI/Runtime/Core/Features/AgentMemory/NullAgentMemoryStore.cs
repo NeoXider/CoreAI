@@ -18,5 +18,14 @@ namespace CoreAI.Ai
         public void Clear(string roleId)
         {
         }
+
+        public void AppendChatMessage(string roleId, string role, string content)
+        {
+        }
+
+        public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        {
+            return System.Array.Empty<ChatMessage>();
+        }
     }
 }

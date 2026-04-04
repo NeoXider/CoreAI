@@ -62,8 +62,11 @@ namespace CoreAI.Ai
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
             string systemBase = _promptComposer.GetSystemPrompt(roleId);
+
+            // ===== ТИП 1: MemoryTool — явная память через function call =====
             string system = systemBase;
-            if (_memoryPolicy != null && _memoryPolicy.IsMemoryEnabled(roleId) &&
+            bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
+            if (useMemoryTool &&
                 _memoryStore != null && _memoryStore.TryLoad(roleId, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem?.Memory))
             {
@@ -123,13 +126,18 @@ namespace CoreAI.Ai
                 }
             }
 
-            if (_memoryPolicy != null && _memoryPolicy.IsMemoryEnabled(roleId) &&
+            // ===== ОБРАБОТКА MemoryTool =====
+            if (useMemoryTool &&
                 _memoryStore != null &&
                 AgentMemoryDirectiveParser.TryExtract(content, out string cleaned,
                     out AgentMemoryDirectiveParser.MemoryDirective dir) &&
                 dir != null)
             {
                 _memoryStore.TryLoad(roleId, out AgentMemoryState existing);
+
+                var roleConfig = _memoryPolicy.GetRoleConfig(roleId);
+                bool shouldAppend = dir.Append || roleConfig.DefaultAction == AgentMemoryPolicy.MemoryToolAction.Append;
+
                 if (dir.Clear)
                 {
                     _memoryStore.Clear(roleId);
@@ -137,7 +145,7 @@ namespace CoreAI.Ai
                 else if (!string.IsNullOrWhiteSpace(dir.MemoryText))
                 {
                     AgentMemoryState state = new() { LastSystemPrompt = systemBase, Memory = dir.MemoryText };
-                    if (dir.Append && !string.IsNullOrWhiteSpace(existing?.Memory))
+                    if (shouldAppend && !string.IsNullOrWhiteSpace(existing?.Memory))
                     {
                         state.Memory = existing.Memory.Trim() + "\n" + dir.MemoryText.Trim();
                     }
