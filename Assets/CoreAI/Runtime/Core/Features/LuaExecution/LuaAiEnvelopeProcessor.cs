@@ -44,19 +44,27 @@ namespace CoreAI.Ai
         public void Process(ApplyAiGameCommand cmd)
         {
             if (cmd == null || cmd.CommandTypeId != Envelope)
+            {
                 return;
-            if (!AiLuaPayloadParser.TryGetExecutableLua(cmd.JsonPayload ?? "", out var lua))
+            }
+
+            if (!AiLuaPayloadParser.TryGetExecutableLua(cmd.JsonPayload ?? "", out string lua))
+            {
                 return;
+            }
 
             try
             {
-                var registry = new LuaApiRegistry();
+                LuaApiRegistry registry = new();
                 _bindings.RegisterGameplayApis(registry);
-                var script = _sandbox.CreateScript(registry);
-                var result = _sandbox.RunChunk(script, lua);
-                var summary = result.ToPrintString();
+                Script script = _sandbox.CreateScript(registry);
+                DynValue result = _sandbox.RunChunk(script, lua);
+                string summary = result.ToPrintString();
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))
+                {
                     _luaScriptVersions.RecordSuccessfulExecution(cmd.LuaScriptVersionKey.Trim(), lua);
+                }
+
                 _sink.Publish(new ApplyAiGameCommand
                 {
                     CommandTypeId = LuaExecutionSucceeded,
@@ -73,7 +81,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                var msg = ex is InterpreterException ie ? ie.Message : ex.Message;
+                string msg = ex is InterpreterException ie ? ie.Message : ex.Message;
                 _sink.Publish(new ApplyAiGameCommand
                 {
                     CommandTypeId = LuaExecutionFailed,
@@ -90,14 +98,15 @@ namespace CoreAI.Ai
                 if (string.Equals(cmd.SourceRoleId, BuiltInAgentRoleIds.Programmer, StringComparison.Ordinal) &&
                     cmd.LuaRepairGeneration < _maxLuaRepairGenerationOnEnvelope)
                 {
-                    var next = cmd.LuaRepairGeneration + 1;
+                    int next = cmd.LuaRepairGeneration + 1;
                     _observer.OnLuaRepairScheduled(next, msg);
                     ScheduleProgrammerRepair(cmd, lua, msg, next);
                 }
             }
         }
 
-        private void ScheduleProgrammerRepair(ApplyAiGameCommand cmd, string failedLua, string error, int nextGeneration)
+        private void ScheduleProgrammerRepair(ApplyAiGameCommand cmd, string failedLua, string error,
+            int nextGeneration)
         {
             try
             {

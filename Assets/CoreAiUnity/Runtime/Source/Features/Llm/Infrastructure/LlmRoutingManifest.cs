@@ -15,8 +15,7 @@ namespace CoreAI.Infrastructure.Llm
         public string rolePattern = "Creator";
 
         /// <summary>Идентификатор профиля из списка профилей манифеста.</summary>
-        [Tooltip("Id из записи в profiles.")]
-        public string profileId = "default";
+        [Tooltip("Id из записи в profiles.")] public string profileId = "default";
 
         /// <summary>Порядок сортировки: меньше — выше при равных условиях.</summary>
         [Tooltip("Меньше — раньше проверяется (среди совпадений порядок в списке тоже важен).")]
@@ -44,8 +43,7 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Для LlmUnity: имя GameObject с LLMAgent (пусто = первый FindFirstObjectByType).")]
         public string unityAgentGameObjectName = "";
 
-        [Min(256)]
-        [Tooltip("Контекстное окно (токены) для профиля. По умолчанию 8192.")]
+        [Min(256)] [Tooltip("Контекстное окно (токены) для профиля. По умолчанию 8192.")]
         public int contextWindowTokens = 8192;
     }
 
@@ -59,11 +57,9 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool enableRoleRouting = true;
 
-        [SerializeField]
-        private List<LlmBackendProfileEntry> profiles = new List<LlmBackendProfileEntry>();
+        [SerializeField] private List<LlmBackendProfileEntry> profiles = new();
 
-        [SerializeField]
-        private List<LlmRoleRouteEntry> routes = new List<LlmRoleRouteEntry>();
+        [SerializeField] private List<LlmRoleRouteEntry> routes = new();
 
         /// <summary>Включена ли таблица маршрутизации (иначе используется legacy-клиент из scope).</summary>
         public bool EnableRoleRouting => enableRoleRouting;

@@ -17,9 +17,13 @@ namespace CoreAI.Tests.EditMode
             public string LastUserPayload;
             private readonly string _reply;
 
-            public CapturingLlm(string reply) => _reply = reply;
+            public CapturingLlm(string reply)
+            {
+                _reply = reply;
+            }
 
-            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
             {
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
@@ -30,18 +34,31 @@ namespace CoreAI.Tests.EditMode
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
 
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
 
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
 
-            public void Clear(string roleId) => States.Remove(roleId);
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
         }
 
         private sealed class TwoStepMemoryLlm : ILlmClient
@@ -49,7 +66,8 @@ namespace CoreAI.Tests.EditMode
             private int _n;
             public string SecondCallSystemPrompt;
 
-            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
             {
                 _n++;
                 if (_n == 1)
@@ -62,7 +80,7 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 SecondCallSystemPrompt = request.SystemPrompt ?? "";
-                var hasMemory = SecondCallSystemPrompt.Contains("remember: apples");
+                bool hasMemory = SecondCallSystemPrompt.Contains("remember: apples");
                 return Task.FromResult(new LlmCompletionResult
                 {
                     Ok = true,
@@ -74,13 +92,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Creator_WhenMemoryExists_AppendsMemoryToSystemPrompt()
         {
-            var llm = new CapturingLlm("{\"ok\":true}");
-            var sink = new ListSink();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
-            var store = new InMemoryStore();
+            CapturingLlm llm = new("{\"ok\":true}");
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "remember_this=1" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
@@ -92,13 +112,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Analyzer_ByDefaultMemoryDisabled_DoesNotAppendMemoryToSystemPrompt()
         {
-            var llm = new CapturingLlm("{\"ok\":true}");
-            var sink = new ListSink();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
-            var store = new InMemoryStore();
+            CapturingLlm llm = new("{\"ok\":true}");
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Analyzer, new AgentMemoryState { Memory = "should_not_be_seen" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Analyzer, Hint = "x" });
@@ -110,21 +132,23 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Creator_MemoryDirective_SavesAndIsRemovedFromPublishedEnvelope()
         {
-            var reply =
+            string reply =
                 "hello\n" +
                 "```memory\nkey=value\n```\n" +
                 "tail";
-            var llm = new CapturingLlm(reply);
-            var sink = new ListSink();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
-            var store = new InMemoryStore();
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+            CapturingLlm llm = new(reply);
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
-            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out var st));
+            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState st));
             Assert.AreEqual("key=value", st.Memory);
             Assert.AreEqual(1, sink.Items.Count);
             StringAssert.DoesNotContain("```memory", sink.Items[0].JsonPayload);
@@ -135,33 +159,37 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Creator_MemoryAppend_AppendsToExisting()
         {
-            var reply = "```memory_append\nB\n```";
-            var llm = new CapturingLlm(reply);
-            var sink = new ListSink();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
-            var store = new InMemoryStore();
+            string reply = "```memory_append\nB\n```";
+            CapturingLlm llm = new(reply);
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "A" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
 
-            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out var st));
+            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState st));
             Assert.AreEqual("A\nB", st.Memory);
         }
 
         [Test]
         public async Task Creator_MemoryClear_ClearsStore()
         {
-            var reply = "```memory_clear\n```";
-            var llm = new CapturingLlm(reply);
-            var sink = new ListSink();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
-            var store = new InMemoryStore();
+            string reply = "```memory_clear\n```";
+            CapturingLlm llm = new(reply);
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "A" });
-            var orch = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, new AgentMemoryPolicy(),
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "x" });
@@ -172,24 +200,29 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Creator_WritesMemory_ThenInNewDialog_CanAnswerUsingIt()
         {
-            var llm = new TwoStepMemoryLlm();
-            var store = new InMemoryStore();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            TwoStepMemoryLlm llm = new();
+            InMemoryStore store = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
 
             // Диалог 1: модель сама записывает память.
-            var sink1 = new ListSink();
-            var orch1 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store, new AgentMemoryPolicy(),
+            ListSink sink1 = new();
+            AiOrchestrator orch1 = new(new SoloAuthorityHost(), llm, sink1, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
-            await orch1.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "store something" });
-            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out var st));
+            await orch1.RunTaskAsync(new AiTaskRequest
+                { RoleId = BuiltInAgentRoleIds.Creator, Hint = "store something" });
+            Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState st));
             Assert.AreEqual("remember: apples", st.Memory);
 
             // Диалог 2: новый оркестратор (как новая сессия), но то же хранилище памяти.
-            var sink2 = new ListSink();
-            var orch2 = new AiOrchestrator(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store, new AgentMemoryPolicy(),
+            ListSink sink2 = new();
+            AiOrchestrator orch2 = new(new SoloAuthorityHost(), llm, sink2, telemetry, composer, store,
+                new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
-            await orch2.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "what do you remember?" });
+            await orch2.RunTaskAsync(new AiTaskRequest
+                { RoleId = BuiltInAgentRoleIds.Creator, Hint = "what do you remember?" });
 
             StringAssert.Contains("## Memory", llm.SecondCallSystemPrompt);
             StringAssert.Contains("remember: apples", llm.SecondCallSystemPrompt);
@@ -198,4 +231,3 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
-

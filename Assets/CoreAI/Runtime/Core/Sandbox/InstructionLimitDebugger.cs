@@ -25,7 +25,10 @@ namespace CoreAI.Sandbox
             _sw.Start();
         }
 
-        public DebuggerCaps GetDebuggerCaps() => DebuggerCaps.CanDebugSourceCode;
+        public DebuggerCaps GetDebuggerCaps()
+        {
+            return DebuggerCaps.CanDebugSourceCode;
+        }
 
         public void SetDebugService(DebugService debugService)
         {
@@ -43,29 +46,43 @@ namespace CoreAI.Sandbox
         {
         }
 
-        public bool IsPauseRequested() => false;
+        public bool IsPauseRequested()
+        {
+            return false;
+        }
 
         public DebuggerAction GetAction(int ip, SourceRef sourceref)
         {
-            var s = System.Threading.Interlocked.Increment(ref _steps);
+            long s = System.Threading.Interlocked.Increment(ref _steps);
             if (s > _maxSteps)
+            {
                 throw new ScriptRuntimeException($"Lua exceeded max steps: {_maxSteps}");
+            }
+
             if (_sw.ElapsedMilliseconds > _timeoutMs)
+            {
                 throw new ScriptRuntimeException($"Lua exceeded {_timeoutMs} ms.");
+            }
+
             return new DebuggerAction { Action = DebuggerAction.ActionType.Run };
         }
 
-        public bool SignalRuntimeException(ScriptRuntimeException ex) => false;
+        public bool SignalRuntimeException(ScriptRuntimeException ex)
+        {
+            return false;
+        }
 
         public void SignalExecutionEnded()
         {
         }
 
-        public List<DynamicExpression> GetWatchItems() => new List<DynamicExpression>();
+        public List<DynamicExpression> GetWatchItems()
+        {
+            return new List<DynamicExpression>();
+        }
 
         public void Update(WatchType watchType, IEnumerable<WatchItem> items, int stackFrameIndex)
         {
         }
     }
 }
-

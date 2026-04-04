@@ -13,4 +13,3 @@ namespace CoreAI.Ai
         void Clear(string roleId);
     }
 }
-

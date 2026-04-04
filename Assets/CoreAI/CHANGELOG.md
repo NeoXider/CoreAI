@@ -2,7 +2,49 @@
 
 Все значимые изменения этого пакета описываются здесь. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
-## [0.1.3] - 2026-04-03
+## [0.3.0] - 2026-04-04
+
+### Microsoft.Extensions.AI Integration (MAJOR)
+
+- ✨ **MEAI Function Calling**: Полная интеграция Microsoft.Extensions.AI для стандартизированного вызова функций
+- ✨ **MemoryTool**: Новый класс с `AIFunctionFactory.Create()` для регистрации memory tool
+- ✨ **MeaiChatClientAdapter**: Адаптер `IChatClient` над `ILlmClient` для MEAI pipeline
+- ✨ **AiOrchestrator**: Обновлён с MEAI pipeline + fallback на legacy режим
+- ✨ **Automatic Tool Invocation**: MEAI автоматически вызывает tools из ответа модели
+- ✨ **Per-Role Memory Tools**: Отдельный instance MemoryTool для каждой роли
+
+### Breaking Changes
+
+- ❌ **Удалён AgentToolCallParser**: Больше не нужен, MEAI заменяет
+- ❌ **Удалён legacy формат**: `[TOOL:memory]...[/TOOL]` больше не поддерживается
+- ✅ **Только JSON формат**: `{"tool": "memory", "action": "write", "content": "..."}`
+
+### System Prompts
+
+- **Creator**: Обновлён для MEAI function calling format
+- **Programmer**: Обновлён для MEAI JSON format
+- Все агенты используют единый MEAI формат
+
+### Dependencies
+
+- ✅ **Microsoft.Extensions.AI** v10.4.1 (через NuGet)
+- ✅ **Microsoft.Extensions.AI.Abstractions** v10.4.1 (через NuGet)
+- MEAI уже был установлен в `packages.config`
+
+### Documentation
+
+- ✨ **MEAI_FUNCTION_CALLING.md**: Полный гайд по MEAI integration
+- ✨ **README_MEAI.md**: Быстрый справочник
+- **AI_AGENT_ROLES.md**: Обновлены роли с MEAI notes
+- **README.md**: Updated package description
+
+### Tests
+
+- ✨ **MemoryToolMeaiEditModeTests.cs**: 8 новых MEAI integration тестов
+- ✅ Все старые тесты обновлены для JSON/MEAI формата
+- ✅ Удалены устаревшие тесты AgentToolCallParser
+
+## [0.2.0] - 2026-04-04
 
 ### Логирование (обязательный блок релиза)
 

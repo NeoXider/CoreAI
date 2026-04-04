@@ -206,14 +206,14 @@ MonoBehaviour:
   _parallelPrompts: 1
   _contextSize: 8192
   _batchSize: 512
-  _model: Qwen3.5-0.8B-Q4_K_M.gguf
+  _model: Qwen3.5-2B-Q4_K_M.gguf
   _flashAttention: 0
   _reasoning: 0
   _lora: 
   _loraWeights: 
   dontDestroyOnLoad: 1
   _embeddingsOnly: 0
-  _embeddingLength: 1024
+  _embeddingLength: 2048
   minContextLength: 0
   maxContextLength: 262144
 --- !u!114 &265009550
@@ -425,7 +425,7 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   m_Enabled: 1
-  serializedVersion: 12
+  serializedVersion: 13
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 2
@@ -477,7 +477,7 @@ Light:
   m_UseBoundingSphereOverride: 0
   m_UseViewFrustumForShadowCasterCull: 1
   m_ForceVisible: 0
-  m_ShadowRadius: 0
+  m_ShapeRadius: 0
   m_ShadowAngle: 0
   m_LightUnit: 1
   m_LuxAtDistance: 1
@@ -735,6 +735,13 @@ MonoBehaviour:
   gameLogSettings: {fileID: 11400000, guid: 3ac91d868ba7d3e4b9a80217e205b9bc, type: 2}
   agentPromptsManifest: {fileID: 0}
   openAiHttpLlmSettings: {fileID: 0}
+  llmRoutingManifest: {fileID: 0}
+  llmRequestTimeoutSeconds: 15
+  aiOrchestrationMaxConcurrent: 2
+  logAiOrchestrationMetrics: 0
+  worldPrefabRegistry: {fileID: 0}
+  aiNetworkExecutionPolicy: 0
+  networkPeerBehaviour: {fileID: 0}
 --- !u!114 &813461310
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -929,6 +936,14 @@ MonoBehaviour:
   playerSpawnAnchor: {fileID: 2000010121}
   creatorPlansWaves: 1
   spawnCompanionBot: 1
+  buildNavMeshAtRuntime: 1
+  suspendAgentsDuringNavMeshBake: 1
+  forceFullNavMeshRebuild: 0
+  logOnStartRoles: 1
+  wavePresetLibrary: {fileID: 0}
+  arenaProgressionContent: {fileID: 0}
+  arenaUnitBaselineConfig: {fileID: 0}
+  vsWaveDifficulty: {fileID: 0}
 --- !u!1 &2000010110
 GameObject:
   m_ObjectHideFlags: 0

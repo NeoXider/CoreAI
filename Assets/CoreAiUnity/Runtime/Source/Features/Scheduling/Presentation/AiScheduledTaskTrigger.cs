@@ -13,37 +13,25 @@ namespace CoreAI.Presentation
     /// </summary>
     public sealed class AiScheduledTaskTrigger : MonoBehaviour
     {
-        [Tooltip("Пусто — ищется GetComponentInParent или FindAnyObjectByType.")]
-        [SerializeField]
+        [Tooltip("Пусто — ищется GetComponentInParent или FindAnyObjectByType.")] [SerializeField]
         private CoreAILifetimeScope lifetimeScope;
 
-        [SerializeField]
-        private string agentRoleId = BuiltInAgentRoleIds.Creator;
+        [SerializeField] private string agentRoleId = BuiltInAgentRoleIds.Creator;
 
-        [TextArea(2, 8)]
-        [SerializeField]
-        private string taskHint = "periodic_timer";
+        [TextArea(2, 8)] [SerializeField] private string taskHint = "periodic_timer";
 
-        [SerializeField]
-        private int priority;
+        [SerializeField] private int priority;
 
-        [SerializeField]
-        private string cancellationScope = "";
+        [SerializeField] private string cancellationScope = "";
 
-        [Tooltip("Метка источника для логов/дашборда (например scheduled_timer:my_id).")]
-        [SerializeField]
+        [Tooltip("Метка источника для логов/дашборда (например scheduled_timer:my_id).")] [SerializeField]
         private string sourceTag = "scheduled_timer";
 
-        [Header("Таймер")]
-        [SerializeField]
-        private bool timerEnabled = true;
+        [Header("Таймер")] [SerializeField] private bool timerEnabled = true;
 
-        [Min(0.1f)]
-        [SerializeField]
-        private float intervalSeconds = 30f;
+        [Min(0.1f)] [SerializeField] private float intervalSeconds = 30f;
 
-        [Tooltip("Если таймер включён — начинать отсчёт при OnEnable.")]
-        [SerializeField]
+        [Tooltip("Если таймер включён — начинать отсчёт при OnEnable.")] [SerializeField]
         private bool startTimerOnEnable = true;
 
         private float _accum;
@@ -63,28 +51,40 @@ namespace CoreAI.Presentation
         private void Update()
         {
             if (!timerEnabled || _timerStopped || _timerPaused)
+            {
                 return;
+            }
 
             _accum += Time.deltaTime;
             if (_accum < intervalSeconds)
+            {
                 return;
+            }
 
             _accum = 0f;
             FireNowInternal();
         }
 
         /// <summary>Очередь задачу сразу (независимо от таймера и паузы таймера).</summary>
-        public void FireNow() => FireNowInternal();
+        public void FireNow()
+        {
+            FireNowInternal();
+        }
 
         private void FireNowInternal()
         {
-            var scope = lifetimeScope != null ? lifetimeScope : GetComponentInParent<CoreAILifetimeScope>();
+            CoreAILifetimeScope scope =
+                lifetimeScope != null ? lifetimeScope : GetComponentInParent<CoreAILifetimeScope>();
             if (scope == null)
+            {
                 scope = FindAnyObjectByType<CoreAILifetimeScope>();
+            }
 
-            var log = GameLoggerUnscopedFallback.Instance;
-            if (scope != null && scope.Container != null && scope.Container.TryResolve<IGameLogger>(out var lg))
+            IGameLogger log = GameLoggerUnscopedFallback.Instance;
+            if (scope != null && scope.Container != null && scope.Container.TryResolve<IGameLogger>(out IGameLogger lg))
+            {
                 log = lg;
+            }
 
             if (scope == null)
             {
@@ -92,7 +92,7 @@ namespace CoreAI.Presentation
                 return;
             }
 
-            if (!scope.Container.TryResolve<IAiOrchestrationService>(out var orch))
+            if (!scope.Container.TryResolve<IAiOrchestrationService>(out IAiOrchestrationService orch))
             {
                 log.LogWarning(
                     GameLogFeature.Composition,
@@ -111,9 +111,15 @@ namespace CoreAI.Presentation
         }
 
         /// <summary>Пауза таймера; <see cref="FireNow"/> по-прежнему работает.</summary>
-        public void PauseTimer() => _timerPaused = true;
+        public void PauseTimer()
+        {
+            _timerPaused = true;
+        }
 
-        public void ResumeTimer() => _timerPaused = false;
+        public void ResumeTimer()
+        {
+            _timerPaused = false;
+        }
 
         /// <summary>Остановить таймер до следующего <see cref="StartTimer"/>.</summary>
         public void StopTimer()
@@ -131,6 +137,9 @@ namespace CoreAI.Presentation
         }
 
         /// <summary>Сбросить накопленное время до следующего тика.</summary>
-        public void RestartTimerCountdown() => _accum = 0f;
+        public void RestartTimerCountdown()
+        {
+            _accum = 0f;
+        }
     }
 }

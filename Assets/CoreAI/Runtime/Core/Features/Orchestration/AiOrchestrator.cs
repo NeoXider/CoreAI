@@ -52,23 +52,28 @@ namespace CoreAI.Ai
         public async Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
             if (!_authority.CanRunAiTasks)
+            {
                 return;
+            }
 
-            var roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
-            var traceId = string.IsNullOrWhiteSpace(task.TraceId) ? Guid.NewGuid().ToString("N") : task.TraceId.Trim();
-            var snap = _telemetry.BuildSnapshot();
-            var systemBase = _promptComposer.GetSystemPrompt(roleId);
-            var system = systemBase;
+            string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+            string traceId = string.IsNullOrWhiteSpace(task.TraceId)
+                ? Guid.NewGuid().ToString("N")
+                : task.TraceId.Trim();
+            GameSessionSnapshot snap = _telemetry.BuildSnapshot();
+            string systemBase = _promptComposer.GetSystemPrompt(roleId);
+            string system = systemBase;
             if (_memoryPolicy != null && _memoryPolicy.IsMemoryEnabled(roleId) &&
-                _memoryStore != null && _memoryStore.TryLoad(roleId, out var mem) &&
+                _memoryStore != null && _memoryStore.TryLoad(roleId, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem?.Memory))
             {
                 system = systemBase.Trim() + "\n\n## Memory\n" + mem.Memory.Trim();
             }
-            var user = _promptComposer.BuildUserPayload(snap, task);
 
-            var sw = Stopwatch.StartNew();
-            var result = await _llm.CompleteAsync(
+            string user = _promptComposer.BuildUserPayload(snap, task);
+
+            Stopwatch sw = Stopwatch.StartNew();
+            LlmCompletionResult result = await _llm.CompleteAsync(
                 new LlmCompletionRequest
                 {
                     AgentRoleId = roleId,
@@ -81,17 +86,19 @@ namespace CoreAI.Ai
             _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok, sw.Elapsed.TotalMilliseconds);
 
             if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
+            {
                 return;
+            }
 
-            var content = result.Content;
+            string content = result.Content;
             if (_structuredPolicy.ShouldValidate(roleId) &&
-                !_structuredPolicy.TryValidate(roleId, content, out var failReason))
+                !_structuredPolicy.TryValidate(roleId, content, out string failReason))
             {
                 _metrics.RecordStructuredRetry(roleId, traceId, failReason ?? "");
-                var retryTask = CloneTaskWithStructuredHint(task, failReason);
-                var userRetry = _promptComposer.BuildUserPayload(snap, retryTask);
+                AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
+                string userRetry = _promptComposer.BuildUserPayload(snap, retryTask);
                 sw = Stopwatch.StartNew();
-                var second = await _llm.CompleteAsync(
+                LlmCompletionResult second = await _llm.CompleteAsync(
                     new LlmCompletionRequest
                     {
                         AgentRoleId = roleId,
@@ -101,36 +108,47 @@ namespace CoreAI.Ai
                     },
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();
-                _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok, sw.Elapsed.TotalMilliseconds);
+                _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok,
+                    sw.Elapsed.TotalMilliseconds);
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
+                {
                     return;
+                }
 
                 content = second.Content;
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
+                {
                     return;
+                }
             }
+
             if (_memoryPolicy != null && _memoryPolicy.IsMemoryEnabled(roleId) &&
                 _memoryStore != null &&
-                AgentMemoryDirectiveParser.TryExtract(content, out var cleaned, out var dir) &&
+                AgentMemoryDirectiveParser.TryExtract(content, out string cleaned,
+                    out AgentMemoryDirectiveParser.MemoryDirective dir) &&
                 dir != null)
             {
-                _memoryStore.TryLoad(roleId, out var existing);
+                _memoryStore.TryLoad(roleId, out AgentMemoryState existing);
                 if (dir.Clear)
                 {
                     _memoryStore.Clear(roleId);
                 }
                 else if (!string.IsNullOrWhiteSpace(dir.MemoryText))
                 {
-                    var state = new AgentMemoryState { LastSystemPrompt = systemBase, Memory = dir.MemoryText };
+                    AgentMemoryState state = new() { LastSystemPrompt = systemBase, Memory = dir.MemoryText };
                     if (dir.Append && !string.IsNullOrWhiteSpace(existing?.Memory))
+                    {
                         state.Memory = existing.Memory.Trim() + "\n" + dir.MemoryText.Trim();
+                    }
+
                     _memoryStore.Save(roleId, state);
                 }
                 else
                 {
                     // Даже если память не меняем, полезно сохранять последний system prompt.
-                    _memoryStore.Save(roleId, new AgentMemoryState { LastSystemPrompt = systemBase, Memory = existing?.Memory });
+                    _memoryStore.Save(roleId,
+                        new AgentMemoryState { LastSystemPrompt = systemBase, Memory = existing?.Memory });
                 }
 
                 content = cleaned;
@@ -153,10 +171,14 @@ namespace CoreAI.Ai
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
         {
-            var hint = (task.Hint ?? "").Trim();
-            var extra = "structured_retry: " + (string.IsNullOrWhiteSpace(failureReason) ? "(unknown)" : failureReason.Trim());
+            string hint = (task.Hint ?? "").Trim();
+            string extra = "structured_retry: " +
+                           (string.IsNullOrWhiteSpace(failureReason) ? "(unknown)" : failureReason.Trim());
             if (hint.Length > 0)
+            {
                 hint += " ";
+            }
+
             hint += extra;
             return new AiTaskRequest
             {

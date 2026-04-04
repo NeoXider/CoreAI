@@ -11,9 +11,11 @@ namespace CoreAI.Ai
         public static string Format(string scriptKey, LuaScriptVersionRecord snapshot)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return "";
+            }
 
-            var sb = new StringBuilder(256);
+            StringBuilder sb = new(256);
             sb.Append("## Lua_script_versioning\n");
             sb.Append("script_key: ").Append(scriptKey.Trim()).Append('\n');
             if (snapshot == null)
@@ -31,17 +33,26 @@ namespace CoreAI.Ai
             sb.Append("current_saved_lua (last successful execution):\n```lua\n");
             sb.Append(Clamp(snapshot.CurrentLua)).Append("\n```\n");
             if (!string.Equals(snapshot.OriginalLua, snapshot.CurrentLua))
+            {
                 sb.Append(
                     "The baseline and current differ. Prefer fixing forward; users can reset to baseline outside the model.\n");
+            }
+
             return sb.ToString();
         }
 
         private static string Clamp(string s)
         {
             if (string.IsNullOrEmpty(s))
+            {
                 return "";
+            }
+
             if (s.Length <= MaxLuaChars)
+            {
                 return s;
+            }
+
             return s.Substring(0, MaxLuaChars) + "\n…";
         }
     }

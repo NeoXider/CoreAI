@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -15,9 +16,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_FirstSuccess_SetsOriginalAndCurrent()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution(Key, "a = 1");
-            Assert.IsTrue(s.TryGetSnapshot(Key, out var snap));
+            Assert.IsTrue(s.TryGetSnapshot(Key, out LuaScriptVersionRecord snap));
             Assert.AreEqual("a = 1", snap.OriginalLua);
             Assert.AreEqual("a = 1", snap.CurrentLua);
             Assert.AreEqual(1, snap.History.Count);
@@ -26,10 +27,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_SecondSuccess_PreservesOriginal_UpdatesCurrent()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution(Key, "v1");
             s.RecordSuccessfulExecution(Key, "v2");
-            Assert.IsTrue(s.TryGetSnapshot(Key, out var snap));
+            Assert.IsTrue(s.TryGetSnapshot(Key, out LuaScriptVersionRecord snap));
             Assert.AreEqual("v1", snap.OriginalLua);
             Assert.AreEqual("v2", snap.CurrentLua);
             Assert.AreEqual(2, snap.History.Count);
@@ -38,11 +39,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_Reset_RestoresCurrentToOriginal()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution(Key, "v1");
             s.RecordSuccessfulExecution(Key, "v2");
             s.ResetToOriginal(Key);
-            Assert.IsTrue(s.TryGetSnapshot(Key, out var snap));
+            Assert.IsTrue(s.TryGetSnapshot(Key, out LuaScriptVersionRecord snap));
             Assert.AreEqual("v1", snap.OriginalLua);
             Assert.AreEqual("v1", snap.CurrentLua);
             Assert.AreEqual(1, snap.History.Count);
@@ -51,10 +52,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_SeedThenRecord_KeepsOriginalFromSeed()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.SeedOriginal(Key, "seed", false);
             s.RecordSuccessfulExecution(Key, "edited");
-            Assert.IsTrue(s.TryGetSnapshot(Key, out var snap));
+            Assert.IsTrue(s.TryGetSnapshot(Key, out LuaScriptVersionRecord snap));
             Assert.AreEqual("seed", snap.OriginalLua);
             Assert.AreEqual("edited", snap.CurrentLua);
         }
@@ -62,10 +63,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_BuildProgrammerPromptSection_ContainsBaseline()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution(Key, "alpha");
             s.RecordSuccessfulExecution(Key, "beta");
-            var section = s.BuildProgrammerPromptSection(Key);
+            string section = s.BuildProgrammerPromptSection(Key);
             StringAssert.Contains("Lua_script_versioning", section);
             StringAssert.Contains(Key, section);
             StringAssert.Contains("alpha", section);
@@ -75,14 +76,14 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AiPromptComposer_ProgrammerWithKey_AppendsVersionSection()
         {
-            var versions = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore versions = new();
             versions.RecordSuccessfulExecution("ui_logic", "print(1)");
             versions.RecordSuccessfulExecution("ui_logic", "print(2)");
-            var composer = new AiPromptComposer(
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 versions);
-            var u = composer.BuildUserPayload(new GameSessionSnapshot(), new AiTaskRequest
+            string u = composer.BuildUserPayload(new GameSessionSnapshot(), new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Programmer,
                 Hint = "h",
@@ -96,12 +97,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_ResetToRevision_RollsBackCurrentAndTrimsHistory()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution("rev", "v0");
             s.RecordSuccessfulExecution("rev", "v1");
             s.RecordSuccessfulExecution("rev", "v2");
             s.ResetToRevision("rev", 1);
-            Assert.IsTrue(s.TryGetSnapshot("rev", out var snap));
+            Assert.IsTrue(s.TryGetSnapshot("rev", out LuaScriptVersionRecord snap));
             Assert.AreEqual("v1", snap.CurrentLua);
             Assert.AreEqual(2, snap.History.Count);
         }
@@ -109,26 +110,26 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_ResetAll_RestoresEveryKeyToBaseline()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution("a", "a1");
             s.RecordSuccessfulExecution("a", "a2");
             s.RecordSuccessfulExecution("b", "b1");
             s.RecordSuccessfulExecution("b", "b2");
             s.ResetAllToOriginal();
-            Assert.IsTrue(s.TryGetSnapshot("a", out var sa));
+            Assert.IsTrue(s.TryGetSnapshot("a", out LuaScriptVersionRecord sa));
             Assert.AreEqual("a1", sa.OriginalLua);
             Assert.AreEqual("a1", sa.CurrentLua);
-            Assert.IsTrue(s.TryGetSnapshot("b", out var sb));
+            Assert.IsTrue(s.TryGetSnapshot("b", out LuaScriptVersionRecord sb));
             Assert.AreEqual("b1", sb.CurrentLua);
         }
 
         [Test]
         public void Memory_GetKnownKeys_IsSorted()
         {
-            var s = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore s = new();
             s.RecordSuccessfulExecution("z", "1");
             s.RecordSuccessfulExecution("a", "1");
-            var keys = s.GetKnownKeys();
+            IReadOnlyList<string> keys = s.GetKnownKeys();
             Assert.AreEqual(2, keys.Count);
             Assert.AreEqual("a", keys[0]);
             Assert.AreEqual("z", keys[1]);
@@ -137,52 +138,62 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void FileStore_RoundTrip_PersistsAcrossInstances()
         {
-            var path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "v.json");
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "v.json");
             if (File.Exists(path))
+            {
                 File.Delete(path);
-            var dir = Path.GetDirectoryName(path);
+            }
+
+            string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
                 Directory.Delete(dir, true);
+            }
 
             {
-                var a = new FileLuaScriptVersionStore(new NullGameLogger(), path);
+                FileLuaScriptVersionStore a = new(new NullGameLogger(), path);
                 a.RecordSuccessfulExecution("k", "one");
                 a.RecordSuccessfulExecution("k", "two");
             }
 
-            var b = new FileLuaScriptVersionStore(new NullGameLogger(), path);
-            Assert.IsTrue(b.TryGetSnapshot("k", out var snap));
+            FileLuaScriptVersionStore b = new(new NullGameLogger(), path);
+            Assert.IsTrue(b.TryGetSnapshot("k", out LuaScriptVersionRecord snap));
             Assert.AreEqual("one", snap.OriginalLua);
             Assert.AreEqual("two", snap.CurrentLua);
             b.ResetToOriginal("k");
 
-            var c = new FileLuaScriptVersionStore(new NullGameLogger(), path);
-            Assert.IsTrue(c.TryGetSnapshot("k", out var snap2));
+            FileLuaScriptVersionStore c = new(new NullGameLogger(), path);
+            Assert.IsTrue(c.TryGetSnapshot("k", out LuaScriptVersionRecord snap2));
             Assert.AreEqual("one", snap2.CurrentLua);
         }
 
         [Test]
         public void FileStore_ResetAll_Persists()
         {
-            var path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "reset_all.json");
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestLuaVersions", "reset_all.json");
             if (File.Exists(path))
+            {
                 File.Delete(path);
-            var dir = Path.GetDirectoryName(path);
+            }
+
+            string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
                 Directory.Delete(dir, true);
+            }
 
             {
-                var a = new FileLuaScriptVersionStore(new NullGameLogger(), path);
+                FileLuaScriptVersionStore a = new(new NullGameLogger(), path);
                 a.RecordSuccessfulExecution("x", "v1");
                 a.RecordSuccessfulExecution("x", "v2");
                 a.RecordSuccessfulExecution("y", "y0");
                 a.ResetAllToOriginal();
             }
 
-            var b = new FileLuaScriptVersionStore(new NullGameLogger(), path);
-            Assert.IsTrue(b.TryGetSnapshot("x", out var sx));
+            FileLuaScriptVersionStore b = new(new NullGameLogger(), path);
+            Assert.IsTrue(b.TryGetSnapshot("x", out LuaScriptVersionRecord sx));
             Assert.AreEqual("v1", sx.CurrentLua);
-            Assert.IsTrue(b.TryGetSnapshot("y", out var sy));
+            Assert.IsTrue(b.TryGetSnapshot("y", out LuaScriptVersionRecord sy));
             Assert.AreEqual("y0", sy.CurrentLua);
         }
     }

@@ -21,8 +21,11 @@ namespace CoreAI.Infrastructure.Llm
         public void PreflightAnnotate(LlmCompletionRequest request)
         {
             if (request == null)
+            {
                 return;
-            var inner = _registry.ResolveClientForRole(request.AgentRoleId);
+            }
+
+            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId);
             request.RoutingProfileId = DescribeInner(inner);
             request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
         }
@@ -33,9 +36,11 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             if (request == null)
+            {
                 return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "LlmCompletionRequest is null" });
+            }
 
-            var inner = _registry.ResolveClientForRole(request.AgentRoleId);
+            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId);
             request.RoutingProfileId = DescribeInner(inner);
             request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
             return inner.CompleteAsync(request, cancellationToken);
@@ -44,15 +49,25 @@ namespace CoreAI.Infrastructure.Llm
         private static string DescribeInner(ILlmClient inner)
         {
             if (inner == null)
+            {
                 return "?";
+            }
+
             if (inner is OpenAiChatLlmClient)
+            {
                 return "OpenAiHttp";
+            }
 #if !COREAI_NO_LLM
             if (inner is LlmUnityLlmClient)
+            {
                 return "LlmUnity";
+            }
 #endif
             if (inner is StubLlmClient)
+            {
                 return "Stub";
+            }
+
             return inner.GetType().Name;
         }
     }

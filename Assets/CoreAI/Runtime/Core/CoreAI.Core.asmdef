@@ -8,8 +8,13 @@
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Microsoft.Extensions.AI.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "System.Text.Json.dll"
+  ],
   "autoReferenced": true,
   "defineConstraints": [],
   "versionDefines": [],

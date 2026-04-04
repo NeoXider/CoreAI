@@ -37,9 +37,12 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Снимает все <see cref="LoggingLlmClientDecorator"/> с вершины цепочки.</summary>
         public static ILlmClient Unwrap(ILlmClient client)
         {
-            var c = client;
+            ILlmClient c = client;
             while (c is LoggingLlmClientDecorator d)
+            {
                 c = d.Inner;
+            }
+
             return c;
         }
 
@@ -55,13 +58,17 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             if (_inner is RoutingLlmClient routing)
+            {
                 routing.PreflightAnnotate(request);
+            }
 
-            var trace = string.IsNullOrWhiteSpace(request.TraceId) ? "—" : request.TraceId.Trim();
-            var role = string.IsNullOrWhiteSpace(request.AgentRoleId) ? "(роль не задана)" : request.AgentRoleId.Trim();
-            var system = request.SystemPrompt ?? "";
-            var user = request.UserPayload ?? "";
-            var backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
+            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "—" : request.TraceId.Trim();
+            string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
+                ? "(роль не задана)"
+                : request.AgentRoleId.Trim();
+            string system = request.SystemPrompt ?? "";
+            string user = request.UserPayload ?? "";
+            string backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
                 ? _backendLabel
                 : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
 
@@ -70,12 +77,14 @@ namespace CoreAI.Infrastructure.Llm
                 $"  system ({system.Length} симв.): {Preview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} симв.): {Preview(user, UserPreviewChars)}");
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result;
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            using (CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
                 if (_requestTimeoutSeconds > 0f)
+                {
                     linked.CancelAfter(TimeSpan.FromSeconds(_requestTimeoutSeconds));
+                }
 
                 try
                 {
@@ -84,7 +93,7 @@ namespace CoreAI.Infrastructure.Llm
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     sw.Stop();
-                    var msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
+                    string msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
                     _logger.LogWarning(GameLogFeature.Llm,
                         $"LLM ⏱ traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | {msg}");
                     return new LlmCompletionResult { Ok = false, Error = msg };
@@ -92,7 +101,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             sw.Stop();
-            var wallMs = sw.Elapsed.TotalMilliseconds;
+            double wallMs = sw.Elapsed.TotalMilliseconds;
 
             if (result == null)
             {
@@ -104,7 +113,7 @@ namespace CoreAI.Infrastructure.Llm
             if (!result.Ok && _requestTimeoutSeconds > 0f && !cancellationToken.IsCancellationRequested &&
                 string.Equals(result.Error, "Cancelled", StringComparison.Ordinal))
             {
-                var msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
+                string msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
                 _logger.LogWarning(GameLogFeature.Llm,
                     $"LLM ⏱ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {msg}");
                 return new LlmCompletionResult { Ok = false, Error = msg };
@@ -117,8 +126,8 @@ namespace CoreAI.Infrastructure.Llm
                 return result;
             }
 
-            var content = result.Content ?? "";
-            var tokLine = FormatTokenLine(result, wallMs, content.Length);
+            string content = result.Content ?? "";
+            string tokLine = FormatTokenLine(result, wallMs, content.Length);
             _logger.LogInfo(GameLogFeature.Llm,
                 $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}\n" +
                 $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
@@ -130,26 +139,37 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (result.CompletionTokens.HasValue && wallMs > 1)
             {
-                var tps = result.CompletionTokens.Value / (wallMs / 1000.0);
-                return $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (по completion)";
+                double tps = result.CompletionTokens.Value / (wallMs / 1000.0);
+                return
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (по completion)";
             }
 
             if (result.TotalTokens.HasValue)
-                return $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s н/д";
+            {
+                return
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s н/д";
+            }
 
             return $"tokens н/д (LLMUnity не отдаёт usage в Chat) | outChars={outChars} | оценка скорости н/д";
         }
 
-        private static string Fmt(int? n) => n.HasValue ? n.Value.ToString() : "—";
+        private static string Fmt(int? n)
+        {
+            return n.HasValue ? n.Value.ToString() : "—";
+        }
 
         private static string Preview(string text, int maxChars)
         {
             if (string.IsNullOrEmpty(text))
+            {
                 return "(пусто)";
+            }
 
-            var t = text.Trim();
+            string t = text.Trim();
             if (t.Length <= maxChars)
+            {
                 return t;
+            }
 
             return t.Substring(0, maxChars) + $"... [+{t.Length - maxChars} симв.]";
         }

@@ -11,12 +11,12 @@ namespace CoreAI.Infrastructure.Lua
     {
         private readonly IGameLogger _logger;
         private readonly CoreAiVersioningLuaRuntimeBindings _versioning;
-        private readonly CoreAI.Infrastructure.World.CoreAiWorldLuaRuntimeBindings _world;
+        private readonly World.CoreAiWorldLuaRuntimeBindings _world;
 
         public AggregatingGameLuaRuntimeBindings(
             IGameLogger logger,
             CoreAiVersioningLuaRuntimeBindings versioning,
-            CoreAI.Infrastructure.World.CoreAiWorldLuaRuntimeBindings world)
+            World.CoreAiWorldLuaRuntimeBindings world)
         {
             _logger = logger;
             _versioning = versioning;

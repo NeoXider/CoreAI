@@ -22,61 +22,76 @@ namespace CoreAI.Infrastructure.World
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
         {
-            registry.Register("coreai_world_spawn", new Func<string, string, double, double, double, string>(
-                (prefabKeyOrName, instanceId, x, y, z) =>
+            registry.Register("coreai_world_spawn",
+                new Func<string, string, double, double, double, string>((prefabKeyOrName, instanceId, x, y, z) =>
                 {
-                    var key = (prefabKeyOrName ?? "").Trim();
-                    var id = (instanceId ?? "").Trim();
+                    string key = (prefabKeyOrName ?? "").Trim();
+                    string id = (instanceId ?? "").Trim();
                     if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(id))
+                    {
                         return "";
+                    }
+
                     Publish(CoreAiWorldCommandEnvelope.Spawn(key, id, new Vector3((float)x, (float)y, (float)z)));
                     return id;
                 }));
 
-            registry.Register("coreai_world_move", new Action<string, double, double, double>(
-                (instanceId, x, y, z) =>
+            registry.Register("coreai_world_move", new Action<string, double, double, double>((instanceId, x, y, z) =>
+            {
+                string id = (instanceId ?? "").Trim();
+                if (string.IsNullOrEmpty(id))
                 {
-                    var id = (instanceId ?? "").Trim();
-                    if (string.IsNullOrEmpty(id))
-                        return;
-                    Publish(CoreAiWorldCommandEnvelope.Move(id, new Vector3((float)x, (float)y, (float)z)));
-                }));
+                    return;
+                }
+
+                Publish(CoreAiWorldCommandEnvelope.Move(id, new Vector3((float)x, (float)y, (float)z)));
+            }));
 
             registry.Register("coreai_world_destroy", new Action<string>(instanceId =>
             {
-                var id = (instanceId ?? "").Trim();
+                string id = (instanceId ?? "").Trim();
                 if (string.IsNullOrEmpty(id))
+                {
                     return;
+                }
+
                 Publish(CoreAiWorldCommandEnvelope.Destroy(id));
             }));
 
             registry.Register("coreai_world_load_scene", new Action<string>(sceneName =>
             {
-                var name = (sceneName ?? "").Trim();
+                string name = (sceneName ?? "").Trim();
                 if (string.IsNullOrEmpty(name))
+                {
                     return;
+                }
+
                 Publish(CoreAiWorldCommandEnvelope.LoadScene(name));
             }));
 
-            registry.Register("coreai_world_reload_scene", new Action(() =>
-            {
-                Publish(CoreAiWorldCommandEnvelope.ReloadScene());
-            }));
+            registry.Register("coreai_world_reload_scene",
+                new Action(() => { Publish(CoreAiWorldCommandEnvelope.ReloadScene()); }));
 
             registry.Register("coreai_world_bind_by_name", new Action<string, string>((targetName, instanceId) =>
             {
-                var name = (targetName ?? "").Trim();
-                var id = (instanceId ?? "").Trim();
+                string name = (targetName ?? "").Trim();
+                string id = (instanceId ?? "").Trim();
                 if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id))
+                {
                     return;
+                }
+
                 Publish(CoreAiWorldCommandEnvelope.BindByName(name, id));
             }));
 
             registry.Register("coreai_world_set_active", new Action<string, bool>((instanceId, active) =>
             {
-                var id = (instanceId ?? "").Trim();
+                string id = (instanceId ?? "").Trim();
                 if (string.IsNullOrEmpty(id))
+                {
                     return;
+                }
+
                 Publish(CoreAiWorldCommandEnvelope.SetActive(id, active));
             }));
         }
@@ -84,8 +99,11 @@ namespace CoreAI.Infrastructure.World
         private void Publish(CoreAiWorldCommandEnvelope env)
         {
             if (_sink == null || env == null)
+            {
                 return;
-            var json = JsonUtility.ToJson(env, false);
+            }
+
+            string json = JsonUtility.ToJson(env, false);
             _sink.Publish(new ApplyAiGameCommand
             {
                 CommandTypeId = WorldCommand,
@@ -97,4 +115,3 @@ namespace CoreAI.Infrastructure.World
         }
     }
 }
-

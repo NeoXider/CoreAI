@@ -19,7 +19,7 @@ namespace CoreAI.Composition
             builder.Register<UnityGameLogSink>(Lifetime.Singleton);
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
-            var opts = builder.RegisterMessagePipe();
+            MessagePipeOptions opts = builder.RegisterMessagePipe();
             builder.RegisterMessageBroker<ApplyAiGameCommand>(opts);
             builder.Register<MessagePipeAiCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
 

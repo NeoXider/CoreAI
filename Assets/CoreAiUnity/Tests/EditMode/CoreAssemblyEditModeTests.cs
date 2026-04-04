@@ -1,6 +1,8 @@
+using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Sandbox;
+using CoreAI.Session;
 using MoonSharp.Interpreter;
 using NUnit.Framework;
 
@@ -17,9 +19,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StubLlmClient_ReturnsJson()
         {
-            var client = new StubLlmClient();
-            var task = client.CompleteAsync(new LlmCompletionRequest { UserPayload = "x" });
-            var result = task.GetAwaiter().GetResult();
+            StubLlmClient client = new();
+            Task<LlmCompletionResult> task = client.CompleteAsync(new LlmCompletionRequest { UserPayload = "x" });
+            LlmCompletionResult result = task.GetAwaiter().GetResult();
             Assert.IsTrue(result.Ok);
             StringAssert.Contains("ApplyWaveModifier", result.Content);
             StringAssert.Contains("\"agentRole\":\"Creator\"", result.Content);
@@ -28,8 +30,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StubLlmClient_PlayerChat_IsConversational()
         {
-            var client = new StubLlmClient();
-            var r = client.CompleteAsync(new LlmCompletionRequest
+            StubLlmClient client = new();
+            LlmCompletionResult r = client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
                 UserPayload = "hello"
@@ -41,14 +43,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AiPromptComposer_UsesSystemProviderAndTemplates()
         {
-            var sys = new BuiltInDefaultAgentSystemPromptProvider();
-            var user = new NoAgentUserPromptTemplateProvider();
-            var composer = new AiPromptComposer(sys, user, new NullLuaScriptVersionStore());
-            var s = composer.GetSystemPrompt(BuiltInAgentRoleIds.Programmer);
+            BuiltInDefaultAgentSystemPromptProvider sys = new();
+            NoAgentUserPromptTemplateProvider user = new();
+            AiPromptComposer composer = new(sys, user, new NullLuaScriptVersionStore());
+            string s = composer.GetSystemPrompt(BuiltInAgentRoleIds.Programmer);
             StringAssert.Contains("Programmer", s);
-            var snap = new CoreAI.Session.GameSessionSnapshot();
+            GameSessionSnapshot snap = new();
             snap.Telemetry["wave"] = "2";
-            var u = composer.BuildUserPayload(snap, new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "h" });
+            string u = composer.BuildUserPayload(snap,
+                new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Creator, Hint = "h" });
             StringAssert.Contains("\"wave\":\"2\"", u);
             StringAssert.Contains("\"hint\":\"h\"", u);
         }
@@ -56,19 +59,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void SecureLuaEnvironment_AllowsWhitelistedApi()
         {
-            var env = new SecureLuaEnvironment();
-            var reg = new LuaApiRegistry();
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
             reg.Register("add", new System.Func<double, double, double>((a, b) => a + b));
-            var script = env.CreateScript(reg);
-            var r = script.DoString("return add(2,3)");
+            Script script = env.CreateScript(reg);
+            DynValue r = script.DoString("return add(2,3)");
             Assert.AreEqual(5, (int)r.Number);
         }
 
         [Test]
         public void SecureLuaEnvironment_StripGlobals_RemovesRequire()
         {
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(new LuaApiRegistry());
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
             Assert.Throws<ScriptRuntimeException>(() => script.DoString("return require('x')"));
         }
     }

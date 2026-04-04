@@ -27,9 +27,9 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public bool TryGetSystemPrompt(string roleId, out string systemPrompt)
         {
-            foreach (var p in _chain)
+            foreach (IAgentSystemPromptProvider p in _chain)
             {
-                if (p.TryGetSystemPrompt(roleId, out var s) && !string.IsNullOrWhiteSpace(s))
+                if (p.TryGetSystemPrompt(roleId, out string s) && !string.IsNullOrWhiteSpace(s))
                 {
                     systemPrompt = s.Trim();
                     return true;

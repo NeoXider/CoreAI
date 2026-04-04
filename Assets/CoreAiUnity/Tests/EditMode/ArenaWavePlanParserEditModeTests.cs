@@ -13,7 +13,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParse_PlainJson_ParsesPayload()
         {
-            Assert.IsTrue(ArenaWavePlanParser.TryParse(ValidEnvelope, out var plan));
+            Assert.IsTrue(ArenaWavePlanParser.TryParse(ValidEnvelope, out ArenaWavePlan plan));
             Assert.IsNotNull(plan);
             Assert.AreEqual(3, plan.waveIndex1Based);
             Assert.AreEqual(5, plan.enemyCount);
@@ -23,8 +23,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParse_MarkdownJsonFence_ParsesPayload()
         {
-            var raw = "```json\n" + ValidEnvelope + "\n```";
-            Assert.IsTrue(ArenaWavePlanParser.TryParse(raw, out var plan));
+            string raw = "```json\n" + ValidEnvelope + "\n```";
+            Assert.IsTrue(ArenaWavePlanParser.TryParse(raw, out ArenaWavePlan plan));
             Assert.IsNotNull(plan);
             Assert.AreEqual(3, plan.waveIndex1Based);
         }
@@ -32,8 +32,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParse_PreambleAndFence_ParsesPayload()
         {
-            var raw = "Sure!\n```json\n" + ValidEnvelope + "\n```\nDone.";
-            Assert.IsTrue(ArenaWavePlanParser.TryParse(raw, out var plan));
+            string raw = "Sure!\n```json\n" + ValidEnvelope + "\n```\nDone.";
+            Assert.IsTrue(ArenaWavePlanParser.TryParse(raw, out ArenaWavePlan plan));
             Assert.IsNotNull(plan);
             Assert.AreEqual(5, plan.enemyCount);
         }

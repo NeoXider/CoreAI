@@ -5,6 +5,7 @@ using CoreAI.Infrastructure.Lua;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using CoreAI.Sandbox;
+using MoonSharp.Interpreter;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -15,53 +16,62 @@ namespace CoreAI.Tests.EditMode
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly System.Collections.Generic.List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         [Test]
         public void Memory_ApplyThenReset_RestoresBaseline()
         {
-            var s = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore s = new();
             s.RecordSuccessfulApply("prog.baseline", "{\"lvl\":1}");
             s.RecordSuccessfulApply("prog.baseline", "{\"lvl\":2}");
             s.ResetToOriginal("prog.baseline");
-            Assert.IsTrue(s.TryGetCurrentPayload("prog.baseline", out var cur));
+            Assert.IsTrue(s.TryGetCurrentPayload("prog.baseline", out string cur));
             Assert.AreEqual("{\"lvl\":1}", cur);
         }
 
         [Test]
         public void Memory_ResetAll_AllKeys()
         {
-            var s = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore s = new();
             s.RecordSuccessfulApply("a", "1");
             s.RecordSuccessfulApply("a", "2");
             s.RecordSuccessfulApply("b", "x");
             s.RecordSuccessfulApply("b", "y");
             s.ResetAllToOriginal();
-            Assert.IsTrue(s.TryGetCurrentPayload("a", out var ca));
+            Assert.IsTrue(s.TryGetCurrentPayload("a", out string ca));
             Assert.AreEqual("1", ca);
-            Assert.IsTrue(s.TryGetCurrentPayload("b", out var cb));
+            Assert.IsTrue(s.TryGetCurrentPayload("b", out string cb));
             Assert.AreEqual("x", cb);
         }
 
         [Test]
         public void FileStore_RoundTrip()
         {
-            var path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestDataOverlays", "d.json");
+            string path = Path.Combine(Application.temporaryCachePath, "CoreAI_TestDataOverlays", "d.json");
             if (File.Exists(path))
+            {
                 File.Delete(path);
-            var dir = Path.GetDirectoryName(path);
+            }
+
+            string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
                 Directory.Delete(dir, true);
+            }
 
             {
-                var a = new FileDataOverlayVersionStore(new NullGameLogger(), path);
+                FileDataOverlayVersionStore a = new(new NullGameLogger(), path);
                 a.RecordSuccessfulApply("k", "{\"n\":1}");
                 a.RecordSuccessfulApply("k", "{\"n\":2}");
             }
 
-            var b = new FileDataOverlayVersionStore(new NullGameLogger(), path);
-            Assert.IsTrue(b.TryGetSnapshot("k", out var snap));
+            FileDataOverlayVersionStore b = new(new NullGameLogger(), path);
+            Assert.IsTrue(b.TryGetSnapshot("k", out DataOverlayVersionRecord snap));
             Assert.AreEqual("{\"n\":1}", snap.OriginalPayload);
             Assert.AreEqual("{\"n\":2}", snap.CurrentPayload);
         }
@@ -69,15 +79,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AiPromptComposer_ProgrammerWithOverlayCsv_AppendsSections()
         {
-            var data = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore data = new();
             data.RecordSuccessfulApply("arena.meta", "{\"xp\":0}");
             data.RecordSuccessfulApply("arena.meta", "{\"xp\":10}");
-            var composer = new AiPromptComposer(
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore(),
                 data);
-            var u = composer.BuildUserPayload(new GameSessionSnapshot(), new AiTaskRequest
+            string u = composer.BuildUserPayload(new GameSessionSnapshot(), new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Programmer,
                 Hint = "h",
@@ -92,12 +102,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Memory_ResetToRevision_RollsBackCurrentAndTrimsHistory()
         {
-            var s = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore s = new();
             s.RecordSuccessfulApply("k", "{\"n\":1}");
             s.RecordSuccessfulApply("k", "{\"n\":2}");
             s.RecordSuccessfulApply("k", "{\"n\":3}");
             s.ResetToRevision("k", 1);
-            Assert.IsTrue(s.TryGetSnapshot("k", out var snap));
+            Assert.IsTrue(s.TryGetSnapshot("k", out DataOverlayVersionRecord snap));
             Assert.AreEqual("{\"n\":2}", snap.CurrentPayload);
             Assert.AreEqual(2, snap.History.Count);
         }
@@ -105,41 +115,41 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void VersioningLuaBindings_DataAndLuaReset_FromSandbox()
         {
-            var luaStore = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore luaStore = new();
             luaStore.SeedOriginal("slot", "print(1)", false);
             luaStore.RecordSuccessfulExecution("slot", "print(2)");
 
-            var dataStore = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore dataStore = new();
             dataStore.RecordSuccessfulApply("cfg", "{\"a\":1}");
             dataStore.RecordSuccessfulApply("cfg", "{\"a\":2}");
 
-            var reg = new LuaApiRegistry();
+            LuaApiRegistry reg = new();
             new CoreAiVersioningLuaRuntimeBindings(luaStore, dataStore).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
             env.RunChunk(script, "coreai_lua_reset('slot')\ncoreai_data_reset('cfg')");
 
-            Assert.IsTrue(luaStore.TryGetSnapshot("slot", out var ls));
+            Assert.IsTrue(luaStore.TryGetSnapshot("slot", out LuaScriptVersionRecord ls));
             Assert.AreEqual("print(1)", ls.CurrentLua);
-            Assert.IsTrue(dataStore.TryGetCurrentPayload("cfg", out var cur));
+            Assert.IsTrue(dataStore.TryGetCurrentPayload("cfg", out string cur));
             Assert.AreEqual("{\"a\":1}", cur);
         }
 
         [Test]
         public void VersioningLuaBindings_ListKeys_FromSandbox()
         {
-            var luaStore = new MemoryLuaScriptVersionStore();
+            MemoryLuaScriptVersionStore luaStore = new();
             luaStore.RecordSuccessfulExecution("a", "print(1)");
             luaStore.RecordSuccessfulExecution("b", "print(2)");
-            var dataStore = new MemoryDataOverlayVersionStore();
+            MemoryDataOverlayVersionStore dataStore = new();
             dataStore.RecordSuccessfulApply("cfg_a", "{}");
             dataStore.RecordSuccessfulApply("cfg_b", "{}");
-            var reg = new LuaApiRegistry();
+            LuaApiRegistry reg = new();
             new CoreAiVersioningLuaRuntimeBindings(luaStore, dataStore).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
-            var dv = env.RunChunk(script, "return coreai_lua_list_keys() .. ';' .. coreai_data_list_keys()");
-            var s = dv.ToObject<string>();
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+            DynValue dv = env.RunChunk(script, "return coreai_lua_list_keys() .. ';' .. coreai_data_list_keys()");
+            string s = dv.ToObject<string>();
             StringAssert.Contains("a", s);
             StringAssert.Contains("b", s);
             StringAssert.Contains("cfg_a", s);
@@ -149,31 +159,31 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void VersioningLuaBindings_DataApply_InvalidJson_Throws()
         {
-            var sink = new ListSink();
-            var reg = new LuaApiRegistry();
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
             new CoreAiVersioningLuaRuntimeBindings(
                 new MemoryLuaScriptVersionStore(),
                 new MemoryDataOverlayVersionStore(),
                 sink,
                 new DefaultDataOverlayPayloadValidator()).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
-            Assert.Throws<MoonSharp.Interpreter.ScriptRuntimeException>(() =>
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+            Assert.Throws<ScriptRuntimeException>(() =>
                 env.RunChunk(script, "coreai_data_apply('bad','oops')"));
         }
 
         [Test]
         public void VersioningLuaBindings_DataApply_PublishesDataOverlayApplied()
         {
-            var sink = new ListSink();
-            var reg = new LuaApiRegistry();
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
             new CoreAiVersioningLuaRuntimeBindings(
                 new MemoryLuaScriptVersionStore(),
                 new MemoryDataOverlayVersionStore(),
                 sink,
                 new DefaultDataOverlayPayloadValidator()).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
             env.RunChunk(script, "coreai_data_apply('cfg','{\"a\":1}')");
             Assert.AreEqual(1, sink.Items.Count);
             Assert.AreEqual(AiGameCommandTypeIds.DataOverlayApplied, sink.Items[0].CommandTypeId);

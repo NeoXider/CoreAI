@@ -24,17 +24,24 @@ namespace CoreAI.Infrastructure.Llm
         public static bool TryAutoAssignResolvableModel(LLM llm, IGameLogger logger)
         {
             if (logger == null)
+            {
                 throw new ArgumentNullException(nameof(logger));
-            if (llm == null || !string.IsNullOrWhiteSpace(llm.model))
-                return true;
+            }
 
-            var candidates = CollectResolvableNonLoraEntries();
+            if (llm == null || !string.IsNullOrWhiteSpace(llm.model))
+            {
+                return true;
+            }
+
+            List<ModelEntry> candidates = CollectResolvableNonLoraEntries();
             if (candidates.Count == 0)
+            {
                 return false;
+            }
 
             // Среди моделей с реальным файлом: сначала первая с includeInBuild (колонка Build), иначе первая в списке.
             ModelEntry chosen = null;
-            foreach (var c in candidates)
+            foreach (ModelEntry c in candidates)
             {
                 if (c.includeInBuild)
                 {
@@ -50,7 +57,8 @@ namespace CoreAI.Infrastructure.Llm
                 logger.LogWarning(
                     GameLogFeature.Llm,
                     "LLMUnity: в Model Manager несколько .gguf с файлами, а LLM.model в сцене пусто — " +
-                    "временно выбрано: «" + chosen.filename + "». Нажмите радиокнопку у нужной модели и сохраните сцену.");
+                    "временно выбрано: «" + chosen.filename +
+                    "». Нажмите радиокнопку у нужной модели и сохраните сцену.");
             }
 
             return TrySetModelFromEntry(llm, chosen, logger);
@@ -60,33 +68,47 @@ namespace CoreAI.Infrastructure.Llm
         /// Назначает модель из Model Manager, если имя файла .gguf (без учёта регистра) содержит все непустые токены.
         /// Удобно для Play Mode тестов (например Qwen3.5 0.8B: токены «qwen», «0.8»).
         /// </summary>
-        public static bool TryAssignModelMatchingFilename(LLM llm, IGameLogger logger, params string[] filenameSubstringsMustContainAll)
+        public static bool TryAssignModelMatchingFilename(LLM llm, IGameLogger logger,
+            params string[] filenameSubstringsMustContainAll)
         {
             if (logger == null)
+            {
                 throw new ArgumentNullException(nameof(logger));
-            if (llm == null || filenameSubstringsMustContainAll == null || filenameSubstringsMustContainAll.Length == 0)
-                return false;
-            if (!string.IsNullOrWhiteSpace(llm.model))
-                return true;
+            }
 
-            var tokens = new List<string>();
-            foreach (var t in filenameSubstringsMustContainAll)
+            if (llm == null || filenameSubstringsMustContainAll == null || filenameSubstringsMustContainAll.Length == 0)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(llm.model))
+            {
+                return true;
+            }
+
+            List<string> tokens = new();
+            foreach (string t in filenameSubstringsMustContainAll)
             {
                 if (string.IsNullOrWhiteSpace(t))
+                {
                     continue;
+                }
+
                 tokens.Add(t.Trim().ToLowerInvariant());
             }
 
             if (tokens.Count == 0)
-                return false;
-
-            var candidates = CollectResolvableNonLoraEntries();
-            var matched = new List<ModelEntry>();
-            foreach (var e in candidates)
             {
-                var fn = Path.GetFileName(e.filename ?? "").ToLowerInvariant();
-                var ok = true;
-                foreach (var tok in tokens)
+                return false;
+            }
+
+            List<ModelEntry> candidates = CollectResolvableNonLoraEntries();
+            List<ModelEntry> matched = new();
+            foreach (ModelEntry e in candidates)
+            {
+                string fn = Path.GetFileName(e.filename ?? "").ToLowerInvariant();
+                bool ok = true;
+                foreach (string tok in tokens)
                 {
                     if (!fn.Contains(tok))
                     {
@@ -96,14 +118,18 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 if (ok)
+                {
                     matched.Add(e);
+                }
             }
 
             if (matched.Count == 0)
+            {
                 return false;
+            }
 
             ModelEntry chosen = null;
-            foreach (var m in matched)
+            foreach (ModelEntry m in matched)
             {
                 if (m.includeInBuild)
                 {
@@ -127,15 +153,24 @@ namespace CoreAI.Infrastructure.Llm
                 return new List<ModelEntry>();
             }
 
-            var candidates = new List<ModelEntry>();
-            foreach (var e in LLMManager.modelEntries)
+            List<ModelEntry> candidates = new();
+            foreach (ModelEntry e in LLMManager.modelEntries)
             {
                 if (e == null || e.lora)
+                {
                     continue;
+                }
+
                 if (string.IsNullOrWhiteSpace(e.filename))
+                {
                     continue;
-                if (!TryResolveModelFilePath(e, out var fullPath) || !File.Exists(fullPath))
+                }
+
+                if (!TryResolveModelFilePath(e, out string fullPath) || !File.Exists(fullPath))
+                {
                     continue;
+                }
+
                 candidates.Add(e);
             }
 
@@ -155,7 +190,9 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             if (string.IsNullOrWhiteSpace(llm.model))
+            {
                 return false;
+            }
 
             logger.LogInfo(
                 GameLogFeature.Llm,
@@ -173,7 +210,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Как в LLM.GetLLMManagerAssetRuntime: путь через Model Manager.
-            var managerPath = LLMManager.GetAssetPath(e.filename);
+            string managerPath = LLMManager.GetAssetPath(e.filename);
             if (!string.IsNullOrWhiteSpace(managerPath) && File.Exists(managerPath))
             {
                 fullPath = managerPath;
@@ -181,14 +218,14 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Файл в StreamingAssets / persistent (как после скачивания через LLMUnity).
-            var assetPath = LLMUnitySetup.GetAssetPath(e.filename);
+            string assetPath = LLMUnitySetup.GetAssetPath(e.filename);
             if (!string.IsNullOrWhiteSpace(assetPath) && File.Exists(assetPath))
             {
                 fullPath = assetPath;
                 return true;
             }
 
-            var downloadPath = LLMUnitySetup.GetDownloadAssetPath(e.filename);
+            string downloadPath = LLMUnitySetup.GetDownloadAssetPath(e.filename);
             if (!string.IsNullOrWhiteSpace(downloadPath) && File.Exists(downloadPath))
             {
                 fullPath = downloadPath;

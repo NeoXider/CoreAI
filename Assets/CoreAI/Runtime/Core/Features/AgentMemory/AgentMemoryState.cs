@@ -16,4 +16,3 @@ namespace CoreAI.Ai
         public string Memory { get; set; }
     }
 }
-

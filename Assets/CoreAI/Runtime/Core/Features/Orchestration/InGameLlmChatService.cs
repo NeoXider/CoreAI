@@ -13,9 +13,9 @@ namespace CoreAI.Ai
     {
         private readonly ILlmClient _llm;
         private readonly IAgentSystemPromptProvider _systemPrompts;
-        private readonly List<(string Role, string Text)> _turns = new List<(string, string)>();
+        private readonly List<(string Role, string Text)> _turns = new();
         private readonly int _maxMessages;
-        private readonly object _lock = new object();
+        private readonly object _lock = new();
 
         public InGameLlmChatService(
             ILlmClient llm,
@@ -33,7 +33,9 @@ namespace CoreAI.Ai
             get
             {
                 lock (_lock)
+                {
                     return _turns.Count / 2;
+                }
             }
         }
 
@@ -41,7 +43,9 @@ namespace CoreAI.Ai
         public void ClearHistory()
         {
             lock (_lock)
+            {
                 _turns.Clear();
+            }
         }
 
         /// <inheritdoc />
@@ -50,23 +54,29 @@ namespace CoreAI.Ai
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(message))
+            {
                 return new LlmCompletionResult { Ok = false, Error = "empty message" };
+            }
 
-            var system = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.PlayerChat, out var sys) && !string.IsNullOrWhiteSpace(sys)
+            string system = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.PlayerChat, out string sys) &&
+                            !string.IsNullOrWhiteSpace(sys)
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
             string transcript;
             lock (_lock)
             {
-                var sb = new StringBuilder();
-                foreach (var (role, text) in _turns)
+                StringBuilder sb = new();
+                foreach ((string role, string text) in _turns)
+                {
                     sb.AppendLine($"{role}: {text}");
+                }
+
                 sb.AppendLine($"User: {message}");
                 transcript = sb.ToString();
             }
 
-            var result = await _llm.CompleteAsync(
+            LlmCompletionResult result = await _llm.CompleteAsync(
                 new LlmCompletionRequest
                 {
                     AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
@@ -86,7 +96,9 @@ namespace CoreAI.Ai
                     {
                         _turns.RemoveAt(0);
                         if (_turns.Count > 0)
+                        {
                             _turns.RemoveAt(0);
+                        }
                     }
                 }
             }

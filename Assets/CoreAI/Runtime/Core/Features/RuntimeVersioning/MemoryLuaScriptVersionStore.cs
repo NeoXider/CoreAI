@@ -20,15 +20,24 @@ namespace CoreAI.Ai
         {
             snapshot = null;
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return false;
-            var key = scriptKey.Trim();
+            }
+
+            string key = scriptKey.Trim();
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
+                {
                     return false;
-                var copy = new List<LuaScriptRevision>(slot.History.Count);
+                }
+
+                List<LuaScriptRevision> copy = new(slot.History.Count);
                 for (int i = 0; i < slot.History.Count; i++)
+                {
                     copy.Add(slot.History[i]);
+                }
+
                 snapshot = new LuaScriptVersionRecord(key, slot.OriginalLua, slot.CurrentLua, copy);
                 return true;
             }
@@ -37,13 +46,16 @@ namespace CoreAI.Ai
         public void RecordSuccessfulExecution(string scriptKey, string executedLuaSource)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return;
-            var key = scriptKey.Trim();
-            var lua = executedLuaSource ?? "";
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = scriptKey.Trim();
+            string lua = executedLuaSource ?? "";
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot))
+                if (!_slots.TryGetValue(key, out Slot slot))
                 {
                     slot = new Slot();
                     _slots[key] = slot;
@@ -54,7 +66,9 @@ namespace CoreAI.Ai
                 }
 
                 if (string.Equals(slot.CurrentLua, lua, StringComparison.Ordinal))
+                {
                     return;
+                }
 
                 int next = slot.History.Count;
                 slot.History.Add(new LuaScriptRevision(next, lua, now));
@@ -65,13 +79,16 @@ namespace CoreAI.Ai
         public void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return;
-            var key = scriptKey.Trim();
-            var seed = originalLuaSource ?? "";
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = scriptKey.Trim();
+            string seed = originalLuaSource ?? "";
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot))
+                if (!_slots.TryGetValue(key, out Slot slot))
                 {
                     slot = new Slot();
                     _slots[key] = slot;
@@ -94,14 +111,20 @@ namespace CoreAI.Ai
         public void ResetToOriginal(string scriptKey)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return;
-            var key = scriptKey.Trim();
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = scriptKey.Trim();
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || string.IsNullOrEmpty(slot.OriginalLua))
+                if (!_slots.TryGetValue(key, out Slot slot) || string.IsNullOrEmpty(slot.OriginalLua))
+                {
                     return;
-                var o = slot.OriginalLua;
+                }
+
+                string o = slot.OriginalLua;
                 slot.CurrentLua = o;
                 slot.History.Clear();
                 slot.History.Add(new LuaScriptRevision(0, o, now));
@@ -111,20 +134,34 @@ namespace CoreAI.Ai
         public void ResetToRevision(string scriptKey, int revisionIndex)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return;
+            }
+
             if (revisionIndex < 0)
+            {
                 return;
-            var key = scriptKey.Trim();
+            }
+
+            string key = scriptKey.Trim();
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
+                {
                     return;
+                }
+
                 if (revisionIndex >= slot.History.Count)
+                {
                     return;
-                var rev = slot.History[revisionIndex];
+                }
+
+                LuaScriptRevision rev = slot.History[revisionIndex];
                 slot.CurrentLua = rev.Source ?? "";
                 if (slot.History.Count > revisionIndex + 1)
+                {
                     slot.History.RemoveRange(revisionIndex + 1, slot.History.Count - revisionIndex - 1);
+                }
             }
         }
 
@@ -134,23 +171,29 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 keys = new List<string>(_slots.Count);
-                foreach (var kv in _slots)
+                foreach (KeyValuePair<string, Slot> kv in _slots)
+                {
                     keys.Add(kv.Key);
+                }
             }
 
             for (int i = 0; i < keys.Count; i++)
+            {
                 ResetToOriginal(keys[i]);
+            }
         }
 
         public IReadOnlyList<string> GetKnownKeys()
         {
             lock (_lock)
             {
-                var list = new List<string>(_slots.Count);
-                foreach (var kv in _slots)
+                List<string> list = new(_slots.Count);
+                foreach (KeyValuePair<string, Slot> kv in _slots)
                 {
                     if (kv.Value.History.Count > 0)
+                    {
                         list.Add(kv.Key);
+                    }
                 }
 
                 list.Sort(StringComparer.Ordinal);
@@ -161,10 +204,16 @@ namespace CoreAI.Ai
         public string BuildProgrammerPromptSection(string scriptKey)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))
+            {
                 return "";
+            }
+
             LuaScriptVersionRecord snap = null;
-            if (TryGetSnapshot(scriptKey, out var s))
+            if (TryGetSnapshot(scriptKey, out LuaScriptVersionRecord s))
+            {
                 snap = s;
+            }
+
             return LuaScriptVersionPromptFormatter.Format(scriptKey, snap);
         }
 
@@ -172,23 +221,31 @@ namespace CoreAI.Ai
         public void ClearAll()
         {
             lock (_lock)
+            {
                 _slots.Clear();
+            }
         }
 
         /// <summary>Заменить состояние из снимков (десериализация с диска).</summary>
         public void ImportFromRecords(IEnumerable<LuaScriptVersionRecord> records)
         {
             if (records == null)
+            {
                 return;
+            }
+
             lock (_lock)
             {
                 _slots.Clear();
-                foreach (var r in records)
+                foreach (LuaScriptVersionRecord r in records)
                 {
                     if (r == null || string.IsNullOrWhiteSpace(r.ScriptKey))
+                    {
                         continue;
-                    var key = r.ScriptKey.Trim();
-                    var slot = new Slot
+                    }
+
+                    string key = r.ScriptKey.Trim();
+                    Slot slot = new()
                     {
                         OriginalLua = r.OriginalLua ?? "",
                         CurrentLua = r.CurrentLua ?? ""
@@ -196,13 +253,19 @@ namespace CoreAI.Ai
                     if (r.History != null && r.History.Count > 0)
                     {
                         for (int i = 0; i < r.History.Count; i++)
+                        {
                             slot.History.Add(r.History[i]);
+                        }
                     }
                     else if (!string.IsNullOrEmpty(slot.CurrentLua))
+                    {
                         slot.History.Add(new LuaScriptRevision(0, slot.CurrentLua, DateTime.UtcNow.Ticks));
+                    }
 
                     if (slot.History.Count > 0)
+                    {
                         _slots[key] = slot;
+                    }
                 }
             }
         }
@@ -212,15 +275,21 @@ namespace CoreAI.Ai
         {
             lock (_lock)
             {
-                var list = new List<LuaScriptVersionRecord>(_slots.Count);
-                foreach (var kv in _slots)
+                List<LuaScriptVersionRecord> list = new(_slots.Count);
+                foreach (KeyValuePair<string, Slot> kv in _slots)
                 {
-                    var slot = kv.Value;
+                    Slot slot = kv.Value;
                     if (slot.History.Count == 0)
+                    {
                         continue;
-                    var copy = new List<LuaScriptRevision>(slot.History.Count);
+                    }
+
+                    List<LuaScriptRevision> copy = new(slot.History.Count);
                     for (int i = 0; i < slot.History.Count; i++)
+                    {
                         copy.Add(slot.History[i]);
+                    }
+
                     list.Add(new LuaScriptVersionRecord(kv.Key, slot.OriginalLua, slot.CurrentLua, copy));
                 }
 

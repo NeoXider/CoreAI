@@ -28,25 +28,29 @@ namespace CoreAI.Infrastructure.Prompts
 
         /// <summary>Переопределения встроенных ролей CoreAI.</summary>
         [Header("Переопределения встроенных ролей (опционально)")]
-        public List<Entry> roleOverrides = new List<Entry>();
+        public List<Entry> roleOverrides = new();
 
         /// <summary>Дополнительные роли игры (не заменяют встроенные по умолчанию).</summary>
         [Header("Кастомные агенты (ваша игра)")]
-        public List<Entry> customAgents = new List<Entry>();
+        public List<Entry> customAgents = new();
 
         /// <summary>Все записи: сначала переопределения ролей, затем кастомные агенты.</summary>
         public IEnumerable<Entry> EnumerateEntries()
         {
             if (roleOverrides != null)
             {
-                foreach (var e in roleOverrides)
+                foreach (Entry e in roleOverrides)
+                {
                     yield return e;
+                }
             }
 
             if (customAgents != null)
             {
-                foreach (var e in customAgents)
+                foreach (Entry e in customAgents)
+                {
                     yield return e;
+                }
             }
         }
     }

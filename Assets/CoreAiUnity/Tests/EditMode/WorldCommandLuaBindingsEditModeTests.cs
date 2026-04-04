@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Sandbox;
+using MoonSharp.Interpreter;
 using NUnit.Framework;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
@@ -13,17 +14,20 @@ namespace CoreAI.Tests.EditMode
         {
             public readonly List<ApplyAiGameCommand> Items = new();
 
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         [Test]
         public void Lua_coreai_world_spawn_PublishesWorldCommand()
         {
-            var sink = new ListSink();
-            var reg = new LuaApiRegistry();
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
             new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
 
             env.RunChunk(script, "coreai_world_spawn('enemy.basic','e1', 1,2,3)");
 
@@ -37,11 +41,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Lua_coreai_world_set_active_PublishesWorldCommand()
         {
-            var sink = new ListSink();
-            var reg = new LuaApiRegistry();
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
             new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
-            var env = new SecureLuaEnvironment();
-            var script = env.CreateScript(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
 
             env.RunChunk(script, "coreai_world_set_active('e1', true)");
 
@@ -52,4 +56,3 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
-

@@ -31,13 +31,19 @@ namespace CoreAI.Infrastructure.AiMemory
             state = null;
             try
             {
-                var path = GetPath(roleId);
+                string path = GetPath(roleId);
                 if (!File.Exists(path))
+                {
                     return false;
-                var json = File.ReadAllText(path);
-                var p = JsonUtility.FromJson<Persisted>(json);
+                }
+
+                string json = File.ReadAllText(path);
+                Persisted p = JsonUtility.FromJson<Persisted>(json);
                 if (p == null)
+                {
                     return false;
+                }
+
                 state = new AgentMemoryState
                 {
                     LastSystemPrompt = p.lastSystemPrompt ?? "",
@@ -57,12 +63,12 @@ namespace CoreAI.Infrastructure.AiMemory
             try
             {
                 Directory.CreateDirectory(_dir);
-                var p = new Persisted
+                Persisted p = new()
                 {
                     lastSystemPrompt = state?.LastSystemPrompt ?? "",
                     memory = state?.Memory ?? ""
                 };
-                var json = JsonUtility.ToJson(p, true);
+                string json = JsonUtility.ToJson(p, true);
                 File.WriteAllText(GetPath(roleId), json);
             }
             catch (Exception)
@@ -75,9 +81,11 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             try
             {
-                var path = GetPath(roleId);
+                string path = GetPath(roleId);
                 if (File.Exists(path))
+                {
                     File.Delete(path);
+                }
             }
             catch (Exception)
             {
@@ -86,11 +94,13 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private string GetPath(string roleId)
         {
-            var safe = string.IsNullOrWhiteSpace(roleId) ? "Creator" : roleId.Trim();
-            foreach (var c in Path.GetInvalidFileNameChars())
+            string safe = string.IsNullOrWhiteSpace(roleId) ? "Creator" : roleId.Trim();
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
                 safe = safe.Replace(c.ToString(), "_");
+            }
+
             return Path.Combine(_dir, safe + ".json");
         }
     }
 }
-

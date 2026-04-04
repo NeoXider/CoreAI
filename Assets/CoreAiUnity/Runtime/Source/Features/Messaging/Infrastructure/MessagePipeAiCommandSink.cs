@@ -15,6 +15,9 @@ namespace CoreAI.Infrastructure.Messaging
         }
 
         /// <inheritdoc />
-        public void Publish(ApplyAiGameCommand command) => _publisher.Publish(command);
+        public void Publish(ApplyAiGameCommand command)
+        {
+            _publisher.Publish(command);
+        }
     }
 }

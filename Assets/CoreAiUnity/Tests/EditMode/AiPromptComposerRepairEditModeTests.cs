@@ -9,12 +9,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildUserPayload_AppendsLuaRepairFields()
         {
-            var composer = new AiPromptComposer(
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
-            var snap = new GameSessionSnapshot();
-            var task = new AiTaskRequest
+            GameSessionSnapshot snap = new();
+            AiTaskRequest task = new()
             {
                 RoleId = BuiltInAgentRoleIds.Programmer,
                 Hint = "fix",
@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode
                 LuaRepairPreviousCode = "return x",
                 LuaRepairErrorMessage = "boom"
             };
-            var u = composer.BuildUserPayload(snap, task);
+            string u = composer.BuildUserPayload(snap, task);
             StringAssert.Contains("lua_repair_generation=2", u);
             StringAssert.Contains("lua_error=boom", u);
             StringAssert.Contains("fix_this_lua=", u);

@@ -9,4 +9,3 @@ namespace CoreAI.Infrastructure.World
         bool TryExecute(ApplyAiGameCommand cmd);
     }
 }
-

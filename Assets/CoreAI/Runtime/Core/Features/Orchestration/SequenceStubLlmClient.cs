@@ -9,10 +9,13 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class SequenceStubLlmClient : ILlmClient
     {
-        private readonly Queue<string> _queue = new Queue<string>();
+        private readonly Queue<string> _queue = new();
 
         /// <summary>Добавить заранее заданный текст ответа в очередь (FIFO).</summary>
-        public void EnqueueResponse(string content) => _queue.Enqueue(content);
+        public void EnqueueResponse(string content)
+        {
+            _queue.Enqueue(content);
+        }
 
         /// <inheritdoc />
         public Task<LlmCompletionResult> CompleteAsync(
@@ -28,7 +31,7 @@ namespace CoreAI.Ai
                 });
             }
 
-            var c = _queue.Dequeue();
+            string c = _queue.Dequeue();
             return Task.FromResult(new LlmCompletionResult { Ok = true, Content = c });
         }
     }

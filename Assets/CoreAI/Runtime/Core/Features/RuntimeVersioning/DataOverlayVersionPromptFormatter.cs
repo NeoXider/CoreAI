@@ -9,14 +9,17 @@ namespace CoreAI.Ai
         public static string Format(string overlayKey, DataOverlayVersionRecord snapshot)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return "";
+            }
 
-            var sb = new StringBuilder(256);
+            StringBuilder sb = new(256);
             sb.Append("## Data_overlay_versioning\n");
             sb.Append("overlay_key: ").Append(overlayKey.Trim()).Append('\n');
             if (snapshot == null)
             {
-                sb.Append("No saved overlays for this key yet. First successful coreai_data_apply establishes baseline.\n");
+                sb.Append(
+                    "No saved overlays for this key yet. First successful coreai_data_apply establishes baseline.\n");
                 return sb.ToString();
             }
 
@@ -31,9 +34,15 @@ namespace CoreAI.Ai
         private static string Clamp(string s)
         {
             if (string.IsNullOrEmpty(s))
+            {
                 return "";
+            }
+
             if (s.Length <= MaxChars)
+            {
                 return s;
+            }
+
             return s.Substring(0, MaxChars) + "\n…";
         }
     }

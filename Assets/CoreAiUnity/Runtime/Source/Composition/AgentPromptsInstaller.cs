@@ -13,21 +13,28 @@ namespace CoreAI.Composition
         /// </summary>
         public static void RegisterAgentPrompts(this IContainerBuilder builder, AgentPromptsManifest manifest)
         {
-            var systemChain = new List<IAgentSystemPromptProvider>();
+            List<IAgentSystemPromptProvider> systemChain = new();
             if (manifest != null)
+            {
                 systemChain.Add(new ManifestAgentSystemPromptProvider(manifest));
+            }
+
             systemChain.Add(new ResourcesAgentSystemPromptProvider("AgentPrompts/System"));
             systemChain.Add(new BuiltInDefaultAgentSystemPromptProvider());
 
             builder.RegisterInstance<IAgentSystemPromptProvider>(new ChainedAgentSystemPromptProvider(systemChain));
 
-            var userChain = new List<IAgentUserPromptTemplateProvider>();
+            List<IAgentUserPromptTemplateProvider> userChain = new();
             if (manifest != null)
+            {
                 userChain.Add(new ManifestUserTemplateProvider(manifest));
+            }
+
             userChain.Add(new ResourcesUserTemplateProvider("AgentPrompts/User"));
             userChain.Add(new NoAgentUserPromptTemplateProvider());
 
-            builder.RegisterInstance<IAgentUserPromptTemplateProvider>(new ChainedAgentUserPromptTemplateProvider(userChain));
+            builder.RegisterInstance<IAgentUserPromptTemplateProvider>(
+                new ChainedAgentUserPromptTemplateProvider(userChain));
         }
     }
 }

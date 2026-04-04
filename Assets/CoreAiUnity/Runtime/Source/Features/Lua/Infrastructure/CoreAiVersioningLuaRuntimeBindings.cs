@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Messaging;
 using CoreAI.Sandbox;
@@ -41,7 +42,10 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("coreai_lua_reset", new Action<string>(k =>
             {
                 if (k == null)
+                {
                     return;
+                }
+
                 _lua.ResetToOriginal(k.ToString().Trim());
             }));
 
@@ -50,32 +54,44 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("coreai_lua_reset_revision", new Action<string, double>((k, revIndex) =>
             {
                 if (k == null)
+                {
                     return;
+                }
+
                 _lua.ResetToRevision(k.ToString().Trim(), (int)revIndex);
             }));
 
             registry.Register("coreai_lua_get_current", new Func<string, string>(k =>
             {
                 if (k == null || string.IsNullOrWhiteSpace(k.ToString()))
+                {
                     return "";
-                var key = k.ToString().Trim();
-                return _lua.TryGetSnapshot(key, out var snap) ? (snap.CurrentLua ?? "") : "";
+                }
+
+                string key = k.ToString().Trim();
+                return _lua.TryGetSnapshot(key, out LuaScriptVersionRecord snap) ? snap.CurrentLua ?? "" : "";
             }));
 
             registry.Register("coreai_lua_list_keys", new Func<string>(() =>
             {
-                var keys = _lua.GetKnownKeys();
+                IReadOnlyList<string> keys = _lua.GetKnownKeys();
                 return keys == null || keys.Count == 0 ? "" : string.Join(",", keys);
             }));
 
             registry.Register("coreai_data_apply", new Action<string, string>((key, payload) =>
             {
                 if (string.IsNullOrWhiteSpace(key))
+                {
                     return;
-                var trimmedKey = key.Trim();
-                var p = payload ?? "";
-                if (!_validator.TryValidate(trimmedKey, p, out var error))
+                }
+
+                string trimmedKey = key.Trim();
+                string p = payload ?? "";
+                if (!_validator.TryValidate(trimmedKey, p, out string error))
+                {
                     throw new InvalidOperationException(error);
+                }
+
                 _data.RecordSuccessfulApply(trimmedKey, p);
                 PublishDataOverlayApplied(trimmedKey, p);
             }));
@@ -83,35 +99,50 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("coreai_data_get", new Func<string, string>(key =>
             {
                 if (key == null || string.IsNullOrWhiteSpace(key))
+                {
                     return "";
-                return _data.TryGetCurrentPayload(key.ToString().Trim(), out var p) ? (p ?? "") : "";
+                }
+
+                return _data.TryGetCurrentPayload(key.ToString().Trim(), out string p) ? p ?? "" : "";
             }));
 
             registry.Register("coreai_data_seed", new Action<string, string>((key, payload) =>
             {
                 if (string.IsNullOrWhiteSpace(key))
+                {
                     return;
+                }
+
                 _data.SeedOriginal(key.Trim(), payload ?? "", false);
             }));
 
             registry.Register("coreai_data_seed_overwrite", new Action<string, string>((key, payload) =>
             {
                 if (string.IsNullOrWhiteSpace(key))
+                {
                     return;
+                }
+
                 _data.SeedOriginal(key.Trim(), payload ?? "", true);
             }));
 
             registry.Register("coreai_data_reset", new Action<string>(k =>
             {
                 if (k == null)
+                {
                     return;
+                }
+
                 _data.ResetToOriginal(k.ToString().Trim());
             }));
 
             registry.Register("coreai_data_reset_revision", new Action<string, double>((k, revIndex) =>
             {
                 if (k == null)
+                {
                     return;
+                }
+
                 _data.ResetToRevision(k.ToString().Trim(), (int)revIndex);
             }));
 
@@ -119,7 +150,7 @@ namespace CoreAI.Infrastructure.Lua
 
             registry.Register("coreai_data_list_keys", new Func<string>(() =>
             {
-                var keys = _data.GetKnownKeys();
+                IReadOnlyList<string> keys = _data.GetKnownKeys();
                 return keys == null || keys.Count == 0 ? "" : string.Join(",", keys);
             }));
         }
@@ -127,8 +158,11 @@ namespace CoreAI.Infrastructure.Lua
         private void PublishDataOverlayApplied(string key, string payload)
         {
             if (_sink == null)
+            {
                 return;
-            var env = new DataOverlayAppliedEnvelope { key = key ?? "", payload = payload ?? "" };
+            }
+
+            DataOverlayAppliedEnvelope env = new() { key = key ?? "", payload = payload ?? "" };
             _sink.Publish(new ApplyAiGameCommand
             {
                 CommandTypeId = DataOverlayApplied,

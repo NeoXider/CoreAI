@@ -11,20 +11,16 @@ namespace CoreAI.Presentation.PlayerChat
     /// </summary>
     public sealed class InGameChatPanel : MonoBehaviour
     {
-        [Tooltip("Поле ввода сообщения игрока (TextMeshPro).")]
-        [SerializeField]
+        [Tooltip("Поле ввода сообщения игрока (TextMeshPro).")] [SerializeField]
         private TMP_InputField inputField;
 
-        [Tooltip("Куда выводить историю диалога (TextMeshPro).")]
-        [SerializeField]
+        [Tooltip("Куда выводить историю диалога (TextMeshPro).")] [SerializeField]
         private TMP_Text outputText;
 
-        [Tooltip("Отправить текущий текст в LLM.")]
-        [SerializeField]
+        [Tooltip("Отправить текущий текст в LLM.")] [SerializeField]
         private Button sendButton;
 
-        [Tooltip("Очистить историю на стороне сервиса чата.")]
-        [SerializeField]
+        [Tooltip("Очистить историю на стороне сервиса чата.")] [SerializeField]
         private Button clearHistoryButton;
 
         private IInGameLlmChatService _chat;
@@ -38,23 +34,35 @@ namespace CoreAI.Presentation.PlayerChat
         private void OnEnable()
         {
             if (sendButton != null)
+            {
                 sendButton.onClick.AddListener(OnSendClicked);
+            }
+
             if (clearHistoryButton != null)
+            {
                 clearHistoryButton.onClick.AddListener(OnClearClicked);
+            }
         }
 
         private void OnDisable()
         {
             if (sendButton != null)
+            {
                 sendButton.onClick.RemoveListener(OnSendClicked);
+            }
+
             if (clearHistoryButton != null)
+            {
                 clearHistoryButton.onClick.RemoveListener(OnClearClicked);
+            }
         }
 
         private void Start()
         {
             if (_scope != null)
+            {
                 _chat = (IInGameLlmChatService)_scope.Container.Resolve(typeof(IInGameLlmChatService));
+            }
         }
 
         private async void OnSendClicked()
@@ -65,32 +73,45 @@ namespace CoreAI.Presentation.PlayerChat
                 return;
             }
 
-            var msg = inputField != null ? inputField.text.Trim() : string.Empty;
+            string msg = inputField != null ? inputField.text.Trim() : string.Empty;
             if (string.IsNullOrEmpty(msg))
+            {
                 return;
+            }
 
             AppendLine("You: " + msg);
             if (inputField != null)
+            {
                 inputField.text = string.Empty;
+            }
 
-            var result = await _chat.SendPlayerMessageAsync(msg);
+            LlmCompletionResult result = await _chat.SendPlayerMessageAsync(msg);
             if (result.Ok)
+            {
                 AppendLine("Assistant: " + result.Content);
+            }
             else
+            {
                 AppendLine("[error] " + result.Error);
+            }
         }
 
         private void OnClearClicked()
         {
             _chat?.ClearHistory();
             if (outputText != null)
+            {
                 outputText.text = string.Empty;
+            }
         }
 
         private void AppendLine(string line)
         {
             if (outputText == null)
+            {
                 return;
+            }
+
             outputText.text += line + "\n";
         }
     }

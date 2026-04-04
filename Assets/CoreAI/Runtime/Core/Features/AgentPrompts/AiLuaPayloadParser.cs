@@ -13,45 +13,72 @@ namespace CoreAI.Ai
         {
             luaCode = null;
             if (string.IsNullOrWhiteSpace(payload))
+            {
                 return false;
+            }
+
             if (ProgrammerLuaResponseParser.TryExtractLuaCode(payload, out luaCode))
+            {
                 return true;
-            if (LlmResponseSanitizer.TryPrepareJsonObject(payload, out var jsonBody) &&
+            }
+
+            if (LlmResponseSanitizer.TryPrepareJsonObject(payload, out string jsonBody) &&
                 TryExtractExecuteLuaJson(jsonBody, out luaCode))
+            {
                 return true;
+            }
+
             return TryExtractExecuteLuaJson(payload, out luaCode);
         }
 
         private static bool TryExtractExecuteLuaJson(string s, out string code)
         {
             code = null;
-            var anchor = IndexOfCommandType(s, "ExecuteLua");
+            int anchor = IndexOfCommandType(s, "ExecuteLua");
             if (anchor < 0)
+            {
                 return false;
+            }
+
             return TryReadJsonStringProperty(s, "code", anchor, out code) && !string.IsNullOrWhiteSpace(code);
         }
 
         private static int IndexOfCommandType(string s, string typeValue)
         {
             const string pat = "\"commandType\"";
-            var i = 0;
+            int i = 0;
             while (i < s.Length)
             {
-                var p = s.IndexOf(pat, i, StringComparison.OrdinalIgnoreCase);
+                int p = s.IndexOf(pat, i, StringComparison.OrdinalIgnoreCase);
                 if (p < 0)
+                {
                     return -1;
-                var colon = s.IndexOf(':', p);
+                }
+
+                int colon = s.IndexOf(':', p);
                 if (colon < 0)
+                {
                     return -1;
-                var startQ = s.IndexOf('"', colon);
+                }
+
+                int startQ = s.IndexOf('"', colon);
                 if (startQ < 0)
+                {
                     return -1;
-                var endQ = FindClosingJsonStringEnd(s, startQ + 1);
+                }
+
+                int endQ = FindClosingJsonStringEnd(s, startQ + 1);
                 if (endQ < 0)
+                {
                     return -1;
-                var val = s.Substring(startQ + 1, endQ - startQ - 1);
+                }
+
+                string val = s.Substring(startQ + 1, endQ - startQ - 1);
                 if (val.Equals(typeValue, StringComparison.OrdinalIgnoreCase))
+                {
                     return p;
+                }
+
                 i = endQ + 1;
             }
 
@@ -60,7 +87,7 @@ namespace CoreAI.Ai
 
         private static int FindClosingJsonStringEnd(string s, int from)
         {
-            for (var i = from; i < s.Length; i++)
+            for (int i = from; i < s.Length; i++)
             {
                 if (s[i] == '\\')
                 {
@@ -69,7 +96,9 @@ namespace CoreAI.Ai
                 }
 
                 if (s[i] == '"')
+                {
                     return i;
+                }
             }
 
             return -1;
@@ -78,28 +107,43 @@ namespace CoreAI.Ai
         private static bool TryReadJsonStringProperty(string s, string prop, int searchFrom, out string value)
         {
             value = null;
-            var key = "\"" + prop + "\"";
-            var k = s.IndexOf(key, searchFrom, StringComparison.OrdinalIgnoreCase);
+            string key = "\"" + prop + "\"";
+            int k = s.IndexOf(key, searchFrom, StringComparison.OrdinalIgnoreCase);
             if (k < 0)
+            {
                 return false;
-            var colon = s.IndexOf(':', k + key.Length);
+            }
+
+            int colon = s.IndexOf(':', k + key.Length);
             if (colon < 0)
+            {
                 return false;
-            var i = colon + 1;
+            }
+
+            int i = colon + 1;
             while (i < s.Length && char.IsWhiteSpace(s[i]))
+            {
                 i++;
+            }
+
             if (i >= s.Length || s[i] != '"')
+            {
                 return false;
+            }
+
             i++;
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             while (i < s.Length)
             {
-                var c = s[i++];
+                char c = s[i++];
                 if (c == '\\')
                 {
                     if (i >= s.Length)
+                    {
                         return false;
-                    var e = s[i++];
+                    }
+
+                    char e = s[i++];
                     switch (e)
                     {
                         case 'n':

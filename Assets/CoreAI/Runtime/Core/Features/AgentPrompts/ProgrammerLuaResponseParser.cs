@@ -12,17 +12,26 @@ namespace CoreAI.Ai
         {
             luaCode = null;
             if (string.IsNullOrEmpty(content))
+            {
                 return false;
+            }
 
-            var start = IndexOfFencedBlock(content, "```lua", StringComparison.OrdinalIgnoreCase);
+            int start = IndexOfFencedBlock(content, "```lua", StringComparison.OrdinalIgnoreCase);
             if (start < 0)
+            {
                 start = IndexOfFencedBlock(content, "```Lua", StringComparison.Ordinal);
-            if (start < 0)
-                return false;
+            }
 
-            var end = content.IndexOf("```", start, StringComparison.Ordinal);
-            if (end < 0)
+            if (start < 0)
+            {
                 return false;
+            }
+
+            int end = content.IndexOf("```", start, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                return false;
+            }
 
             luaCode = content.Substring(start, end - start).Trim();
             return !string.IsNullOrEmpty(luaCode);
@@ -30,12 +39,18 @@ namespace CoreAI.Ai
 
         private static int IndexOfFencedBlock(string content, string fenceOpen, StringComparison comparison)
         {
-            var i = content.IndexOf(fenceOpen, comparison);
+            int i = content.IndexOf(fenceOpen, comparison);
             if (i < 0)
+            {
                 return -1;
-            var lineBreak = content.IndexOf('\n', i + fenceOpen.Length);
+            }
+
+            int lineBreak = content.IndexOf('\n', i + fenceOpen.Length);
             if (lineBreak < 0)
+            {
                 return -1;
+            }
+
             return lineBreak + 1;
         }
     }
@@ -50,20 +65,37 @@ namespace CoreAI.Ai
         public static string StripMarkdownCodeFences(string s)
         {
             if (string.IsNullOrWhiteSpace(s))
+            {
                 return s;
-            var t = s.Trim();
+            }
+
+            string t = s.Trim();
             if (!t.StartsWith("```", StringComparison.Ordinal))
+            {
                 return t;
-            var afterOpen = t.IndexOf('\n');
+            }
+
+            int afterOpen = t.IndexOf('\n');
             if (afterOpen < 0)
+            {
                 afterOpen = t.IndexOf('\r');
+            }
+
             if (afterOpen >= 0)
+            {
                 t = t.Substring(afterOpen + 1).TrimStart('\r', '\n');
+            }
             else
+            {
                 t = t.Substring(3).TrimStart();
-            var close = t.LastIndexOf("```", StringComparison.Ordinal);
+            }
+
+            int close = t.LastIndexOf("```", StringComparison.Ordinal);
             if (close >= 0)
+            {
                 t = t.Substring(0, close);
+            }
+
             return t.Trim();
         }
 
@@ -75,10 +107,16 @@ namespace CoreAI.Ai
         {
             jsonObject = null;
             if (string.IsNullOrWhiteSpace(raw))
+            {
                 return false;
-            var work = raw.Trim();
-            for (var pass = 0; pass < 6 && work.StartsWith("```", StringComparison.Ordinal); pass++)
+            }
+
+            string work = raw.Trim();
+            for (int pass = 0; pass < 6 && work.StartsWith("```", StringComparison.Ordinal); pass++)
+            {
                 work = StripMarkdownCodeFences(work);
+            }
+
             return TryExtractFirstBalancedJsonObject(work, out jsonObject);
         }
 
@@ -86,16 +124,22 @@ namespace CoreAI.Ai
         {
             json = null;
             if (string.IsNullOrEmpty(s))
-                return false;
-            var start = s.IndexOf('{');
-            if (start < 0)
-                return false;
-            var depth = 0;
-            var inString = false;
-            var escape = false;
-            for (var i = start; i < s.Length; i++)
             {
-                var c = s[i];
+                return false;
+            }
+
+            int start = s.IndexOf('{');
+            if (start < 0)
+            {
+                return false;
+            }
+
+            int depth = 0;
+            bool inString = false;
+            bool escape = false;
+            for (int i = start; i < s.Length; i++)
+            {
+                char c = s[i];
                 if (escape)
                 {
                     escape = false;
@@ -105,9 +149,14 @@ namespace CoreAI.Ai
                 if (inString)
                 {
                     if (c == '\\')
+                    {
                         escape = true;
+                    }
                     else if (c == '"')
+                    {
                         inString = false;
+                    }
+
                     continue;
                 }
 
@@ -118,7 +167,9 @@ namespace CoreAI.Ai
                 }
 
                 if (c == '{')
+                {
                     depth++;
+                }
                 else if (c == '}')
                 {
                     depth--;

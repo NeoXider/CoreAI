@@ -12,24 +12,35 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class SpyLogger : IGameLogger
         {
-            public readonly List<string> Lines = new List<string>();
+            public readonly List<string> Lines = new();
 
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null) =>
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
                 Lines.Add($"D:{feature}:{message}");
+            }
 
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null) =>
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
                 Lines.Add($"I:{feature}:{message}");
+            }
 
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null) =>
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
                 Lines.Add($"W:{feature}:{message}");
+            }
 
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null) =>
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
                 Lines.Add($"E:{feature}:{message}");
+            }
         }
 
         private sealed class AllOnSettings : IGameLogSettings
         {
-            public bool ShouldLog(GameLogFeature feature, GameLogLevel level) => true;
+            public bool ShouldLog(GameLogFeature feature, GameLogLevel level)
+            {
+                return true;
+            }
         }
 
         private sealed class MockLlm : ILlmClient
@@ -48,7 +59,10 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken = default)
             {
                 if (_delayMs > 0)
+                {
                     await Task.Delay(_delayMs, cancellationToken).ConfigureAwait(false);
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 return _result;
             }
@@ -57,19 +71,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Success_LogsTraceIdAndRole()
         {
-            var spy = new SpyLogger();
-            var inner = new MockLlm(0, new LlmCompletionResult { Ok = true, Content = "ok" });
-            var dec = new LoggingLlmClientDecorator(inner, spy, 0f);
-            var req = new LlmCompletionRequest
+            SpyLogger spy = new();
+            MockLlm inner = new(0, new LlmCompletionResult { Ok = true, Content = "ok" });
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f);
+            LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Creator,
                 TraceId = "abc123",
                 SystemPrompt = "sys",
                 UserPayload = "user"
             };
-            var r = await dec.CompleteAsync(req);
+            LlmCompletionResult r = await dec.CompleteAsync(req);
             Assert.IsTrue(r.Ok);
-            var joined = string.Join("\n", spy.Lines);
+            string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("abc123", joined);
             StringAssert.Contains(BuiltInAgentRoleIds.Creator, joined);
             StringAssert.Contains("LLM ▶", joined);
@@ -79,20 +93,20 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Timeout_LogsWarningAndReturnsError()
         {
-            var spy = new SpyLogger();
-            var inner = new MockLlm(5000, new LlmCompletionResult { Ok = true, Content = "late" });
-            var dec = new LoggingLlmClientDecorator(inner, spy, 0.05f);
-            using var cts = new CancellationTokenSource();
-            var req = new LlmCompletionRequest
+            SpyLogger spy = new();
+            MockLlm inner = new(5000, new LlmCompletionResult { Ok = true, Content = "late" });
+            LoggingLlmClientDecorator dec = new(inner, spy, 0.05f);
+            using CancellationTokenSource cts = new();
+            LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Programmer,
                 TraceId = "t-out",
                 UserPayload = "x"
             };
-            var r = await dec.CompleteAsync(req, cts.Token);
+            LlmCompletionResult r = await dec.CompleteAsync(req, cts.Token);
             Assert.IsFalse(r.Ok);
             Assert.IsTrue(r.Error?.Contains("timeout") == true || r.Error?.Contains("Timeout") == true);
-            var joined = string.Join("\n", spy.Lines);
+            string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("t-out", joined);
             StringAssert.Contains("LLM ⏱", joined);
         }

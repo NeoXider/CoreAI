@@ -56,6 +56,7 @@ namespace CoreAI.Ai
     public interface ILlmClient
     {
         /// <summary>Один запрос к модели; поддерживает отмену и таймауты снаружи (декоратор).</summary>
-        Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default);
+        Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+            CancellationToken cancellationToken = default);
     }
 }

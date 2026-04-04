@@ -21,7 +21,9 @@ namespace CoreAI.Infrastructure.Logging
         public void LogDebug(GameLogFeature feature, string message, Object context = null)
         {
             if (!_settings.ShouldLog(feature, GameLogLevel.Debug))
+            {
                 return;
+            }
 
             _sink.Write(GameLogLevel.Debug, Format(feature, message), context);
         }
@@ -30,7 +32,9 @@ namespace CoreAI.Infrastructure.Logging
         public void LogInfo(GameLogFeature feature, string message, Object context = null)
         {
             if (!_settings.ShouldLog(feature, GameLogLevel.Info))
+            {
                 return;
+            }
 
             _sink.Write(GameLogLevel.Info, Format(feature, message), context);
         }
@@ -39,7 +43,9 @@ namespace CoreAI.Infrastructure.Logging
         public void LogWarning(GameLogFeature feature, string message, Object context = null)
         {
             if (!_settings.ShouldLog(feature, GameLogLevel.Warning))
+            {
                 return;
+            }
 
             _sink.Write(GameLogLevel.Warning, Format(feature, message), context);
         }
@@ -48,7 +54,9 @@ namespace CoreAI.Infrastructure.Logging
         public void LogError(GameLogFeature feature, string message, Object context = null)
         {
             if (!_settings.ShouldLog(feature, GameLogLevel.Error))
+            {
                 return;
+            }
 
             _sink.Write(GameLogLevel.Error, Format(feature, message), context);
         }

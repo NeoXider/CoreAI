@@ -15,14 +15,19 @@ namespace CoreAI.Infrastructure.Lua
         public bool TryValidate(string overlayKey, string payload, out string error)
         {
             error = "";
-            var p = (payload ?? "").Trim();
+            string p = (payload ?? "").Trim();
             if (p.Length == 0)
+            {
                 return true;
+            }
+
             if ((p.StartsWith("{") && p.EndsWith("}")) || (p.StartsWith("[") && p.EndsWith("]")))
+            {
                 return true;
+            }
+
             error = $"payload for '{overlayKey}' must be JSON object/array or empty.";
             return false;
         }
     }
 }
-

@@ -2,7 +2,27 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
-## [0.1.3] - 2026-04-03
+## [0.3.0] - 2026-04-04
+
+### MEAI Integration
+
+- Обновлён для работы с **Microsoft.Extensions.AI** function calling
+- Все системные промпты агентов используют MEAI format
+- Тесты обновлены для проверки MEAI pipeline
+
+### Tests
+
+- ✨ **MemoryToolMeaiEditModeTests.cs**: 8 MEAI integration тестов
+- ✅ Все PlayMode тесты обновлены для JSON/MEAI формата
+- ✅ Удалены устаревшие тесты AgentToolCallParser
+- **+50 тестов** общей сложности для MEAI coverage
+
+### Documentation
+
+- **AI_AGENT_ROLES.md**: Обновлены роли с MEAI integration
+- Новые гайды по MEAI function calling
+
+## [0.2.0] - 2026-04-04
 
 ### Структура
 

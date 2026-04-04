@@ -20,4 +20,3 @@ namespace CoreAI.Ai
         }
     }
 }
-

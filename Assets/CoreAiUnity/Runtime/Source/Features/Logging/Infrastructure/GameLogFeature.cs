@@ -23,6 +23,7 @@ namespace CoreAI.Infrastructure.Logging
 
         /// <summary>Пример Roguelite-арены (отладочные логи демо).</summary>
         ExampleRoguelite = 1 << 3,
+
         /// <summary>Запросы/ответы LLM (декоратор в CoreAI.Infrastructure.Llm).</summary>
         Llm = 1 << 4,
 

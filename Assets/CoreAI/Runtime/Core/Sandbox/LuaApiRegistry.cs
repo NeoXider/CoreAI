@@ -9,30 +9,39 @@ namespace CoreAI.Sandbox
     /// </summary>
     public sealed class LuaApiRegistry
     {
-        private readonly Dictionary<string, Delegate> _apis = new Dictionary<string, Delegate>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
 
         /// <summary>Зарегистрировать глобальную функцию Lua с именем <paramref name="name"/>.</summary>
-        public void Register(string name, Delegate callback) => _apis[name] = callback;
+        public void Register(string name, Delegate callback)
+        {
+            _apis[name] = callback;
+        }
 
         /// <summary>Проверить наличие API (для тестов и расширений).</summary>
-        public bool TryGet(string name, out Delegate callback) => _apis.TryGetValue(name, out callback);
+        public bool TryGet(string name, out Delegate callback)
+        {
+            return _apis.TryGetValue(name, out callback);
+        }
 
         /// <summary>Пробросить все зарегистрированные делегаты в таблицу глобалов MoonSharp.</summary>
         public void ApplyToGlobals(Table globals)
         {
-            foreach (var kv in _apis)
+            foreach (KeyValuePair<string, Delegate> kv in _apis)
             {
-                var inner = kv.Value;
-                var key = kv.Key;
+                Delegate inner = kv.Value;
+                string key = kv.Key;
                 globals[key] = DynValue.NewCallback((ctx, args) =>
                 {
                     try
                     {
-                        var arr = args.GetArray();
-                        var clr = new object[arr.Length];
-                        for (var i = 0; i < arr.Length; i++)
+                        DynValue[] arr = args.GetArray();
+                        object[] clr = new object[arr.Length];
+                        for (int i = 0; i < arr.Length; i++)
+                        {
                             clr[i] = arr[i].ToObject();
-                        var result = inner.DynamicInvoke(clr);
+                        }
+
+                        object result = inner.DynamicInvoke(clr);
                         return DynValue.FromObject(ctx.GetScript(), result);
                     }
                     catch (Exception ex)

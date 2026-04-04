@@ -12,11 +12,10 @@ namespace CoreAI.Ai
     {
         private readonly IAiOrchestrationService _inner;
         private readonly int _maxConcurrent;
-        private readonly object _queueLock = new object();
-        private readonly List<WorkItem> _pending = new List<WorkItem>();
-        private readonly object _scopeLock = new object();
-        private readonly Dictionary<string, CancellationTokenSource> _scopeTokens =
-            new Dictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
+        private readonly object _queueLock = new();
+        private readonly List<WorkItem> _pending = new();
+        private readonly object _scopeLock = new();
+        private readonly Dictionary<string, CancellationTokenSource> _scopeTokens = new(StringComparer.Ordinal);
         private int _inFlight;
 
         /// <param name="inner">Фактический оркестратор (обычно <see cref="AiOrchestrator"/>).</param>
@@ -24,15 +23,15 @@ namespace CoreAI.Ai
         public QueuedAiOrchestrator(IAiOrchestrationService inner, AiOrchestrationQueueOptions options)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-            var max = options?.MaxConcurrent ?? 2;
+            int max = options?.MaxConcurrent ?? 2;
             _maxConcurrent = max < 1 ? 1 : max;
         }
 
         /// <inheritdoc />
         public Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
-            var tcs = new TaskCompletionSource<object>();
-            var work = new WorkItem
+            TaskCompletionSource<object> tcs = new();
+            WorkItem work = new()
             {
                 Task = task ?? new AiTaskRequest(),
                 OuterCt = cancellationToken,
@@ -53,7 +52,7 @@ namespace CoreAI.Ai
         {
             while (_inFlight < _maxConcurrent && _pending.Count > 0)
             {
-                var w = _pending[0];
+                WorkItem w = _pending[0];
                 _pending.RemoveAt(0);
                 _inFlight++;
                 _ = RunOneAsync(w);
@@ -62,7 +61,7 @@ namespace CoreAI.Ai
 
         private async Task RunOneAsync(WorkItem w)
         {
-            var scopeKey = w.Task.CancellationScope?.Trim();
+            string scopeKey = w.Task.CancellationScope?.Trim();
             CancellationTokenSource scopeLinked = null;
             try
             {
@@ -71,8 +70,10 @@ namespace CoreAI.Ai
                 {
                     lock (_scopeLock)
                     {
-                        if (_scopeTokens.TryGetValue(scopeKey, out var prev))
+                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
+                        {
                             prev.Cancel();
+                        }
 
                         scopeLinked = CancellationTokenSource.CreateLinkedTokenSource(w.OuterCt);
                         _scopeTokens[scopeKey] = scopeLinked;
@@ -98,8 +99,11 @@ namespace CoreAI.Ai
                 {
                     lock (_scopeLock)
                     {
-                        if (_scopeTokens.TryGetValue(scopeKey, out var cur) && ReferenceEquals(cur, scopeLinked))
+                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource cur) &&
+                            ReferenceEquals(cur, scopeLinked))
+                        {
                             _scopeTokens.Remove(scopeKey);
+                        }
                     }
 
                     scopeLinked.Dispose();

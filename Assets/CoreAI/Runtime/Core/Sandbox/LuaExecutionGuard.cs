@@ -24,17 +24,22 @@ namespace CoreAI.Sandbox
         public DynValue Execute(Script script, DynValue function, params DynValue[] args)
         {
             if (function.Type != DataType.Function)
+            {
                 throw new ArgumentException("Expected Lua function.", nameof(function));
+            }
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             try
             {
                 // MoonSharp: без debugger бесконечный цикл может зависнуть навсегда.
                 // Подключаем минимальный debugger, который ограничивает шаги и wall-clock (best-effort).
                 script.AttachDebugger(new InstructionLimitDebugger(_maxSteps, _timeoutMs));
-                var result = script.Call(function, args);
+                DynValue result = script.Call(function, args);
                 if (sw.ElapsedMilliseconds > _timeoutMs)
+                {
                     throw new TimeoutException($"Lua exceeded {_timeoutMs} ms (elapsed {sw.ElapsedMilliseconds} ms).");
+                }
+
                 return result;
             }
             catch (InterpreterException)
@@ -43,7 +48,14 @@ namespace CoreAI.Sandbox
             }
             finally
             {
-                try { script.DetachDebugger(); } catch { /* ignore */ }
+                try
+                {
+                    script.DetachDebugger();
+                }
+                catch
+                {
+                    /* ignore */
+                }
             }
         }
     }

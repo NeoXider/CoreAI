@@ -22,7 +22,8 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAILifetimeScope : LifetimeScope
     {
-        [Tooltip("Если null — логируются все фичи (DefaultGameLogSettings). Иначе — фильтр по флагам и минимальному уровню.")]
+        [Tooltip(
+            "Если null — логируются все фичи (DefaultGameLogSettings). Иначе — фильтр по флагам и минимальному уровню.")]
         [SerializeField]
         private GameLogSettingsAsset gameLogSettings;
 
@@ -30,11 +31,13 @@ namespace CoreAI.Composition
         [SerializeField]
         private AgentPromptsManifest agentPromptsManifest;
 
-        [Tooltip("Если Use OpenAi Compatible Http включён в asset — ILlmClient ходит в chat/completions (OpenAI-совместимо), иначе LLMAgent / заглушка.")]
+        [Tooltip(
+            "Если Use OpenAi Compatible Http включён в asset — ILlmClient ходит в chat/completions (OpenAI-совместимо), иначе LLMAgent / заглушка.")]
         [SerializeField]
         private OpenAiHttpLlmSettings openAiHttpLlmSettings;
 
-        [Tooltip("Опционально: маршрутизация ILlmClient по роли (Enable Role Routing). Иначе — только legacy Open Ai + LLMUnity.")]
+        [Tooltip(
+            "Опционально: маршрутизация ILlmClient по роли (Enable Role Routing). Иначе — только legacy Open Ai + LLMUnity.")]
         [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
 
@@ -42,9 +45,7 @@ namespace CoreAI.Composition
         [SerializeField]
         private float llmRequestTimeoutSeconds = 15f;
 
-        [Tooltip("Максимум параллельных задач IAiOrchestrationService (очередь остальных).")]
-        [SerializeField]
-        [Min(1)]
+        [Tooltip("Максимум параллельных задач IAiOrchestrationService (очередь остальных).")] [SerializeField] [Min(1)]
         private int aiOrchestrationMaxConcurrent = 2;
 
         [Tooltip("Писать метрики оркестратора в лог при включённом GameLogFeature.Metrics в Game Log Settings.")]
@@ -69,15 +70,21 @@ namespace CoreAI.Composition
         protected override void Configure(IContainerBuilder builder)
         {
             if (gameLogSettings != null)
+            {
                 builder.RegisterInstance<IGameLogSettings>(gameLogSettings);
+            }
             else
+            {
                 builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            }
 
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
             if (worldPrefabRegistry != null)
+            {
                 builder.RegisterInstance(worldPrefabRegistry);
+            }
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton).As<IDataOverlayPayloadValidator>();
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
@@ -85,12 +92,12 @@ namespace CoreAI.Composition
             builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
 
-            var openAi = openAiHttpLlmSettings;
-            var routingManifest = llmRoutingManifest;
-            var llmTimeout = llmRequestTimeoutSeconds;
+            OpenAiHttpLlmSettings openAi = openAiHttpLlmSettings;
+            LlmRoutingManifest routingManifest = llmRoutingManifest;
+            float llmTimeout = llmRequestTimeoutSeconds;
             builder.Register(c =>
             {
-                var reg = new LlmClientRegistry(c.Resolve<IGameLogger>());
+                LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
                 reg.SetLegacyFallback(ResolveLlmClient(openAi, c.Resolve<IGameLogger>()));
                 reg.ApplyManifest(routingManifest);
                 return reg;
@@ -117,9 +124,13 @@ namespace CoreAI.Composition
             }
 
             if (networkPeerBehaviour != null)
+            {
                 builder.RegisterInstance<IAiNetworkPeer>(networkPeerBehaviour);
+            }
             else
+            {
                 builder.Register<DefaultSoloNetworkPeer>(Lifetime.Singleton).As<IAiNetworkPeer>();
+            }
 
             builder.Register<IAuthorityHost>(c =>
                     new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), aiNetworkExecutionPolicy),
@@ -142,21 +153,30 @@ namespace CoreAI.Composition
         private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger)
         {
             if (openAi != null && openAi.UseOpenAiCompatibleHttp)
+            {
                 return new OpenAiChatLlmClient(openAi);
+            }
 #if COREAI_NO_LLM
             return new StubLlmClient();
 #else
-            var agent = Object.FindFirstObjectByType<LLMAgent>();
+            LLMAgent agent = FindFirstObjectByType<LLMAgent>();
             if (agent == null)
+            {
                 return new StubLlmClient();
+            }
 
             // Если LLMUnity в сцене оставили без модели (GGUF путь пуст), она пишет ошибку и не поднимется.
             // Тогда безопаснее использовать stub и не пытаться дергать LLMUnity.
-            var llm = agent.GetComponent<LLM>();
+            LLM llm = agent.GetComponent<LLM>();
             if (llm != null)
+            {
                 LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, logger);
+            }
+
             if (llm != null && string.IsNullOrWhiteSpace(llm.model))
+            {
                 return new StubLlmClient();
+            }
 
             return new LlmUnityLlmClient(agent, logger);
 #endif

@@ -20,7 +20,7 @@ namespace CoreAI.Infrastructure.Messaging
     public sealed class AiGameCommandRouter : IStartable, IDisposable
     {
         /// <summary>Событие для простого UI (MVP), без жёсткой связи с Canvas.</summary>
-        public static event System.Action<ApplyAiGameCommand> CommandReceived;
+        public static event Action<ApplyAiGameCommand> CommandReceived;
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;
@@ -47,21 +47,27 @@ namespace CoreAI.Infrastructure.Messaging
             _subscription = _subscriber.Subscribe(cmd =>
             {
                 if (cmd == null)
+                {
                     return;
-                var captured = cmd;
+                }
+
+                ApplyAiGameCommand captured = cmd;
                 UniTask.Void(async () =>
                 {
                     await UniTask.SwitchToMainThread();
                     if (_disposed)
+                    {
                         return;
+                    }
+
                     try
                     {
                         _luaProcessor.Process(captured);
                         _worldExecutor?.TryExecute(captured);
                         CommandReceived?.Invoke(captured);
-                        var pay = captured.JsonPayload ?? "";
-                        var shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "…" : pay;
-                        var trace = string.IsNullOrWhiteSpace(captured.TraceId) ? "—" : captured.TraceId;
+                        string pay = captured.JsonPayload ?? "";
+                        string shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "…" : pay;
+                        string trace = string.IsNullOrWhiteSpace(captured.TraceId) ? "—" : captured.TraceId;
                         _logger.LogInfo(GameLogFeature.MessagePipe,
                             $"ApplyAiGameCommand traceId={trace} type={captured.CommandTypeId} role={captured.SourceRoleId} gen={captured.LuaRepairGeneration} payload={shortPay}");
                     }

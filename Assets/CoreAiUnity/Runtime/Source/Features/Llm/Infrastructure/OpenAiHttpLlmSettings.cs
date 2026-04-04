@@ -9,33 +9,28 @@ namespace CoreAI.Infrastructure.Llm
     [CreateAssetMenu(menuName = "CoreAI/LLM/OpenAI-compatible HTTP", fileName = "OpenAiHttpLlmSettings")]
     public sealed class OpenAiHttpLlmSettings : ScriptableObject
     {
-        [Tooltip("Если включено, ILlmClient ходит в HTTP chat/completions вместо LLMAgent на сцене.")]
-        [SerializeField]
+        [Tooltip("Если включено, ILlmClient ходит в HTTP chat/completions вместо LLMAgent на сцене.")] [SerializeField]
         private bool useOpenAiCompatibleHttp;
 
-        [Tooltip("База без завершающего слэша, например https://api.openai.com/v1 или http://localhost:1234/v1 (LM Studio).")]
+        [Tooltip(
+            "База без завершающего слэша, например https://api.openai.com/v1 или http://localhost:1234/v1 (LM Studio).")]
         [SerializeField]
         private string apiBaseUrl = "https://api.openai.com/v1";
 
-        [SerializeField]
-        private string apiKey = "";
+        [SerializeField] private string apiKey = "";
 
-        [SerializeField]
-        private string model = "gpt-4o-mini";
+        [SerializeField] private string model = "gpt-4o-mini";
 
-        [SerializeField]
-        [Range(0f, 2f)]
-        private float temperature = 0.2f;
+        [SerializeField] [Range(0f, 2f)] private float temperature = 0.2f;
 
-        [SerializeField]
-        [Min(5)]
-        private int requestTimeoutSeconds = 120;
+        [SerializeField] [Min(5)] private int requestTimeoutSeconds = 120;
 
         /// <summary>Использовать HTTP вместо LLMUnity для клиента, собранного из этого asset.</summary>
         public bool UseOpenAiCompatibleHttp => useOpenAiCompatibleHttp;
 
         /// <summary>Базовый URL API без завершающего слэша.</summary>
-        public string ApiBaseUrl => string.IsNullOrWhiteSpace(apiBaseUrl) ? "https://api.openai.com/v1" : apiBaseUrl.TrimEnd('/');
+        public string ApiBaseUrl =>
+            string.IsNullOrWhiteSpace(apiBaseUrl) ? "https://api.openai.com/v1" : apiBaseUrl.TrimEnd('/');
 
         /// <summary>Bearer-токен (храните вне репозитория).</summary>
         public string ApiKey => apiKey ?? "";

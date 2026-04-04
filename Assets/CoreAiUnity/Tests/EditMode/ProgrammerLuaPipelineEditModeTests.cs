@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode
         public void ProgrammerLuaResponseParser_ExtractsBlock()
         {
             const string raw = "Here is the patch:\n```lua\nreturn add(2, 3)\n```\nDone.";
-            Assert.IsTrue(ProgrammerLuaResponseParser.TryExtractLuaCode(raw, out var lua));
+            Assert.IsTrue(ProgrammerLuaResponseParser.TryExtractLuaCode(raw, out string lua));
             Assert.AreEqual("return add(2, 3)", lua);
         }
 
@@ -29,12 +29,12 @@ namespace CoreAI.Tests.EditMode
         public void ExtractedLua_RunsInSecureSandbox_WithWhitelistedApi()
         {
             const string raw = "```lua\nreturn add(10, 1)\n```";
-            Assert.IsTrue(ProgrammerLuaResponseParser.TryExtractLuaCode(raw, out var lua));
-            var env = new SecureLuaEnvironment();
-            var reg = new LuaApiRegistry();
+            Assert.IsTrue(ProgrammerLuaResponseParser.TryExtractLuaCode(raw, out string lua));
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
             reg.Register("add", new System.Func<double, double, double>((a, b) => a + b));
-            var script = env.CreateScript(reg);
-            var r = script.DoString(lua);
+            Script script = env.CreateScript(reg);
+            DynValue r = script.DoString(lua);
             Assert.AreEqual(11, (int)r.Number);
         }
     }

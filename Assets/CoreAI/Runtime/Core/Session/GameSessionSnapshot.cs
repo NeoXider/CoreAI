@@ -10,6 +10,6 @@ namespace CoreAI.Session
         /// Ключи и значения определяет тайтл (например: "wave", "player.hp.current", "player.style", ...).
         /// </summary>
         public System.Collections.Generic.Dictionary<string, string> Telemetry { get; } =
-            new System.Collections.Generic.Dictionary<string, string>();
+            new();
     }
 }

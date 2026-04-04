@@ -21,12 +21,17 @@ namespace CoreAI.Infrastructure.Prompts
         {
             systemPrompt = null;
             if (string.IsNullOrWhiteSpace(roleId))
+            {
                 return false;
+            }
 
-            var path = $"{_resourcePathPrefix}/{roleId.Trim()}";
-            var ta = Resources.Load<TextAsset>(path);
+            string path = $"{_resourcePathPrefix}/{roleId.Trim()}";
+            TextAsset ta = Resources.Load<TextAsset>(path);
             if (ta == null || string.IsNullOrWhiteSpace(ta.text))
+            {
                 return false;
+            }
+
             systemPrompt = ta.text;
             return true;
         }

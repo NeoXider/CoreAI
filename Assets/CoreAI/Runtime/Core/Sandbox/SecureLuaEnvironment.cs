@@ -14,7 +14,7 @@ namespace CoreAI.Sandbox
         /// <summary>Создать MoonSharp-скрипт с whitelist API из <paramref name="registry"/> и безопасными модулями.</summary>
         public Script CreateScript(LuaApiRegistry registry)
         {
-            var script = new Script(SandboxModules);
+            Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
             StripRiskyGlobals(script);
             return script;
@@ -22,7 +22,8 @@ namespace CoreAI.Sandbox
 
         private static void StripRiskyGlobals(Script script)
         {
-            var g = script.Globals;
+            Table g = script.Globals;
+
             void Remove(string name)
             {
                 try
@@ -47,7 +48,7 @@ namespace CoreAI.Sandbox
         /// <summary>Скомпилировать строку в чанк и выполнить под <paramref name="guard"/> (лимит времени).</summary>
         public DynValue RunChunk(Script script, string luaCode, LuaExecutionGuard guard = null)
         {
-            var fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_chunk");
+            DynValue fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_chunk");
             guard ??= new LuaExecutionGuard();
             return guard.Execute(script, fn);
         }

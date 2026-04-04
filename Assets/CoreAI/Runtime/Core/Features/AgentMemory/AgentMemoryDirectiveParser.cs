@@ -33,25 +33,33 @@ namespace CoreAI.Ai
             cleanedContent = content;
             directive = null;
             if (string.IsNullOrEmpty(content))
+            {
                 return false;
+            }
 
-            var start = content.IndexOf("```memory", StringComparison.OrdinalIgnoreCase);
+            int start = content.IndexOf("```memory", StringComparison.OrdinalIgnoreCase);
             if (start < 0)
+            {
                 return false;
+            }
 
-            var fenceEnd = content.IndexOf('\n', start);
+            int fenceEnd = content.IndexOf('\n', start);
             if (fenceEnd < 0)
+            {
                 return false;
+            }
 
-            var header = content.Substring(start, fenceEnd - start).Trim();
-            var kind = header.Substring(3).Trim(); // remove leading ```
+            string header = content.Substring(start, fenceEnd - start).Trim();
+            string kind = header.Substring(3).Trim(); // remove leading ```
 
-            var end = content.IndexOf("```", fenceEnd + 1, StringComparison.Ordinal);
+            int end = content.IndexOf("```", fenceEnd + 1, StringComparison.Ordinal);
             if (end < 0)
+            {
                 return false;
+            }
 
-            var inner = content.Substring(fenceEnd + 1, end - (fenceEnd + 1));
-            var dir = new MemoryDirective();
+            string inner = content.Substring(fenceEnd + 1, end - (fenceEnd + 1));
+            MemoryDirective dir = new();
             if (kind.Equals("memory_clear", StringComparison.OrdinalIgnoreCase))
             {
                 dir.Clear = true;
@@ -67,7 +75,7 @@ namespace CoreAI.Ai
             }
 
             // Remove directive block from content (including closing fence).
-            var afterEnd = end + 3;
+            int afterEnd = end + 3;
             cleanedContent = content.Substring(0, start) + content.Substring(afterEnd);
             cleanedContent = cleanedContent.Trim();
 
@@ -76,4 +84,3 @@ namespace CoreAI.Ai
         }
     }
 }
-

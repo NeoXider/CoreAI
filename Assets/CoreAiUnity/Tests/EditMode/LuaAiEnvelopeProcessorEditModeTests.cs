@@ -14,14 +14,17 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class ListSink : IAiGameCommandSink
         {
-            public readonly List<ApplyAiGameCommand> Items = new List<ApplyAiGameCommand>();
+            public readonly List<ApplyAiGameCommand> Items = new();
 
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class CapturingBindings : IGameLuaRuntimeBindings
         {
-            public readonly List<string> Reports = new List<string>();
+            public readonly List<string> Reports = new();
 
             public void RegisterGameplayApis(LuaApiRegistry registry)
             {
@@ -46,11 +49,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Processor_GoodLua_PublishesSuccess()
         {
-            var sink = new ListSink();
-            var bindings = new CapturingBindings();
-            var spy = new SpyOrchestrator();
-            var versions = new MemoryLuaScriptVersionStore();
-            var proc = new LuaAiEnvelopeProcessor(
+            ListSink sink = new();
+            CapturingBindings bindings = new();
+            SpyOrchestrator spy = new();
+            MemoryLuaScriptVersionStore versions = new();
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 sink,
@@ -75,17 +78,17 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, bindings.Reports.Count);
             Assert.AreEqual("ok", bindings.Reports[0]);
             Assert.AreEqual(0, spy.RunCount);
-            Assert.IsTrue(versions.TryGetSnapshot("vslot", out var vs));
+            Assert.IsTrue(versions.TryGetSnapshot("vslot", out LuaScriptVersionRecord vs));
             StringAssert.Contains("report('ok')", vs.CurrentLua);
         }
 
         [Test]
         public void Processor_BadLua_SchedulesProgrammerRepair()
         {
-            var sink = new ListSink();
-            var bindings = new CapturingBindings();
-            var spy = new SpyOrchestrator();
-            var proc = new LuaAiEnvelopeProcessor(
+            ListSink sink = new();
+            CapturingBindings bindings = new();
+            SpyOrchestrator spy = new();
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 sink,
@@ -118,9 +121,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Processor_NonProgrammer_DoesNotRepair()
         {
-            var sink = new ListSink();
-            var spy = new SpyOrchestrator();
-            var proc = new LuaAiEnvelopeProcessor(
+            ListSink sink = new();
+            SpyOrchestrator spy = new();
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 new CoreDefaultLuaRuntimeBindings(),
                 sink,
@@ -144,9 +147,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Processor_ProgrammerAtMaxRepairGeneration_DoesNotScheduleAgain()
         {
-            var sink = new ListSink();
-            var spy = new SpyOrchestrator();
-            var proc = new LuaAiEnvelopeProcessor(
+            ListSink sink = new();
+            SpyOrchestrator spy = new();
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 new CoreDefaultLuaRuntimeBindings(),
                 sink,

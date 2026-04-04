@@ -26,9 +26,9 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public bool TryGetUserTemplate(string roleId, out string template)
         {
-            foreach (var p in _chain)
+            foreach (IAgentUserPromptTemplateProvider p in _chain)
             {
-                if (p.TryGetUserTemplate(roleId, out var t) && !string.IsNullOrWhiteSpace(t))
+                if (p.TryGetUserTemplate(roleId, out string t) && !string.IsNullOrWhiteSpace(t))
                 {
                     template = t;
                     return true;

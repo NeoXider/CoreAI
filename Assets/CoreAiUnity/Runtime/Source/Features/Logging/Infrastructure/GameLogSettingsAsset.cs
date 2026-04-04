@@ -8,12 +8,10 @@ namespace CoreAI.Infrastructure.Logging
     [CreateAssetMenu(fileName = "GameLogSettings", menuName = "CoreAI/Logging/Game Log Settings")]
     public sealed class GameLogSettingsAsset : ScriptableObject, IGameLogSettings
     {
-        [Tooltip("Для каких категорий разрешён вывод")]
-        [SerializeField]
+        [Tooltip("Для каких категорий разрешён вывод")] [SerializeField]
         private GameLogFeature enabledFeatures = GameLogFeature.AllBuiltIn;
 
-        [Tooltip("Минимальный уровень: например Warning отсечёт Debug и Info")]
-        [SerializeField]
+        [Tooltip("Минимальный уровень: например Warning отсечёт Debug и Info")] [SerializeField]
         private GameLogLevel minimumLevel = GameLogLevel.Debug;
 
         private void OnValidate()
@@ -23,17 +21,23 @@ namespace CoreAI.Infrastructure.Logging
                 GameLogFeature.Core | GameLogFeature.Composition | GameLogFeature.MessagePipe |
                 GameLogFeature.ExampleRoguelite;
             if (enabledFeatures == legacyAllBuiltIn)
+            {
                 enabledFeatures = GameLogFeature.AllBuiltIn;
+            }
         }
 
         /// <inheritdoc />
         public bool ShouldLog(GameLogFeature feature, GameLogLevel level)
         {
             if (feature == GameLogFeature.None)
+            {
                 return false;
+            }
 
             if ((enabledFeatures & feature) == 0)
+            {
                 return false;
+            }
 
             return level >= minimumLevel;
         }

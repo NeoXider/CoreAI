@@ -9,7 +9,9 @@ namespace CoreAI.Infrastructure.Logging
         public bool ShouldLog(GameLogFeature feature, GameLogLevel level)
         {
             if (feature == GameLogFeature.None)
+            {
                 return false;
+            }
 
             return true;
         }

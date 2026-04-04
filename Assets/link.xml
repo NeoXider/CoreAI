@@ -1,0 +1,14 @@
+<linker>
+  <!-- Microsoft.Extensions.AI core -->
+  <assembly fullname="Microsoft.Extensions.AI" preserve="all"/>
+  <assembly fullname="Microsoft.Extensions.AI.Abstractions" preserve="all"/>
+
+  <!-- Зависимости, критичные для работы MEAI -->
+  <assembly fullname="Microsoft.Extensions.DependencyInjection.Abstractions" preserve="all"/>
+  <assembly fullname="Microsoft.Extensions.Logging.Abstractions" preserve="all"/>
+  <assembly fullname="System.Text.Json" preserve="all"/>
+  <assembly fullname="System.Threading.Channels" preserve="all"/>
+  
+  <!-- Сохраняем наши скрипты, чтобы рефлексия MEAI работала с MemoryTool -->
+  <assembly fullname="CoreAI.Core" preserve="all"/>
+</linker>

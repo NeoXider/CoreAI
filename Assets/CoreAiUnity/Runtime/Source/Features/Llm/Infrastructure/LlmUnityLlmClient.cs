@@ -20,6 +20,9 @@ namespace CoreAI.Infrastructure.Llm
         private readonly LLMAgent _unityAgent;
         private readonly IGameLogger _logger;
 
+        public LLMAgent UnityAgent => _unityAgent;
+        public LLM LLM => _unityAgent?.llm ?? _unityAgent?.GetComponent<LLM>();
+
         /// <param name="unityAgent">Агент LLMUnity на сцене (с привязанным <c>LLM</c>).</param>
         public LlmUnityLlmClient(LLMAgent unityAgent, IGameLogger logger)
         {
@@ -33,9 +36,11 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             if (_unityAgent == null)
+            {
                 return new LlmCompletionResult { Ok = false, Error = "LLMAgent is null" };
+            }
 
-            var llm = _unityAgent.llm != null ? _unityAgent.llm : _unityAgent.GetComponent<LLM>();
+            LLM llm = _unityAgent.llm != null ? _unityAgent.llm : _unityAgent.GetComponent<LLM>();
             if (llm == null)
             {
                 return new LlmCompletionResult
@@ -47,7 +52,7 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
-                var setupTask = LLM.WaitUntilModelSetup();
+                Task<bool> setupTask = LLM.WaitUntilModelSetup();
                 while (!setupTask.IsCompleted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -59,11 +64,12 @@ namespace CoreAI.Infrastructure.Llm
                     return new LlmCompletionResult
                     {
                         Ok = false,
-                        Error = "LLMUnity: не удалась подготовка моделей (LLMManager / скачивание). См. консоль LLMUnity."
+                        Error =
+                            "LLMUnity: не удалась подготовка моделей (LLMManager / скачивание). См. консоль LLMUnity."
                     };
                 }
 
-                var readyTask = llm.WaitUntilReady();
+                Task readyTask = llm.WaitUntilReady();
                 while (!readyTask.IsCompleted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -82,13 +88,15 @@ namespace CoreAI.Infrastructure.Llm
                     };
                 }
 
-                var prevSystem = _unityAgent.systemPrompt;
+                string prevSystem = _unityAgent.systemPrompt;
                 try
                 {
                     if (!string.IsNullOrEmpty(request.SystemPrompt))
+                    {
                         _unityAgent.systemPrompt = request.SystemPrompt;
+                    }
 
-                    var text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: false);
+                    string text = await _unityAgent.Chat(request.UserPayload ?? string.Empty, addToHistory: false);
                     cancellationToken.ThrowIfCancellationRequested();
                     return new LlmCompletionResult { Ok = true, Content = text ?? "" };
                 }

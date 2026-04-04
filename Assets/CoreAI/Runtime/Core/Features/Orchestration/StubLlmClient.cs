@@ -9,9 +9,10 @@ namespace CoreAI.Ai
     public sealed class StubLlmClient : ILlmClient
     {
         /// <inheritdoc />
-        public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+        public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+            CancellationToken cancellationToken = default)
         {
-            var role = string.IsNullOrWhiteSpace(request.AgentRoleId)
+            string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
                 ? BuiltInAgentRoleIds.Creator
                 : request.AgentRoleId.Trim();
 
@@ -19,20 +20,23 @@ namespace CoreAI.Ai
             // Stub для Programmer возвращает валидный fenced-bлок Lua.
             if (role == BuiltInAgentRoleIds.Programmer)
             {
-                var payload = "```lua\nreport('stub: lua executed (Programmer)');\n```";
+                string payload = "```lua\nreport('stub: lua executed (Programmer)');\n```";
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = payload });
             }
 
             if (role == BuiltInAgentRoleIds.PlayerChat)
             {
-                var reply = "[stub] " + (request.UserPayload ?? "").Trim();
+                string reply = "[stub] " + (request.UserPayload ?? "").Trim();
                 if (reply.Length > 200)
+                {
                     reply = reply.Substring(0, 200) + "…";
+                }
+
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = reply });
             }
 
-            var userLen = request.UserPayload?.Length ?? 0;
-            var modifierJson =
+            int userLen = request.UserPayload?.Length ?? 0;
+            string modifierJson =
                 "{\"commandType\":\"ApplyWaveModifier\",\"payload\":{\"agentRole\":\"" + EscapeJson(role) +
                 "\",\"modifierId\":\"stub\",\"wave\":" + userLen + "}}";
             return Task.FromResult(new LlmCompletionResult { Ok = true, Content = modifierJson });
@@ -41,7 +45,10 @@ namespace CoreAI.Ai
         private static string EscapeJson(string s)
         {
             if (string.IsNullOrEmpty(s))
+            {
                 return "";
+            }
+
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }

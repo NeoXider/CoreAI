@@ -11,15 +11,13 @@ namespace CoreAI.Presentation.AiDashboard
     /// </summary>
     public sealed class AiDashboardPresenter : MonoBehaviour
     {
-        [Tooltip("Опционально: показать флаги разрешений ролей в заголовке оверлея.")]
-        [SerializeField]
+        [Tooltip("Опционально: показать флаги разрешений ролей в заголовке оверлея.")] [SerializeField]
         private AiPermissionsAsset permissions;
 
-        [Tooltip("Включить отрисовку IMGUI-лога команд ИИ.")]
-        [SerializeField]
+        [Tooltip("Включить отрисовку IMGUI-лога команд ИИ.")] [SerializeField]
         private bool showGui = true;
 
-        private readonly List<string> _visible = new List<string>();
+        private readonly List<string> _visible = new();
 
         private void OnEnable()
         {
@@ -33,26 +31,32 @@ namespace CoreAI.Presentation.AiDashboard
 
         private void OnAiCommand(ApplyAiGameCommand cmd)
         {
-            var src = string.IsNullOrWhiteSpace(cmd.SourceTag) ? "" : $" [{cmd.SourceTag}]";
+            string src = string.IsNullOrWhiteSpace(cmd.SourceTag) ? "" : $" [{cmd.SourceTag}]";
             _visible.Add($"{cmd.CommandTypeId}{src}: {cmd.JsonPayload}");
             while (_visible.Count > 48)
+            {
                 _visible.RemoveAt(0);
+            }
         }
 
         private void OnGUI()
         {
             if (!showGui)
+            {
                 return;
+            }
 
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             if (permissions != null)
             {
                 sb.AppendLine(
                     $"AI perms: C={permissions.AllowCreator} A={permissions.AllowAnalyzer} M={permissions.AllowCoreMechanic}");
             }
 
-            foreach (var line in _visible)
+            foreach (string line in _visible)
+            {
                 sb.AppendLine(line);
+            }
 
             const float w = 520f;
             GUI.Box(new Rect(10, 10, w, 220), "CoreAI — live log (MVP)");

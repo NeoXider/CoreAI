@@ -22,24 +22,30 @@ namespace CoreAI.Infrastructure.Llm
     {
         private void Awake()
         {
-            var log = ResolveLogger();
+            IGameLogger log = ResolveLogger();
 
             // Сначала LLM, привязанный к LLMAgent на сцене (избегаем «первого попавшегося» пустого LLM).
-            var agent = UnityEngine.Object.FindFirstObjectByType<LLMAgent>();
-            var llm = agent != null ? agent.GetComponent<LLM>() : UnityEngine.Object.FindFirstObjectByType<LLM>();
+            LLMAgent agent = FindFirstObjectByType<LLMAgent>();
+            LLM llm = agent != null ? agent.GetComponent<LLM>() : FindFirstObjectByType<LLM>();
             if (llm == null)
+            {
                 return;
+            }
 
             LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
 
             if (!string.IsNullOrWhiteSpace(llm.model))
+            {
                 return;
+            }
 
             // Отключаем сервер и агент до того, как он начнёт стартовать.
             llm.enabled = false;
 
             if (agent != null)
+            {
                 agent.enabled = false;
+            }
 
             log.LogWarning(
                 GameLogFeature.Llm,
@@ -50,11 +56,14 @@ namespace CoreAI.Infrastructure.Llm
 
         private static IGameLogger ResolveLogger()
         {
-            var scope = UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>();
-            if (scope != null && scope.Container != null && scope.Container.TryResolve<IGameLogger>(out var log))
+            CoreAILifetimeScope scope = FindAnyObjectByType<CoreAILifetimeScope>();
+            if (scope != null && scope.Container != null &&
+                scope.Container.TryResolve<IGameLogger>(out IGameLogger log))
+            {
                 return log;
+            }
+
             return GameLoggerUnscopedFallback.Instance;
         }
     }
 }
-

@@ -5,20 +5,24 @@
     "CoreAI.Core",
     "CoreAI.ExampleGame",
     "CoreAI.Source",
-    "MoonSharp.Interpreter"
-  ],
-  "optionalUnityReferences": [
-    "TestAssemblies"
+    "MoonSharp.Interpreter",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
   ],
   "includePlatforms": [
     "Editor"
   ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
-  "autoReferenced": true,
-  "defineConstraints": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
   "versionDefines": [],
   "noEngineReferences": false
 }

@@ -20,7 +20,7 @@ namespace CoreAI.Composition
             builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
             builder.Register<Func<IAiOrchestrationService>>(c =>
             {
-                var r = c;
+                IObjectResolver r = c;
                 return () => r.Resolve<IAiOrchestrationService>();
             }, Lifetime.Singleton);
             builder.Register<LuaAiEnvelopeProcessor>(Lifetime.Singleton);

@@ -31,8 +31,14 @@ namespace CoreAI.Ai
         {
         }
 
-        public IReadOnlyList<string> GetKnownKeys() => System.Array.Empty<string>();
+        public IReadOnlyList<string> GetKnownKeys()
+        {
+            return System.Array.Empty<string>();
+        }
 
-        public string BuildProgrammerPromptSection(string scriptKey) => "";
+        public string BuildProgrammerPromptSection(string scriptKey)
+        {
+            return "";
+        }
     }
 }

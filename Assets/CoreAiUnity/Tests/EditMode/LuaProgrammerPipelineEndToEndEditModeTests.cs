@@ -25,13 +25,16 @@ namespace CoreAI.Tests.EditMode
 
             public QueueLlmClient(params string[] responses)
             {
-                foreach (var r in responses)
+                foreach (string r in responses)
+                {
                     _responses.Enqueue(r);
+                }
             }
 
-            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
             {
-                var text = _responses.Count > 0 ? _responses.Dequeue() : "";
+                string text = _responses.Count > 0 ? _responses.Dequeue() : "";
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = text });
             }
         }
@@ -40,7 +43,10 @@ namespace CoreAI.Tests.EditMode
         {
             public readonly List<ApplyAiGameCommand> Items = new();
 
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class EnvelopeDispatchSink : IAiGameCommandSink
@@ -57,9 +63,13 @@ namespace CoreAI.Tests.EditMode
             public void Publish(ApplyAiGameCommand command)
             {
                 if (command.CommandTypeId == Envelope)
+                {
                     _processor.Process(command);
+                }
                 else
+                {
                     _nonEnvelope.Publish(command);
+                }
             }
         }
 
@@ -80,15 +90,16 @@ namespace CoreAI.Tests.EditMode
             const string bad = "```lua\nnot_a_function()\n```";
             const string good = "```lua\nreport('repaired')\n```";
 
-            var llm = new QueueLlmClient(bad, good);
-            var events = new ListCommandSink();
-            var bindings = new CapturingBindings();
-            var telemetry = new SessionTelemetryCollector();
-            var provider = new BuiltInDefaultAgentSystemPromptProvider();
-            var composer = new AiPromptComposer(provider, new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            QueueLlmClient llm = new(bad, good);
+            ListCommandSink events = new();
+            CapturingBindings bindings = new();
+            SessionTelemetryCollector telemetry = new();
+            BuiltInDefaultAgentSystemPromptProvider provider = new();
+            AiPromptComposer composer = new(provider, new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
 
             IAiOrchestrationService orchestrator = null;
-            var proc = new LuaAiEnvelopeProcessor(
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 events,
@@ -96,8 +107,9 @@ namespace CoreAI.Tests.EditMode
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
 
-            var sink = new EnvelopeDispatchSink(proc, events);
-            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy(),
+            EnvelopeDispatchSink sink = new(proc, events);
+            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer,
+                new NullAgentMemoryStore(), new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
@@ -106,11 +118,14 @@ namespace CoreAI.Tests.EditMode
                 Hint = "Write Lua using report()."
             }).ConfigureAwait(false);
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 5000)
             {
                 if (events.Items.Any(c => c.CommandTypeId == LuaExecutionSucceeded))
+                {
                     break;
+                }
+
                 await Task.Delay(25).ConfigureAwait(false);
             }
 
@@ -124,28 +139,29 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Orchestrator_Programmer_ComplexWrongThenFixed_RepairCarriesErrorInUserPayload()
         {
-            var bad = "```lua\n" +
-                      "local function chaos() return missing_global + 1 end\n" +
-                      "chaos()\n```";
+            string bad = "```lua\n" +
+                         "local function chaos() return missing_global + 1 end\n" +
+                         "chaos()\n```";
             const string good = "```lua\nreport('ok_after_complex_fail')\n```";
 
-            var llm = new QueueLlmClient(bad, good);
-            var events = new ListCommandSink();
-            var bindings = new CapturingBindings();
-            var telemetry = new SessionTelemetryCollector();
-            var provider = new BuiltInDefaultAgentSystemPromptProvider();
-            var composer = new AiPromptComposer(provider, new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            QueueLlmClient llm = new(bad, good);
+            ListCommandSink events = new();
+            CapturingBindings bindings = new();
+            SessionTelemetryCollector telemetry = new();
+            BuiltInDefaultAgentSystemPromptProvider provider = new();
+            AiPromptComposer composer = new(provider, new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
 
-            var gotSecondPayload = false;
-            var secondUserPayload = "";
-            var capturingLlm = new PayloadCapturingLlm(llm, (_, user) =>
+            bool gotSecondPayload = false;
+            string secondUserPayload = "";
+            PayloadCapturingLlm capturingLlm = new(llm, (_, user) =>
             {
                 gotSecondPayload = true;
                 secondUserPayload = user;
             });
 
             IAiOrchestrationService orchestrator = null;
-            var proc = new LuaAiEnvelopeProcessor(
+            LuaAiEnvelopeProcessor proc = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 events,
@@ -153,8 +169,9 @@ namespace CoreAI.Tests.EditMode
                 new NullLuaExecutionObserver(),
                 new NullLuaScriptVersionStore());
 
-            var sink = new EnvelopeDispatchSink(proc, events);
-            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), capturingLlm, sink, telemetry, composer, new NullAgentMemoryStore(), new AgentMemoryPolicy(),
+            EnvelopeDispatchSink sink = new(proc, events);
+            orchestrator = new AiOrchestrator(new SoloAuthorityHost(), capturingLlm, sink, telemetry, composer,
+                new NullAgentMemoryStore(), new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
@@ -163,11 +180,14 @@ namespace CoreAI.Tests.EditMode
                 Hint = "complex_task"
             }).ConfigureAwait(false);
 
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 5000)
             {
                 if (events.Items.Any(c => c.CommandTypeId == LuaExecutionSucceeded))
+                {
                     break;
+                }
+
                 await Task.Delay(25).ConfigureAwait(false);
             }
 
@@ -191,11 +211,15 @@ namespace CoreAI.Tests.EditMode
                 _onSecond = onSecond;
             }
 
-            public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
             {
                 _n++;
                 if (_n >= 2)
+                {
                     _onSecond(request, request.UserPayload);
+                }
+
                 return await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
             }
         }

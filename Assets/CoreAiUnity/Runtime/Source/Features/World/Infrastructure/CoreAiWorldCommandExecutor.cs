@@ -22,11 +22,17 @@ namespace CoreAI.Infrastructure.World
 
         public bool TryExecute(ApplyAiGameCommand cmd)
         {
-            if (cmd == null || !string.Equals(cmd.CommandTypeId, AiGameCommandTypeIds.WorldCommand, StringComparison.Ordinal))
+            if (cmd == null || !string.Equals(cmd.CommandTypeId, AiGameCommandTypeIds.WorldCommand,
+                    StringComparison.Ordinal))
+            {
                 return false;
-            var json = cmd.JsonPayload ?? "";
+            }
+
+            string json = cmd.JsonPayload ?? "";
             if (string.IsNullOrWhiteSpace(json))
+            {
                 return false;
+            }
 
             CoreAiWorldCommandEnvelope env;
             try
@@ -40,7 +46,9 @@ namespace CoreAI.Infrastructure.World
             }
 
             if (env == null || string.IsNullOrWhiteSpace(env.action))
+            {
                 return false;
+            }
 
             switch (env.action.Trim())
             {
@@ -72,22 +80,22 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            var key = (env.prefabKeyOrName ?? "").Trim();
-            if (!_prefabRegistry.TryResolve(key, out var prefab) || prefab == null)
+            string key = (env.prefabKeyOrName ?? "").Trim();
+            if (!_prefabRegistry.TryResolve(key, out GameObject prefab) || prefab == null)
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] prefab not found: '{key}'");
                 return false;
             }
 
-            var id = (env.instanceId ?? "").Trim();
+            string id = (env.instanceId ?? "").Trim();
             if (string.IsNullOrEmpty(id))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe, "[World] spawn missing instanceId");
                 return false;
             }
 
-            var pos = new Vector3(env.px, env.py, env.pz);
-            var go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
+            Vector3 pos = new(env.px, env.py, env.pz);
+            GameObject go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
             go.name = $"{prefab.name}#{id}";
             _instances[id] = go;
             return true;
@@ -95,25 +103,36 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryMove(CoreAiWorldCommandEnvelope env)
         {
-            var id = (env.instanceId ?? "").Trim();
+            string id = (env.instanceId ?? "").Trim();
             if (string.IsNullOrEmpty(id))
+            {
                 return false;
-            if (!_instances.TryGetValue(id, out var go) || go == null)
+            }
+
+            if (!_instances.TryGetValue(id, out GameObject go) || go == null)
+            {
                 return false;
+            }
+
             go.transform.position = new Vector3(env.mx, env.my, env.mz);
             return true;
         }
 
         private bool TryDestroy(CoreAiWorldCommandEnvelope env)
         {
-            var id = (env.instanceId ?? "").Trim();
+            string id = (env.instanceId ?? "").Trim();
             if (string.IsNullOrEmpty(id))
+            {
                 return false;
-            if (_instances.TryGetValue(id, out var go))
+            }
+
+            if (_instances.TryGetValue(id, out GameObject go))
             {
                 _instances.Remove(id);
                 if (go != null)
+                {
                     UnityEngine.Object.Destroy(go);
+                }
             }
 
             return true;
@@ -121,45 +140,62 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryLoadScene(CoreAiWorldCommandEnvelope env)
         {
-            var name = (env.sceneName ?? "").Trim();
+            string name = (env.sceneName ?? "").Trim();
             if (string.IsNullOrEmpty(name))
+            {
                 return false;
+            }
+
             SceneManager.LoadScene(name);
             return true;
         }
 
         private bool TryReloadScene()
         {
-            var scene = SceneManager.GetActiveScene();
+            Scene scene = SceneManager.GetActiveScene();
             if (!scene.IsValid())
+            {
                 return false;
+            }
+
             SceneManager.LoadScene(scene.name);
             return true;
         }
 
         private bool TryBindByName(CoreAiWorldCommandEnvelope env)
         {
-            var name = (env.targetName ?? "").Trim();
-            var id = (env.instanceId ?? "").Trim();
+            string name = (env.targetName ?? "").Trim();
+            string id = (env.instanceId ?? "").Trim();
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id))
+            {
                 return false;
-            var go = GameObject.Find(name);
+            }
+
+            GameObject go = GameObject.Find(name);
             if (go == null)
+            {
                 return false;
+            }
+
             _instances[id] = go;
             return true;
         }
 
         private bool TrySetActive(CoreAiWorldCommandEnvelope env)
         {
-            var id = (env.instanceId ?? "").Trim();
+            string id = (env.instanceId ?? "").Trim();
             if (string.IsNullOrEmpty(id))
+            {
                 return false;
-            if (!_instances.TryGetValue(id, out var go) || go == null)
+            }
+
+            if (!_instances.TryGetValue(id, out GameObject go) || go == null)
+            {
                 return false;
+            }
+
             go.SetActive(env.boolValue != 0);
             return true;
         }
     }
 }
-

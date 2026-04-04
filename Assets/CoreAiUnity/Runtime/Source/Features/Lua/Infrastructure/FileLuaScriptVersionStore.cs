@@ -20,7 +20,7 @@ namespace CoreAI.Infrastructure.Lua
         public FileLuaScriptVersionStore(IGameLogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            var dir = Path.Combine(Application.persistentDataPath, "CoreAI", "LuaScriptVersions");
+            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "LuaScriptVersions");
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "lua_script_versions.json");
             LoadFromDisk();
@@ -31,14 +31,19 @@ namespace CoreAI.Infrastructure.Lua
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
-            var dir = Path.GetDirectoryName(_filePath);
+            string dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
+            {
                 Directory.CreateDirectory(dir);
+            }
+
             LoadFromDisk();
         }
 
-        public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot) =>
-            _memory.TryGetSnapshot(scriptKey, out snapshot);
+        public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)
+        {
+            return _memory.TryGetSnapshot(scriptKey, out snapshot);
+        }
 
         public void RecordSuccessfulExecution(string scriptKey, string executedLuaSource)
         {
@@ -70,10 +75,15 @@ namespace CoreAI.Infrastructure.Lua
             SaveToDisk();
         }
 
-        public IReadOnlyList<string> GetKnownKeys() => _memory.GetKnownKeys();
+        public IReadOnlyList<string> GetKnownKeys()
+        {
+            return _memory.GetKnownKeys();
+        }
 
-        public string BuildProgrammerPromptSection(string scriptKey) =>
-            _memory.BuildProgrammerPromptSection(scriptKey);
+        public string BuildProgrammerPromptSection(string scriptKey)
+        {
+            return _memory.BuildProgrammerPromptSection(scriptKey);
+        }
 
         private void LoadFromDisk()
         {
@@ -81,27 +91,39 @@ namespace CoreAI.Infrastructure.Lua
             {
                 _memory.ClearAll();
                 if (!File.Exists(_filePath))
+                {
                     return;
+                }
+
                 try
                 {
-                    var json = File.ReadAllText(_filePath);
-                    var dto = JsonUtility.FromJson<PersistRootDto>(json);
+                    string json = File.ReadAllText(_filePath);
+                    PersistRootDto dto = JsonUtility.FromJson<PersistRootDto>(json);
                     if (dto?.slots == null || dto.slots.Count == 0)
+                    {
                         return;
-                    var records = new List<LuaScriptVersionRecord>();
+                    }
+
+                    List<LuaScriptVersionRecord> records = new();
                     for (int i = 0; i < dto.slots.Count; i++)
                     {
-                        var s = dto.slots[i];
+                        PersistSlotDto s = dto.slots[i];
                         if (s == null || string.IsNullOrWhiteSpace(s.scriptKey))
+                        {
                             continue;
-                        var hist = new List<LuaScriptRevision>();
+                        }
+
+                        List<LuaScriptRevision> hist = new();
                         if (s.history != null)
                         {
                             for (int h = 0; h < s.history.Count; h++)
                             {
-                                var r = s.history[h];
+                                PersistRevDto r = s.history[h];
                                 if (r == null)
+                                {
                                     continue;
+                                }
+
                                 hist.Add(new LuaScriptRevision(r.index, r.source ?? "", r.utcTicks));
                             }
                         }
@@ -131,12 +153,12 @@ namespace CoreAI.Infrastructure.Lua
             {
                 try
                 {
-                    var records = _memory.ExportAllRecords();
-                    var root = new PersistRootDto { slots = new List<PersistSlotDto>() };
+                    List<LuaScriptVersionRecord> records = _memory.ExportAllRecords();
+                    PersistRootDto root = new() { slots = new List<PersistSlotDto>() };
                     for (int i = 0; i < records.Count; i++)
                     {
-                        var r = records[i];
-                        var slot = new PersistSlotDto
+                        LuaScriptVersionRecord r = records[i];
+                        PersistSlotDto slot = new()
                         {
                             scriptKey = r.ScriptKey,
                             originalLua = r.OriginalLua,
@@ -147,7 +169,7 @@ namespace CoreAI.Infrastructure.Lua
                         {
                             for (int h = 0; h < r.History.Count; h++)
                             {
-                                var rev = r.History[h];
+                                LuaScriptRevision rev = r.History[h];
                                 slot.history.Add(new PersistRevDto
                                 {
                                     index = rev.Index,
@@ -160,7 +182,7 @@ namespace CoreAI.Infrastructure.Lua
                         root.slots.Add(slot);
                     }
 
-                    var json = JsonUtility.ToJson(root, true);
+                    string json = JsonUtility.ToJson(root, true);
                     File.WriteAllText(_filePath, json);
                 }
                 catch (Exception ex)
@@ -173,7 +195,7 @@ namespace CoreAI.Infrastructure.Lua
         [Serializable]
         private sealed class PersistRootDto
         {
-            public List<PersistSlotDto> slots = new List<PersistSlotDto>();
+            public List<PersistSlotDto> slots = new();
         }
 
         [Serializable]
@@ -182,7 +204,7 @@ namespace CoreAI.Infrastructure.Lua
             public string scriptKey = "";
             public string originalLua = "";
             public string currentLua = "";
-            public List<PersistRevDto> history = new List<PersistRevDto>();
+            public List<PersistRevDto> history = new();
         }
 
         [Serializable]

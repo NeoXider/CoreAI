@@ -20,15 +20,24 @@ namespace CoreAI.Ai
         {
             snapshot = null;
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return false;
-            var key = overlayKey.Trim();
+            }
+
+            string key = overlayKey.Trim();
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
+                {
                     return false;
-                var copy = new List<LuaScriptRevision>(slot.History.Count);
+                }
+
+                List<LuaScriptRevision> copy = new(slot.History.Count);
                 for (int i = 0; i < slot.History.Count; i++)
+                {
                     copy.Add(slot.History[i]);
+                }
+
                 snapshot = new DataOverlayVersionRecord(key, slot.OriginalPayload, slot.CurrentPayload, copy);
                 return true;
             }
@@ -37,13 +46,16 @@ namespace CoreAI.Ai
         public void RecordSuccessfulApply(string overlayKey, string jsonOrTextPayload)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return;
-            var key = overlayKey.Trim();
-            var payload = jsonOrTextPayload ?? "";
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = overlayKey.Trim();
+            string payload = jsonOrTextPayload ?? "";
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot))
+                if (!_slots.TryGetValue(key, out Slot slot))
                 {
                     slot = new Slot();
                     _slots[key] = slot;
@@ -54,7 +66,9 @@ namespace CoreAI.Ai
                 }
 
                 if (string.Equals(slot.CurrentPayload, payload, StringComparison.Ordinal))
+                {
                     return;
+                }
 
                 int next = slot.History.Count;
                 slot.History.Add(new LuaScriptRevision(next, payload, now));
@@ -65,13 +79,16 @@ namespace CoreAI.Ai
         public void SeedOriginal(string overlayKey, string originalPayload, bool overwriteExistingOriginal = false)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return;
-            var key = overlayKey.Trim();
-            var seed = originalPayload ?? "";
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = overlayKey.Trim();
+            string seed = originalPayload ?? "";
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot))
+                if (!_slots.TryGetValue(key, out Slot slot))
                 {
                     slot = new Slot();
                     _slots[key] = slot;
@@ -94,14 +111,20 @@ namespace CoreAI.Ai
         public void ResetToOriginal(string overlayKey)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return;
-            var key = overlayKey.Trim();
-            var now = DateTime.UtcNow.Ticks;
+            }
+
+            string key = overlayKey.Trim();
+            long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || string.IsNullOrEmpty(slot.OriginalPayload))
+                if (!_slots.TryGetValue(key, out Slot slot) || string.IsNullOrEmpty(slot.OriginalPayload))
+                {
                     return;
-                var o = slot.OriginalPayload;
+                }
+
+                string o = slot.OriginalPayload;
                 slot.CurrentPayload = o;
                 slot.History.Clear();
                 slot.History.Add(new LuaScriptRevision(0, o, now));
@@ -111,20 +134,34 @@ namespace CoreAI.Ai
         public void ResetToRevision(string overlayKey, int revisionIndex)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return;
+            }
+
             if (revisionIndex < 0)
+            {
                 return;
-            var key = overlayKey.Trim();
+            }
+
+            string key = overlayKey.Trim();
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
+                {
                     return;
+                }
+
                 if (revisionIndex >= slot.History.Count)
+                {
                     return;
-                var rev = slot.History[revisionIndex];
+                }
+
+                LuaScriptRevision rev = slot.History[revisionIndex];
                 slot.CurrentPayload = rev.Source ?? "";
                 if (slot.History.Count > revisionIndex + 1)
+                {
                     slot.History.RemoveRange(revisionIndex + 1, slot.History.Count - revisionIndex - 1);
+                }
             }
         }
 
@@ -134,24 +171,34 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 keys = new List<string>(_slots.Count);
-                foreach (var kv in _slots)
+                foreach (KeyValuePair<string, Slot> kv in _slots)
+                {
                     keys.Add(kv.Key);
+                }
             }
 
             for (int i = 0; i < keys.Count; i++)
+            {
                 ResetToOriginal(keys[i]);
+            }
         }
 
         public bool TryGetCurrentPayload(string overlayKey, out string currentPayload)
         {
             currentPayload = null;
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return false;
-            var key = overlayKey.Trim();
+            }
+
+            string key = overlayKey.Trim();
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out var slot) || slot.History.Count == 0)
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
+                {
                     return false;
+                }
+
                 currentPayload = slot.CurrentPayload ?? "";
                 return true;
             }
@@ -161,11 +208,13 @@ namespace CoreAI.Ai
         {
             lock (_lock)
             {
-                var list = new List<string>(_slots.Count);
-                foreach (var kv in _slots)
+                List<string> list = new(_slots.Count);
+                foreach (KeyValuePair<string, Slot> kv in _slots)
                 {
                     if (kv.Value.History.Count > 0)
+                    {
                         list.Add(kv.Key);
+                    }
                 }
 
                 list.Sort(StringComparer.Ordinal);
@@ -176,32 +225,46 @@ namespace CoreAI.Ai
         public string BuildProgrammerPromptSection(string overlayKey)
         {
             if (string.IsNullOrWhiteSpace(overlayKey))
+            {
                 return "";
+            }
+
             DataOverlayVersionRecord snap = null;
-            if (TryGetSnapshot(overlayKey, out var s))
+            if (TryGetSnapshot(overlayKey, out DataOverlayVersionRecord s))
+            {
                 snap = s;
+            }
+
             return DataOverlayVersionPromptFormatter.Format(overlayKey, snap);
         }
 
         public void ClearAll()
         {
             lock (_lock)
+            {
                 _slots.Clear();
+            }
         }
 
         public void ImportFromRecords(IEnumerable<DataOverlayVersionRecord> records)
         {
             if (records == null)
+            {
                 return;
+            }
+
             lock (_lock)
             {
                 _slots.Clear();
-                foreach (var r in records)
+                foreach (DataOverlayVersionRecord r in records)
                 {
                     if (r == null || string.IsNullOrWhiteSpace(r.OverlayKey))
+                    {
                         continue;
-                    var key = r.OverlayKey.Trim();
-                    var slot = new Slot
+                    }
+
+                    string key = r.OverlayKey.Trim();
+                    Slot slot = new()
                     {
                         OriginalPayload = r.OriginalPayload ?? "",
                         CurrentPayload = r.CurrentPayload ?? ""
@@ -209,13 +272,19 @@ namespace CoreAI.Ai
                     if (r.History != null && r.History.Count > 0)
                     {
                         for (int i = 0; i < r.History.Count; i++)
+                        {
                             slot.History.Add(r.History[i]);
+                        }
                     }
                     else if (!string.IsNullOrEmpty(slot.CurrentPayload))
+                    {
                         slot.History.Add(new LuaScriptRevision(0, slot.CurrentPayload, DateTime.UtcNow.Ticks));
+                    }
 
                     if (slot.History.Count > 0)
+                    {
                         _slots[key] = slot;
+                    }
                 }
             }
         }
@@ -224,15 +293,21 @@ namespace CoreAI.Ai
         {
             lock (_lock)
             {
-                var list = new List<DataOverlayVersionRecord>(_slots.Count);
-                foreach (var kv in _slots)
+                List<DataOverlayVersionRecord> list = new(_slots.Count);
+                foreach (KeyValuePair<string, Slot> kv in _slots)
                 {
-                    var slot = kv.Value;
+                    Slot slot = kv.Value;
                     if (slot.History.Count == 0)
+                    {
                         continue;
-                    var copy = new List<LuaScriptRevision>(slot.History.Count);
+                    }
+
+                    List<LuaScriptRevision> copy = new(slot.History.Count);
                     for (int i = 0; i < slot.History.Count; i++)
+                    {
                         copy.Add(slot.History[i]);
+                    }
+
                     list.Add(new DataOverlayVersionRecord(kv.Key, slot.OriginalPayload, slot.CurrentPayload, copy));
                 }
 

@@ -1,0 +1,15 @@
+{
+  "name": "PlayModeTest",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "MessagePipe",
+    "undream.llmunity.Runtime",
+    "MoonSharp.Interpreter",
+    "Microsoft.Extensions.AI",
+    "Microsoft.Extensions.AI.Abstractions"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

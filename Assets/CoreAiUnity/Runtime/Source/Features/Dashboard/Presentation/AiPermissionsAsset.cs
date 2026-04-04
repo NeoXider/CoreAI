@@ -8,14 +8,11 @@ namespace CoreAI.Presentation.AiDashboard
     [CreateAssetMenu(fileName = "AiPermissions", menuName = "CoreAI/Ai Permissions", order = 0)]
     public sealed class AiPermissionsAsset : ScriptableObject
     {
-        [SerializeField]
-        private bool allowCreator = true;
+        [SerializeField] private bool allowCreator = true;
 
-        [SerializeField]
-        private bool allowAnalyzer = true;
+        [SerializeField] private bool allowAnalyzer = true;
 
-        [SerializeField]
-        private bool allowCoreMechanic = true;
+        [SerializeField] private bool allowCoreMechanic = true;
 
         /// <summary>Разрешить роль Creator (сессионные команды).</summary>
         public bool AllowCreator => allowCreator;

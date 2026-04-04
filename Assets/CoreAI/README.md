@@ -15,6 +15,8 @@ UPM-пакет **портативного ядра** **CoreAI.Core** — без 
 | Путь в пакете | Сборка | Содержание |
 |---------------|--------|------------|
 | `Runtime/Core/` | **CoreAI.Core** | Контракты оркестрации, очередь, сессия, песочница MoonSharp, промпты, версионирование Lua/data overlays — **без UnityEngine** |
+| `Runtime/Core/Features/AgentMemory/` | **CoreAI.Core** | **MEAI Function Calling** через Microsoft.Extensions.AI, MemoryTool с AIFunctionFactory, автоматический вызов tools |
+| `Runtime/Core/Features/Orchestration/` | **CoreAI.Core** | AiOrchestrator с MEAI pipeline, MeaiChatClientAdapter, fallback на legacy ILlmClient |
 
 Changelog: **`CHANGELOG.md`**.
 
@@ -49,7 +51,22 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity#v0.1.3
 
 ### Зависимости этого пакета (UPM)
 
-В `package.json`: **VContainer**, **MoonSharp**. Интеграция с Unity (MessagePipe, LLMUnity, UniTask и т.д.) объявлена в **`com.nexoider.coreaiunity`**.
+В `package.json`: **VContainer**, **MoonSharp**, **Microsoft.Extensions.AI**. Интеграция с Unity (MessagePipe, LLMUnity, UniTask и т.д.) объявлена в **`com.nexoider.coreaiunity`**.
+
+### Microsoft.Extensions.AI
+
+Пакет использует **Microsoft.Extensions.AI** (MEAI) для стандартизированного function calling:
+
+```xml
+<package id="Microsoft.Extensions.AI" version="10.4.1" manuallyInstalled="true" />
+```
+
+MEAI обеспечивает:
+- Provider-agnostic подход для поддержки различных LLM бэкендов
+- Decorator-based функциональность через `AIFunctionFactory.Create()`
+- Middleware `UseFunctionInvocation()` для автоматического обнаружения и выполнения функций
+
+Подробнее: [Tool-Call документация](Runtime/Core/Features/AgentMemory/TOOL_CALL_DOCUMENTATION.md).
 
 ---
 

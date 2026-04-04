@@ -9,10 +9,19 @@ namespace CoreAI.Editor
     {
         private const string Prefix = "[CoreAI] ";
 
-        internal static void Log(string message) => Debug.Log(Prefix + message);
+        internal static void Log(string message)
+        {
+            Debug.Log(Prefix + message);
+        }
 
-        internal static void LogWarning(string message) => Debug.LogWarning(Prefix + message);
+        internal static void LogWarning(string message)
+        {
+            Debug.LogWarning(Prefix + message);
+        }
 
-        internal static void LogError(string message) => Debug.LogError(Prefix + message);
+        internal static void LogError(string message)
+        {
+            Debug.LogError(Prefix + message);
+        }
     }
 }

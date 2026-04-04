@@ -13,6 +13,9 @@ namespace CoreAI.Ai
     public sealed class CodeRefinerStub : ICodeRefiner
     {
         /// <inheritdoc />
-        public string Refine(string rawModelOutput, string agentRoleId) => rawModelOutput;
+        public string Refine(string rawModelOutput, string agentRoleId)
+        {
+            return rawModelOutput;
+        }
     }
 }

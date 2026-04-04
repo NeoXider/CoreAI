@@ -10,10 +10,12 @@ namespace CoreAI.Ai
         public bool IsMemoryEnabled(string roleId)
         {
             if (string.IsNullOrWhiteSpace(roleId))
+            {
                 roleId = BuiltInAgentRoleIds.Creator;
+            }
+
             roleId = roleId.Trim();
             return roleId == BuiltInAgentRoleIds.Creator;
         }
     }
 }
-
