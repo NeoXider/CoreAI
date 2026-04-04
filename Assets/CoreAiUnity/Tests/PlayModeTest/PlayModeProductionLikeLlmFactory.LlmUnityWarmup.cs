@@ -25,6 +25,17 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
+            // Температура настраивается в агенте
+            LLMAgent agent = llmClient.UnityAgent;
+            if (agent != null)
+            {
+                if (agent.temperature != 0.2f)
+                {
+                    agent.temperature = 0.2f;
+                    Debug.Log("[LLMUnity Test] Set LLMAgent temperature to 0.2 for reliable tool calling.");
+                }
+            }
+
             LLM llm = llmClient.LLM;
             if (llm == null)
             {

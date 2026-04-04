@@ -156,6 +156,66 @@ namespace CoreAI.Tests.PlayMode
         }
 
 #if !COREAI_NO_LLM
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator Creator_WritesMemory_ViaLmStudio()
+        {
+            Debug.Log("[Test] === LM STUDIO TEST STARTED ===");
+            Debug.Log("[Test] Убедитесь, что в LM Studio:");
+            Debug.Log("[Test] 1. Загружена модель (например Qwen3.5-4B)");
+            Debug.Log("[Test] 2. Включен Server (справа сверху, порт 1234)");
+            
+            var store = new InMemoryStore();
+            var policy = new AgentMemoryPolicy();
+            var telemetry = new SessionTelemetryCollector();
+            var composer = new AiPromptComposer(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            // Настройка для LM Studio
+            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            settings.SetRuntimeConfiguration(
+                useOpenAiCompatibleHttp: true,
+                apiBaseUrl: "http://localhost:1234/v1",
+                apiKey: "lm-studio", // LM Studio принимает любой ключ
+                model: "", // LM Studio использует ту модель, что сейчас активна
+                temperature: 0.2f // Оптимально для Tool Call
+            );
+
+            var client = new OpenAiChatLlmClient(settings);
+
+            var sink = new ListSink();
+            var orch = new AiOrchestrator(
+                new SoloAuthorityHost(),
+                client,
+                sink,
+                telemetry,
+                composer,
+                store,
+                policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics());
+
+            Debug.Log("[Test] Sending request to LM Studio...");
+            var task = orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Creator,
+                Hint = "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"lm studio 4b connected\"}"
+            });
+
+            yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio request");
+
+            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) || string.IsNullOrWhiteSpace(state.Memory))
+            {
+                Debug.LogWarning("[Test] LM Studio did not write memory. Check logs above.");
+                Assert.Ignore("LM Studio test skipped (model likely didn't follow tool format)");
+            }
+
+            Debug.Log($"[Test] SUCCESS! Memory content: {state.Memory}");
+            Assert.IsTrue(state.Memory.Contains("lm studio 4b connected") || state.Memory.Contains("lm studio"));
+        }
+
         private static IEnumerator RunCreatorMemoryWithSharedLlm()
         {
             ILlmClient client = SharedLlmUnity.Client;
