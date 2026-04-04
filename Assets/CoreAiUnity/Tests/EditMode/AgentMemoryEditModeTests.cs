@@ -113,7 +113,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task Analyzer_ByDefaultMemoryDisabled_DoesNotAppendMemoryToSystemPrompt()
+        public async Task Analyzer_ByDefaultMemoryEnabled_AppendsMemoryToSystemPrompt()
+        {
+            CapturingLlm llm = new("{\"ok\":true}");
+            ListSink sink = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
+            InMemoryStore store = new();
+            store.Save(BuiltInAgentRoleIds.Analyzer, new AgentMemoryState { Memory = "should_be_visible" });
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
+                new AgentMemoryPolicy(),
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
+
+            await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Analyzer, Hint = "x" });
+
+            // Теперь Analyzer имеет включённую память по умолчанию
+            Assert.IsTrue(llm.LastSystemPrompt.Contains("## Memory"));
+            StringAssert.Contains("should_be_visible", llm.LastSystemPrompt);
+        }
+
+        [Test]
+        public async Task Analyzer_MemoryCanBeDisabled_ViaPolicy()
         {
             CapturingLlm llm = new("{\"ok\":true}");
             ListSink sink = new();
@@ -122,8 +143,11 @@ namespace CoreAI.Tests.EditMode
                 new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore());
             InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Analyzer, new AgentMemoryState { Memory = "should_not_be_seen" });
-            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store,
-                new AgentMemoryPolicy(),
+
+            var policy = new AgentMemoryPolicy();
+            policy.DisableMemoryTool(BuiltInAgentRoleIds.Analyzer);
+
+            AiOrchestrator orch = new(new SoloAuthorityHost(), llm, sink, telemetry, composer, store, policy,
                 new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = BuiltInAgentRoleIds.Analyzer, Hint = "x" });

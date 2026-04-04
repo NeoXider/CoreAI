@@ -2,50 +2,39 @@
 
 ## 🚨 КРИТИЧНОЕ (без этого система не работает как задумано)
 
-### 1. MemoryTool не работает для всех агентов кроме Creator
+### 1. ✅ MemoryTool работает для ВСЕХ агентов
 
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryPolicy.cs`
 
-**Проблема:**
-```csharp
-public bool IsMemoryEnabled(string roleId)
-{
-    return roleId == BuiltInAgentRoleIds.Creator; // ← ТОЛЬКО Creator!
-}
-```
+**Статус:** ✅ ГОТОВО
 
-**Что нужно:**
-- [ ] Включить память для **всех** ролей: Creator, CoreMechanicAI, Programmer, Analyzer, AINpc, PlayerChat
-- [ ] Добавить конфигурацию: какие роли используют `write`, какие `append`
-- [ ] CoreMechanicAI → `append` (накапливает историю крафтов)
-- [ ] Creator → `write` (перезаписывает дизайн-решения)
-- [ ] Programmer → `write` (сохраняет Lua формулы)
-
-**Влияние:** Сейчас CoreMechanicAI **НЕ МОЖЕТ** сохранять историю крафтов. Все тесты крафта с памятью работают только потому что используют `InMemoryStore` напрямую, минуя `AgentMemoryPolicy`.
+- ✅ Все 6 ролей используют MemoryTool по умолчанию
+- ✅ Append по умолчанию (накапливают историю)
+- ✅ Легко вкл/выкл: `policy.DisableMemoryTool("PlayerChat")`
+- ✅ Конфигурация на роль: write/append/clear
 
 ---
 
-### 2. Нет валидации ответов LLM (RoleStructuredResponsePolicy)
+### 2. ❌ Нет валидации ответов LLM (RoleStructuredResponsePolicy)
 
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/NoOpRoleStructuredResponsePolicy.cs`
 
 **Проблема:**
 ```csharp
 public bool ShouldValidate(string roleId) => false; // ← Никогда не проверяет
-public bool TryValidate(...) => true; // ← Всегда «валидно»
 ```
 
 **Что нужно:**
-- [ ] Реализовать `ProgrammerResponsePolicy` — проверка что ответ содержит Lua код или JSON
-- [ ] Реализовать `CoreMechanicResponsePolicy` — проверка что ответ содержит JSON с числами
-- [ ] Реализовать `CreatorResponsePolicy` — проверка что ответ содержит JSON с командой
+- [ ] `ProgrammerResponsePolicy` — проверка что ответ содержит Lua код или JSON
+- [ ] `CoreMechanicResponsePolicy` — проверка что ответ содержит JSON с числами
+- [ ] `CreatorResponsePolicy` — проверка что ответ содержит JSON с командой
 - [ ] При неуде валидации → автоматический retry с подсказкой (сейчас 1 retry уже заложен в `AiOrchestrator`)
 
 **Влияние:** Если модель отвечает текстом вместо JSON/Lua, система не пытается исправить.
 
 ---
 
-### 3. Нет конфигурации игры (GameConfig)
+### 3. ❌ Нет конфигурации игры (GameConfig)
 
 **Проблема:** В проекте **НЕТ** файлов `*Config*.cs` кроме тестового.
 
@@ -61,12 +50,12 @@ public bool TryValidate(...) => true; // ← Всегда «валидно»
 
 ## ⚠️ ВАЖНОЕ (система работает, но не полностью)
 
-### 4. CoreMechanicAI не имеет специализированных инструментов
+### 4. ❌ CoreMechanicAI не имеет специализированных инструментов
 
 **Что есть:**
 - ✅ Системный промпт есть
 - ✅ RoleId есть
-- ✅ Память (после фикса #1) будет
+- ✅ Память работает
 
 **Чего нет:**
 - [ ] `CraftingTool` — специализированная функция для расчёта крафта (как MemoryTool но для крафта)
@@ -74,27 +63,14 @@ public bool TryValidate(...) => true; // ← Всегда «валидно»
 - [ ] `CompatibilityChecker` — проверка совместимости ингредиентов
 - [ ] JSON schema validation — проверка что ответ CoreMechanicAI содержит нужные поля
 
-**Что нужно:**
-```csharp
-// Пример CraftingTool
-public AIFunction CreateCraftingTool()
-{
-    return AIFunctionFactory.Create(
-        (string ingredient1, string ingredient2, float quality) => {
-            return new CraftResult { ItemName = "...", Damage = ..., Quality = quality };
-        },
-        "calculate_craft",
-        "Calculate crafting result from two ingredients with quality 0-100.");
-}
-```
-
 ---
 
-### 5. Programmer не имеет автоматического ремонта вне Lua sandbox
+### 5. ⚠️ Programmer auto-repair только для Lua errors
 
 **Что есть:**
 - ✅ `LuaAiEnvelopeProcessor` — выполняет Lua, ловит ошибки
 - ✅ Автоматический retry Programmer при ошибке Lua (до 4 поколений)
+- ✅ **Тесты:** `LuaExecutionPipelineEditModeTests.cs` — 8 тестов
 
 **Чего нет:**
 - [ ] Ремонт если Programmer **вообще не дал Lua** (дал текст вместо кода)
@@ -103,11 +79,12 @@ public AIFunction CreateCraftingTool()
 
 ---
 
-### 6. Нет multi-agent orchestration (последовательность агентов)
+### 6. ❌ Нет multi-agent orchestration (последовательность агентов)
 
 **Что есть:**
 - ✅ `AiOrchestrator` — запускает ОДНУ задачу одного агента
 - ✅ `QueuedAiOrchestrator` — очередь задач с приоритетами
+- ✅ **Тесты:** `AgentDataPassingEditModeTests.cs` — 4 теста передачи данных
 
 **Чего нет:**
 - [ ] `MultiAgentWorkflow` — цепочка: Creator → CoreMechanicAI → Programmer
@@ -115,19 +92,9 @@ public AIFunction CreateCraftingTool()
 - [ ] Условная логика: «если CoreMechanicAI вернул качество > 80, вызвать Programmer»
 - [ ] Parallel execution: «Analyzer и CoreMechanicAI работают параллельно»
 
-**Что нужно:**
-```csharp
-// Пример API
-var workflow = new MultiAgentWorkflow()
-    .Step(BuiltInAgentRoleIds.Creator, "Design weapon from iron+crystal")
-    .Then(BuiltInAgentRoleIds.CoreMechanic, "Calculate stats (use Creator output)")
-    .Then(BuiltInAgentRoleIds.Programmer, "Generate Lua (use CoreMechanic output)")
-    .ExecuteAsync();
-```
-
 ---
 
-### 7. Analyzer не участвует ни в одном тесте
+### 7. ❌ Analyzer не участвует ни в одном тесте
 
 **Что есть:**
 - ✅ Системный промпт есть
@@ -140,7 +107,7 @@ var workflow = new MultiAgentWorkflow()
 
 ---
 
-### 8. AINpc и PlayerChat не тестированы
+### 8. ❌ AINpc и PlayerChat не тестированы
 
 **Что есть:**
 - ✅ Системные промпты есть
@@ -156,7 +123,7 @@ var workflow = new MultiAgentWorkflow()
 
 ## 🔧 ТЕХНИЧЕСКОЕ (инфраструктура)
 
-### 9. Нет логирования HTTP запросов к LLM
+### 9. ⚠️ Логирование HTTP запросов к LLM
 
 **Что есть:**
 - ✅ `LoggingLlmClientDecorator.cs` — обёртка для логирования
@@ -169,7 +136,7 @@ var workflow = new MultiAgentWorkflow()
 
 ---
 
-### 10. Нет метрик оркестрации
+### 10. ❌ Нет метрик оркестрации
 
 **Что есть:**
 - ✅ `IAiOrchestrationMetrics.cs` — интерфейс
@@ -183,7 +150,7 @@ var workflow = new MultiAgentWorkflow()
 
 ---
 
-### 11. Нет версионирования промптов
+### 11. ❌ Нет версионирования промптов
 
 **Что есть:**
 - ✅ `LuaScriptVersionStore` — версионирование Lua скриптов
@@ -196,7 +163,7 @@ var workflow = new MultiAgentWorkflow()
 
 ---
 
-### 12. WorldCommand Executor минимальный
+### 12. ⚠️ WorldCommand Executor минимальный
 
 **Что есть:**
 - ✅ `CoreAiWorldCommandExecutor` — spawn/move/destroy/load_scene/bind_by_name/set_active
@@ -213,7 +180,7 @@ var workflow = new MultiAgentWorkflow()
 
 ## 📝 ДОКУМЕНТАЦИЯ
 
-### 13. Нет полного описания workflow
+### 13. ❌ Нет полного описания workflow
 
 **Что нужно:**
 - [ ] Диаграмма: «Как команда от игрока проходит через всю систему»
@@ -221,7 +188,7 @@ var workflow = new MultiAgentWorkflow()
 - [ ] Описание формата JSON команд для каждой роли
 - [ ] Troubleshooting guide: «Модель не отвечает», «Lua упала», «Память не пишется»
 
-### 14. Нет примеров использования
+### 14. ❌ Нет примеров использования
 
 **Что нужно:**
 - [ ] Quick Start: «Запусти LM Studio → запусти сцену → отправь команду»
@@ -234,25 +201,34 @@ var workflow = new MultiAgentWorkflow()
 
 ## 🎯 ПРИОРИТЕТЫ (что делать первым)
 
-### Sprint 1 — Критическое
-1. ✅ **Исправить AgentMemoryPolicy** — включить память для всех ролей, 2 типа памяти (готово!)
-2. ~~**Добавить RoleStructuredResponsePolicy**~~ — отложено
-3. ~~**Создать GameConfig**~~ — отложено
+### ✅ Sprint 1 — КРИТИЧНОЕ (ГОТОВО)
+1. ✅ **AgentMemoryPolicy** — память для всех ролей, 2 типа памяти
+2. ✅ **MemoryTool** — write/append/clear через MEAI
+3. ✅ **ChatHistory** — LLMAgent контекст (сохранение/загрузка)
+4. ✅ **FileAgentMemoryStore** — персистентность в JSON
+5. ✅ **IAgentMemoryStore** — расширенный интерфейс
 
-### Sprint 2 — Multi-agent
-4. **MultiAgentWorkflow** — цепочка агентов (4 часа)
-5. **CraftingTool** для CoreMechanicAI (2 часа)
-6. **Тесты полного воркфлоу** (Creator → CoreMechanicAI → Programmer) (3 часа)
+### ✅ Sprint 2 — ТЕСТЫ (ГОТОВО)
+6. ✅ **LuaExecutionPipelineEditModeTests** — 8 тестов Lua execution
+7. ✅ **AgentDataPassingEditModeTests** — 4 теста передачи данных
+8. ✅ **MultiAgentCraftingWorkflowPlayModeTests** — полный воркфлоу 3 агентов
+9. ✅ **CraftingMemoryViaLlmUnityPlayModeTests** — 4 крафта + детерминизм
+10. ✅ **CraftingMemoryViaOpenAiPlayModeTests** — 4 крафта + детерминизм
 
-### Sprint 3 — Инфраструктура
-7. **Логирование HTTP** запросов к LLM (2 часа)
-8. **Метрики** оркестрации (2 часа)
-9. **AINpc и PlayerChat тесты** (3 часа)
+### Sprint 3 — Multi-agent (СЛЕДУЮЩИЙ)
+11. **MultiAgentWorkflow** — цепочка агентов (4 часа)
+12. **CraftingTool** для CoreMechanicAI (2 часа)
+13. **RoleStructuredResponsePolicy** — валидация ответов (3 часа)
 
-### Sprint 4 — Полировка
-10. **WorldCommand** расширения (3 часа)
-11. **Версионирование промптов** (2 часа)
-12. **Документация** с диаграммами (4 часа)
+### Sprint 4 — Инфраструктура
+14. **Логирование HTTP** запросов к LLM (2 часа)
+15. **Метрики** оркестрации (2 часа)
+16. **AINpc и PlayerChat тесты** (3 часа)
+
+### Sprint 5 — Полировка
+17. **WorldCommand** расширения (3 часа)
+18. **Версионирование промптов** (2 часа)
+19. **Документация** с диаграммами (4 часа)
 
 ---
 
@@ -269,7 +245,7 @@ var workflow = new MultiAgentWorkflow()
 | **Programmer** — auto-repair | | ✅ | (только Lua errors) |
 | **CoreMechanicAI** — системный промпт | ✅ | | |
 | **CoreMechanicAI** — крафт | | ✅ | (нет CraftingTool) |
-| **CoreMechanicAI** — память | | | ❌ (выключена в policy) |
+| **CoreMechanicAI** — память | ✅ | | |
 | **AINpc** — системный промпт | ✅ | | |
 | **AINpc** — диалоги | | | ❌ (нет тестов) |
 | **PlayerChat** — системный промпт | ✅ | | |
@@ -279,15 +255,39 @@ var workflow = new MultiAgentWorkflow()
 | **ChatHistory** — LLMAgent контекст | ✅ | | |
 | **ChatHistory** — загрузка/сохранение | ✅ | | |
 | **AiOrchestrator** — один агент | ✅ | | |
-| **MultiAgent** — цепочка | | | ❌ |
+| **MultiAgent** — цепочка | | ✅ | (есть EditMode тесты) |
 | **Lua Sandbox** — исполнение | ✅ | | |
 | **Lua Sandbox** — timeout | | | ❌ |
+| **Lua Repair** — авто-повтор | ✅ | | |
+| **Data Passing** — между агентами | ✅ | | |
 | **World Commands** — spawn/move/destroy | ✅ | | |
 | **World Commands** — animation/sound/UI | | | ❌ |
 | **Dashboard** — MVP лог | ✅ | | |
 | **Dashboard** — метрики | | | ❌ |
 | **Тесты** — EditMode крафт | ✅ | | |
+| **Тесты** — EditMode Lua execution | ✅ | | |
+| **Тесты** — EditMode data passing | ✅ | | |
 | **Тесты** — PlayMode память | ✅ | | |
-| **Тесты** — PlayMode multi-agent | | | ❌ |
+| **Тесты** — PlayMode multi-agent | ✅ | | |
 
-**Итого:** ✅ Реализовано ~40%, ⚠️ Частично ~25%, ❌ Не реализовано ~35%
+**Итого:** ✅ Реализовано ~60%, ⚠️ Частично ~20%, ❌ Не реализовано ~20%
+
+---
+
+## 📋 НОВЫЕ ТЕСТЫ (добавлены)
+
+### EditMode тесты
+
+| Файл | Тестов | Что проверяет |
+|------|--------|---------------|
+| `LuaExecutionPipelineEditModeTests.cs` | 8 | Lua sandbox, execution success/failure, repair loop, max generations, role isolation |
+| `AgentDataPassingEditModeTests.cs` | 4 | Creator→CoreMechanic, CoreMechanic→Programmer, memory isolation, full chain |
+| `AiCraftingMechanicIntegrationEditModeTests.cs` | 7 | Crafting domain, AI creates unique items, deterministic |
+
+### PlayMode тесты
+
+| Файл | Тестов | Бэкенд | Что проверяет |
+|------|--------|--------|---------------|
+| `MultiAgentCraftingWorkflowPlayModeTests.cs` | 2 | OpenAI HTTP | Creator→Mechanic→Programmer, memory isolation |
+| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | LLMUnity | 4 крафта + детерминизм |
+| `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | OpenAI HTTP | 4 крафта + 2 крафта quick |
