@@ -105,7 +105,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     RoleId = BuiltInAgentRoleIds.Creator,
                     Hint =
-                        "IMPORTANT: Use the memory tool. Output JSON only: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"remember: apples\"}"
+                        "IMPORTANT: Use the memory tool. Output JSON only: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"remember: apples\"}}"
                 });
                 Debug.Log("[Test] Starting creator memory write task...");
                 yield return PlayModeTestAwait.WaitTask(t1, 300f, "creator memory write");
@@ -204,7 +204,7 @@ namespace CoreAI.Tests.PlayMode
             var task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"lm studio 4b connected\"}"
+                Hint = "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"lm studio 4b connected\"}}"
             });
 
             yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio request");
@@ -247,7 +247,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "IMPORTANT: Use the memory tool. Output JSON only: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"remember: apples\"}"
+                    "IMPORTANT: Use the memory tool. Output JSON only: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"remember: apples\"}}"
             });
             Debug.Log("[Test] Starting creator memory write task...");
             yield return PlayModeTestAwait.WaitTask(t1, 300f, "creator memory write");

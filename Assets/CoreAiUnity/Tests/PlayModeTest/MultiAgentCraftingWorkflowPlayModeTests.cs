@@ -86,7 +86,7 @@ namespace CoreAI.Tests.PlayMode
                                "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
                                "Output JSON with: item_type, estimated_damage, estimated_fire_damage, quality.\n" +
                                "Also save your design decision to memory using memory tool:\n" +
-                               "{\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon, damage ~45, fire ~15\"}"
+                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon, damage ~45, fire ~15\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "creator design");
@@ -122,7 +122,7 @@ namespace CoreAI.Tests.PlayMode
                                "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
                                "Output JSON: {\"item_name\": \"...\", \"damage\": N, \"fire_damage\": N, \"quality\": N}\n" +
                                "Save to memory using memory tool:\n" +
-                               "{\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Craft#1: <item_name> damage:N fire:N quality:N\"}"
+                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Craft#1: <item_name> damage:N fire:N quality:N\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic calculation");
@@ -174,12 +174,8 @@ namespace CoreAI.Tests.PlayMode
                                "- Use create_item('ItemName', 'weapon', quality)\n" +
                                "- Add special effect for fire damage\n" +
                                "- Use report() to log the result\n\n" +
-                               "Output only a fenced Lua block:\n" +
-                               "```lua\n" +
-                               "create_item('...', 'weapon', quality)\n" +
-                               "add_special_effect('fire_damage: 15')\n" +
-                               "report('crafted ...')\n" +
-                               "```"
+                               "Use the execute_lua tool:\n" +
+                               "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('...', 'weapon', quality)\\nadd_special_effect('fire_damage: 15')\\nreport('crafted ...')\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "programmer lua");
@@ -303,7 +299,7 @@ namespace CoreAI.Tests.PlayMode
                     {
                         RoleId = BuiltInAgentRoleIds.Creator,
                         Hint = "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
-                               "Save to memory: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon\"}"
+                               "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "creator");
@@ -329,7 +325,7 @@ namespace CoreAI.Tests.PlayMode
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate weapon from: Iron (hardness:60) + Fire Crystal (magic:85).\n" +
                                "Output JSON with item_name, damage, fire_damage.\n" +
-                               "Save to memory: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Craft#1: <name> damage:N fire:N\"}"
+                               "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Craft#1: <name> damage:N fire:N\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic");

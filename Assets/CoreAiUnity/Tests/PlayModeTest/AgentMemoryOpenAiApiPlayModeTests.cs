@@ -75,7 +75,7 @@ namespace CoreAI.Tests.PlayMode
                 var task = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.Creator,
-                    Hint = $"Temperature test {temp}. Запомни фразу 'temp test {temp}'. Используй JSON: {{\"tool\": \"memory\", \"action\": \"write\", \"content\": \"temp test {temp}\"}}"
+                    Hint = $"Temperature test {temp}. Запомни фразу 'temp test {temp}'. Используй JSON: {{\"name\": \"memory\", \"arguments\": {{\"action\": \"write\", \"content\": \"temp test {temp}\"}}}}"
                 });
 
                 yield return PlayModeTestAwait.WaitTask(task, 120f, $"LM Studio memory write temp={temp}");
@@ -134,7 +134,7 @@ namespace CoreAI.Tests.PlayMode
             var task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Важно: запомни фразу 'qwen4b работает отлично'. Используй только JSON: {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"qwen4b работает отлично\"}"
+                Hint = "Важно: запомни фразу 'qwen4b работает отлично'. Используй только JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"qwen4b работает отлично\"}}"
             });
 
             yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory write");
@@ -188,7 +188,7 @@ namespace CoreAI.Tests.PlayMode
             var task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Добавь в память: 'добавлено через lm studio'. Используй: {\"tool\": \"memory\", \"action\": \"append\", \"content\": \"добавлено через lm studio\"}"
+                Hint = "Добавь в память: 'добавлено через lm studio'. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"добавлено через lm studio\"}}"
             });
 
             yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory append");
@@ -248,7 +248,7 @@ namespace CoreAI.Tests.PlayMode
             var task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Очисти всю память. Используй: {\"tool\": \"memory\", \"action\": \"clear\"}"
+                Hint = "Очисти всю память. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}"
             });
 
             yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory clear");

@@ -80,15 +80,18 @@ namespace CoreAI.Tests.PlayMode
                 // ===== TEST 1: WRITE MEMORY =====
                 {
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Save this to memory: 'Test craft #1: Iron Sword'\n\n" +
-                        "Call the memory tool now:\n" +
-                        "```json\n" +
-                        "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Test craft #1: Iron Sword\"}}\n" +
-                        "```";
+                    string prompt = "Save this to memory: 'Test craft #1: Iron Sword'. Use the memory tool to write it.";
 
-                    Debug.Log($"[AllToolCalls] TEST 1: Write memory");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] 📤 PROMPT TO MODEL:");
+                    Debug.Log($"[AllToolCalls] {prompt}");
+                    Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
+
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -97,24 +100,38 @@ namespace CoreAI.Tests.PlayMode
 
                     yield return PlayModeTestAwait.WaitTask(t, 120f, "memory write");
 
+                    Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
+                    Debug.Log($"[AllToolCalls] System Prompt: {capturingLlm.LastSystemPrompt?.Substring(0, Math.Min(200, capturingLlm.LastSystemPrompt?.Length ?? 0))}...");
+                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
                     // Проверяем что память сохранена
-                    Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1),
-                        "Memory should be saved after tool call");
-                    Debug.Log($"[AllToolCalls] ✓ Memory written: {state1.Memory}");
+                    if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1))
+                    {
+                        Debug.Log($"[AllToolCalls] ✓ Memory written: {state1.Memory}");
+                        Assert.IsTrue(!string.IsNullOrWhiteSpace(state1.Memory), "Memory should not be empty");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[AllToolCalls] ⚠ Memory NOT SAVED - model did not call memory tool");
+                        Assert.Fail("Memory should be saved after tool call");
+                    }
                 }
 
                 // ===== TEST 2: APPEND MEMORY =====
                 {
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Append this to memory: 'Test craft #2: Steel Shield'\n\n" +
-                        "Call the memory tool:\n" +
-                        "```json\n" +
-                        "{\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"Test craft #2: Steel Shield\"}}\n" +
-                        "```";
+                    string prompt = "Append this to memory: 'Test craft #2: Steel Shield'. Use the memory tool to append it.";
 
-                    Debug.Log($"[AllToolCalls] TEST 2: Append memory");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] 📤 PROMPT TO MODEL:");
+                    Debug.Log($"[AllToolCalls] {prompt}");
+                    Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
+
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -123,25 +140,37 @@ namespace CoreAI.Tests.PlayMode
 
                     yield return PlayModeTestAwait.WaitTask(t, 120f, "memory append");
 
-                    Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2),
-                        "Memory should exist after append");
-                    StringAssert.Contains("Iron Sword", state2.Memory, "Should contain previous craft");
-                    StringAssert.Contains("Steel Shield", state2.Memory, "Should contain new craft");
-                    Debug.Log($"[AllToolCalls] ✓ Memory appended: {state2.Memory}");
+                    Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
+                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
+                    if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2))
+                    {
+                        Debug.Log($"[AllToolCalls] ✓ Memory appended: {state2.Memory}");
+                        StringAssert.Contains("Iron Sword", state2.Memory, "Should contain previous craft");
+                        StringAssert.Contains("Steel Shield", state2.Memory, "Should contain new craft");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[AllToolCalls] ⚠ Memory NOT SAVED - model did not call memory tool");
+                        Assert.Fail("Memory should exist after append");
+                    }
                 }
 
                 // ===== TEST 3: CLEAR MEMORY =====
                 {
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Clear all memory.\n\n" +
-                        "Call the memory tool:\n" +
-                        "```json\n" +
-                        "{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}\n" +
-                        "```";
+                    string prompt = "Clear all memory. Use the memory tool to clear it.";
 
-                    Debug.Log($"[AllToolCalls] TEST 3: Clear memory");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] 📤 PROMPT TO MODEL:");
+                    Debug.Log($"[AllToolCalls] {prompt}");
+                    Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
+
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -150,9 +179,18 @@ namespace CoreAI.Tests.PlayMode
 
                     yield return PlayModeTestAwait.WaitTask(t, 120f, "memory clear");
 
-                    Assert.IsFalse(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out _),
-                        "Memory should be cleared after tool call");
-                    Debug.Log($"[AllToolCalls] ✓ Memory cleared");
+                    Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
+                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
+                    if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out _))
+                    {
+                        Debug.Log($"[AllToolCalls] ✓ Memory cleared");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[AllToolCalls] ⚠ Memory NOT CLEARED - model did not call memory tool");
+                        Assert.Fail("Memory should be cleared after tool call");
+                    }
                 }
 
                 Debug.Log("[AllToolCalls] ═══ MEMORY TOOL TEST PASSED ═══");
@@ -199,12 +237,19 @@ namespace CoreAI.Tests.PlayMode
                 // ===== TEST: EXECUTE LUA =====
                 {
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     string prompt = "Create a simple item called 'TestDagger' with quality 50.\n\n" +
                         "Use the execute_lua tool to call: create_item('TestDagger', 'weapon', 50) and report('crafted TestDagger')";
 
-                    Debug.Log($"[AllToolCalls] TEST: Execute Lua");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");
+                    Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
+                    Debug.Log($"[AllToolCalls] 📤 PROMPT TO MODEL:");
+                    Debug.Log($"[AllToolCalls] {prompt}");
+                    Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
+
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Programmer,
@@ -213,7 +258,10 @@ namespace CoreAI.Tests.PlayMode
 
                     yield return PlayModeTestAwait.WaitTask(t, 120f, "execute_lua");
 
-                    // Проверяем что команда была создана
+                    Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
+                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+                    Debug.Log($"[AllToolCalls] Commands produced: {sink.Items.Count}");
+
                     Assert.Greater(sink.Items.Count, 0, "Should produce at least one command");
                     Debug.Log($"[AllToolCalls] ✓ Lua executed, command produced");
                 }
@@ -244,6 +292,38 @@ namespace CoreAI.Tests.PlayMode
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics());
+        }
+
+        /// <summary>
+        /// Обёртка над ILlmClient для перехвата запросов и ответов.
+        /// </summary>
+        private sealed class CapturingLlmClient : ILlmClient
+        {
+            private readonly ILlmClient _inner;
+            public string LastSystemPrompt;
+            public string LastUserPayload;
+            public string LastContent;
+
+            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                System.Threading.CancellationToken cancellationToken = default)
+            {
+                LastSystemPrompt = request.SystemPrompt;
+                LastUserPayload = request.UserPayload;
+
+                var result = await _inner.CompleteAsync(request, cancellationToken);
+
+                if (result != null && result.Ok)
+                {
+                    LastContent = result.Content;
+                }
+
+                return result;
+            }
+
+            public void SetTools(IReadOnlyList<CoreAI.Ai.ILlmTool> tools) => _inner.SetTools(tools);
         }
     }
 #endif

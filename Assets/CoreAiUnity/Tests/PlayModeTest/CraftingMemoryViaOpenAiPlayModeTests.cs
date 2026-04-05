@@ -389,12 +389,13 @@ namespace CoreAI.Tests.PlayMode
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
             string instructions = "OUTPUT FORMAT:\n" +
-                "1. First, use the memory tool to save this craft:\n" +
-                "   {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}\n\n" +
-                "2. Then output Lua code in a fenced block:\n" +
-                "   ```lua\n" +
-                "   create_item('YourWeaponName', 'weapon', quality)\n" +
-                "   report('crafted YourWeaponName')\n" +
+                "1. First, call the memory tool to save this craft:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
+                "   ```\n\n" +
+                "2. Then, call the execute_lua tool to create the item:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', quality)\\nreport('crafted YourWeaponName')\"}}\n" +
                 "   ```";
 
             return header + ingredients + memorySection + instructions;
@@ -412,12 +413,13 @@ namespace CoreAI.Tests.PlayMode
                 "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
                 "This tests deterministic behavior: same input = same output.\n\n" +
                 "OUTPUT FORMAT:\n" +
-                "1. Use memory tool:\n" +
-                "   {\"tool\": \"memory\", \"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}\n\n" +
-                "2. Output Lua code:\n" +
-                "   ```lua\n" +
-                "   create_item('SameNameAsBefore', 'weapon', quality)\n" +
-                "   report('crafted SameNameAsBefore')\n" +
+                "1. Call the memory tool:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
+                "   ```\n\n" +
+                "2. Call the execute_lua tool:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', quality)\\nreport('crafted SameNameAsBefore')\"}}\n" +
                 "   ```";
 
             return header + ingredients + memorySection + instructions;
