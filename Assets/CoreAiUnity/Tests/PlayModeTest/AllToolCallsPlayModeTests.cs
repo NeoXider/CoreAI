@@ -201,11 +201,8 @@ namespace CoreAI.Tests.PlayMode
                     ListSink sink = new();
                     AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Create a simple item using Lua.\n\n" +
-                        "Call the execute_lua tool:\n" +
-                        "```json\n" +
-                        "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('TestDagger', 'weapon', 50)\\nreport('crafted TestDagger')\"}}\n" +
-                        "```";
+                    string prompt = "Create a simple item called 'TestDagger' with quality 50.\n\n" +
+                        "Use the execute_lua tool to call: create_item('TestDagger', 'weapon', 50) and report('crafted TestDagger')";
 
                     Debug.Log($"[AllToolCalls] TEST: Execute Lua");
                     Task t = orch.RunTaskAsync(new AiTaskRequest
