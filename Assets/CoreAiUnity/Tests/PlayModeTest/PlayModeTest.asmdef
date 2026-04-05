@@ -1,21 +1,31 @@
 {
-  "name": "PlayModeTest",
-  "references": [
-    "CoreAI.Core",
-    "CoreAI.Source",
-    "MessagePipe",
-    "undream.llmunity.Runtime",
-    "MoonSharp.Interpreter",
-    "Microsoft.Extensions.AI",
-    "Microsoft.Extensions.AI.Abstractions",
-    "VContainer"
-  ],
-  "optionalUnityReferences": [
-    "TestAssemblies"
-  ],
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "nunit.framework.dll",
-    "Newtonsoft.Json.dll"
-  ]
+    "name": "PlayModeTest",
+    "rootNamespace": "",
+    "references": [
+        "CoreAI.Core",
+        "CoreAI.Source",
+        "MessagePipe",
+        "undream.llmunity.Runtime",
+        "MoonSharp.Interpreter",
+        "VContainer",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll",
+        "Microsoft.Extensions.AI.dll",
+        "Microsoft.Extensions.AI.Abstractions.dll",
+        "System.Text.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

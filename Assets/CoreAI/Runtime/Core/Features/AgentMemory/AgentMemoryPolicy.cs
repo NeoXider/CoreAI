@@ -14,7 +14,21 @@ namespace CoreAI.Ai
     public sealed class AgentMemoryPolicy
     {
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
+        private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
         private static readonly MemoryLlmTool _memoryToolInstance = new();
+
+        /// <summary>
+        /// Установить произвольные инструменты для роли (добавляются к MemoryTool).
+        /// </summary>
+        public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                _customTools.Remove(roleId);
+                return;
+            }
+            _customTools[roleId] = new List<ILlmTool>(tools);
+        }
 
         /// <summary>Конфигурация памяти для одной роли.</summary>
         public struct RoleMemoryConfig
@@ -153,16 +167,25 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Получить список инструментов (tools) для роли.
-        /// Включает MemoryTool если память включена для роли.
+        /// Включает MemoryTool если память включена для роли + любые кастомные инструменты.
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
-            if (!IsMemoryEnabled(roleId))
+            var tools = new List<ILlmTool>();
+
+            // Добавляем MemoryTool если включён
+            if (IsMemoryEnabled(roleId))
             {
-                return Array.Empty<ILlmTool>();
+                tools.Add(_memoryToolInstance);
             }
 
-            return new[] { _memoryToolInstance };
+            // Добавляем кастомные инструменты для роли
+            if (_customTools.TryGetValue(roleId, out var custom))
+            {
+                tools.AddRange(custom);
+            }
+
+            return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
         }
     }
 }

@@ -9,6 +9,9 @@
 | [DGF_SPEC.md](DGF_SPEC.md) | Нормативный SPEC шаблона (версия в шапке); **§9.4** — главный поток Unity после LLM / MessagePipe. |
 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли (Creator, Programmer, …), placement, размеры моделей. |
 | [MemorySystem.md](MemorySystem.md) | 🧠 **Система памяти**: 2 типа (MemoryTool + ChatHistory), конфигурация, примеры. |
+| [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | 🔧 **Tool Calling Specification**: Единый формат, доступные инструменты, AgentBuilder. |
+| [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) | 🏗️ **Agent Builder**: Конструктор кастомных агентов, режимы, инструменты. |
+| [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md) | 🛒 **Merchant NPC**: Торговец с get_inventory инструментом. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, GGUF, OpenAI HTTP, логи **`[Llm]`** / **traceId**, таймаут запроса, PlayMode-тесты, Lua-конвейер. |
 | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | World Commands: управление миром из Lua через whitelist API → MessagePipe → main thread. |
 | [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md) | Мультиплеер + AI архитектура. |

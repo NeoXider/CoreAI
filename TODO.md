@@ -1,5 +1,37 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
 
+**Обновлено:** 2026-04-06 | **Текущая версия:** v0.7.0
+
+## ✅ ВЫПОЛНЕНО В v0.7.0 (v0.7.0 - 2026-04-06)
+
+### Единый MEAI Tool Calling Format
+
+- ✅ `{"name": "tool_name", "arguments": {...}}` - единый формат для всех tool calls
+- ✅ `LuaTool.cs` + `LuaLlmTool.cs` - MEAI инструмент для Programmer
+- ✅ `InventoryTool.cs` + `InventoryLlmTool.cs` - MEAI инструмент для Merchant NPC
+- ✅ `CoreAISettings.cs` - публичные настройки (MaxLuaRepairGenerations=3, MaxToolCallRetries=3)
+- ✅ `AgentMemoryPolicy.SetToolsForRole()` - добавление кастомных инструментов
+- ✅ `LlmUnityMeaiChatClient.TryParseToolCallFromText()` - парсинг Qwen-style форматов
+- ✅ **Merchant Agent** - новый NPC-торговец с инструментами (get_inventory + memory)
+- ✅ **AgentBuilder** - конструктор кастомных агентов (3 режима: ToolsOnly, ToolsAndChat, ChatOnly)
+- ✅ **WithChatHistory()** - сохранение истории диалога (контекст сессии, в RAM)
+- ✅ **WithMemory()** - персистентная память (между сессиями, в JSON файл)
+- ✅ **AgentMode** - enum режимов работы агента
+- ✅ Удалён `AgentMemoryDirectiveParser` - всё через MEAI pipeline
+- ✅ Обновлены все промпты (Programmer, Merchant)
+- ✅ Обновлены все PlayMode тесты под v0.7.0 формат
+
+### Доступные Tools
+
+| Tool | Назначение | Агент |
+|------|-----------|-------|
+| `memory` | Сохранение/добавление/очистка памяти | Все агенты |
+| `execute_lua` | Выполнение Lua скриптов | Programmer |
+| `get_inventory` | Получение инвентаря NPC | Merchant |
+| `game_config` | Чтение/запись конфигов | Creator, другие |
+
+---
+
 ## 🚨 КРИТИЧНОЕ (без этого система не работает как задумано)
 
 ### 1. ✅ MemoryTool работает для ВСЕХ агентов (v0.7.0 — единый MEAI формат)
@@ -270,9 +302,16 @@
 ### ✅ Sprint 2.7 — ЕДИНЫЙ TOOL CALLING (v0.7.0 ГОТОВО)
 14. ✅ **LuaTool** — MEAI AIFunction для Programmer
 15. ✅ **LuaLlmTool** — ILlmTool обёртка
-16. ✅ **CoreAISettings** — публичные настройки (MaxLuaRepairGenerations=3)
-17. ✅ **LlmUnityMeaiChatClient.TryParseToolCallFromText** — парсинг JSON
-18. ✅ **Удалены** старые парсинги и дубликаты тестов
+16. ✅ **InventoryTool** — MEAI AIFunction для Merchant NPC
+17. ✅ **InventoryLlmTool** — ILlmTool обёртка
+18. ✅ **Merchant Agent** — новый NPC-торговец с инструментами
+19. ✅ **CoreAISettings** — публичные настройки (MaxLuaRepairGenerations=3, MaxToolCallRetries=3)
+20. ✅ **Tool Call Retry** — до 3 попыток при неудачном tool call. Модель получает сообщение об ошибке и может исправить формат.
+21. ✅ **AgentBuilder** — конструктор кастомных агентов (ToolsOnly, ToolsAndChat, ChatOnly)
+22. ✅ **AgentMode** — enum режимов работы
+23. ✅ **LlmUnityMeaiChatClient.TryParseToolCallFromText** — парсинг JSON
+24. ✅ **AgentMemoryPolicy.SetToolsForRole()** — кастомные инструменты
+25. ✅ **Удалены** старые парсинги и дубликаты тестов
 
 ### Sprint 3 — Multi-agent (СЛЕДУЮЩИЙ)
 19. **MultiAgentWorkflow** — цепочка агентов (4 часа)
@@ -312,6 +351,10 @@
 | **PlayerChat** — системный промпт | ✅ | | |
 | **PlayerChat** — UI | | ✅ | (есть панель, нет тестов) |
 | **PlayerChat** — валидация ответа | ✅ | | |
+| **Merchant** — системный промпт | ✅ | | |
+| **Merchant** — get_inventory tool | ✅ | | |
+| **Merchant** — memory tool | ✅ | | |
+| **Merchant** — PlayMode тест | ✅ | | |
 | **MemoryTool** — write/append/clear | ✅ | | |
 | **MemoryTool** — isolation по ролям | ✅ | | |
 | **ChatHistory** — LLMAgent контекст | ✅ | | |
@@ -339,9 +382,11 @@
 | **Тесты** — PlayMode память | ✅ | | |
 | **Тесты** — PlayMode all tool calls (v0.7.0) | ✅ | | |
 | **Тесты** — PlayMode multi-agent | ✅ | | |
+| **Тесты** — PlayMode Merchant NPC (v0.7.0) | ✅ | | |
+| **Tool Call Retry** — 3 попытки при ошибке (v0.7.0) | ✅ | | |
 | **CoreAISettings** — публичные настройки (v0.7.0) | ✅ | | |
 
-**Итого:** ✅ Реализовано ~80%, ⚠️ Частично ~12%, ❌ Не реализовано ~8%
+**Итого:** ✅ Реализовано ~82%, ⚠️ Частично ~10%, ❌ Не реализовано ~8%
 
 ---
 
@@ -385,4 +430,6 @@
 | `MultiAgentCraftingWorkflowPlayModeTests.cs` | 2 | OpenAI HTTP | Creator→Mechanic→Programmer, memory isolation |
 | `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | LLMUnity | 4 крафта + детерминизм |
 | `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | OpenAI HTTP | 4 крафта + 2 крафта quick |
-| `AllToolCallsPlayModeTests.cs` | 2 | LLMUnity или HTTP | Memory tool (write/append/clear) + Execute Lua (v0.7.0) |
+| `AllToolCallsPlayModeTests.cs` | 3 | LLMUnity или HTTP | Memory tool (write/append/clear) + Execute Lua (v0.7.0) |
+| `MerchantWithToolCallingPlayModeTests.cs` | 1 | LLMUnity или HTTP | Merchant NPC вызывает get_inventory и отвечает с предметами (v0.7.0) |
+| `CustomAgentsPlayModeTests.cs` | 3 | LLMUnity или HTTP | 3 кастомных агента: Merchant (ToolsAndChat), Analyzer (ToolsOnly), Storyteller (ChatOnly) |

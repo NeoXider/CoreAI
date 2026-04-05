@@ -248,6 +248,7 @@ flowchart TB
 | **Analyzer** | `AnalyzerResponsePolicy` | JSON с `metric`/`recommendation`/`analysis` | ✅ Да |
 | **AINpc** | `AINpcResponsePolicy` | JSON ИЛИ непустой текст (мягкая) | ✅ Да |
 | **PlayerChat** | `PlayerChatResponsePolicy` | Без валидации (свободный текст) | ❌ Нет |
+| **Merchant** | `NoOpRoleStructuredResponsePolicy` | Tool call `get_inventory` + текст | ✅ Tool Call Retry (3 попытки) |
 
 ### 8.2 Как работает retry
 
@@ -258,6 +259,16 @@ flowchart TB
    structured_retry: Expected execute_lua tool call
    ```
 4. Метрика `RecordStructuredRetry(roleId, traceId, failureReason)` логируется
+
+### Tool Call Retry
+
+Для tool calls (memory, execute_lua, get_inventory) действует отдельный механизм retry:
+1. Если модель вернула tool call в неправильном формате
+2. Система возвращает ошибку: "ERROR: Tool call not recognized. Use this format: {\"name\": \"...\", \"arguments\": {...}}"
+3. Модель получает ещё одну попытку (до `CoreAISettings.MaxToolCallRetries`, по умолчанию 3)
+4. Если все попытки исчерпаны - ответ принимается как есть
+
+Это помогает маленьким моделям (Qwen3.5-2B) которые иногда забывают формат tool call.
 
 ### 8.3 Кастомные роли
 

@@ -9,13 +9,14 @@ namespace CoreAI
         /// <summary>
         /// Максимум автоматических повторов Programmer при ошибке Lua.
         /// По умолчанию: 3. Можно менять до инициализации.
-        /// 
-        /// Пример:
-        /// <code>
-        /// CoreAISettings.MaxLuaRepairGenerations = 5; // Увеличить лимит
-        /// </code>
         /// </summary>
         public static int MaxLuaRepairGenerations { get; set; } = 3;
+
+        /// <summary>
+        /// Максимум повторов при неудачном tool call (модель не распознала формат).
+        /// По умолчанию: 3. Можно менять до инициализации.
+        /// </summary>
+        public static int MaxToolCallRetries { get; set; } = 3;
 
         /// <summary>
         /// Включить подробное логирование MEAI pipeline.

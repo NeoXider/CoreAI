@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using LLMUnity;
@@ -96,7 +97,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient.CompleteAsync: starting");
-                
+
                 await EnsureClientReady(cancellationToken);
 
                 string prevSystem = _unityAgent.systemPrompt;
@@ -106,7 +107,7 @@ namespace CoreAI.Infrastructure.Llm
                         _unityAgent.systemPrompt = request.SystemPrompt;
 
                     _currentRoleId = request.AgentRoleId ?? "Unknown";
-                    
+
                     _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: tools={request.Tools?.Count ?? 0}, store={_memoryStore != null}");
 
                     // Create actual MemoryTool if we have tools in request and store is available
@@ -133,9 +134,9 @@ namespace CoreAI.Infrastructure.Llm
 
                     var innerClient = new LlmUnityMeaiChatClient(_unityAgent, _logger);
                     var loggerFactory = NullLoggerFactory.Instance;
-                    
+
                     _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Creating FunctionInvokingChatClient");
-                    
+
                     MEAI.FunctionInvokingChatClient functionClient;
                     try
                     {
@@ -159,30 +160,85 @@ namespace CoreAI.Infrastructure.Llm
                             Tools = tools
                         };
 
-                        _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Calling GetResponseAsync");
-                        MEAI.ChatResponse response = await functionClient.GetResponseAsync(messages, options, cancellationToken);
-                        _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: GetResponseAsync completed");
+                        int retries = 0;
+                        int maxRetries = CoreAISettings.MaxToolCallRetries;
+                        bool toolCallSuccess = false;
+                        string finalContent = "";
 
-                        string content = "";
-                        foreach (var msg in response.Messages)
-                    {
-                        if (msg.Role == MEAI.ChatRole.Assistant)
+                        while (retries <= maxRetries && !toolCallSuccess)
                         {
-                            foreach (var item in msg.Contents)
-                            {
-                                if (item is MEAI.TextContent tc)
-                                    content += tc.Text;
-                            }
-                        }
-                    }
+                            _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: Calling GetResponseAsync (attempt {retries + 1}/{maxRetries + 1})");
+                            MEAI.ChatResponse response = await functionClient.GetResponseAsync(messages, options, cancellationToken);
+                            _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: GetResponseAsync completed");
 
-                    if (_useChatHistory && _memoryStore != null && !string.IsNullOrEmpty(content))
+                            string content = "";
+                            bool hasToolCall = false;
+                            foreach (var msg in response.Messages)
+                            {
+                                if (msg.Role == MEAI.ChatRole.Assistant)
+                                {
+                                    foreach (var item in msg.Contents)
+                                    {
+                                        if (item is MEAI.TextContent tc)
+                                            content += tc.Text;
+                                        else if (item is MEAI.FunctionCallContent)
+                                            hasToolCall = true;
+                                    }
+                                }
+                            }
+
+                            // Если tool call был выполнен через MEAI - успех
+                            if (hasToolCall)
+                            {
+                                _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call executed successfully via MEAI");
+                                toolCallSuccess = true;
+                            }
+                            // Если нет tool call и tools были запрошены - пробуем распознать JSON
+                            else if (tools.Count > 0)
+                            {
+                                bool parsed = LlmUnityMeaiChatClient.TryParseToolCallFromText(
+                                    content, tools, out var parsedToolCalls, out var cleanedContent);
+
+                                if (parsed)
+                                {
+                                    _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call parsed from JSON text");
+                                    toolCallSuccess = true;
+                                }
+                                else if (retries < maxRetries)
+                                {
+                                    // Tool call не распознан - говорим модели исправить
+                                    retries++;
+                                    string errorMsg = $"ERROR: Tool call not recognized. You must use this exact JSON format:\n" +
+                                                      $"{{\"name\": \"tool_name\", \"arguments\": {{...}}}}\n\n" +
+                                                      $"Your response was:\n{content?.Substring(0, Math.Min(200, content?.Length ?? 0))}\n\n" +
+                                                      $"Please try again with the correct format.";
+                                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, content));
+                                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, errorMsg));
+                                    _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: Tool call not recognized, retry {retries}/{maxRetries}");
+                                    continue;
+                                }
+                                else
+                                {
+                                    // Все попытки исчерпаны - считаем как есть
+                                    _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: All {maxRetries} retries exhausted for tool call");
+                                    toolCallSuccess = true;
+                                }
+                            }
+                            else
+                            {
+                                toolCallSuccess = true; // Нет tools - просто текст ок
+                            }
+
+                            finalContent = content;
+                        }
+
+                    if (_useChatHistory && _memoryStore != null && !string.IsNullOrEmpty(finalContent))
                     {
                         _memoryStore.AppendChatMessage(_currentRoleId, "user", request.UserPayload ?? "");
-                        _memoryStore.AppendChatMessage(_currentRoleId, "assistant", content);
+                        _memoryStore.AppendChatMessage(_currentRoleId, "assistant", finalContent);
                     }
 
-                    return new LlmCompletionResult { Ok = true, Content = content ?? "" };
+                    return new LlmCompletionResult { Ok = true, Content = finalContent ?? "" };
                     } // end using functionClient
                 }
                 finally
@@ -267,7 +323,7 @@ namespace CoreAI.Infrastructure.Llm
             /// Qwen3.5-2B возвращает tool call как JSON текст, а не как структурный tool_call.
             /// Поддерживает единый формат: {"name": "tool_name", "arguments": {...}}
             /// </summary>
-            private bool TryParseToolCallFromText(
+            public static bool TryParseToolCallFromText(
                 string text,
                 IReadOnlyList<MEAI.AITool> availableTools,
                 out List<MEAI.FunctionCallContent> toolCalls,
@@ -362,12 +418,11 @@ namespace CoreAI.Infrastructure.Llm
                     cleanedText = text.Substring(0, match.Index) + text.Substring(match.Index + match.Length);
                     cleanedText = cleanedText.Trim();
 
-                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: Parsed tool call: {functionName}");
                     return true;
                 }
-                catch (Exception ex)
+                catch
                 {
-                    _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: Failed to parse tool call: {ex.Message}");
+                    // Parsing failed - caller will handle
                 }
 
                 return false;

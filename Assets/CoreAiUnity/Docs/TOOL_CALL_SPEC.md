@@ -36,9 +36,37 @@
 - `LuaTool.cs` - MEAI AIFunction
 - `LuaLlmTool.cs` - ILlmTool обёртка
 
-### 3. Game Config Tool
+### 3. Get Inventory Tool (Merchant NPC)
 
-**Назначение:** Чтение и изменение игровых конфитов.
+**Назначение:** Получение инвентаря NPC-торговца для осмысленных ответов игроку.
+
+**Формат:**
+```json
+{"name": "get_inventory", "arguments": {}}
+```
+
+**Возвращает:** Список предметов с именем, типом, количеством и ценой.
+
+**Код:**
+- `InventoryTool.cs` - MEAI AIFunction
+- `InventoryLlmTool.cs` - ILlmTool обёртка
+
+**Пример:** 
+```
+Player: "Что у тебя есть?"
+  ↓
+Merchant: {"name": "get_inventory", "arguments": {}}
+  ↓
+Tool: [{name: "Iron Sword", price: 50, qty: 3}]
+  ↓
+Merchant: "У меня есть Iron Sword за 50 монет..."
+```
+
+**Когда использовать:** Merchant/Shopkeeper NPC который продаёт предметы.
+
+### 4. Game Config Tool
+
+**Назначение:** Чтение и изменение игровых конфигов.
 
 **Формат:**
 ```json
@@ -56,18 +84,71 @@
 ```csharp
 // До инициализации:
 CoreAISettings.MaxLuaRepairGenerations = 3;    // Лимит повторов Programmer
+CoreAISettings.MaxToolCallRetries = 3;         // Лимит повторов tool call
 CoreAISettings.EnableMeaiDebugLogging = true;  // Отладка MEAI
 CoreAISettings.LlmRequestTimeoutSeconds = 300; // Таймаут LLM
 ```
 
-## Тестирование
+### Tool Call Retry
 
-### EditMode Tests
-- `MeaiToolCallsEditModeTests.cs` - MemoryTool, LuaTool, парсинг JSON
+При неудачном tool call (модель вернула неправильный формат):
+1. Система возвращает ошибку модели: "ERROR: Tool call not recognized. Use this format..."
+2. Модель получает ещё одну попытку
+3. Повторяется до `MaxToolCallRetries` (по умолчанию 3)
+4. Если все попытки исчерпаны - ответ принимается как есть
 
-### PlayMode Tests  
-- `AllToolCallsPlayModeTests.cs` - Боевые тесты с LLM (LLMUnity или HTTP)
-- `CraftingMemoryViaLlmUnityPlayModeTests.cs` - Полный workflow крафта
+Это помогает маленьким моделям (Qwen3.5-2B) научиться правильному формату.
+
+**Логирование:**
+```
+MeaiLlmUnityClient: Calling GetResponseAsync (attempt 1/4)
+MeaiLlmUnityClient: Tool call not recognized, retry 1/3
+MeaiLlmUnityClient: Calling GetResponseAsync (attempt 2/4)
+MeaiLlmUnityClient: Tool call parsed from JSON text
+```
+
+## Кастомные агенты через AgentBuilder
+
+Создание нового агента с уникальными инструментами — 3 строки:
+
+```csharp
+var merchant = new AgentBuilder("Merchant")
+    .WithSystemPrompt("You are a shopkeeper...")
+    .WithTool(new InventoryLlmTool(myProvider))
+    .WithMemory()
+    .WithMode(AgentMode.ToolsAndChat)
+    .Build();
+
+merchant.ApplyToPolicy(policy);
+```
+
+### Режимы агента
+
+| Режим | Описание | Пример |
+|-------|----------|--------|
+| `ToolsOnly` | Только инструменты (без текста) | Фоновый анализ телеметрии |
+| `ToolsAndChat` | Инструменты + текст (по умолчанию) | Merchant, Crafter, Advisor |
+| `ChatOnly` | Только текст (без инструментов) | PlayerChat, Storyteller |
+
+### Кастомные инструменты
+
+```csharp
+public class WeatherLlmTool : ILlmTool
+{
+    public string Name => "get_weather";
+    public string Description => "Get current weather.";
+    public string ParametersSchema => "{}";
+    
+    public AIFunction CreateAIFunction()
+    {
+        return AIFunctionFactory.Create(
+            async (CancellationToken ct) => await _provider.GetWeatherAsync(ct),
+            "get_weather", "Get current weather.");
+    }
+}
+```
+
+Подробнее: [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)
 
 ## Архитектура
 
@@ -76,8 +157,20 @@ AiOrchestrator → MeaiLlmUnityClient → FunctionInvokingChatClient
                                          ↓
                               LlmUnityMeaiChatClient.TryParseToolCallFromText()
                                          ↓
-                              MemoryTool / LuaTool / GameConfigTool
+                    ┌────────────────────┼────────────────────┐
+                    ↓                    ↓                    ↓
+            MemoryTool           LuaTool           InventoryTool
 ```
+
+## Тестирование
+
+### EditMode Tests
+- `MeaiToolCallsEditModeTests.cs` - MemoryTool, LuaTool, парсинг JSON
+
+### PlayMode Tests  
+- `AllToolCallsPlayModeTests.cs` - Memory tool + Execute Lua
+- `ChatWithToolCallingPlayModeTests.cs` - Chat Agent + Inventory tool
+- `CraftingMemoryViaLlmUnityPlayModeTests.cs` - Полный workflow крафта
 
 ## Breaking Changes v0.7.0
 
@@ -85,3 +178,4 @@ AiOrchestrator → MeaiLlmUnityClient → FunctionInvokingChatClient
 - ❌ Fenced блоки (```memory, ```lua) не используются для tool calls
 - ❌ `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
 - ✅ Programmer вызывает `execute_lua` tool вместо fenced блоков
+- ✅ Chat Agent может вызывать `get_inventory` перед ответом игроку

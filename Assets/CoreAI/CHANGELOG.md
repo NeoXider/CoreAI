@@ -11,9 +11,19 @@
 #### Новое
 - ✨ **LuaTool**: MEAI AIFunction для выполнения Lua скриптов от Programmer
 - ✨ **LuaLlmTool**: ILlmTool обёртка для Lua tool
-- ✨ **CoreAISettings**: Публичные статические настройки (MaxLuaRepairGenerations=3, LlmRequestTimeoutSeconds, EnableMeaiDebugLogging)
+- ✨ **InventoryTool**: MEAI AIFunction для Merchant NPC (получение инвентаря)
+- ✨ **InventoryLlmTool**: ILlmTool обёртка для Inventory tool
+- ✨ **Merchant Agent**: Новый NPC-торговец с инструментами (get_inventory + memory)
+- ✨ **AgentBuilder**: Конструктор кастомных агентов — легко создавать новых агентов с уникальными инструментами
+- ✨ **AgentMode**: 3 режима — ToolsOnly, ToolsAndChat, ChatOnly
+- ✨ **WithChatHistory()**: Сохранение истории диалога (контекст текущей сессии, в RAM)
+- ✨ **WithMemory()**: Персистентная память (между сессиями, в JSON файл)
+- ✨ **Tool Call Retry**: До 3 попыток автоматически при неудачном tool call. Модель получает сообщение об ошибке и может исправить формат. (CoreAISettings.MaxToolCallRetries)
+- ✨ **CoreAISettings**: Публичные статические настройки (MaxLuaRepairGenerations=3, MaxToolCallRetries=3, LlmRequestTimeoutSeconds, EnableMeaiDebugLogging)
 - 🔧 **Единый формат tool calls**: `{"name": "tool_name", "arguments": {...}}`
-- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Парсинг JSON tool calls для моделей без структурных tool_calls
+- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Парсинг JSON tool calls для моделей без структурных tool_calls (поддержка Qwen-style форматов)
+- 🔧 **AgentMemoryPolicy.SetToolsForRole()**: Добавление кастомных инструментов к роли
+- 🔧 **ProgrammerResponsePolicy упрощена**: Больше не проверяет fenced блоки
 
 #### Удалено
 - ❌ **AgentMemoryDirectiveParser**: Удалён - всё через MEAI pipeline
@@ -35,6 +45,11 @@
 - 🔧 `MeaiToolCallsEditModeTests.cs` - MemoryTool, LuaTool, парсинг JSON
 - 🔧 `LuaExecutionPipelineEditModeTests.cs` - обновлено ожидаемое количество повторов (4→3)
 - 🔧 `RoleStructuredResponsePolicyEditModeTests.cs` - Programmer теперь пропускает любой текст
+- 🔧 Все PlayMode тесты обновлены под единый формат tool calls v0.7.0
+
+#### Новые тесты
+- ✨ `AgentBuilderEditModeTests.cs` - 8 тестов на конструктор агентов
+- ✨ `CustomAgentsPlayModeTests.cs` - 3 теста на кастомных агентов (Merchant, Analyzer, Storyteller)
 
 ---
 

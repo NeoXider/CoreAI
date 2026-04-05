@@ -4,16 +4,52 @@
 
 ## [0.7.0] - 2026-04-06
 
-### Единый MEAI Tool Calling Format
+### Единый MEAI Tool Calling Format (MAJOR)
 
+**Все tool calls теперь используют единый формат через MEAI function calling**
+
+#### Новое
+- ✨ **LuaTool**: MEAI AIFunction для выполнения Lua скриптов от Programmer
+- ✨ **LuaLlmTool**: ILlmTool обёртка для Lua tool
+- ✨ **InventoryTool**: MEAI AIFunction для Merchant NPC (получение инвентаря)
+- ✨ **InventoryLlmTool**: ILlmTool обёртка для Inventory tool
+- ✨ **Merchant Agent**: Новый NPC-торговец с инструментами (get_inventory + memory)
+- ✨ **AgentBuilder**: Конструктор кастомных агентов — легко создавать новых агентов с уникальными инструментами
+- ✨ **AgentMode**: 3 режима — ToolsOnly, ToolsAndChat, ChatOnly
+- ✨ **WithChatHistory()**: Сохранение истории диалога (контекст текущей сессии, в RAM)
+- ✨ **WithMemory()**: Персистентная память (между сессиями, в JSON файл)
+- ✨ **Tool Call Retry**: До 3 попыток автоматически при неудачном tool call. Модель получает сообщение об ошибке и может исправить формат. (CoreAISettings.MaxToolCallRetries)
+
+#### Изменения
 - 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Упрощён до единого формата `{"name": "...", "arguments": {...}}`
 - 🔧 **Все tool calls через MEAI**: Memory и Lua tools работают через FunctionInvokingChatClient
-- 🔧 **Обновлён тест CraftingMemoryViaLlmUnityPlayModeTests**: Промпты используют новый формат tool calls
+- 🔧 **ProgrammerResponsePolicy упрощена**: Больше не проверяет fenced блоки
+- 🔧 **AgentMemoryPolicy.SetToolsForRole()**: Добавление кастомных инструментов к роли
+- 🔧 **Обновлены все промпты**: Programmer, Merchant используют единый формат
 
-### Breaking Changes
+#### Удалено
+- ❌ **AgentMemoryDirectiveParser**: Удалён - всё через MEAI pipeline
+- ❌ **Fallback парсинг в AiOrchestrator**: Memory tool работает через FunctionInvokingChatClient
+- ❌ **Fenced блоки** (```memory, ```lua): Не используются для tool calls
 
-- Промпты агентов обновлены для использования `{"name": "tool", "arguments": {...}}` вместо старых форматов
-- Fenced блоки ```lua и ```memory больше не используются - только JSON tool calls
+#### Breaking Changes
+- **Programmer агент** теперь вызывает `execute_lua` tool вместо fenced ```lua блоков
+- **Memory tool** формат: `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
+- **MaxLuaRepairGenerations** изменён с 4 на 3
+
+#### Тесты
+- ✨ **AgentBuilderEditModeTests** - 8 тестов на конструктор агентов
+- ✨ **CustomAgentsPlayModeTests** - 3 теста на кастомных агентов (Merchant, Analyzer, Storyteller)
+- 🔧 **MeaiToolCallsEditModeTests** - MemoryTool, LuaTool, парсинг JSON
+- 🔧 **LuaExecutionPipelineEditModeTests** - обновлено ожидаемое количество повторов (4→3)
+- 🔧 **RoleStructuredResponsePolicyEditModeTests** - Programmer теперь пропускает любой текст
+- 🔧 Все PlayMode тесты обновлены под единый формат tool calls v0.7.0
+
+#### Документация
+- 📝 **AGENT_BUILDER.md** - полное руководство по конструктору агентов
+- 📝 **TOOL_CALL_SPEC.md** - обновлённая спецификация tool calling
+- 📝 **CHAT_TOOL_CALLING.md** - Merchant NPC с tool calling
+- 📝 **DEVELOPER_GUIDE.md** - обновлены секции
 
 ### Dependencies
 

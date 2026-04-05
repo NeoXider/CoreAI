@@ -19,7 +19,8 @@ namespace CoreAI.Tests.EditMode
                     BuiltInAgentRoleIds.Programmer,
                     BuiltInAgentRoleIds.AiNpc,
                     BuiltInAgentRoleIds.CoreMechanic,
-                    BuiltInAgentRoleIds.PlayerChat
+                    BuiltInAgentRoleIds.PlayerChat,
+                    BuiltInAgentRoleIds.Merchant
                 },
                 BuiltInAgentRoleIds.AllBuiltInRoles.ToArray());
         }

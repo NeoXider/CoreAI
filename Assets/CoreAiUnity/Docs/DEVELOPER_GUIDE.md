@@ -121,6 +121,7 @@ flowchart LR
 
 - **Цепочка системного промпта:** манифест (опционально) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → встроенный fallback (**`BuiltInAgentSystemPromptTexts`**).
 - **Встроенные роли:** см. **`BuiltInAgentRoleIds`** и тесты **`AgentRolesAndPromptsTests`**.
+- **Кастомные агенты:** используйте **`AgentBuilder`** для создания новых агентов с уникальными инструментами. См. [AGENT_BUILDER.md](AGENT_BUILDER.md).
 - **User payload:** по умолчанию — JSON вида `{"telemetry":{...},"hint":"..."}` из **`GameSessionSnapshot.Telemetry`**; при ремонте Lua добавляются поля **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
 - **Память агента (опционально):** агент сохраняет память через **MEAI tool calling**:
   - `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` — перезаписать

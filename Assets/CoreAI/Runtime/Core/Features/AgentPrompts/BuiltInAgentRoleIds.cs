@@ -26,6 +26,9 @@ namespace CoreAI.Ai
         /// <summary>Игровой чат с игроком (как с ассистентом), без обязательного JSON в ответе.</summary>
         public const string PlayerChat = "PlayerChat";
 
+        /// <summary>Торговец/NPC с инвентарём для продажи предметов игроку.</summary>
+        public const string Merchant = "Merchant";
+
         /// <summary>Все встроенные роли (для тестов и валидации манифестов).</summary>
         public static readonly IReadOnlyList<string> AllBuiltInRoles = new[]
         {
@@ -34,7 +37,8 @@ namespace CoreAI.Ai
             Programmer,
             AiNpc,
             CoreMechanic,
-            PlayerChat
+            PlayerChat,
+            Merchant
         };
     }
 }
