@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
@@ -58,7 +59,7 @@ namespace CoreAI.Ai
             }
 
             // Подставляем переменные {VariableName}
-            foreach (var kvp in context.Variables)
+            foreach (KeyValuePair<string, string> kvp in context.Variables)
             {
                 hint = hint.Replace("{" + kvp.Key + "}", kvp.Value);
             }

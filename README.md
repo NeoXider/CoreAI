@@ -1,40 +1,40 @@
-# 🤖 CoreAI — AI-агенты для динамичных игр
+# 🤖 CoreAI — AI Agents for Dynamic Games
 
-**Живые NPC, процедурный контент, динамические механики** — всё управляется AI прямо во время игры.
+**Living NPCs, procedural content, dynamic mechanics** — all driven by AI, right during gameplay.
 
-> Представьте игру, которая **подстраивается не только цифрами**, а **логикой и ситуациями**: другой набор угроз, другой темп, другой «характер» мира. CoreAI делает это реальностью.
+> Imagine a game that adapts not just with numbers, but with logic and situations: different threats, different pacing, different world "character". CoreAI makes this a reality.
 
 ---
 
-## ✨ Что умеет CoreAI
+## ✨ What CoreAI Can Do
 
-### 🏗️ Создавай AI-агентов за 3 строки
+### 🏗️ Create AI Agents in 3 Lines
 
 ```csharp
 var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
-    .WithTool(new InventoryLlmTool(myInventory))  // Знает ассортимент
-    .WithMemory()                                  // Помнит покупателей
-    .WithMode(AgentMode.ToolsAndChat)              // Инструменты + чат
+    .WithTool(new InventoryLlmTool(myInventory))  // Knows their stock
+    .WithMemory()                                  // Remembers buyers
+    .WithMode(AgentMode.ToolsAndChat)              // Tools + chat
     .Build();
 ```
 
-**3 режима:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
+**3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
 
 ---
 
-### 🔧 AI вызывает инструменты (Tools)
+### 🔧 AI Calls Tools (Function Calling)
 
-AI не просто генерирует текст — **вызывает код** для реальных действий:
+AI doesn't just generate text — it **calls code** for real actions:
 
-| Инструмент | Что делает | Кто использует |
-|------------|-----------|----------------|
-| 🧠 **MemoryTool** | Память между сессиями | Все агенты |
-| 📜 **LuaTool** | Выполняет Lua скрипты | Programmer AI |
-| 🎒 **InventoryTool** | Инвентарь NPC | Merchant AI |
-| ⚙️ **GameConfigTool** | Меняет конфиги игры | Creator AI |
+| Tool | What it does | Who uses it |
+|------|-------------|-------------|
+| 🧠 **MemoryTool** | Persistent memory between sessions | All agents |
+| 📜 **LuaTool** | Executes Lua scripts | Programmer AI |
+| 🎒 **InventoryTool** | Gets NPC inventory | Merchant AI |
+| ⚙️ **GameConfigTool** | Reads/writes game configs | Creator AI |
 
-**Создай свой:**
+**Create your own:**
 ```csharp
 public class WeatherLlmTool : ILlmTool
 {
@@ -47,45 +47,45 @@ public class WeatherLlmTool : ILlmTool
 
 ---
 
-### 🎮 Динамические механики — AI меняет игру на лету
+### 🎮 Dynamic Mechanics — AI Changes the Game Live
 
 ```
-Игрок: "Скрафти оружие из Железа и Кристалла Огня"
+Player: "Craft a weapon from Iron and Fire Crystal"
   ↓
-CoreMechanicAI: "Железо + Кристалл Огня → Меч Пламени, урон 45"
+CoreMechanicAI: "Iron + Fire Crystal → Flame Sword, damage 45"
   ↓
 Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
                add_special_effect("fire_damage: 15")
   ↓
-✨ Игрок получает уникальный предмет!
+✨ Player receives a unique item!
 ```
 
 ---
 
-### 🧠 Память — AI помнит всё
+### 🧠 Memory — AI Remembers Everything
 
 | | Memory | ChatHistory |
 |--|--------|-------------|
-| **Хранение** | JSON файл (диск) | В LLMAgent (RAM) |
-| **Срок** | Между сессиями | Текущий разговор |
-| **Для чего** | Факты, покупки, квесты | Контекст беседы |
+| **Storage** | JSON file on disk | In LLMAgent (RAM) |
+| **Duration** | Between sessions | Current conversation |
+| **For what** | Facts, purchases, quests | Conversation context |
 
 ---
 
-### 🔄 Tool Call Retry — AI учится на ошибках
+### 🔄 Tool Call Retry — AI Learns from Mistakes
 
-Маленькие модели (Qwen3.5-2B) иногда забывают формат. CoreAI автоматически даёт **3 попытки** + проверяет fenced Lua блоки сразу.
+Small models (Qwen3.5-0.8B) sometimes forget the format. CoreAI automatically gives **3 retries** + checks fenced Lua blocks immediately.
 
 ---
 
-## 🏛️ Архитектура
+## 🏛️ Architecture
 
-Репозиторий состоит из **двух пакетов**:
+The repository consists of **two packages**:
 
-| Пакет | Что внутри | Зависимости |
-|-------|-----------|-------------|
-| **[com.nexoider.coreai](Assets/CoreAI)** | Портативное ядро — C# **без** Unity | VContainer, MoonSharp |
-| **[com.nexoider.coreaiunity](Assets/CoreAiUnity)** | Unity-слой — DI, LLM, MessagePipe, тесты | Зависит от `coreai` |
+| Package | What's inside | Dependencies |
+|---------|--------------|--------------|
+| **[com.nexoider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
+| **[com.nexoider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MessagePipe, tests | Depends on `coreai` |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -105,12 +105,12 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
 ┌─────────────────────────────────────────────────────────────┐
 │                   AI Agents                                  │
 │  🛒 Merchant  📜 Programmer  🎨 Creator  📊 Analyzer        │
-│  🗡️ CoreMechanic  💬 PlayerChat  + Ваши кастомные!          │
+│  🗡️ CoreMechanic  💬 PlayerChat  + Your custom ones!        │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   Tools (ILlmTool)                           │
-│  🧠 Memory  📜 Lua  🎒 Inventory  ⚙️ GameConfig  + Ваши!    │
+│  🧠 Memory  📜 Lua  🎒 Inventory  ⚙️ GameConfig  + Yours!   │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -121,9 +121,9 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
 
 ---
 
-## 🚀 Быстрый старт
+## 🚀 Quick Start
 
-### 1. Установи пакеты (UPM)
+### 1. Install Packages (UPM)
 
 ```
 Window → Package Manager → + → Add package from git URL…
@@ -132,13 +132,13 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-### 2. Открой сцену
+### 2. Open the Scene
 
 ```
 Assets/CoreAiUnity/Scenes/_mainCoreAI.unity → Play
 ```
 
-### 3. Создай своего агента
+### 3. Create Your Agent
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")
@@ -151,48 +151,48 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ---
 
-## 📚 Документация
+## 📚 Documentation
 
-| Документ | Что внутри |
-|----------|-----------|
-| 📖 [CoreAI README](Assets/CoreAI/README.md) | Общее описание + AgentBuilder |
-| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Конструктор агентов |
-| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спецификация tool calling |
-| 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC |
-| 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Память агентов |
-| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, архитектура |
-| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли и промпты |
-| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | История изменений |
+| Document | What's inside |
+|----------|--------------|
+| 📖 [CoreAI README](Assets/CoreAI/README.md) | General overview + AgentBuilder |
+| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Agent builder guide |
+| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Tool calling specification |
+| 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC with inventory |
+| 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Agent memory system |
+| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, architecture |
+| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Agent roles and prompts |
+| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | Version history |
 
 ---
 
-## 🧪 Тесты
+## 🧪 Tests
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode — 191 тест (быстрые, без LLM)
-  └── PlayMode — 12 тестов (с реальной LLM)
+  ├── EditMode — 191 tests (fast, no LLM)
+  └── PlayMode — 12+ tests (with real LLM)
 ```
 
 ---
 
-## 🌐 Мультиплеер и синглплеер
+## 🌐 Multiplayer and Singleplayer
 
-- **Синглплеер:** тот же пайплайн, AI работает локально
-- **Мультиплеер:** AI-логика на хосте, клиенты получают согласованные исходы
+- **Singleplayer:** Same pipeline, AI works locally
+- **Multiplayer:** AI logic on host, clients receive agreed outcomes
 
-**Один шаблон — и для одиночной кампании, и для коопа.**
-
----
-
-## 🤝 Автор и сообщество
-
-**Автор:** [Neoxider](https://github.com/NeoXider)  
-**Экосистема:** [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools)  
-**Лицензия:** [PolyForm Noncommercial 1.0.0](LICENSE) (коммерция — по отдельной лицензии)
-
-**Контакт:** neoxider@gmail.com | [GitHub Issues](https://github.com/NeoXider/CoreAI/issues)
+**One template — for both solo campaign and coop.**
 
 ---
 
-> 🎮 **CoreAI** — сделай свою игру умнее. Один агент за раз.
+## 🤝 Author and Community
+
+**Author:** [Neoxider](https://github.com/NeoXider)  
+**Ecosystem:** [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools)  
+**License:** [PolyForm Noncommercial 1.0.0](LICENSE) (commercial use — separate license)
+
+**Contact:** neoxider@gmail.com | [GitHub Issues](https://github.com/NeoXider/CoreAI/issues)
+
+---
+
+> 🎮 **CoreAI** — Make your game smarter. One agent at a time.

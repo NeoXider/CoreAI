@@ -54,21 +54,21 @@ namespace CoreAI.Tests.PlayModeTest
             yield return null; // Даём Unity инициализироваться
 
             // Arrange
-            var tool = new GameConfigTool(_testStore, _policy, "Creator");
+            GameConfigTool tool = new(_testStore, _policy, "Creator");
 
             // Act 1: AI читает текущий конфиг
-            var readResult = tool.ExecuteAsync("read").Result;
+            GameConfigTool.GameConfigResult readResult = tool.ExecuteAsync("read").Result;
             Assert.IsTrue(readResult.Success, $"Read failed: {readResult.Error}");
             Assert.IsTrue(readResult.ConfigJson.Contains("difficulty"));
             Assert.IsTrue(readResult.ConfigJson.Contains("1.0"), "Initial enemy_hp_mult should be 1.0");
 
             // Act 2: AI возвращает изменённый конфиг (имитация ответа LLM)
-            var modifiedConfig = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
-            var writeResult = tool.ExecuteAsync("update", modifiedConfig).Result;
+            string modifiedConfig = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
+            GameConfigTool.GameConfigResult writeResult = tool.ExecuteAsync("update", modifiedConfig).Result;
             Assert.IsTrue(writeResult.Success, $"Update failed: {writeResult.Error}");
 
             // Assert: Проверяем что конфиг обновился
-            _testStore.TryLoad("session", out var finalJson);
+            _testStore.TryLoad("session", out string finalJson);
             Assert.IsNotNull(finalJson);
             Assert.IsTrue(finalJson.Contains("2"), "Difficulty should be 2");
             Assert.IsTrue(finalJson.Contains("1.5"), "enemy_hp_mult should be 1.5");
@@ -85,11 +85,11 @@ namespace CoreAI.Tests.PlayModeTest
         {
             yield return null;
 
-            var restrictedPolicy = new GameConfigPolicy();
+            GameConfigPolicy restrictedPolicy = new();
             restrictedPolicy.RevokeAccess("AINpc");
 
-            var tool = new GameConfigTool(_testStore, restrictedPolicy, "AINpc");
-            var result = tool.ExecuteAsync("read").Result;
+            GameConfigTool tool = new(_testStore, restrictedPolicy, "AINpc");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("no allowed config", result.Error);
@@ -109,8 +109,8 @@ namespace CoreAI.Tests.PlayModeTest
             _policy.GrantFullAccess("Creator");
             _policy.SetKnownKeys(new[] { "session", "crafting" });
 
-            var tool = new GameConfigTool(_testStore, _policy, "Creator");
-            var result = tool.ExecuteAsync("read").Result;
+            GameConfigTool tool = new(_testStore, _policy, "Creator");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
 
             Assert.IsTrue(result.Success, $"Read failed: {result.Error}");
             Assert.IsTrue(result.ConfigJson.Contains("session"));

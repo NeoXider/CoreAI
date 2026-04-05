@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
@@ -23,17 +24,40 @@ namespace CoreAI.Tests.PlayMode
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         /// <summary>
@@ -139,11 +163,14 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[MultiAgent] ✓ CoreMechanicAI memory: {mechanicMemory}");
 
                     // Извлекаем имя предмета
-                    string itemName = CraftingMemoryItemNameExtractor.ExtractName(sink.Items.Count > 0 ? sink.Items[0].JsonPayload : "");
+                    string itemName =
+                        CraftingMemoryItemNameExtractor.ExtractName(sink.Items.Count > 0
+                            ? sink.Items[0].JsonPayload
+                            : "");
                     if (string.IsNullOrEmpty(itemName))
                     {
                         // Пытаемся извлечь из памяти
-                        var match = System.Text.RegularExpressions.Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
+                        Match match = System.Text.RegularExpressions.Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
                         if (match.Success)
                         {
                             itemName = match.Groups[1].Value;
@@ -232,9 +259,9 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[MultiAgent] ═══════════════════════════════════════");
 
                 // Проверяем изоляцию памяти
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out var creatorState));
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var mechanicState));
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Programmer, out var programmerState));
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorState));
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicState));
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Programmer, out AgentMemoryState programmerState));
 
                 Debug.Log($"[MultiAgent] Creator memory:      {creatorState.Memory}");
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
@@ -298,8 +325,9 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Creator,
-                        Hint = "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
-                               "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon\"}}"
+                        Hint =
+                            "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
+                            "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "creator");
@@ -307,7 +335,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Creator");
 
                     Assert.IsTrue(
-                        store.TryLoad(BuiltInAgentRoleIds.Creator, out var _creatorMemQuick) &&
+                        store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState _creatorMemQuick) &&
                         !string.IsNullOrWhiteSpace(_creatorMemQuick.Memory),
                         "Creator did not write memory");
                 }
@@ -333,7 +361,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "CoreMechanicAI");
 
                     Assert.IsTrue(
-                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var _mechanicMemQuick) &&
+                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState _mechanicMemQuick) &&
                         !string.IsNullOrWhiteSpace(_mechanicMemQuick.Memory),
                         "CoreMechanicAI did not write memory");
                 }
@@ -341,8 +369,8 @@ namespace CoreAI.Tests.PlayMode
                 // ===== ПРОВЕРКА ИЗОЛЯЦИИ =====
                 Debug.Log("[MultiAgent.Quick] ═══ MEMORY ISOLATION CHECK ═══");
 
-                var creatorMem = store.States[BuiltInAgentRoleIds.Creator];
-                var mechanicMem = store.States[BuiltInAgentRoleIds.CoreMechanic];
+                AgentMemoryState creatorMem = store.States[BuiltInAgentRoleIds.Creator];
+                AgentMemoryState mechanicMem = store.States[BuiltInAgentRoleIds.CoreMechanic];
 
                 Debug.Log($"[MultiAgent.Quick] Creator memory:      {creatorMem.Memory}");
                 Debug.Log($"[MultiAgent.Quick] CoreMechanic memory: {mechanicMem.Memory}");

@@ -62,7 +62,11 @@ namespace CoreAI.Ai
         /// </summary>
         public AgentBuilder WithTool(ILlmTool tool)
         {
-            if (tool == null) throw new ArgumentNullException(nameof(tool));
+            if (tool == null)
+            {
+                throw new ArgumentNullException(nameof(tool));
+            }
+
             _tools.Add(tool);
             return this;
         }
@@ -74,9 +78,12 @@ namespace CoreAI.Ai
         {
             if (tools != null)
             {
-                foreach (var tool in tools)
+                foreach (ILlmTool tool in tools)
+                {
                     _tools.Add(tool);
+                }
             }
+
             return this;
         }
 
@@ -145,8 +152,10 @@ namespace CoreAI.Ai
     {
         /// <summary>Полная замена памяти.</summary>
         Write = 0,
+
         /// <summary>Добавление к существующей памяти.</summary>
         Append = 1,
+
         /// <summary>Очистка памяти.</summary>
         Clear = 2
     }

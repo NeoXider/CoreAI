@@ -20,12 +20,12 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            var trimmed = rawContent.Trim();
+            string trimmed = rawContent.Trim();
 
             // Извлекаем JSON из markdown если нужно
             if (trimmed.StartsWith("```json"))
             {
-                var endFence = trimmed.IndexOf("```", 7);
+                int endFence = trimmed.IndexOf("```", 7);
                 if (endFence > 0)
                 {
                     trimmed = trimmed.Substring(7, endFence - 7).Trim();
@@ -35,8 +35,8 @@ namespace CoreAI.Ai
             // Должен быть JSON объект
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
-                var jsonStart = trimmed.IndexOf('{');
-                var jsonEnd = trimmed.LastIndexOf('}');
+                int jsonStart = trimmed.IndexOf('{');
+                int jsonEnd = trimmed.LastIndexOf('}');
 
                 if (jsonStart >= 0 && jsonEnd > jsonStart)
                 {
@@ -50,15 +50,16 @@ namespace CoreAI.Ai
             }
 
             // Проверяем наличие ключевых полей для Analyzer
-            var lower = trimmed.ToLowerInvariant();
-            var hasMetricKey = lower.Contains("\"metric") ||
-                               lower.Contains("\"recommendation") || lower.Contains("\"suggestion") ||
-                               lower.Contains("\"analysis") || lower.Contains("\"status") ||
-                               lower.Contains("\"finding") || lower.Contains("\"issue");
+            string lower = trimmed.ToLowerInvariant();
+            bool hasMetricKey = lower.Contains("\"metric") ||
+                                lower.Contains("\"recommendation") || lower.Contains("\"suggestion") ||
+                                lower.Contains("\"analysis") || lower.Contains("\"status") ||
+                                lower.Contains("\"finding") || lower.Contains("\"issue");
 
             if (!hasMetricKey)
             {
-                failureReason = "JSON should contain fields like 'metric', 'recommendation', 'analysis', or 'status'. None found.";
+                failureReason =
+                    "JSON should contain fields like 'metric', 'recommendation', 'analysis', or 'status'. None found.";
                 return false;
             }
 

@@ -18,7 +18,11 @@ namespace CoreAI.Tests.EditMode.Lua
         private sealed class TestSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Commands = new();
-            public void Publish(ApplyAiGameCommand command) => Commands.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Commands.Add(command);
+            }
         }
 
         private sealed class TestObserver : ILuaExecutionObserver
@@ -27,9 +31,20 @@ namespace CoreAI.Tests.EditMode.Lua
             public string LastFailure;
             public int RepairCount;
 
-            public void OnLuaSuccess(string resultSummary) => LastSuccess = resultSummary;
-            public void OnLuaFailure(string errorMessage) => LastFailure = errorMessage;
-            public void OnLuaRepairScheduled(int nextGeneration, string errorPreview) => RepairCount++;
+            public void OnLuaSuccess(string resultSummary)
+            {
+                LastSuccess = resultSummary;
+            }
+
+            public void OnLuaFailure(string errorMessage)
+            {
+                LastFailure = errorMessage;
+            }
+
+            public void OnLuaRepairScheduled(int nextGeneration, string errorPreview)
+            {
+                RepairCount++;
+            }
         }
 
         private sealed class RepairSink : IAiGameCommandSink
@@ -126,7 +141,7 @@ namespace CoreAI.Tests.EditMode.Lua
             TestSink sink = new();
             TestObserver observer = new();
 
-            var bindings = new TestLuaBindings();
+            TestLuaBindings bindings = new();
             LuaAiEnvelopeProcessor processor = CreateProcessor(bindings, sink, observer);
 
             // Простое выражение —MoonSharp sandbox может ограничивать local
@@ -149,7 +164,7 @@ namespace CoreAI.Tests.EditMode.Lua
             TestSink sink = new();
             TestObserver observer = new();
 
-            var bindings = new CraftingTestBindings();
+            CraftingTestBindings bindings = new();
             LuaAiEnvelopeProcessor processor = CreateProcessor(bindings, sink, observer);
 
             // Имитация ответа AI с формулой крафта
@@ -161,7 +176,7 @@ namespace CoreAI.Tests.EditMode.Lua
                 "```\n\n" +
                 "This formula calculates damage based on material hardness.";
 
-            var cmd = new ApplyAiGameCommand
+            ApplyAiGameCommand cmd = new()
             {
                 CommandTypeId = AiGameCommandTypeIds.Envelope,
                 JsonPayload = aiResponse,
@@ -186,7 +201,7 @@ namespace CoreAI.Tests.EditMode.Lua
             TestSink sink = new();
             TestObserver observer = new();
 
-            var bindings = new CraftingTestBindings();
+            CraftingTestBindings bindings = new();
             LuaAiEnvelopeProcessor processor = CreateProcessor(bindings, sink, observer);
 
             string luaCode =
@@ -215,17 +230,17 @@ namespace CoreAI.Tests.EditMode.Lua
             TestObserver observer = new();
 
             // Создаём фейковый оркестратор который ловит repair запросы
-            var bindings = new CoreDefaultLuaRuntimeBindings();
+            CoreDefaultLuaRuntimeBindings bindings = new();
             bool repairScheduled = false;
             AiTaskRequest capturedRepairTask = null;
 
-            var fakeOrchestrator = new FakeOrchestrator((task) =>
+            FakeOrchestrator fakeOrchestrator = new((task) =>
             {
                 repairScheduled = true;
                 capturedRepairTask = task;
             });
 
-            LuaAiEnvelopeProcessor processor = new LuaAiEnvelopeProcessor(
+            LuaAiEnvelopeProcessor processor = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 repairSink,
@@ -234,7 +249,7 @@ namespace CoreAI.Tests.EditMode.Lua
                 new NullLuaScriptVersionStore());
 
             // Ошибочный Lua
-            processor.Process(MakeEnvelope("bad_function_call()", "Programmer", generation: 0));
+            processor.Process(MakeEnvelope("bad_function_call()", "Programmer", 0));
 
             Assert.AreEqual(1, repairSink.Commands.Count);
             Assert.AreEqual(AiGameCommandTypeIds.LuaExecutionFailed, repairSink.Commands[0].CommandTypeId);
@@ -253,12 +268,12 @@ namespace CoreAI.Tests.EditMode.Lua
         public void LuaExecution_MultipleRepairs_RespectsMaxGenerations()
         {
             int repairCount = 0;
-            var fakeOrchestrator = new FakeOrchestrator((task) => repairCount++);
-            var bindings = new CoreDefaultLuaRuntimeBindings();
+            FakeOrchestrator fakeOrchestrator = new((task) => repairCount++);
+            CoreDefaultLuaRuntimeBindings bindings = new();
             TestSink sink = new();
             TestObserver observer = new();
 
-            LuaAiEnvelopeProcessor processor = new LuaAiEnvelopeProcessor(
+            LuaAiEnvelopeProcessor processor = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 sink,
@@ -267,19 +282,19 @@ namespace CoreAI.Tests.EditMode.Lua
                 new NullLuaScriptVersionStore());
 
             // Generation 0 → repair 1
-            processor.Process(MakeEnvelope("error1()", "Programmer", generation: 0));
+            processor.Process(MakeEnvelope("error1()", "Programmer", 0));
             Assert.AreEqual(1, repairCount);
 
             // Generation 1 → repair 2
-            processor.Process(MakeEnvelope("error2()", "Programmer", generation: 1));
+            processor.Process(MakeEnvelope("error2()", "Programmer", 1));
             Assert.AreEqual(2, repairCount);
 
             // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairGenerations = 3)
-            processor.Process(MakeEnvelope("error3()", "Programmer", generation: 2));
+            processor.Process(MakeEnvelope("error3()", "Programmer", 2));
             Assert.AreEqual(3, repairCount);
 
             // Generation 3 → NO MORE repairs (max = 3)
-            processor.Process(MakeEnvelope("error4()", "Programmer", generation: 3));
+            processor.Process(MakeEnvelope("error4()", "Programmer", 3));
             Assert.AreEqual(3, repairCount); // Не увеличилось!
         }
 
@@ -291,12 +306,12 @@ namespace CoreAI.Tests.EditMode.Lua
         public void LuaExecution_NonProgrammerRole_NoRepairScheduled()
         {
             int repairCount = 0;
-            var fakeOrchestrator = new FakeOrchestrator((task) => repairCount++);
-            var bindings = new CoreDefaultLuaRuntimeBindings();
+            FakeOrchestrator fakeOrchestrator = new((task) => repairCount++);
+            CoreDefaultLuaRuntimeBindings bindings = new();
             TestSink sink = new();
             TestObserver observer = new();
 
-            LuaAiEnvelopeProcessor processor = new LuaAiEnvelopeProcessor(
+            LuaAiEnvelopeProcessor processor = new(
                 new SecureLuaEnvironment(),
                 bindings,
                 sink,
@@ -305,7 +320,7 @@ namespace CoreAI.Tests.EditMode.Lua
                 new NullLuaScriptVersionStore());
 
             // CoreMechanicAI ошибается — repair НЕ планируется
-            processor.Process(MakeEnvelope("bad_call()", "CoreMechanicAI", generation: 0));
+            processor.Process(MakeEnvelope("bad_call()", "CoreMechanicAI", 0));
 
             Assert.AreEqual(1, sink.Commands.Count);
             Assert.AreEqual(AiGameCommandTypeIds.LuaExecutionFailed, sink.Commands[0].CommandTypeId);
@@ -334,14 +349,9 @@ namespace CoreAI.Tests.EditMode.Lua
             {
                 registry.Register("report", new Action<string>(_ => { }));
                 registry.Register("calc_damage", new Func<double, double, double>((b, multiplier) => b * multiplier));
-                registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
-                {
-                    LastCreatedItem = name;
-                }));
-                registry.Register("add_special_effect", new Action<string>(_ =>
-                {
-                    SpecialEffectCount++;
-                }));
+                registry.Register("create_item",
+                    new Action<string, string, double>((name, type, quality) => { LastCreatedItem = name; }));
+                registry.Register("add_special_effect", new Action<string>(_ => { SpecialEffectCount++; }));
             }
         }
 

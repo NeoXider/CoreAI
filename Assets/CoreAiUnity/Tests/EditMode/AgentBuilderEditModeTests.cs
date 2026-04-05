@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -14,7 +15,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_CreatesBasicAgent_WithDefaults()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("You are a test agent.")
                 .Build();
 
@@ -27,7 +28,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_AddsTools_Correctly()
         {
-            var config = new AgentBuilder("ToolAgent")
+            AgentConfig config = new AgentBuilder("ToolAgent")
                 .WithSystemPrompt("You use tools.")
                 .WithTool(new MemoryLlmTool())
                 .Build();
@@ -39,7 +40,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_AddsMultipleTools_Correctly()
         {
-            var config = new AgentBuilder("MultiToolAgent")
+            AgentConfig config = new AgentBuilder("MultiToolAgent")
                 .WithSystemPrompt("You use many tools.")
                 .WithTool(new MemoryLlmTool())
                 .WithTool(new MemoryLlmTool())
@@ -52,7 +53,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_WithMemory_AddsMemoryTool()
         {
-            var config = new AgentBuilder("MemoryAgent")
+            AgentConfig config = new AgentBuilder("MemoryAgent")
                 .WithSystemPrompt("You remember things.")
                 .WithMemory()
                 .Build();
@@ -64,15 +65,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_WithMode_SetsCorrectMode()
         {
-            var toolsOnly = new AgentBuilder("ToolsOnly")
+            AgentConfig toolsOnly = new AgentBuilder("ToolsOnly")
                 .WithMode(AgentMode.ToolsOnly)
                 .Build();
 
-            var toolsAndChat = new AgentBuilder("ToolsAndChat")
+            AgentConfig toolsAndChat = new AgentBuilder("ToolsAndChat")
                 .WithMode(AgentMode.ToolsAndChat)
                 .Build();
 
-            var chatOnly = new AgentBuilder("ChatOnly")
+            AgentConfig chatOnly = new AgentBuilder("ChatOnly")
                 .WithMode(AgentMode.ChatOnly)
                 .Build();
 
@@ -84,7 +85,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Builder_FullConfiguration_AllFieldsSet()
         {
-            var config = new AgentBuilder("FullAgent")
+            AgentConfig config = new AgentBuilder("FullAgent")
                 .WithSystemPrompt("You are a full configured agent.")
                 .WithMemory(MemoryToolAction.Append)
                 .WithMode(AgentMode.ToolsAndChat)
@@ -99,27 +100,27 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Config_ApplyToPolicy_SetsToolsOnPolicy()
         {
-            var policy = new AgentMemoryPolicy();
-            
-            var config = new AgentBuilder("PolicyAgent")
+            AgentMemoryPolicy policy = new();
+
+            AgentConfig config = new AgentBuilder("PolicyAgent")
                 .WithSystemPrompt("Test")
                 .WithMemory()
                 .Build();
 
             config.ApplyToPolicy(policy);
 
-            var tools = policy.GetToolsForRole("PolicyAgent");
+            IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole("PolicyAgent");
             Assert.Greater(tools.Count, 0, "Should have tools after ApplyToPolicy");
         }
 
         [Test]
         public void Builder_ChainCalls_ReturnsSameBuilder()
         {
-            var builder = new AgentBuilder("ChainAgent");
-            
-            var result1 = builder.WithSystemPrompt("Test");
-            var result2 = builder.WithMemory();
-            var result3 = builder.WithMode(AgentMode.ChatOnly);
+            AgentBuilder builder = new("ChainAgent");
+
+            AgentBuilder result1 = builder.WithSystemPrompt("Test");
+            AgentBuilder result2 = builder.WithMemory();
+            AgentBuilder result3 = builder.WithMode(AgentMode.ChatOnly);
 
             Assert.AreSame(builder, result1);
             Assert.AreSame(builder, result2);

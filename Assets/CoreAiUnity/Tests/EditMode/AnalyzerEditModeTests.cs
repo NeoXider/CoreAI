@@ -35,7 +35,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_SystemPrompt_IsNotEmpty()
         {
-            var prompt = _promptComposer.GetSystemPrompt("Analyzer");
+            string prompt = _promptComposer.GetSystemPrompt("Analyzer");
             Assert.IsNotNull(prompt);
             Assert.Greater(prompt.Length, 50, "Analyzer system prompt should be substantial");
         }
@@ -43,7 +43,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_SystemPrompt_ContainsAnalysisKeywords()
         {
-            var prompt = _promptComposer.GetSystemPrompt("Analyzer").ToLowerInvariant();
+            string prompt = _promptComposer.GetSystemPrompt("Analyzer").ToLowerInvariant();
             StringAssert.Contains("analy", prompt); // analyze/analysis
             StringAssert.Contains("telemetry", prompt); // reads telemetry
         }
@@ -51,8 +51,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_SystemPrompt_DifferentFromCreator()
         {
-            var analyzerPrompt = _promptComposer.GetSystemPrompt("Analyzer");
-            var creatorPrompt = _promptComposer.GetSystemPrompt("Creator");
+            string analyzerPrompt = _promptComposer.GetSystemPrompt("Analyzer");
+            string creatorPrompt = _promptComposer.GetSystemPrompt("Creator");
             Assert.AreNotEqual(analyzerPrompt, creatorPrompt);
         }
 
@@ -64,9 +64,9 @@ namespace CoreAI.Tests.EditMode
         public void Analyzer_ReceivesTelemetry_InUserPayload()
         {
             _telemetry.SetTelemetry("wave", 3);
-            var snapshot = _telemetry.BuildSnapshot();
+            GameSessionSnapshot snapshot = _telemetry.BuildSnapshot();
 
-            var userPayload = _promptComposer.BuildUserPayload(snapshot, new AiTaskRequest
+            string userPayload = _promptComposer.BuildUserPayload(snapshot, new AiTaskRequest
             {
                 RoleId = "Analyzer",
                 Hint = "Analyze player death rate"
@@ -79,8 +79,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_EmptyTelemetry_HandlesGracefully()
         {
-            var snapshot = _telemetry.BuildSnapshot();
-            var userPayload = _promptComposer.BuildUserPayload(snapshot, new AiTaskRequest
+            GameSessionSnapshot snapshot = _telemetry.BuildSnapshot();
+            string userPayload = _promptComposer.BuildUserPayload(snapshot, new AiTaskRequest
             {
                 RoleId = "Analyzer",
                 Hint = ""
@@ -96,8 +96,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_ResponsePolicy_ValidJson_ReturnsTrue()
         {
-            var policy = new AnalyzerResponsePolicy();
-            var content = @"{""metric"": ""player_death_rate"", ""value"": 0.35, ""status"": ""balanced""}";
+            AnalyzerResponsePolicy policy = new();
+            string content = @"{""metric"": ""player_death_rate"", ""value"": 0.35, ""status"": ""balanced""}";
 
             Assert.IsTrue(policy.ShouldValidate("Analyzer"));
             Assert.IsTrue(policy.TryValidate("Analyzer", content, out _));
@@ -106,18 +106,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_ResponsePolicy_InvalidText_ReturnsFalse()
         {
-            var policy = new AnalyzerResponsePolicy();
-            var content = "The game seems balanced enough.";
+            AnalyzerResponsePolicy policy = new();
+            string content = "The game seems balanced enough.";
 
-            Assert.IsFalse(policy.TryValidate("Analyzer", content, out var reason));
+            Assert.IsFalse(policy.TryValidate("Analyzer", content, out string reason));
             StringAssert.Contains("Expected JSON", reason);
         }
 
         [Test]
         public void Analyzer_ResponsePolicy_RecommendationsJson_ReturnsTrue()
         {
-            var policy = new AnalyzerResponsePolicy();
-            var content = @"{""recommendation"": ""increase enemy HP by 10%"", ""analysis"": ""players die too fast""}";
+            AnalyzerResponsePolicy policy = new();
+            string content =
+                @"{""recommendation"": ""increase enemy HP by 10%"", ""analysis"": ""players die too fast""}";
 
             Assert.IsTrue(policy.TryValidate("Analyzer", content, out _));
         }
@@ -129,7 +130,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Analyzer_StubLlm_ReturnsJsonResponse()
         {
-            var result = _stubLlm.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = _stubLlm.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Analyzer",
                 SystemPrompt = _promptComposer.GetSystemPrompt("Analyzer"),
@@ -150,14 +151,14 @@ namespace CoreAI.Tests.EditMode
         public void Analyzer_Orchestrator_PublishesEnvelope()
         {
             // Arrange
-            var commandSink = new TestCommandSink();
-            var authority = new TestAuthorityHost { CanRunAiTasks = true };
-            var memoryStore = new NullAgentMemoryStore();
-            var memoryPolicy = new AgentMemoryPolicy();
-            var structuredPolicy = new NoOpRoleStructuredResponsePolicy();
-            var metrics = new NullAiOrchestrationMetrics();
+            TestCommandSink commandSink = new();
+            TestAuthorityHost authority = new() { CanRunAiTasks = true };
+            NullAgentMemoryStore memoryStore = new();
+            AgentMemoryPolicy memoryPolicy = new();
+            NoOpRoleStructuredResponsePolicy structuredPolicy = new();
+            NullAiOrchestrationMetrics metrics = new();
 
-            var orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 authority,
                 _stubLlm,
                 commandSink,
@@ -178,7 +179,7 @@ namespace CoreAI.Tests.EditMode
 
             // Assert
             Assert.IsTrue(commandSink.PublishedCommands.Count > 0, "Should publish at least one command");
-            var envelope = commandSink.PublishedCommands[0];
+            ApplyAiGameCommand envelope = commandSink.PublishedCommands[0];
             Assert.AreEqual("Analyzer", envelope.SourceRoleId);
             Assert.IsNotNull(envelope.JsonPayload);
         }
@@ -190,10 +191,14 @@ namespace CoreAI.Tests.EditMode
         private sealed class TestCommandSink : IAiGameCommandSink
         {
             public List<ApplyAiGameCommand> PublishedCommands { get; } = new();
-            public void Publish(ApplyAiGameCommand command) => PublishedCommands.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                PublishedCommands.Add(command);
+            }
         }
 
-        private sealed class TestAuthorityHost : CoreAI.Authority.IAuthorityHost
+        private sealed class TestAuthorityHost : IAuthorityHost
         {
             public bool CanRunAiTasks { get; set; } = true;
         }
@@ -209,7 +214,10 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class StubSessionTelemetryProvider : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new GameSessionSnapshot();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         #endregion

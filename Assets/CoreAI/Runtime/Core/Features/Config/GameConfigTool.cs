@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -31,7 +33,8 @@ namespace CoreAI.Config
             return AIFunctionFactory.Create(
                 func,
                 "game_config",
-                "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " + string.Join(", ", _policy.GetAllowedKeys(_roleId)));
+                "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
+                string.Join(", ", _policy.GetAllowedKeys(_roleId)));
         }
 
         /// <summary>
@@ -82,7 +85,7 @@ namespace CoreAI.Config
 
         private async Task<GameConfigResult> ExecuteReadAsync(CancellationToken cancellationToken)
         {
-            var keys = _policy.GetAllowedKeys(_roleId);
+            string[] keys = _policy.GetAllowedKeys(_roleId);
             if (keys.Length == 0)
             {
                 return new GameConfigResult
@@ -92,8 +95,8 @@ namespace CoreAI.Config
                 };
             }
 
-            var configs = new System.Collections.Generic.Dictionary<string, string>();
-            foreach (var key in keys)
+            Dictionary<string, string> configs = new();
+            foreach (string key in keys)
             {
                 if (_store.TryLoad(key, out string json) && !string.IsNullOrEmpty(json))
                 {
@@ -112,7 +115,7 @@ namespace CoreAI.Config
             }
 
             // Объединяем все конфиги в один JSON объект
-            var combinedJson = CombineConfigsToJson(configs);
+            string combinedJson = CombineConfigsToJson(configs);
             return new GameConfigResult
             {
                 Success = true,
@@ -144,7 +147,7 @@ namespace CoreAI.Config
             }
 
             // Определяем какие ключи можно менять этой роли
-            var allowedKeys = _policy.GetAllowedKeys(_roleId);
+            string[] allowedKeys = _policy.GetAllowedKeys(_roleId);
             if (allowedKeys.Length == 0)
             {
                 return new GameConfigResult
@@ -158,7 +161,7 @@ namespace CoreAI.Config
             // В реальной игре AI должен возвращать только изменённые части
             // Для более сложной логики (частичное обновление) используйте GameConfigPolicy.ApplyChanges
             string primarykey = allowedKeys[0];
-            
+
             // Пытаемся применить изменения через политику (если она поддерживает)
             if (_policy.TryApplyChanges(_roleId, content, out string[] appliedKeys, out string error))
             {
@@ -186,16 +189,21 @@ namespace CoreAI.Config
         /// </summary>
         private static string CombineConfigsToJson(System.Collections.Generic.Dictionary<string, string> configs)
         {
-            var sb = new System.Text.StringBuilder();
+            StringBuilder sb = new();
             sb.Append("{");
             bool first = true;
-            foreach (var kvp in configs)
+            foreach (KeyValuePair<string, string> kvp in configs)
             {
-                if (!first) sb.Append(",");
+                if (!first)
+                {
+                    sb.Append(",");
+                }
+
                 first = false;
                 // kvp.Value уже JSON, оборачиваем по ключу
                 sb.Append($"\"{kvp.Key}\":{kvp.Value}");
             }
+
             sb.Append("}");
             return sb.ToString();
         }
@@ -208,6 +216,7 @@ namespace CoreAI.Config
             public bool Success { get; set; }
             public string Message { get; set; }
             public string Error { get; set; }
+
             /// <summary>JSON конфиг (для read) или применённый конфиг (для update).</summary>
             public string ConfigJson { get; set; }
         }

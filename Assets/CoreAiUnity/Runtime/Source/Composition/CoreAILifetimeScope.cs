@@ -100,7 +100,8 @@ namespace CoreAI.Composition
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
-                reg.SetLegacyFallback(ResolveLlmClient(openAi, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
+                reg.SetLegacyFallback(
+                    ResolveLlmClient(openAi, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
@@ -149,14 +150,16 @@ namespace CoreAI.Composition
             builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton).As<ICoreAiWorldCommandExecutor>();
 
             // Game Config: Unity SO-based config store (override NullGameConfigStore from CorePortable)
-            builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton).As<IGameConfigStore>();
+            builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
+                .As<IGameConfigStore>();
 
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
         }
 
         /// <summary>Порядок выбора дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.</summary>
-        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger, IAgentMemoryStore memoryStore)
+        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger,
+            IAgentMemoryStore memoryStore)
         {
             if (openAi != null && openAi.UseOpenAiCompatibleHttp)
             {

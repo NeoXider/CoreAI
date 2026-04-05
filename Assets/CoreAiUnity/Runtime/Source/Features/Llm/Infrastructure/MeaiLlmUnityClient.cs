@@ -46,9 +46,12 @@ namespace CoreAI.Infrastructure.Llm
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {
             _tools.Clear();
-            if (tools == null) return;
-            
-            foreach (var tool in tools)
+            if (tools == null)
+            {
+                return;
+            }
+
+            foreach (ILlmTool tool in tools)
             {
                 if (tool is AgentMemory.MemoryLlmTool)
                 {
@@ -60,11 +63,15 @@ namespace CoreAI.Infrastructure.Llm
         private async Task EnsureClientReady(CancellationToken cancellationToken)
         {
             if (_unityAgent == null)
+            {
                 throw new InvalidOperationException("LLMAgent is null");
+            }
 
             LLM llm = _unityAgent.llm ?? _unityAgent.GetComponent<LLM>();
             if (llm == null)
+            {
                 throw new InvalidOperationException("LLMAgent: не назначен компонент LLM");
+            }
 
             Task<bool> setupTask = LLM.WaitUntilModelSetup();
             while (!setupTask.IsCompleted)
@@ -74,7 +81,9 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             if (!await setupTask)
+            {
                 throw new InvalidOperationException("LLMUnity: не удалась подготовка моделей");
+            }
 
             Task readyTask = llm.WaitUntilReady();
             while (!readyTask.IsCompleted)
@@ -87,7 +96,9 @@ namespace CoreAI.Infrastructure.Llm
             cancellationToken.ThrowIfCancellationRequested();
 
             if (llm.failed)
+            {
                 throw new InvalidOperationException("LLMUnity: сервер LLM не поднялся");
+            }
         }
 
         public async Task<LlmCompletionResult> CompleteAsync(
@@ -104,36 +115,40 @@ namespace CoreAI.Infrastructure.Llm
                 try
                 {
                     if (!string.IsNullOrEmpty(request.SystemPrompt))
+                    {
                         _unityAgent.systemPrompt = request.SystemPrompt;
+                    }
 
                     _currentRoleId = request.AgentRoleId ?? "Unknown";
 
-                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: tools={request.Tools?.Count ?? 0}, store={_memoryStore != null}");
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiLlmUnityClient: tools={request.Tools?.Count ?? 0}, store={_memoryStore != null}");
 
                     // Create actual MemoryTool if we have tools in request and store is available
                     List<MEAI.AITool> tools = new();
                     if (request.Tools != null && _memoryStore != null)
                     {
-                        foreach (var tool in request.Tools)
+                        foreach (ILlmTool tool in request.Tools)
                         {
                             if (tool is AgentMemory.MemoryLlmTool)
                             {
                                 try
                                 {
-                                    var memoryTool = new MemoryTool(_memoryStore, _currentRoleId);
+                                    MemoryTool memoryTool = new(_memoryStore, _currentRoleId);
                                     tools.Add(memoryTool.CreateAIFunction());
                                     _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Added MemoryTool");
                                 }
                                 catch (Exception toolEx)
                                 {
-                                    _logger.LogWarning(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool creation failed: " + toolEx.Message);
+                                    _logger.LogWarning(GameLogFeature.Llm,
+                                        "MeaiLlmUnityClient: Tool creation failed: " + toolEx.Message);
                                 }
                             }
                         }
                     }
 
-                    var innerClient = new LlmUnityMeaiChatClient(_unityAgent, _logger);
-                    var loggerFactory = NullLoggerFactory.Instance;
+                    LlmUnityMeaiChatClient innerClient = new(_unityAgent, _logger);
+                    NullLoggerFactory loggerFactory = NullLoggerFactory.Instance;
 
                     _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Creating FunctionInvokingChatClient");
 
@@ -144,18 +159,20 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(GameLogFeature.Llm, "MeaiLlmUnityClient: FunctionInvokingChatClient creation failed: " + ex.Message + "\n" + ex.StackTrace);
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmUnityClient: FunctionInvokingChatClient creation failed: " + ex.Message + "\n" +
+                            ex.StackTrace);
                         throw;
                     }
 
                     using (functionClient)
                     {
-                        var messages = new List<MEAI.ChatMessage>
+                        List<MEAI.ChatMessage> messages = new()
                         {
-                            new(MEAI.ChatRole.User, request.UserPayload ?? "")
+                            new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? "")
                         };
 
-                        var options = new MEAI.ChatOptions
+                        MEAI.ChatOptions options = new()
                         {
                             Tools = tools
                         };
@@ -167,22 +184,28 @@ namespace CoreAI.Infrastructure.Llm
 
                         while (retries <= maxRetries && !toolCallSuccess)
                         {
-                            _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: Calling GetResponseAsync (attempt {retries + 1}/{maxRetries + 1})");
-                            MEAI.ChatResponse response = await functionClient.GetResponseAsync(messages, options, cancellationToken);
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                $"MeaiLlmUnityClient: Calling GetResponseAsync (attempt {retries + 1}/{maxRetries + 1})");
+                            MEAI.ChatResponse response =
+                                await functionClient.GetResponseAsync(messages, options, cancellationToken);
                             _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: GetResponseAsync completed");
 
                             string content = "";
                             bool hasToolCall = false;
-                            foreach (var msg in response.Messages)
+                            foreach (MEAI.ChatMessage msg in response.Messages)
                             {
                                 if (msg.Role == MEAI.ChatRole.Assistant)
                                 {
-                                    foreach (var item in msg.Contents)
+                                    foreach (MEAI.AIContent item in msg.Contents)
                                     {
                                         if (item is MEAI.TextContent tc)
+                                        {
                                             content += tc.Text;
+                                        }
                                         else if (item is MEAI.FunctionCallContent)
+                                        {
                                             hasToolCall = true;
+                                        }
                                     }
                                 }
                             }
@@ -190,7 +213,8 @@ namespace CoreAI.Infrastructure.Llm
                             // Если tool call был выполнен через MEAI - успех
                             if (hasToolCall)
                             {
-                                _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call executed successfully via MEAI");
+                                _logger.LogInfo(GameLogFeature.Llm,
+                                    "MeaiLlmUnityClient: Tool call executed successfully via MEAI");
                                 toolCallSuccess = true;
                             }
                             // Если нет tool call и tools были запрошены - пробуем распознать
@@ -198,35 +222,42 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 // 1. Пробуем распознать JSON tool call
                                 bool parsed = LlmUnityMeaiChatClient.TryParseToolCallFromText(
-                                    content, tools, out var parsedToolCalls, out var cleanedContent);
+                                    content, tools, out List<MEAI.FunctionCallContent> parsedToolCalls,
+                                    out string cleanedContent);
 
                                 if (parsed)
                                 {
-                                    _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call parsed from JSON text");
+                                    _logger.LogInfo(GameLogFeature.Llm,
+                                        "MeaiLlmUnityClient: Tool call parsed from JSON text");
                                     toolCallSuccess = true;
                                 }
                                 // 2. Fallback: проверяем fenced Lua block (Programmer может ответить кодом)
-                                else if (ProgrammerLuaResponseParser.TryExtractLuaCode(content, out var luaCode) && !string.IsNullOrEmpty(luaCode))
+                                else if (ProgrammerLuaResponseParser.TryExtractLuaCode(content, out string luaCode) &&
+                                         !string.IsNullOrEmpty(luaCode))
                                 {
-                                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: Fenced Lua block found, will execute directly");
+                                    _logger.LogInfo(GameLogFeature.Llm,
+                                        $"MeaiLlmUnityClient: Fenced Lua block found, will execute directly");
                                     toolCallSuccess = true;
                                 }
                                 // 3. Ничего не найдено → retry или принимаем как есть
                                 else if (retries < maxRetries)
                                 {
                                     retries++;
-                                    string errorMsg = $"ERROR: Tool call not recognized. You must use this exact JSON format:\n" +
-                                                      $"{{\"name\": \"tool_name\", \"arguments\": {{...}}}}\n\n" +
-                                                      $"Your response was:\n{content?.Substring(0, Math.Min(200, content?.Length ?? 0))}\n\n" +
-                                                      $"Please try again with the correct format.";
+                                    string errorMsg =
+                                        $"ERROR: Tool call not recognized. You must use this exact JSON format:\n" +
+                                        $"{{\"name\": \"tool_name\", \"arguments\": {{...}}}}\n\n" +
+                                        $"Your response was:\n{content?.Substring(0, Math.Min(200, content?.Length ?? 0))}\n\n" +
+                                        $"Please try again with the correct format.";
                                     messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, content));
                                     messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, errorMsg));
-                                    _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: Tool call not recognized, retry {retries}/{maxRetries}");
+                                    _logger.LogWarning(GameLogFeature.Llm,
+                                        $"MeaiLlmUnityClient: Tool call not recognized, retry {retries}/{maxRetries}");
                                     continue;
                                 }
                                 else
                                 {
-                                    _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: All {maxRetries} retries exhausted for tool call");
+                                    _logger.LogWarning(GameLogFeature.Llm,
+                                        $"MeaiLlmUnityClient: All {maxRetries} retries exhausted for tool call");
                                     toolCallSuccess = true;
                                 }
                             }
@@ -238,13 +269,13 @@ namespace CoreAI.Infrastructure.Llm
                             finalContent = content;
                         }
 
-                    if (_useChatHistory && _memoryStore != null && !string.IsNullOrEmpty(finalContent))
-                    {
-                        _memoryStore.AppendChatMessage(_currentRoleId, "user", request.UserPayload ?? "");
-                        _memoryStore.AppendChatMessage(_currentRoleId, "assistant", finalContent);
-                    }
+                        if (_useChatHistory && _memoryStore != null && !string.IsNullOrEmpty(finalContent))
+                        {
+                            _memoryStore.AppendChatMessage(_currentRoleId, "user", request.UserPayload ?? "");
+                            _memoryStore.AppendChatMessage(_currentRoleId, "assistant", finalContent);
+                        }
 
-                    return new LlmCompletionResult { Ok = true, Content = finalContent ?? "" };
+                        return new LlmCompletionResult { Ok = true, Content = finalContent ?? "" };
                     } // end using functionClient
                 }
                 finally
@@ -279,17 +310,19 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.ChatOptions options = null,
                 CancellationToken cancellationToken = default)
             {
-                var messagesList = new List<MEAI.ChatMessage>(messages);
+                List<MEAI.ChatMessage> messagesList = new(messages);
                 string userMessage = "";
 
-                foreach (var msg in messagesList)
+                foreach (MEAI.ChatMessage msg in messagesList)
                 {
                     if (msg.Role == MEAI.ChatRole.User)
                     {
-                        foreach (var item in msg.Contents)
+                        foreach (MEAI.AIContent item in msg.Contents)
                         {
                             if (item is MEAI.TextContent tc)
+                            {
                                 userMessage += tc.Text + "\n";
+                            }
                         }
                     }
                 }
@@ -299,9 +332,10 @@ namespace CoreAI.Infrastructure.Llm
                 // Qwen3.5-2B не поддерживает структурные tool_calls.
                 // Модель возвращает JSON tool call как обычный текст в content.
                 // Нужно распознать JSON и создать FunctionCallContent для MEAI FunctionInvokingChatClient.
-                var responseContents = new List<MEAI.AIContent>();
+                List<MEAI.AIContent> responseContents = new();
 
-                if (TryParseToolCallFromText(result, options?.Tools?.ToList() ?? new List<MEAI.AITool>(), out var toolCallContents, out var cleanedText))
+                if (TryParseToolCallFromText(result, options?.Tools?.ToList() ?? new List<MEAI.AITool>(),
+                        out List<MEAI.FunctionCallContent> toolCallContents, out string cleanedText))
                 {
                     // Модель вернула tool call - возвращаем FunctionCallContent
                     responseContents.AddRange(toolCallContents);
@@ -316,7 +350,7 @@ namespace CoreAI.Infrastructure.Llm
                     responseContents.Add(new MEAI.TextContent(result));
                 }
 
-                var responseMessage = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, responseContents);
+                MEAI.ChatMessage responseMessage = new(MEAI.ChatRole.Assistant, responseContents);
                 return new MEAI.ChatResponse(responseMessage)
                 {
                     ModelId = options?.ModelId,
@@ -347,11 +381,11 @@ namespace CoreAI.Infrastructure.Llm
                 // Или Qwen-стиль: {"memory_written": true, "content": "..."} или {"tool": "memory", ...}
                 // Может быть в ```json блоке или просто JSON в тексте
 
-                var jsonRegex = new Regex(
+                Regex jsonRegex = new(
                     @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})|(\{[^{}]*""memory_written""[^{}]*\})|(\{[^{}]*""tool""\s*:\s*""memory""[^{}]*\})",
                     RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-                var match = jsonRegex.Match(text);
+                Match match = jsonRegex.Match(text);
                 if (!match.Success)
                 {
                     return false;
@@ -359,27 +393,27 @@ namespace CoreAI.Infrastructure.Llm
 
                 try
                 {
-                    string jsonStr = match.Groups[1].Success ? match.Groups[1].Value : 
-                                     match.Groups[2].Success ? match.Groups[2].Value :
-                                     match.Groups[3].Success ? match.Groups[3].Value :
-                                     match.Groups[4].Value;
+                    string jsonStr = match.Groups[1].Success ? match.Groups[1].Value :
+                        match.Groups[2].Success ? match.Groups[2].Value :
+                        match.Groups[3].Success ? match.Groups[3].Value :
+                        match.Groups[4].Value;
 
-                    var json = JObject.Parse(jsonStr);
+                    JObject json = JObject.Parse(jsonStr);
 
                     string functionName = null;
-                    var argumentsDict = new Dictionary<string, object?>();
+                    Dictionary<string, object> argumentsDict = new();
 
                     // Формат 1: {"name": "memory", "arguments": {...}}
                     if (json["name"] != null && json["arguments"] != null)
                     {
                         functionName = json["name"]?.ToString()?.Trim();
-                        var argsObj = json["arguments"] as JObject;
+                        JObject argsObj = json["arguments"] as JObject;
                         if (argsObj != null)
                         {
-                            foreach (var prop in argsObj.Properties())
+                            foreach (JProperty prop in argsObj.Properties())
                             {
-                                argumentsDict[prop.Name] = prop.Value?.Type == JTokenType.String 
-                                    ? prop.Value.ToString() 
+                                argumentsDict[prop.Name] = prop.Value?.Type == JTokenType.String
+                                    ? prop.Value.ToString()
                                     : prop.Value?.ToObject<object>();
                             }
                         }
@@ -389,14 +423,15 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         functionName = "memory";
                         argumentsDict["action"] = "write";
-                        var contentParts = new List<string>();
-                        foreach (var prop in json.Properties())
+                        List<string> contentParts = new();
+                        foreach (JProperty prop in json.Properties())
                         {
                             if (prop.Name != "memory_written" && prop.Value.Type == JTokenType.String)
                             {
                                 contentParts.Add($"{prop.Name}: {prop.Value}");
                             }
                         }
+
                         argumentsDict["content"] = string.Join(", ", contentParts);
                     }
                     // Формат 3: {"tool": "memory", "action": "...", "content": "..."}
@@ -417,7 +452,7 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
 
-                    var functionCall = new MEAI.FunctionCallContent($"call_{functionName}_1", functionName, argumentsDict);
+                    MEAI.FunctionCallContent functionCall = new($"call_{functionName}_1", functionName, argumentsDict);
                     toolCalls.Add(functionCall);
 
                     // Удаляем JSON блок из текста
@@ -437,10 +472,11 @@ namespace CoreAI.Infrastructure.Llm
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> messages,
                 MEAI.ChatOptions options = null,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
-                var response = await GetResponseAsync(messages, options, cancellationToken);
-                foreach (var msg in response.Messages)
+                MEAI.ChatResponse response = await GetResponseAsync(messages, options, cancellationToken);
+                foreach (MEAI.ChatMessage msg in response.Messages)
                 {
                     yield return new MEAI.ChatResponseUpdate
                     {
@@ -450,25 +486,53 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            public object? GetService(Type serviceType, object? key) => null;
-            public void Dispose() { }
+            public object? GetService(Type serviceType, object? key)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
     }
 
     internal sealed class NullLoggerFactory : ILoggerFactory
     {
         public static readonly NullLoggerFactory Instance = new();
-        public ILogger CreateLogger(string categoryName) => NullLogger.Instance;
-        public void AddProvider(ILoggerProvider provider) { }
-        public void Dispose() { }
+
+        public ILogger CreateLogger(string categoryName)
+        {
+            return NullLogger.Instance;
+        }
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     internal sealed class NullLogger : ILogger
     {
         public static readonly NullLogger Instance = new();
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => false;
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return false;
+        }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+        }
     }
 }
 #endif

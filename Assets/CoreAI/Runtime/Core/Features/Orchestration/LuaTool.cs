@@ -47,7 +47,7 @@ namespace CoreAI.Ai
 
             try
             {
-                var result = await _executor.ExecuteAsync(code, cancellationToken);
+                LuaResult result = await _executor.ExecuteAsync(code, cancellationToken);
                 return result;
             }
             catch (Exception ex)

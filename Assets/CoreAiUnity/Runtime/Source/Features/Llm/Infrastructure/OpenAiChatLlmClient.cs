@@ -7,6 +7,7 @@ using CoreAI.Ai;
 using UnityEngine;
 using UnityEngine.Networking;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -90,6 +91,7 @@ namespace CoreAI.Infrastructure.Llm
                         tcs.TrySetResult(new LlmCompletionResult { Ok = false, Error = "Empty response from LLM" });
                         return;
                     }
+
                     if (text.IndexOf("\"error\"", StringComparison.Ordinal) >= 0)
                     {
                         tcs.TrySetResult(new LlmCompletionResult { Ok = false, Error = text });
@@ -130,11 +132,11 @@ namespace CoreAI.Infrastructure.Llm
             int maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault(
                 Math.Max(128, Math.Min(2048, request.ContextWindowTokens / 4)));
 
-            var tools = request.Tools ?? _tools;
-            
+            IReadOnlyList<ILlmTool> tools = request.Tools ?? _tools;
+
             // Detect if using new Responses API (LM Studio) vs Chat Completions
             bool useResponsesApi = _settings.ApiBaseUrl.Contains("/responses");
-            
+
             if (useResponsesApi)
             {
                 return BuildResponsesApiBody(request, temperature, maxOutputTokens, tools);
@@ -145,30 +147,33 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private string BuildChatCompletionsBody(LlmCompletionRequest request, float temperature, int maxOutputTokens, IReadOnlyList<ILlmTool> tools)
+        private string BuildChatCompletionsBody(LlmCompletionRequest request, float temperature, int maxOutputTokens,
+            IReadOnlyList<ILlmTool> tools)
         {
-            var requestDict = new Dictionary<string, object>
+            Dictionary<string, object> requestDict = new()
             {
                 { "model", _settings.Model },
                 { "temperature", temperature },
                 { "max_tokens", maxOutputTokens },
-                { "messages", new List<Dictionary<string, string>>
+                {
+                    "messages", new List<Dictionary<string, string>>
                     {
-                        new Dictionary<string, string> { { "role", "system" }, { "content", request.SystemPrompt ?? "" } },
-                        new Dictionary<string, string> { { "role", "user" }, { "content", request.UserPayload ?? "" } }
+                        new() { { "role", "system" }, { "content", request.SystemPrompt ?? "" } },
+                        new() { { "role", "user" }, { "content", request.UserPayload ?? "" } }
                     }
                 }
             };
 
             if (tools != null && tools.Count > 0)
             {
-                var toolsList = new List<Dictionary<string, object>>();
-                foreach (var tool in tools)
+                List<Dictionary<string, object>> toolsList = new();
+                foreach (ILlmTool tool in tools)
                 {
                     toolsList.Add(new Dictionary<string, object>
                     {
                         { "type", "function" },
-                        { "function", new Dictionary<string, object>
+                        {
+                            "function", new Dictionary<string, object>
                             {
                                 { "name", tool.Name },
                                 { "description", tool.Description },
@@ -177,15 +182,17 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     });
                 }
+
                 requestDict["tools"] = toolsList;
             }
 
             return JsonConvert.SerializeObject(requestDict, Formatting.None);
         }
 
-        private string BuildResponsesApiBody(LlmCompletionRequest request, float temperature, int maxOutputTokens, IReadOnlyList<ILlmTool> tools)
+        private string BuildResponsesApiBody(LlmCompletionRequest request, float temperature, int maxOutputTokens,
+            IReadOnlyList<ILlmTool> tools)
         {
-            var inputList = new List<Dictionary<string, object>>();
+            List<Dictionary<string, object>> inputList = new();
 
             // System message
             if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -204,7 +211,7 @@ namespace CoreAI.Infrastructure.Llm
                 { "content", request.UserPayload ?? "" }
             });
 
-            var requestDict = new Dictionary<string, object>
+            Dictionary<string, object> requestDict = new()
             {
                 { "model", _settings.Model },
                 { "input", inputList },
@@ -221,8 +228,8 @@ namespace CoreAI.Infrastructure.Llm
             // Add tools for Responses API
             if (tools != null && tools.Count > 0)
             {
-                var toolsList = new List<Dictionary<string, object>>();
-                foreach (var tool in tools)
+                List<Dictionary<string, object>> toolsList = new();
+                foreach (ILlmTool tool in tools)
                 {
                     toolsList.Add(new Dictionary<string, object>
                     {
@@ -232,6 +239,7 @@ namespace CoreAI.Infrastructure.Llm
                         { "parameters", JsonConvert.DeserializeObject(tool.ParametersSchema ?? "{}") }
                     });
                 }
+
                 requestDict["tools"] = toolsList;
             }
 
@@ -245,14 +253,15 @@ namespace CoreAI.Infrastructure.Llm
                 return "";
             }
 
-            var toolDefs = new List<string>();
-            foreach (var tool in tools)
+            List<string> toolDefs = new();
+            foreach (ILlmTool tool in tools)
             {
                 string escapedName = JsonEscape(tool.Name);
                 string escapedDesc = JsonEscape(tool.Description);
                 // Parameters schema is already valid JSON - don't escape it
                 string escapedParams = tool.ParametersSchema ?? "{}";
-                toolDefs.Add("{\"type\":\"function\",\"function\":{\"name\":\"" + escapedName + "\",\"description\":\"" + escapedDesc + "\",\"parameters\":" + escapedParams + "}}");
+                toolDefs.Add("{\"type\":\"function\",\"function\":{\"name\":\"" + escapedName +
+                             "\",\"description\":\"" + escapedDesc + "\",\"parameters\":" + escapedParams + "}}");
             }
 
             return ",\"tools\":[" + string.Join(",", toolDefs) + "]";
@@ -321,6 +330,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     return ParseResponsesApiResponse(body);
                 }
+
                 // Fall back to Chat Completions format
                 OaiChatResponse dto = JsonUtility.FromJson<OaiChatResponse>(body);
                 if (dto?.choices == null || dto.choices.Length == 0)
@@ -342,35 +352,38 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
+                Dictionary<string, object> response = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
                 if (response == null || !response.ContainsKey("output"))
                 {
                     return (null, null);
                 }
 
-                var outputs = response["output"] as Newtonsoft.Json.Linq.JArray;
+                JArray outputs = response["output"] as Newtonsoft.Json.Linq.JArray;
                 if (outputs == null || outputs.Count == 0)
                 {
                     return (null, null);
                 }
 
                 string content = "";
-                
+
                 // Look for message type in output
-                foreach (var output in outputs)
+                foreach (JToken output in outputs)
                 {
-                    var outputObj = output as Newtonsoft.Json.Linq.JObject;
-                    if (outputObj == null) continue;
+                    JObject outputObj = output as Newtonsoft.Json.Linq.JObject;
+                    if (outputObj == null)
+                    {
+                        continue;
+                    }
 
                     string type = outputObj["type"]?.ToString();
                     if (type == "message")
                     {
-                        var contentArray = outputObj["content"] as Newtonsoft.Json.Linq.JArray;
+                        JArray contentArray = outputObj["content"] as Newtonsoft.Json.Linq.JArray;
                         if (contentArray != null)
                         {
-                            foreach (var item in contentArray)
+                            foreach (JToken item in contentArray)
                             {
-                                var itemObj = item as Newtonsoft.Json.Linq.JObject;
+                                JObject itemObj = item as Newtonsoft.Json.Linq.JObject;
                                 if (itemObj?["type"]?.ToString() == "output_text")
                                 {
                                     content = itemObj["text"]?.ToString() ?? "";
@@ -378,6 +391,7 @@ namespace CoreAI.Infrastructure.Llm
                                 }
                             }
                         }
+
                         break;
                     }
                 }
@@ -386,15 +400,21 @@ namespace CoreAI.Infrastructure.Llm
                 OaiUsage usage = null;
                 if (response.ContainsKey("usage"))
                 {
-                    var usageObj = response["usage"] as Newtonsoft.Json.Linq.JObject;
+                    JObject usageObj = response["usage"] as Newtonsoft.Json.Linq.JObject;
                     if (usageObj != null)
                     {
                         int inputTokens = 0;
                         int outputTokens = 0;
                         if (usageObj["input_tokens"] != null)
+                        {
                             inputTokens = usageObj["input_tokens"].ToObject<int>();
+                        }
+
                         if (usageObj["output_tokens"] != null)
+                        {
                             outputTokens = usageObj["output_tokens"].ToObject<int>();
+                        }
+
                         usage = new OaiUsage
                         {
                             prompt_tokens = inputTokens,

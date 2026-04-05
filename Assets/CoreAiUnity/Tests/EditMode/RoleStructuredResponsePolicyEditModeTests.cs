@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Programmer_ValidLuaCodeBlock_ReturnsTrue()
         {
-            var content = @"Here's the code:
+            string content = @"Here's the code:
 ```lua
 function add(a, b)
     return a + b
@@ -37,21 +37,21 @@ end
         {
             // ProgrammerResponsePolicy теперь пропускает любой текст
             // т.к. tool calls обрабатываются через MEAI pipeline отдельно
-            var content = "Sure, I can help with that. Here's what you should do...";
+            string content = "Sure, I can help with that. Here's what you should do...";
             Assert.IsTrue(_composite.TryValidate("Programmer", content, out _));
         }
 
         [Test]
         public void Programmer_JsonWithExecuteLua_ReturnsTrue()
         {
-            var content = @"{""execute_lua"": ""function add(a,b) return a+b end""}";
+            string content = @"{""execute_lua"": ""function add(a,b) return a+b end""}";
             Assert.IsTrue(_composite.TryValidate("Programmer", content, out _));
         }
 
         [Test]
         public void Programmer_EmptyResponse_ReturnsFalse()
         {
-            Assert.IsFalse(_composite.TryValidate("Programmer", "", out var reason));
+            Assert.IsFalse(_composite.TryValidate("Programmer", "", out string reason));
             StringAssert.Contains("empty", reason);
         }
 
@@ -62,7 +62,7 @@ end
         [Test]
         public void CoreMechanic_ValidJsonWithNumbers_ReturnsTrue()
         {
-            var content = @"{""damage"": 42.5, ""armor"": 10, ""resist"": 0.25}";
+            string content = @"{""damage"": 42.5, ""armor"": 10, ""resist"": 0.25}";
             Assert.IsTrue(_composite.ShouldValidate("CoreMechanicAI"));
             Assert.IsTrue(_composite.TryValidate("CoreMechanicAI", content, out _));
         }
@@ -70,16 +70,16 @@ end
         [Test]
         public void CoreMechanic_PlainText_ReturnsFalse()
         {
-            var content = "I think we should increase damage by 20%.";
-            Assert.IsFalse(_composite.TryValidate("CoreMechanicAI", content, out var reason));
+            string content = "I think we should increase damage by 20%.";
+            Assert.IsFalse(_composite.TryValidate("CoreMechanicAI", content, out string reason));
             StringAssert.Contains("Expected JSON", reason);
         }
 
         [Test]
         public void CoreMechanic_JsonWithoutNumbers_ReturnsFalse()
         {
-            var content = @"{""name"": ""sword"", ""type"": ""weapon""}";
-            Assert.IsFalse(_composite.TryValidate("CoreMechanicAI", content, out var reason));
+            string content = @"{""name"": ""sword"", ""type"": ""weapon""}";
+            Assert.IsFalse(_composite.TryValidate("CoreMechanicAI", content, out string reason));
             StringAssert.Contains("numeric", reason);
         }
 
@@ -90,7 +90,7 @@ end
         [Test]
         public void Creator_ValidJsonObject_ReturnsTrue()
         {
-            var content = @"{""commandType"": ""ArenaWavePlan"", ""payload"": {""waveIndex"": 3}}";
+            string content = @"{""commandType"": ""ArenaWavePlan"", ""payload"": {""waveIndex"": 3}}";
             Assert.IsTrue(_composite.ShouldValidate("Creator"));
             Assert.IsTrue(_composite.TryValidate("Creator", content, out _));
         }
@@ -98,7 +98,7 @@ end
         [Test]
         public void Creator_MarkdownJson_ReturnsTrue()
         {
-            var content = @"```json
+            string content = @"```json
 {""commandType"": ""ArenaWavePlan"", ""payload"": {}}
 ```";
             Assert.IsTrue(_composite.TryValidate("Creator", content, out _));
@@ -107,8 +107,8 @@ end
         [Test]
         public void Creator_PlainText_ReturnsFalse()
         {
-            var content = "I'll create a new wave with more enemies.";
-            Assert.IsFalse(_composite.TryValidate("Creator", content, out var reason));
+            string content = "I'll create a new wave with more enemies.";
+            Assert.IsFalse(_composite.TryValidate("Creator", content, out string reason));
             StringAssert.Contains("Expected JSON", reason);
         }
 
@@ -119,7 +119,7 @@ end
         [Test]
         public void Analyzer_ValidMetricsJson_ReturnsTrue()
         {
-            var content = @"{""metric"": ""player_death_rate"", ""value"": 0.35, ""status"": ""balanced""}";
+            string content = @"{""metric"": ""player_death_rate"", ""value"": 0.35, ""status"": ""balanced""}";
             Assert.IsTrue(_composite.ShouldValidate("Analyzer"));
             Assert.IsTrue(_composite.TryValidate("Analyzer", content, out _));
         }
@@ -127,23 +127,24 @@ end
         [Test]
         public void Analyzer_RecommendationsJson_ReturnsTrue()
         {
-            var content = @"{""recommendation"": ""increase enemy HP by 10%"", ""analysis"": ""players die too fast""}";
+            string content =
+                @"{""recommendation"": ""increase enemy HP by 10%"", ""analysis"": ""players die too fast""}";
             Assert.IsTrue(_composite.TryValidate("Analyzer", content, out _));
         }
 
         [Test]
         public void Analyzer_PlainText_ReturnsFalse()
         {
-            var content = "The game seems balanced enough.";
-            Assert.IsFalse(_composite.TryValidate("Analyzer", content, out var reason));
+            string content = "The game seems balanced enough.";
+            Assert.IsFalse(_composite.TryValidate("Analyzer", content, out string reason));
             StringAssert.Contains("Expected JSON", reason);
         }
 
         [Test]
         public void Analyzer_JsonWithoutMetricKeys_ReturnsFalse()
         {
-            var content = @"{""name"": ""test"", ""value"": 42}";
-            Assert.IsFalse(_composite.TryValidate("Analyzer", content, out var reason));
+            string content = @"{""name"": ""test"", ""value"": 42}";
+            Assert.IsFalse(_composite.TryValidate("Analyzer", content, out string reason));
             StringAssert.Contains("metric", reason);
         }
 
@@ -154,7 +155,7 @@ end
         [Test]
         public void AINpc_ValidText_ReturnsTrue()
         {
-            var content = "Greetings, traveler! What brings you to these lands?";
+            string content = "Greetings, traveler! What brings you to these lands?";
             Assert.IsTrue(_composite.ShouldValidate("AINpc"));
             Assert.IsTrue(_composite.TryValidate("AINpc", content, out _));
         }
@@ -162,14 +163,14 @@ end
         [Test]
         public void AINpc_ValidJson_ReturnsTrue()
         {
-            var content = @"{""dialogue"": ""Hello!"", ""emotion"": ""happy""}";
+            string content = @"{""dialogue"": ""Hello!"", ""emotion"": ""happy""}";
             Assert.IsTrue(_composite.TryValidate("AINpc", content, out _));
         }
 
         [Test]
         public void AINpc_EmptyText_ReturnsFalse()
         {
-            Assert.IsFalse(_composite.TryValidate("AINpc", "", out var reason));
+            Assert.IsFalse(_composite.TryValidate("AINpc", "", out string reason));
             StringAssert.Contains("empty", reason);
         }
 
@@ -198,7 +199,7 @@ end
         [Test]
         public void Composite_UnknownRole_FallbackToNoOp()
         {
-            var unknownRoleId = "CustomRole";
+            string unknownRoleId = "CustomRole";
             Assert.IsFalse(_composite.ShouldValidate(unknownRoleId));
             Assert.IsTrue(_composite.TryValidate(unknownRoleId, "anything", out _));
         }
@@ -206,7 +207,7 @@ end
         [Test]
         public void Composite_RegisterCustomPolicy_UsesCustom()
         {
-            var customRoleId = "CustomRole";
+            string customRoleId = "CustomRole";
             _composite.RegisterPolicy(customRoleId, new AlwaysFailPolicy());
 
             Assert.IsTrue(_composite.ShouldValidate(customRoleId));
@@ -227,7 +228,11 @@ end
 
         private sealed class AlwaysFailPolicy : IRoleStructuredResponsePolicy
         {
-            public bool ShouldValidate(string roleId) => true;
+            public bool ShouldValidate(string roleId)
+            {
+                return true;
+            }
+
             public bool TryValidate(string roleId, string rawContent, out string failureReason)
             {
                 failureReason = "Always fails for testing";

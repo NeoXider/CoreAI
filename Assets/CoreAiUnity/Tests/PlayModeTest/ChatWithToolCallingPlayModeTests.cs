@@ -25,17 +25,40 @@ namespace CoreAI.Tests.PlayMode
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<CoreAI.Ai.ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         /// <summary>
@@ -45,7 +68,8 @@ namespace CoreAI.Tests.PlayMode
         {
             public List<InventoryTool.InventoryItem> Inventory { get; } = new();
 
-            public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(System.Threading.CancellationToken cancellationToken)
+            public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
+                System.Threading.CancellationToken cancellationToken)
             {
                 return Task.FromResult(Inventory);
             }
@@ -58,7 +82,10 @@ namespace CoreAI.Tests.PlayMode
             public string LastUserPayload;
             public string LastContent;
 
-            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+            public CapturingLlmClient(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -67,7 +94,7 @@ namespace CoreAI.Tests.PlayMode
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
 
-                var result = await _inner.CompleteAsync(request, cancellationToken);
+                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
 
                 if (result != null && result.Ok)
                 {
@@ -77,7 +104,10 @@ namespace CoreAI.Tests.PlayMode
                 return result;
             }
 
-            public void SetTools(IReadOnlyList<CoreAI.Ai.ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
         }
 
         /// <summary>
@@ -105,10 +135,13 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[ChatWithToolCalling] Backend: {handle.ResolvedBackend}");
 
                 // Настраиваем тестовый инвентарь
-                var testInventory = new TestInventoryProvider();
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem { Name = "Leather Armor", Type = "armor", Quantity = 2, Price = 100 });
+                TestInventoryProvider testInventory = new();
+                testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                    { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
+                testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                    { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
+                testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                    { Name = "Leather Armor", Type = "armor", Quantity = 2, Price = 100 });
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
@@ -120,7 +153,7 @@ namespace CoreAI.Tests.PlayMode
 
                 ListSink sink = new();
                 CapturingLlmClient capturingLlm = new(handle.Client);
-                
+
                 // Создаём оркестратор с InventoryTool
                 AiOrchestrator orch = CreateOrchestratorWithInventory(
                     capturingLlm, store, policy, telemetry, composer, sink, testInventory);
@@ -139,18 +172,19 @@ namespace CoreAI.Tests.PlayMode
                     Hint = playerMessage
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling");  // 240s для retry loop
+                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling"); // 240s для retry loop
 
                 Debug.Log($"[ChatWithToolCalling] 📥 AGENT RESPONSE:");
                 Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
                 Debug.Log($"[ChatWithToolCalling] Commands produced: {sink.Items.Count}");
 
                 // Проверяем что ответ содержит что-то связанное с предметами
-                bool responseMentionsItems = capturingLlm.LastContent?.Contains("Sword", StringComparison.OrdinalIgnoreCase) == true ||
-                                             capturingLlm.LastContent?.Contains("Potion", StringComparison.OrdinalIgnoreCase) == true ||
-                                             capturingLlm.LastContent?.Contains("Armor", StringComparison.OrdinalIgnoreCase) == true ||
-                                             capturingLlm.LastContent?.Contains("inventory", StringComparison.OrdinalIgnoreCase) == true ||
-                                             capturingLlm.LastContent?.Contains("items", StringComparison.OrdinalIgnoreCase) == true;
+                bool responseMentionsItems =
+                    capturingLlm.LastContent?.Contains("Sword", StringComparison.OrdinalIgnoreCase) == true ||
+                    capturingLlm.LastContent?.Contains("Potion", StringComparison.OrdinalIgnoreCase) == true ||
+                    capturingLlm.LastContent?.Contains("Armor", StringComparison.OrdinalIgnoreCase) == true ||
+                    capturingLlm.LastContent?.Contains("inventory", StringComparison.OrdinalIgnoreCase) == true ||
+                    capturingLlm.LastContent?.Contains("items", StringComparison.OrdinalIgnoreCase) == true;
 
                 if (responseMentionsItems)
                 {
@@ -183,7 +217,7 @@ namespace CoreAI.Tests.PlayMode
             InventoryTool.IInventoryProvider inventoryProvider)
         {
             // Добавляем InventoryTool и MemoryTool для Merchant
-            policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<CoreAI.Ai.ILlmTool>
+            policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
             {
                 new MemoryLlmTool(),
                 new InventoryLlmTool(inventoryProvider)

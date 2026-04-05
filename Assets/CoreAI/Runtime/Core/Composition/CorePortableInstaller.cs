@@ -34,7 +34,8 @@ namespace CoreAI.Composition
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
-            builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(), Lifetime.Singleton);
+            builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),
+                Lifetime.Singleton);
             builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
             builder.Register<GameConfigPolicy>(Lifetime.Singleton);
             builder.Register<AiOrchestrator>(Lifetime.Singleton);

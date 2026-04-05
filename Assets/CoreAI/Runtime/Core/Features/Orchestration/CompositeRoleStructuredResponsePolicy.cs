@@ -35,7 +35,7 @@ namespace CoreAI.Ai
                 return _fallback.ShouldValidate(roleId);
             }
 
-            return _policies.TryGetValue(roleId, out var policy)
+            return _policies.TryGetValue(roleId, out IRoleStructuredResponsePolicy policy)
                 ? policy.ShouldValidate(roleId)
                 : _fallback.ShouldValidate(roleId);
         }
@@ -48,7 +48,7 @@ namespace CoreAI.Ai
                 return _fallback.TryValidate(roleId, rawContent, out failureReason);
             }
 
-            if (_policies.TryGetValue(roleId, out var policy))
+            if (_policies.TryGetValue(roleId, out IRoleStructuredResponsePolicy policy))
             {
                 return policy.TryValidate(roleId, rawContent, out failureReason);
             }
@@ -61,7 +61,7 @@ namespace CoreAI.Ai
         /// </summary>
         public IRoleStructuredResponsePolicy GetPolicy(string roleId)
         {
-            return _policies.TryGetValue(roleId, out var policy) ? policy : _fallback;
+            return _policies.TryGetValue(roleId, out IRoleStructuredResponsePolicy policy) ? policy : _fallback;
         }
 
         /// <summary>

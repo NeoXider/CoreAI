@@ -39,7 +39,7 @@ namespace CoreAI.Ai
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            var tool = new LuaTool(_executor);
+            LuaTool tool = new(_executor);
             return tool.CreateAIFunction();
         }
     }

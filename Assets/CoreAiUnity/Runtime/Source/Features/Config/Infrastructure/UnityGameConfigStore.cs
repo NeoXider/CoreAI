@@ -26,15 +26,20 @@ namespace CoreAI.Infrastructure.Config
         /// </summary>
         public void Register(string key, ScriptableObject config)
         {
-            if (string.IsNullOrEmpty(key) || config == null) return;
+            if (string.IsNullOrEmpty(key) || config == null)
+            {
+                return;
+            }
+
             _configsByKey[key] = config;
-            _logger.LogInfo(GameLogFeature.Core, $"[GameConfig] Registered config key: {key} (type: {config.GetType().Name})");
+            _logger.LogInfo(GameLogFeature.Core,
+                $"[GameConfig] Registered config key: {key} (type: {config.GetType().Name})");
         }
 
         /// <inheritdoc />
         public bool TryLoad(string key, out string json)
         {
-            if (_configsByKey.TryGetValue(key, out var so) && so != null)
+            if (_configsByKey.TryGetValue(key, out ScriptableObject so) && so != null)
             {
                 json = JsonUtility.ToJson(so);
                 return true;
@@ -47,7 +52,7 @@ namespace CoreAI.Infrastructure.Config
         /// <inheritdoc />
         public bool TrySave(string key, string json)
         {
-            if (!_configsByKey.TryGetValue(key, out var so) || so == null)
+            if (!_configsByKey.TryGetValue(key, out ScriptableObject so) || so == null)
             {
                 _logger.LogWarning(GameLogFeature.Core, $"[GameConfig] Config key not found: {key}");
                 return false;

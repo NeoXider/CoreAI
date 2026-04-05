@@ -31,7 +31,7 @@ namespace CoreAI.Ai
 
         public AIFunction CreateAIFunction()
         {
-            var tool = new InventoryTool(_provider);
+            InventoryTool tool = new(_provider);
             return tool.CreateAIFunction();
         }
     }

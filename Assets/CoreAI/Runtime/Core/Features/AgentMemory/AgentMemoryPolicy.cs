@@ -27,6 +27,7 @@ namespace CoreAI.Ai
                 _customTools.Remove(roleId);
                 return;
             }
+
             _customTools[roleId] = new List<ILlmTool>(tools);
         }
 
@@ -50,6 +51,7 @@ namespace CoreAI.Ai
         {
             /// <summary>Перезаписать всю память.</summary>
             Write,
+
             /// <summary>Дополнить существующую память.</summary>
             Append
         }
@@ -62,8 +64,8 @@ namespace CoreAI.Ai
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 _roleConfigs[roleId] = new RoleMemoryConfig(
-                    useMemoryTool: true,
-                    defaultAction: MemoryToolAction.Append);
+                    true,
+                    MemoryToolAction.Append);
             }
         }
 
@@ -80,7 +82,7 @@ namespace CoreAI.Ai
 
             roleId = roleId.Trim();
 
-            if (_roleConfigs.TryGetValue(roleId, out var config))
+            if (_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config))
             {
                 return config.UseMemoryTool;
             }
@@ -101,12 +103,12 @@ namespace CoreAI.Ai
 
             roleId = roleId.Trim();
 
-            if (_roleConfigs.TryGetValue(roleId, out var config))
+            if (_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config))
             {
                 return config;
             }
 
-            return new RoleMemoryConfig(useMemoryTool: true, MemoryToolAction.Append);
+            return new RoleMemoryConfig(true, MemoryToolAction.Append);
         }
 
         /// <summary>
@@ -117,11 +119,14 @@ namespace CoreAI.Ai
             bool? useMemoryTool = null,
             MemoryToolAction? defaultAction = null)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) return;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
 
             roleId = roleId.Trim();
 
-            var existing = GetRoleConfig(roleId);
+            RoleMemoryConfig existing = GetRoleConfig(roleId);
 
             _roleConfigs[roleId] = new RoleMemoryConfig
             {
@@ -135,7 +140,7 @@ namespace CoreAI.Ai
         /// </summary>
         public void EnableMemoryTool(string roleId)
         {
-            ConfigureRole(roleId, useMemoryTool: true);
+            ConfigureRole(roleId, true);
         }
 
         /// <summary>
@@ -143,7 +148,7 @@ namespace CoreAI.Ai
         /// </summary>
         public void DisableMemoryTool(string roleId)
         {
-            ConfigureRole(roleId, useMemoryTool: false);
+            ConfigureRole(roleId, false);
         }
 
         /// <summary>
@@ -153,7 +158,7 @@ namespace CoreAI.Ai
         {
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
-                ConfigureRole(roleId, useMemoryTool: enabled);
+                ConfigureRole(roleId, enabled);
             }
         }
 
@@ -171,7 +176,7 @@ namespace CoreAI.Ai
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
-            var tools = new List<ILlmTool>();
+            List<ILlmTool> tools = new();
 
             // Добавляем MemoryTool если включён
             if (IsMemoryEnabled(roleId))
@@ -180,7 +185,7 @@ namespace CoreAI.Ai
             }
 
             // Добавляем кастомные инструменты для роли
-            if (_customTools.TryGetValue(roleId, out var custom))
+            if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom))
             {
                 tools.AddRange(custom);
             }

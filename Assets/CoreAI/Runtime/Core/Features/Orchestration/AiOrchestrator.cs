@@ -78,7 +78,7 @@ namespace CoreAI.Ai
 
             // Get tools for this role (includes MemoryTool if enabled)
             // MeaiToolsLlmClientDecorator will inject them into system prompt automatically
-            var tools = _memoryPolicy?.GetToolsForRole(roleId);
+            IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = await _llm.CompleteAsync(

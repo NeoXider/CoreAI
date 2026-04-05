@@ -166,20 +166,20 @@ namespace CoreAI.Infrastructure.AiMemory
                 string path = GetPath(roleId);
                 if (!File.Exists(path))
                 {
-                    return System.Array.Empty<ChatMessage>();
+                    return Array.Empty<ChatMessage>();
                 }
 
                 string json = File.ReadAllText(path);
                 Persisted p = JsonUtility.FromJson<Persisted>(json);
                 if (p == null || string.IsNullOrEmpty(p.chatHistoryJson))
                 {
-                    return System.Array.Empty<ChatMessage>();
+                    return Array.Empty<ChatMessage>();
                 }
 
-                var wrapper = JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
+                ChatMessageArrayWrapper wrapper = JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
                 if (wrapper == null || wrapper.messages == null)
                 {
-                    return System.Array.Empty<ChatMessage>();
+                    return Array.Empty<ChatMessage>();
                 }
 
                 if (maxMessages <= 0)
@@ -193,7 +193,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception)
             {
-                return System.Array.Empty<ChatMessage>();
+                return Array.Empty<ChatMessage>();
             }
         }
 

@@ -67,6 +67,8 @@ namespace CoreAI.Ai
             CancellationToken cancellationToken = default);
 
         /// <summary>Установить инструменты (tools), доступные модели для вызова. Default: no-op.</summary>
-        virtual void SetTools(IReadOnlyList<ILlmTool> tools) { }
+        virtual void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+        }
     }
 }

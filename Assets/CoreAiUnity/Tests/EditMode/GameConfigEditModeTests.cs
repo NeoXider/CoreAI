@@ -28,7 +28,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Policy_ConfigureRole_CanReadWrite()
         {
-            _policy.ConfigureRole("Creator", readKeys: new[] { "session" }, writeKeys: new[] { "session" });
+            _policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" });
             _policy.SetKnownKeys(new[] { "session", "crafting" });
 
             Assert.IsTrue(_policy.CanRead("Creator", "session"));
@@ -66,10 +66,10 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_Read_ReturnsConfigJson()
         {
             _store.TrySave("session", "{\"difficulty\":2,\"enemy_hp_mult\":1.5}");
-            _policy.ConfigureRole("Creator", readKeys: new[] { "session" }, writeKeys: new[] { "session" });
+            _policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" });
 
-            var tool = new GameConfigTool(_store, _policy, "Creator");
-            var result = tool.ExecuteAsync("read").Result;
+            GameConfigTool tool = new(_store, _policy, "Creator");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
 
             Assert.IsTrue(result.Success);
             StringAssert.Contains("difficulty", result.ConfigJson);
@@ -81,8 +81,8 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_ReadUnknownRole_ReturnsError()
         {
             _policy.SetKnownKeys(new[] { "session" });
-            var tool = new GameConfigTool(_store, _policy, "UnknownRole");
-            var result = tool.ExecuteAsync("read").Result;
+            GameConfigTool tool = new(_store, _policy, "UnknownRole");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("no allowed config", result.Error);
@@ -96,14 +96,14 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_Update_SavesNewJson()
         {
             _store.TrySave("session", "{\"difficulty\":1,\"enemy_hp_mult\":1.0}");
-            _policy.ConfigureRole("Creator", readKeys: new[] { "session" }, writeKeys: new[] { "session" });
+            _policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" });
 
-            var tool = new GameConfigTool(_store, _policy, "Creator");
-            var newConfig = "{\"difficulty\":3,\"enemy_hp_mult\":2.5}";
-            var result = tool.ExecuteAsync("update", newConfig).Result;
+            GameConfigTool tool = new(_store, _policy, "Creator");
+            string newConfig = "{\"difficulty\":3,\"enemy_hp_mult\":2.5}";
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("update", newConfig).Result;
 
             Assert.IsTrue(result.Success);
-            _store.TryLoad("session", out var savedJson);
+            _store.TryLoad("session", out string savedJson);
             StringAssert.Contains("difficulty", savedJson);
             StringAssert.Contains("3", savedJson);
             StringAssert.Contains("2.5", savedJson);
@@ -113,8 +113,8 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_UpdateWithoutContent_ReturnsError()
         {
             _policy.GrantFullAccess("Creator");
-            var tool = new GameConfigTool(_store, _policy, "Creator");
-            var result = tool.ExecuteAsync("update").Result;
+            GameConfigTool tool = new(_store, _policy, "Creator");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("update").Result;
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("Content", result.Error);
@@ -124,8 +124,8 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_UpdateInvalidJson_ReturnsError()
         {
             _policy.GrantFullAccess("Creator");
-            var tool = new GameConfigTool(_store, _policy, "Creator");
-            var result = tool.ExecuteAsync("update", "not json").Result;
+            GameConfigTool tool = new(_store, _policy, "Creator");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("update", "not json").Result;
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("JSON", result.Error);
@@ -134,8 +134,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConfigTool_UnknownAction_ReturnsError()
         {
-            var tool = new GameConfigTool(_store, _policy, "Creator");
-            var result = tool.ExecuteAsync("delete").Result;
+            GameConfigTool tool = new(_store, _policy, "Creator");
+            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("delete").Result;
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("Unknown action", result.Error);
@@ -153,22 +153,22 @@ namespace CoreAI.Tests.EditMode
             _policy.GrantFullAccess("Creator");
             _policy.SetKnownKeys(new[] { "session" });
 
-            var tool = new GameConfigTool(_store, _policy, "Creator");
+            GameConfigTool tool = new(_store, _policy, "Creator");
 
             // Шаг 1: Читаем
-            var readResult = tool.ExecuteAsync("read").Result;
+            GameConfigTool.GameConfigResult readResult = tool.ExecuteAsync("read").Result;
             Assert.IsTrue(readResult.Success);
             StringAssert.Contains("difficulty", readResult.ConfigJson);
 
             // Шаг 2: Модифицируем (имитация что AI изменил JSON)
-            var modifiedJson = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
+            string modifiedJson = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
 
             // Шаг 3: Сохраняем
-            var writeResult = tool.ExecuteAsync("update", modifiedJson).Result;
+            GameConfigTool.GameConfigResult writeResult = tool.ExecuteAsync("update", modifiedJson).Result;
             Assert.IsTrue(writeResult.Success);
 
             // Шаг 4: Проверяем что сохранилось
-            _store.TryLoad("session", out var finalJson);
+            _store.TryLoad("session", out string finalJson);
             StringAssert.Contains("difficulty", finalJson);
             StringAssert.Contains("2", finalJson);
             StringAssert.Contains("1.5", finalJson);

@@ -47,7 +47,7 @@ namespace CoreAI.Config
         /// <param name="writeKeys">Ключи для записи (null = все).</param>
         public void ConfigureRole(string roleId, string[] readKeys = null, string[] writeKeys = null)
         {
-            var access = new RoleConfigAccess();
+            RoleConfigAccess access = new();
             if (readKeys == null)
             {
                 access.CanReadAll = true;
@@ -98,12 +98,13 @@ namespace CoreAI.Config
         /// </summary>
         public string[] GetAllowedKeys(string roleId)
         {
-            if (_roleAccess.TryGetValue(roleId, out var access))
+            if (_roleAccess.TryGetValue(roleId, out RoleConfigAccess access))
             {
                 if (access.CanWriteAll)
                 {
                     return _allKnownKeys;
                 }
+
                 return access.WriteKeys.ToArray();
             }
 
@@ -116,7 +117,11 @@ namespace CoreAI.Config
         /// </summary>
         public bool CanRead(string roleId, string key)
         {
-            if (!_roleAccess.TryGetValue(roleId, out var access)) return false;
+            if (!_roleAccess.TryGetValue(roleId, out RoleConfigAccess access))
+            {
+                return false;
+            }
+
             return access.CanReadAll || access.ReadKeys.Contains(key);
         }
 
@@ -125,7 +130,11 @@ namespace CoreAI.Config
         /// </summary>
         public bool CanWrite(string roleId, string key)
         {
-            if (!_roleAccess.TryGetValue(roleId, out var access)) return false;
+            if (!_roleAccess.TryGetValue(roleId, out RoleConfigAccess access))
+            {
+                return false;
+            }
+
             return access.CanWriteAll || access.WriteKeys.Contains(key);
         }
 

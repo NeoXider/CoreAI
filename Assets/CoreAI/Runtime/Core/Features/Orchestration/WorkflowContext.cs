@@ -25,7 +25,7 @@ namespace CoreAI.Ai
         /// </summary>
         public string GetVariable(string key, string defaultValue = "")
         {
-            return Variables.TryGetValue(key, out var value) ? value : defaultValue;
+            return Variables.TryGetValue(key, out string value) ? value : defaultValue;
         }
 
         /// <summary>

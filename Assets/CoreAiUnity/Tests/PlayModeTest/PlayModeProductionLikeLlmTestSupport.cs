@@ -17,11 +17,30 @@ namespace CoreAI.Tests.PlayMode
     public sealed class InMemoryStore : IAgentMemoryStore
     {
         public readonly Dictionary<string, AgentMemoryState> States = new();
-        public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-        public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-        public void Clear(string roleId) => States.Remove(roleId);
-        public void AppendChatMessage(string roleId, string role, string content) { }
-        public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+
+        public bool TryLoad(string roleId, out AgentMemoryState state)
+        {
+            return States.TryGetValue(roleId, out state);
+        }
+
+        public void Save(string roleId, AgentMemoryState state)
+        {
+            States[roleId] = state;
+        }
+
+        public void Clear(string roleId)
+        {
+            States.Remove(roleId);
+        }
+
+        public void AppendChatMessage(string roleId, string role, string content)
+        {
+        }
+
+        public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        {
+            return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+        }
     }
 
     /// <summary>

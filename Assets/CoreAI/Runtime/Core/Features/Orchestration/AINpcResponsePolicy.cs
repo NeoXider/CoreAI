@@ -21,7 +21,7 @@ namespace CoreAI.Ai
             }
 
             // NPC может отвечать либо JSON, либо просто текстом (реплика)
-            var trimmed = rawContent.Trim();
+            string trimmed = rawContent.Trim();
             if (trimmed.Length < 2)
             {
                 failureReason = "NPC response too short (less than 2 characters).";

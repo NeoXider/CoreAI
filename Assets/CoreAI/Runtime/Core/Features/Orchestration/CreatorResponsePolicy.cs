@@ -20,12 +20,12 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            var trimmed = rawContent.Trim();
+            string trimmed = rawContent.Trim();
 
             // Извлекаем JSON из markdown если нужно
             if (trimmed.StartsWith("```json"))
             {
-                var endFence = trimmed.IndexOf("```", 7);
+                int endFence = trimmed.IndexOf("```", 7);
                 if (endFence > 0)
                 {
                     trimmed = trimmed.Substring(7, endFence - 7).Trim();
@@ -35,8 +35,8 @@ namespace CoreAI.Ai
             // Должен быть JSON объект
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
-                var jsonStart = trimmed.IndexOf('{');
-                var jsonEnd = trimmed.LastIndexOf('}');
+                int jsonStart = trimmed.IndexOf('{');
+                int jsonEnd = trimmed.LastIndexOf('}');
 
                 if (jsonStart >= 0 && jsonEnd > jsonStart)
                 {

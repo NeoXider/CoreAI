@@ -20,15 +20,15 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            var trimmed = rawContent.Trim();
+            string trimmed = rawContent.Trim();
 
             // Должен содержать JSON объект
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
                 // Пробуем извлечь JSON из markdown
-                var jsonStart = trimmed.IndexOf('{');
-                var jsonEnd = trimmed.LastIndexOf('}');
-                
+                int jsonStart = trimmed.IndexOf('{');
+                int jsonEnd = trimmed.LastIndexOf('}');
+
                 if (jsonStart >= 0 && jsonEnd > jsonStart)
                 {
                     trimmed = trimmed.Substring(jsonStart, jsonEnd - jsonStart + 1);
@@ -42,7 +42,7 @@ namespace CoreAI.Ai
 
             // Проверяем что JSON содержит хотя бы одно числовое поле
             // Простая проверка: ищем "key": number pattern
-            var hasNumeric = System.Text.RegularExpressions.Regex.IsMatch(
+            bool hasNumeric = System.Text.RegularExpressions.Regex.IsMatch(
                 trimmed,
                 @"""[^""]+""\s*:\s*\d+\.?\d*");
 

@@ -33,9 +33,9 @@ namespace CoreAI.Ai
     /// <summary>Одно сообщение в истории чата.</summary>
     public struct ChatMessage
     {
-        public string Role;      // "user" | "assistant" | "system"
+        public string Role; // "user" | "assistant" | "system"
         public string Content;
-        public long Timestamp;   // Unix timestamp
+        public long Timestamp; // Unix timestamp
 
         public ChatMessage(string role, string content)
         {

@@ -25,17 +25,40 @@ namespace CoreAI.Tests.PlayMode
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<CoreAI.Ai.ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class CapturingLlmClient : ILlmClient
@@ -46,7 +69,10 @@ namespace CoreAI.Tests.PlayMode
             public string LastContent;
             public IReadOnlyList<ILlmTool> LastTools;
 
-            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+            public CapturingLlmClient(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -55,12 +81,19 @@ namespace CoreAI.Tests.PlayMode
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
                 LastTools = request.Tools;
-                var result = await _inner.CompleteAsync(request, cancellationToken);
-                if (result != null && result.Ok) LastContent = result.Content;
+                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
+                if (result != null && result.Ok)
+                {
+                    LastContent = result.Content;
+                }
+
                 return result;
             }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
         }
 
         private sealed class TestResult
@@ -74,31 +107,41 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Merchant_ToolsAndChat()
         {
             Debug.Log("[CustomAgents] ═══ TEST 1: MERCHANT (ToolsAndChat) ═══");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 300, out var handle, out var ignore))
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 300, out PlayModeProductionLikeLlmHandle handle,
+                    out string ignore))
+            {
                 Assert.Ignore(ignore);
+            }
+
             try
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                var inv = new TestInventoryProvider();
-                inv.Items.Add(new InventoryTool.InventoryItem { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
-                inv.Items.Add(new InventoryTool.InventoryItem { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
+                TestInventoryProvider inv = new();
+                inv.Items.Add(new InventoryTool.InventoryItem
+                    { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
+                inv.Items.Add(new InventoryTool.InventoryItem
+                    { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
 
-                var merchant = new AgentBuilder("TestMerchant")
+                AgentConfig merchant = new AgentBuilder("TestMerchant")
                     .WithSystemPrompt("You are a shopkeeper. When asked about items, call get_inventory first.")
                     .WithTool(new InventoryLlmTool(inv))
                     .WithMemory()
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();
 
-                var task = RunAgentTestAsync(handle.Client, merchant, "What items do you have?");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant");  // 240s для retry loop
-                var r = task.Result;
-                Debug.Log($"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
+                Task<TestResult> task = RunAgentTestAsync(handle.Client, merchant, "What items do you have?");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant"); // 240s для retry loop
+                TestResult r = task.Result;
+                Debug.Log(
+                    $"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Merchant should have tools");
                 Assert.IsNotNull(r.Response);
                 Debug.Log("[CustomAgents] ✓ TEST 1 PASSED");
             }
-            finally { handle.Dispose(); }
+            finally
+            {
+                handle.Dispose();
+            }
         }
 
         [UnityTest]
@@ -106,26 +149,33 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Analyzer_ToolsOnly()
         {
             Debug.Log("[CustomAgents] ═══ TEST 2: ANALYZER (ToolsOnly) ═══");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out var handle, out var ignore))
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
+                    out string ignore))
+            {
                 Assert.Ignore(ignore);
+            }
+
             try
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                var analyzer = new AgentBuilder("TestAnalyzer")
+                AgentConfig analyzer = new AgentBuilder("TestAnalyzer")
                     .WithSystemPrompt("You analyze sessions. Call get_session_stats tool.")
                     .WithTool(new SessionStatsLlmTool())
                     .WithMode(AgentMode.ToolsOnly)
                     .Build();
 
-                var task = RunAgentTestAsync(handle.Client, analyzer, "Analyze session");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer");  // 240s для retry loop
-                var r = task.Result;
+                Task<TestResult> task = RunAgentTestAsync(handle.Client, analyzer, "Analyze session");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer"); // 240s для retry loop
+                TestResult r = task.Result;
                 Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
                 Assert.AreEqual(AgentMode.ToolsOnly, analyzer.Mode);
                 Assert.Greater(r.ToolsCount, 0);
                 Debug.Log("[CustomAgents] ✓ TEST 2 PASSED");
             }
-            finally { handle.Dispose(); }
+            finally
+            {
+                handle.Dispose();
+            }
         }
 
         [UnityTest]
@@ -133,36 +183,44 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Storyteller_ChatOnly()
         {
             Debug.Log("[CustomAgents] ═══ TEST 3: STORYTELLER (ChatOnly) ═══");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.4f, 300, out var handle, out var ignore))
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.4f, 300, out PlayModeProductionLikeLlmHandle handle,
+                    out string ignore))
+            {
                 Assert.Ignore(ignore);
+            }
+
             try
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                var storyteller = new AgentBuilder("TestStoryteller")
+                AgentConfig storyteller = new AgentBuilder("TestStoryteller")
                     .WithSystemPrompt("You are a campfire storyteller. Share tales.")
                     .WithMemory(MemoryToolAction.Append)
                     .WithMode(AgentMode.ChatOnly)
                     .Build();
 
-                var task = RunAgentTestAsync(handle.Client, storyteller, "Tell me a story");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller");  // 240s для retry loop
-                var r = task.Result;
-                Debug.Log($"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
+                Task<TestResult> task = RunAgentTestAsync(handle.Client, storyteller, "Tell me a story");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller"); // 240s для retry loop
+                TestResult r = task.Result;
+                Debug.Log(
+                    $"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.AreEqual(AgentMode.ChatOnly, storyteller.Mode);
                 Assert.IsNotNull(r.Response);
                 Debug.Log("[CustomAgents] ✓ TEST 3 PASSED");
             }
-            finally { handle.Dispose(); }
+            finally
+            {
+                handle.Dispose();
+            }
         }
 
         private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg)
         {
-            var store = new InMemoryStore();
-            var policy = new AgentMemoryPolicy();
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
             cfg.ApplyToPolicy(policy);
-            var sink = new ListSink();
-            var cap = new CapturingLlmClient(llm);
-            var orch = new AiOrchestrator(
+            ListSink sink = new();
+            CapturingLlmClient cap = new(llm);
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
                 new AiPromptComposer(new CustomAgentPromptProvider(cfg.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
@@ -175,14 +233,27 @@ namespace CoreAI.Tests.PlayMode
         private sealed class CustomAgentPromptProvider : IAgentSystemPromptProvider
         {
             private readonly string _p;
-            public CustomAgentPromptProvider(string p) => _p = p;
-            public bool TryGetSystemPrompt(string roleId, out string prompt) { prompt = _p; return !string.IsNullOrEmpty(prompt); }
+
+            public CustomAgentPromptProvider(string p)
+            {
+                _p = p;
+            }
+
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = _p;
+                return !string.IsNullOrEmpty(prompt);
+            }
         }
 
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
             public List<InventoryTool.InventoryItem> Items { get; } = new();
-            public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(CancellationToken ct) => Task.FromResult(Items);
+
+            public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(CancellationToken ct)
+            {
+                return Task.FromResult(Items);
+            }
         }
 
         private sealed class SessionStatsLlmTool : ILlmTool
@@ -190,6 +261,7 @@ namespace CoreAI.Tests.PlayMode
             public string Name => "get_session_stats";
             public string Description => "Get session stats.";
             public string ParametersSchema => "{}";
+
             public Microsoft.Extensions.AI.AIFunction CreateAIFunction()
             {
                 return Microsoft.Extensions.AI.AIFunctionFactory.Create(

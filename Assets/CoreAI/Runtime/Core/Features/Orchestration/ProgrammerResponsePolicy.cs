@@ -27,7 +27,7 @@ namespace CoreAI.Ai
             // Если content пустой после tool calling - значит tool был вызван успешно
             // Если content есть - это обычный текст (объяснение, комментарии)
             // Валидация проходит если есть любой контент (tool calls уже обработаны MEAI)
-            
+
             failureReason = "";
             return true;
         }

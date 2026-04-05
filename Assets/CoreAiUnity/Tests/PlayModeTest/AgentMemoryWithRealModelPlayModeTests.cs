@@ -36,8 +36,14 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
@@ -167,29 +173,29 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[Test] Убедитесь, что в LM Studio:");
             Debug.Log("[Test] 1. Загружена модель (например Qwen3.5-4B)");
             Debug.Log("[Test] 2. Включен Server (справа сверху, порт 1234)");
-            
-            var store = new InMemoryStore();
-            var policy = new AgentMemoryPolicy();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
             // Настройка для LM Studio
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(
-                useOpenAiCompatibleHttp: true,
-                apiBaseUrl: "http://localhost:1234/v1",
-                apiKey: "lm-studio", // LM Studio принимает любой ключ
-                model: "", // LM Studio использует ту модель, что сейчас активна
-                temperature: 0.2f // Оптимально для Tool Call
+                true,
+                "http://localhost:1234/v1",
+                "lm-studio", // LM Studio принимает любой ключ
+                "", // LM Studio использует ту модель, что сейчас активна
+                0.2f // Оптимально для Tool Call
             );
 
-            var client = new OpenAiChatLlmClient(settings);
+            OpenAiChatLlmClient client = new(settings);
 
-            var sink = new ListSink();
-            var orch = new AiOrchestrator(
+            ListSink sink = new();
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
                 client,
                 sink,
@@ -201,15 +207,17 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics());
 
             Debug.Log("[Test] Sending request to LM Studio...");
-            var task = orch.RunTaskAsync(new AiTaskRequest
+            Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"lm studio 4b connected\"}}"
+                Hint =
+                    "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"lm studio 4b connected\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio request");  // 240s для retry loop
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio request"); // 240s для retry loop
 
-            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) || string.IsNullOrWhiteSpace(state.Memory))
+            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state) ||
+                string.IsNullOrWhiteSpace(state.Memory))
             {
                 Debug.LogWarning("[Test] LM Studio did not write memory. Check logs above.");
                 Assert.Ignore("LM Studio test skipped (model likely didn't follow tool format)");

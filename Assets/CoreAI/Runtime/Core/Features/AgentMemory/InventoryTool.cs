@@ -32,7 +32,7 @@ namespace CoreAI.Ai
         {
             try
             {
-                var items = await _provider.GetInventoryAsync(cancellationToken);
+                List<InventoryItem> items = await _provider.GetInventoryAsync(cancellationToken);
                 return new InventoryResult
                 {
                     Success = true,

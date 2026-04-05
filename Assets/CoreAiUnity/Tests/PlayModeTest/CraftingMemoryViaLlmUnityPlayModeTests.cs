@@ -25,16 +25,36 @@ namespace CoreAI.Tests.PlayMode
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
+
             public void Publish(ApplyAiGameCommand command)
             {
                 Debug.Log($"[LoggingSink] Received command: {command.CommandTypeId}");
@@ -103,7 +123,10 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
 
                     LogAfterModelCall("craft 1", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1")) yield break;
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1"))
+                    {
+                        yield break;
+                    }
                 }
 
                 // ===== КРАФТ 2: Steel + Hardwood =====
@@ -127,7 +150,10 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
 
                     LogAfterModelCall("craft 2", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2")) yield break;
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2"))
+                    {
+                        yield break;
+                    }
                 }
 
                 // ===== КРАФТ 3: Mithril + Enchanted Wood =====
@@ -151,7 +177,10 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
 
                     LogAfterModelCall("craft 3", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3")) yield break;
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3"))
+                    {
+                        yield break;
+                    }
                 }
 
                 // ===== КРАФТ 4: Steel + Hardwood (ПОВТОР крафта #2) — проверка детерминизма =====
@@ -161,7 +190,8 @@ namespace CoreAI.Tests.PlayMode
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
                         memoryAccum);
 
-                    LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2 — DETERMINISM CHECK)", prompt, store);
+                    LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2 — DETERMINISM CHECK)", prompt,
+                        store);
 
                     ListSink sink = new();
                     AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
@@ -181,23 +211,29 @@ namespace CoreAI.Tests.PlayMode
                     if (sink.Items.Count > 0)
                     {
                         string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(sink.Items[0].JsonPayload);
-                        Debug.Log($"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
+                        Debug.Log(
+                            $"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
 
                         // Модель должна либо повторить имя, либо явно сослаться на предыдущий крафт
                         bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                            craft4Name.ToLowerInvariant() == craft2Name.ToLowerInvariant();
+                                               craft4Name.ToLowerInvariant() == craft2Name.ToLowerInvariant();
 
                         if (!isDeterministic)
                         {
-                            Debug.LogWarning($"[CraftingMemory.LLMUnity] ⚠ DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
+                            Debug.LogWarning(
+                                $"[CraftingMemory.LLMUnity] ⚠ DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
                         }
                         else
                         {
-                            Debug.Log($"[CraftingMemory.LLMUnity] ✓ DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
+                            Debug.Log(
+                                $"[CraftingMemory.LLMUnity] ✓ DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
                         }
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4")) yield break;
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4"))
+                    {
+                        yield break;
+                    }
                 }
 
                 // ===== ФИНАЛЬНАЯ ПРОВЕРКА =====
@@ -208,7 +244,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.AreEqual(4, craftedNames.Count, "Must have 4 crafted items");
 
                 // Крафты 1, 2, 3 — уникальны
-                var uniqueFirst3 = new HashSet<string>(craftedNames.Take(3).Select(n => n.ToLowerInvariant()));
+                HashSet<string> uniqueFirst3 = new(craftedNames.Take(3).Select(n => n.ToLowerInvariant()));
                 Assert.AreEqual(3, uniqueFirst3.Count,
                     $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames.Take(3))}");
 
@@ -217,7 +253,8 @@ namespace CoreAI.Tests.PlayMode
                 string craft2Final = craftedNames[1];
                 string craft4Final = craftedNames[3];
                 Debug.Log($"[CraftingMemory.LLMUnity] Crafted items: {string.Join(" | ", craftedNames)}");
-                Debug.Log($"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
+                Debug.Log(
+                    $"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
                     $"→ {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? "✓ SAME" : "⚠ DIFFERENT")}");
                 Debug.Log($"[CraftingMemory.LLMUnity] Full memory history:\n{memoryAccum}");
                 Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
@@ -250,7 +287,8 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics());
         }
 
-        private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2, string previousCrafts)
+        private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
+            string previousCrafts)
         {
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
@@ -261,19 +299,20 @@ namespace CoreAI.Tests.PlayMode
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
             string instructions = "OUTPUT FORMAT:\n" +
-                "1. First, call the memory tool to save this craft:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
-                "   ```\n\n" +
-                "2. Then, call the execute_lua tool to create the item:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', quality)\\nreport('crafted YourWeaponName')\"}}\n" +
-                "   ```";
+                                  "1. First, call the memory tool to save this craft:\n" +
+                                  "   ```json\n" +
+                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
+                                  "   ```\n\n" +
+                                  "2. Then, call the execute_lua tool to create the item:\n" +
+                                  "   ```json\n" +
+                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', quality)\\nreport('crafted YourWeaponName')\"}}\n" +
+                                  "   ```";
 
             return header + ingredients + memorySection + instructions;
         }
 
-        private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2, string previousCrafts)
+        private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
+            string previousCrafts)
         {
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
@@ -282,17 +321,17 @@ namespace CoreAI.Tests.PlayMode
                 : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
 
             string instructions = "IMPORTANT: These EXACT ingredients were used before (see memory above).\n" +
-                "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
-                "This tests deterministic behavior: same input = same output.\n\n" +
-                "OUTPUT FORMAT:\n" +
-                "1. Call the memory tool:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
-                "   ```\n\n" +
-                "2. Call the execute_lua tool:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', quality)\\nreport('crafted SameNameAsBefore')\"}}\n" +
-                "   ```";
+                                  "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
+                                  "This tests deterministic behavior: same input = same output.\n\n" +
+                                  "OUTPUT FORMAT:\n" +
+                                  "1. Call the memory tool:\n" +
+                                  "   ```json\n" +
+                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
+                                  "   ```\n\n" +
+                                  "2. Call the execute_lua tool:\n" +
+                                  "   ```json\n" +
+                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', quality)\\nreport('crafted SameNameAsBefore')\"}}\n" +
+                                  "   ```";
 
             return header + ingredients + memorySection + instructions;
         }

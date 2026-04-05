@@ -22,7 +22,8 @@ namespace CoreAI.Config
         public string Name => "game_config";
 
         /// <inheritdoc />
-        public string Description => "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes.";
+        public string Description =>
+            "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes.";
 
         /// <inheritdoc />
         public string ParametersSchema =>

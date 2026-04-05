@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
@@ -20,17 +21,40 @@ namespace CoreAI.Tests.PlayMode
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         [UnityTest]
@@ -38,29 +62,29 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator MemoryTool_DifferentTemperatures_ViaLmStudio()
         {
             float[] temperatures = new float[] { 0.0f, 0.2f, 0.7f };
-            
-            foreach (var temp in temperatures)
+
+            foreach (float temp in temperatures)
             {
                 Debug.Log($"[LM Studio Test] === ТЕСТ ТЕМПЕРАТУРЫ: {temp} ===");
 
-                var store = new InMemoryStore();
-                var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+                InMemoryStore store = new();
+                OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
                 settings.SetRuntimeConfiguration(
-                    useOpenAiCompatibleHttp: true,
-                    apiBaseUrl: "http://localhost:1234/v1",
-                    apiKey: "any-key",
-                    model: "",
-                    temperature: temp
+                    true,
+                    "http://localhost:1234/v1",
+                    "any-key",
+                    "",
+                    temp
                 );
 
-                var client = new OpenAiChatLlmClient(settings);
-                var sink = new ListSink();
-                var composer = new AiPromptComposer(
+                OpenAiChatLlmClient client = new(settings);
+                ListSink sink = new();
+                AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                var orch = new AiOrchestrator(
+                AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     client,
                     sink,
@@ -72,25 +96,30 @@ namespace CoreAI.Tests.PlayMode
                     new NullAiOrchestrationMetrics());
 
                 Debug.Log($"[LM Studio Test] Отправляем запрос с temp={temp}...");
-                var task = orch.RunTaskAsync(new AiTaskRequest
+                Task task = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.Creator,
-                    Hint = $"Temperature test {temp}. Запомни фразу 'temp test {temp}'. Используй JSON: {{\"name\": \"memory\", \"arguments\": {{\"action\": \"write\", \"content\": \"temp test {temp}\"}}}}"
+                    Hint =
+                        $"Temperature test {temp}. Запомни фразу 'temp test {temp}'. Используй JSON: {{\"name\": \"memory\", \"arguments\": {{\"action\": \"write\", \"content\": \"temp test {temp}\"}}}}"
                 });
 
-                yield return PlayModeTestAwait.WaitTask(task, 240f, $"LM Studio memory write temp={temp}");  // 240s для retry loop
+                yield return
+                    PlayModeTestAwait.WaitTask(task, 240f,
+                        $"LM Studio memory write temp={temp}"); // 240s для retry loop
 
                 // Check either direct JSON in content OR tool_calls result
-                if (store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) && !string.IsNullOrWhiteSpace(state.Memory))
+                if (store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state) &&
+                    !string.IsNullOrWhiteSpace(state.Memory))
                 {
                     Debug.Log($"[LM Studio Test] ТЕМПЕРАТУРА {temp} — УСПЕХ! Память: {state.Memory}");
                     Assert.IsTrue(state.Memory.Contains($"temp test {temp}") || state.Memory.Contains("temp test"));
                 }
                 else
                 {
-                    Debug.LogWarning($"[LM Studio Test] ТЕМПЕРАТУРА {temp} — НЕУДАЧА. Модель не соблюла формат (ожидай JSON в content или tool_calls).");
+                    Debug.LogWarning(
+                        $"[LM Studio Test] ТЕМПЕРАТУРА {temp} — НЕУДАЧА. Модель не соблюла формат (ожидай JSON в content или tool_calls).");
                 }
-                
+
                 yield return new WaitForSeconds(1.0f);
             }
         }
@@ -102,24 +131,24 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[LM Studio Test] === НАЧТЕСТОВА ===");
             Debug.Log("[LM Studio Test] Убедитесь: 1) Модель загружена 2) Server включен (порт 1234)");
 
-            var store = new InMemoryStore();
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            InMemoryStore store = new();
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(
-                useOpenAiCompatibleHttp: true,
-                apiBaseUrl: "http://localhost:1234/v1",
-                apiKey: "any-key-works",
-                model: "",
-                temperature: 0.2f // Оптимально для Tool Call (избегает зацикливания 0.0)
+                true,
+                "http://localhost:1234/v1",
+                "any-key-works",
+                "",
+                0.2f // Оптимально для Tool Call (избегает зацикливания 0.0)
             );
 
-            var client = new OpenAiChatLlmClient(settings);
-            var sink = new ListSink();
-            var composer = new AiPromptComposer(
+            OpenAiChatLlmClient client = new(settings);
+            ListSink sink = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
-            var orch = new AiOrchestrator(
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
                 client,
                 sink,
@@ -131,15 +160,17 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics());
 
             Debug.Log("[LM Studio Test] Отправляем запрос...");
-            var task = orch.RunTaskAsync(new AiTaskRequest
+            Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Важно: запомни фразу 'qwen4b работает отлично'. Используй только JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"qwen4b работает отлично\"}}"
+                Hint =
+                    "Важно: запомни фразу 'qwen4b работает отлично'. Используй только JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"qwen4b работает отлично\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory write");  // 240s для retry loop
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory write"); // 240s для retry loop
 
-            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) || string.IsNullOrWhiteSpace(state.Memory))
+            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state) ||
+                string.IsNullOrWhiteSpace(state.Memory))
             {
                 Debug.LogWarning("[LM Studio Test] Память не записана. Проверьте логи выше.");
                 Assert.Ignore("LM Studio memory test skipped (format not followed)");
@@ -155,26 +186,26 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log("[LM Studio Test] === ТЕСТ ДОБАВЛЕНИЯ В ПАМЯТЬ ===");
 
-            var store = new InMemoryStore();
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "начальное значение" });
 
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(
-                useOpenAiCompatibleHttp: true,
-                apiBaseUrl: "http://localhost:1234/v1",
-                apiKey: "any-key",
-                model: "",
-                temperature: 0.2f
+                true,
+                "http://localhost:1234/v1",
+                "any-key",
+                "",
+                0.2f
             );
 
-            var client = new OpenAiChatLlmClient(settings);
-            var sink = new ListSink();
-            var composer = new AiPromptComposer(
+            OpenAiChatLlmClient client = new(settings);
+            ListSink sink = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
-            var orch = new AiOrchestrator(
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
                 client,
                 sink,
@@ -185,27 +216,28 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics());
 
-            var task = orch.RunTaskAsync(new AiTaskRequest
+            Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Добавь в память: 'добавлено через lm studio'. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"добавлено через lm studio\"}}"
+                Hint =
+                    "Добавь в память: 'добавлено через lm studio'. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"добавлено через lm studio\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory append");  // 240s для retry loop
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory append"); // 240s для retry loop
 
-            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state))
+            if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state))
             {
                 Assert.Ignore("Append test skipped");
             }
 
             Debug.Log($"[LM Studio Test] Память после добавления: {state.Memory}");
-            
+
             if (!state.Memory.Contains("добавлено через lm studio") && !state.Memory.Contains("добавлено"))
             {
                 Debug.LogWarning("[LM Studio Test] Append не сработал. Модель не добавила новое значение.");
                 Assert.Ignore("Append test skipped (model did not append content)");
             }
-            
+
             Assert.IsTrue(state.Memory.Contains("начальное значение"));
         }
 
@@ -215,26 +247,26 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log("[LM Studio Test] === ТЕСТ ОЧИСТКИ ПАМЯТИ ===");
 
-            var store = new InMemoryStore();
+            InMemoryStore store = new();
             store.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "это будет удалено" });
 
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.SetRuntimeConfiguration(
-                useOpenAiCompatibleHttp: true,
-                apiBaseUrl: "http://localhost:1234/v1",
-                apiKey: "any-key",
-                model: "",
-                temperature: 0.2f
+                true,
+                "http://localhost:1234/v1",
+                "any-key",
+                "",
+                0.2f
             );
 
-            var client = new OpenAiChatLlmClient(settings);
-            var sink = new ListSink();
-            var composer = new AiPromptComposer(
+            OpenAiChatLlmClient client = new(settings);
+            ListSink sink = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
-            var orch = new AiOrchestrator(
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
                 client,
                 sink,
@@ -245,15 +277,16 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics());
 
-            var task = orch.RunTaskAsync(new AiTaskRequest
+            Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint = "Очисти всю память. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory clear");  // 240s для retry loop
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory clear"); // 240s для retry loop
 
-            if (store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) && !string.IsNullOrWhiteSpace(state.Memory))
+            if (store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state) &&
+                !string.IsNullOrWhiteSpace(state.Memory))
             {
                 Debug.LogWarning($"[LM Studio Test] Память не очищена: {state.Memory}");
                 Assert.Ignore("Clear test skipped");
