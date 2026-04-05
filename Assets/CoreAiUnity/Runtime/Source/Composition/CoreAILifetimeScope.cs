@@ -106,8 +106,7 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
             builder.Register<ILlmClient>(c =>
                 new LoggingLlmClientDecorator(
-                    new MeaiToolsLlmClientDecorator(
-                        new RoutingLlmClient(c.Resolve<ILlmClientRegistry>())),
+                    new RoutingLlmClient(c.Resolve<ILlmClientRegistry>()),
                     c.Resolve<IGameLogger>(),
                     llmTimeout), Lifetime.Singleton);
 

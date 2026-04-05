@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -131,40 +132,32 @@ namespace CoreAI.Ai
                 }
             }
 
-            // ===== ОБРАБОТКА MemoryTool =====
-            if (useMemoryTool &&
-                _memoryStore != null &&
-                AgentMemoryDirectiveParser.TryExtract(content, out string cleaned,
-                    out AgentMemoryDirectiveParser.MemoryDirective dir) &&
-                dir != null)
+            // ===== ОБРАБОТКА MemoryTool (через MEAI function calling или content block) =====
+            if (useMemoryTool && _memoryStore != null)
             {
-                _memoryStore.TryLoad(roleId, out AgentMemoryState existing);
-
-                var roleConfig = _memoryPolicy.GetRoleConfig(roleId);
-                bool shouldAppend = dir.Append || roleConfig.DefaultAction == AgentMemoryPolicy.MemoryToolAction.Append;
-
-                if (dir.Clear)
+                // Check content for ```memory blocks (fallback)
+                if (AgentMemoryDirectiveParser.TryExtract(content, out string cleaned, out AgentMemoryDirectiveParser.MemoryDirective dirFromContent))
                 {
-                    _memoryStore.Clear(roleId);
-                }
-                else if (!string.IsNullOrWhiteSpace(dir.MemoryText))
-                {
-                    AgentMemoryState state = new() { LastSystemPrompt = systemBase, Memory = dir.MemoryText };
-                    if (shouldAppend && !string.IsNullOrWhiteSpace(existing?.Memory))
+                    content = cleaned;
+                    
+                    _memoryStore.TryLoad(roleId, out AgentMemoryState existing);
+                    var roleConfig = _memoryPolicy.GetRoleConfig(roleId);
+                    bool shouldAppend = dirFromContent.Append || roleConfig.DefaultAction == AgentMemoryPolicy.MemoryToolAction.Append;
+
+                    if (dirFromContent.Clear)
                     {
-                        state.Memory = existing.Memory.Trim() + "\n" + dir.MemoryText.Trim();
+                        _memoryStore.Clear(roleId);
                     }
-
-                    _memoryStore.Save(roleId, state);
+                    else if (!string.IsNullOrWhiteSpace(dirFromContent.MemoryText))
+                    {
+                        AgentMemoryState state = new() { LastSystemPrompt = systemBase, Memory = dirFromContent.MemoryText };
+                        if (shouldAppend && !string.IsNullOrWhiteSpace(existing?.Memory))
+                        {
+                            state.Memory = existing.Memory.Trim() + "\n" + dirFromContent.MemoryText.Trim();
+                        }
+                        _memoryStore.Save(roleId, state);
+                    }
                 }
-                else
-                {
-                    // Даже если память не меняем, полезно сохранять последний system prompt.
-                    _memoryStore.Save(roleId,
-                        new AgentMemoryState { LastSystemPrompt = systemBase, Memory = existing?.Memory });
-                }
-
-                content = cleaned;
             }
 
             _commandSink.Publish(new ApplyAiGameCommand

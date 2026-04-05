@@ -80,6 +80,7 @@ namespace CoreAI.Tests.PlayMode
 
                 yield return PlayModeTestAwait.WaitTask(task, 120f, $"LM Studio memory write temp={temp}");
 
+                // Check either direct JSON in content OR tool_calls result
                 if (store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) && !string.IsNullOrWhiteSpace(state.Memory))
                 {
                     Debug.Log($"[LM Studio Test] ТЕМПЕРАТУРА {temp} — УСПЕХ! Память: {state.Memory}");
@@ -87,7 +88,7 @@ namespace CoreAI.Tests.PlayMode
                 }
                 else
                 {
-                    Debug.LogWarning($"[LM Studio Test] ТЕМПЕРАТУРА {temp} — НЕУДАЧА. Модель не соблюла формат.");
+                    Debug.LogWarning($"[LM Studio Test] ТЕМПЕРАТУРА {temp} — НЕУДАЧА. Модель не соблюла формат (ожидай JSON в content или tool_calls).");
                 }
                 
                 yield return new WaitForSeconds(1.0f);

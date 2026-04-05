@@ -30,11 +30,14 @@ namespace CoreAI.Ai
         protected static string JsonParams(params (string name, string type, bool required, string desc)[] p)
         {
             var props = new List<string>();
+            var requiredProps = new List<string>();
             foreach (var (name, type, required, desc) in p)
             {
-                props.Add($"\"{name}\":{{\"type\":\"{type}\",\"description\":\"{desc}\"{(required ? ",\"required\":true" : "")}}}");
+                props.Add($"\"{name}\":{{\"type\":\"{type}\",\"description\":\"{desc}\"}}");
+                if (required) requiredProps.Add($"\"{name}\"");
             }
-            return $"{{\"type\":\"object\",\"properties\":{{ {string.Join(",",props)} }}}}";
+            string requiredPart = requiredProps.Count > 0 ? $",\"required\":[{string.Join(",",requiredProps)}]" : "";
+            return $"{{\"type\":\"object\",\"properties\":{{{string.Join(",",props)}}}{requiredPart}}}";
         }
     }
 }
