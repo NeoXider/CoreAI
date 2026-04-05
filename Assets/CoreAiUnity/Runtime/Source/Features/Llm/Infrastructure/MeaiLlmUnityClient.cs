@@ -193,9 +193,10 @@ namespace CoreAI.Infrastructure.Llm
                                 _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call executed successfully via MEAI");
                                 toolCallSuccess = true;
                             }
-                            // Если нет tool call и tools были запрошены - пробуем распознать JSON
+                            // Если нет tool call и tools были запрошены - пробуем распознать
                             else if (tools.Count > 0)
                             {
+                                // 1. Пробуем распознать JSON tool call
                                 bool parsed = LlmUnityMeaiChatClient.TryParseToolCallFromText(
                                     content, tools, out var parsedToolCalls, out var cleanedContent);
 
@@ -204,9 +205,15 @@ namespace CoreAI.Infrastructure.Llm
                                     _logger.LogInfo(GameLogFeature.Llm, "MeaiLlmUnityClient: Tool call parsed from JSON text");
                                     toolCallSuccess = true;
                                 }
+                                // 2. Fallback: проверяем fenced Lua block (Programmer может ответить кодом)
+                                else if (ProgrammerLuaResponseParser.TryExtractLuaCode(content, out var luaCode) && !string.IsNullOrEmpty(luaCode))
+                                {
+                                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmUnityClient: Fenced Lua block found, will execute directly");
+                                    toolCallSuccess = true;
+                                }
+                                // 3. Ничего не найдено → retry или принимаем как есть
                                 else if (retries < maxRetries)
                                 {
-                                    // Tool call не распознан - говорим модели исправить
                                     retries++;
                                     string errorMsg = $"ERROR: Tool call not recognized. You must use this exact JSON format:\n" +
                                                       $"{{\"name\": \"tool_name\", \"arguments\": {{...}}}}\n\n" +
@@ -219,7 +226,6 @@ namespace CoreAI.Infrastructure.Llm
                                 }
                                 else
                                 {
-                                    // Все попытки исчерпаны - считаем как есть
                                     _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmUnityClient: All {maxRetries} retries exhausted for tool call");
                                     toolCallSuccess = true;
                                 }
