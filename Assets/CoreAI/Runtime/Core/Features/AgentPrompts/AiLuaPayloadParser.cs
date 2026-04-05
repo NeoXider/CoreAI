@@ -4,7 +4,7 @@ using System.Text;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Достаёт исполняемый Lua из ответа LLM: сначала markdown fenced lua, затем JSON ExecuteLua.
+    /// Достаёт исполняемый Lua из ответа LLM: сначала MEAI tool call, затем markdown fenced lua, затем JSON ExecuteLua.
     /// </summary>
     public static class AiLuaPayloadParser
     {

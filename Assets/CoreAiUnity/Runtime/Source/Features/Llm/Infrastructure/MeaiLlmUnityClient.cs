@@ -281,11 +281,12 @@ namespace CoreAI.Infrastructure.Llm
                     return false;
                 }
 
-                // Ищем JSON в формате: {"name": "...", "arguments": {...}}
+                // Ищем JSON tool call в формате: {"name": "...", "arguments": {...}}
+                // Или Qwen-стиль: {"memory_written": true, "content": "..."} или {"tool": "memory", ...}
                 // Может быть в ```json блоке или просто JSON в тексте
 
                 var jsonRegex = new Regex(
-                    @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
+                    @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})|(\{[^{}]*""memory_written""[^{}]*\})|(\{[^{}]*""tool""\s*:\s*""memory""[^{}]*\})",
                     RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
                 var match = jsonRegex.Match(text);
@@ -296,33 +297,61 @@ namespace CoreAI.Infrastructure.Llm
 
                 try
                 {
-                    string jsonStr = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+                    string jsonStr = match.Groups[1].Success ? match.Groups[1].Value : 
+                                     match.Groups[2].Success ? match.Groups[2].Value :
+                                     match.Groups[3].Success ? match.Groups[3].Value :
+                                     match.Groups[4].Value;
 
                     var json = JObject.Parse(jsonStr);
 
-                    if (json["name"] == null)
-                    {
-                        return false;
-                    }
-
-                    string functionName = json["name"]?.ToString()?.Trim();
-                    if (string.IsNullOrEmpty(functionName))
-                    {
-                        return false;
-                    }
-
+                    string functionName = null;
                     var argumentsDict = new Dictionary<string, object?>();
-                    if (json["arguments"] != null && json["arguments"].Type != Newtonsoft.Json.Linq.JTokenType.Null)
+
+                    // Формат 1: {"name": "memory", "arguments": {...}}
+                    if (json["name"] != null && json["arguments"] != null)
                     {
+                        functionName = json["name"]?.ToString()?.Trim();
                         var argsObj = json["arguments"] as JObject;
                         if (argsObj != null)
                         {
                             foreach (var prop in argsObj.Properties())
                             {
-                                argumentsDict[prop.Name] = prop.Value?.Type == Newtonsoft.Json.Linq.JTokenType.String 
+                                argumentsDict[prop.Name] = prop.Value?.Type == JTokenType.String 
                                     ? prop.Value.ToString() 
                                     : prop.Value?.ToObject<object>();
                             }
+                        }
+                    }
+                    // Формат 2 (Qwen-style): {"memory_written": true, "item_name": "...", "task_id": "..."}
+                    else if (json["memory_written"]?.Type == JTokenType.Boolean && json["memory_written"].Value<bool>())
+                    {
+                        functionName = "memory";
+                        argumentsDict["action"] = "write";
+                        var contentParts = new List<string>();
+                        foreach (var prop in json.Properties())
+                        {
+                            if (prop.Name != "memory_written" && prop.Value.Type == JTokenType.String)
+                            {
+                                contentParts.Add($"{prop.Name}: {prop.Value}");
+                            }
+                        }
+                        argumentsDict["content"] = string.Join(", ", contentParts);
+                    }
+                    // Формат 3: {"tool": "memory", "action": "...", "content": "..."}
+                    else if (json["tool"]?.ToString()?.ToLowerInvariant() == "memory")
+                    {
+                        functionName = "memory";
+                        argumentsDict["action"] = json["action"]?.ToString() ?? "write";
+                        argumentsDict["content"] = json["content"]?.ToString();
+                    }
+
+                    if (functionName == null || functionName == "memory")
+                    {
+                        functionName = "memory";
+                        if (argumentsDict.Count == 0)
+                        {
+                            argumentsDict["action"] = "write";
+                            argumentsDict["content"] = json.ToString(Newtonsoft.Json.Formatting.None);
                         }
                     }
 

@@ -3,7 +3,8 @@ using System;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Извлекает Lua из ответа LLM (fenced-блок с маркером lua). MVP до появления полноценного JSON-конверта для Programmer.
+    /// Извлекает Lua из ответа LLM (fenced-блок с маркером lua). Fallback для обратной совместимости.
+    /// Основной путь: MEAI execute_lua tool call.
     /// </summary>
     public static class ProgrammerLuaResponseParser
     {

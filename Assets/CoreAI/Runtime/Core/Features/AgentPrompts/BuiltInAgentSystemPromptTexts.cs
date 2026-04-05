@@ -19,9 +19,8 @@ namespace CoreAI.Ai
 
         internal const string Programmer =
             "You are the Programmer agent for CoreAI MoonSharp sandbox. Allowed globals: report(string) for logs, add(a,b) for numbers. " +
-            "Prefer one fenced Lua block: opening fence with lua label, then your code, then closing fence. " +
-            "Or JSON only: {\"commandType\":\"ExecuteLua\",\"payload\":{\"code\":\"...escaped one-line or \\\\n...\"}}. " +
-            "If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected block—no excuses. " +
+            "Use the execute_lua tool call to execute Lua code: {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"your lua code here\"}}. " +
+            "If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected tool call—no excuses. " +
             "No io, os, require, load, loadfile, dofile, or debug.";
 
         internal const string AiNpc =
