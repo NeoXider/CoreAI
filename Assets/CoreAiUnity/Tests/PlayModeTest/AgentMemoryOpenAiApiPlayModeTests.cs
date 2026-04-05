@@ -78,7 +78,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint = $"Temperature test {temp}. Запомни фразу 'temp test {temp}'. Используй JSON: {{\"name\": \"memory\", \"arguments\": {{\"action\": \"write\", \"content\": \"temp test {temp}\"}}}}"
                 });
 
-                yield return PlayModeTestAwait.WaitTask(task, 120f, $"LM Studio memory write temp={temp}");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, $"LM Studio memory write temp={temp}");  // 240s для retry loop
 
                 // Check either direct JSON in content OR tool_calls result
                 if (store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) && !string.IsNullOrWhiteSpace(state.Memory))
@@ -137,7 +137,7 @@ namespace CoreAI.Tests.PlayMode
                 Hint = "Важно: запомни фразу 'qwen4b работает отлично'. Используй только JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"qwen4b работает отлично\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory write");
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory write");  // 240s для retry loop
 
             if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) || string.IsNullOrWhiteSpace(state.Memory))
             {
@@ -191,7 +191,7 @@ namespace CoreAI.Tests.PlayMode
                 Hint = "Добавь в память: 'добавлено через lm studio'. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"добавлено через lm studio\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory append");
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory append");  // 240s для retry loop
 
             if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state))
             {
@@ -251,7 +251,7 @@ namespace CoreAI.Tests.PlayMode
                 Hint = "Очисти всю память. Используй: {\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio memory clear");
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio memory clear");  // 240s для retry loop
 
             if (store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) && !string.IsNullOrWhiteSpace(state.Memory))
             {

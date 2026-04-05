@@ -207,7 +207,7 @@ namespace CoreAI.Tests.PlayMode
                 Hint = "IMPORTANT: Use memory tool. Output ONLY this JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"lm studio 4b connected\"}}"
             });
 
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "LM Studio request");
+            yield return PlayModeTestAwait.WaitTask(task, 240f, "LM Studio request");  // 240s для retry loop
 
             if (!store.TryLoad(BuiltInAgentRoleIds.Creator, out var state) || string.IsNullOrWhiteSpace(state.Memory))
             {

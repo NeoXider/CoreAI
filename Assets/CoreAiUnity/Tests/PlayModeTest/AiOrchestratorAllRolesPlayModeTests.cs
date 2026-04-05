@@ -95,8 +95,9 @@ namespace CoreAI.Tests.PlayMode
                         "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
                 });
 
-                // Programmer role может занять больше времени из-за сложности промпта
-                float timeout = role == BuiltInAgentRoleIds.Programmer ? 180f : 120f;
+                // Programmer role может занять больше времени из-за сложности промпта и retry loop
+                // С retry (4 попытки) каждая занимает ~30-40с, поэтому даём больше времени
+                float timeout = role == BuiltInAgentRoleIds.Programmer ? 300f : 180f;
                 yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'");
 
                 if (sink.Commands.Count == 0)

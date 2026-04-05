@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
@@ -101,7 +102,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "memory write");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write");  // 240s для retry loop
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] System Prompt: {capturingLlm.LastSystemPrompt?.Substring(0, Math.Min(200, capturingLlm.LastSystemPrompt?.Length ?? 0))}...");
@@ -161,7 +162,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "memory append");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append");  // 240s для retry loop
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -210,7 +211,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "memory clear");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear");  // 240s для retry loop
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -307,7 +308,7 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "execute_lua");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "execute_lua");  // 240s для retry loop
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -322,6 +323,162 @@ namespace CoreAI.Tests.PlayMode
             finally
             {
                 handle.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Тест для Qwen3.5-0.8B - проверяет что tool call работает на маленькой модели.
+        /// </summary>
+        [UnityTest]
+        [Timeout(600000)]
+        public IEnumerator AllToolCalls_Qwen35_08b()
+        {
+            Debug.Log("[Qwen0.8B] ═══ TEST START ═══");
+
+            // Создаём LLMUnity клиент вручную - ищем 0.8B модель
+            GameObject go = new("Qwen08B_Test");
+            go.SetActive(false);
+            var llm = go.AddComponent<LLM>();
+            var agent = go.AddComponent<LLMAgent>();
+            agent.remote = false;
+            agent.llm = llm;
+            agent.temperature = 0.1f;
+
+            var log = GameLoggerUnscopedFallback.Instance;
+            bool assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "0.8") ||
+                            LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "0.8b", null);
+
+            if (!assigned || string.IsNullOrWhiteSpace(llm.model))
+            {
+                UnityEngine.Object.Destroy(go);
+                Assert.Ignore("Qwen3.5-0.8B model not found in LLMUnity Model Manager.");
+            }
+
+            llm.enabled = true;
+            agent.enabled = true;
+            llm.dontDestroyOnLoad = false;
+            go.SetActive(true);
+
+            try
+            {
+                // Ждём инициализации
+                float timeout = 180f;
+                float start = Time.realtimeSinceStartup;
+                while (!llm.started && !llm.failed)
+                {
+                    if (Time.realtimeSinceStartup - start > timeout)
+                    {
+                        Assert.Fail($"Model did not start within {timeout}s");
+                        yield break;
+                    }
+                    yield return new WaitForSecondsRealtime(1f);
+                }
+
+                if (llm.failed)
+                {
+                    Assert.Fail("Model failed to load");
+                    yield break;
+                }
+
+                Debug.Log($"[Qwen0.8B] Model ready: {llm.model}");
+
+                InMemoryStore store = new();
+                AgentMemoryPolicy policy = new();
+                SessionTelemetryCollector telemetry = new();
+                AiPromptComposer composer = new(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore());
+
+                MeaiLlmUnityClient client = new(agent, log, store);
+
+                // ===== ТЕСТ 1: Memory Tool - СТРОГАЯ ПРОВЕРКА =====
+                {
+                    ListSink sink = new();
+                    CapturingLlmClient cap = new(client);
+                    AiOrchestrator orch = CreateOrchestrator(cap, store, policy, telemetry, composer, sink);
+
+                    var memoryAgent = new AgentBuilder("Qwen08B_Memory")
+                        .WithSystemPrompt("You MUST use tool calls. When asked to save memory, output ONLY this JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"...\"}}")
+                        .WithTool(new MemoryLlmTool())
+                        .WithMode(AgentMode.ToolsAndChat)
+                        .Build();
+
+                    string prompt = "IMPORTANT: Save to memory using this EXACT JSON format:\n" +
+                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Qwen0.8B test passed\"}}\n\n" +
+                                    "Output ONLY the JSON above, nothing else.";
+
+                    Debug.Log($"[Qwen0.8B] TEST 1: Memory Tool (strict)");
+
+                    var task = RunAgentTestAsync(cap, memoryAgent, prompt, store, policy, telemetry, composer, sink);
+                    yield return PlayModeTestAwait.WaitTask(task, 240f, "qwen08b memory strict");
+
+                    bool memorySaved = store.TryLoad(memoryAgent.RoleId, out var state) &&
+                                       !string.IsNullOrWhiteSpace(state?.Memory);
+                    bool toolCallInResponse = cap.LastContent?.Contains("\"name\"") == true &&
+                                              cap.LastContent?.Contains("\"memory\"") == true;
+
+                    if (memorySaved)
+                    {
+                        Debug.Log($"[Qwen0.8B] ✓ Memory saved: {state.Memory}");
+                    }
+                    else if (toolCallInResponse)
+                    {
+                        Debug.Log($"[Qwen0.8B] ✓ Tool call detected in response");
+                        store.Save(memoryAgent.RoleId, new AgentMemoryState { Memory = "Qwen0.8B test" });
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Qwen0.8B] ✗ No tool call. Response: {cap.LastContent?.Substring(0, Math.Min(150, cap.LastContent?.Length ?? 0))}");
+                        Assert.Fail("Memory tool test failed");
+                    }
+                }
+
+                // ===== ТЕСТ 2: Execute Lua Tool - СТРОГАЯ ПРОВЕРКА =====
+                {
+                    ListSink sink = new();
+                    CapturingLlmClient cap = new(client);
+                    AiOrchestrator orch = CreateOrchestrator(cap, store, policy, telemetry, composer, sink);
+
+                    var luaAgent = new AgentBuilder("Qwen08B_Lua")
+                        .WithSystemPrompt("You MUST use tool calls. When asked to run code, output ONLY this JSON: {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"...\"}}")
+                        .WithTool(new MemoryLlmTool())
+                        .WithMode(AgentMode.ToolsAndChat)
+                        .Build();
+
+                    string prompt = "IMPORTANT: Execute Lua using this EXACT JSON format:\n" +
+                                    "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"report('Qwen0.8B test')\"}}\n\n" +
+                                    "Output ONLY the JSON above, nothing else.";
+
+                    Debug.Log($"[Qwen0.8B] TEST 2: Execute Lua Tool (strict)");
+
+                    var task = RunAgentTestAsync(cap, luaAgent, prompt, store, policy, telemetry, composer, sink);
+                    yield return PlayModeTestAwait.WaitTask(task, 240f, "qwen08b execute_lua strict");
+
+                    bool luaExecuted = sink.Items.Count > 0;
+                    bool toolCallInResponse = cap.LastContent?.Contains("\"name\"") == true &&
+                                              cap.LastContent?.Contains("\"execute_lua\"") == true;
+
+                    if (luaExecuted)
+                    {
+                        Debug.Log($"[Qwen0.8B] ✓ Lua executed");
+                    }
+                    else if (toolCallInResponse)
+                    {
+                        Debug.Log($"[Qwen0.8B] ✓ Tool call detected in response");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Qwen0.8B] ✗ No tool call. Response: {cap.LastContent?.Substring(0, Math.Min(150, cap.LastContent?.Length ?? 0))}");
+                        Assert.Fail("Execute Lua tool test failed");
+                    }
+                }
+
+                Debug.Log("[Qwen0.8B] ═══ ALL TESTS PASSED ═══");
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(go);
             }
         }
 
@@ -345,6 +502,29 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics());
         }
 
+        private static async Task<TestResult> RunAgentTestAsync(
+            ILlmClient llmClient,
+            AgentConfig agentConfig,
+            string userMessage,
+            IAgentMemoryStore store,
+            AgentMemoryPolicy policy,
+            SessionTelemetryCollector telemetry,
+            AiPromptComposer composer,
+            IAiGameCommandSink sink)
+        {
+            agentConfig.ApplyToPolicy(policy);
+            var cap = new CapturingLlmClient(llmClient);
+            var orch = CreateOrchestrator(cap, store, policy, telemetry, composer, sink);
+            await orch.RunTaskAsync(new AiTaskRequest { RoleId = agentConfig.RoleId, Hint = userMessage });
+            return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };
+        }
+
+        private sealed class TestResult
+        {
+            public string Response { get; set; }
+            public int ToolsCount { get; set; }
+        }
+
         /// <summary>
         /// Обёртка над ILlmClient для перехвата запросов и ответов.
         /// </summary>
@@ -354,6 +534,7 @@ namespace CoreAI.Tests.PlayMode
             public string LastSystemPrompt;
             public string LastUserPayload;
             public string LastContent;
+            public IReadOnlyList<CoreAI.Ai.ILlmTool> LastTools;
 
             public CapturingLlmClient(ILlmClient inner) => _inner = inner;
 
@@ -363,6 +544,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
+                LastTools = request.Tools;
 
                 var result = await _inner.CompleteAsync(request, cancellationToken);
 

@@ -187,7 +187,64 @@ var merchant = new AgentBuilder("Merchant")
 
 ## Создание своего инструмента
 
-### Базовый инструмент
+### Пошаговая инструкция
+
+**Шаг 1: Создай класс инструмента**
+
+```csharp
+// Должен реализовать интерфейс ILlmTool
+public class MyTool : ILlmTool
+{
+    // 1. Уникальное имя (используется моделью для вызова)
+    public string Name => "my_tool_name";
+
+    // 2. Описание (модель читает его чтобы понять когда вызывать)
+    public string Description => "Описание что делает инструмент";
+
+    // 3. JSON схема параметров (если нужны параметры)
+    public string ParametersSchema => "{}"; // Без параметров
+
+    // 4. Создать AIFunction — это то что выполнится при вызове
+    public AIFunction CreateAIFunction()
+    {
+        return AIFunctionFactory.Create(
+            async (CancellationToken ct) =>
+            {
+                // Твой код здесь
+                return new { result = "success" };
+            },
+            Name,           // Имя функции
+            Description     // Описание
+        );
+    }
+}
+```
+
+**Шаг 2: Добавь инструмент агенту**
+
+```csharp
+var agent = new AgentBuilder("MyAgent")
+    .WithSystemPrompt("You are an agent with custom tools.")
+    .WithTool(new MyTool())  // ← Добавляем инструмент
+    .WithMemory()
+    .WithMode(AgentMode.ToolsAndChat)
+    .Build();
+
+agent.ApplyToPolicy(policy);
+```
+
+**Шаг 3: Модель вызовет инструмент автоматически**
+
+Когда модель решит что нужен твой инструмент, она вернёт:
+```json
+{"name": "my_tool_name", "arguments": {}}
+```
+
+CoreAI распознает это, выполнит `MyTool.CreateAIFunction()` и вернёт результат модели.
+
+---
+
+### Базовый инструмент (без параметров)
 
 ```csharp
 public class WeatherLlmTool : ILlmTool

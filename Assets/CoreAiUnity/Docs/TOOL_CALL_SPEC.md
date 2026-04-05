@@ -132,13 +132,16 @@ merchant.ApplyToPolicy(policy);
 
 ### Кастомные инструменты
 
+**Создание своего инструмента — 3 шага:**
+
+**1. Создай класс:**
 ```csharp
 public class WeatherLlmTool : ILlmTool
 {
     public string Name => "get_weather";
-    public string Description => "Get current weather.";
+    public string Description => "Get current weather in game world.";
     public string ParametersSchema => "{}";
-    
+
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
@@ -148,7 +151,21 @@ public class WeatherLlmTool : ILlmTool
 }
 ```
 
-Подробнее: [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)
+**2. Добавь агенту:**
+```csharp
+var agent = new AgentBuilder("Farmer")
+    .WithSystemPrompt("You are a farmer. Check weather before answering.")
+    .WithTool(new WeatherLlmTool(weatherProvider))
+    .WithMode(AgentMode.ToolsAndChat)
+    .Build();
+```
+
+**3. Модель вызовет инструмент когда нужно:**
+```json
+{"name": "get_weather", "arguments": {}}
+```
+
+**Подробнее:** [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) — полная инструкция с примерами параметров
 
 ## Архитектура
 

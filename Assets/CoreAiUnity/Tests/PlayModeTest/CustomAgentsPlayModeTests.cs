@@ -91,7 +91,7 @@ namespace CoreAI.Tests.PlayMode
                     .Build();
 
                 var task = RunAgentTestAsync(handle.Client, merchant, "What items do you have?");
-                yield return PlayModeTestAwait.WaitTask(task, 120f, "merchant");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant");  // 240s для retry loop
                 var r = task.Result;
                 Debug.Log($"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Merchant should have tools");
@@ -118,7 +118,7 @@ namespace CoreAI.Tests.PlayMode
                     .Build();
 
                 var task = RunAgentTestAsync(handle.Client, analyzer, "Analyze session");
-                yield return PlayModeTestAwait.WaitTask(task, 120f, "analyzer");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer");  // 240s для retry loop
                 var r = task.Result;
                 Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
                 Assert.AreEqual(AgentMode.ToolsOnly, analyzer.Mode);
@@ -145,7 +145,7 @@ namespace CoreAI.Tests.PlayMode
                     .Build();
 
                 var task = RunAgentTestAsync(handle.Client, storyteller, "Tell me a story");
-                yield return PlayModeTestAwait.WaitTask(task, 120f, "storyteller");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller");  // 240s для retry loop
                 var r = task.Result;
                 Debug.Log($"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.AreEqual(AgentMode.ChatOnly, storyteller.Mode);

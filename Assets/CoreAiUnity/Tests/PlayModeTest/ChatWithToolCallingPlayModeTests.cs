@@ -139,7 +139,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint = playerMessage
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "chat with tool calling");
+                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling");  // 240s для retry loop
 
                 Debug.Log($"[ChatWithToolCalling] 📥 AGENT RESPONSE:");
                 Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
