@@ -36,7 +36,9 @@ namespace CoreAI.Infrastructure.Llm
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
-            string url = _settings.ApiBaseUrl + "/chat/completions";
+            bool useResponsesApi = _settings.ApiBaseUrl.Contains("/responses");
+            string endpoint = useResponsesApi ? "/responses" : "/chat/completions";
+            string url = _settings.ApiBaseUrl + endpoint;
             string body = BuildJsonBody(request);
             UnityWebRequest req = new(url, UnityWebRequest.kHttpVerbPOST);
             byte[] bodyRaw = Encoding.UTF8.GetBytes(body);
@@ -128,7 +130,23 @@ namespace CoreAI.Infrastructure.Llm
             int maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault(
                 Math.Max(128, Math.Min(2048, request.ContextWindowTokens / 4)));
 
-            // Build JSON using Dictionary for proper serialization
+            var tools = request.Tools ?? _tools;
+            
+            // Detect if using new Responses API (LM Studio) vs Chat Completions
+            bool useResponsesApi = _settings.ApiBaseUrl.Contains("/responses");
+            
+            if (useResponsesApi)
+            {
+                return BuildResponsesApiBody(request, temperature, maxOutputTokens, tools);
+            }
+            else
+            {
+                return BuildChatCompletionsBody(request, temperature, maxOutputTokens, tools);
+            }
+        }
+
+        private string BuildChatCompletionsBody(LlmCompletionRequest request, float temperature, int maxOutputTokens, IReadOnlyList<ILlmTool> tools)
+        {
             var requestDict = new Dictionary<string, object>
             {
                 { "model", _settings.Model },
@@ -142,7 +160,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             };
 
-            var tools = request.Tools ?? _tools;
             if (tools != null && tools.Count > 0)
             {
                 var toolsList = new List<Dictionary<string, object>>();
@@ -163,8 +180,62 @@ namespace CoreAI.Infrastructure.Llm
                 requestDict["tools"] = toolsList;
             }
 
-            string jsonBody = JsonConvert.SerializeObject(requestDict, Formatting.None);
-            return jsonBody;
+            return JsonConvert.SerializeObject(requestDict, Formatting.None);
+        }
+
+        private string BuildResponsesApiBody(LlmCompletionRequest request, float temperature, int maxOutputTokens, IReadOnlyList<ILlmTool> tools)
+        {
+            var inputList = new List<Dictionary<string, object>>();
+
+            // System message
+            if (!string.IsNullOrEmpty(request.SystemPrompt))
+            {
+                inputList.Add(new Dictionary<string, object>
+                {
+                    { "role", "system" },
+                    { "content", request.SystemPrompt }
+                });
+            }
+
+            // User message  
+            inputList.Add(new Dictionary<string, object>
+            {
+                { "role", "user" },
+                { "content", request.UserPayload ?? "" }
+            });
+
+            var requestDict = new Dictionary<string, object>
+            {
+                { "model", _settings.Model },
+                { "input", inputList },
+                { "max_output_tokens", maxOutputTokens }
+            };
+
+            // Add reasoning settings for Qwen models
+            requestDict["reasoning"] = new Dictionary<string, string>
+            {
+                { "effort", "low" },
+                { "summary", "auto" }
+            };
+
+            // Add tools for Responses API
+            if (tools != null && tools.Count > 0)
+            {
+                var toolsList = new List<Dictionary<string, object>>();
+                foreach (var tool in tools)
+                {
+                    toolsList.Add(new Dictionary<string, object>
+                    {
+                        { "type", "function" },
+                        { "name", tool.Name },
+                        { "description", tool.Description },
+                        { "parameters", JsonConvert.DeserializeObject(tool.ParametersSchema ?? "{}") }
+                    });
+                }
+                requestDict["tools"] = toolsList;
+            }
+
+            return JsonConvert.SerializeObject(requestDict, Formatting.None);
         }
 
         private static string BuildToolsJson(IReadOnlyList<ILlmTool> tools)
@@ -245,6 +316,12 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
+                // Try Responses API first (LM Studio new format)
+                if (body.Contains("\"output\""))
+                {
+                    return ParseResponsesApiResponse(body);
+                }
+                // Fall back to Chat Completions format
                 OaiChatResponse dto = JsonUtility.FromJson<OaiChatResponse>(body);
                 if (dto?.choices == null || dto.choices.Length == 0)
                 {
@@ -254,6 +331,80 @@ namespace CoreAI.Infrastructure.Llm
                 OaiMessage m = dto.choices[0].message;
                 string content = m?.content ?? "";
                 return (content, dto.usage);
+            }
+            catch
+            {
+                return (null, null);
+            }
+        }
+
+        private static (string Content, OaiUsage Usage) ParseResponsesApiResponse(string body)
+        {
+            try
+            {
+                var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
+                if (response == null || !response.ContainsKey("output"))
+                {
+                    return (null, null);
+                }
+
+                var outputs = response["output"] as Newtonsoft.Json.Linq.JArray;
+                if (outputs == null || outputs.Count == 0)
+                {
+                    return (null, null);
+                }
+
+                string content = "";
+                
+                // Look for message type in output
+                foreach (var output in outputs)
+                {
+                    var outputObj = output as Newtonsoft.Json.Linq.JObject;
+                    if (outputObj == null) continue;
+
+                    string type = outputObj["type"]?.ToString();
+                    if (type == "message")
+                    {
+                        var contentArray = outputObj["content"] as Newtonsoft.Json.Linq.JArray;
+                        if (contentArray != null)
+                        {
+                            foreach (var item in contentArray)
+                            {
+                                var itemObj = item as Newtonsoft.Json.Linq.JObject;
+                                if (itemObj?["type"]?.ToString() == "output_text")
+                                {
+                                    content = itemObj["text"]?.ToString() ?? "";
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                // Parse usage if available
+                OaiUsage usage = null;
+                if (response.ContainsKey("usage"))
+                {
+                    var usageObj = response["usage"] as Newtonsoft.Json.Linq.JObject;
+                    if (usageObj != null)
+                    {
+                        int inputTokens = 0;
+                        int outputTokens = 0;
+                        if (usageObj["input_tokens"] != null)
+                            inputTokens = usageObj["input_tokens"].ToObject<int>();
+                        if (usageObj["output_tokens"] != null)
+                            outputTokens = usageObj["output_tokens"].ToObject<int>();
+                        usage = new OaiUsage
+                        {
+                            prompt_tokens = inputTokens,
+                            completion_tokens = outputTokens,
+                            total_tokens = inputTokens + outputTokens
+                        };
+                    }
+                }
+
+                return (content, usage);
             }
             catch
             {
