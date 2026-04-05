@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts. Microsoft.Extensions.AI function calling for universal LLM support. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts. LLM response validation per role, Microsoft.Extensions.AI function calling. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI.",
   "dependencies": {
     "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
     "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"

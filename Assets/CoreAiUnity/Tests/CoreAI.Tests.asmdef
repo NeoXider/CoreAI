@@ -5,9 +5,13 @@
     "CoreAI.Core",
     "CoreAI.ExampleGame",
     "CoreAI.Source",
+    "CoreAI.Authority",
+    "CoreAI.Metrics",
+    "CoreAI.Prompts",
     "MoonSharp.Interpreter",
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
+    "UnityEditor.TestRunner",
+    "VContainer"
   ],
   "includePlatforms": [
     "Editor"

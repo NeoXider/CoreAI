@@ -1,5 +1,7 @@
 #if !COREAI_NO_LLM
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -26,6 +28,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly AgentMemoryPolicy _memoryPolicy;
         private readonly bool _useChatHistory;
         private string _currentRoleId;
+        private IReadOnlyList<ILlmTool> _tools;
 
         public LLMAgent UnityAgent => _unityAgent;
         public LLM LLM => _unityAgent?.llm ?? _unityAgent?.GetComponent<LLM>();
@@ -47,6 +50,13 @@ namespace CoreAI.Infrastructure.Llm
             _memoryStore = memoryStore;
             _memoryPolicy = memoryPolicy;
             _useChatHistory = useChatHistory;
+            _tools = Array.Empty<ILlmTool>();
+        }
+
+        /// <inheritdoc />
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _tools = tools ?? Array.Empty<ILlmTool>();
         }
 
         /// <inheritdoc />
@@ -107,9 +117,13 @@ namespace CoreAI.Infrastructure.Llm
                     };
                 }
 
+                bool prevReasoning = llm.reasoning;
                 string prevSystem = _unityAgent.systemPrompt;
                 try
                 {
+                    llm.reasoning = false;
+
+                    // Tools are now injected by MeaiToolsLlmClientDecorator - just use request.SystemPrompt directly
                     if (!string.IsNullOrEmpty(request.SystemPrompt))
                     {
                         _unityAgent.systemPrompt = request.SystemPrompt;
@@ -136,6 +150,7 @@ namespace CoreAI.Infrastructure.Llm
                 finally
                 {
                     _unityAgent.systemPrompt = prevSystem;
+                    llm.reasoning = prevReasoning;
                 }
             }
             catch (OperationCanceledException)
@@ -145,7 +160,7 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, "LlmUnityLlmClient: " + ex.Message);
-                return new LlmCompletionResult { Ok = false, Error = ex.Message };
+                    return new LlmCompletionResult { Ok = false, Error = ex.Message };
             }
         }
 

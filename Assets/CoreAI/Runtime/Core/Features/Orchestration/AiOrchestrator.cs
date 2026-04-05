@@ -75,6 +75,10 @@ namespace CoreAI.Ai
 
             string user = _promptComposer.BuildUserPayload(snap, task);
 
+            // Get tools for this role (includes MemoryTool if enabled)
+            // MeaiToolsLlmClientDecorator will inject them into system prompt automatically
+            var tools = _memoryPolicy?.GetToolsForRole(roleId);
+
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = await _llm.CompleteAsync(
                 new LlmCompletionRequest
@@ -82,7 +86,8 @@ namespace CoreAI.Ai
                     AgentRoleId = roleId,
                     SystemPrompt = system,
                     UserPayload = user,
-                    TraceId = traceId
+                    TraceId = traceId,
+                    Tools = tools
                 },
                 cancellationToken).ConfigureAwait(false);
             sw.Stop();

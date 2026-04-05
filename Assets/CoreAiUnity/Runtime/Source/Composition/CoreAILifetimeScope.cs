@@ -1,6 +1,8 @@
 using CoreAI.Ai;
+using CoreAI.Config;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.AiMemory;
+using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Lua;
@@ -104,7 +106,8 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
             builder.Register<ILlmClient>(c =>
                 new LoggingLlmClientDecorator(
-                    new RoutingLlmClient(c.Resolve<ILlmClientRegistry>()),
+                    new MeaiToolsLlmClientDecorator(
+                        new RoutingLlmClient(c.Resolve<ILlmClientRegistry>())),
                     c.Resolve<IGameLogger>(),
                     llmTimeout), Lifetime.Singleton);
 
@@ -145,6 +148,10 @@ namespace CoreAI.Composition
             // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton).As<ICoreAiWorldCommandExecutor>();
+
+            // Game Config: Unity SO-based config store (override NullGameConfigStore from CorePortable)
+            builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton).As<IGameConfigStore>();
+
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
         }

@@ -2,7 +2,7 @@
 
 **Назначение:** единый словарь **типов агентов** (поведений ИИ), их целей, типичных входов/выходов и правил **размещения** (хост / локально / гибрид). Игра на шаблоне **включает только нужные роли**; оркестратор не обязан поднимать всех. Рекомендации по **размеру/типу модели** (локально vs API) — §6.
 
-**Версия документа:** 1.4
+**Версия документа:** 1.5
 
 **Связанные документы:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (сеть, авторитет, NGO по умолчанию), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (карта кода, Lua, тесты, **traceId** / лог **Llm**), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, таймаут запроса), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (настройка демо-сцены).
 
@@ -234,7 +234,54 @@ flowchart TB
 
 ---
 
-## 8. Версии документа
+## 8. Валидация ответов LLM (Response Validation)
+
+Начиная с **v0.5.0**, каждая роль имеет **специализированную политику валидации** ответов. Это гарантирует что модель возвращает ожидаемый формат, а при ошибке — автоматический retry.
+
+### 8.1 Политики по ролям
+
+| Роль | Политика | Что ожидает | Retry при ошибке |
+|------|----------|-------------|------------------|
+| **Programmer** | `ProgrammerResponsePolicy` | Lua code block (```lua) ИЛИ JSON с `execute_lua` | ✅ Да |
+| **CoreMechanicAI** | `CoreMechanicResponsePolicy` | JSON с числовыми полями | ✅ Да |
+| **Creator** | `CreatorResponsePolicy` | JSON объект (команда мира) | ✅ Да |
+| **Analyzer** | `AnalyzerResponsePolicy` | JSON с `metric`/`recommendation`/`analysis` | ✅ Да |
+| **AINpc** | `AINpcResponsePolicy` | JSON ИЛИ непустой текст (мягкая) | ✅ Да |
+| **PlayerChat** | `PlayerChatResponsePolicy` | Без валидации (свободный текст) | ❌ Нет |
+
+### 8.2 Как работает retry
+
+1. LLM возвращает ответ
+2. `CompositeRoleStructuredResponsePolicy` проверяет формат по roleId
+3. При провале → `AiOrchestrator` делает **один повторный запрос** с подсказкой:
+   ```
+   structured_retry: Expected Lua code block or JSON with execute_lua
+   ```
+4. Метрика `RecordStructuredRetry(roleId, traceId, failureReason)` логируется
+
+### 8.3 Кастомные роли
+
+Для кастомных ролей используйте:
+```csharp
+var composite = container.Resolve<CompositeRoleStructuredResponsePolicy>();
+composite.RegisterPolicy("MyRole", new MyCustomValidationPolicy());
+```
+
+Или отключите валидацию:
+```csharp
+composite.RegisterPolicy("MyRole", new NoOpRoleStructuredResponsePolicy());
+```
+
+### 8.4 Тесты
+
+Все политики покрыты **20 EditMode тестами**:
+- `RoleStructuredResponsePolicyEditModeTests.cs` — валидация для каждой роли
+- Проверка валидных/невалидных ответов
+- Проверка `failureReason` сообщений
+
+---
+
+## 9. Версии документа
 
 | Версия | Изменения |
 |--------|-----------|
@@ -242,3 +289,4 @@ flowchart TB
 | 1.1 | §6 рекомендации по моделям (локально/API) по ролям; классы Tiny–XL; очереди fast/slow |
 | 1.2 | §1.4 + правка HostAuthoritative: LLM или заглушка; ссылка на DGF_SPEC §5.2 |
 | 1.3 | §6.6 Qwen 3.5 0.8B/4B/9B и OpenAI-compatible через CoreAI |
+| 1.4 | §8 валидация ответов LLM per role, retry flow, кастомные роли |

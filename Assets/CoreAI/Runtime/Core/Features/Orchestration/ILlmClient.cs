@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,6 +27,9 @@ namespace CoreAI.Ai
 
         /// <summary>Опциональный лимит токенов ответа модели.</summary>
         public int? MaxOutputTokens { get; set; }
+
+        /// <summary>Инструменты (tools), доступные модели для вызова.</summary>
+        public IReadOnlyList<ILlmTool> Tools { get; set; }
     }
 
     /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>
@@ -58,5 +62,8 @@ namespace CoreAI.Ai
         /// <summary>Один запрос к модели; поддерживает отмену и таймауты снаружи (декоратор).</summary>
         Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default);
+
+        /// <summary>Установить инструменты (tools), доступные модели для вызова. Default: no-op.</summary>
+        virtual void SetTools(IReadOnlyList<ILlmTool> tools) { }
     }
 }

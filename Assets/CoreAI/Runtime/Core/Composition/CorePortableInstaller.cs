@@ -1,6 +1,7 @@
 using System;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Config;
 using CoreAI.Session;
 using CoreAI.Sandbox;
 using VContainer;
@@ -32,7 +33,10 @@ namespace CoreAI.Composition
             builder.Register<CodeRefinerStub>(Lifetime.Singleton).As<ICodeRefiner>();
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
-            builder.Register<IRoleStructuredResponsePolicy, NoOpRoleStructuredResponsePolicy>(Lifetime.Singleton);
+            builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
+            builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(), Lifetime.Singleton);
+            builder.Register<NullGameConfigStore>(Lifetime.Singleton).As<IGameConfigStore>();
+            builder.Register<GameConfigPolicy>(Lifetime.Singleton);
             builder.Register<AiOrchestrator>(Lifetime.Singleton);
             builder.Register<IAiOrchestrationService>(c =>
                     new QueuedAiOrchestrator(c.Resolve<AiOrchestrator>(), c.Resolve<AiOrchestrationQueueOptions>()),

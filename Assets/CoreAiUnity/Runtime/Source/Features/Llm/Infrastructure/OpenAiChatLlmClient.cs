@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,11 +16,19 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class OpenAiChatLlmClient : ILlmClient
     {
         private readonly OpenAiHttpLlmSettings _settings;
+        private IReadOnlyList<ILlmTool> _tools;
 
         /// <param name="settings">Asset с URL, ключом и именем модели.</param>
         public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _tools = Array.Empty<ILlmTool>();
+        }
+
+        /// <inheritdoc />
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _tools = tools ?? Array.Empty<ILlmTool>();
         }
 
         /// <inheritdoc />
@@ -114,13 +123,38 @@ namespace CoreAI.Infrastructure.Llm
             string model = JsonEscape(_settings.Model);
             int maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault(
                 Math.Max(128, Math.Min(2048, request.ContextWindowTokens / 4)));
+
+            var tools = request.Tools ?? _tools;
+            string toolsJson = BuildToolsJson(tools);
+
             return "{\"model\":\"" + model + "\",\"temperature\":" +
                    _settings.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                    ",\"max_tokens\":" + maxOutputTokens +
                    ",\"messages\":[" +
                    "{\"role\":\"system\",\"content\":\"" + sys + "\"}," +
                    "{\"role\":\"user\",\"content\":\"" + user + "\"}" +
-                   "]}";
+                   "]" +
+                   toolsJson +
+                   "}";
+        }
+
+        private static string BuildToolsJson(IReadOnlyList<ILlmTool> tools)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                return "";
+            }
+
+            var toolDefs = new List<string>();
+            foreach (var tool in tools)
+            {
+                string escapedName = JsonEscape(tool.Name);
+                string escapedDesc = JsonEscape(tool.Description);
+                string escapedParams = JsonEscape(tool.ParametersSchema);
+                toolDefs.Add("{\"type\":\"function\",\"function\":{\"name\":\"" + escapedName + "\",\"description\":\"" + escapedDesc + "\",\"parameters\":" + escapedParams + "}}");
+            }
+
+            return ",\"tools\":[" + string.Join(",", toolDefs) + "]";
         }
 
         private static string JsonEscape(string s)
@@ -222,6 +256,21 @@ namespace CoreAI.Infrastructure.Llm
         private class OaiMessage
         {
             public string content;
+            public OaiToolCall[] tool_calls;
+        }
+
+        [Serializable]
+        private class OaiToolCall
+        {
+            public string id;
+            public OaiToolFunction function;
+        }
+
+        [Serializable]
+        private class OaiToolFunction
+        {
+            public string name;
+            public string arguments;
         }
     }
 }

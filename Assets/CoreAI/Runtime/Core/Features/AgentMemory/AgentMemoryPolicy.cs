@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using CoreAI.AgentMemory;
 
 namespace CoreAI.Ai
 {
@@ -12,6 +14,7 @@ namespace CoreAI.Ai
     public sealed class AgentMemoryPolicy
     {
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
+        private static readonly MemoryLlmTool _memoryToolInstance = new();
 
         /// <summary>Конфигурация памяти для одной роли.</summary>
         public struct RoleMemoryConfig
@@ -146,6 +149,20 @@ namespace CoreAI.Ai
         public bool ShouldInjectMemory(string roleId)
         {
             return IsMemoryEnabled(roleId);
+        }
+
+        /// <summary>
+        /// Получить список инструментов (tools) для роли.
+        /// Включает MemoryTool если память включена для роли.
+        /// </summary>
+        public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
+        {
+            if (!IsMemoryEnabled(roleId))
+            {
+                return Array.Empty<ILlmTool>();
+            }
+
+            return new[] { _memoryToolInstance };
         }
     }
 }

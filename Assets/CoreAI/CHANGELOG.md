@@ -2,6 +2,78 @@
 
 Все значимые изменения этого пакета описываются здесь. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [0.5.0] - 2026-04-05
+
+### LLM Response Validation (NEW)
+
+- ✨ **ProgrammerResponsePolicy**: Валидация ответов Programmer — требует Lua код или JSON с execute_lua
+- ✨ **CoreMechanicResponsePolicy**: Валидация JSON с числами для CoreMechanicAI
+- ✨ **CreatorResponsePolicy**: Валидация JSON объектов для Creator
+- ✨ **AnalyzerResponsePolicy**: Валидация JSON с метриками для Analyzer
+- ✨ **AINpcResponsePolicy**: Мягкая валидация (JSON или текст) для AINpc
+- ✨ **PlayerChatResponsePolicy**: Без валидации для PlayerChat (свободный текст)
+- ✨ **CompositeRoleStructuredResponsePolicy**: Маршрутизация валидации по roleId
+- ✨ **Автоматический retry**: При неудачной валидации AiOrchestrator делает повторный запрос с подсказкой
+- ✨ **20 EditMode тестов**: Comprehensive test coverage для всех политик
+
+### GameConfig Infrastructure (NEW)
+
+- ✨ **IGameConfigStore**: Универсальный интерфейс загрузки/сохранения JSON конфигов по ключу
+- ✨ **GameConfigTool**: ILlmTool для AI function calling (read/update configs)
+- ✨ **GameConfigPolicy**: Контроль доступа — какие роли могут читать/менять какие ключи
+- ✨ **GameConfigLlmTool**: Обёртка для MEAI function calling
+- ✨ **NullGameConfigStore**: Заглушка по умолчанию
+- ✨ **DI регистрация**: В CorePortableInstaller
+
+### Architecture
+
+- `IRoleStructuredResponsePolicy` теперь использует специализированные политики вместо NoOp
+- `AiOrchestrator` уже поддерживает retry при провале валидации (было заложено ранее)
+- GameConfig полностью game-agnostic — игра реализует `IGameConfigStore` для своей системы хранения
+- Обратная совместимость: `NoOpRoleStructuredResponsePolicy` и `NullGameConfigStore` остаются для кастомных ролей
+
+### Breaking Changes
+
+- Нет. Обратная совместимость сохранена.
+
+---
+
+## [0.4.0] - 2026-04-05
+
+### Tool Calling Infrastructure (MAJOR)
+
+- ✨ **ILlmTool Interface**: Новый интерфейс для инструментов LLM в CoreAI (portable)
+- ✨ **LlmToolBase**: Базовый класс для простых инструментов с JSON schema
+- ✨ **MemoryLlmTool**: ILlmTool реализация для memory tool
+- ✨ **ILlmClient.SetTools()**: Новый метод для установки tools на LLM клиенте
+- ✨ **LlmCompletionRequest.Tools**: Новое поле для передачи tools в запросе
+- ✨ **OpenAiChatLlmClient Tools Support**: Поддержка tools в OpenAI JSON body (tools array)
+- ✨ **AgentMemoryPolicy.GetToolsForRole()**: Возвращает MemoryTool для роли
+- ✨ **AiOrchestrator Tools Integration**: Автоматически передаёт tools в LLM клиент
+
+### MeaiToolsLlmClientDecorator (NEW)
+
+- ✨ **MeaiToolsLlmClientDecorator**: Декоратор для ILlmClient с автоматическим инжектированием tools в system prompt
+- ✨ **Qwen3-compatible format**: Tools описание в формате, понятном Qwen3 для лучшего tool calling
+- ✨ **Universal**: Работает с любым LLM бэкендом (OpenAI HTTP, LLMUnity)
+
+### CoreAIUnity (LLMUnity Integration)
+
+- ✨ **LlmUnityLlmClient.SetTools()**: Реализация для LLMUnity
+- ✨ **Tools Injection into System Prompt**: Tools добавляются в system prompt для LLMUnity
+
+### Architecture
+
+- **CoreAI (Portable)**: OpenAiChatLlmClient, ILlmTool, AgentMemoryPolicy с tools
+- **CoreAIUnity**: LlmUnityLlmClient с tool calling поддержкой
+- Единый интерфейс ILlmClient работает с обоими бэкендами
+
+### Breaking Changes
+
+- ✅ ILlmClient получил новый virtual метод SetTools() - обратная совместимость сохранена
+
+---
+
 ## [0.3.0] - 2026-04-04
 
 ### Microsoft.Extensions.AI Integration (MAJOR)

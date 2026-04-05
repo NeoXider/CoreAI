@@ -43,11 +43,23 @@
 |------|------------|
 | `Composition/` | `CoreAILifetimeScope`, `RegisterCore` + `RegisterCorePortable` |
 | `Features/Logging/Infrastructure/` | `IGameLogger`, `GameLogFeature`, `GameLogSettingsAsset` |
-| `Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity, маршрутизация, таймауты |
+| `Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity с tool calling, маршрутизация, таймауты |
 | `Features/Lua/Infrastructure/` | Файловые store версий, агрегация биндингов Lua |
 | `Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe, main thread |
 | `Features/Prompts/Infrastructure/` | Манифест и Resources для промптов |
 | `Features/AgentMemory/Infrastructure/` | Файловое хранилище памяти агента |
+
+### Tool Calling Support
+
+CoreAIUnity расширяет CoreAI с поддержкой tool calling для LLMUnity:
+
+- **LlmUnityLlmClient** - реализация ILlmClient для LLMUnity с поддержкой tools
+- **Tools Injection** - tools добавляются в system prompt модели
+- **Dual Backend** - единый интерфейс работает с OpenAI API и LLMUnity:
+  - OpenAI API (CoreAI): tools в JSON body (`"tools": [...]`)
+  - LLMUnity (CoreAIUnity): tools в system prompt
+
+**AiOrchestrator** автоматически передаёт tools (включая MemoryTool) в LLM клиент через `SetTools()`.
 | `Features/OrchestrationMetrics/Infrastructure/` | Метрики оркестратора |
 | `Features/Dashboard/Presentation/` | `AiDashboardPresenter`, `AiPermissionsAsset` |
 | `Features/PlayerChat/Presentation/` | `InGameChatPanel` |
