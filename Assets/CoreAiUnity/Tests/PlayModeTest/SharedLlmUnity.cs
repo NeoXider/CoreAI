@@ -42,7 +42,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            LlmUnityLlmClient llmClient = _handle.Client as LlmUnityLlmClient;
+            MeaiLlmUnityClient llmClient = _handle.Client as MeaiLlmUnityClient;
             if (llmClient == null)
             {
                 _error = "Could not get LLM client";

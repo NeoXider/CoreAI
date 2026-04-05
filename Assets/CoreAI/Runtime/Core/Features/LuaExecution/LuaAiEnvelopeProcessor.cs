@@ -12,7 +12,7 @@ namespace CoreAI.Ai
     public sealed class LuaAiEnvelopeProcessor
     {
         /// <summary>Максимум автоматических повторов Programmer при ошибке Lua в одном конверте.</summary>
-        public const int DefaultMaxLuaRepairGenerations = 4;
+        public const int DefaultMaxLuaRepairGenerations = 3; // Совместимо с CoreAISettings.MaxLuaRepairGenerations
 
         private readonly SecureLuaEnvironment _sandbox;
         private readonly IGameLuaRuntimeBindings _bindings;
@@ -36,8 +36,8 @@ namespace CoreAI.Ai
             _resolveOrchestrator = resolveOrchestrator ?? throw new ArgumentNullException(nameof(resolveOrchestrator));
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
             _luaScriptVersions = luaScriptVersions ?? new NullLuaScriptVersionStore();
-            // Важно: VContainer плохо резолвит optional-примитивы. Поэтому лимит не передаём через DI.
-            _maxLuaRepairGenerationOnEnvelope = DefaultMaxLuaRepairGenerations;
+            // Важно: VContainer плохо резолвит optional-примитивы. Поэтому лимит берём из CoreAISettings.
+            _maxLuaRepairGenerationOnEnvelope = CoreAISettings.MaxLuaRepairGenerations;
         }
 
         /// <summary>Обработать команду-конверт: извлечь Lua, выполнить, опубликовать результат или запланировать ремонт.</summary>

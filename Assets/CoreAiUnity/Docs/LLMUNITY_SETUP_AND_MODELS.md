@@ -12,7 +12,7 @@
 - Репозиторий (README, Quick start, **LLM model management**): [github.com/undreamai/LLMUnity](https://github.com/undreamai/LLMUnity)  
 
 **Quick start (кратко):** GameObject → компонент **LLM** → **Download model** или **Load model** (.gguf) → отдельный (или тот же) объект → **LLMAgent** → в инспекторе ссылка **LLM** на сервер → в коде `await llmAgent.Chat("...")`.  
-Перед первым запросом в билдах с **Download on Start** в документации рекомендуется `await LLM.WaitUntilModelSetup();` — **LlmUnityLlmClient** в CoreAI дожидается завершения глобальной подготовки моделей и поднятия сервера **LLM** перед вызовом **Chat**.
+Перед первым запросом в билдах с **Download on Start** в документации рекомендуется `await LLM.WaitUntilModelSetup();` — **MeaiLlmUnityClient** в CoreAI дожидается завершения глобальной подготовки моделей и поднятия сервера **LLM** перед вызовом **Chat**.
 
 **Model Manager (инспектор LLM):** список моделей копируется в билд; галочка **Build** отключает включение конкретной модели в сборку; выбор **радиокнопкой** записывает путь в поле **`LLM.model`** (его нужно **сохранить в сцене**). Если в списке несколько моделей с файлами на диске, а `model` пустой, CoreAI может **автовыбрать** одну (см. `LlmUnityModelBootstrap`: приоритет у записей с **Build**).
 
@@ -24,7 +24,7 @@
 
 1. Объект с компонентом **`LLM`** (сервер/inference): выбрана модель **Qwen3.5 0.8B** (или другая GGUF), при необходимости **Num GPU Layers** &gt; 0 на видеокарте.
 2. Дочерний (или связанный) объект с **`LLMAgent`**: в инспекторе указана ссылка на этот **`LLM`**, **Remote** выключен для чисто локального режима.
-3. На **`CompositionRoot`** висит **`CoreAILifetimeScope`**: поле **Open Ai Http Llm Settings** пустое **или** в asset выключён **Use Open Ai Compatible Http** — тогда `ILlmClient` = **LlmUnityLlmClient** → ваш `LLMAgent`.
+3. На **`CompositionRoot`** висит **`CoreAILifetimeScope`**: поле **Open Ai Http Llm Settings** пустое **или** в asset выключён **Use Open Ai Compatible Http** — тогда `ILlmClient` = **MeaiLlmUnityClient** → ваш `LLMAgent`.
 
 **Проверка:** Play Mode → консоль без ошибок загрузки модели; оркестратор/чат дергают `ILlmClient` (см. логи уровня AI).
 

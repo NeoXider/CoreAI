@@ -12,7 +12,7 @@ namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
     /// Клиент к эндпоинту <c>/chat/completions</c> в формате OpenAI (совместим с многими прокси: vLLM, LiteLLM, LM Studio и т.д.).
-    /// Вызовы <see cref="CompleteAsync"/> должны идти с главного потока Unity (как и <see cref="LlmUnityLlmClient"/>).
+    /// Вызовы <see cref="CompleteAsync"/> должны идти с главного потока Unity (как и <see cref="MeaiLlmUnityClient"/>).
     /// </summary>
     public sealed class OpenAiChatLlmClient : ILlmClient
     {

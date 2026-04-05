@@ -61,7 +61,7 @@
    - При наличии GPU увеличьте **Num GPU Layers** (начните с части слоёв, при нехватке VRAM уменьшите).
    - **Remote** на **LLM** — выключен для чисто локального режима.
    - Для отладки: **Log Level = All** (если поле есть в вашей версии пакета).
-   - Если включён **Download on Start**, при первом запуске дождитесь загрузки; в коде LLMUnity рекомендует `await LLM.WaitUntilModelSetup()` — адаптер CoreAI **LlmUnityLlmClient** ждёт готовности перед **Chat**.
+   - Если включён **Download on Start**, при первом запуске дождитесь загрузки; в коде LLMUnity рекомендует `await LLM.WaitUntilModelSetup()` — адаптер CoreAI **MeaiLlmUnityClient** ждёт готовности перед **Chat**.
 3. Компонент **LLM Agent (Script)**:
    - **LLM** — ссылка на компонент **LLM** на том же GameObject (в репозитории уже проставлена).
    - **Remote** — выключен.

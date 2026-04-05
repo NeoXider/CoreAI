@@ -51,15 +51,14 @@
 
 ### Tool Calling Support
 
-CoreAIUnity расширяет CoreAI с поддержкой tool calling для LLMUnity:
+CoreAIUnity использует **Microsoft.Extensions.AI (MEAI)** для полноценного tool calling:
 
-- **LlmUnityLlmClient** - реализация ILlmClient для LLMUnity с поддержкой tools
-- **Tools Injection** - tools добавляются в system prompt модели
-- **Dual Backend** - единый интерфейс работает с OpenAI API и LLMUnity:
-  - OpenAI API (CoreAI): tools в JSON body (`"tools": [...]`)
-  - LLMUnity (CoreAIUnity): tools в system prompt
+- **MeaiLlmUnityClient** - реализация ILlmClient с полной MEAI интеграцией
+- **FunctionInvokingChatClient** - использует MEAI для автоматического вызова функций
+- **MemoryTool.CreateAIFunction()** - AIFunction для MEAI function calling
+- **Fallback**: AgentMemoryDirectiveParser для моделей без формального tool_calls
 
-**AiOrchestrator** автоматически передаёт tools (включая MemoryTool) в LLM клиент через `SetTools()`.
+**AiOrchestrator** автоматически передаёт tools через MEAI pipeline.
 | `Features/OrchestrationMetrics/Infrastructure/` | Метрики оркестратора |
 | `Features/Dashboard/Presentation/` | `AiDashboardPresenter`, `AiPermissionsAsset` |
 | `Features/PlayerChat/Presentation/` | `InGameChatPanel` |

@@ -100,7 +100,7 @@ namespace CoreAI.Composition
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
-                reg.SetLegacyFallback(ResolveLlmClient(openAi, c.Resolve<IGameLogger>()));
+                reg.SetLegacyFallback(ResolveLlmClient(openAi, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
@@ -156,7 +156,7 @@ namespace CoreAI.Composition
         }
 
         /// <summary>Порядок выбора дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.</summary>
-        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger)
+        private static ILlmClient ResolveLlmClient(OpenAiHttpLlmSettings openAi, IGameLogger logger, IAgentMemoryStore memoryStore)
         {
             if (openAi != null && openAi.UseOpenAiCompatibleHttp)
             {
@@ -171,7 +171,7 @@ namespace CoreAI.Composition
                 return new StubLlmClient();
             }
 
-            // Если LLMUnity в сцене оставили без модели (GGUF путь пуст), она пишет ошибку и не поднимется.
+            // Если LLMUnity в сцене оставили без модели (GGUF путь пуст), она пишет ошибку и не поднимся.
             // Тогда безопаснее использовать stub и не пытаться дергать LLMUnity.
             LLM llm = agent.GetComponent<LLM>();
             if (llm != null)
@@ -184,7 +184,7 @@ namespace CoreAI.Composition
                 return new StubLlmClient();
             }
 
-            return new LlmUnityLlmClient(agent, logger);
+            return new MeaiLlmUnityClient(agent, logger, memoryStore);
 #endif
         }
     }

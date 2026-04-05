@@ -16,7 +16,7 @@ UPM-пакет **портативного ядра** **CoreAI.Core** — без 
 |---------------|--------|------------|
 | `Runtime/Core/` | **CoreAI.Core** | Контракты оркестрации, очередь, сессия, песочница MoonSharp, промпты, версионирование Lua/data overlays — **без UnityEngine** |
 | `Runtime/Core/Features/AgentMemory/` | **CoreAI.Core** | **MEAI Function Calling** через Microsoft.Extensions.AI, MemoryTool с AIFunctionFactory, автоматический вызов tools |
-| `Runtime/Core/Features/Orchestration/` | **CoreAI.Core** | AiOrchestrator с MEAI pipeline, MeaiChatClientAdapter, fallback на legacy ILlmClient |
+| `Runtime/Core/Features/Orchestration/` | **CoreAI.Core** | AiOrchestrator с обработкой tool results от MEAI, fallback на legacy парсинг |
 | `Runtime/Core/Features/Llm/` | **CoreAI.Core** | **ILlmTool** интерфейс для tool calling, **OpenAiChatLlmClient** с поддержкой tools в JSON body |
 
 ### Tool Calling (ILlmTool)
@@ -26,10 +26,20 @@ CoreAI предоставляет универсальный интерфейс 
 - **ILlmTool** - интерфейс инструмента (Name, Description, ParametersSchema)
 - **LlmToolBase** - базовый класс для простых инструментов
 - **MemoryLlmTool** - реализация memory tool (write/append/clear)
+- **LuaLlmTool** - реализация execute_lua tool для Programmer
 - **ILlmClient.SetTools()** - метод для установки tools на LLM клиенте
 - **AgentMemoryPolicy.GetToolsForRole()** - возвращает tools для роли
 
-Поддерживается **OpenAI API** (tools array в JSON body).
+Поддерживается **OpenAI API** (tools array в JSON body) и **LLMUnity** (через MEAI).
+
+### Глобальные настройки
+
+```csharp
+// До инициализации системы:
+CoreAISettings.MaxLuaRepairGenerations = 3; // Лимит повторов Programmer (по умолчанию)
+CoreAISettings.EnableMeaiDebugLogging = true; // Отладка MEAI
+CoreAISettings.LlmRequestTimeoutSeconds = 300; // Таймаут LLM (5 минут)
+```
 
 Changelog: **`CHANGELOG.md`**.
 

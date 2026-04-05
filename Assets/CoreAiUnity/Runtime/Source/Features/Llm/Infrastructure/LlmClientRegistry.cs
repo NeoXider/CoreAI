@@ -7,6 +7,7 @@ using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 #endif
 using UnityEngine;
+using IAgentMemoryStore = CoreAI.Ai.IAgentMemoryStore;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -16,6 +17,7 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class LlmClientRegistry : ILlmClientRegistry, ILlmRoutingController
     {
         private readonly IGameLogger _logger;
+        private readonly IAgentMemoryStore _memoryStore;
         private readonly object _gate = new();
         private ILlmClient _legacyFallback = new StubLlmClient();
         private Dictionary<string, ILlmClient> _byProfileId = new(StringComparer.Ordinal);
@@ -24,9 +26,10 @@ namespace CoreAI.Infrastructure.Llm
         private bool _useManifestRouting;
 
         /// <param name="logger">Логи конфигурации маршрутизации (без прямого Unity Debug).</param>
-        public LlmClientRegistry(IGameLogger logger)
+        public LlmClientRegistry(IGameLogger logger, IAgentMemoryStore memoryStore = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _memoryStore = memoryStore;
         }
 
         /// <summary>Клиент по умолчанию, если маршрутизация выключена или нет совпадения.</summary>
@@ -198,7 +201,7 @@ namespace CoreAI.Infrastructure.Llm
                         return new StubLlmClient();
                     }
 
-                    return new LlmUnityLlmClient(agent, _logger);
+                    return new MeaiLlmUnityClient(agent, _logger, _memoryStore);
 #endif
                 default:
                     return new StubLlmClient();

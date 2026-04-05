@@ -18,7 +18,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            LlmUnityLlmClient llmClient = handle.Client as LlmUnityLlmClient;
+            MeaiLlmUnityClient llmClient = handle.Client as MeaiLlmUnityClient;
             if (llmClient == null)
             {
                 Debug.LogWarning("[LLMUnity Test] Could not get LLM client reference");

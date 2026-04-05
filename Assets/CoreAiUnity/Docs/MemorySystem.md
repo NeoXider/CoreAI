@@ -5,16 +5,30 @@
 ### Тип 1: MemoryTool (function call) — ЯВНАЯ ПАМЯТЬ
 
 **Как работает:**
-1. Модель видит `MemoryTool` как функцию через `Microsoft.Extensions.AI.AIFunctionFactory`
-2. Модель ВЫЗЫВАЕТ функцию: `{"tool": "memory", "action": "write", "content": "..."}`
-3. `AiOrchestrator` перехватывает вызов и сохраняет в `IAgentMemoryStore`
-4. При следующем запросе память **подставляется в системный промпт**
+1. **Microsoft.Extensions.AI (MEAI)** интеграция через `FunctionInvokingChatClient`
+2. `MemoryTool.CreateAIFunction()` создаёт AIFunction для MEAI
+3. Модель вызывает функцию через **единый JSON формат**: `{"name": "memory", "arguments": {"action": "write", "content": "..."}}`
+4. MEAI `FunctionInvokingChatClient` распознаёт вызов и выполняет `MemoryTool.ExecuteAsync()`
+5. При следующем запросе память **подставляется в системный промпт**
 
-**Три действия:**
+**MEAI Pipeline:**
+```
+LLM Request → FunctionInvokingChatClient → LLMAgent
+                    ↓
+            [Model: {"name": "memory", "arguments": {...}}]
+                    ↓
+            AIFunction (MemoryTool) executes
+                    ↓
+            [Tool result returned]
+                    ↓
+            Final response → AiOrchestrator
+```
+
+**Три действия (единый формат):**
 ```json
-{"tool": "memory", "action": "write", "content": "Craft#1: Iron Blade damage:45"}
-{"tool": "memory", "action": "append", "content": "Craft#2: Steel Longsword damage:72"}
-{"tool": "memory", "action": "clear"}
+{"name": "memory", "arguments": {"action": "write", "content": "Craft#1: Iron Blade damage:45"}}
+{"name": "memory", "arguments": {"action": "append", "content": "Craft#2: Steel Longsword damage:72"}}
+{"name": "memory", "arguments": {"action": "clear"}}
 ```
 
 **Когда использовать:**
@@ -44,7 +58,7 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 ### Тип 2: ChatHistory (LLMUnity) — ПОЛНЫЙ КОНТЕКСТ
 
 **Как работает:**
-1. `LlmUnityLlmClient` вызывается с `useChatHistory: true`
+1. `MeaiLlmUnityClient` вызывается с `useChatHistory: true`
 2. При `CompleteAsync()`:
    - Загружает последние 20 сообщений из `IAgentMemoryStore.GetChatHistory()`
    - Вставляет в `LLMAgent.AddToHistory()`
@@ -155,7 +169,7 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 
 ```csharp
 // Настройка LLMUnity клиента
-var client = new LlmUnityLlmClient(
+var client = new MeaiLlmUnityClient(
     llmAgent,
     logger,
     memoryStore: fileStore,
@@ -202,4 +216,4 @@ policy.SetMemoryToolForAll(false);        // Выключить для ВСЕХ 
 | `NullAgentMemoryStore.cs` | Заглушка (ничего не сохраняет) |
 | `FileAgentMemoryStore.cs` | Unity: JSON файлы в persistentDataPath |
 | `AiOrchestrator.cs` | Orchestrator: injects memory into system prompt |
-| `LlmUnityLlmClient.cs` | LLMUnity: поддержка ChatHistory (Тип 2) |
+| `MeaiLlmUnityClient.cs` | LLMUnity с MEAI: поддержка MemoryTool (Тип 1) и ChatHistory (Тип 2) |

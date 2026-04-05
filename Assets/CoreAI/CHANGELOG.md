@@ -2,6 +2,90 @@
 
 Все значимые изменения этого пакета описываются здесь. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [0.7.0] - 2026-04-06
+
+### Единый MEAI Tool Calling Format (MAJOR)
+
+**Все tool calls теперь используют единый формат через MEAI function calling**
+
+#### Новое
+- ✨ **LuaTool**: MEAI AIFunction для выполнения Lua скриптов от Programmer
+- ✨ **LuaLlmTool**: ILlmTool обёртка для Lua tool
+- ✨ **CoreAISettings**: Публичные статические настройки (MaxLuaRepairGenerations=3, LlmRequestTimeoutSeconds, EnableMeaiDebugLogging)
+- 🔧 **Единый формат tool calls**: `{"name": "tool_name", "arguments": {...}}`
+- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Парсинг JSON tool calls для моделей без структурных tool_calls
+
+#### Удалено
+- ❌ **AgentMemoryDirectiveParser**: Удалён - всё через MEAI pipeline
+- ❌ **Fallback парсинг в AiOrchestrator**: Memory tool работает через FunctionInvokingChatClient
+- ❌ **Валидация fenced Lua блоков в ProgrammerResponsePolicy**: Programmer вызывает execute_lua tool
+- ❌ **Fenced блоки** (```memory, ```lua): Не используются для tool calls
+
+#### Breaking Changes
+- **Programmer агент** теперь вызывает `execute_lua` tool вместо fenced ```lua блоков
+- **Memory tool** формат: `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
+- **MaxLuaRepairGenerations** изменён с 4 на 3
+
+#### Удалённые тесты
+- ❌ `AgentMemoryEditModeTests.cs` - использовал удалённый AgentMemoryDirectiveParser
+- ❌ `AgentDataPassingEditModeTests.cs` - использовал старые memory парсинги
+- ❌ `MemoryToolMeaiEditModeTests.cs` - дублировал MeaiToolCallsEditModeTests.cs
+
+#### Обновлённые тесты
+- 🔧 `MeaiToolCallsEditModeTests.cs` - MemoryTool, LuaTool, парсинг JSON
+- 🔧 `LuaExecutionPipelineEditModeTests.cs` - обновлено ожидаемое количество повторов (4→3)
+- 🔧 `RoleStructuredResponsePolicyEditModeTests.cs` - Programmer теперь пропускает любой текст
+
+---
+
+## [0.6.1] - 2026-04-06
+
+### Tool Calling Fallback для LLM без структурных tool_calls
+
+- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Добавлен fallback парсинг JSON tool calls из текста ответа модели
+- 🔧 **Поддержка Qwen3.5-2B и подобных моделей**: Модель возвращает tool call как JSON текст в content, а не как структурный tool_call — теперь это распознаётся и преобразуется в `FunctionCallContent` для MEAI `FunctionInvokingChatClient`
+- 🔧 **Распознаваемые форматы**: 
+  - `{"tool": "memory", "action": "write", "content": "..."}`
+  - `{"name": "memory", "arguments": {...}}`
+  - ```json\n{...}\n``` fenced blocks
+
+### Fixes
+
+- ✅ **Memory Tool теперь работает с Qwen3.5-2B**: `FunctionInvokingChatClient` распознаёт tool call и вызывает `MemoryTool.ExecuteAsync()`
+- ✅ **Память сохраняется между вызовами**: Craft 2 видит память из Craft 1
+- ✅ **AgentMemoryDirectiveParser как двойной fallback**: Если MEAI не распознал tool call, AiOrchestrator использует AgentMemoryDirectiveParser.TryExtract()
+
+---
+
+## [0.6.0] - 2026-04-05
+
+### Microsoft.Extensions.AI Full Integration (MAJOR)
+
+- ✨ **MeaiLlmUnityClient**: Полная интеграция с Microsoft.Extensions.AI для LLMUnity
+- ✨ **FunctionInvokingChatClient**: Использует MEAI `FunctionInvokingChatClient` для автоматического tool calling
+- ✨ **MemoryTool AIFunction**: MemoryTool.CreateAIFunction() использует AIFunctionFactory.Create() для MEAI
+- ✨ **Автоматический вызов функций**: MEAI автоматически парсит tool_calls и выполняет AIFunction
+- ✨ **IChatClient реализация**: Внутренний IChatClient обёртка над LLMAgent
+
+### Removed
+
+- ❌ **MeaiChatClientAdapter**: Удалён — заменён на полноценный MEAI pipeline
+- ❌ **Ручной парсинг tool_calls**: Удалён из основного flow — теперь через MEAI
+- ❌ **MeaiToolsLlmClientDecorator**: Удалён — не нужен при использовании FunctionInvokingChatClient
+
+### AgentMemoryDirectiveParser Fallback
+
+- AgentMemoryDirectiveParser.TryExtract() теперь используется как fallback
+- Поддерживает: ```memory блоки и ```json блоки с "tool": "memory"
+- Работает когда модель не использует формальный tool_calls
+
+### Breaking Changes
+
+- LlmUnityLlmClient заменён на MeaiLlmUnityClient
+- Все ссылки на LlmUnityLlmClient обновлены на MeaiLlmUnityClient
+
+---
+
 ## [0.5.0] - 2026-04-05
 
 ### LLM Response Validation (NEW)

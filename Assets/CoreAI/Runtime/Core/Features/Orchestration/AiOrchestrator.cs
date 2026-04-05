@@ -132,33 +132,9 @@ namespace CoreAI.Ai
                 }
             }
 
-            // ===== ОБРАБОТКА MemoryTool (через MEAI function calling или content block) =====
-            if (useMemoryTool && _memoryStore != null)
-            {
-                // Check content for ```memory blocks (fallback)
-                if (AgentMemoryDirectiveParser.TryExtract(content, out string cleaned, out AgentMemoryDirectiveParser.MemoryDirective dirFromContent))
-                {
-                    content = cleaned;
-                    
-                    _memoryStore.TryLoad(roleId, out AgentMemoryState existing);
-                    var roleConfig = _memoryPolicy.GetRoleConfig(roleId);
-                    bool shouldAppend = dirFromContent.Append || roleConfig.DefaultAction == AgentMemoryPolicy.MemoryToolAction.Append;
-
-                    if (dirFromContent.Clear)
-                    {
-                        _memoryStore.Clear(roleId);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(dirFromContent.MemoryText))
-                    {
-                        AgentMemoryState state = new() { LastSystemPrompt = systemBase, Memory = dirFromContent.MemoryText };
-                        if (shouldAppend && !string.IsNullOrWhiteSpace(existing?.Memory))
-                        {
-                            state.Memory = existing.Memory.Trim() + "\n" + dirFromContent.MemoryText.Trim();
-                        }
-                        _memoryStore.Save(roleId, state);
-                    }
-                }
-            }
+            // ===== ОБРАБОТКА MemoryTool через MEAI function calling =====
+            // Память уже сохранена через FunctionInvokingChatClient -> MemoryTool.ExecuteAsync()
+            // Дополнительный fallback парсинг не нужен - всё через единый MEAI pipeline
 
             _commandSink.Publish(new ApplyAiGameCommand
             {

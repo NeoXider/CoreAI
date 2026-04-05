@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -10,6 +11,19 @@ using UnityEditor;
 
 namespace CoreAI.Tests.PlayMode
 {
+    /// <summary>
+    /// In-memory store for tests.
+    /// </summary>
+    public sealed class InMemoryStore : IAgentMemoryStore
+    {
+        public readonly Dictionary<string, AgentMemoryState> States = new();
+        public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
+        public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
+        public void Clear(string roleId) => States.Remove(roleId);
+        public void AppendChatMessage(string roleId, string role, string content) { }
+        public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+    }
+
     /// <summary>
     /// Какой бэкенд использовать в Play Mode тестах с реальной моделью (см. <see cref="PlayModeProductionLikeLlmFactory.TryCreate"/>).
     /// Переменная окружения: <c>COREAI_PLAYMODE_LLM_BACKEND</c> = <c>auto</c> | <c>http</c> | <c>llmunity</c> (без значения = auto).
@@ -221,7 +235,7 @@ namespace CoreAI.Tests.PlayMode
                 return false;
             }
 
-            LlmUnityLlmClient client = new(agent, GameLoggerUnscopedFallback.Instance);
+            MeaiLlmUnityClient client = new(agent, GameLoggerUnscopedFallback.Instance, new InMemoryStore());
             handle = new PlayModeProductionLikeLlmHandle(client, PlayModeProductionLikeLlmBackend.LlmUnity, null, go);
             ignoreReason = null;
             return true;

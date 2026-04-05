@@ -274,17 +274,13 @@ namespace CoreAI.Tests.EditMode.Lua
             processor.Process(MakeEnvelope("error2()", "Programmer", generation: 1));
             Assert.AreEqual(2, repairCount);
 
-            // Generation 2 → repair 3
+            // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairGenerations = 3)
             processor.Process(MakeEnvelope("error3()", "Programmer", generation: 2));
             Assert.AreEqual(3, repairCount);
 
-            // Generation 3 → repair 4
+            // Generation 3 → NO MORE repairs (max = 3)
             processor.Process(MakeEnvelope("error4()", "Programmer", generation: 3));
-            Assert.AreEqual(4, repairCount);
-
-            // Generation 4 → NO MORE repairs (max = 4)
-            processor.Process(MakeEnvelope("error5()", "Programmer", generation: 4));
-            Assert.AreEqual(4, repairCount); // Не увеличилось!
+            Assert.AreEqual(3, repairCount); // Не увеличилось!
         }
 
         #endregion

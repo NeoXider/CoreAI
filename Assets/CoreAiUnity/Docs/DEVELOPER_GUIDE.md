@@ -94,9 +94,9 @@ flowchart LR
 
 1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, **`Priority`**, **`CancellationScope`**, опционально поля ремонта Lua и **`TraceId`**).
 2. Реализация по умолчанию — **`QueuedAiOrchestrator`** (лимит параллелизма, приоритет, отмена предыдущей задачи с тем же **`CancellationScope`**) вокруг **`AiOrchestrator`**. **`AiOrchestrator`** назначает **`TraceId`**, собирает промпты, вызывает **`ILlmClient.CompleteAsync`**; при **`IRoleStructuredResponsePolicy`** для роли возможен **один** повтор с подсказкой **`structured_retry:`** в user/hint. Затем публикуется **`ApplyAiGameCommand`** (**`AiEnvelope`**, **`TraceId`**, …). Метрики — **`IAiOrchestrationMetrics`** (лог при **`GameLogFeature.Metrics`**).
-3. В DI **`ILlmClient`** — **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или legacy один клиент): внутри — **`OpenAiChatLlmClient`** / **`LlmUnityLlmClient`** / **`StubLlmClient`** по **`LlmRoutingManifest`** и роли. Лог **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), строка бэкенда **`RoutingLlmClient→OpenAiHttp`** и т.п. Для «это stub?» — **`LoggingLlmClientDecorator.Unwrap(client)`**.
-4. Подписчик **`AiGameCommandRouter`** получает **`ApplyAiGameCommand`** из MessagePipe и **переносит обработку на главный поток Unity** (`UniTask.SwitchToMainThread`), затем вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua (fenced `lua` или JSON **`ExecuteLua`**), выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
-5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (лимит поколений см. **`LuaAiEnvelopeProcessor`**).
+3. В DI **`ILlmClient`** — **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или legacy один клиент): внутри — **`OpenAiChatLlmClient`** / **`MeaiLlmUnityClient`** / **`StubLlmClient`** по **`LlmRoutingManifest`** и роли. Лог **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), строка бэкенда **`RoutingLlmClient→OpenAiHttp`** и т.п. Для «это stub?» — **`LoggingLlmClientDecorator.Unwrap(client)`**.
+4. Подписчик **`AiGameCommandRouter`** получает **`ApplyAiGameCommand`** из MessagePipe и **переносит обработку на главный поток Unity** (`UniTask.SwitchToMainThread`), затем вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua код, выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
+5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (до **3 попыток** по умолчанию, настраивается через **`CoreAISettings.MaxLuaRepairGenerations`**).
 
 **Важно:** геймплейные системы могут подписываться на **`ApplyAiGameCommand`** и реагировать на типы команд; не парсить сырой текст LLM вне общего конвейера, если хотите единообразия. Подробнее логи и таймаут: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1 (блок про CoreAI) и таймаут.
 
@@ -108,7 +108,7 @@ flowchart LR
 
 | Режим | Где настраивается | Когда выбирается |
 |--------|-------------------|------------------|
-| **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если HTTP выключен: фактический клиент — **`LlmUnityLlmClient`**, в контейнере обёрнут в **`LoggingLlmClientDecorator`**. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
+| **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если HTTP выключен: фактический клиент — **`MeaiLlmUnityClient`**, в контейнере обёрнут в **`LoggingLlmClientDecorator`**. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
 | **OpenAI-compatible HTTP** | Asset **CoreAI → LLM → OpenAI-compatible HTTP**, поле на **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — тогда внутри декоратора реализация — **`OpenAiChatLlmClient`**. |
 
 Символ **`COREAI_NO_LLM`**: в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
@@ -122,11 +122,11 @@ flowchart LR
 - **Цепочка системного промпта:** манифест (опционально) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → встроенный fallback (**`BuiltInAgentSystemPromptTexts`**).
 - **Встроенные роли:** см. **`BuiltInAgentRoleIds`** и тесты **`AgentRolesAndPromptsTests`**.
 - **User payload:** по умолчанию — JSON вида `{"telemetry":{...},"hint":"..."}` из **`GameSessionSnapshot.Telemetry`**; при ремонте Lua добавляются поля **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
-- **Память агента (опционально):** агент может сам сохранять “память” через блоки в ответе:
-  - fenced `memory` — перезаписать память
-  - fenced `memory_append` — дописать
-  - fenced `memory_clear` — очистить
-  
+- **Память агента (опционально):** агент сохраняет память через **MEAI tool calling**:
+  - `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` — перезаписать
+  - `{"name": "memory", "arguments": {"action": "append", "content": "..."}}` — дописать
+  - `{"name": "memory", "arguments": {"action": "clear"}}` — очистить
+
   По умолчанию память **выключена у всех ролей**, кроме **Creator** (см. `AgentMemoryPolicy`). В рантайме Unity память хранится в `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`.
 
 ---

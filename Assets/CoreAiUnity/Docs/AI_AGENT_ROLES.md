@@ -62,7 +62,7 @@ flowchart TB
 | **Placement** | Обычно **HostAuthoritative** в мультиплеере. |
 | **Примеры** | «Игрок слишком доминирует — усложнить волну 7»; «включить сюжетную ветку Б»; «выдать недельный модификатор». |
 | **Риски** | Высокий приоритет в оркестраторе; обязателен **валидатор** схемы и лимиты на частоту смен правил. |
-| **Формат** | JSON tool calls: `{"tool": "memory", "action": "write", "content": "..."}` для сохранения памяти. |
+| **Формат** | JSON tool calls: `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` для сохранения памяти. |
 
 ---
 
@@ -97,7 +97,7 @@ flowchart TB
 **Дополнительно (рантайм‑инструменты):**
 - Встроенная фича **World Commands** позволяет Programmer через Lua безопасно публиковать команды мира (спавн/перемещение/сцены) без прямого доступа к Unity API. См. **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
 - Рекомендация: любые «изменения компонентов» делайте через **типизированные** команды или allowlist‑политику (не через произвольную рефлексию из Lua).
-- **Формат Tool Calls**: Programmer использует **только JSON** для tool calls: `{"tool": "memory", "action": "write", "content": "..."}`. Это универсальный формат, работающий со всеми моделями включая Qwen.
+- **Формат Tool Calls**: Все агенты используют **единый JSON формат** для tool calls: `{"name": "tool_name", "arguments": {...}}`. Programmer вызывает `execute_lua` tool для Lua кода, Memory tool для сохранения памяти.
 
 ---
 
@@ -242,7 +242,7 @@ flowchart TB
 
 | Роль | Политика | Что ожидает | Retry при ошибке |
 |------|----------|-------------|------------------|
-| **Programmer** | `ProgrammerResponsePolicy` | Lua code block (```lua) ИЛИ JSON с `execute_lua` | ✅ Да |
+| **Programmer** | `ProgrammerResponsePolicy` | Tool call `execute_lua` | ✅ Да |
 | **CoreMechanicAI** | `CoreMechanicResponsePolicy` | JSON с числовыми полями | ✅ Да |
 | **Creator** | `CreatorResponsePolicy` | JSON объект (команда мира) | ✅ Да |
 | **Analyzer** | `AnalyzerResponsePolicy` | JSON с `metric`/`recommendation`/`analysis` | ✅ Да |
@@ -255,7 +255,7 @@ flowchart TB
 2. `CompositeRoleStructuredResponsePolicy` проверяет формат по roleId
 3. При провале → `AiOrchestrator` делает **один повторный запрос** с подсказкой:
    ```
-   structured_retry: Expected Lua code block or JSON with execute_lua
+   structured_retry: Expected execute_lua tool call
    ```
 4. Метрика `RecordStructuredRetry(roleId, traceId, failureReason)` логируется
 

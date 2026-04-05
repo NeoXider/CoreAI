@@ -2,6 +2,71 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.7.0] - 2026-04-06
+
+### Единый MEAI Tool Calling Format
+
+- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Упрощён до единого формата `{"name": "...", "arguments": {...}}`
+- 🔧 **Все tool calls через MEAI**: Memory и Lua tools работают через FunctionInvokingChatClient
+- 🔧 **Обновлён тест CraftingMemoryViaLlmUnityPlayModeTests**: Промпты используют новый формат tool calls
+
+### Breaking Changes
+
+- Промпты агентов обновлены для использования `{"name": "tool", "arguments": {...}}` вместо старых форматов
+- Fenced блоки ```lua и ```memory больше не используются - только JSON tool calls
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.7.0**
+
+---
+
+## [0.6.1] - 2026-04-06
+
+### Tool Calling Fallback для LLM без структурных tool_calls
+
+- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Добавлен fallback парсинг JSON tool calls из текста ответа модели
+- 🔧 **Поддержка Qwen3.5-2B**: Модель возвращает tool call как JSON текст, а не как структурный tool_call — теперь это распознаётся и преобразуется в `FunctionCallContent` для MEAI
+- 🔧 **Форматы распознавания**: 
+  - `{"tool": "memory", "action": "write", "content": "..."}`
+  - `{"name": "memory", "arguments": {...}}`
+  - ```json\n{...}\n``` fenced blocks
+
+### Fixes
+
+- ✅ **Memory Tool теперь работает**: `FunctionInvokingChatClient` распознаёт tool call и вызывает `MemoryTool.ExecuteAsync()`
+- ✅ **Память сохраняется между вызовами**: Craft 2 видит память из Craft 1
+
+### Documentation
+
+- Обновлены секции troubleshooting в LLMUNITY_SETUP_AND_MODELS.md
+
+---
+
+## [0.6.0] - 2026-04-05
+
+### Microsoft.Extensions.AI Full Integration
+
+- ✨ **MeaiLlmUnityClient**: Полная интеграция с Microsoft.Extensions.AI для LLMUnity
+- ✨ **FunctionInvokingChatClient**: Использует MEAI FunctionInvokingChatClient для автоматического tool calling
+- ✨ **IChatClient реализация**: Внутренний IChatClient обёртка над LLMAgent
+- ✨ **MemoryTool.CreateAIFunction()**: Создаёт AIFunction для MEAI
+
+### Removed
+
+- ❌ **LlmUnityLlmClient**: Заменён на MeaiLlmUnityClient
+- ❌ **MeaiChatClientAdapter**: Удалён — интеграция теперь через MeaiLlmUnityClient
+
+### Documentation
+
+- Обновлена документация: MemorySystem.md, DEVELOPER_GUIDE.md, DGF_SPEC.md, LLMUNITY_SETUP_AND_MODELS.md
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.6.0**
+
+---
+
 ## [0.5.0] - 2026-04-05
 
 ### LLM Response Validation

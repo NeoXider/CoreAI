@@ -58,7 +58,7 @@ namespace CoreAI.Infrastructure.Llm
                 return "OpenAiHttp";
             }
 #if !COREAI_NO_LLM
-            if (inner is LlmUnityLlmClient)
+            if (inner is MeaiLlmUnityClient)
             {
                 return "LlmUnity";
             }

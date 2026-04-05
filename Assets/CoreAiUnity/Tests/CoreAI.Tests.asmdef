@@ -21,7 +21,8 @@
   "overrideReferences": true,
   "precompiledReferences": [
     "nunit.framework.dll",
-    "Microsoft.Extensions.AI.Abstractions.dll"
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Newtonsoft.Json.dll"
   ],
   "autoReferenced": false,
   "defineConstraints": [

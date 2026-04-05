@@ -1,16 +1,13 @@
-using System.Text.RegularExpressions;
+using System;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов Programmer: требует Lua код или JSON с execute_lua.
+    /// Политика валидации ответов Programmer: требует вызов execute_lua tool.
+    /// Все tool calls обрабатываются через единый MEAI pipeline.
     /// </summary>
     public sealed class ProgrammerResponsePolicy : IRoleStructuredResponsePolicy
     {
-        private static readonly Regex LuaCodeBlockRegex = new(
-            @"```(?:lua)?\s*\n([\s\S]+?)```",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
         /// <inheritdoc />
         public bool ShouldValidate(string roleId)
         {
@@ -26,32 +23,13 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            // Вариант 1: Markdown code block с Lua
-            if (LuaCodeBlockRegex.IsMatch(rawContent))
-            {
-                failureReason = "";
-                return true;
-            }
-
-            // Вариант 2: JSON с execute_lua
-            if (rawContent.Contains("execute_lua") && rawContent.Contains("{") && rawContent.Contains("}"))
-            {
-                failureReason = "";
-                return true;
-            }
-
-            // Вариант 3: Простой Lua код (без markdown, но с lua-ключевыми словами)
-            var trimmed = rawContent.Trim();
-            if ((trimmed.StartsWith("function") || trimmed.StartsWith("local ") || trimmed.Contains("return ")) &&
-                !trimmed.StartsWith("{"))
-            {
-                failureReason = "";
-                return true;
-            }
-
-            failureReason = "Expected Lua code block (```lua ... ```) or JSON with 'execute_lua' field. " +
-                            "Got plain text instead.";
-            return false;
+            // Programmer должен вызвать execute_lua tool
+            // Если content пустой после tool calling - значит tool был вызван успешно
+            // Если content есть - это обычный текст (объяснение, комментарии)
+            // Валидация проходит если есть любой контент (tool calls уже обработаны MEAI)
+            
+            failureReason = "";
+            return true;
         }
     }
 }

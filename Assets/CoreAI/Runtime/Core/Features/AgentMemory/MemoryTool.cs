@@ -5,6 +5,11 @@ using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
 {
+    /// <summary>
+    /// AIFunction-обёртка для работы с памятью агента.
+    /// Используется в MEAI function calling pipeline (FunctionInvokingChatClient).
+    /// Создаёт AIFunction, который вызывает ExecuteAsync при tool call от модели.
+    /// </summary>
     public sealed class MemoryTool
     {
         private readonly IAgentMemoryStore _store;

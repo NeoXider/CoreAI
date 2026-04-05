@@ -33,18 +33,19 @@ end
         }
 
         [Test]
-        public void Programmer_JsonWithExecuteLua_ReturnsTrue()
+        public void Programmer_PlainText_ReturnsTrue()
         {
-            var content = @"{""execute_lua"": ""function add(a,b) return a+b end""}";
+            // ProgrammerResponsePolicy теперь пропускает любой текст
+            // т.к. tool calls обрабатываются через MEAI pipeline отдельно
+            var content = "Sure, I can help with that. Here's what you should do...";
             Assert.IsTrue(_composite.TryValidate("Programmer", content, out _));
         }
 
         [Test]
-        public void Programmer_PlainText_ReturnsFalse()
+        public void Programmer_JsonWithExecuteLua_ReturnsTrue()
         {
-            var content = "Sure, I can help with that. Here's what you should do...";
-            Assert.IsFalse(_composite.TryValidate("Programmer", content, out var reason));
-            StringAssert.Contains("Expected Lua code block", reason);
+            var content = @"{""execute_lua"": ""function add(a,b) return a+b end""}";
+            Assert.IsTrue(_composite.TryValidate("Programmer", content, out _));
         }
 
         [Test]

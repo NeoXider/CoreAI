@@ -6,7 +6,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>OpenAI-compatible HTTP (<see cref="OpenAiChatLlmClient"/>).</summary>
         OpenAiHttp = 0,
 
-        /// <summary>Локальный LLMUnity (<see cref="LlmUnityLlmClient"/>).</summary>
+        /// <summary>Локальный LLMUnity (<see cref="MeaiLlmUnityClient"/>).</summary>
         LlmUnity = 1,
 
         /// <summary>Заглушка (<see cref="StubLlmClient"/>).</summary>

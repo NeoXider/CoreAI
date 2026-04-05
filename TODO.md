@@ -2,7 +2,7 @@
 
 ## 🚨 КРИТИЧНОЕ (без этого система не работает как задумано)
 
-### 1. ✅ MemoryTool работает для ВСЕХ агентов
+### 1. ✅ MemoryTool работает для ВСЕХ агентов (v0.7.0 — единый MEAI формат)
 
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryPolicy.cs`
 
@@ -12,6 +12,8 @@
 - ✅ Append по умолчанию (накапливают историю)
 - ✅ Легко вкл/выкл: `policy.DisableMemoryTool("PlayerChat")`
 - ✅ Конфигурация на роль: write/append/clear
+- ✅ **v0.7.0**: Единый формат tool calls `{"name": "memory", "arguments": {...}}`
+- ✅ **v0.7.0**: `AgentMemoryDirectiveParser` удалён — всё через MEAI pipeline
 
 ---
 
@@ -21,14 +23,15 @@
 
 **Статус:** ✅ ГОТОВО
 
-- ✅ `ProgrammerResponsePolicy` — проверка Lua кода или JSON с execute_lua
+- ✅ `ProgrammerResponsePolicy` — Programmer вызывает `execute_lua` tool (v0.7.0)
 - ✅ `CoreMechanicResponsePolicy` — проверка JSON с числами
 - ✅ `CreatorResponsePolicy` — проверка JSON объекта
 - ✅ `AnalyzerResponsePolicy` — проверка JSON с метриками
 - ✅ `AINpcResponsePolicy` — мягкая (JSON или текст)
 - ✅ `PlayerChatResponsePolicy` — без валидации
 - ✅ `CompositeRoleStructuredResponsePolicy` — маршрутизация по роли
-- ✅ Автоматический retry при неуде валидации (уже заложен в `AiOrchestrator`)
+- ✅ Автоматический retry при неудачной валидации (уже заложен в `AiOrchestrator`)
+- ✅ **v0.7.0**: ProgrammerResponsePolicy упрощена — пропускает любой текст (tool calls через MEAI)
 - ✅ 20 EditMode тестов
 - ✅ DI регистрация в CorePortableInstaller
 
@@ -54,6 +57,39 @@
 - ✅ `GAME_CONFIG_GUIDE.md` — полная инструкция для разработчиков
 
 **Влияние:** AI может читать и менять любые конфиги игры через function calling. Игра только реализует `IGameConfigStore` для своей системы хранения.
+
+---
+
+## ✅ ВЫПОЛНЕНО В v0.7.0
+
+### 7. ✅ Единый MEAI Tool Calling Format
+
+**Файлы:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/`
+
+**Статус:** ✅ ГОТОВО
+
+- ✅ `LuaTool.cs` — MEAI AIFunction для выполнения Lua скриптов
+- ✅ `LuaLlmTool.cs` — ILlmTool обёртка для Programmer
+- ✅ `LlmUnityMeaiChatClient.TryParseToolCallFromText()` — парсинг JSON tool calls для моделей без структурных tool_calls
+- ✅ `CoreAISettings.cs` — публичные статические настройки:
+  - `MaxLuaRepairGenerations = 3` (по умолчанию, было 4)
+  - `LlmRequestTimeoutSeconds = 300`
+  - `EnableMeaiDebugLogging = false`
+- ✅ Единый формат: `{"name": "tool_name", "arguments": {...}}`
+- ✅ Удалён `AgentMemoryDirectiveParser.cs`
+- ✅ Удалён fallback парсинг в `AiOrchestrator`
+- ✅ Обновлена `ProgrammerResponsePolicy` — больше не проверяет fenced блоки
+- ✅ Обновлён `LuaAiEnvelopeProcessor` — использует `CoreAISettings.MaxLuaRepairGenerations`
+
+**Тесты:**
+- ✅ `MeaiToolCallsEditModeTests.cs` — MemoryTool, LuaTool, парсинг JSON
+- ✅ `AllToolCallsPlayModeTests.cs` — боевые тесты с переключением LLMUnity/HTTP
+- ✅ `LuaExecutionPipelineEditModeTests.cs` — обновлено max generations (4→3)
+
+**Удалённые тесты:**
+- ❌ `AgentMemoryEditModeTests.cs` — использовал удалённый парсер
+- ❌ `AgentDataPassingEditModeTests.cs` — старые memory парсинги
+- ❌ `MemoryToolMeaiEditModeTests.cs` — дублировал MeaiToolCallsEditModeTests
 
 ---
 
@@ -221,29 +257,36 @@
 
 ### ✅ Sprint 2 — ТЕСТЫ (ГОТОВО)
 6. ✅ **LuaExecutionPipelineEditModeTests** — 8 тестов Lua execution
-7. ✅ **AgentDataPassingEditModeTests** — 4 теста передачи данных
-8. ✅ **MultiAgentCraftingWorkflowPlayModeTests** — полный воркфлоу 3 агентов
-9. ✅ **CraftingMemoryViaLlmUnityPlayModeTests** — 4 крафта + детерминизм
-10. ✅ **CraftingMemoryViaOpenAiPlayModeTests** — 4 крафта + детерминизм
+7. ✅ **MultiAgentCraftingWorkflowPlayModeTests** — полный воркфлоу 3 агентов
+8. ✅ **CraftingMemoryViaLlmUnityPlayModeTests** — 4 крафта + детерминизм
+9. ✅ **CraftingMemoryViaOpenAiPlayModeTests** — 4 крафта + детерминизм
+10. ✅ **AllToolCallsPlayModeTests** — боевые тесты всех tool calls (v0.7.0)
 
 ### ✅ Sprint 2.5 — ВАЛИДАЦИЯ (ГОТОВО)
 11. ✅ **RoleStructuredResponsePolicy** — валидация всех ролей (7 классов)
 12. ✅ **CompositeRoleStructuredResponsePolicy** — маршрутизация
 13. ✅ **RoleStructuredResponsePolicyEditModeTests** — 20 тестов
 
+### ✅ Sprint 2.7 — ЕДИНЫЙ TOOL CALLING (v0.7.0 ГОТОВО)
+14. ✅ **LuaTool** — MEAI AIFunction для Programmer
+15. ✅ **LuaLlmTool** — ILlmTool обёртка
+16. ✅ **CoreAISettings** — публичные настройки (MaxLuaRepairGenerations=3)
+17. ✅ **LlmUnityMeaiChatClient.TryParseToolCallFromText** — парсинг JSON
+18. ✅ **Удалены** старые парсинги и дубликаты тестов
+
 ### Sprint 3 — Multi-agent (СЛЕДУЮЩИЙ)
-14. **MultiAgentWorkflow** — цепочка агентов (4 часа)
-15. **CraftingTool** для CoreMechanicAI (2 часа)
+19. **MultiAgentWorkflow** — цепочка агентов (4 часа)
+20. **CraftingTool** для CoreMechanicAI (2 часа)
 
 ### Sprint 4 — Инфраструктура
-16. **Логирование HTTP** запросов к LLM (2 часа)
-17. **Метрики** оркестрации (2 часа)
-18. **AINpc и PlayerChat тесты** (3 часа)
+21. **Логирование HTTP** запросов к LLM (2 часа)
+22. **Метрики** оркестрации (2 часа)
+23. **AINpc и PlayerChat тесты** (3 часа)
 
 ### Sprint 5 — Полировка
-19. **WorldCommand** расширения (3 часа)
-20. **Версионирование промптов** (2 часа)
-21. **Документация** с диаграммами (4 часа)
+24. **WorldCommand** расширения (3 часа)
+25. **Версионирование промптов** (2 часа)
+26. **Документация** с диаграммами (4 часа)
 
 ---
 
@@ -275,10 +318,11 @@
 | **ChatHistory** — загрузка/сохранение | ✅ | | |
 | **AiOrchestrator** — один агент | ✅ | | |
 | **AiOrchestrator** — валидация retry | ✅ | | |
+| **AiOrchestrator** — MEAI tool calling (v0.7.0) | ✅ | | |
 | **MultiAgent** — цепочка | | ✅ | (есть EditMode тесты) |
 | **Lua Sandbox** — исполнение | ✅ | | |
 | **Lua Sandbox** — timeout | ✅ | | |
-| **Lua Repair** — авто-повтор | ✅ | | |
+| **Lua Repair** — авто-повтор (v0.7.0: max=3) | ✅ | | |
 | **Data Passing** — между агентами | ✅ | | |
 | **World Commands** — spawn/move/destroy | ✅ | | |
 | **World Commands** — animation/sound/UI | | | ❌ |
@@ -290,21 +334,21 @@
 | **Analyzer** — тесты | ✅ | | |
 | **Dashboard** — MVP лог | ✅ | | |
 | **Dashboard** — метрики | | | ❌ |
-| **Тесты** — EditMode крафт | ✅ | | |
 | **Тесты** — EditMode Lua execution | ✅ | | |
-| **Тесты** — EditMode data passing | ✅ | | |
-| **Тесты** — EditMode валидация | ✅ | | |
+| **Тесты** — EditMode MEAI tool calls (v0.7.0) | ✅ | | |
 | **Тесты** — PlayMode память | ✅ | | |
+| **Тесты** — PlayMode all tool calls (v0.7.0) | ✅ | | |
 | **Тесты** — PlayMode multi-agent | ✅ | | |
+| **CoreAISettings** — публичные настройки (v0.7.0) | ✅ | | |
 
-**Итого:** ✅ Реализовано ~75%, ⚠️ Частично ~15%, ❌ Не реализовано ~10%
+**Итого:** ✅ Реализовано ~80%, ⚠️ Частично ~12%, ❌ Не реализовано ~8%
 
 ---
 
 ## 🐛 ИЗВЕСТНЫЕ ПРОБЛЕМЫ ТЕСТОВ
 
 ### Unity Cache Issue
-- ⚠️ `AgentMemoryEditModeTests.Analyzer_ByDefaultMemoryDisabled` — Unity кэширует старую DLL. Код исправлен (тест переименован → `Analyzer_ByDefaultMemoryEnabled`), но нужно **Delete Library/ScriptAssemblies** и реимпорт.
+- ⚠️ Если тесты не компилируются — **Delete Library/ScriptAssemblies** и реимпорт.
 
 ### Lua Sandbox Tests
 - ✅ **Timeout реализован**: `LuaExecutionGuard` (2000мс timeout, 200K instruction limit)
@@ -312,6 +356,10 @@
 
 ### Cross-Role Memory Sharing
 - ❌ **Не реализовано**: память агентов изолирована. `Creator` не видит память `CoreMechanicAI` и наоборот. Это **не баг** — так задумано. Для передачи данных между агентами нужен `MultiAgentWorkflow` (TODO #6).
+
+### v0.7.0 Breaking Changes
+- ✅ `AgentMemoryDirectiveParser` удалён — все тесты обновлены на MEAI tool calling
+- ✅ `MaxLuaRepairGenerations` изменён с 4 на 3 — тесты обновлены
 
 ---
 
@@ -321,9 +369,14 @@
 
 | Файл | Тестов | Что проверяет |
 |------|--------|---------------|
-| `LuaExecutionPipelineEditModeTests.cs` | 8 | Lua sandbox, execution success/failure, repair loop, max generations, role isolation |
-| `AgentDataPassingEditModeTests.cs` | 4 | Creator→CoreMechanic, CoreMechanic→Programmer, memory isolation, full chain |
+| `LuaExecutionPipelineEditModeTests.cs` | 8 | Lua sandbox, execution success/failure, repair loop, max generations (v0.7.0: 3), role isolation |
+| `MeaiToolCallsEditModeTests.cs` | 10 | MemoryTool, LuaTool, парсинг JSON, regex tool calls (v0.7.0) |
 | `AiCraftingMechanicIntegrationEditModeTests.cs` | 7 | Crafting domain, AI creates unique items, deterministic |
+
+**Удалённые тесты (v0.7.0):**
+- ❌ `AgentMemoryEditModeTests.cs` — использовал удалённый `AgentMemoryDirectiveParser`
+- ❌ `AgentDataPassingEditModeTests.cs` — старые memory парсинги
+- ❌ `MemoryToolMeaiEditModeTests.cs` — дублировал MeaiToolCallsEditModeTests
 
 ### PlayMode тесты
 
@@ -332,3 +385,4 @@
 | `MultiAgentCraftingWorkflowPlayModeTests.cs` | 2 | OpenAI HTTP | Creator→Mechanic→Programmer, memory isolation |
 | `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | LLMUnity | 4 крафта + детерминизм |
 | `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | OpenAI HTTP | 4 крафта + 2 крафта quick |
+| `AllToolCallsPlayModeTests.cs` | 2 | LLMUnity или HTTP | Memory tool (write/append/clear) + Execute Lua (v0.7.0) |
