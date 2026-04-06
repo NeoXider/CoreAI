@@ -72,6 +72,8 @@ CoreAI использует **двухуровневую архитектуру*
 | `reload_scene` | Перезагрузить сцену | — |
 | `bind_by_name` | Привязать по имени | `targetName`, `instanceId` |
 | `set_active` | Включить/выключить | `instanceId` или `targetName` |
+| `play_animation` | Проиграть анимацию | `instanceId` или `targetName`, `stringValue` (имя анимации) |
+| `list_animations` | Получить список анимаций | `instanceId` или `targetName` |
 | `show_text` | Показать текст | `targetName`, `stringValue` |
 | `apply_force` | Применить силу | `instanceId` или `targetName`, `x`, `y`, `z` |
 | `spawn_particles` | Создать частицы | `instanceId` или `targetName`, `stringValue` |
@@ -99,6 +101,12 @@ CoreAI использует **двухуровневую архитектуру*
 
 // Show text notification
 {"name": "world_command", "arguments": {"action": "show_text", "targetName": "Player", "stringValue": "Quest completed!"}}
+
+// Play animation on enemy
+{"name": "world_command", "arguments": {"action": "play_animation", "targetName": "Enemy1", "stringValue": "attack"}}
+
+// List available animations
+{"name": "world_command", "arguments": {"action": "list_animations", "targetName": "Enemy1"}}
 
 // Load next level
 {"name": "world_command", "arguments": {"action": "load_scene", "stringValue": "Level_2"}}

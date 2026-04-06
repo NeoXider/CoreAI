@@ -25,21 +25,22 @@ namespace CoreAI.Infrastructure.Llm
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
             "Actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, " +
-            "set_active, show_text, apply_force, spawn_particles, list_objects. " +
+            "set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects. " +
             "Use 'spawn' to create objects, 'move' to reposition, 'destroy' to remove, " +
+            "'play_animation' to play animations, 'list_animations' to get available animations, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
             "'show_text' to display notifications. " +
             "Objects can be targeted by 'instanceId' or 'targetName'.";
 
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true, "Command: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, show_text, apply_force, spawn_particles, list_objects"),
+            ("action", "string", true, "Command: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects"),
             ("instanceId", "string", false, "Instance ID of the target object"),
-            ("targetName", "string", false, "Object name to target (alternative to instanceId, works with move, destroy, set_active, etc.)"),
+            ("targetName", "string", false, "Object name to target (alternative to instanceId, works with move, destroy, set_active, play_animation, list_animations, etc.)"),
             ("x", "number", false, "X coordinate (for spawn, move, apply_force)"),
             ("y", "number", false, "Y coordinate (for spawn, move, apply_force)"),
             ("z", "number", false, "Z coordinate (for spawn, move, apply_force)"),
             ("prefabKey", "string", false, "Prefab key for spawn command"),
-            ("stringValue", "string", false, "String value: text for show_text, or search pattern for list_objects"),
+            ("stringValue", "string", false, "String value: animation name for play_animation, text for show_text, or search pattern for list_objects"),
             ("volume", "number", false, "Reserved for future use")
         );
 

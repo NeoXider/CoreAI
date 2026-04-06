@@ -162,5 +162,15 @@ namespace CoreAI.Infrastructure.World
                 stringValue = searchPattern ?? ""
             };
         }
+
+        public static CoreAiWorldCommandEnvelope ListAnimations(string instanceId = "", string targetName = "")
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "list_animations",
+                instanceId = instanceId ?? "",
+                targetName = targetName ?? ""
+            };
+        }
     }
 }

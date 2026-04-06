@@ -11,6 +11,8 @@
 - ✅ `WorldLlmTool.cs` — ILlmTool обёртка (в CoreAiUnity)
 - ✅ `list_objects` action — получить список объектов в иерархии сцены
 - ✅ `targetName` для всех команд — работа с объектами по имени
+- ✅ `play_animation` action — проиграть анимацию (Animator или Animation компонент)
+- ✅ `list_animations` action — получить список доступных анимаций объекта
 - ✅ EditMode и PlayMode тесты
 - ⏳ `show_text` — уведомление на 2 секунды с анимацией (на потом)
 - ⏳ `apply_force`, `spawn_particles` — заглушки (на потом)

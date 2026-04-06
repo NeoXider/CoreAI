@@ -80,11 +80,13 @@ namespace CoreAI.Infrastructure.Llm
                     "reload_scene" => CreateReloadSceneCommand(),
                     "bind_by_name" => CreateBindByNameCommand(targetName, instanceId),
                     "set_active" => CreateSetActiveCommand(instanceId, targetName, true),
+                    "play_animation" => CreatePlayAnimationCommand(instanceId, targetName, stringValue),
+                    "list_animations" => CreateListAnimationsCommand(instanceId, targetName),
                     "show_text" => CreateShowTextCommand(targetName, stringValue),
                     "apply_force" => CreateApplyForceCommand(instanceId, targetName, x, y, z),
                     "spawn_particles" => CreateSpawnParticlesCommand(instanceId, targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),
-                    _ => throw new ArgumentException($"Unknown action: '{action}'. Valid actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, show_text, apply_force, spawn_particles, list_objects")
+                    _ => throw new ArgumentException($"Unknown action: '{action}'. Valid actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects")
                 };
 
                 if (envelope == null)
@@ -157,6 +159,15 @@ namespace CoreAI.Infrastructure.Llm
             return env;
         }
 
+        private static CoreAiWorldCommandEnvelope CreatePlayAnimationCommand(string? instanceId, string? targetName, string? animationName)
+        {
+            if (string.IsNullOrEmpty(animationName)) return null;
+            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
+            var env = CoreAiWorldCommandEnvelope.PlayAnimation(instanceId ?? "", animationName);
+            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
+            return env;
+        }
+
         private static CoreAiWorldCommandEnvelope CreateShowTextCommand(string? targetName, string? text)
         {
             if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(text)) return null;
@@ -183,6 +194,12 @@ namespace CoreAI.Infrastructure.Llm
         private static CoreAiWorldCommandEnvelope CreateListObjectsCommand(string? searchPattern)
         {
             return CoreAiWorldCommandEnvelope.ListObjects(searchPattern ?? "");
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateListAnimationsCommand(string? instanceId, string? targetName)
+        {
+            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.ListAnimations(instanceId ?? "", targetName ?? "");
         }
 
         private static string SerializeResult(bool success, string message, string? action = null)

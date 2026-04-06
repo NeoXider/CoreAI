@@ -100,6 +100,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(result.Message.Contains("Unknown action"));
         }
 
+        // TODO: play_sound удалён из WorldTool, будет реализован отдельно через IAudioController (на потом)
+
         [Test]
         public async Task WorldTool_ExecuteAsync_PlayAnimation_ReturnsSuccess()
         {
@@ -113,20 +115,6 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("play_animation", result.Action);
             Assert.IsTrue(executor.LastCommandJson.Contains("play_animation"));
             Assert.IsTrue(executor.LastCommandJson.Contains("attack"));
-        }
-
-        [Test]
-        public async Task WorldTool_ExecuteAsync_PlaySound_ReturnsSuccess()
-        {
-            TestWorldExecutor executor = new();
-            WorldTool tool = new(executor);
-
-            string resultJson = await tool.ExecuteAsync("play_sound", instanceId: "speaker1", stringValue: "boom", volume: 0.5f);
-            WorldTool.WorldResult result = JsonSerializer.Deserialize<WorldTool.WorldResult>(resultJson);
-
-            Assert.IsTrue(result.Success);
-            Assert.AreEqual("play_sound", result.Action);
-            Assert.IsTrue(executor.LastCommandJson.Contains("play_sound"));
         }
 
         [Test]

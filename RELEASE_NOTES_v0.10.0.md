@@ -27,6 +27,8 @@
 | `reload_scene` | Перезагрузить сцену | — |
 | `bind_by_name` | Привязать по имени | `targetName`, `instanceId` |
 | `set_active` | Включить/выключить | `instanceId` или `targetName` |
+| `play_animation` | Проиграть анимацию | `instanceId` или `targetName`, `stringValue` |
+| `list_animations` | Получить список анимаций | `instanceId` или `targetName` |
 | `show_text` | Показать текст | `targetName`, `stringValue` |
 | `apply_force` | Применить силу | `instanceId` или `targetName`, `x`, `y`, `z` |
 | `spawn_particles` | Создать частицы | `instanceId` или `targetName`, `stringValue` |
@@ -38,11 +40,16 @@
   - Поддержка поиска по имени (search pattern)
 - ✅ **`targetName` для всех команд** — работа с объектами по имени (альтернатива instanceId)
   - Сначала ищет в `_instances` по instanceId, затем `GameObject.Find` по targetName
+- ✅ **`play_animation`** — проиграть анимацию на объекте
+  - Поддержка Animator (Mecanim) и Legacy Animation компонентов
+  - Использует `Animator.runtimeAnimatorController.animationClips` для получения списка анимаций
+- ✅ **`list_animations`** — получить список доступных анимаций объекта
+  - Возвращает все AnimationClips из AnimatorController
+  - Поиск объекта по `instanceId` или `targetName`
 
 #### Удалённые инструменты
 
-- ❌ **`play_sound`** — удалён (будет переделан через абстрактный интерфейс)
-- ❌ **`play_animation`** — удалён (будет переделан через абстрактный интерфейс)
+- ❌ **`play_sound`** — удалён (будет переделан через абстрактный интерфейс `IAudioController`)
 
 ### Architecture: Engine-Agnostic Pattern
 

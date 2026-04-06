@@ -9,12 +9,18 @@
   - `IWorldCommandExecutor` — абстрактный интерфейс в **CoreAI** (движок-независимый)
   - `WorldTool.cs` — AIFunction для MEAI function calling (в CoreAiUnity)
   - `WorldLlmTool.cs` — ILlmTool обёртка (в CoreAiUnity)
-  - Поддерживаемые actions: `spawn`, `move`, `destroy`, `load_scene`, `reload_scene`, `bind_by_name`, `set_active`, `show_text`, `apply_force`, `spawn_particles`, `list_objects`
+  - Поддерживаемые actions: `spawn`, `move`, `destroy`, `load_scene`, `reload_scene`, `bind_by_name`, `set_active`, `play_animation`, `show_text`, `apply_force`, `spawn_particles`, `list_objects`
 - **`list_objects` action** — получить список всех объектов в иерархии сцены
   - Возвращает имя, позицию, активность, тег, слой, количество детей
   - Поддержка поиска по имени (search pattern)
+- **`play_animation` action** — проиграть анимацию на объекте (поддержка Animator и Animation)
+  - Использует `Animator.runtimeAnimatorController.animationClips` для получения списка анимаций
+  - Поддержка Animator (Mecanim) и Legacy Animation компонентов
+- **`list_animations` action** — получить список доступных анимаций объекта
+  - Возвращает все AnimationClips из AnimatorController
+  - Поиск объекта по `instanceId` или `targetName`
 - **`targetName` для всех commands** — работа с объектами по имени (альтернатива instanceId)
-  - move, destroy, set_active, play_animation, play_sound, apply_force, spawn_particles
+  - move, destroy, set_active, play_animation, apply_force, spawn_particles
   - Сначала ищет в _instances по instanceId, затем GameObject.Find по targetName
 - `WorldToolEditModeTests.cs` — EditMode тесты для WorldTool
 - `WorldCommandPlayModeTests.cs` — PlayMode тесты для world command tool calling
