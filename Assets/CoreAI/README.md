@@ -4,7 +4,7 @@
 
 | Версия | Unity | Статус |
 |--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.7.0 — [CHANGELOG](CHANGELOG.md) |
+| См. `package.json` | `6000.0+` | ✅ v0.9.0 — [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -17,6 +17,7 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember customer purchases.")
     .WithTool(new InventoryLlmTool(myInventory))  // Знает свой ассортимент
     .WithMemory()                                  // Помнит что купил игрок
+    .WithChatHistory()                             // Помнит контекст разговора (8192 токена)
     .WithMode(AgentMode.ToolsAndChat)              // Вызывает инструменты + отвечает
     .Build();
 ```
@@ -201,10 +202,12 @@ What catches your eye?"
 
 | Документ | Что внутри |
 |----------|-----------|
-| 🏗️ [AGENT_BUILDER.md](Docs/AGENT_BUILDER.md) | Конструктор агентов, режимы, инструменты |
+| 🏗️ [AGENT_BUILDER.md](Docs/AGENT_BUILDER.md) | Конструктор агентов, режимы, ChatHistory |
+| 🛠️ [MEAI_TOOL_CALLING.md](Docs/MEAI_TOOL_CALLING.md) | Архитектура MEAI pipeline |
 | 🔧 [TOOL_CALL_SPEC.md](../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спецификация tool calling |
 | 🛒 [CHAT_TOOL_CALLING.md](../CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC с инвентарём |
 | 🧠 [MemorySystem.md](../CoreAiUnity/Docs/MemorySystem.md) | Память и ChatHistory |
+| ⚙️ [COREAI_SETTINGS.md](../CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
 | 🗺️ [DEVELOPER_GUIDE.md](../CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, архитектура |
 | 🤖 [AI_AGENT_ROLES.md](../CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли агентов и промпты |
 | 📋 [CHANGELOG.md](CHANGELOG.md) | Все изменения по версиям |
@@ -215,7 +218,7 @@ What catches your eye?"
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode (191 тестов) — быстрые, без LLM
+  ├── EditMode (215+ тестов) — быстрые, без LLM
   └── PlayMode (12 тестов) — с реальной LLM
 ```
 

@@ -48,7 +48,33 @@
 - ✅ **PlayMode тесты** — все используют CoreAISettingsAsset через фабрику (`TryCreate(null, ...)`)
 - ✅ **PlayModeLlmUnityTestHarness** — читает GGUF из CoreAISettingsAsset
 - ✅ Тесты robust для обоих бэкендов (LLMUnity и HTTP API)
-- ✅ Тесты robust для обоих бэкендов (LLMUnity и HTTP API)
+
+### EditMode тесты (v0.9.0)
+
+| Файл | Тестов | Что проверяет |
+|------|--------|--------------|
+| `CoreAISettingsAssetEditModeTests.cs` | 7 | Настройки, бэкенды, синглтон, кастомный ответ |
+| `AgentBuilderChatHistoryEditModeTests.cs` | 7 | WithChatHistory, ContextWindowTokens, Persist |
+| `OfflineLlmClientEditModeTests.cs` | 5 | Заглушка по ролям, кастомный ответ |
+| `MeaiLlmClientEditModeTests.cs` | 4 | Фабричные методы, AIFunction |
+| `OpenAiChatLlmClientEditModeTests.cs` | 5 | Фабрика HTTP, конструкторы, ошибка подключения |
+
+**Итого новых EditMode тестов в v0.9.0: 28**
+
+### PlayMode тесты (v0.9.0)
+
+| Файл | Тестов | Что проверяет |
+|------|--------|--------------|
+| `MeaiLlmClientPlayModeTests.cs` | 3 | CreateHttp, CreateLlmUnity, null аргументы |
+| `AllToolCallsPlayModeTests.cs` | 3 | Обновлены под новый MeaiLlmClient |
+| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | Использует CoreAISettingsAsset |
+| `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | Использует CoreAISettingsAsset |
+| `MultiAgentCraftingWorkflowPlayModeTests.cs` | 2 | Использует CoreAISettingsAsset |
+| `CustomAgentsPlayModeTests.cs` | 3 | Использует CoreAISettingsAsset |
+| `ChatWithToolCallingPlayModeTests.cs` | 1 | Использует CoreAISettingsAsset |
+| `SharedLlmUnity.cs` | 1 | Глобальный клиент из настроек |
+
+**Итого новых PlayMode тестов в v0.9.0: 16**
 
 ### Доступные настройки через CoreAISettingsAsset
 

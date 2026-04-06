@@ -1,33 +1,31 @@
 {
-  "name": "CoreAI.Tests",
-  "rootNamespace": "CoreAI.Tests",
-  "references": [
-    "CoreAI.Core",
-    "CoreAI.ExampleGame",
-    "CoreAI.Source",
-    "CoreAI.Authority",
-    "CoreAI.Metrics",
-    "CoreAI.Prompts",
-    "MoonSharp.Interpreter",
-    "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner",
-    "VContainer"
-  ],
-  "includePlatforms": [
-    "Editor"
-  ],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "nunit.framework.dll",
-    "Microsoft.Extensions.AI.Abstractions.dll",
-    "Newtonsoft.Json.dll"
-  ],
-  "autoReferenced": false,
-  "defineConstraints": [
-    "UNITY_INCLUDE_TESTS"
-  ],
-  "versionDefines": [],
-  "noEngineReferences": false
+    "name": "CoreAI.Tests",
+    "rootNamespace": "CoreAI.Tests",
+    "references": [
+        "CoreAI.Core",
+        "CoreAI.ExampleGame",
+        "CoreAI.Source",
+        "MoonSharp.Interpreter",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "VContainer",
+        "undream.llmunity.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Microsoft.Extensions.AI.Abstractions.dll",
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

@@ -103,7 +103,7 @@ The repository consists of **two packages**:
 | Package | What's inside | Dependencies |
 |---------|--------------|--------------|
 | **[com.nexoider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
-| **[com.nexoider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MessagePipe, tests | Depends on `coreai` |
+| **[com.nexoider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MEAI, MessagePipe, tests | Depends on `coreai` |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -174,12 +174,14 @@ var storyteller = new AgentBuilder("Storyteller")
 | Document | What's inside |
 |----------|--------------|
 | 📖 [CoreAI README](Assets/CoreAI/README.md) | General overview + AgentBuilder |
-| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Agent builder guide |
+| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Agent builder guide + ChatHistory |
 | 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Tool calling specification |
 | 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC with inventory |
 | 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Agent memory system |
 | 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, architecture |
 | 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Agent roles and prompts |
+| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
+| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline architecture |
 | 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | Version history |
 
 ---
@@ -188,7 +190,12 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode — 191 tests (fast, no LLM)
+  ├── EditMode — 215+ tests (fast, no LLM)
+  │   ├── CoreAISettingsAssetEditModeTests (7)
+  │   ├── AgentBuilderChatHistoryEditModeTests (7)
+  │   ├── OfflineLlmClientEditModeTests (5)
+  │   ├── MeaiLlmClientEditModeTests (4)
+  │   └── ... (other tests)
   └── PlayMode — 12+ tests (with real LLM)
 ```
 
