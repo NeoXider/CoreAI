@@ -101,11 +101,7 @@ namespace CoreAI.Infrastructure.Llm
             var aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
             var functionClient = new MEAI.FunctionInvokingChatClient(_innerClient, NullLoggerFactory.Instance)
             {
-                // Ограничиваем число итераций tool calling:
-                // - Модель может вызывать несколько РАЗНЫХ tools подряд (memory → inventory → etc)
-                // - Но если модель зацикливает ОДИН И ТОТ ЖЕ tool - прерываем
-                // - 3 последовательных ошибки = останавливаем
-                MaximumIterationsPerRequest = 3
+                MaximumIterationsPerRequest = CoreAI.CoreAISettings.MaxToolCallIterations
             };
 
             var chatMessages = new List<MEAI.ChatMessage>
@@ -113,6 +109,18 @@ namespace CoreAI.Infrastructure.Llm
                 new(MEAI.ChatRole.System, request.SystemPrompt ?? ""),
                 new(MEAI.ChatRole.User, request.UserPayload ?? "")
             };
+
+            // Логируем начальный промпт для отладки tool calling
+            _logger.LogInfo(GameLogFeature.Llm,
+                $"MeaiLlmClient: Initial prompt (system={chatMessages[0].Contents?.Count ?? 0} parts, user={chatMessages[1].Contents?.Count ?? 0} parts)");
+
+            if (aiTools.Count > 0)
+            {
+                foreach (var tool in aiTools)
+                {
+                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Tool: {tool.Name}");
+                }
+            }
 
             var chatOptions = new MEAI.ChatOptions
             {
@@ -124,12 +132,27 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatResponse response;
             try
             {
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Calling GetResponseAsync with {chatMessages.Count} messages, {aiTools.Count} tools");
                 response = await functionClient.GetResponseAsync(chatMessages, chatOptions, cancellationToken);
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }
             catch (Exception ex)
             {
                 _logger.LogError(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
                 return new LlmCompletionResult { Ok = false, Error = ex.Message };
+            }
+
+            // Логируем все сообщения в ответе для отладки tool calling
+            if (response.Messages != null)
+            {
+                foreach (var msg in response.Messages)
+                {
+                    var role = msg.Role.ToString();
+                    var content = msg.Contents != null
+                        ? string.Join(" | ", msg.Contents.Select(c => c.ToString()))
+                        : "(empty)";
+                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Response message role={role}, content={content.Substring(0, System.Math.Min(200, content.Length))}...");
+                }
             }
 
             // Логируем результат tool calling если включено

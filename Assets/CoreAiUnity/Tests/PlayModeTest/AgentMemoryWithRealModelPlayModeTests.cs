@@ -31,7 +31,7 @@ namespace CoreAI.Tests.PlayMode
             var t1 = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Use the 'memory' tool to write this exact content: 'remember: apples'. Call the memory tool with action='write' and content='remember: apples'."
+                Hint = "IMPORTANT: Use the 'memory' tool to write data. DO NOT output JSON. CALL the memory tool now with action='write' and content='remember: apples'."
             });
             yield return setup.RunAndWait(t1, 300f, "creator memory write");
 

@@ -60,5 +60,30 @@ namespace CoreAI
         /// Синхронизируется из CoreAISettingsAsset при старте.
         /// </summary>
         public static int ContextWindowTokens { get; set; } = 8192;
+
+        /// <summary>
+        /// Универсальный стартовый системный промпт — идёт ПЕРЕД промптом каждого агента.
+        /// Задаёт общие правила для всех моделей: формат вывода, ограничения, стиль.
+        /// По умолчанию: пустой (отключён). Добавляется в начало системного промпта каждого агента.
+        /// </summary>
+        /// <example>
+        /// CoreAISettings.UniversalSystemPromptPrefix = 
+        ///     "You are an AI agent in a Unity game. Always respond in the expected format. " +
+        ///     "Never break character. Use tools when appropriate.";
+        /// </example>
+        public static string UniversalSystemPromptPrefix { get; set; } = "";
+
+        /// <summary>
+        /// Общая температура генерации для всех агентов.
+        /// 0.0 = детерминировано (максимально предсказуемо), 2.0 = максимально случайно.
+        /// По умолчанию: 0.1. Можно переопределить на уровне агента через AgentBuilder.WithTemperature().
+        /// </summary>
+        public static float Temperature { get; set; } = 0.1f;
+
+        /// <summary>
+        /// Максимум итераций tool calling за один запрос (сколько раз модель может вызвать инструменты подряд).
+        /// По умолчанию: 2. Можно менять до инициализации.
+        /// </summary>
+        public static int MaxToolCallIterations { get; set; } = 2;
     }
 }

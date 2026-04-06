@@ -27,8 +27,8 @@ namespace CoreAI.Tests.PlayMode
             var settings = CoreAISettingsAsset.Instance;
             if (settings != null)
             {
-                bool oldDebug = settings.EnableHttpDebugLogging;
                 settings.GetType().GetField("enableHttpDebugLogging", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
+                settings.GetType().GetField("logLlmInput", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
             }
 
             Debug.Log($"[MemoryTest] Backend: {setup.BackendName}, writing memory...");
@@ -68,7 +68,7 @@ namespace CoreAI.Tests.PlayMode
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Append to memory: 'appended value'. Use: {\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"appended value\"}}"
+                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='append' and content='appended value'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory append");
@@ -105,7 +105,7 @@ namespace CoreAI.Tests.PlayMode
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Clear all memory. Use: {\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}"
+                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='clear'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory clear");

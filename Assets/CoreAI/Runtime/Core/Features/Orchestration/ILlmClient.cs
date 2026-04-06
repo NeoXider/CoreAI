@@ -28,8 +28,8 @@ namespace CoreAI.Ai
         /// <summary>Опциональный лимит токенов ответа модели.</summary>
         public int? MaxOutputTokens { get; set; }
 
-        /// <summary>Температура генерации (по умолчанию 0.2).</summary>
-        public float Temperature { get; set; } = 0.2f;
+        /// <summary>Температура генерации (по умолчанию 0.1, переопределяется на уровне агента).</summary>
+        public float Temperature { get; set; } = 0.1f;
 
         /// <summary>Инструменты (tools), доступные модели для вызова.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }

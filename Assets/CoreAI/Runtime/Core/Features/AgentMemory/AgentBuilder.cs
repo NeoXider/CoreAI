@@ -45,6 +45,7 @@ namespace CoreAI.Ai
         private bool _withChatHistory;
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
+        private float? _temperature;
 
         public AgentBuilder(string roleId)
         {
@@ -129,6 +130,22 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Установить температуру генерации для конкретного агента.
+        /// Переопределяет общую температуру из CoreAISettings.Temperature.
+        /// <para>0.0 = детерминировано, 1.0 = креативно, 2.0 = максимально случайно.</para>
+        /// </summary>
+        /// <example>
+        /// .WithTemperature(0.0f)   // Для строгого JSON/кода
+        /// .WithTemperature(0.3f)   // Для NPC диалогов
+        /// .WithTemperature(0.8f)   // Для творческих задач
+        /// </example>
+        public AgentBuilder WithTemperature(float temperature)
+        {
+            _temperature = temperature;
+            return this;
+        }
+
+        /// <summary>
         /// Сконфигурировать агента в политике.
         /// </summary>
         public AgentConfig Build()
@@ -136,15 +153,27 @@ namespace CoreAI.Ai
             // Размер контекста: 0 → минимальный, null → из CoreAISettings, явно → использовать явно
             int ctxTokens = _contextWindowTokens ?? CoreAI.CoreAISettings.ContextWindowTokens;
 
+            // Температура: null → из CoreAISettings, явно → использовать явно
+            float temp = _temperature ?? CoreAI.CoreAISettings.Temperature;
+
+            // Применяем универсальный префикс к системному промпту
+            string finalPrompt = _systemPrompt;
+            string prefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
+            if (!string.IsNullOrWhiteSpace(prefix) && !string.IsNullOrWhiteSpace(finalPrompt))
+            {
+                finalPrompt = prefix.TrimEnd() + " " + finalPrompt;
+            }
+
             return new AgentConfig
             {
                 RoleId = _roleId,
-                SystemPrompt = _systemPrompt,
+                SystemPrompt = finalPrompt,
                 Tools = new List<ILlmTool>(_tools),
                 Mode = _mode,
                 WithChatHistory = _withChatHistory,
                 ContextWindowTokens = ctxTokens,
-                PersistChatHistoryBetweenSessions = _persistChatHistory
+                PersistChatHistoryBetweenSessions = _persistChatHistory,
+                Temperature = temp
             };
         }
     }
@@ -161,6 +190,7 @@ namespace CoreAI.Ai
         public bool WithChatHistory { get; internal set; }
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
+        public float Temperature { get; internal set; }
 
         /// <summary>
         /// Применить конфигурацию к политике.

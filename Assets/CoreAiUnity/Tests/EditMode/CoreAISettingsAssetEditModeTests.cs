@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
             Assert.AreEqual("", settings.ApiKey);
             Assert.AreEqual("gpt-4o-mini", settings.ModelName);
-            Assert.AreEqual(0.2f, settings.Temperature);
+            Assert.AreEqual(0.1f, settings.Temperature);
             Assert.AreEqual(4096, settings.MaxTokens);
             Assert.AreEqual(120, settings.RequestTimeoutSeconds);
             Assert.AreEqual("", settings.LlmUnityAgentName);
@@ -33,6 +33,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.LlmUnityKeepAlive);
             Assert.AreEqual(1, settings.LlmUnityMaxConcurrentChats);
             Assert.AreEqual(3, settings.MaxLuaRepairGenerations);
+            Assert.AreEqual(2, settings.MaxToolCallIterations);
             Assert.AreEqual(3, settings.MaxToolCallRetries);
             Assert.AreEqual(8192, settings.ContextWindowTokens);
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);

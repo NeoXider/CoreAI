@@ -76,7 +76,7 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
 
 ### 🔄 Tool Call Retry — AI Learns from Mistakes
 
-Small models (Qwen3.5-0.8B) sometimes forget the format. CoreAI automatically gives **3 retries** + checks fenced Lua blocks immediately.
+Small models (Qwen3.5-2B) sometimes forget the format. CoreAI automatically gives **3 retries** + checks fenced Lua blocks immediately.
 
 ---
 
@@ -88,11 +88,9 @@ Small models (Qwen3.5-0.8B) sometimes forget the format. CoreAI automatically gi
 | **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Excellent | **Ideal** via API — fast & accurate |
 | **LM Studio / OpenAI API** | Any | ✅ Excellent | External models via HTTP — best choice |
 | Qwen3.5-2B | 2B | ⚠️ Works | Minimal, but may make mistakes |
-| Qwen3.5-0.8B | 0.8B | ❌ Unstable | Tests only, tool call unreliable |
 
 > 💡 **Recommendation: Qwen3.5-4B locally or Qwen3.5-35B (MoE) via API**  
-> MoE models (Mixture of Experts) activate only 3B parameters per inference — fast as 4B, accurate as 35B.  
-> Models under 2B (0.8B) often can't generate proper tool calls and just echo input text.
+> MoE models (Mixture of Experts) activate only 3B parameters per inference — fast as 4B, accurate as 35B.
 
 ---
 

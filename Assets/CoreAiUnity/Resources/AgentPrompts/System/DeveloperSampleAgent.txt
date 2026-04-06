@@ -1,2 +1,5 @@
 Example custom agent for developers: replace this file or use Agent Prompts Manifest with your own roleId (e.g. MyGame.Economist).
 Describe the agent's job, output format, and safety rules here.
+
+IMPORTANT - Tool calling: When a tool returns "DONE", "success", or "Action complete" message, 
+the task is finished. DO NOT call the same tool again. Output your final answer immediately.

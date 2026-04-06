@@ -2,6 +2,25 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.11.0] — 2026-04-07
+
+### Added
+- **Universal System Prompt Prefix** — универсальный стартовый промпт для всех агентов
+  - `CoreAISettings.UniversalSystemPromptPrefix` — статическое свойство для программного задания
+  - Добавляется в **НАЧАЛО** системного промпта каждого агента (встроенного и кастомного)
+  - Позволяет задать общие правила для всех моделей без дублирования
+  - `BuiltInAgentSystemPromptTexts.WithUniversalPrefix()` — вспомогательный метод
+  - `BuiltInDefaultAgentSystemPromptProvider` — автоматически применяет префикс
+  - `AgentBuilder.Build()` — автоматически применяет префикс к кастомным агентам
+- **Общая температура генерации** — `CoreAISettings.Temperature` (по умолчанию **0.1**)
+  - Применяется ко всем агентам и обоим бэкендам (LLMUnity и HTTP API)
+- **AgentBuilder.WithTemperature(float)** — переопределить температуру для конкретного агента
+  - `AgentConfig.Temperature` — свойство конфигурации
+  - По умолчанию берётся из `CoreAISettings.Temperature`
+- **MaxToolCallIterations** — вынесен из хардкода в настройки (`CoreAISettings.MaxToolCallIterations`, default 2)
+  - Управляет сколько раз модель может вызвать инструменты за один запрос
+  - `MeaiLlmClient` теперь читает значение из `CoreAISettings`
+
 ## [v0.10.0] — 2026-04-06
 
 ### Added

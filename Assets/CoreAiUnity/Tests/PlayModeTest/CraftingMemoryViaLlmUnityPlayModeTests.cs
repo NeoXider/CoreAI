@@ -16,9 +16,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тест крафта с памятью — LLMUnity (локальная GGUF модель).
-    /// Полный воркфлоу: Крафт → Память → Проверка → Новый крафт без повторов.
-    /// С подробным логированием запросов и ответов модели.
+    /// PlayMode тест крафта с памятью — проверяет что модель использует инструмент memory
+    /// для сохранения состояния между вызовами. Тест НЕ передаёт предыдущие крафты в промпт,
+    /// модель должна сама сохранять и читать память через инструмент.
     /// </summary>
 #if !COREAI_NO_LLM
     public sealed class CraftingMemoryViaLlmUnityPlayModeTests
@@ -35,6 +35,7 @@ namespace CoreAI.Tests.PlayMode
             public void Save(string roleId, AgentMemoryState state)
             {
                 States[roleId] = state;
+                Debug.Log($"[InMemoryStore] Saved for {roleId}: {state.Memory}");
             }
 
             public void Clear(string roleId)
@@ -66,7 +67,7 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>
         /// Полный воркфлоу крафта через LLMUnity: 3 итерации, AI запоминает каждый крафт
-        /// и должен создавать уникальные предметы.
+        /// через инструмент memory и должен создавать уникальные предметы.
         /// </summary>
         [UnityTest]
         [Timeout(2400000)]
@@ -100,18 +101,16 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                // Обернуть клиент с правильным MemoryStore
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
                 List<string> craftedNames = new();
-                string memoryAccum = "";
 
                 // ===== КРАФТ 1: Iron + Oak =====
                 {
                     string prompt = BuildCraftPrompt(1,
                         "Iron (metal, hardness:60, magic:5, rarity:1)",
                         "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
-                        memoryAccum);
+                        store);
 
                     LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
 
@@ -127,7 +126,15 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
 
                     LogAfterModelCall("craft 1", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1"))
+
+                    // Проверяем что модель записала в память
+                    if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) ||
+                        string.IsNullOrWhiteSpace(mem.Memory))
+                    {
+                        Debug.LogWarning("[CraftingMemory.LLMUnity] ⚠ Model did NOT write to memory after craft 1!");
+                    }
+
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1"))
                     {
                         yield break;
                     }
@@ -138,7 +145,7 @@ namespace CoreAI.Tests.PlayMode
                     string prompt = BuildCraftPrompt(2,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        memoryAccum);
+                        store);
 
                     LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
 
@@ -154,7 +161,8 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
 
                     LogAfterModelCall("craft 2", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2"))
+
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 2"))
                     {
                         yield break;
                     }
@@ -165,7 +173,7 @@ namespace CoreAI.Tests.PlayMode
                     string prompt = BuildCraftPrompt(3,
                         "Mithril (metal, hardness:70, magic:60, rarity:4)",
                         "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
-                        memoryAccum);
+                        store);
 
                     LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
 
@@ -181,7 +189,8 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
 
                     LogAfterModelCall("craft 3", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3"))
+
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 3"))
                     {
                         yield break;
                     }
@@ -192,7 +201,7 @@ namespace CoreAI.Tests.PlayMode
                     string prompt = BuildDeterministicCraftPrompt(4,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        memoryAccum);
+                        store);
 
                     LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2 — DETERMINISM CHECK)", prompt,
                         store);
@@ -210,15 +219,13 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 4 (determinism)", sink, store);
 
-                    // Проверяем детерминизм: модель должна повторить имя крафта #2
-                    string craft2Name = craftedNames[1]; // Steel+Hardwood из крафта #2
+                    string craft2Name = craftedNames[1];
                     if (sink.Items.Count > 0)
                     {
                         string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(sink.Items[0].JsonPayload);
                         Debug.Log(
                             $"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
 
-                        // Модель должна либо повторить имя, либо явно сослаться на предыдущий крафт
                         bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
                                                craft4Name.ToLowerInvariant() == craft2Name.ToLowerInvariant();
 
@@ -234,7 +241,7 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 4"))
                     {
                         yield break;
                     }
@@ -260,7 +267,13 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log(
                     $"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
                     $"→ {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? "✓ SAME" : "⚠ DIFFERENT")}");
-                Debug.Log($"[CraftingMemory.LLMUnity] Full memory history:\n{memoryAccum}");
+
+                // Проверяем финальное состояние памяти
+                if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))
+                {
+                    Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
+                }
+
                 Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
                 Debug.Log("[CraftingMemory.LLMUnity] ═══ TEST PASSED ═══");
                 Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
@@ -292,13 +305,22 @@ namespace CoreAI.Tests.PlayMode
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
-            string previousCrafts)
+            InMemoryStore store)
         {
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
-            string memorySection = string.IsNullOrEmpty(previousCrafts)
+
+            // Читаем память из store — это то, что модель должна была сохранить
+            string memoryFromStore = "";
+            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
+                !string.IsNullOrWhiteSpace(mem.Memory))
+            {
+                memoryFromStore = mem.Memory;
+            }
+
+            string memorySection = string.IsNullOrEmpty(memoryFromStore)
                 ? "This is your first craft. No previous crafts to check.\n\n"
-                : $"YOUR MEMORY (previous crafts):\n{previousCrafts}\n\n" +
+                : $"YOUR MEMORY (previous crafts):\n{memoryFromStore}\n\n" +
                   "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
@@ -316,13 +338,21 @@ namespace CoreAI.Tests.PlayMode
         }
 
         private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
-            string previousCrafts)
+            InMemoryStore store)
         {
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
-            string memorySection = string.IsNullOrEmpty(previousCrafts)
+
+            string memoryFromStore = "";
+            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
+                !string.IsNullOrWhiteSpace(mem.Memory))
+            {
+                memoryFromStore = mem.Memory;
+            }
+
+            string memorySection = string.IsNullOrEmpty(memoryFromStore)
                 ? "This is your first craft.\n\n"
-                : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
+                : $"YOUR MEMORY (ALL previous crafts):\n{memoryFromStore}\n\n";
 
             string instructions = "IMPORTANT: These EXACT ingredients were used before (see memory above).\n" +
                                   "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
@@ -348,7 +378,6 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[CraftingMemory.LLMUnity] │ 📤 SENDING TO MODEL: {label}");
             Debug.Log($"[CraftingMemory.LLMUnity] ├─────────────────────────────────────────");
 
-            // Логируем память, которую видит модель
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
@@ -382,7 +411,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.LLMUnity] │ ❌ NO COMMAND produced");
             }
 
-            // Логируем память после ответа
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
@@ -400,7 +428,6 @@ namespace CoreAI.Tests.PlayMode
             ListSink sink,
             InMemoryStore store,
             List<string> craftedNames,
-            ref string memoryAccum,
             string label)
         {
             if (sink.Items.Count == 0)
@@ -411,7 +438,6 @@ namespace CoreAI.Tests.PlayMode
 
             string payload = sink.Items[0].JsonPayload;
 
-            // Извлекаем имя предмета
             string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
             if (string.IsNullOrEmpty(itemName))
             {
@@ -420,16 +446,6 @@ namespace CoreAI.Tests.PlayMode
             }
 
             craftedNames.Add(itemName);
-            memoryAccum += $"{itemName}, ";
-
-            // Обновляем память
-            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState existing))
-            {
-                store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState
-                {
-                    Memory = existing.Memory + $" | New: {itemName}"
-                });
-            }
 
             Debug.Log($"[{label}] ✓ Crafted: '{itemName}'");
             return true;

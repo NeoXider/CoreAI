@@ -101,9 +101,12 @@ namespace CoreAI.Composition
                 
                 // Синхронизируем статические CoreAISettings с asset
                 CoreAI.CoreAISettings.MaxLuaRepairGenerations = settings.MaxLuaRepairGenerations;
+                CoreAI.CoreAISettings.MaxToolCallIterations = settings.MaxToolCallIterations;
                 CoreAI.CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
                 CoreAI.CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
                 CoreAI.CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;
+                CoreAI.CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
+                CoreAI.CoreAISettings.Temperature = settings.Temperature;
                 if (settings.RequestTimeoutSeconds > 0)
                 {
                     CoreAI.CoreAISettings.LlmRequestTimeoutSeconds = settings.RequestTimeoutSeconds;

@@ -1,4 +1,4 @@
-# 📋 Tool Calling Specification v0.10.0
+# 📋 Tool Calling Specification v0.11.0
 
 ## Единый формат MEAI Tool Calls
 
@@ -7,6 +7,25 @@
 ```json
 {"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}
 ```
+
+## Температура генерации
+
+**Общая температура:** `CoreAISettings.Temperature` (по умолчанию **0.1**). Применяется ко всем агентам.
+
+**Переопределение на уровне агента:**
+```csharp
+var agent = new AgentBuilder("Creator")
+    .WithSystemPrompt("...")
+    .WithTemperature(0.0f)  // Строгий JSON
+    .Build();
+```
+
+| Значение | Когда использовать |
+|----------|-------------------|
+| `0.0` | Строгий JSON, код, математика |
+| `0.1` | **По умолчанию** — tool calling |
+| `0.3` | NPC диалоги |
+| `0.7+` | Креативные задачи |
 
 ## 🏗️ Архитектура: Engine-Agnostic Pattern
 
@@ -264,7 +283,6 @@ AiOrchestrator → MeaiLlmUnityClient → FunctionInvokingChatClient
 | **Qwen3.5-4B** | 4B | ✅ Отлично | **Рекомендуемая** для локального запуска |
 | **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Превосходно | **Идеально** через API — быстро и точно |
 | Qwen3.5-2B | 2B | ⚠️ Работает | Минимальная, но может ошибаться |
-| Qwen3.5-0.8B | 0.8B | ❌ Нестабильно | Только тесты |
 
 > 💡 **Рекомендация: Qwen3.5-4B локально или Qwen3.5-35B (MoE) через API**  
 > MoE-модели (Mixture of Experts) активируют только 3B параметров при инференсе — быстрые как 4B, точные как 35B.
@@ -278,6 +296,37 @@ AiOrchestrator → MeaiLlmUnityClient → FunctionInvokingChatClient
 - `AllToolCallsPlayModeTests.cs` - Memory tool + Execute Lua
 - `ChatWithToolCallingPlayModeTests.cs` - Chat Agent + Inventory tool
 - `CraftingMemoryViaLlmUnityPlayModeTests.cs` - Полный workflow крафта
+
+## Системные промпты
+
+### Universal System Prompt Prefix (v0.11.0+)
+
+CoreAI поддерживает **универсальный стартовый промпт** — текст, который добавляется в **НАЧАЛО** системного промпта каждого агента. Это позволяет задать общие правила для всех моделей без дублирования в каждом промпте.
+
+**Структура системного промпта:**
+```
+[Universal Prefix] + [Agent-Specific Prompt]
+```
+
+**Пример:**
+```yaml
+# Universal Prefix (общий для всех):
+"You are an AI agent in a game. Always stay in character."
+
+# Agent-Specific Prompt (для Programmer):
+"You are the Programmer agent for CoreAI MoonSharp sandbox..."
+
+# Итоговый промпт (автоматически):
+"You are an AI agent in a game. Always stay in character. You are the Programmer agent..."
+```
+
+**Как настроить:**
+- **Inspector:** CoreAISettings → "⚙️ Общие настройки" → Universal System Prompt Prefix
+- **Код:** `CoreAISettings.UniversalSystemPromptPrefix = "..."`
+
+> Префикс применяется ко **всем** агентам: встроенным (Creator, Programmer, Analyzer...) и кастомным (через AgentBuilder).
+
+---
 
 ## Breaking Changes v0.7.0
 

@@ -61,7 +61,7 @@ namespace CoreAI.Ai
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"Memory written successfully for role: {_roleId}"
+                            Message = $"DONE: Memory saved for {_roleId}. Action complete, no further calls needed."
                         });
 
                     case "append":
@@ -94,7 +94,7 @@ namespace CoreAI.Ai
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"Content appended to memory for role: {_roleId}"
+                            Message = $"DONE: Content appended to memory for {_roleId}. Action complete, no further calls needed."
                         });
 
                     case "clear":
@@ -102,7 +102,7 @@ namespace CoreAI.Ai
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"Memory cleared for role: {_roleId}"
+                            Message = $"DONE: Memory cleared for {_roleId}. Action complete, no further calls needed."
                         });
 
                     default:

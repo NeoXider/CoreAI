@@ -90,10 +90,10 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string modelName = "gpt-4o-mini";
 
-        [Tooltip("Температура генерации: 0.0 — детерминировано, 2.0 — максимально случайно.")]
+        [Tooltip("Температура генерации: 0.0 — детерминировано, 2.0 — максимально случайно. Общая для всех агентов.")]
         [SerializeField]
         [Range(0f, 2f)]
-        private float temperature = 0.2f;
+        private float temperature = 0.1f;
 
         [Tooltip("Максимум токенов в ответе. 0 = без лимита.")]
         [SerializeField]
@@ -137,10 +137,20 @@ namespace CoreAI.Infrastructure.Llm
         private int llmUnityMaxConcurrentChats = 1;
 
         [Header("⚙️ Общие настройки")]
+        [Tooltip("Универсальный стартовый промпт — идёт ПЕРЕД промптом каждого агента. Задаёт общие правила для всех моделей.")]
+        [TextArea(3, 6)]
+        [SerializeField]
+        private string universalSystemPromptPrefix = "";
+
         [Tooltip("Максимум автоматических повторов Programmer при ошибке Lua.")]
         [SerializeField]
         [Min(1)]
         private int maxLuaRepairGenerations = 3;
+
+        [Tooltip("Максимум итераций tool calling за один запрос (сколько раз модель может вызвать инструменты подряд).")]
+        [SerializeField]
+        [Min(1)]
+        private int maxToolCallIterations = 2;
 
         [Tooltip("Максимум повторов при неудачном tool call (модель не распознала формат).")]
         [SerializeField]
@@ -309,8 +319,14 @@ namespace CoreAI.Infrastructure.Llm
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
 
         // Общие
+        /// <summary>Универсальный стартовый промпт для всех агентов.</summary>
+        public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";
+
         /// <summary>Максимум повторов Lua repair.</summary>
         public int MaxLuaRepairGenerations => maxLuaRepairGenerations < 1 ? 3 : maxLuaRepairGenerations;
+
+        /// <summary>Максимум итераций tool calling за один запрос.</summary>
+        public int MaxToolCallIterations => maxToolCallIterations < 1 ? 2 : maxToolCallIterations;
 
         /// <summary>Максимум повторов tool call.</summary>
         public int MaxToolCallRetries => maxToolCallRetries < 1 ? 3 : maxToolCallRetries;
@@ -409,6 +425,26 @@ namespace CoreAI.Infrastructure.Llm
             backendType = LlmBackendType.Auto;
         }
 
+        /// <summary>
+        /// Синхронизировать статические CoreAISettings с значениями этого ScriptableObject.
+        /// Вызывается при старте из CoreAILifetimeScope.
+        /// </summary>
+        public void SyncToStaticSettings()
+        {
+            CoreAISettings.MaxLuaRepairGenerations = MaxLuaRepairGenerations;
+            CoreAISettings.MaxToolCallIterations = MaxToolCallIterations;
+            CoreAISettings.MaxToolCallRetries = MaxToolCallRetries;
+            CoreAISettings.EnableMeaiDebugLogging = EnableMeaiDebugLogging;
+            CoreAISettings.LlmRequestTimeoutSeconds = (int)LlmRequestTimeoutSeconds;
+            CoreAISettings.EnableHttpDebugLogging = EnableHttpDebugLogging;
+            CoreAISettings.LogTokenUsage = LogTokenUsage;
+            CoreAISettings.LogLlmLatency = LogLlmLatency;
+            CoreAISettings.LogLlmConnectionErrors = LogLlmConnectionErrors;
+            CoreAISettings.ContextWindowTokens = ContextWindowTokens;
+            CoreAISettings.UniversalSystemPromptPrefix = UniversalSystemPromptPrefix;
+            CoreAISettings.Temperature = Temperature;
+        }
+
         #endregion
 
         #region Unity Editor Helpers
@@ -419,6 +455,7 @@ namespace CoreAI.Infrastructure.Llm
             // Валидация при изменении в Inspector
             if (requestTimeoutSeconds < 0) requestTimeoutSeconds = 120;
             if (maxLuaRepairGenerations < 1) maxLuaRepairGenerations = 3;
+            if (maxToolCallIterations < 1) maxToolCallIterations = 2;
             if (maxToolCallRetries < 1) maxToolCallRetries = 3;
             if (contextWindowTokens < 256) contextWindowTokens = 8192;
             if (maxConcurrentOrchestrations < 1) maxConcurrentOrchestrations = 2;

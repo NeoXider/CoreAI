@@ -2,6 +2,30 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.11.0] - 2026-04-07
+
+### Universal System Prompt Prefix
+
+- ✨ **CoreAISettingsAsset.universalSystemPromptPrefix** — поле в Inspector (секция "⚙️ Общие настройки")
+- ✨ **CoreAISettings.UniversalSystemPromptPrefix** — статическое свойство для программного задания
+- ✨ **SyncToStaticSettings()** — синхронизация при старте из CoreAILifetimeScope
+- ✨ Префикс автоматически применяется ко всем агентам (встроенным и кастомным)
+
+### Temperature (общая для всех бэкендов)
+
+- ✨ **CoreAISettingsAsset.temperature** — изменён default с `0.2` на `0.1`
+- ✨ **CoreAISettings.Temperature** — статическое свойство (по умолчанию `0.1`)
+- ✨ Температура применяется и для LLMUnity, и для HTTP API
+- ✨ **AgentBuilder.WithTemperature(float)** — переопределить температуру для конкретного агента
+- ✨ **AgentConfig.Temperature** — свойство конфигурации
+- ✨ Поле в Inspector: "Temperature" в секции "⚙️ Общие настройки"
+
+### MaxToolCallIterations (вынесен из хардкода)
+
+- ✨ **CoreAISettingsAsset.maxToolCallIterations** — поле в Inspector (default 2)
+- ✨ **CoreAISettings.MaxToolCallIterations** — статическое свойство
+- ✨ **MeaiLlmClient** теперь читает из настроек вместо хардкода `MaximumIterationsPerRequest = 2`
+
 ## [0.7.0] - 2026-04-06
 
 ### Единый MEAI Tool Calling Format (MAJOR)

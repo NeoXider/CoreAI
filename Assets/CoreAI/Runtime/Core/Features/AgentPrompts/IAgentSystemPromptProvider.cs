@@ -49,7 +49,7 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public bool TryGetSystemPrompt(string roleId, out string systemPrompt)
         {
-            systemPrompt = roleId switch
+            string basePrompt = roleId switch
             {
                 BuiltInAgentRoleIds.Creator => BuiltInAgentSystemPromptTexts.Creator,
                 BuiltInAgentRoleIds.Analyzer => BuiltInAgentSystemPromptTexts.Analyzer,
@@ -61,6 +61,7 @@ namespace CoreAI.Ai
                 _ =>
                     $"You are agent \"{roleId}\" in CoreAI. Follow the user message and any session hints; prefer structured output when the game requests it."
             };
+            systemPrompt = BuiltInAgentSystemPromptTexts.WithUniversalPrefix(basePrompt);
             return true;
         }
     }

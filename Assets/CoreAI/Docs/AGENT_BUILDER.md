@@ -258,13 +258,43 @@ var agent = new AgentBuilder("MyAgent")
     .WithSystemPrompt("You are an agent with custom tools.")
     .WithTool(new MyTool())  // ← Добавляем инструмент
     .WithMemory()
-    .WithMode(AgentMode.ToolsAndChat)
-    .Build();
-
-agent.ApplyToPolicy(policy);
 ```
 
-**Шаг 3: Модель вызовет инструмент автоматически**
+### Температура генерации
+
+Температура управляет **креативностью** модели. Общая температура задаётся в `CoreAISettings.Temperature` (по умолчанию **0.1**), но может быть переопределена для конкретного агента.
+
+| Значение | Поведение | Когда использовать |
+|----------|-----------|-------------------|
+| `0.0` | Полностью детерминировано | Строгий JSON, код, математика |
+| `0.1` | Минимальная вариативность | **По умолчанию** — tool calling, крафт |
+| `0.3` | Лёгкая вариативность | NPC диалоги, аналитика |
+| `0.7` | Креативно | Storyteller, генерация контента |
+| `1.0+` | Максимально случайно | Редко, только для творческих задач |
+
+```csharp
+// Агент с низкой температурой (строгий JSON)
+var mechanic = new AgentBuilder("CoreMechanic")
+    .WithSystemPrompt("Calculate crafting stats. Output JSON only.")
+    .WithTemperature(0.0f)  // Всегда детерминированно
+    .Build();
+
+// Агент с обычной температурой (NPC диалог)
+var npc = new AgentBuilder("Guard")
+    .WithSystemPrompt("You are a city guard. Greet players.")
+    .WithTemperature(0.3f)  // Лёгкая вариативность
+    .WithChatHistory()
+    .Build();
+
+// Агент без переопределения — использует общую температуру (0.1)
+var creator = new AgentBuilder("Creator")
+    .WithSystemPrompt("You are the Creator agent...")
+    .Build();  // Temperature = 0.1 из CoreAISettings
+```
+
+> 💡 **Совет:** для tool calling используй `0.0–0.2`. Чем выше температура, тем больше модель может «фантазировать» вместо следования формату.
+
+**Шаг 3: Модель вызовет инструмент когда нужно**
 
 Когда модель решит что нужен твой инструмент, она вернёт:
 ```json
@@ -442,6 +472,7 @@ async Task AskMerchant(string playerMessage)
 | `WithTools(IEnumerable<ILlmTool>)` | Добавить несколько инструментов | `.WithTools(tools)` |
 | `WithMemory(MemoryToolAction)` | Включить память | `.WithMemory()` или `.WithMemory(MemoryToolAction.Write)` |
 | `WithChatHistory()` | Включить историю диалога | `.WithChatHistory()` |
+| `WithTemperature(float)` | Переопределить температуру | `.WithTemperature(0.0f)` |
 | `WithMode(AgentMode)` | Установить режим | `.WithMode(AgentMode.ToolsAndChat)` |
 | `Build()` | Создать AgentConfig | `.Build()` |
 
@@ -450,9 +481,10 @@ async Task AskMerchant(string playerMessage)
 | Свойство | Тип | Описание |
 |----------|-----|----------|
 | `RoleId` | string | Уникальный ID агента |
-| `SystemPrompt` | string | Системный промпт |
+| `SystemPrompt` | string | Системный промпт (с Universal Prefix если задан) |
 | `Tools` | IReadOnlyList<ILlmTool> | Список инструментов |
 | `Mode` | AgentMode | Режим работы |
+| `Temperature` | float | Температура генерации (из CoreAISettings или переопределена) |
 
 ### AgentMode
 
@@ -586,7 +618,6 @@ Attempt 3: Final attempt
 | **Qwen3.5-4B** | 4B | ✅ Отлично | **Рекомендуемая** для локального запуска |
 | **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Превосходно | **Идеально** через API — быстро и точно |
 | Qwen3.5-2B | 2B | ⚠️ Работает | Минимальная, но может ошибаться |
-| Qwen3.5-0.8B | 0.8B | ❌ Нестабильно | Только тесты |
 
 > 💡 **Рекомендация: Qwen3.5-4B локально или Qwen3.5-35B (MoE) через API**  
 > MoE-модели активируют только часть параметров (3B) — быстрые как 4B, точные как 35B.
