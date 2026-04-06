@@ -11,23 +11,54 @@
 - ✅ **Память** — персистентная память агента (write/append/clear)
 - ✅ **История диалогов** — автоматическое сохранение контекста разговора
 - ✅ **Минимум кода** — 3-5 строк на агента
+- ✅ **Единый MEAI pipeline** — одинаковый tool calling для HTTP API и LLMUnity
 
 ---
 
 ## Быстрый старт
 
-### Простой торговец
+### 1. Создай агента
 
 ```csharp
 var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. When player asks to buy, call get_inventory first.")
     .WithTool(new InventoryLlmTool(myInventoryProvider))
-    .WithMemory()  // Персистентная память (что купил игрок)
-    .WithChatHistory()  // История диалога (контекст разговора)
+    .WithMemory()  // Персистентная память
     .WithMode(AgentMode.ToolsAndChat)
     .Build();
 
 merchant.ApplyToPolicy(policy);
+```
+
+### 2. Настрой бэкенд (единые настройки)
+
+```
+Unity → Create → CoreAI → CoreAI Settings
+```
+
+В Inspector выбери **LLM Backend**:
+- **Auto** — автоматически выберет LLMUnity или HTTP API
+- **LlmUnity** — локальная GGUF модель
+- **OpenAiHttp** — HTTP API (LM Studio, OpenAI, Qwen)
+- **Offline** — без модели (заглушка)
+
+### 3. Создай клиент и вызывай
+
+```csharp
+// HTTP API
+var client = MeaiLlmClient.CreateHttp(coreAiSettings, logger, memoryStore);
+
+// LLMUnity (локальная модель)
+var client = MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore);
+
+// Вызов агента
+var result = await client.CompleteAsync(new LlmCompletionRequest
+{
+    AgentRoleId = "Blacksmith",
+    SystemPrompt = merchant.SystemPrompt,
+    UserPayload = "Show me your swords",
+    Tools = merchant.Tools  // ILlmTool[] из AgentBuilder
+});
 ```
 
 ---

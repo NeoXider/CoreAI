@@ -75,9 +75,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[CraftingMemory.LLMUnity] ═══ TEST START ═══");
             Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
 
-            // Создаём LLMUnity клиент через фабрику (как в игре)
+            // Backend из CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.LlmUnity,
+                    null,
                     0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,

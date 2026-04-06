@@ -71,8 +71,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[MultiAgent] ═══ TEST START: Creator → CoreMechanic → Programmer ═══");
             Debug.Log("[MultiAgent] ═══════════════════════════════════════");
 
+            // Backend из CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    null,
                     0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
@@ -294,8 +295,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[MultiAgent.Quick] ═══ TEST START: Creator → CoreMechanic ═══");
             Debug.Log("[MultiAgent.Quick] ═══════════════════════════════════════");
 
+            // Backend из CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    null,
                     0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,

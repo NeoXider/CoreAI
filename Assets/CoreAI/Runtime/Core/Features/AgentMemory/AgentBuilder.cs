@@ -42,6 +42,9 @@ namespace CoreAI.Ai
         private readonly List<ILlmTool> _tools = new();
         private string _systemPrompt;
         private AgentMode _mode = AgentMode.ToolsAndChat;
+        private bool _withChatHistory;
+        private int? _contextWindowTokens;
+        private bool _persistChatHistory;
 
         public AgentBuilder(string roleId)
         {
@@ -97,6 +100,26 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Включить историю диалога для агента (контекст текущей сессии).
+        /// <para>contextWindowTokens: размер контекста. 0 = минимальный, null = из CoreAISettings (по умолчанию 8192).</para>
+        /// <para>persistBetweenSessions: сохранять историю между сессиями (в JSON файл). По умолчанию false (только RAM).</para>
+        /// </summary>
+        /// <example>
+        /// .WithChatHistory()                    // 8192 из конфига, без сохранения
+        /// .WithChatHistory(4096)                // 4096 токенов, без сохранения
+        /// .WithChatHistory(0)                   // минимальный контекст, без сохранения
+        /// .WithChatHistory(persistBetweenSessions: true)  // 8192 из конфига, сохраняется между сессиями
+        /// .WithChatHistory(4096, true)          // 4096 токенов, сохраняется между сессиями
+        /// </example>
+        public AgentBuilder WithChatHistory(int? contextWindowTokens = null, bool persistBetweenSessions = false)
+        {
+            _withChatHistory = true;
+            _contextWindowTokens = contextWindowTokens;
+            _persistChatHistory = persistBetweenSessions;
+            return this;
+        }
+
+        /// <summary>
         /// Включить память для агента (добавляет MemoryTool).
         /// </summary>
         public AgentBuilder WithMemory(MemoryToolAction defaultAction = MemoryToolAction.Append)
@@ -110,12 +133,18 @@ namespace CoreAI.Ai
         /// </summary>
         public AgentConfig Build()
         {
+            // Размер контекста: 0 → минимальный, null → из CoreAISettings, явно → использовать явно
+            int ctxTokens = _contextWindowTokens ?? CoreAI.CoreAISettings.ContextWindowTokens;
+
             return new AgentConfig
             {
                 RoleId = _roleId,
                 SystemPrompt = _systemPrompt,
                 Tools = new List<ILlmTool>(_tools),
-                Mode = _mode
+                Mode = _mode,
+                WithChatHistory = _withChatHistory,
+                ContextWindowTokens = ctxTokens,
+                PersistChatHistoryBetweenSessions = _persistChatHistory
             };
         }
     }
@@ -129,6 +158,9 @@ namespace CoreAI.Ai
         public string SystemPrompt { get; internal set; }
         public IReadOnlyList<ILlmTool> Tools { get; internal set; }
         public AgentMode Mode { get; internal set; }
+        public bool WithChatHistory { get; internal set; }
+        public int ContextWindowTokens { get; internal set; }
+        public bool PersistChatHistoryBetweenSessions { get; internal set; }
 
         /// <summary>
         /// Применить конфигурацию к политике.

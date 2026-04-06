@@ -74,9 +74,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[CraftingMemory.OpenAI] ═══ TEST START ═══");
             Debug.Log("[CraftingMemory.OpenAI] ═══════════════════════════════════════");
 
-            // Создаём HTTP клиент через фабрику (как в игре)
+            // Backend из CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    null,
                     0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
@@ -277,8 +277,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[CraftingMemory.OpenAI] ═══ 2-CRAFT TEST START ═══");
             Debug.Log("[CraftingMemory.OpenAI] ═══════════════════════════════════════");
 
+            // Backend из CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    null,
                     0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,

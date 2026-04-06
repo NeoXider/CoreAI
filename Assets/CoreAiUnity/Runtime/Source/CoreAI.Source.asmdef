@@ -1,28 +1,29 @@
 {
-  "name": "CoreAI.Source",
-  "rootNamespace": "CoreAI",
-  "references": [
-    "CoreAI.Core",
-    "MessagePipe",
-    "MessagePipe.VContainer",
-    "Unity.TextMeshPro",
-    "undream.llmunity.Runtime",
-    "UniTask",
-    "VContainer"
-  ],
-  "includePlatforms": [],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "Newtonsoft.Json.dll",
-    "Microsoft.Extensions.AI.dll",
-    "Microsoft.Extensions.AI.Abstractions.dll",
-    "Microsoft.Bcl.AsyncInterfaces.dll",
-    "Microsoft.Extensions.Logging.Abstractions.dll"
-  ],
-  "autoReferenced": true,
-  "defineConstraints": [],
-  "versionDefines": [],
-  "noEngineReferences": false
+    "name": "CoreAI.Source",
+    "rootNamespace": "CoreAI",
+    "references": [
+        "CoreAI.Core",
+        "MessagePipe",
+        "MessagePipe.VContainer",
+        "Unity.TextMeshPro",
+        "undream.llmunity.Runtime",
+        "UniTask",
+        "VContainer"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll",
+        "Microsoft.Extensions.AI.dll",
+        "Microsoft.Extensions.AI.Abstractions.dll",
+        "Microsoft.Bcl.AsyncInterfaces.dll",
+        "Microsoft.Extensions.Logging.Abstractions.dll",
+        "System.Text.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

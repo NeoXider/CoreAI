@@ -1,11 +1,11 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "0.5.0",
+  "version": "0.9.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: CoreAI.Source (DI, LLM, MessagePipe, Lua bindings), EditMode/PlayMode tests, Editor, Docs. LLM response validation per role, MEAI function calling. Depends on com.nexoider.coreai 0.5.0+. Monorepo folder: Assets/CoreAiUnity.",
+  "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching. Depends on com.nexoider.coreai 0.9.0+.",
   "dependencies": {
-    "com.nexoider.coreai": "0.5.0",
+    "com.nexoider.coreai": "0.9.0",
     "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
     "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",

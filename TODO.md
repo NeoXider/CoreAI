@@ -1,6 +1,65 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
 
-**Обновлено:** 2026-04-06 | **Текущая версия:** v0.7.0
+**Обновлено:** 2026-04-06 | **Текущая версия:** v0.9.0
+
+## ✅ ВЫПОЛНЕНО В v0.9.0 — Единый MEAI Pipeline + AgentBuilder
+
+### Мега-рефакторинг: Одинаковый tool calling для всех бэкендов
+
+- ✅ `MeaiLlmClient.cs` — **единый MEAI клиент** для всех бэкендов
+  - `MeaiLlmClient.CreateHttp(settings, logger, memoryStore)` — HTTP API
+  - `MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore)` — локальная GGUF
+  - Принимает `MEAI.IChatClient` → оборачивает в `FunctionInvokingChatClient`
+  - Автоматический tool calling: ILlmTool → AIFunction → выполнение → результат
+- ✅ `MeaiLlmUnityClient.cs` — **упрощён до фабрики**: делегирует в `MeaiLlmClient.CreateLlmUnity()`
+- ✅ `OpenAiChatLlmClient.cs` — **упрощён до фабрики**: делегирует в `MeaiLlmClient.CreateHttp()`
+- ✅ `LlmUnityMeaiChatClient.cs` — вынесен в отдельный файл (MEAI IChatClient для LLMAgent)
+- ✅ `MeaiOpenAiChatClient.cs` — MEAI IChatClient для HTTP API (UnityWebRequest)
+- ✅ **Одинаковый MEAI pipeline для обоих бэкендов**:
+  - Больше нет ручного парсинга tool calls из текста
+  - Оба клиента используют `MeaiLlmClient` → `FunctionInvokingChatClient` → `AIFunction[]`
+  - Стандартный Microsoft подход вместо хаков
+- ✅ **AgentBuilder** обновлён:
+  - `WithChatHistory()` — контекст из `CoreAISettings.ContextWindowTokens` (по умолчанию 8192)
+  - `WithChatHistory(4096)` — переопределить размер контекста для конкретного агента
+  - `AgentConfig.ContextWindowTokens` — свойство для использования в рантайме
+  - `WithMemory()` — добавляет MemoryTool
+- ✅ `CoreAISettings.ContextWindowTokens` — новое свойство (синхронизируется из Asset)
+- ✅ `Docs/MEAI_TOOL_CALLING.md` — полная документация архитектуры
+- ✅ `Docs/AGENT_BUILDER.md` — обновлена с примерами создания клиентов
+
+### CoreAISettingsAsset — единый ScriptableObject-синглтон
+
+- ✅ `CoreAISettingsAsset.cs` — все настройки в одном месте (API, LLMUnity, retry, timeout, offline)
+- ✅ `IOpenAiHttpSettings.cs` — интерфейс для адаптации обоих типов настроек
+- ✅ `OfflineLlmClient.cs` — кастомный ответ вместо заглушки по ролям
+- ✅ `CoreAILifetimeScope` — приоритет нового asset, синхронизация со статическими `CoreAISettings`
+- ✅ `CoreAISettingsAssetEditor.cs` — кастомный Inspector с группировкой по секциям
+- ✅ **🔗 Test Connection** — кнопка проверки подключения прямо из Inspector (с логом в Console)
+- ✅ `CoreAISettings.asset` — asset по умолчанию (автозагрузка)
+- ✅ **LLMUnity настройки по умолчанию**: `Qwen3.5-2B-Q4_K_M.gguf`
+- ✅ **LLM Backend**: `Auto` (настраиваемый приоритет), `LlmUnity`, `OpenAiHttp`, `Offline`
+- ✅ **Auto Priority**: `LlmUnity First` или `HTTP First` — какой бэкенд пробовать первым
+- ✅ **Offline кастомный ответ**: текст вместо заглушки по ролям
+- ✅ **LLMUnity настройки**: `DontDestroyOnLoad`, `StartupTimeout`, `StartupDelay`, `KeepAlive`, `MaxConcurrentChats`
+- ✅ Контекст по умолчанию: **8192** токенов
+- ✅ 📖 `Docs/COREAI_SETTINGS.md` — настройки + архитектура tool calling
+- ✅ 📖 `Docs/MEAI_TOOL_CALLING.md` — полная документация архитектуры MEAI
+- ✅ **PlayMode тесты** — все используют CoreAISettingsAsset через фабрику (`TryCreate(null, ...)`)
+- ✅ **PlayModeLlmUnityTestHarness** — читает GGUF из CoreAISettingsAsset
+- ✅ Тесты robust для обоих бэкендов (LLMUnity и HTTP API)
+- ✅ Тесты robust для обоих бэкендов (LLMUnity и HTTP API)
+
+### Доступные настройки через CoreAISettingsAsset
+
+| Секция | Настройки |
+|--------|----------|
+| 🌐 HTTP API | Base URL, API Key, Model, Temperature, Max Tokens, Timeout |
+| 💾 LLMUnity | Agent Name, GGUF Path, DontDestroyOnLoad, Startup Timeout/Delay, Keep Alive, Max Concurrent |
+| ⚙️ Общие | Lua Repair Retries, Tool Call Retries, Context Window, Max Concurrent, LLM Timeout |
+| 🔧 Отладка | MEAI Debug, HTTP Debug, Orchestration Metrics |
+
+---
 
 ## ✅ ВЫПОЛНЕНО В v0.7.0 (v0.7.0 - 2026-04-06)
 

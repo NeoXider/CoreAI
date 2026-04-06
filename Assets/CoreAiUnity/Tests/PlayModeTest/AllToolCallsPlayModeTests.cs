@@ -94,6 +94,27 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
 
+                // Получаем LLMAgent и LLM для настройки (только для LLMUnity)
+                var llmUnityClient = handle.Client as MeaiLlmUnityClient;
+                var agent = llmUnityClient?.UnityAgent;
+                var llm = agent?.llm ?? agent?.GetComponent<LLM>();
+                var log = GameLoggerUnscopedFallback.Instance;
+
+                // ВАЖНО: Отключаем остановку сервера между вызовами (только LLMUnity)
+                if (llm != null)
+                {
+                    try
+                    {
+                        var keepProp = llm.GetType().GetProperty("keepModelLoaded");
+                        if (keepProp != null)
+                        {
+                            keepProp.SetValue(llm, true);
+                            Debug.Log("[AllToolCalls] keepModelLoaded = true (server stays running)");
+                        }
+                    }
+                    catch { Debug.Log("[AllToolCalls] keepModelLoaded property not found"); }
+                }
+
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
                 SessionTelemetryCollector telemetry = new();
@@ -102,14 +123,18 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                // Используем клиент из фабрики (работает для обоих бэкендов)
+                var sharedClient = handle.Client;
+                Debug.Log($"[AllToolCalls] Using client: {sharedClient.GetType().Name}");
+
                 // ===== TEST 1: WRITE MEMORY =====
                 {
                     ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     string prompt = "Save this to memory: 'Test craft #1: Iron Sword'\n\n" +
-                                    "IMPORTANT: Output ONLY this exact JSON, nothing else:\n" +
+                                    "IMPORTANT: Respond with ONLY this exact JSON format:\n" +
                                     "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Test craft #1: Iron Sword\"}}";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
@@ -125,12 +150,21 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write"); // 240s для retry loop
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write");
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
-                    Debug.Log(
-                        $"[AllToolCalls] System Prompt: {capturingLlm.LastSystemPrompt?.Substring(0, Math.Min(200, capturingLlm.LastSystemPrompt?.Length ?? 0))}...");
-                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+                    Debug.Log($"[AllToolCalls] System Prompt (first 200 chars):");
+                    Debug.Log(capturingLlm.LastSystemPrompt?.Substring(0, Math.Min(200, capturingLlm.LastSystemPrompt?.Length ?? 0)));
+                    Debug.Log($"[AllToolCalls] Content (FULL):");
+                    if (string.IsNullOrEmpty(capturingLlm.LastContent))
+                    {
+                        Debug.LogWarning("[AllToolCalls] ⚠ Content is EMPTY!");
+                    }
+                    else
+                    {
+                        Debug.Log(capturingLlm.LastContent);
+                    }
+                    Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
 
                     // Проверяем что память сохранена
                     bool memorySaved = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1) &&
@@ -170,7 +204,7 @@ namespace CoreAI.Tests.PlayMode
                 // ===== TEST 2: APPEND MEMORY =====
                 {
                     ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     string prompt =
@@ -225,7 +259,7 @@ namespace CoreAI.Tests.PlayMode
                 // ===== TEST 3: CLEAR MEMORY =====
                 {
                     ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     string prompt = "Clear all memory. Use the memory tool to clear it.";
@@ -281,6 +315,7 @@ namespace CoreAI.Tests.PlayMode
         /// <summary>
         /// Тест Execute Lua Tool: Programmer вызывает Lua код.
         /// Переключаемый бэкенд: LLMUnity или HTTP API.
+        /// Для HTTP API используется fallback парсинг tool calls из текста.
         /// </summary>
         [UnityTest]
         [Timeout(600000)]
@@ -290,7 +325,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
-                    0.2f,
+                    0.3f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
@@ -301,7 +336,14 @@ namespace CoreAI.Tests.PlayMode
             try
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
+                Debug.Log($"[AllToolCalls.ExecuteLua] Backend: {handle.ResolvedBackend}");
+                Debug.Log($"[AllToolCalls.ExecuteLua] Client: {handle.Client.GetType().Name}");
+
+                // Для HTTP API — предупреждение
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
+                {
+                    Debug.Log("[AllToolCalls.ExecuteLua] HTTP API — используется fallback парсинг tool calls из текста");
+                }
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
@@ -318,8 +360,7 @@ namespace CoreAI.Tests.PlayMode
 
                     // Добавляем execute_lua tool для Programmer
                     AgentMemoryPolicy policyWithLua = new();
-                    policyWithLua.EnableMemoryTool(BuiltInAgentRoleIds.Programmer); // Memory tool
-                    // Примечание: execute_lua tool добавляется автоматически для Programmer через ILlmClient.SetTools
+                    policyWithLua.EnableMemoryTool(BuiltInAgentRoleIds.Programmer);
 
                     AiOrchestrator orch =
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);

@@ -1,19 +1,22 @@
 {
-  "name": "CoreAI.Editor",
-  "rootNamespace": "CoreAI.Editor",
-  "references": [
-    "CoreAI.Source",
-    "VContainer"
-  ],
-  "includePlatforms": [
-    "Editor"
-  ],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
-  "autoReferenced": true,
-  "defineConstraints": [],
-  "versionDefines": [],
-  "noEngineReferences": false
+    "name": "CoreAI.Editor",
+    "rootNamespace": "CoreAI.Editor",
+    "references": [
+        "CoreAI.Source",
+        "VContainer",
+        "undream.llmunity.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
 }

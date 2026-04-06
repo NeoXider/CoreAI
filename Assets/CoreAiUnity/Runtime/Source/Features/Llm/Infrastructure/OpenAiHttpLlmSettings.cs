@@ -7,7 +7,7 @@ namespace CoreAI.Infrastructure.Llm
     /// Ключ не коммитьте: для билда используйте локальный asset вне репозитория или загрузку из защищённого хранилища.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/LLM/OpenAI-compatible HTTP", fileName = "OpenAiHttpLlmSettings")]
-    public sealed class OpenAiHttpLlmSettings : ScriptableObject
+    public sealed class OpenAiHttpLlmSettings : ScriptableObject, IOpenAiHttpSettings
     {
         [Tooltip("Если включено, ILlmClient ходит в HTTP chat/completions вместо LLMAgent на сцене.")] [SerializeField]
         private bool useOpenAiCompatibleHttp;
@@ -24,6 +24,8 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField] [Range(0f, 2f)] private float temperature = 0.2f;
 
         [SerializeField] [Min(5)] private int requestTimeoutSeconds = 120;
+        
+        [SerializeField] [Min(64)] private int maxTokens = 4096;
 
         /// <summary>Использовать HTTP вместо LLMUnity для клиента, собранного из этого asset.</summary>
         public bool UseOpenAiCompatibleHttp => useOpenAiCompatibleHttp;
@@ -43,6 +45,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Таймаут UnityWebRequest в секундах.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds;
+        
+        /// <summary>Максимум токенов в ответе.</summary>
+        public int MaxTokens => maxTokens;
 
         /// <summary>
         /// Для PlayMode-тестов и рантайм-конфигурации без asset (не вызывать из прод-кода без явной политики).
@@ -53,7 +58,8 @@ namespace CoreAI.Infrastructure.Llm
             string apiKey,
             string model,
             float temperature = 0.2f,
-            int requestTimeoutSeconds = 120)
+            int requestTimeoutSeconds = 120,
+            int maxTokens = 4096)
         {
             this.useOpenAiCompatibleHttp = useOpenAiCompatibleHttp;
             this.apiBaseUrl = string.IsNullOrWhiteSpace(apiBaseUrl) ? "https://api.openai.com/v1" : apiBaseUrl;
@@ -61,6 +67,7 @@ namespace CoreAI.Infrastructure.Llm
             this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = temperature;
             this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
+            this.maxTokens = maxTokens < 64 ? 4096 : maxTokens;
         }
     }
 }

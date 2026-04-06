@@ -29,5 +29,36 @@ namespace CoreAI
         /// По умолчанию: 300 (5 минут).
         /// </summary>
         public static int LlmRequestTimeoutSeconds { get; set; } = 300;
+
+        /// <summary>
+        /// Логировать сырые HTTP request/response (заголовки, тело, код ответа).
+        /// По умолчанию: false.
+        /// </summary>
+        public static bool EnableHttpDebugLogging { get; set; } = false;
+
+        /// <summary>
+        /// Логировать количество токенов (input, output, total) в каждом ответе.
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogTokenUsage { get; set; } = true;
+
+        /// <summary>
+        /// Логировать время отклика LLM (latency в миллисекундах).
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogLlmLatency { get; set; } = true;
+
+        /// <summary>
+        /// Логировать ошибки подключения к LLM (timeout, network error).
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogLlmConnectionErrors { get; set; } = true;
+
+        /// <summary>
+        /// Размер контекстного окна по умолчанию (токены).
+        /// По умолчанию: 8192. Можно менять до инициализации.
+        /// Синхронизируется из CoreAISettingsAsset при старте.
+        /// </summary>
+        public static int ContextWindowTokens { get; set; } = 8192;
     }
 }

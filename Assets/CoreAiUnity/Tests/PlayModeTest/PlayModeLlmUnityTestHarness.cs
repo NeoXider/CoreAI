@@ -37,7 +37,11 @@ namespace CoreAI.Tests.PlayMode
                                          BindingFlags.NonPublic | BindingFlags.Instance);
         }
 
-        public static GameObject CreateRuntimeLlmAndAgent(out LLM llm, out LLMAgent agent)
+        public static GameObject CreateRuntimeLlmAndAgent(
+            string agentName,
+            string ggufPath,
+            out LLM llm,
+            out LLMAgent agent)
         {
             llm = null;
             agent = null;
@@ -51,8 +55,25 @@ namespace CoreAI.Tests.PlayMode
             agent.llm = llm;
 
             IGameLogger log = GameLoggerUnscopedFallback.Instance;
-            bool assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b")
-                            || LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
+
+            // Пробуем назначить модель из настроек
+            bool assigned = false;
+            if (!string.IsNullOrWhiteSpace(ggufPath))
+            {
+                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, ggufPath);
+            }
+
+            // Fallback: ищем qwen + 2b
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");
+            }
+
+            // Fallback: авто-назначение
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
+            }
 
             if (!assigned || string.IsNullOrWhiteSpace(llm.model))
             {
@@ -120,6 +141,14 @@ namespace CoreAI.Tests.PlayMode
             }
 
             return go;
+        }
+
+        /// <summary>
+        /// Legacy overload — backwards compatibility.
+        /// </summary>
+        public static GameObject CreateRuntimeLlmAndAgent(out LLM llm, out LLMAgent agent)
+        {
+            return CreateRuntimeLlmAndAgent(null, null, out llm, out agent);
         }
 
         public static void TriggerAwakeIfNeeded(LLM llmComponent)
