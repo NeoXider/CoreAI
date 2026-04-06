@@ -63,18 +63,25 @@
 
 ### PlayMode тесты (v0.9.0)
 
+Все PlayMode тесты работают **только через CoreAISettingsAsset** — никаких захардкоженных LM Studio URL.
+
 | Файл | Тестов | Что проверяет |
 |------|--------|--------------|
+| `TestAgentSetup.cs` | 🆕 **Универсальный setup** — читает CoreAISettingsAsset, создаёт клиент, добавляет LogAssert |
 | `MeaiLlmClientPlayModeTests.cs` | 3 | CreateHttp, CreateLlmUnity, null аргументы |
-| `AllToolCallsPlayModeTests.cs` | 3 | Обновлены под новый MeaiLlmClient |
+| `AgentMemoryWithRealModelPlayModeTests.cs` | 1 | Обновлён под TestAgentSetup, без LM Studio |
+| `AllToolCallsPlayModeTests.cs` | 3 | Использует CoreAISettingsAsset |
 | `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | Использует CoreAISettingsAsset |
 | `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | Использует CoreAISettingsAsset |
 | `MultiAgentCraftingWorkflowPlayModeTests.cs` | 2 | Использует CoreAISettingsAsset |
 | `CustomAgentsPlayModeTests.cs` | 3 | Использует CoreAISettingsAsset |
 | `ChatWithToolCallingPlayModeTests.cs` | 1 | Использует CoreAISettingsAsset |
-| `SharedLlmUnity.cs` | 1 | Глобальный клиент из настроек |
 
-**Итого новых PlayMode тестов в v0.9.0: 16**
+**Удалено:**
+- ❌ `OpenAiLmStudioPlayModeTests.cs` — LM Studio URL захардкожен
+- ❌ `AgentMemoryOpenAiApiPlayModeTests.cs` (старый) — LM Studio URL захардкожен, переписан на TestAgentSetup
+
+**Итого PlayMode тестов в v0.9.0: 13**
 
 ### Доступные настройки через CoreAISettingsAsset
 

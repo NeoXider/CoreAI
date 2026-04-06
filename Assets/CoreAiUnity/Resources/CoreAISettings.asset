@@ -13,24 +13,24 @@ MonoBehaviour:
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
   backendType: 0
-  autoPriority: 0
-  apiBaseUrl: http://localhost:1234/v1
-  apiKey: 
-  modelName: gpt-4o-mini
+  autoPriority: 1
+  apiBaseUrl: https://openrouter.ai/api/v1
+  apiKey: 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
+  modelName: nvidia/nemotron-3-super-120b-a12b:free
   temperature: 0.2
-  maxTokens: 4096
+  maxTokens: 8192
   requestTimeoutSeconds: 120
   llmUnityAgentName: 
   ggufModelPath: Qwen3.5-2B-Q4_K_M.gguf
   llmUnityDontDestroyOnLoad: 1
   llmUnityStartupTimeoutSeconds: 120
   llmUnityStartupDelaySeconds: 1
-  llmUnityKeepAlive: 0
+  llmUnityKeepAlive: 1
   llmUnityMaxConcurrentChats: 1
   maxLuaRepairGenerations: 3
   maxToolCallRetries: 3
   contextWindowTokens: 8192
-  offlineUseCustomResponse: 0
+  offlineUseCustomResponse: 1
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
   enableMeaiDebugLogging: 0

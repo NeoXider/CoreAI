@@ -72,7 +72,9 @@ namespace CoreAI.Tests.EditMode
 
             var client = new OpenAiChatLlmClient(settings);
 
-            // Ожидаем лог ошибки таймаута
+            // Ожидаем все возможные логи ошибок (connection error или timeout)
+            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Cannot connect to destination host");
+            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Cannot connect to destination host");
             LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Request timeout");
             LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Request timeout");
 
