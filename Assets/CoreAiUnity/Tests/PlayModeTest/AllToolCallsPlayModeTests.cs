@@ -70,6 +70,7 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>
         /// Тест Memory Tool: сохранение, добавление и очистка памяти.
+        /// Проверяет РЕАЛЬНЫЙ tool call — модель должна вызвать инструмент, а не ответить текстом.
         /// Переключаемый бэкенд: LLMUnity или HTTP API.
         /// </summary>
         [UnityTest]
@@ -81,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
             // Создаём LLM клиент через фабрику (auto-select backend)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null, // auto-select из env
-                    0.2f,
+                    0.1f, // низкая температура для надёжного tool calling
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
@@ -132,9 +133,11 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Save this to memory: 'Test craft #1: Iron Sword'\n\n" +
-                                    "IMPORTANT: Respond with ONLY this exact JSON format:\n" +
-                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Test craft #1: Iron Sword\"}}";
+                    // Явный JSON шаблон + инструкция
+                    string prompt = "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'\n\n" +
+                                    "You MUST call the memory tool with this exact format:\n" +
+                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Test craft #1: Iron Sword\"}}\n\n" +
+                                    "DO NOT respond with text. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
@@ -152,8 +155,6 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write");
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
-                    Debug.Log($"[AllToolCalls] System Prompt (first 200 chars):");
-                    Debug.Log(capturingLlm.LastSystemPrompt?.Substring(0, Math.Min(200, capturingLlm.LastSystemPrompt?.Length ?? 0)));
                     Debug.Log($"[AllToolCalls] Content (FULL):");
                     if (string.IsNullOrEmpty(capturingLlm.LastContent))
                     {
@@ -165,39 +166,23 @@ namespace CoreAI.Tests.PlayMode
                     }
                     Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
 
-                    // Проверяем что память сохранена
+                    // СТРОГАЯ проверка: память должна быть сохранена РЕАЛЬНЫМ tool call'ом
                     bool memorySaved = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1) &&
                                        !string.IsNullOrWhiteSpace(state1.Memory);
 
-                    // Или модель показала намерение сохранить (любой формат)
-                    bool modelAttemptedMemory = capturingLlm.LastContent?.Contains("memory") == true &&
-                                                (capturingLlm.LastContent?.Contains("Iron Sword") == true ||
-                                                 capturingLlm.LastContent?.Contains("craft") == true ||
-                                                 capturingLlm.LastContent?.Contains("arguments") == true);
-
-                    if (memorySaved)
+                    if (!memorySaved)
                     {
-                        Debug.Log($"[AllToolCalls] ✓ Memory written to store: {state1.Memory}");
-                    }
-                    else if (modelAttemptedMemory)
-                    {
-                        Debug.Log($"[AllToolCalls] ✓ Model attempted memory (extracted from response)");
-                        // Извлекаем что модель хотела сохранить
-                        string extracted = capturingLlm.LastContent;
-                        int start = extracted.IndexOf("Iron Sword");
-                        if (start >= 0)
-                        {
-                            store.Save(BuiltInAgentRoleIds.CoreMechanic,
-                                new AgentMemoryState { Memory = $"Test craft #1: Iron Sword" });
-                        }
+                        Debug.LogError($"[AllToolCalls] ❌ WRITE FAILED: Memory NOT saved by tool call. " +
+                            $"Model responded with text instead of calling the memory tool.");
                     }
                     else
                     {
-                        Debug.LogWarning($"[AllToolCalls] ⚠ Memory NOT SAVED");
+                        Debug.Log($"[AllToolCalls] ✓ Memory written by tool call: {state1.Memory}");
                     }
 
-                    Assert.IsTrue(memorySaved || modelAttemptedMemory,
-                        "Memory should be saved or model should attempt to save");
+                    Assert.IsTrue(memorySaved,
+                        "Memory must be saved by actual tool call, not by text response. " +
+                        "Model should call the memory tool, not respond with text.");
                 }
 
                 // ===== TEST 2: APPEND MEMORY =====
@@ -206,8 +191,11 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt =
-                        "Append this to memory: 'Test craft #2: Steel Shield'. Use the memory tool to append it.";
+                    // Явный JSON шаблон для append
+                    string prompt = "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'\n\n" +
+                                    "You MUST call the memory tool with this exact format:\n" +
+                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"Test craft #2: Steel Shield\"}}\n\n" +
+                                    "DO NOT respond with text. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
@@ -222,37 +210,29 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append"); // 240s для retry loop
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append");
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
 
-                    // Model attempted append if response contains Steel/Shield OR any JSON structure
-                    bool modelAttemptedAppend = capturingLlm.LastContent?.Contains("Steel") == true ||
-                                                capturingLlm.LastContent?.Contains("Shield") == true ||
-                                                capturingLlm.LastContent?.Contains("{") == true ||
-                                                capturingLlm.LastContent?.Contains("append") == true;
+                    // СТРОГАЯ проверка: память должна содержать ОБА элемента
+                    bool memoryAppended = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
+                                          state2.Memory.Contains("Iron Sword") &&
+                                          state2.Memory.Contains("Steel Shield");
 
-                    if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
-                        state2.Memory.Contains("Steel Shield"))
+                    if (!memoryAppended)
                     {
-                        Debug.Log($"[AllToolCalls] ✓ Memory appended: {state2.Memory}");
-                    }
-                    else if (modelAttemptedAppend)
-                    {
-                        Debug.Log($"[AllToolCalls] ✓ Model attempted append (simulating for test)");
-                        store.Save(BuiltInAgentRoleIds.CoreMechanic,
-                            new AgentMemoryState
-                                { Memory = "Test craft #1: Iron Sword | Test craft #2: Steel Shield" });
+                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var s) ? s.Memory : "(none)";
+                        Debug.LogError($"[AllToolCalls] ❌ APPEND FAILED: Memory not appended by tool call. " +
+                            $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
-                        Debug.LogWarning(
-                            $"[AllToolCalls] ⚠ Memory NOT APPENDED - Response: {capturingLlm.LastContent}");
-                        store.Save(BuiltInAgentRoleIds.CoreMechanic,
-                            new AgentMemoryState
-                                { Memory = "Test craft #1: Iron Sword | Test craft #2: Steel Shield" });
+                        Debug.Log($"[AllToolCalls] ✓ Memory appended by tool call: {state2.Memory}");
                     }
+
+                    Assert.IsTrue(memoryAppended,
+                        "Memory must be appended by actual tool call. Expected both 'Iron Sword' and 'Steel Shield' in memory.");
                 }
 
                 // ===== TEST 3: CLEAR MEMORY =====
@@ -261,7 +241,11 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    string prompt = "Clear all memory. Use the memory tool to clear it.";
+                    // Явный JSON шаблон для clear
+                    string prompt = "Clear all memory using the memory tool.\n\n" +
+                                    "You MUST call the memory tool with this exact format:\n" +
+                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}\n\n" +
+                                    "DO NOT respond with text. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
@@ -276,31 +260,27 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear"); // 240s для retry loop
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear");
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
 
-                    if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out _))
+                    // СТРОГАЯ проверка: память должна быть удалена РЕАЛЬНЫМ tool call'ом
+                    bool memoryCleared = !store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out _);
+
+                    if (!memoryCleared)
                     {
-                        Debug.Log($"[AllToolCalls] ✓ Memory cleared");
+                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var s) ? s.Memory : "(none)";
+                        Debug.LogError($"[AllToolCalls] ❌ CLEAR FAILED: Memory NOT cleared by tool call. " +
+                            $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
-                        // Модель могла не вызвать clear - проверяем что ответ релевантный
-                        bool modelAttemptedClear = capturingLlm.LastContent?.Contains("clear") == true ||
-                                                   capturingLlm.LastContent?.Contains("cleared") == true ||
-                                                   capturingLlm.LastContent?.Contains("action") == true;
-                        if (modelAttemptedClear)
-                        {
-                            Debug.Log($"[AllToolCalls] ✓ Model attempted clear");
-                            store.Clear(BuiltInAgentRoleIds.CoreMechanic);
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"[AllToolCalls] ⚠ Memory NOT CLEARED");
-                        }
+                        Debug.Log($"[AllToolCalls] ✓ Memory cleared by tool call");
                     }
+
+                    Assert.IsTrue(memoryCleared,
+                        "Memory must be cleared by actual tool call. Memory store should be empty.");
                 }
 
                 Debug.Log("[AllToolCalls] ═══ MEMORY TOOL TEST PASSED ═══");
@@ -313,8 +293,8 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>
         /// Тест Execute Lua Tool: Programmer вызывает Lua код.
+        /// Проверяет РЕАЛЬНЫЙ tool call и что Lua код был валидным и выполнился.
         /// Переключаемый бэкенд: LLMUnity или HTTP API.
-        /// Для HTTP API используется fallback парсинг tool calls из текста.
         /// </summary>
         [UnityTest]
         [Timeout(600000)]
@@ -324,7 +304,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
-                    0.3f,
+                    0.1f, // низкая температура для надёжного tool calling
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
@@ -337,12 +317,6 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log($"[AllToolCalls.ExecuteLua] Backend: {handle.ResolvedBackend}");
                 Debug.Log($"[AllToolCalls.ExecuteLua] Client: {handle.Client.GetType().Name}");
-
-                // Для HTTP API — предупреждение
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
-                {
-                    Debug.Log("[AllToolCalls.ExecuteLua] HTTP API — используется fallback парсинг tool calls из текста");
-                }
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
@@ -367,9 +341,11 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);
 
+                    // Явный JSON шаблон + инструкция
                     string prompt = "Create a simple item called 'TestDagger' with quality 50.\n\n" +
-                                    "IMPORTANT: You MUST use the execute_lua tool call format:\n" +
-                                    "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('TestDagger', 'weapon', 50)\\nreport('crafted TestDagger')\"}}";
+                                    "You MUST use the execute_lua tool call with this exact format:\n" +
+                                    "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('TestDagger', 'weapon', 50)\\nreport('crafted TestDagger')\"}}\n\n" +
+                                    "DO NOT respond with text. CALL the execute_lua tool now with valid Lua code.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");
@@ -384,14 +360,31 @@ namespace CoreAI.Tests.PlayMode
                         Hint = prompt
                     });
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "execute_lua"); // 240s для retry loop
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "execute_lua");
 
                     Debug.Log($"[AllToolCalls] 📥 MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
                     Debug.Log($"[AllToolCalls] Commands produced: {sink.Items.Count}");
 
-                    Assert.Greater(sink.Items.Count, 0, "Should produce at least one command");
-                    Debug.Log($"[AllToolCalls] ✓ Lua executed, command produced");
+                    // СТРОГАЯ проверка: команды должны быть опубликованы через sink
+                    if (sink.Items.Count == 0)
+                    {
+                        Debug.LogError($"[AllToolCalls] ❌ EXECUTE LUA FAILED: " +
+                            $"No commands produced. Model responded with text instead of calling execute_lua tool. " +
+                            $"Response: {capturingLlm.LastContent}");
+                    }
+                    else
+                    {
+                        Debug.Log($"[AllToolCalls] ✓ Lua executed, {sink.Items.Count} command(s) produced");
+                        foreach (var cmd in sink.Items)
+                        {
+                            Debug.Log($"[AllToolCalls]   - Command: {cmd.CommandTypeId}");
+                        }
+                    }
+
+                    Assert.Greater(sink.Items.Count, 0,
+                        "Should produce at least one command. Model must call the execute_lua tool, " +
+                        "not respond with text. The Lua code must be valid and produce ApplyAiGameCommand.");
                 }
 
                 Debug.Log("[AllToolCalls] ═══ EXECUTE LUA TOOL TEST PASSED ═══");

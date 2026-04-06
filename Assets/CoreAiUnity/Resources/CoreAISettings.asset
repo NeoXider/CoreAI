@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 0
+  backendType: 2
   autoPriority: 1
   apiBaseUrl: http://10.35.88.194:1234/v1
   apiKey: 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

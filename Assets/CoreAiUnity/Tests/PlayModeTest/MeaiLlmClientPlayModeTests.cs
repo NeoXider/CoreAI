@@ -88,16 +88,18 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log("[MeaiLlmUnity.LLMUnity] Creating LLMUnity client...");
 
-            // Создаём LLMAgent через фабрику
+            // Используем настройки из CoreAISettingsAsset
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.LlmUnity,
+                    null, // from settings
                     0.2f,
                     300,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
-                Assert.Ignore("Failed to create LLMUnity client: " + ignore);
+                Assert.Ignore("Failed to create LLM client from settings: " + ignore);
             }
+
+            Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
 
             Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
             yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);

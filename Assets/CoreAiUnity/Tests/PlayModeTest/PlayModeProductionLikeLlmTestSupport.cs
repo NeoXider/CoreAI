@@ -41,7 +41,17 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
 
-            // HTTP или Offline — используем как есть
+            // HTTP клиент — создаём новый с MemoryStore через CreateHttp
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
+            {
+                var settings = CoreAISettingsAsset.Instance;
+                if (settings != null)
+                {
+                    return MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, memoryStore);
+                }
+            }
+
+            // Offline или другой — используем как есть
             return handle.Client;
         }
     }
