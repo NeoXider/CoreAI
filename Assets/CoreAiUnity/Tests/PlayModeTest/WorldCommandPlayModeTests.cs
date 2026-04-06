@@ -106,6 +106,62 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("list_objects"));
         }
 
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator WorldTool_PlayAnimation()
+        {
+            using var setup = new TestAgentSetup();
+            yield return setup.Initialize();
+            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+
+            Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing play_animation...");
+
+            var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Creator,
+                Hint = "Use the world_command tool to play animation. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"play_animation\", \"targetName\": \"Enemy\", \"stringValue\": \"attack\"}}"
+            });
+
+            yield return setup.RunAndWait(task, 240f, "world play_animation");
+
+            if (!setup.WorldExecutor.LastCommandWasCalled)
+            {
+                Debug.LogWarning("[WorldTest] Play animation command not executed.");
+                Assert.Ignore("World play_animation skipped - model may not support tool-call format");
+            }
+
+            Debug.Log($"[WorldTest] SUCCESS! Play animation command executed: {setup.WorldExecutor.LastCommandJson}");
+            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("play_animation"));
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator WorldTool_ListAnimations()
+        {
+            using var setup = new TestAgentSetup();
+            yield return setup.Initialize();
+            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+
+            Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_animations...");
+
+            var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Creator,
+                Hint = "Use the world_command tool to list animations. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"list_animations\", \"targetName\": \"Enemy\"}}"
+            });
+
+            yield return setup.RunAndWait(task, 240f, "world list_animations");
+
+            if (!setup.WorldExecutor.LastCommandWasCalled)
+            {
+                Debug.LogWarning("[WorldTest] List animations command not executed.");
+                Assert.Ignore("World list_animations skipped - model may not support tool-call format");
+            }
+
+            Debug.Log($"[WorldTest] SUCCESS! List animations command executed: {setup.WorldExecutor.LastCommandJson}");
+            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("list_animations"));
+        }
+
         [Test]
         public void WorldLlmTool_CanBeCreated()
         {
@@ -130,16 +186,11 @@ namespace CoreAI.Tests.PlayMode
             public bool LastCommandWasCalled;
             public string LastCommandJson;
 
-            public bool TryApply(string commandJson)
-            {
-                LastCommandWasCalled = true;
-                LastCommandJson = commandJson;
-                return true;
-            }
-
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
-                throw new System.NotImplementedException();
+                LastCommandWasCalled = true;
+                LastCommandJson = cmd.JsonPayload;
+                return true;
             }
         }
     }

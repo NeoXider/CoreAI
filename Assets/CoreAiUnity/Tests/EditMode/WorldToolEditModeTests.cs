@@ -147,6 +147,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task WorldTool_ExecuteAsync_ListAnimations_ReturnsSuccess()
+        {
+            TestWorldExecutor executor = new();
+            WorldTool tool = new(executor);
+
+            string resultJson = await tool.ExecuteAsync("list_animations", instanceId: "enemy1");
+            WorldTool.WorldResult result = JsonSerializer.Deserialize<WorldTool.WorldResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("list_animations", result.Action);
+            Assert.IsTrue(executor.LastCommandJson.Contains("list_animations"));
+            Assert.IsTrue(executor.LastCommandJson.Contains("enemy1"));
+        }
+
+        [Test]
         public async Task WorldTool_ExecuteAsync_MoveWithTargetName_IncludesTargetName()
         {
             TestWorldExecutor executor = new();
