@@ -5,13 +5,37 @@
 
 ## Источники паттернов (из открытых исходников)
 
-### Claude Agent SDK (Anthropic)
-- **Subagent definition** — декларативное описание агентов с description, prompt, tools, model
-- **Task tool** — subagent spawn через `Task` tool, не явный вызов
-- **Context isolation** — subagent получает чистый контекст, не засоряет родителя
-- **Session persistence** — можно сохранять и восстанавливать состояние
-- **Model decides parallelism** — модель сама решает когда параллелить
-- **Max turns/budget** — ограничения на ресурсы
+### Claude Agent SDK (Anthropic) — Лучшие практики
+Изучено из: ksred.com, DeepWiki, Claude Lab
+
+1. **Декларативное определение subagents**
+   ```typescript
+   agents: {
+     "security-reviewer": {
+       description: "Identifies security vulnerabilities",
+       prompt: "You are a security specialist...",
+       tools: ["Read", "Grep"],
+       model: "opus"  // subagent может использовать другую модель
+     }
+   }
+   ```
+
+2. **Task tool** — НЕ ЯВЛЯЕТСЯ частью subagent tools!
+   - Task ДОЛЖЕН быть в allowedTools родителя
+   - Task НЕ должен быть в subagent tools — subagents не спавнят своих subagents
+
+3. **Контекстная изоляция** — каждый subagent получает ЧИСТЫЙ контекст
+   - subagent видит ТОЛЬКО свою задачу
+   - не засоряет родительский контекст
+   - результаты агрегируются обратно
+
+4. **Модель САМА решает параллельность** — не нужно явное `parallel` действие
+   - define capability, not scheduling
+
+5. **Контроль ресурсов**:
+   - `maxTurns` — лимит tool calls для subagent
+   - `maxTokens` — лимит output tokens
+   - `maxBudgetUsd` — лимит бюджета
 
 ### Anthropic Research System
 - **Lead agent + Subagents** — lead координирует, subagents выполняют
@@ -34,6 +58,8 @@
 ### 1. SubAgentDefinition — декларативное определение subagent
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/SubAgentDefinition.cs` (NEW)
 
+**Важно:** SubAgentDefinition НЕ содержит Task tool — subagents не могут спавнить subagents!
+
 ```csharp
 public sealed class SubAgentDefinition {
     /// <summary>Role ID агента (используется для поиска в AgentRegistry).</summary>
@@ -45,21 +71,54 @@ public sealed class SubAgentDefinition {
     /// <summary>Специфичный system prompt для subagent (расширяет базовый).</summary>
     public string CustomPrompt { get; init; }
     
-    /// <summary>Дополнительные инструменты для subagent (поверх базовых).</summary>
-    public IReadOnlyList<ILlmTool> AdditionalTools { get; init; }
+    /// <summary>Инструменты для subagent (НЕ включает Task tool!).</summary>
+    public IReadOnlyList<ILlmTool> Tools { get; init; }
     
     /// <summary>Модель для subagent (null = использовать модель родителя).</summary>
     public string Model { get; init; }
     
-    /// <summary>Max токенов для subagent. 0 = без лимита.</summary>
-    public int MaxTokens { get; init; }
+    /// <summary>Max токенов для subagent ответа. По умолчанию: 4096.</summary>
+    public int MaxTokens { get; init; } = 4096;
     
-    /// <summary>Max tool calls для subagent.</summary>
-    public int MaxToolCalls { get; init; } = 10;
+    /// <summary>Max turns (tool calls) для subagent. По умолчанию: 10.</summary>
+    public int MaxTurns { get; init; } = 10;
 }
 ```
 
-### 2. AgentRegistry — реестр с поддержкой SubAgentDefinition
+**Ограничения Claude Agent SDK (лучшие практики):**
+- Task tool ДОЛЖЕН быть в allowedTools родителя
+- Task tool НЕ должен быть в subagent tools — subagents не спавнят subagents
+
+### 2. AgentLlmTool Schema — по паттерну Claude Agent SDK
+
+**Ключевое правило:** AgentLlmTool (подобен Task в Claude Agent SDK) — только для родительского агента!
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "subagent": {
+      "type": "string",
+      "description": "Which subagent to call (e.g., 'Programmer', 'CoreMechanicAI')."
+    },
+    "task": {
+      "type": "string",
+      "description": "Task description for the subagent"
+    },
+    "context": {
+      "type": "string",
+      "description": "Optional context from parent (trimmed to fit)"
+    },
+    "max_turns": {
+      "type": "integer",
+      "description": "Max turns (default from SubAgentDefinition)"
+    }
+  },
+  "required": ["subagent", "task"]
+}
+```
+
+### 3. AgentRegistry — реестр с поддержкой SubAgentDefinition
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentRegistry.cs` (MODIFY)
 
 ```csharp
@@ -109,6 +168,25 @@ public interface IAgentRegistry {
 ### 4. AgentOrchestrator — выполнение subagent с изоляцией контекста
 **Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentOrchestrator.cs` (MODIFY)
 
+**Session Persistence (опционально):**
+```csharp
+// Сохранение сессии subagent для продолжения
+Task<AgentCallResult> ExecuteSubAgentAsync(
+    string subAgentRoleId,
+    string task,
+    string context,
+    int maxTurns,
+    CancellationToken ct,
+    string? resumeSessionId = null  // опционально для продолжения
+);
+```
+
+**Лучшие практики Claude Agent SDK:**
+- Subagent получает ЧИСТЫЙ контекст — только свою задачу
+- Результат возвращается как текст/tool_result
+- НЕ засоряет контекст родителя промежуточными шагами
+- Модель САМА решает когда параллелить (через несколько вызовов)
+
 ```csharp
 public interface IAgentOrchestrator {
     Task<AgentCallResult> ExecuteSubAgentAsync(
@@ -135,18 +213,23 @@ public interface IAgentOrchestrator {
 
 ```csharp
 public static class CoreAISettings {
-    /// <summary>Max параллельных subagents. По умолчанию: 3.</summary>
+    /// <summary>Max параллельных subagents. По умолчанию: 3 (Anthropic Research).</summary>
     public static int MaxParallelAgents { get; set; } = 3;
     
     /// <summary>Таймаут subagent в секундах. По умолчанию: 60.</summary>
     public static int AgentCallTimeoutSeconds { get; set; } = 60;
     
-    /// <summary>Max turns для subagent. По умолчанию: 10.</summary>
+    /// <summary>Max turns (tool calls) для subagent. По умолчанию: 10.</summary>
     public static int SubAgentMaxTurns { get; set; } = 10;
     
     /// <summary>Max tokens для subagent ответа. По умолчанию: 4096.</summary>
     public static int SubAgentMaxTokens { get; set; } = 4096;
 }
+```
+
+**Почему 3:**
+- Anthropic Research System использует 3-5 parallel agents
+- Claude Agent SDK: "Claude decides when to parallelise" — модель сама
 ```
 
 ---

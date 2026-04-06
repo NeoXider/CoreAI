@@ -94,13 +94,16 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
 
-                // Получаем LLMAgent и LLM для настройки (только для LLMUnity)
+                InMemoryStore store = new();
+                AgentMemoryPolicy policy = new();
+
+                // Обернуть клиент с правильным MemoryStore (решает проблему разных store'ов)
+                ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
+
+                // Получаем LLMAgent и LLM для keepModelLoaded (только для LLMUnity)
                 var llmUnityClient = handle.Client as MeaiLlmUnityClient;
                 var agent = llmUnityClient?.UnityAgent;
                 var llm = agent?.llm ?? agent?.GetComponent<LLM>();
-                var log = GameLoggerUnscopedFallback.Instance;
-
-                // ВАЖНО: Отключаем остановку сервера между вызовами (только LLMUnity)
                 if (llm != null)
                 {
                     try
@@ -115,16 +118,12 @@ namespace CoreAI.Tests.PlayMode
                     catch { Debug.Log("[AllToolCalls] keepModelLoaded property not found"); }
                 }
 
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                // Используем клиент из фабрики (работает для обоих бэкендов)
-                var sharedClient = handle.Client;
                 Debug.Log($"[AllToolCalls] Using client: {sharedClient.GetType().Name}");
 
                 // ===== TEST 1: WRITE MEMORY =====
@@ -353,10 +352,13 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                // Обернуть клиент с правильным MemoryStore
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
                 // ===== TEST: EXECUTE LUA =====
                 {
                     ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(handle.Client);
+                    CapturingLlmClient capturingLlm = new(clientWithMemory);
 
                     // Добавляем execute_lua tool для Programmer
                     AgentMemoryPolicy policyWithLua = new();

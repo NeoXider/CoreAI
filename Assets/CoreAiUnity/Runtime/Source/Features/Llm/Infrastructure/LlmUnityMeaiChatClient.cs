@@ -19,7 +19,7 @@ namespace CoreAI.Infrastructure.Llm
     /// MEAI IChatClient обёртка над LLMAgent.
     /// Парсит tool calls из текстового ответа модели (Qwen не поддерживает структурные tool_calls).
     /// </summary>
-    internal sealed class LlmUnityMeaiChatClient : MEAI.IChatClient
+    public sealed class LlmUnityMeaiChatClient : MEAI.IChatClient
     {
         private readonly LLMAgent _unityAgent;
         private readonly IGameLogger _logger;

@@ -152,7 +152,10 @@ namespace CoreAI.Tests.PlayMode
                     new NullLuaScriptVersionStore());
 
                 ListSink sink = new();
-                CapturingLlmClient capturingLlm = new(handle.Client);
+
+                // Обернуть клиент с правильным MemoryStore и добавляем capturing
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+                CapturingLlmClient capturingLlm = new(clientWithMemory);
 
                 // Создаём оркестратор с InventoryTool
                 AiOrchestrator orch = CreateOrchestratorWithInventory(

@@ -129,7 +129,9 @@ namespace CoreAI.Tests.PlayMode
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();
 
-                Task<TestResult> task = RunAgentTestAsync(handle.Client, merchant, "What items do you have?");
+                // Обернуть клиент для правильной работы MemoryTool
+                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+                Task<TestResult> task = RunAgentTestAsync(clientWithStore, merchant, "What items do you have?");
                 yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant"); // 240s для retry loop
                 TestResult r = task.Result;
                 Debug.Log(
@@ -164,7 +166,8 @@ namespace CoreAI.Tests.PlayMode
                     .WithMode(AgentMode.ToolsOnly)
                     .Build();
 
-                Task<TestResult> task = RunAgentTestAsync(handle.Client, analyzer, "Analyze session");
+                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+                Task<TestResult> task = RunAgentTestAsync(clientWithStore, analyzer, "Analyze session");
                 yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer"); // 240s для retry loop
                 TestResult r = task.Result;
                 Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
@@ -198,7 +201,8 @@ namespace CoreAI.Tests.PlayMode
                     .WithMode(AgentMode.ChatOnly)
                     .Build();
 
-                Task<TestResult> task = RunAgentTestAsync(handle.Client, storyteller, "Tell me a story");
+                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+                Task<TestResult> task = RunAgentTestAsync(clientWithStore, storyteller, "Tell me a story");
                 yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller"); // 240s для retry loop
                 TestResult r = task.Result;
                 Debug.Log(

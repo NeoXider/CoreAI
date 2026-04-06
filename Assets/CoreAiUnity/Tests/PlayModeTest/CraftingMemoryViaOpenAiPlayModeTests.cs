@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
@@ -99,6 +100,9 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                // Обернуть клиент с правильным MemoryStore (консистентность для всех тестов)
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
                 List<string> craftedNames = new();
                 string memoryAccum = "";
 
@@ -112,7 +116,7 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -139,7 +143,7 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -166,7 +170,7 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -194,7 +198,7 @@ namespace CoreAI.Tests.PlayMode
                         store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -298,6 +302,8 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
                 // ===== КРАФТ 1 =====
                 string prompt1 = BuildCraftPrompt(1,
                     "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
@@ -307,7 +313,7 @@ namespace CoreAI.Tests.PlayMode
                 LogBeforeModelCall("CRAFT 1: Steel + Fire Crystal", prompt1, store);
 
                 ListSink sink1 = new();
-                AiOrchestrator orch1 = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink1);
+                AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
 
                 Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                 {
@@ -345,7 +351,7 @@ namespace CoreAI.Tests.PlayMode
                 LogBeforeModelCall("CRAFT 2: Same ingredients, check memory", prompt2, store);
 
                 ListSink sink2 = new();
-                AiOrchestrator orch2 = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink2);
+                AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
 
                 Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                 {

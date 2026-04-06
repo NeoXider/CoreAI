@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Messaging;
@@ -92,6 +93,9 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                // Обернуть клиент с правильным MemoryStore
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
                 // ===== ШАГ 1: Creator решает что крафтить =====
                 {
                     Debug.Log("[MultiAgent] ┌─────────────────────────────────────────");
@@ -101,7 +105,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Creator");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -137,7 +141,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "CoreMechanicAI");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -193,7 +197,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Programmer");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -227,7 +231,7 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -316,13 +320,15 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
                 // ===== CREATOR =====
                 {
                     Debug.Log("[MultiAgent.Quick] === CREATOR: Design craft ===");
                     LogAgentMemory(store, "Creator");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -348,7 +354,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "CoreMechanicAI");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(handle.Client, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {

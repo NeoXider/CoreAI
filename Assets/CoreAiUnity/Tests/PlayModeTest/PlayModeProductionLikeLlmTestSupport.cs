@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -11,6 +12,39 @@ using UnityEditor;
 
 namespace CoreAI.Tests.PlayMode
 {
+    /// <summary>
+    /// Helper для оборачивания ILlmClient с правильным IAgentMemoryStore.
+    /// Решает проблему: фабрика создаёт клиент со своим InMemoryStore,
+    /// а тест использует другой store в оркестраторе.
+    /// </summary>
+    public static class LlmClientTestHelpers
+    {
+        /// <summary>
+        /// Обернуть клиент из PlayModeProductionLikeLlmHandle с нужным IAgentMemoryStore.
+        /// Для LLMUnity — пересоздаёт MeaiLlmClient с правильным store.
+        /// Для HTTP — возвращает как есть (HTTP клиент уже правильно создаётся с null store).
+        /// </summary>
+        public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle, IAgentMemoryStore memoryStore)
+        {
+            if (handle == null) throw new ArgumentNullException(nameof(handle));
+
+            // LLMUnity клиент — пересоздаём с нужным MemoryStore
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+            {
+                var llmUnityClient = handle.Client as MeaiLlmUnityClient;
+                if (llmUnityClient != null)
+                {
+                    return new MeaiLlmClient(
+                        new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
+                        GameLoggerUnscopedFallback.Instance,
+                        memoryStore);
+                }
+            }
+
+            // HTTP или Offline — используем как есть
+            return handle.Client;
+        }
+    }
     /// <summary>
     /// In-memory store for tests.
     /// </summary>

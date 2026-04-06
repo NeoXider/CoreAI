@@ -1,8 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using NUnit.Framework;
@@ -53,7 +55,10 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[Test] LLM handle created, waiting for model...");
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log("[Test] Model ready, running orchestrator...");
-                yield return RunEachBuiltInRoleScenario(handle.Client);
+
+                // Обернуть клиент с NullAgentMemoryStore (тест не использует память, но для консистентности)
+                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new NullAgentMemoryStore());
+                yield return RunEachBuiltInRoleScenario(clientWithStore);
                 Debug.Log("[Test] Orchestrator completed successfully");
             }
             finally

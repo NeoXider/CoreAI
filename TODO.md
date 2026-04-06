@@ -55,11 +55,12 @@
 |------|--------|--------------|
 | `CoreAISettingsAssetEditModeTests.cs` | 7 | Настройки, бэкенды, синглтон, кастомный ответ |
 | `AgentBuilderChatHistoryEditModeTests.cs` | 7 | WithChatHistory, ContextWindowTokens, Persist |
-| `OfflineLlmClientEditModeTests.cs` | 5 | Заглушка по ролям, кастомный ответ |
+| `OfflineLlmClientEditModeTests.cs` | 6 | Заглушка по ролям, кастомный ответ, unknown роль |
 | `MeaiLlmClientEditModeTests.cs` | 4 | Фабричные методы, AIFunction |
 | `OpenAiChatLlmClientEditModeTests.cs` | 5 | Фабрика HTTP, конструкторы, ошибка подключения |
+| `AgentToolsVisibilityEditModeTests.cs` | 5 | Агент видит все инструменты, policy retrievable, BuildAIFunctions |
 
-**Итого новых EditMode тестов в v0.9.0: 28**
+**Итого новых EditMode тестов в v0.9.0: 34**
 
 ### PlayMode тесты (v0.9.0)
 
@@ -67,9 +68,10 @@
 
 | Файл | Тестов | Что проверяет |
 |------|--------|--------------|
-| `TestAgentSetup.cs` | 🆕 **Универсальный setup** — читает CoreAISettingsAsset, создаёт клиент, добавляет LogAssert |
+| `TestAgentSetup.cs` | 🆕 **Универсальный setup** — читает CoreAISettingsAsset, создаёт клиент, LogAssert только для HTTP |
 | `MeaiLlmClientPlayModeTests.cs` | 3 | CreateHttp, CreateLlmUnity, null аргументы |
 | `AgentMemoryWithRealModelPlayModeTests.cs` | 1 | Обновлён под TestAgentSetup, без LM Studio |
+| `AgentMemoryOpenAiApiPlayModeTests.cs` | 3 | Обновлён под TestAgentSetup (write/append/clear) |
 | `AllToolCallsPlayModeTests.cs` | 3 | Использует CoreAISettingsAsset |
 | `CraftingMemoryViaLlmUnityPlayModeTests.cs` | 1 | Использует CoreAISettingsAsset |
 | `CraftingMemoryViaOpenAiPlayModeTests.cs` | 2 | Использует CoreAISettingsAsset |
@@ -81,7 +83,7 @@
 - ❌ `OpenAiLmStudioPlayModeTests.cs` — LM Studio URL захардкожен
 - ❌ `AgentMemoryOpenAiApiPlayModeTests.cs` (старый) — LM Studio URL захардкожен, переписан на TestAgentSetup
 
-**Итого PlayMode тестов в v0.9.0: 13**
+**Итого PlayMode тестов в v0.9.0: 19**
 
 ### Доступные настройки через CoreAISettingsAsset
 
@@ -260,6 +262,21 @@
 - [ ] Условная логика: «если CoreMechanicAI вернул качество > 80, вызвать Programmer»
 - [ ] Parallel execution: «Analyzer и CoreMechanicAI работают параллельно»
 
+**План реализации:** [TODO/MultiAgent_Orchestration_v2.0.md](./TODO/MultiAgent_Orchestration_v2.0.md) — Multi-Agent Orchestration v2.0 (по паттерну Claude Agent SDK)
+
+**Ключевые решения из плана:**
+- ✅ Таймаут: 60 сек
+- ✅ Ошибки: возвращать в JSON
+- ✅ Параллельность: да, default=3 (по Anthropic Research System)
+- ✅ Subagent result: передаётся как tool_result через MEAI
+- ✅ Max turns для subagent: 10
+
+**Паттерны из открытых исходников:**
+- Claude Agent SDK: декларативные subagents с description + tools + model
+- Task tool НЕ в subagent tools — subagents не спавнят subagents
+- Контекстная изоляция — subagent получает чистый контекст
+- Модель сама решает параллельность
+
 ---
 
 ### 4. ✅ Analyzer тесты
@@ -278,32 +295,42 @@
 
 ---
 
-### 8. ❌ AINpc и PlayerChat не тестированы
+### 8. 🔄 AINpc и PlayerChat тесты (В ПРОЦЕССЕ)
 
 **Что есть:**
 - ✅ Системные промпты есть
 - ✅ `InGameChatPanel.cs` — UI для чата
+- ✅ `AINpcResponsePolicy.cs` — валидация ответа NPC
+- ✅ `PlayerChatResponsePolicy.cs` — валидация ответа чата
+
+**Создано:**
+- ✅ PlayMode тесты: `PlayerChatAndAINpcPlayModeTests.cs`
+  - `PlayerChat_RespondsToGreeting` — игрок отправляет сообщение, получает ответ
+  - `PlayerChat_MaintainsHistory` — история сохраняется между сообщениями
+  - `PlayerChat_ClearHistory_Works` — очистка истории работает
+  - `AINpc_GeneratesPlainTextDialogue` — NPC генерирует текстовую реплику
+  - `AINpc_ToolsAndChatMode_CanUseTools` — NPC с инструментами (ToolsAndChat)
+  - `AINpc_ChatOnlyMode_PlainTextOnly` — NPC только чат (ChatOnly)
 
 **Чего нет:**
-- [ ] Тест: PlayerChat отвечает на вопрос игрока
-- [ ] Тест: AINpc генерирует реплику в мире
-- [ ] Интеграция PlayerChat с UI (есть `InGameChatPanel` но неясно работает ли)
 - [ ] Rate limiting для чата (спам защита)
 
 ---
 
 ## 🔧 ТЕХНИЧЕСКОЕ (инфраструктура)
 
-### 9. ⚠️ Логирование HTTP запросов к LLM
+### 9. ✅ Логирование HTTP запросов к LLM
 
-**Что есть:**
-- ✅ `LoggingLlmClientDecorator.cs` — обёртка для логирования
+**Файлы:** `CoreAISettings.cs`, `CoreAISettingsAsset.cs`, `MeaiOpenAiChatClient.cs`, `MeaiLlmClient.cs`, `MeaiLlmUnityClient.cs`
 
-**Чего нет:**
-- [ ] Логирование **сырого** HTTP request/response (headers, body)
-- [ ] Логирование token usage (сколько токенов потрачено)
-- [ ] Логирование latency (время ответа модели)
-- [ ] Логирование ошибок подключения (LM Studio недоступен)
+**Статус:** ✅ УЖЕ РЕАЛИЗОВАНО
+
+- ✅ `EnableHttpDebugLogging` — логирование сырых HTTP request/response
+- ✅ `LogTokenUsage` — логирование token usage
+- ✅ `LogLlmLatency` — логирование latency
+- ✅ `LogLlmConnectionErrors` — логирование ошибок подключения
+- ✅ `LogLlmInput` — логирование входящих промтов
+- ✅ `LogLlmOutput` — логирование исходящих ответов
 
 ---
 
@@ -405,14 +432,12 @@
 24. ✅ **AgentMemoryPolicy.SetToolsForRole()** — кастомные инструменты
 25. ✅ **Удалены** старые парсинги и дубликаты тестов
 
-### Sprint 3 — Multi-agent (СЛЕДУЮЩИЙ)
-19. **MultiAgentWorkflow** — цепочка агентов (4 часа)
-20. **CraftingTool** для CoreMechanicAI (2 часа)
+### Sprint 3 — Тестирование AINpc/PlayerChat (В ПРОЦЕССЕ)
+19. **AINpc и PlayerChat PlayMode тесты** — созданы (3 часа)
 
-### Sprint 4 — Инфраструктура
-21. **Логирование HTTP** запросов к LLM (2 часа)
+### Sprint 4 — Инфраструктура (СЛЕДУЮЩИЙ)
+21. ✅ **Логирование HTTP** — УЖЕ РЕАЛИЗОВАНО
 22. **Метрики** оркестрации (2 часа)
-23. **AINpc и PlayerChat тесты** (3 часа)
 
 ### Sprint 5 — Полировка
 24. **WorldCommand** расширения (3 часа)
@@ -438,10 +463,10 @@
 | **CoreMechanicAI** — валидация ответа | ✅ | | |
 | **CoreMechanicAI** — память | ✅ | | |
 | **AINpc** — системный промпт | ✅ | | |
-| **AINpc** — диалоги | | ✅ | (нет тестов) |
+| **AINpc** — диалоги | ✅ | 🔄 | (PlayMode тесты добавлены) |
 | **AINpc** — валидация ответа | ✅ | | |
 | **PlayerChat** — системный промпт | ✅ | | |
-| **PlayerChat** — UI | | ✅ | (есть панель, нет тестов) |
+| **PlayerChat** — UI | ✅ | 🔄 | (PlayMode тесты добавлены) |
 | **PlayerChat** — валидация ответа | ✅ | | |
 | **Merchant** — системный промпт | ✅ | | |
 | **Merchant** — get_inventory tool | ✅ | | |

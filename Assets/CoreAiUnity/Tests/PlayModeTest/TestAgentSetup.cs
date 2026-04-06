@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
@@ -87,7 +88,21 @@ namespace CoreAI.Tests.PlayMode
             }
 
             yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
-            Client = _handle.Client;
+
+            // Пересоздаём клиент с нашим MemoryStore чтобы tool calls писали в правильный store
+            var llmUnityClient = _handle.Client as MeaiLlmUnityClient;
+            if (llmUnityClient != null)
+            {
+                Client = new MeaiLlmClient(
+                    new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
+                    GameLoggerUnscopedFallback.Instance,
+                    MemoryStore);
+            }
+            else
+            {
+                Client = _handle.Client;
+            }
+
             BackendName = "LLMUnity";
             CreateOrchestrator();
         }
@@ -103,8 +118,26 @@ namespace CoreAI.Tests.PlayMode
 
         private IEnumerator InitializeAuto(CoreAISettingsAsset settings)
         {
-            Debug.Log("[TestAgentSetup] Auto mode: trying LLMUnity first...");
+            bool httpFirst = settings.AutoPriority == LlmAutoPriority.HttpFirst;
+            Debug.Log($"[TestAgentSetup] Auto mode: trying {(httpFirst ? "HTTP" : "LLMUnity")} first...");
 
+            if (httpFirst)
+            {
+                // HTTP First
+                SetupHttpLogAsserts();
+                InitializeHttp(settings);
+                if (Client != null)
+                {
+                    BackendName = "HTTP (Auto)";
+                    Debug.Log("[TestAgentSetup] Using HTTP");
+                    CreateOrchestrator();
+                    yield break;
+                }
+
+                Debug.Log("[TestAgentSetup] HTTP not available, falling back to LLMUnity...");
+            }
+
+            // LLMUnity First (или HTTP не подключился)
             if (PlayModeProductionLikeLlmFactory.TryCreate(
                     PlayModeProductionLikeLlmBackend.LlmUnity,
                     settings.Temperature,
@@ -113,7 +146,21 @@ namespace CoreAI.Tests.PlayMode
                     out _))
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
-                Client = _handle.Client;
+
+                // Пересоздаём клиент с нашим MemoryStore
+                var llmUnityClient = _handle.Client as MeaiLlmUnityClient;
+                if (llmUnityClient != null)
+                {
+                    Client = new MeaiLlmClient(
+                        new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
+                        GameLoggerUnscopedFallback.Instance,
+                        MemoryStore);
+                }
+                else
+                {
+                    Client = _handle.Client;
+                }
+
                 BackendName = "LLMUnity (Auto)";
                 Debug.Log("[TestAgentSetup] Using LLMUnity");
             }

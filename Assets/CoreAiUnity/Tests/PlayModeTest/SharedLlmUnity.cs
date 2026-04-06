@@ -1,5 +1,6 @@
 #if !COREAI_NO_LLM
 using System.Collections;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -19,6 +20,14 @@ namespace CoreAI.Tests.PlayMode
         public static bool IsReady => _initialized && _handle?.Client != null && string.IsNullOrEmpty(_error);
         public static string Error => _error;
         public static ILlmClient Client => _handle?.Client;
+
+        /// <summary>
+        /// Получить клиент с правильным MemoryStore.
+        /// </summary>
+        public static ILlmClient ClientWithMemoryStore(IAgentMemoryStore store)
+        {
+            return _handle?.WrapWithMemoryStore(store);
+        }
 
         public static IEnumerator Initialize()
         {

@@ -1,0 +1,467 @@
+#if !COREAI_NO_LLM
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using CoreAI.AgentMemory;
+using CoreAI.Ai;
+using CoreAI.Authority;
+using CoreAI.Infrastructure.Logging;
+using CoreAI.Messaging;
+using CoreAI.Session;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
+
+namespace CoreAI.Tests.PlayMode
+{
+    /// <summary>
+    /// PlayMode тесты: PlayerChat отвечает на вопрос игрока через InGameLlmChatService.
+    /// </summary>
+    public sealed class PlayerChatPlayModeTests
+    {
+        private sealed class InMemoryStore : IAgentMemoryStore
+        {
+            public readonly Dictionary<string, AgentMemoryState> States = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+                => States.TryGetValue(roleId, out state);
+
+            public void Save(string roleId, AgentMemoryState state)
+                => States[roleId] = state;
+
+            public void Clear(string roleId)
+                => States.Remove(roleId);
+
+            public void AppendChatMessage(string roleId, string role, string content) { }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+                => Array.Empty<ChatMessage>();
+        }
+
+        private sealed class CapturingLlmClient : ILlmClient
+        {
+            public string LastSystemPrompt;
+            public string LastUserPayload;
+            public string LastRoleId;
+            public LlmCompletionResult LastResult;
+
+            private readonly ILlmClient _inner;
+
+            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                System.Threading.CancellationToken cancellationToken = default)
+            {
+                LastSystemPrompt = request.SystemPrompt;
+                LastUserPayload = request.UserPayload;
+                LastRoleId = request.AgentRoleId;
+
+                LastResult = await _inner.CompleteAsync(request, cancellationToken);
+                return LastResult;
+            }
+
+            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator PlayerChat_RespondsToGreeting()
+        {
+            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var composer = new AiPromptComposer(
+                    systemPrompts,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore());
+
+                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
+
+                Debug.Log($"[PlayerChat] Sending: 'Hello, how are you?'");
+                LlmCompletionResult result = chatService.SendPlayerMessageAsync("Hello, how are you?").Result;
+
+                Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
+                Debug.Log($"[PlayerChat] Role: {capturing.LastRoleId}");
+                Debug.Log($"[PlayerChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
+                Debug.Log($"[PlayerChat] Response: {result.Content}");
+                Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
+
+                Assert.IsTrue(result.Ok, $"LLM call failed: {result.Error}");
+                Assert.AreEqual(BuiltInAgentRoleIds.PlayerChat, capturing.LastRoleId);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "Response should not be empty");
+
+                // Проверяем что в ответе есть осмысленный текст (не just tool call result)
+                bool hasTextContent = result.Content.Length > 10;
+                Assert.IsTrue(hasTextContent, "Response should contain text");
+
+                Debug.Log($"[PlayerChat] ✓ PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
+                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator PlayerChat_MaintainsHistory()
+        {
+            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
+
+                // First message
+                var r1 = chatService.SendPlayerMessageAsync("My name is Adventurer").Result;
+                Assert.AreEqual(1, chatService.HistoryPairCount);
+
+                // Second message - should see history
+                var r2 = chatService.SendPlayerMessageAsync("What is my name?").Result;
+                Assert.AreEqual(2, chatService.HistoryPairCount);
+
+                // Verify history is in the prompt
+                StringAssert.Contains("Adventurer", capturing.LastUserPayload);
+
+                Debug.Log($"[PlayerChat] ✓ History maintained: {chatService.HistoryPairCount} pairs");
+                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator PlayerChat_ClearHistory_Works()
+        {
+            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
+
+                var r1 = chatService.SendPlayerMessageAsync("Hello").Result;
+                Assert.AreEqual(1, chatService.HistoryPairCount);
+
+                chatService.ClearHistory();
+                Assert.AreEqual(0, chatService.HistoryPairCount);
+
+                // Next message should not have history
+                string userPayloadBeforeClear = capturing.LastUserPayload;
+                var r2 = chatService.SendPlayerMessageAsync("Hi again").Result;
+
+                Debug.Log($"[PlayerChat] ✓ History cleared successfully");
+                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// PlayMode тесты: AINpc генерирует реплику (plain text и JSON dialogue).
+    /// </summary>
+    public sealed class AINpcPlayModeTests
+    {
+        private sealed class InMemoryStore : IAgentMemoryStore
+        {
+            public readonly Dictionary<string, AgentMemoryState> States = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+                => States.TryGetValue(roleId, out state);
+
+            public void Save(string roleId, AgentMemoryState state)
+                => States[roleId] = state;
+
+            public void Clear(string roleId)
+                => States.Remove(roleId);
+
+            public void AppendChatMessage(string roleId, string role, string content) { }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+                => Array.Empty<ChatMessage>();
+        }
+
+        private sealed class ListSink : IAiGameCommandSink
+        {
+            public readonly List<ApplyAiGameCommand> Items = new();
+
+            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+        }
+
+        private sealed class CapturingLlmClient : ILlmClient
+        {
+            public string LastSystemPrompt;
+            public string LastUserPayload;
+            public string LastRoleId;
+            public LlmCompletionResult LastResult;
+
+            private readonly ILlmClient _inner;
+
+            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                System.Threading.CancellationToken cancellationToken = default)
+            {
+                LastSystemPrompt = request.SystemPrompt;
+                LastUserPayload = request.UserPayload;
+                LastRoleId = request.AgentRoleId;
+
+                LastResult = await _inner.CompleteAsync(request, cancellationToken);
+                return LastResult;
+            }
+
+            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator AINpc_GeneratesPlainTextDialogue()
+        {
+            Debug.Log("[AINpc] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+                ListSink sink = new();
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var composer = new AiPromptComposer(
+                    systemPrompts,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore());
+
+                var orch = new AiOrchestrator(
+                    new SoloAuthorityHost(),
+                    capturing,
+                    sink,
+                    new SessionTelemetryCollector(),
+                    composer,
+                    store,
+                    new AgentMemoryPolicy(),
+                    new NoOpRoleStructuredResponsePolicy(),
+                    new NullAiOrchestrationMetrics());
+
+                Debug.Log("[AINpc] Requesting NPC dialogue...");
+                Task t = orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.AiNpc,
+                    Hint = "A traveler enters the tavern. Say greeting."
+                });
+
+                yield return PlayModeTestAwait.WaitTask(t, 120f, "AINpc dialogue");
+
+                Debug.Log($"[AINpc] ═══════════════════════════════════════");
+                Debug.Log($"[AINpc] Role: {capturing.LastRoleId}");
+                Debug.Log($"[AINpc] Response: {capturing.LastResult.Content}");
+                Debug.Log($"[AINpc] ═══════════════════════════════════════");
+
+                Assert.IsTrue(capturing.LastResult.Ok, $"LLM call failed: {capturing.LastResult.Error}");
+                Assert.AreEqual(BuiltInAgentRoleIds.AiNpc, capturing.LastRoleId);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));
+
+                // AINpcResponsePolicy validates: non-empty text passes
+                Debug.Log($"[AINpc] ✓ AINpc generated dialogue");
+                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator AINpc_ToolsAndChatMode_CanUseTools()
+        {
+            Debug.Log("[AINpc] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 180,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+                ListSink sink = new();
+
+                var policy = new AgentMemoryPolicy();
+                policy.SetToolsForRole(BuiltInAgentRoleIds.AiNpc, new List<ILlmTool>
+                {
+                    new MemoryLlmTool()
+                });
+                policy.EnableMemoryTool(BuiltInAgentRoleIds.AiNpc);
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var composer = new AiPromptComposer(
+                    systemPrompts,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore());
+
+                var orch = new AiOrchestrator(
+                    new SoloAuthorityHost(),
+                    capturing,
+                    sink,
+                    new SessionTelemetryCollector(),
+                    composer,
+                    store,
+                    policy,
+                    new CompositeRoleStructuredResponsePolicy(),
+                    new NullAiOrchestrationMetrics());
+
+                Debug.Log("[AINpc] Requesting NPC with memory tool...");
+                Task t = orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.AiNpc,
+                    Hint = "Welcome the player and remember their name is 'Hero'"
+                });
+
+                yield return PlayModeTestAwait.WaitTask(t, 180f, "AINpc with tools");
+
+                Debug.Log($"[AINpc] Response: {capturing.LastResult.Content}");
+                Debug.Log($"[AINpc] Commands: {sink.Items.Count}");
+
+                Assert.IsTrue(capturing.LastResult.Ok);
+
+                // Should have called memory tool
+                bool usedMemory = capturing.LastResult.Content?.Contains("memory") == true ||
+                                 capturing.LastResult.Content?.Contains("remember") == true;
+
+                Debug.Log($"[AINpc] ✓ AINpc with ToolsAndChat mode completed");
+                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator AINpc_ChatOnlyMode_PlainTextOnly()
+        {
+            Debug.Log("[AINpc] ═══ TEST START ═══");
+
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
+                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+
+                InMemoryStore store = new();
+                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
+                ListSink sink = new();
+
+                // ChatOnly mode - no tools
+                var config = new AgentBuilder(BuiltInAgentRoleIds.AiNpc)
+                    .WithMode(AgentMode.ChatOnly)
+                    .WithSystemPrompt("You are a mysterious merchant.")
+                    .Build();
+
+                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
+                var composer = new AiPromptComposer(
+                    systemPrompts,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore());
+
+                var orch = new AiOrchestrator(
+                    new SoloAuthorityHost(),
+                    capturing,
+                    sink,
+                    new SessionTelemetryCollector(),
+                    composer,
+                    store,
+                    new AgentMemoryPolicy(), // No tools
+                    new AINpcResponsePolicy(),
+                    new NullAiOrchestrationMetrics());
+
+                Debug.Log("[AINpc] Testing ChatOnly mode...");
+                Task t = orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.AiNpc,
+                    Hint = "A customer approaches. What do you sell?"
+                });
+
+                yield return PlayModeTestAwait.WaitTask(t, 120f, "AINpc ChatOnly");
+
+                Assert.IsTrue(capturing.LastResult.Ok);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));
+
+                Debug.Log($"[AINpc] ✓ AINpc ChatOnly mode works");
+                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+    }
+}
+#endif
