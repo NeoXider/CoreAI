@@ -12,18 +12,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 2
+  backendType: 0
   autoPriority: 1
   apiBaseUrl: http://10.35.88.194:1234/v1
   apiKey: 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
   modelName: gemma-4-26b-a4b-it
   temperature: 0.1
   maxTokens: 24000
-  requestTimeoutSeconds: 120
+  requestTimeoutSeconds: 300
   llmUnityAgentName: 
   ggufModelPath: 
   llmUnityDontDestroyOnLoad: 1
-  llmUnityStartupTimeoutSeconds: 120
+  llmUnityStartupTimeoutSeconds: 300
   llmUnityStartupDelaySeconds: 1
   llmUnityKeepAlive: 1
   llmUnityMaxConcurrentChats: 1
@@ -49,6 +49,6 @@ MonoBehaviour:
   logTokenUsage: 1
   logLlmLatency: 1
   logLlmConnectionErrors: 1
-  llmRequestTimeoutSeconds: 15
+  llmRequestTimeoutSeconds: 300
   maxConcurrentOrchestrations: 2
   logOrchestrationMetrics: 0

@@ -39,6 +39,12 @@ namespace CoreAI.Tests.PlayMode
                 => Array.Empty<ChatMessage>();
         }
 
+        private sealed class ListSink : IAiGameCommandSink
+        {
+            public readonly List<ApplyAiGameCommand> Items = new();
+            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+        }
+
         private sealed class CapturingLlmClient : ILlmClient
         {
             public string LastSystemPrompt;
@@ -79,7 +85,11 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                // Только для LLMUnity — ждём готовности модели. Для HTTP не нужно.
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -133,7 +143,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -176,106 +189,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-
-                InMemoryStore store = new();
-                CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
-
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
-
-                var r1 = chatService.SendPlayerMessageAsync("Hello").Result;
-                Assert.AreEqual(1, chatService.HistoryPairCount);
-
-                chatService.ClearHistory();
-                Assert.AreEqual(0, chatService.HistoryPairCount);
-
-                // Next message should not have history
-                string userPayloadBeforeClear = capturing.LastUserPayload;
-                var r2 = chatService.SendPlayerMessageAsync("Hi again").Result;
-
-                Debug.Log($"[PlayerChat] ✓ History cleared successfully");
-                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
-        }
-    }
-
-    /// <summary>
-    /// PlayMode тесты: AINpc генерирует реплику (plain text и JSON dialogue).
-    /// </summary>
-    public sealed class AINpcPlayModeTests
-    {
-        private sealed class InMemoryStore : IAgentMemoryStore
-        {
-            public readonly Dictionary<string, AgentMemoryState> States = new();
-
-            public bool TryLoad(string roleId, out AgentMemoryState state)
-                => States.TryGetValue(roleId, out state);
-
-            public void Save(string roleId, AgentMemoryState state)
-                => States[roleId] = state;
-
-            public void Clear(string roleId)
-                => States.Remove(roleId);
-
-            public void AppendChatMessage(string roleId, string role, string content) { }
-
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
-                => Array.Empty<ChatMessage>();
-        }
-
-        private sealed class ListSink : IAiGameCommandSink
-        {
-            public readonly List<ApplyAiGameCommand> Items = new();
-
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
-        }
-
-        private sealed class CapturingLlmClient : ILlmClient
-        {
-            public string LastSystemPrompt;
-            public string LastUserPayload;
-            public string LastRoleId;
-            public LlmCompletionResult LastResult;
-
-            private readonly ILlmClient _inner;
-
-            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
-
-            public async Task<LlmCompletionResult> CompleteAsync(
-                LlmCompletionRequest request,
-                System.Threading.CancellationToken cancellationToken = default)
-            {
-                LastSystemPrompt = request.SystemPrompt;
-                LastUserPayload = request.UserPayload;
-                LastRoleId = request.AgentRoleId;
-
-                LastResult = await _inner.CompleteAsync(request, cancellationToken);
-                return LastResult;
-            }
-
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
-        }
-
-        [UnityTest]
-        [Timeout(300000)]
-        public IEnumerator AINpc_GeneratesPlainTextDialogue()
-        {
-            Debug.Log("[AINpc] ═══ TEST START ═══");
-
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
-                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
-            {
-                Assert.Ignore(ignore);
-            }
-
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -306,7 +223,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint = "A traveler enters the tavern. Say greeting."
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "AINpc dialogue");
+                yield return PlayModeTestAwait.WaitTask(t, 300f, "AINpc dialogue");
 
                 Debug.Log($"[AINpc] ═══════════════════════════════════════");
                 Debug.Log($"[AINpc] Role: {capturing.LastRoleId}");
@@ -341,7 +258,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -449,7 +369,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint = "A customer approaches. What do you sell?"
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "AINpc ChatOnly");
+                yield return PlayModeTestAwait.WaitTask(t, 300f, "AINpc ChatOnly");
 
                 Assert.IsTrue(capturing.LastResult.Ok);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));

@@ -92,7 +92,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -314,7 +317,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
                 Debug.Log($"[AllToolCalls.ExecuteLua] Backend: {handle.ResolvedBackend}");
                 Debug.Log($"[AllToolCalls.ExecuteLua] Client: {handle.Client.GetType().Name}");
 

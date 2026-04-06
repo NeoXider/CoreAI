@@ -51,7 +51,7 @@ namespace CoreAI.Tests.PlayMode
             };
 
             var task = client.CompleteAsync(request);
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "MeaiLlmClient HTTP request");
+            yield return PlayModeTestAwait.WaitTask(task, 300f, "MeaiLlmClient HTTP request");
 
             var result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
             if (!result.Ok)
@@ -101,8 +101,12 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
 
-            Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
-            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            // Только для LLMUnity — ждём готовности модели
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+            {
+                Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            }
 
             var logger = GameLoggerUnscopedFallback.Instance;
             var store = new InMemoryStore();

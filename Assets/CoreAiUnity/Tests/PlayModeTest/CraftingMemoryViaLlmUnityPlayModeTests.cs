@@ -90,8 +90,12 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log("[CraftingMemory.LLMUnity] ✓ Model ready");
+                // Только для LLMUnity — ждём готовности модели. Для HTTP не нужно.
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
+                Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
