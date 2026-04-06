@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,7 +38,8 @@ namespace CoreAI.Tests.EditMode
             TestMemoryState store = new();
             MemoryTool tool = new(store, "TestRole");
 
-            MemoryTool.MemoryResult result = await tool.ExecuteAsync("write", "Test memory content");
+            string resultJson = await tool.ExecuteAsync("write", "Test memory content");
+            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.AreEqual("Test memory content", store.LastSaved?.Memory);
@@ -50,7 +52,8 @@ namespace CoreAI.Tests.EditMode
             store.Save("TestRole", new AgentMemoryState { Memory = "Line 1" });
             MemoryTool tool = new(store, "TestRole");
 
-            MemoryTool.MemoryResult result = await tool.ExecuteAsync("append", "Line 2");
+            string resultJson = await tool.ExecuteAsync("append", "Line 2");
+            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.IsTrue(store.States["TestRole"].Memory.Contains("Line 1"));
@@ -64,7 +67,8 @@ namespace CoreAI.Tests.EditMode
             store.Save("TestRole", new AgentMemoryState { Memory = "Old memory" });
             MemoryTool tool = new(store, "TestRole");
 
-            MemoryTool.MemoryResult result = await tool.ExecuteAsync("clear");
+            string resultJson = await tool.ExecuteAsync("clear");
+            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.IsFalse(store.States.ContainsKey("TestRole"));

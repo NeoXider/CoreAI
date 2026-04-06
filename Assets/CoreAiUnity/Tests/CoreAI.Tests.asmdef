@@ -20,7 +20,8 @@
     "precompiledReferences": [
         "nunit.framework.dll",
         "Microsoft.Extensions.AI.Abstractions.dll",
-        "Newtonsoft.Json.dll"
+        "Newtonsoft.Json.dll",
+        "System.Text.Json.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [

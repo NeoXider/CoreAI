@@ -163,10 +163,18 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _showDebug = EditorGUILayout.BeginFoldoutHeaderGroup(_showDebug, "🔧 Отладка");
             if (_showDebug)
             {
+                EditorGUILayout.LabelField("📝 Логирование LLM", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logLlmInput"),
+                    new GUIContent("Log LLM Input", "Логировать входящие промпты (system, user) и инструменты"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logLlmOutput"),
+                    new GUIContent("Log LLM Output", "Логировать исходящие ответы модели и результаты tool calls"));
+                
+                EditorGUILayout.Space();
+                
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableHttpDebugLogging"),
+                    new GUIContent("HTTP Debug Logging", "Логировать сырые HTTP request/response JSON"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableMeaiDebugLogging"),
                     new GUIContent("MEAI Debug Logging"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableHttpDebugLogging"),
-                    new GUIContent("HTTP Debug Logging", "Логировать сырые HTTP запросы"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("logOrchestrationMetrics"),
                     new GUIContent("Log Orchestration Metrics"));
             }

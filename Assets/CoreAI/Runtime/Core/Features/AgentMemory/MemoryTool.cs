@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -24,7 +25,8 @@ namespace CoreAI.Ai
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, string?, CancellationToken, Task<MemoryResult>> func = ExecuteAsync;
+            // Возвращаем строку (JSON) - MEAI правильно отправит её модели как tool result
+            Func<string, string?, CancellationToken, Task<string>> func = ExecuteAsync;
             return AIFunctionFactory.Create(
                 func,
                 "memory",
@@ -32,14 +34,14 @@ namespace CoreAI.Ai
         }
 
 
-        public async Task<MemoryResult> ExecuteAsync(
+        public async Task<string> ExecuteAsync(
             string action,
             string? content = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(action))
             {
-                return new MemoryResult { Success = false, Error = "Action is required" };
+                return SerializeResult(new MemoryResult { Success = false, Error = "Action is required" });
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -51,62 +53,80 @@ namespace CoreAI.Ai
                     case "write":
                         if (string.IsNullOrEmpty(content))
                         {
-                            return new MemoryResult { Success = false, Error = "Content is required for write action" };
+                            return SerializeResult(new MemoryResult { Success = false, Error = "Content is required for write action" });
                         }
 
+                        // Записываем память (полная замена)
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
-                        return new MemoryResult
+                        return SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"Memory written successfully for role: {_roleId}"
-                        };
+                        });
 
                     case "append":
                         if (string.IsNullOrEmpty(content))
                         {
-                            return new MemoryResult
-                                { Success = false, Error = "Content is required for append action" };
+                            return SerializeResult(new MemoryResult
+                                { Success = false, Error = "Content is required for append action" });
                         }
 
                         string currentState = _store.TryLoad(_roleId, out AgentMemoryState existing)
                             ? existing?.Memory ?? ""
                             : "";
 
+                        // Идемпотентность: если контент уже существует, не добавляем повторно
+                        // Это защищает от зацикливания tool call в FunctionInvokingChatClient
+                        if (currentState.Contains(content, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return SerializeResult(new MemoryResult
+                            {
+                                Success = true,
+                                Message = $"Content already exists in memory for role: {_roleId}"
+                            });
+                        }
+
                         string newMemory = string.IsNullOrEmpty(currentState)
                             ? content
                             : currentState + "\n" + content;
 
                         _store.Save(_roleId, new AgentMemoryState { Memory = newMemory });
-                        return new MemoryResult
+                        return SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"Content appended to memory for role: {_roleId}"
-                        };
+                        });
 
                     case "clear":
                         _store.Clear(_roleId);
-                        return new MemoryResult
+                        return SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"Memory cleared for role: {_roleId}"
-                        };
+                        });
 
                     default:
-                        return new MemoryResult
+                        return SerializeResult(new MemoryResult
                         {
                             Success = false,
                             Error = $"Unknown action: '{action}'. Valid actions: write, append, clear"
-                        };
+                        });
                 }
             }
             catch (Exception ex)
             {
-                return new MemoryResult
+                return SerializeResult(new MemoryResult
                 {
                     Success = false,
                     Error = $"Memory operation failed: {ex.Message}"
-                };
+                });
             }
+        }
+
+        private static string SerializeResult(MemoryResult result)
+        {
+            // Сериализуем в JSON строку - MEAI отправит это модели как tool result
+            return JsonSerializer.Serialize(result);
         }
 
 

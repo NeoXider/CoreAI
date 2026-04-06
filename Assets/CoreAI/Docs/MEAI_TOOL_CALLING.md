@@ -101,10 +101,12 @@ switch (tool)
 | `LuaTool.cs` | AIFunction для выполнения Lua |
 | `InventoryTool.cs` | AIFunction для инвентаря |
 | `GameConfigTool.cs` | AIFunction для конфигов |
+| `WorldTool.cs` | AIFunction для управления миром |
 | `MemoryLlmTool.cs` | ILlmTool → MemoryTool адаптер |
 | `LuaLlmTool.cs` | ILlmTool → LuaTool адаптер |
 | `InventoryLlmTool.cs` | ILlmTool → InventoryTool адаптер |
 | `GameConfigLlmTool.cs` | ILlmTool → GameConfigTool адаптер |
+| `WorldLlmTool.cs` | ILlmTool → WorldTool адаптер |
 
 ### Unity слой (CoreAiUnity)
 

@@ -13,6 +13,8 @@ namespace CoreAI.Infrastructure.World
         public string instanceId = "";
         public string targetName = "";
         public int boolValue;
+        public float floatValue;
+        public string stringValue = "";
 
         // Spawn
         public string prefabKeyOrName = "";
@@ -96,6 +98,68 @@ namespace CoreAI.Infrastructure.World
                 action = "set_active",
                 instanceId = instanceId ?? "",
                 boolValue = active ? 1 : 0
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope PlayAnimation(string instanceId, string animationName)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "play_animation",
+                instanceId = instanceId ?? "",
+                stringValue = animationName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope PlaySound(string instanceId, string clipName, float volume)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "play_sound",
+                instanceId = instanceId ?? "",
+                stringValue = clipName ?? "",
+                floatValue = volume
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope ShowText(string targetName, string text)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "show_text",
+                targetName = targetName ?? "",
+                stringValue = text ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope ApplyForce(string instanceId, Vector3 force)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "apply_force",
+                instanceId = instanceId ?? "",
+                px = force.x, // Reusing px, py, pz for a Vector3 generic param
+                py = force.y,
+                pz = force.z
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SpawnParticles(string instanceId, string effectName)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "spawn_particles",
+                instanceId = instanceId ?? "",
+                stringValue = effectName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope ListObjects(string searchPattern = "")
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "list_objects",
+                stringValue = searchPattern ?? ""
             };
         }
     }

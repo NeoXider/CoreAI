@@ -1,6 +1,33 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
 
-**Обновлено:** 2026-04-06 | **Текущая версия:** v0.9.0
+**Обновлено:** 2026-04-06 | **Текущая версия:** v0.10.0
+
+## 🚧 В РАБОТЕ — v0.10.0
+
+### WorldCommand как MEAI tool call
+
+- ✅ `IWorldCommandExecutor` — абстрактный интерфейс в CoreAI
+- ✅ `WorldTool.cs` — AIFunction для MEAI function calling (в CoreAiUnity)
+- ✅ `WorldLlmTool.cs` — ILlmTool обёртка (в CoreAiUnity)
+- ✅ `list_objects` action — получить список объектов в иерархии сцены
+- ✅ `targetName` для всех команд — работа с объектами по имени
+- ✅ EditMode и PlayMode тесты
+- ⏳ `show_text` — уведомление на 2 секунды с анимацией (на потом)
+- ⏳ `apply_force`, `spawn_particles` — заглушки (на потом)
+
+### Абстрактные интерфейсы для будущих инструментов (в CoreAI)
+
+- ✅ `IWorldCommandExecutor` — управление миром (spawn, move, destroy, etc.)
+- ✅ `IAudioController` — управление звуком (PlaySound, StopSound, SetVolume)
+- ✅ `IUIController` — управление UI (ShowText, Hide, SetVisible)
+- ✅ `IPhysicsController` — управление физикой (ApplyForce, SpawnParticles)
+- ⏳ Реализация в CoreAiUnity для Audio, UI, Physics (на потом)
+
+### Engine-Agnostic Pattern документация
+
+- 📖 [ENGINE_AGNOSTIC_TOOLS.md](../CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md) — полный паттерн engine-agnostic tools
+  - Два типа: Engine-Agnostic (Memory, Lua) и Engine-Specific (World, Audio, UI)
+  - Абстракции в CoreAI, реализации в CoreAiUnity
 
 ## ✅ ВЫПОЛНЕНО В v0.9.0 — Единый MEAI Pipeline + AgentBuilder
 

@@ -37,14 +37,76 @@ namespace CoreAI.Infrastructure.Llm
             var msgs = chatMessages.ToList();
             string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
-            var messages = new List<Dictionary<string, string>>();
+            // Debug: логируем URL для диагностики
+            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: POST {url}");
+
+            // Логируем входящие промпты если включено
+            if (_settings.LogLlmInput)
+            {
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: === LLM Input ===");
+                foreach (var msg in msgs)
+                {
+                    // Для tool messages извлекаем content правильно
+                    string content = msg.Text ?? "";
+                    if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
+                    {
+                        var textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
+                        content = textContent?.Text ?? string.Join(", ", msg.Contents.Select(c => c.GetType().Name));
+                    }
+                    
+                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: [{msg.Role}] {content}");
+                }
+                if (options?.Tools != null && options.Tools.Count > 0)
+                {
+                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Tools ({options.Tools.Count}):");
+                    foreach (var tool in options.Tools)
+                    {
+                        if (tool is MEAI.AIFunction af)
+                        {
+                            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient:   - {af.Name}: {af.Description}");
+                        }
+                    }
+                }
+            }
+
+            var messages = new List<Dictionary<string, object>>();
             foreach (var msg in msgs)
             {
-                messages.Add(new Dictionary<string, string>
+                // Для tool messages нужно извлекать content и tool_call_id правильно
+                string content = msg.Text ?? "";
+                if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
+                {
+                    // Tool messages могут иметь content в Contents коллекции
+                    var textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
+                    if (textContent != null)
+                    {
+                        content = textContent.Text;
+                    }
+                    else
+                    {
+                        // Fallback: сериализуем весь Contents
+                        content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
+                    }
+                }
+
+                var msgDict = new Dictionary<string, object>
                 {
                     { "role", msg.Role.ToString().ToLowerInvariant() },
-                    { "content", msg.Text ?? "" }
-                });
+                    { "content", content }
+                };
+
+                // Для tool messages добавляем tool_call_id (требуется для LM Studio!)
+                if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
+                {
+                    // Ищем FunctionResultContent который содержит tool_call_id
+                    var functionResult = msg.Contents.OfType<MEAI.FunctionResultContent>().FirstOrDefault();
+                    if (functionResult != null && !string.IsNullOrEmpty(functionResult.CallId))
+                    {
+                        msgDict["tool_call_id"] = functionResult.CallId;
+                    }
+                }
+
+                messages.Add(msgDict);
             }
 
             var toolsList = new List<Dictionary<string, object>>();
@@ -79,13 +141,33 @@ namespace CoreAI.Infrastructure.Llm
 
             string json = JsonConvert.SerializeObject(req);
 
+            // Логируем сырой JSON запроса если включено
+            if (_settings.EnableHttpDebugLogging)
+            {
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Request JSON={json}");
+            }
+
             using var webReq = new UnityWebRequest(url, "POST");
             byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
             webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
             webReq.downloadHandler = new DownloadHandlerBuffer();
             webReq.SetRequestHeader("Content-Type", "application/json");
+
+            // OpenRouter требует эти заголовки
+            if (url.Contains("openrouter"))
+            {
+                webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                webReq.SetRequestHeader("X-Title", "CoreAI");
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Added OpenRouter headers");
+            }
+
             if (!string.IsNullOrEmpty(_settings.ApiKey))
+            {
                 webReq.SetRequestHeader("Authorization", "Bearer " + _settings.ApiKey);
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: API key set (len={_settings.ApiKey.Length})");
+            }
+
+            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Timeout={_settings.RequestTimeoutSeconds}s");
             webReq.timeout = _settings.RequestTimeoutSeconds;
 
             var op = webReq.SendWebRequest();
@@ -97,7 +179,16 @@ namespace CoreAI.Infrastructure.Llm
                 throw new Exception($"HTTP error: {webReq.error}");
             }
 
-            return ParseResponse(webReq.downloadHandler.text);
+            // Логируем ответ от модели если включено
+            string responseJson = webReq.downloadHandler.text;
+            if (_settings.EnableHttpDebugLogging)
+            {
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Response JSON={responseJson}");
+            }
+
+            var response = ParseResponse(responseJson);
+
+            return response;
         }
 
         private static MEAI.ChatResponse ParseResponse(string json)

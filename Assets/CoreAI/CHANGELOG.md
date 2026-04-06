@@ -2,6 +2,43 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.10.0] — 2026-04-06
+
+### Added
+- **WorldCommand как MEAI tool call** — LLM может управлять миром через function calling
+  - `IWorldCommandExecutor` — абстрактный интерфейс в **CoreAI** (движок-независимый)
+  - `WorldTool.cs` — AIFunction для MEAI function calling (в CoreAiUnity)
+  - `WorldLlmTool.cs` — ILlmTool обёртка (в CoreAiUnity)
+  - Поддерживаемые actions: `spawn`, `move`, `destroy`, `load_scene`, `reload_scene`, `bind_by_name`, `set_active`, `show_text`, `apply_force`, `spawn_particles`, `list_objects`
+- **`list_objects` action** — получить список всех объектов в иерархии сцены
+  - Возвращает имя, позицию, активность, тег, слой, количество детей
+  - Поддержка поиска по имени (search pattern)
+- **`targetName` для всех commands** — работа с объектами по имени (альтернатива instanceId)
+  - move, destroy, set_active, play_animation, play_sound, apply_force, spawn_particles
+  - Сначала ищет в _instances по instanceId, затем GameObject.Find по targetName
+- `WorldToolEditModeTests.cs` — EditMode тесты для WorldTool
+- `WorldCommandPlayModeTests.cs` — PlayMode тесты для world command tool calling
+- **Debug logging в CoreAISettingsAsset** — настраиваемое логирование через Inspector
+  - `LogLlmInput` — логирует входящие промпты (system, user) и инструменты
+  - `LogLlmOutput` — логирует исходящие ответы модели и результаты tool calls
+  - `EnableHttpDebugLogging` — логирует сырые HTTP request/response JSON
+- `tool_call_id` в tool messages для LM Studio совместимости
+- Идемпотентность в `MemoryTool.append` — защита от дублирования при зацикливании модели
+
+### Changed
+- `MeaiOpenAiChatClient` — правильное извлечение tool results из `msg.Contents`
+- `MemoryTool.ExecuteAsync` — возвращает JSON строку вместо объекта для корректной сериализации
+- `TestAgentSetup` — добавлен `WorldExecutor` для PlayMode тестов
+- Убраны `LogAssert.Expect` для ошибок подключения из PlayMode тестов (ошибки появляются только при недоступном хосте)
+
+### Fixed
+- Tool results не отправлялись модели (пустой `[tool]` content) — исправлено извлечение из `Contents` коллекции
+- LM Studio 400 Bad Request — добавлен обязательный `tool_call_id` для tool messages
+- Memory append добавлял значение 3 раза — добавлена идемпотентность
+- Write test не проходил — исправлен hint чтобы не сбивать модель с толку
+
+---
+
 ## [v0.9.0] — 2026-04-06
 
 ### Added

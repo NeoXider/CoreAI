@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -22,12 +23,20 @@ namespace CoreAI.Tests.PlayMode
             yield return setup.Initialize();
             if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
 
+            // Включаем debug логирование для этого теста
+            var settings = CoreAISettingsAsset.Instance;
+            if (settings != null)
+            {
+                bool oldDebug = settings.EnableHttpDebugLogging;
+                settings.GetType().GetField("enableHttpDebugLogging", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
+            }
+
             Debug.Log($"[MemoryTest] Backend: {setup.BackendName}, writing memory...");
 
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "IMPORTANT: Use memory tool. Output ONLY JSON: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"qwen4b works great\"}}"
+                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='write' and content='qwen4b works great'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory write");

@@ -8,6 +8,7 @@ using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using UnityEngine;
@@ -24,6 +25,7 @@ namespace CoreAI.Tests.PlayMode
     {
         public ILlmClient Client { get; set; }
         public InMemoryStore MemoryStore { get; } = new();
+        public TestWorldCommandExecutor WorldExecutor { get; } = new();
         public AiOrchestrator Orchestrator { get; private set; }
         public AgentMemoryPolicy Policy { get; } = new();
         public bool IsReady { get; private set; }
@@ -213,11 +215,13 @@ namespace CoreAI.Tests.PlayMode
 
         private void SetupHttpLogAsserts()
         {
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Cannot connect to destination host");
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Cannot connect to destination host");
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Request timeout");
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Request timeout");
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: HTTP error: Request timeout");
+            // НЕ используем LogAssert.Expect для ошибок подключения/timeout,
+            // потому что они появляются ТОЛЬКО при недоступном хосте.
+            // При успешном подключении эти логи не генерируются,
+            // и LogAssert.Expect вызовет "Expected log did not appear" ошибку.
+            
+            // Если нужно проверить обработку ошибок - используйте отдельные тесты
+            // с недоступным хостом (как в EditMode тестах).
         }
 
         /// <summary>
@@ -253,6 +257,23 @@ namespace CoreAI.Tests.PlayMode
         private sealed class NullSink : IAiGameCommandSink
         {
             public void Publish(ApplyAiGameCommand command) { }
+        }
+
+        /// <summary>
+        /// Тестовый WorldCommand executor для PlayMode тестов.
+        /// </summary>
+        public sealed class TestWorldCommandExecutor : ICoreAiWorldCommandExecutor
+        {
+            public bool LastCommandWasCalled;
+            public string LastCommandJson;
+
+            public bool TryExecute(ApplyAiGameCommand cmd)
+            {
+                LastCommandWasCalled = true;
+                LastCommandJson = cmd.JsonPayload;
+                Debug.Log($"[WorldCommand] Executed: {cmd.JsonPayload}");
+                return true;
+            }
         }
     }
 }

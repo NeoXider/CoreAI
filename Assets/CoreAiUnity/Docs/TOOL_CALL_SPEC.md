@@ -1,4 +1,4 @@
-# 📋 Tool Calling Specification v0.7.0
+# 📋 Tool Calling Specification v0.10.0
 
 ## Единый формат MEAI Tool Calls
 
@@ -7,6 +7,22 @@
 ```json
 {"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}
 ```
+
+## 🏗️ Архитектура: Engine-Agnostic Pattern
+
+CoreAI использует **двухуровневую архитектуру** для инструментов:
+
+| Уровень | Пакет | Что содержит |
+|---------|-------|-------------|
+| **Абстрактный** | `CoreAI` | Интерфейсы, базовые классы, контракты |
+| **Реализация** | `CoreAiUnity` | Конкретная реализация для Unity |
+
+Этот паттерн позволяет:
+- ✅ **Движок-независимое ядро** — CoreAI работает с любым движком
+- ✅ **Лёгкая портируемость** — новые движки реализуют те же интерфейсы
+- ✅ **Единый API** — LLM вызывает инструменты одинаково на всех платформах
+
+📖 **Полная документация:** [ENGINE_AGNOSTIC_TOOLS.md](../../CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md)
 
 ## Доступные Tools
 
@@ -36,7 +52,61 @@
 - `LuaTool.cs` - MEAI AIFunction
 - `LuaLlmTool.cs` - ILlmTool обёртка
 
-### 3. Get Inventory Tool (Merchant NPC)
+### 3. World Command Tool
+
+**Назначение:** Управление игровым миром — спавн, перемещение, удаление объектов, анимации, звуки, сцены.
+
+**Формат:**
+```json
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "x": 0, "y": 0, "z": 0, "instanceId": "enemy_1"}}
+```
+
+**Доступные actions:**
+| Action | Описание | Обязательные параметры |
+|--------|----------|------------------------|
+| `spawn` | Создать объект | `prefabKey`, `x`, `y`, `z`, `instanceId` |
+| `move` | Переместить объект | `instanceId` или `targetName`, `x`, `y`, `z` |
+| `destroy` | Удалить объект | `instanceId` или `targetName` |
+| `list_objects` | Получить список объектов | — (опционально: `stringValue` для поиска) |
+| `load_scene` | Загрузить сцену | `stringValue` (имя сцены) |
+| `reload_scene` | Перезагрузить сцену | — |
+| `bind_by_name` | Привязать по имени | `targetName`, `instanceId` |
+| `set_active` | Включить/выключить | `instanceId` или `targetName` |
+| `show_text` | Показать текст | `targetName`, `stringValue` |
+| `apply_force` | Применить силу | `instanceId` или `targetName`, `x`, `y`, `z` |
+| `spawn_particles` | Создать частицы | `instanceId` или `targetName`, `stringValue` |
+
+**Код:**
+- `WorldTool.cs` - MEAI AIFunction
+- `WorldLlmTool.cs` - ILlmTool обёртка
+
+**Примеры:**
+```json
+// Spawn enemy at position
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "x": 10, "y": 0, "z": 5, "instanceId": "enemy_1"}}
+
+// Move player to checkpoint (по targetName)
+{"name": "world_command", "arguments": {"action": "move", "targetName": "Player", "x": 100, "y": 0, "z": 50}}
+
+// Destroy object by name
+{"name": "world_command", "arguments": {"action": "destroy", "targetName": "OldBuilding"}}
+
+// List all objects in scene
+{"name": "world_command", "arguments": {"action": "list_objects"}}
+
+// Search objects by name pattern
+{"name": "world_command", "arguments": {"action": "list_objects", "stringValue": "enemy"}}
+
+// Show text notification
+{"name": "world_command", "arguments": {"action": "show_text", "targetName": "Player", "stringValue": "Quest completed!"}}
+
+// Load next level
+{"name": "world_command", "arguments": {"action": "load_scene", "stringValue": "Level_2"}}
+```
+
+**Когда использовать:** Creator/Designer AI который динамически управляет миром.
+
+### 4. Get Inventory Tool (Merchant NPC)
 
 **Назначение:** Получение инвентаря NPC-торговца для осмысленных ответов игроку.
 

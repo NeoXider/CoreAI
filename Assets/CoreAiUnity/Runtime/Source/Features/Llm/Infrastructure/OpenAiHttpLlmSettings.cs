@@ -27,6 +27,19 @@ namespace CoreAI.Infrastructure.Llm
         
         [SerializeField] [Min(64)] private int maxTokens = 4096;
 
+        [Header("🔧 Отладка")]
+        [Tooltip("Логировать входящие промпты (system, user) и инструменты.")]
+        [SerializeField]
+        private bool logLlmInput = true;
+
+        [Tooltip("Логировать исходящие ответы модели и результаты tool calls.")]
+        [SerializeField]
+        private bool logLlmOutput = true;
+
+        [Tooltip("Логировать сырые HTTP request/response JSON.")]
+        [SerializeField]
+        private bool enableHttpDebugLogging = false;
+
         /// <summary>Использовать HTTP вместо LLMUnity для клиента, собранного из этого asset.</summary>
         public bool UseOpenAiCompatibleHttp => useOpenAiCompatibleHttp;
 
@@ -48,6 +61,15 @@ namespace CoreAI.Infrastructure.Llm
         
         /// <summary>Максимум токенов в ответе.</summary>
         public int MaxTokens => maxTokens;
+
+        /// <summary>Логировать входящие промпты (system, user) и инструменты.</summary>
+        public bool LogLlmInput => logLlmInput;
+
+        /// <summary>Логировать исходящие ответы модели и результаты tool calls.</summary>
+        public bool LogLlmOutput => logLlmOutput;
+
+        /// <summary>Логировать сырые HTTP request/response JSON.</summary>
+        public bool EnableHttpDebugLogging => enableHttpDebugLogging;
 
         /// <summary>
         /// Для PlayMode-тестов и рантайм-конфигурации без asset (не вызывать из прод-кода без явной политики).

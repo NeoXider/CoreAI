@@ -23,5 +23,16 @@ namespace CoreAI.Infrastructure.Llm
         
         /// <summary>Максимум токенов в ответе.</summary>
         int MaxTokens { get; }
+
+        // === Отладка ===
+
+        /// <summary>Логировать входящие промпты (system, user) и инструменты.</summary>
+        bool LogLlmInput { get; }
+
+        /// <summary>Логировать исходящие ответы модели и результаты tool calls.</summary>
+        bool LogLlmOutput { get; }
+
+        /// <summary>Логировать сырые HTTP request/response JSON.</summary>
+        bool EnableHttpDebugLogging { get; }
     }
 }

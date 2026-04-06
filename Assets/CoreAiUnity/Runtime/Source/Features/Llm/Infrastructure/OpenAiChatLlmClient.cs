@@ -44,6 +44,9 @@ namespace CoreAI.Infrastructure.Llm
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public bool LogLlmInput => _s.LogLlmInput;
+            public bool LogLlmOutput => _s.LogLlmOutput;
+            public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
         }
     }
 }
