@@ -182,9 +182,21 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Log LLM Input", "Логировать входящие промпты (system, user) и инструменты"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("logLlmOutput"),
                     new GUIContent("Log LLM Output", "Логировать исходящие ответы модели и результаты tool calls"));
-                
+
+                EditorGUILayout.Space(4);
+
+                EditorGUILayout.LabelField("🔨 Tool Call Logging", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logToolCalls"),
+                    new GUIContent("Log Tool Calls", "Логировать каждый вызов инструмента (название, успех/неудача)"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logToolCallArguments"),
+                    new GUIContent("Log Arguments", "Логировать аргументы tool call (может быть многословно)"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logToolCallResults"),
+                    new GUIContent("Log Results", "Логировать результаты tool call (ответы инструментов)"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("logMeaiToolCallingSteps"),
+                    new GUIContent("Log MEAI Steps", "Логировать внутренние шаги FunctionInvokingChatClient (итерации, retry)"));
+
                 EditorGUILayout.Space();
-                
+
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableHttpDebugLogging"),
                     new GUIContent("HTTP Debug Logging", "Логировать сырые HTTP request/response JSON"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableMeaiDebugLogging"),

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.World;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using UnityEngine;
 
@@ -67,6 +68,21 @@ namespace CoreAI.Infrastructure.Llm
                 return SerializeResult(false, "Action is required. Valid actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, show_text, apply_force, spawn_particles, list_objects");
             }
 
+            if (CoreAISettings.LogToolCalls)
+            {
+                CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: action={action}");
+            }
+            if (CoreAISettings.LogToolCallArguments)
+            {
+                var args = new System.Text.StringBuilder();
+                if (!string.IsNullOrEmpty(instanceId)) args.Append($" instanceId={instanceId}");
+                if (!string.IsNullOrEmpty(targetName)) args.Append($" targetName={targetName}");
+                if (!string.IsNullOrEmpty(prefabKey)) args.Append($" prefabKey={prefabKey}");
+                if (x != 0f || y != 0f || z != 0f) args.Append($" pos=({x},{y},{z})");
+                if (!string.IsNullOrEmpty(stringValue)) args.Append($" stringValue={stringValue}");
+                if (args.Length > 0) CoreAI.Logging.Log.Instance.Info($"  args:{args}");
+            }
+
             action = action.Trim().ToLowerInvariant();
 
             try
@@ -102,12 +118,22 @@ namespace CoreAI.Infrastructure.Llm
                     JsonPayload = json
                 }), cancellationToken);
 
-                return SerializeResult(success, 
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
+                }
+
+                return SerializeResult(success,
                     success ? $"World command '{action}' executed successfully" : $"Failed to execute world command '{action}'",
                     action);
             }
             catch (Exception ex)
             {
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    CoreAI.Logging.Log.Instance.Error($"[Tool Call] world_command: FAILED - {ex.Message}");
+                }
+                
                 return SerializeResult(false, $"World command failed: {ex.Message}", action);
             }
         }

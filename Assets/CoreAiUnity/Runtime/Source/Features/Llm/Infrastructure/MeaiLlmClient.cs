@@ -99,9 +99,15 @@ namespace CoreAI.Infrastructure.Llm
         {
             _currentRoleId = request.AgentRoleId ?? "Unknown";
             var aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
-            var functionClient = new MEAI.FunctionInvokingChatClient(_innerClient, NullLoggerFactory.Instance)
+
+            if (CoreAISettings.LogMeaiToolCallingSteps)
             {
-                MaximumIterationsPerRequest = CoreAI.CoreAISettings.MaxToolCallIterations
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: FunctionInvokingChatClient created with {aiTools.Count} tools, max iterations={CoreAISettings.MaxToolCallIterations}");
+            }
+
+            var functionClient = new MeaiLoggingFunctionInvokingChatClient(_innerClient, _logger)
+            {
+                MaximumIterationsPerRequest = CoreAISettings.MaxToolCallIterations
             };
 
             var chatMessages = new List<MEAI.ChatMessage>

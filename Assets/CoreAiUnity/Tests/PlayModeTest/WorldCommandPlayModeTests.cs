@@ -28,8 +28,9 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing spawn...");
 
-            // Добавляем WorldTool к агенту
+            // Регистрируем WorldTool для роли Creator
             var tools = new List<ILlmTool> { new WorldLlmTool(setup.WorldExecutor) };
+            setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -60,6 +61,10 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing move...");
 
+            // Регистрируем WorldTool для роли Creator
+            var tools = new List<ILlmTool> { new WorldLlmTool(setup.WorldExecutor) };
+            setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
+
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -87,6 +92,10 @@ namespace CoreAI.Tests.PlayMode
             if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_objects...");
+
+            // Регистрируем WorldTool для роли Creator
+            var tools = new List<ILlmTool> { new WorldLlmTool(setup.WorldExecutor) };
+            setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -116,6 +125,10 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing play_animation...");
 
+            // Регистрируем WorldTool для роли Creator
+            var tools = new List<ILlmTool> { new WorldLlmTool(setup.WorldExecutor) };
+            setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
+
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -143,6 +156,10 @@ namespace CoreAI.Tests.PlayMode
             if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_animations...");
+
+            // Регистрируем WorldTool для роли Creator
+            var tools = new List<ILlmTool> { new WorldLlmTool(setup.WorldExecutor) };
+            setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {

@@ -39,6 +39,15 @@ namespace CoreAI.Ai
             string? content = null,
             CancellationToken cancellationToken = default)
         {
+            if (CoreAISettings.LogToolCalls)
+            {
+                Logging.Log.Instance.Info($"[Tool Call] memory: action={action}");
+            }
+            if (CoreAISettings.LogToolCallArguments && content != null)
+            {
+                var preview = content.Length > 200 ? content.Substring(0, 200) : content;
+                Logging.Log.Instance.Info($"  content: {preview}");
+            }
             if (string.IsNullOrEmpty(action))
             {
                 return SerializeResult(new MemoryResult { Success = false, Error = "Action is required" });
@@ -58,6 +67,12 @@ namespace CoreAI.Ai
 
                         // Записываем память (полная замена)
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
+                        
+                        if (CoreAISettings.LogToolCallResults)
+                        {
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}");
+                        }
+                        
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
@@ -91,6 +106,12 @@ namespace CoreAI.Ai
                             : currentState + "\n" + content;
 
                         _store.Save(_roleId, new AgentMemoryState { Memory = newMemory });
+                        
+                        if (CoreAISettings.LogToolCallResults)
+                        {
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}");
+                        }
+                        
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
@@ -99,6 +120,12 @@ namespace CoreAI.Ai
 
                     case "clear":
                         _store.Clear(_roleId);
+                        
+                        if (CoreAISettings.LogToolCallResults)
+                        {
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}");
+                        }
+                        
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
@@ -115,6 +142,10 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    Logging.Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}");
+                }
                 return SerializeResult(new MemoryResult
                 {
                     Success = false,

@@ -205,6 +205,23 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool logLlmConnectionErrors = true;
 
+        [Header("🔨 Tool Call Logging")]
+        [Tooltip("Логировать каждый вызов инструмента (название, аргументы, успех/неудача).")]
+        [SerializeField]
+        private bool logToolCalls = true;
+
+        [Tooltip("Логировать аргументы tool call (может быть многословно).")]
+        [SerializeField]
+        private bool logToolCallArguments = true;
+
+        [Tooltip("Логировать результаты tool call (ответы инструментов).")]
+        [SerializeField]
+        private bool logToolCallResults = true;
+
+        [Tooltip("Логировать внутренние шаги MEAI FunctionInvokingChatClient (итерации, retry).")]
+        [SerializeField]
+        private bool logMeaiToolCallingSteps = true;
+
         [Tooltip("Таймаут LLM-запроса в LifetimeScope (секунды). 0 = без ограничения.")]
         [SerializeField]
         [Min(0f)]
@@ -365,6 +382,18 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Логировать ошибки подключения.</summary>
         public bool LogLlmConnectionErrors => logLlmConnectionErrors;
 
+        /// <summary>Логировать вызовы инструментов (название, успех/неудача).</summary>
+        public bool LogToolCalls => logToolCalls;
+
+        /// <summary>Логировать аргументы tool call.</summary>
+        public bool LogToolCallArguments => logToolCallArguments;
+
+        /// <summary>Логировать результаты tool call.</summary>
+        public bool LogToolCallResults => logToolCallResults;
+
+        /// <summary>Логировать шаги MEAI FunctionInvokingChatClient.</summary>
+        public bool LogMeaiToolCallingSteps => logMeaiToolCallingSteps;
+
         #endregion
 
         #region Runtime Configuration
@@ -443,6 +472,10 @@ namespace CoreAI.Infrastructure.Llm
             CoreAISettings.ContextWindowTokens = ContextWindowTokens;
             CoreAISettings.UniversalSystemPromptPrefix = UniversalSystemPromptPrefix;
             CoreAISettings.Temperature = Temperature;
+            CoreAISettings.LogToolCalls = LogToolCalls;
+            CoreAISettings.LogToolCallArguments = LogToolCallArguments;
+            CoreAISettings.LogToolCallResults = LogToolCallResults;
+            CoreAISettings.LogMeaiToolCallingSteps = LogMeaiToolCallingSteps;
         }
 
         #endregion

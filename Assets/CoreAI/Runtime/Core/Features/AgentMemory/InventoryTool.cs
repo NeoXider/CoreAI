@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
@@ -30,9 +31,20 @@ namespace CoreAI.Ai
 
         public async Task<InventoryResult> GetInventoryAsync(CancellationToken cancellationToken = default)
         {
+            if (CoreAISettings.LogToolCalls)
+            {
+                Logging.Log.Instance.Info($"[Tool Call] get_inventory: fetching items");
+            }
+
             try
             {
                 List<InventoryItem> items = await _provider.GetInventoryAsync(cancellationToken);
+
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    Logging.Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items");
+                }
+
                 return new InventoryResult
                 {
                     Success = true,
@@ -41,6 +53,11 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    Logging.Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}");
+                }
+
                 return new InventoryResult
                 {
                     Success = false,

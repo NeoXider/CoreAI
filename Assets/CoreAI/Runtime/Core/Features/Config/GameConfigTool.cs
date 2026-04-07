@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 
 namespace CoreAI.Config
@@ -53,6 +54,15 @@ namespace CoreAI.Config
                 return new GameConfigResult { Success = false, Error = "Action is required. Use 'read' or 'update'." };
             }
 
+            if (CoreAISettings.LogToolCalls)
+            {
+                Logging.Log.Instance.Info($"[Tool Call] game_config: action={action}");
+            }
+            if (CoreAISettings.LogToolCallArguments && !string.IsNullOrEmpty(content))
+            {
+                Logging.Log.Instance.Info($"  content length={content.Length}");
+            }
+
             action = action.Trim().ToLowerInvariant();
 
             try
@@ -75,6 +85,11 @@ namespace CoreAI.Config
             }
             catch (Exception ex)
             {
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    Logging.Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}");
+                }
+
                 return new GameConfigResult
                 {
                     Success = false,

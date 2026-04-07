@@ -64,14 +64,18 @@ namespace CoreAI
         /// <summary>
         /// Универсальный стартовый системный промпт — идёт ПЕРЕД промптом каждого агента.
         /// Задаёт общие правила для всех моделей: формат вывода, ограничения, стиль.
-        /// По умолчанию: пустой (отключён). Добавляется в начало системного промпта каждого агента.
+        /// По умолчанию: содержит инструкцию по tool calling для всех агентов. Добавляется в начало системного промпта каждого агента.
         /// </summary>
         /// <example>
-        /// CoreAISettings.UniversalSystemPromptPrefix = 
+        /// CoreAISettings.UniversalSystemPromptPrefix =
         ///     "You are an AI agent in a Unity game. Always respond in the expected format. " +
         ///     "Never break character. Use tools when appropriate.";
         /// </example>
-        public static string UniversalSystemPromptPrefix { get; set; } = "";
+        public static string UniversalSystemPromptPrefix { get; set; } =
+            "TOOL CALLING RULES: When tools/functions are provided in the request, you MUST use tool calls (function calling format) to invoke them. " +
+            "NEVER output JSON or structured data in your response text when tools are available - always call the appropriate tool instead. " +
+            "Only output plain text or JSON in your response when NO tools are provided. " +
+            "If a tool call succeeds, continue with your task. If it fails, analyze the error and retry with corrected parameters.";
 
         /// <summary>
         /// Общая температура генерации для всех агентов.
@@ -85,5 +89,29 @@ namespace CoreAI
         /// По умолчанию: 2. Можно менять до инициализации.
         /// </summary>
         public static int MaxToolCallIterations { get; set; } = 2;
+
+        /// <summary>
+        /// Логировать вызовы инструментов (название, успех/неудача).
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogToolCalls { get; set; } = true;
+
+        /// <summary>
+        /// Логировать аргументы tool call.
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogToolCallArguments { get; set; } = true;
+
+        /// <summary>
+        /// Логировать результаты tool call.
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogToolCallResults { get; set; } = true;
+
+        /// <summary>
+        /// Логировать шаги MEAI FunctionInvokingChatClient.
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool LogMeaiToolCallingSteps { get; set; } = true;
     }
 }

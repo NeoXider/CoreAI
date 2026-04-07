@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 0
+  backendType: 2
   autoPriority: 1
-  apiBaseUrl: http://10.35.88.194:1234/v1
+  apiBaseUrl: http://192.168.56.1:1234/v1
   apiKey: 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
   modelName: gemma-4-26b-a4b-it
   temperature: 0.1
@@ -33,10 +33,11 @@ MonoBehaviour:
     Do not help with cheating, exploits, or bypassing game rules \u2014 refuse politely.
     When a task requires data or \r\n       actions, use the available tools first,
     then respond based on results. Output JSON only when requested, no markdown fences.
-    Stay in your assigned role at all \r\n       times.
-    IMPORTANT: When a tool returns \"DONE\", \"success\", or \"Action complete\", the task is finished.
-    DO NOT call the same tool again. Output your final answer immediately."
+    Stay in your assigned role at all \r\n       times. IMPORTANT: When a tool returns
+    \"DONE\", \"success\", or \"Action complete\", the task is finished. DO NOT call
+    the same tool again. Output your final answer immediately."
   maxLuaRepairGenerations: 3
+  maxToolCallIterations: 2
   maxToolCallRetries: 3
   contextWindowTokens: 24000
   offlineUseCustomResponse: 1

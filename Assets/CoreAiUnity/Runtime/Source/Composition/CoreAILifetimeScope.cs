@@ -11,6 +11,8 @@ using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
+using CoreAI.Logging;
+using CoreAI.Unity.Logging;
 using LLMUnity;
 using UnityEngine;
 using VContainer;
@@ -98,7 +100,7 @@ namespace CoreAI.Composition
             {
                 CoreAISettingsAsset.SetInstance(settings);
                 builder.RegisterInstance(settings);
-                
+
                 // Синхронизируем статические CoreAISettings с asset
                 CoreAI.CoreAISettings.MaxLuaRepairGenerations = settings.MaxLuaRepairGenerations;
                 CoreAI.CoreAISettings.MaxToolCallIterations = settings.MaxToolCallIterations;
@@ -107,11 +109,22 @@ namespace CoreAI.Composition
                 CoreAI.CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;
                 CoreAI.CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
                 CoreAI.CoreAISettings.Temperature = settings.Temperature;
+                CoreAI.CoreAISettings.LogToolCalls = settings.LogToolCalls;
+                CoreAI.CoreAISettings.LogToolCallArguments = settings.LogToolCallArguments;
+                CoreAI.CoreAISettings.LogToolCallResults = settings.LogToolCallResults;
+                CoreAI.CoreAISettings.LogMeaiToolCallingSteps = settings.LogMeaiToolCallingSteps;
                 if (settings.RequestTimeoutSeconds > 0)
                 {
                     CoreAI.CoreAISettings.LlmRequestTimeoutSeconds = settings.RequestTimeoutSeconds;
                 }
             }
+
+            // Устанавливаем логгер для CoreAI.Core (будет разрешён после построения контейнера)
+            builder.RegisterBuildCallback(resolver =>
+            {
+                var gameLogger = resolver.Resolve<IGameLogger>();
+                Log.Instance = new UnityLog(gameLogger);
+            });
 
             if (gameLogSettings != null)
             {

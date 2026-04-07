@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
@@ -45,13 +46,35 @@ namespace CoreAI.Ai
                 return new LuaResult { Success = false, Error = "Lua code is required" };
             }
 
+            if (CoreAISettings.LogToolCalls)
+            {
+                Logging.Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}");
+            }
+            if (CoreAISettings.LogToolCallArguments)
+            {
+                var preview = code.Length > 150 ? code.Substring(0, 150) : code;
+                Logging.Log.Instance.Info($"  code preview: {preview}");
+            }
+
             try
             {
                 LuaResult result = await _executor.ExecuteAsync(code, cancellationToken);
+                
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    var outputPreview = result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
+                    Logging.Log.Instance.Info($"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}");
+                }
+                
                 return result;
             }
             catch (Exception ex)
             {
+                if (CoreAISettings.LogToolCallResults)
+                {
+                    Logging.Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}");
+                }
+                
                 return new LuaResult
                 {
                     Success = false,
