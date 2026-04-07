@@ -72,9 +72,9 @@ namespace CoreAI.Tests.EditMode
 
             var client = new OpenAiChatLlmClient(settings);
 
-            // Ожидаем ошибку timeout (UnityWebRequest возвращает timeout для недоступного хоста)
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Request timeout");
-            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Request timeout");
+            // Ожидаем ошибку подключения (Cannot resolve destination host)
+            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiOpenAiChatClient: Cannot resolve destination host");
+            LogAssert.Expect(LogType.Error, "[CoreAI] [Llm] MeaiLlmClient: HTTP error: Cannot resolve destination host");
 
             var result = await client.CompleteAsync(new LlmCompletionRequest
             {

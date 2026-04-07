@@ -12,6 +12,21 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class AgentBuilderEditModeTests
     {
+        private string _savedUniversalPrefix;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _savedUniversalPrefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
+            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
+        }
+
         [Test]
         public void Builder_CreatesBasicAgent_WithDefaults()
         {

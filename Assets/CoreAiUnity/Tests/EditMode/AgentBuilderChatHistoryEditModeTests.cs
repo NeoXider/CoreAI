@@ -11,6 +11,21 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class AgentBuilderChatHistoryEditModeTests
     {
+        private string _savedUniversalPrefix;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _savedUniversalPrefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
+            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
+        }
+
         [Test]
         public void WithChatHistory_Default_ShouldUseSettingsContext()
         {

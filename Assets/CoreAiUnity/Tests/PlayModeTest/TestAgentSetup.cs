@@ -33,8 +33,12 @@ namespace CoreAI.Tests.PlayMode
 
         private PlayModeProductionLikeLlmHandle _handle;
 
+        private static int _instanceCounter;
+        private readonly int _instanceId;
+
         public TestAgentSetup()
         {
+            _instanceId = System.Threading.Interlocked.Increment(ref _instanceCounter);
             SetupLogAsserts();
         }
 
@@ -52,7 +56,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             BackendName = settings.BackendType.ToString();
-            Debug.Log($"[TestAgentSetup] Backend: {settings.BackendType}");
+            Debug.Log($"[TestAgentSetup#{_instanceId}] Backend: {settings.BackendType}");
 
             switch (settings.BackendType)
             {
