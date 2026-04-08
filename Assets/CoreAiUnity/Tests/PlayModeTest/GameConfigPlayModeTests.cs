@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Config;
+using Newtonsoft.Json;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -57,14 +58,14 @@ namespace CoreAI.Tests.PlayModeTest
             GameConfigTool tool = new(_testStore, _policy, "Creator");
 
             // Act 1: AI читает текущий конфиг
-            GameConfigTool.GameConfigResult readResult = tool.ExecuteAsync("read").Result;
+            GameConfigTool.GameConfigResult readResult = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
             Assert.IsTrue(readResult.Success, $"Read failed: {readResult.Error}");
             Assert.IsTrue(readResult.ConfigJson.Contains("difficulty"));
             Assert.IsTrue(readResult.ConfigJson.Contains("1.0"), "Initial enemy_hp_mult should be 1.0");
 
             // Act 2: AI возвращает изменённый конфиг (имитация ответа LLM)
             string modifiedConfig = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
-            GameConfigTool.GameConfigResult writeResult = tool.ExecuteAsync("update", modifiedConfig).Result;
+            GameConfigTool.GameConfigResult writeResult = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", modifiedConfig).Result);
             Assert.IsTrue(writeResult.Success, $"Update failed: {writeResult.Error}");
 
             // Assert: Проверяем что конфиг обновился
@@ -89,7 +90,7 @@ namespace CoreAI.Tests.PlayModeTest
             restrictedPolicy.RevokeAccess("AINpc");
 
             GameConfigTool tool = new(_testStore, restrictedPolicy, "AINpc");
-            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
+            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("no allowed config", result.Error);
@@ -110,7 +111,7 @@ namespace CoreAI.Tests.PlayModeTest
             _policy.SetKnownKeys(new[] { "session", "crafting" });
 
             GameConfigTool tool = new(_testStore, _policy, "Creator");
-            GameConfigTool.GameConfigResult result = tool.ExecuteAsync("read").Result;
+            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
 
             Assert.IsTrue(result.Success, $"Read failed: {result.Error}");
             Assert.IsTrue(result.ConfigJson.Contains("session"));

@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,14 +23,16 @@ namespace CoreAI.Ai
 
         public AIFunction CreateAIFunction()
         {
-            Func<CancellationToken, Task<InventoryResult>> func = GetInventoryAsync;
-            return AIFunctionFactory.Create(
-                func,
-                "get_inventory",
-                "Get current inventory items from an NPC or merchant. Call this before offering items to the player.");
+            Func<CancellationToken, Task<string>> func = ExecuteAsync;
+            var options = new AIFunctionFactoryOptions
+            {
+                Name = "get_inventory",
+                Description = "Get current inventory items from an NPC or merchant. Call this before offering items to the player."
+            };
+            return AIFunctionFactory.Create(func, options);
         }
 
-        public async Task<InventoryResult> GetInventoryAsync(CancellationToken cancellationToken = default)
+        public async Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
         {
             if (CoreAISettings.LogToolCalls)
             {
@@ -45,11 +48,11 @@ namespace CoreAI.Ai
                     Logging.Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items", LogTag.Llm);
                 }
 
-                return new InventoryResult
+                return SerializeResult(new InventoryResult
                 {
                     Success = true,
                     Items = items
-                };
+                });
             }
             catch (Exception ex)
             {
@@ -58,12 +61,17 @@ namespace CoreAI.Ai
                     Logging.Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}", LogTag.Llm);
                 }
 
-                return new InventoryResult
+                return SerializeResult(new InventoryResult
                 {
                     Success = false,
                     Error = ex.Message
-                };
+                });
             }
+        }
+
+        private static string SerializeResult(InventoryResult result)
+        {
+            return JsonConvert.SerializeObject(result);
         }
 
         public sealed class InventoryResult

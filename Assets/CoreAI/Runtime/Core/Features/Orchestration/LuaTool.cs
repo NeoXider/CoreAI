@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -25,11 +26,13 @@ namespace CoreAI.Ai
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, CancellationToken, Task<LuaResult>> func = ExecuteAsync;
-            return AIFunctionFactory.Create(
-                func,
-                "execute_lua",
-                "Execute Lua code. Use this to run game logic, create items, report events, etc.");
+            Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
+            var options = new AIFunctionFactoryOptions
+            {
+                Name = "execute_lua",
+                Description = "Execute Lua code. Use this to run game logic, create items, report events, etc."
+            };
+            return AIFunctionFactory.Create(func, options);
         }
 
         /// <summary>
@@ -37,13 +40,13 @@ namespace CoreAI.Ai
         /// </summary>
         /// <param name="code">Lua код для выполнения</param>
         /// <param name="cancellationToken">Токен отмены</param>
-        public async Task<LuaResult> ExecuteAsync(
+        public async Task<string> ExecuteAsync(
             string code,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(code))
             {
-                return new LuaResult { Success = false, Error = "Lua code is required" };
+                return SerializeResult(new LuaResult { Success = false, Error = "Lua code is required" });
             }
 
             if (CoreAISettings.LogToolCalls)
@@ -66,7 +69,7 @@ namespace CoreAI.Ai
                     Logging.Log.Instance.Info($"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}", LogTag.Lua);
                 }
                 
-                return result;
+                return SerializeResult(result);
             }
             catch (Exception ex)
             {
@@ -75,12 +78,17 @@ namespace CoreAI.Ai
                     Logging.Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}", LogTag.Lua);
                 }
                 
-                return new LuaResult
+                return SerializeResult(new LuaResult
                 {
                     Success = false,
                     Error = $"Lua execution failed: {ex.Message}"
-                };
+                });
             }
+        }
+
+        private static string SerializeResult(LuaResult result)
+        {
+            return JsonConvert.SerializeObject(result);
         }
 
         /// <summary>

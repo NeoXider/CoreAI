@@ -267,35 +267,45 @@ namespace CoreAI.Tests.EditMode.Lua
         [Test]
         public void LuaExecution_MultipleRepairs_RespectsMaxGenerations()
         {
-            int repairCount = 0;
-            FakeOrchestrator fakeOrchestrator = new((task) => repairCount++);
-            CoreDefaultLuaRuntimeBindings bindings = new();
-            TestSink sink = new();
-            TestObserver observer = new();
+            int originalMax = CoreAISettings.MaxLuaRepairGenerations;
+            CoreAISettings.MaxLuaRepairGenerations = 3;
 
-            LuaAiEnvelopeProcessor processor = new(
-                new SecureLuaEnvironment(),
-                bindings,
-                sink,
-                () => fakeOrchestrator,
-                observer,
-                new NullLuaScriptVersionStore());
+            try
+            {
+                int repairCount = 0;
+                FakeOrchestrator fakeOrchestrator = new((task) => repairCount++);
+                CoreDefaultLuaRuntimeBindings bindings = new();
+                TestSink sink = new();
+                TestObserver observer = new();
 
-            // Generation 0 → repair 1
-            processor.Process(MakeEnvelope("error1()", "Programmer", 0));
-            Assert.AreEqual(1, repairCount);
+                LuaAiEnvelopeProcessor processor = new(
+                    new SecureLuaEnvironment(),
+                    bindings,
+                    sink,
+                    () => fakeOrchestrator,
+                    observer,
+                    new NullLuaScriptVersionStore());
 
-            // Generation 1 → repair 2
-            processor.Process(MakeEnvelope("error2()", "Programmer", 1));
-            Assert.AreEqual(2, repairCount);
+                // Generation 0 → repair 1
+                processor.Process(MakeEnvelope("error1()", "Programmer", 0));
+                Assert.AreEqual(1, repairCount);
 
-            // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairGenerations = 3)
-            processor.Process(MakeEnvelope("error3()", "Programmer", 2));
-            Assert.AreEqual(3, repairCount);
+                // Generation 1 → repair 2
+                processor.Process(MakeEnvelope("error2()", "Programmer", 1));
+                Assert.AreEqual(2, repairCount);
 
-            // Generation 3 → NO MORE repairs (max = 3)
-            processor.Process(MakeEnvelope("error4()", "Programmer", 3));
-            Assert.AreEqual(3, repairCount); // Не увеличилось!
+                // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairGenerations = 3)
+                processor.Process(MakeEnvelope("error3()", "Programmer", 2));
+                Assert.AreEqual(3, repairCount);
+
+                // Generation 3 → NO MORE repairs (max = 3)
+                processor.Process(MakeEnvelope("error4()", "Programmer", 3));
+                Assert.AreEqual(3, repairCount); // Не увеличилось!
+            }
+            finally
+            {
+                CoreAISettings.MaxLuaRepairGenerations = originalMax;
+            }
         }
 
         #endregion

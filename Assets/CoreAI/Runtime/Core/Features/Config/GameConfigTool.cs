@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -30,12 +31,14 @@ namespace CoreAI.Config
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string?, CancellationToken, Task<GameConfigResult>> func = ExecuteAsync;
-            return AIFunctionFactory.Create(
-                func,
-                "game_config",
-                "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
-                string.Join(", ", _policy.GetAllowedKeys(_roleId)));
+            Func<string, string?, CancellationToken, Task<string>> func = ExecuteAsync;
+            var options = new AIFunctionFactoryOptions
+            {
+                Name = "game_config",
+                Description = "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
+                string.Join(", ", _policy.GetAllowedKeys(_roleId))
+            };
+            return AIFunctionFactory.Create(func, options);
         }
 
         /// <summary>
@@ -44,14 +47,14 @@ namespace CoreAI.Config
         /// <param name="action">Действие: "read" или "update".</param>
         /// <param name="content">Для update — изменённый JSON конфиг. Для read — игнорируется.</param>
         /// <param name="cancellationToken">Токен отмены.</param>
-        public async Task<GameConfigResult> ExecuteAsync(
+        public async Task<string> ExecuteAsync(
             string action,
             string? content = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(action))
             {
-                return new GameConfigResult { Success = false, Error = "Action is required. Use 'read' or 'update'." };
+                return SerializeResult(new GameConfigResult { Success = false, Error = "Action is required. Use 'read' or 'update'." });
             }
 
             if (CoreAISettings.LogToolCalls)
@@ -76,11 +79,11 @@ namespace CoreAI.Config
                         return await ExecuteUpdateAsync(content, cancellationToken);
 
                     default:
-                        return new GameConfigResult
+                        return SerializeResult(new GameConfigResult
                         {
                             Success = false,
                             Error = $"Unknown action: '{action}'. Valid actions: read, update"
-                        };
+                        });
                 }
             }
             catch (Exception ex)
@@ -90,24 +93,29 @@ namespace CoreAI.Config
                     Logging.Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}", LogTag.Config);
                 }
 
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = false,
                     Error = $"GameConfigTool failed: {ex.Message}"
-                };
+                });
             }
         }
 
-        private async Task<GameConfigResult> ExecuteReadAsync(CancellationToken cancellationToken)
+        private static string SerializeResult(GameConfigResult result)
+        {
+            return JsonConvert.SerializeObject(result);
+        }
+
+        private async Task<string> ExecuteReadAsync(CancellationToken cancellationToken)
         {
             string[] keys = _policy.GetAllowedKeys(_roleId);
             if (keys.Length == 0)
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = false,
                     Error = $"Role '{_roleId}' has no allowed config keys."
-                };
+                });
             }
 
             Dictionary<string, string> configs = new();
@@ -121,55 +129,55 @@ namespace CoreAI.Config
 
             if (configs.Count == 0)
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = true,
                     Message = "No configs available for allowed keys.",
                     ConfigJson = "{}"
-                };
+                });
             }
 
             // Объединяем все конфиги в один JSON объект
             string combinedJson = CombineConfigsToJson(configs);
-            return new GameConfigResult
+            return SerializeResult(new GameConfigResult
             {
                 Success = true,
                 Message = $"Config read successfully for keys: {string.Join(", ", configs.Keys)}",
                 ConfigJson = combinedJson
-            };
+            });
         }
 
-        private async Task<GameConfigResult> ExecuteUpdateAsync(string? content, CancellationToken cancellationToken)
+        private async Task<string> ExecuteUpdateAsync(string? content, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(content))
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = false,
                     Error = "Content (JSON config) is required for update action."
-                };
+                });
             }
 
             // Валидируем что это JSON
             content = content.Trim();
             if (!content.StartsWith("{") || !content.EndsWith("}"))
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = false,
                     Error = "Content must be a valid JSON object."
-                };
+                });
             }
 
             // Определяем какие ключи можно менять этой роли
             string[] allowedKeys = _policy.GetAllowedKeys(_roleId);
             if (allowedKeys.Length == 0)
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = false,
                     Error = $"Role '{_roleId}' is not allowed to modify any config keys."
-                };
+                });
             }
 
             // Для простоты: сохраняем весь JSON как новый конфиг первого разрешённого ключ
@@ -180,22 +188,22 @@ namespace CoreAI.Config
             // Пытаемся применить изменения через политику (если она поддерживает)
             if (_policy.TryApplyChanges(_roleId, content, out string[] appliedKeys, out string error))
             {
-                return new GameConfigResult
+                return SerializeResult(new GameConfigResult
                 {
                     Success = true,
                     Message = $"Config updated for keys: {string.Join(", ", appliedKeys)}",
                     ConfigJson = content
-                };
+                });
             }
 
             // Fallback: сохраняем как есть для первичного ключа
             _store.TrySave(primarykey, content);
-            return new GameConfigResult
+            return SerializeResult(new GameConfigResult
             {
                 Success = true,
                 Message = $"Config updated for key: {primarykey}",
                 ConfigJson = content
-            };
+            });
         }
 
         /// <summary>

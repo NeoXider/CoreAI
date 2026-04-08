@@ -147,26 +147,36 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Processor_ProgrammerAtMaxRepairGeneration_DoesNotScheduleAgain()
         {
-            ListSink sink = new();
-            SpyOrchestrator spy = new();
-            LuaAiEnvelopeProcessor proc = new(
-                new SecureLuaEnvironment(),
-                new CoreDefaultLuaRuntimeBindings(),
-                sink,
-                () => spy,
-                new NullLuaExecutionObserver(),
-                new NullLuaScriptVersionStore());
+            int originalMax = CoreAISettings.MaxLuaRepairGenerations;
+            CoreAISettings.MaxLuaRepairGenerations = 3;
 
-            proc.Process(new ApplyAiGameCommand
+            try
             {
-                CommandTypeId = Envelope,
-                JsonPayload = "```lua\nstill_bad()\n```",
-                SourceRoleId = BuiltInAgentRoleIds.Programmer,
-                LuaRepairGeneration = 4
-            });
+                ListSink sink = new();
+                SpyOrchestrator spy = new();
+                LuaAiEnvelopeProcessor proc = new(
+                    new SecureLuaEnvironment(),
+                    new CoreDefaultLuaRuntimeBindings(),
+                    sink,
+                    () => spy,
+                    new NullLuaExecutionObserver(),
+                    new NullLuaScriptVersionStore());
 
-            Assert.AreEqual(LuaExecutionFailed, sink.Items[0].CommandTypeId);
-            Assert.AreEqual(0, spy.RunCount, "При LuaRepairGeneration >= max цикл ремонта не продолжается");
+                proc.Process(new ApplyAiGameCommand
+                {
+                    CommandTypeId = Envelope,
+                    JsonPayload = "```lua\nstill_bad()\n```",
+                    SourceRoleId = BuiltInAgentRoleIds.Programmer,
+                    LuaRepairGeneration = 4
+                });
+
+                Assert.AreEqual(LuaExecutionFailed, sink.Items[0].CommandTypeId);
+                Assert.AreEqual(0, spy.RunCount, "При LuaRepairGeneration >= max цикл ремонта не продолжается");
+            }
+            finally
+            {
+                CoreAISettings.MaxLuaRepairGenerations = originalMax;
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
+using Newtonsoft.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,7 +39,7 @@ namespace CoreAI.Tests.EditMode
             MemoryTool tool = new(store, "TestRole");
 
             string resultJson = await tool.ExecuteAsync("write", "Test memory content");
-            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.AreEqual("Test memory content", store.LastSaved?.Memory);
@@ -53,7 +53,7 @@ namespace CoreAI.Tests.EditMode
             MemoryTool tool = new(store, "TestRole");
 
             string resultJson = await tool.ExecuteAsync("append", "Line 2");
-            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.IsTrue(store.States["TestRole"].Memory.Contains("Line 1"));
@@ -68,7 +68,7 @@ namespace CoreAI.Tests.EditMode
             MemoryTool tool = new(store, "TestRole");
 
             string resultJson = await tool.ExecuteAsync("clear");
-            MemoryTool.MemoryResult result = JsonSerializer.Deserialize<MemoryTool.MemoryResult>(resultJson);
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.IsFalse(store.States.ContainsKey("TestRole"));
@@ -96,7 +96,8 @@ namespace CoreAI.Tests.EditMode
             TestLuaExecutor executor = new();
             LuaTool tool = new(executor);
 
-            LuaTool.LuaResult result = await tool.ExecuteAsync("");
+            string resultJson = await tool.ExecuteAsync("");
+            LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);
 
             Assert.IsFalse(result.Success);
             Assert.AreEqual("Lua code is required", result.Error);
@@ -108,7 +109,8 @@ namespace CoreAI.Tests.EditMode
             TestLuaExecutor executor = new();
             LuaTool tool = new(executor);
 
-            LuaTool.LuaResult result = await tool.ExecuteAsync("report('test')");
+            string resultJson = await tool.ExecuteAsync("report('test')");
+            LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);
 
             Assert.IsTrue(result.Success);
             Assert.IsTrue(executor.WasCalled);

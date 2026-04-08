@@ -54,7 +54,12 @@ namespace CoreAI.Infrastructure.Llm
         public AIFunction CreateAIFunction()
         {
             Func<string, float, float, float, float, float, float, string?, string?, string?, float, CancellationToken, Task<string>> func = ExecuteAsync;
-            return AIFunctionFactory.Create(func, Name, Description);
+            var options = new AIFunctionFactoryOptions
+            {
+                Name = Name,
+                Description = Description
+            };
+            return AIFunctionFactory.Create(func, options);
         }
 
         public async Task<string> ExecuteAsync(

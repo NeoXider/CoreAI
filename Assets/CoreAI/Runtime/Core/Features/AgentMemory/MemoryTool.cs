@@ -1,5 +1,5 @@
 using System;
-using System.Text.Json;
+using Newtonsoft.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -26,12 +26,13 @@ namespace CoreAI.Ai
 
         public AIFunction CreateAIFunction()
         {
-            // Возвращаем строку (JSON) - MEAI правильно отправит её модели как tool result
             Func<string, string?, CancellationToken, Task<string>> func = ExecuteAsync;
-            return AIFunctionFactory.Create(
-                func,
-                "memory",
-                "Store, append, or clear persistent memory for agent recall across sessions.");
+            var options = new AIFunctionFactoryOptions
+            {
+                Name = "memory",
+                Description = "Store, append, or clear persistent memory for agent recall across sessions."
+            };
+            return AIFunctionFactory.Create(func, options);
         }
 
 
@@ -158,7 +159,7 @@ namespace CoreAI.Ai
         private static string SerializeResult(MemoryResult result)
         {
             // Сериализуем в JSON строку - MEAI отправит это модели как tool result
-            return JsonSerializer.Serialize(result);
+            return JsonConvert.SerializeObject(result);
         }
 
 
