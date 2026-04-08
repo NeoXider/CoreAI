@@ -22,6 +22,11 @@ namespace CoreAI.Infrastructure.World
         public float x;
         public float y;
         public float z;
+        
+        // Force
+        public float fx;
+        public float fy;
+        public float fz;
 
         // Scene
         public string sceneName = "";
@@ -124,9 +129,9 @@ namespace CoreAI.Infrastructure.World
             {
                 action = "apply_force",
                 targetName = targetName ?? "",
-                x = force.x,
-                y = force.y,
-                z = force.z
+                fx = force.x,
+                fy = force.y,
+                fz = force.z
             };
         }
 

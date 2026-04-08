@@ -68,16 +68,16 @@ namespace CoreAI.Ai
 
                         // Записываем память (полная замена)
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
-                        
+
                         if (CoreAISettings.LogToolCallResults)
                         {
                             Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}", LogTag.Memory);
                         }
-                        
+
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"DONE: Memory saved for {_roleId}. Action complete, no further calls needed."
+                            Message = $"DONE: Memory saved for {_roleId}."
                         });
 
                     case "append":
@@ -98,7 +98,7 @@ namespace CoreAI.Ai
                             return SerializeResult(new MemoryResult
                             {
                                 Success = true,
-                                Message = $"Content already exists in memory for role: {_roleId}"
+                                Message = $"Content already exists in memory for role: {_roleId}. Continue with your task."
                             });
                         }
 
@@ -107,30 +107,30 @@ namespace CoreAI.Ai
                             : currentState + "\n" + content;
 
                         _store.Save(_roleId, new AgentMemoryState { Memory = newMemory });
-                        
+
                         if (CoreAISettings.LogToolCallResults)
                         {
                             Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}", LogTag.Memory);
                         }
-                        
+
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"DONE: Content appended to memory for {_roleId}. Action complete, no further calls needed."
+                            Message = $"DONE: Content appended to memory for {_roleId}."
                         });
 
                     case "clear":
                         _store.Clear(_roleId);
-                        
+
                         if (CoreAISettings.LogToolCallResults)
                         {
                             Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}", LogTag.Memory);
                         }
-                        
+
                         return SerializeResult(new MemoryResult
                         {
                             Success = true,
-                            Message = $"DONE: Memory cleared for {_roleId}. Action complete, no further calls needed."
+                            Message = $"DONE: Memory cleared for {_roleId}."
                         });
 
                     default:

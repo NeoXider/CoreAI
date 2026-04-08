@@ -41,9 +41,12 @@ namespace CoreAI.Infrastructure.Llm
         public override string ParametersSchema => JsonParams(
             ("action", "string", true, "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects"),
             ("targetName", "string", false, "Object name to target (required for move, destroy, set_active, play_animation, etc). Used to set a name for spawned objects."),
-            ("x", "number", false, "X coordinate (for spawn, move, apply_force)"),
-            ("y", "number", false, "Y coordinate (for spawn, move, apply_force)"),
-            ("z", "number", false, "Z coordinate (for spawn, move, apply_force)"),
+            ("x", "number", false, "X coordinate (for spawn, move)"),
+            ("y", "number", false, "Y coordinate (for spawn, move)"),
+            ("z", "number", false, "Z coordinate (for spawn, move)"),
+            ("fx", "number", false, "Force X (for apply_force)"),
+            ("fy", "number", false, "Force Y (for apply_force)"),
+            ("fz", "number", false, "Force Z (for apply_force)"),
             ("prefabKey", "string", false, "Prefab key for spawn command"),
             ("stringValue", "string", false, "String value: animation name for play_animation, text for show_text, or search pattern for list_objects"),
             ("volume", "number", false, "Reserved for future use")
@@ -51,7 +54,7 @@ namespace CoreAI.Infrastructure.Llm
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, float, float, float, string?, string?, string?, float, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string, float, float, float, float, float, float, string?, string?, string?, float, CancellationToken, Task<string>> func = ExecuteAsync;
             return AIFunctionFactory.Create(func, Name, Description);
         }
 
@@ -60,6 +63,9 @@ namespace CoreAI.Infrastructure.Llm
             float x = 0f,
             float y = 0f,
             float z = 0f,
+            float fx = 0f,
+            float fy = 0f,
+            float fz = 0f,
             string? prefabKey = null,
             string? targetName = null,
             string? stringValue = null,
@@ -81,6 +87,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(targetName)) args.Append($" targetName={targetName}");
                 if (!string.IsNullOrEmpty(prefabKey)) args.Append($" prefabKey={prefabKey}");
                 if (x != 0f || y != 0f || z != 0f) args.Append($" pos=({x},{y},{z})");
+                if (fx != 0f || fy != 0f || fz != 0f) args.Append($" force=({fx},{fy},{fz})");
                 if (!string.IsNullOrEmpty(stringValue)) args.Append($" stringValue={stringValue}");
                 if (args.Length > 0) CoreAI.Logging.Log.Instance.Info($"  args:{args}", CoreAI.Logging.LogTag.World);
             }
@@ -100,7 +107,7 @@ namespace CoreAI.Infrastructure.Llm
                     "play_animation" => CreatePlayAnimationCommand(targetName, stringValue),
                     "list_animations" => CreateListAnimationsCommand(targetName),
                     "show_text" => CreateShowTextCommand(targetName, stringValue),
-                    "apply_force" => CreateApplyForceCommand(targetName, x, y, z),
+                    "apply_force" => CreateApplyForceCommand(targetName, fx, fy, fz),
                     "spawn_particles" => CreateSpawnParticlesCommand(targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),
                     _ => null

@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode
 {

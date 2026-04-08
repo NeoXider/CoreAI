@@ -1,12 +1,15 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Messaging;
+using CoreAI.Sandbox;
 using CoreAI.Session;
 using LLMUnity;
 using NUnit.Framework;
@@ -98,7 +101,15 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
 
                 InMemoryStore store = new();
+
+                // Создаём LuaLlmTool с настоящим исполнителем Lua (SecureLuaEnvironment)
+                RealLuaExecutor luaExecutor = new();
+                LuaLlmTool luaTool = new(luaExecutor);
+
                 AgentMemoryPolicy policy = new();
+                // Регистрируем execute_lua инструмент для CoreMechanic
+                policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
+                
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -308,6 +319,53 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics());
         }
 
+        /// <summary>
+        /// Настоящий ILuaExecutor через SecureLuaEnvironment — выполняет Lua код в песочнице.
+        /// </summary>
+        private sealed class RealLuaExecutor : LuaTool.ILuaExecutor
+        {
+            private readonly SecureLuaEnvironment _sandbox;
+            private readonly LuaApiRegistry _registry;
+
+            public RealLuaExecutor()
+            {
+                _sandbox = new SecureLuaEnvironment();
+                _registry = new LuaApiRegistry();
+                
+                // Регистрируем базовые API: report, create_item
+                _registry.Register("report", new Action<string>(msg => 
+                    Debug.Log($"[Lua.report] {msg}")));
+                _registry.Register("create_item", new Action<string, string, double>((name, type, quality) => 
+                    Debug.Log($"[Lua.create_item] name={name}, type={type}, quality={quality}")));
+                _registry.Register("add", new Func<double, double, double>((a, b) => a + b));
+            }
+
+            public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
+            {
+                try
+                {
+                    var script = _sandbox.CreateScript(_registry);
+                    var result = _sandbox.RunChunk(script, code);
+                    string output = result?.ToString() ?? "nil";
+                    Debug.Log($"[RealLuaExecutor] SUCCESS: {output}");
+                    return Task.FromResult(new LuaTool.LuaResult 
+                    { 
+                        Success = true, 
+                        Output = output 
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[RealLuaExecutor] FAILED: {ex.Message}");
+                    return Task.FromResult(new LuaTool.LuaResult 
+                    { 
+                        Success = false, 
+                        Error = ex.Message 
+                    });
+                }
+            }
+        }
+
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
             InMemoryStore store)
         {
@@ -328,15 +386,16 @@ namespace CoreAI.Tests.PlayMode
                   "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
-            string instructions = "OUTPUT FORMAT:\n" +
-                                  "1. First, call the memory tool to save this craft:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
-                                  "   ```\n\n" +
-                                  "2. Then, call the execute_lua tool to create the item:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', quality)\\nreport('crafted YourWeaponName')\"}}\n" +
-                                  "   ```";
+            string instructions = "You MUST perform these actions IN ORDER using tool calls:\n\n" +
+                                  "STEP 1: Call the 'memory' tool with:\n" +
+                                  "  - action: \"write\"\n" +
+                                  "  - content: \"Previous crafts: Craft #1 - <weapon name> made from Iron + Oak Wood\"\n\n" +
+                                  "STEP 2: Call the 'execute_lua' tool with Lua code:\n" +
+                                  "  create_item('YourWeaponName', 'weapon', quality)\n" +
+                                  "  report('crafted YourWeaponName')\n\n" +
+                                  "Choose a creative weapon name based on the ingredients (e.g., 'IronOakBlade', 'OakReinforcedMace'). " +
+                                  "Quality should be 1-100 based on ingredient rarity (both are rarity:1, so quality ~40-60).\n\n" +
+                                  "CRITICAL: You MUST call BOTH tools. Do NOT stop after memory.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -358,18 +417,14 @@ namespace CoreAI.Tests.PlayMode
                 ? "This is your first craft.\n\n"
                 : $"YOUR MEMORY (ALL previous crafts):\n{memoryFromStore}\n\n";
 
-            string instructions = "IMPORTANT: These EXACT ingredients were used before (see memory above).\n" +
-                                  "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
-                                  "This tests deterministic behavior: same input = same output.\n\n" +
-                                  "OUTPUT FORMAT:\n" +
-                                  "1. Call the memory tool:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
-                                  "   ```\n\n" +
-                                  "2. Call the execute_lua tool:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', quality)\\nreport('crafted SameNameAsBefore')\"}}\n" +
-                                  "   ```";
+            string instructions = "You MUST perform these actions IN ORDER using tool calls:\n\n" +
+                                  "STEP 1: Call the 'memory' tool with:\n" +
+                                  "  - action: \"write\"\n" +
+                                  "  - content: \"Previous crafts: <full list including this craft #\" + craftNumber + \">\"\n\n" +
+                                  "STEP 2: Call the 'execute_lua' tool with Lua code.\n\n" +
+                                  "CRITICAL: You MUST craft the EXACT SAME item as before — same name, same quality.\n" +
+                                  "These are the EXACT same ingredients, so the result must be IDENTICAL.\n" +
+                                  "You MUST call BOTH tools. Do NOT stop after memory.";
 
             return header + ingredients + memorySection + instructions;
         }

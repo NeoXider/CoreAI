@@ -118,7 +118,7 @@ CoreAI.CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
 
 ## 3. 🟠 Архитектурные недоработки
 
-### 3.1 Двойная обёртка World Tool (WorldTool + WorldLlmTool)
+### ~~3.1 Двойная обёртка World Tool (WorldTool + WorldLlmTool)~~
 
 Для мирового инструмента существуют **два класса** с пересекающейся логикой:
 
@@ -139,7 +139,7 @@ public AIFunction CreateAIFunction()
 
 Это нарушает consistency: `MemoryLlmTool` и `LuaLlmTool` хранят логику внутри себя, а `WorldLlmTool` делегирует в `WorldTool`, который существует отдельно.
 
-### 3.2 CoreAiWorldCommandEnvelope — переиспользование полей
+### ~~3.2 CoreAiWorldCommandEnvelope — переиспользование полей~~
 
 [CoreAiWorldCommandEnvelope.cs](file:///c:/Git/CoreAI/Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CoreAiWorldCommandEnvelope.cs) — использует одни и те же поля для разных целей:
 
@@ -155,7 +155,7 @@ public static CoreAiWorldCommandEnvelope ApplyForce(string instanceId, Vector3 f
 
 Поля `px/py/pz` — это координаты спавна, но используются и для силы. Это **семантическая путаница**, которая приведёт к багам при расширении.
 
-### 3.3 Два интерфейса WorldCommand — один мёртвый
+### ~~3.3 Два интерфейса WorldCommand — один мёртвый~~
 
 В проекте существуют **два интерфейса** для world commands:
 
@@ -166,7 +166,7 @@ public static CoreAiWorldCommandEnvelope ApplyForce(string instanceId, Vector3 f
 
 [IWorldCommandExecutor.cs](file:///c:/Git/CoreAI/Assets/CoreAI/Runtime/Core/Features/World/IWorldCommandExecutor.cs) в CoreAI.Core — **мёртвый интерфейс**. Вся реальная работа идёт через `ICoreAiWorldCommandExecutor` из CoreAiUnity.
 
-### 3.4 InGameLlmChatService — хрупкая склейка истории
+### ~~3.4 InGameLlmChatService — хрупкая склейка истории~~
 
 [InGameLlmChatService.cs](file:///c:/Git/CoreAI/Assets/CoreAI/Runtime/Core/Features/Orchestration/InGameLlmChatService.cs) склеивает историю чата в **одну строку** для отправки как `UserPayload`:
 
@@ -181,7 +181,7 @@ transcript = sb.ToString();
 
 Это **не MEAI-совместимый** подход. MEAI использует `ChatMessage[]` с ролями. При большой истории токены тратятся на парсинг формата `"Role: text"`, а не на семантику. Также нет защиты от prompt injection внутри текста.
 
-### 3.5 VContainer в CoreAI.Core
+### ~~3.5 VContainer в CoreAI.Core~~
 
 `CoreAI.Core.asmdef` имеет зависимость `"VContainer"`. Это противоречит идее "портативного ядра":
 
@@ -244,9 +244,9 @@ transcript = sb.ToString();
 | ~~`InGameLlmChatService` (склейка истории)~~ | ✅ `InGameLlmChatServiceEditModeTests` (10 тестов) |
 | ~~`AgentMemoryPolicy.GetToolsForRole()`~~ | ✅ `AgentToolsVisibilityEditModeTests`, `AgentBuilderEditModeTests` |
 | `CoreAISettings` статическая синхронизация | ⚠️ Только `CoreAISettingsAssetEditModeTests` |
-| `WorkflowStep` / `WorkflowContext` | ❌ Мёртвый код — удалить вместо тестирования |
+| ~~`WorkflowStep` / `WorkflowContext`~~ | ✅ Удалено |
 | ~~`NetworkedAuthorityHost` / `AiNetworkExecutionPolicy`~~ | ✅ `NetworkedAuthorityHostEditModeTests` (7 тестов) |
-| `ICodeRefiner` / `CodeRefinerStub` | ❌ Мёртвый код — удалить вместо тестирования |
+| ~~`ICodeRefiner` / `CodeRefinerStub`~~ | ✅ Удалено |
 | ~~`UnityLog` (мост ILog → IGameLogger)~~ | ✅ `UnityLogEditModeTests` (13 тестов) |
 
 ### 5.3 Хрупкость PlayMode тестов *(подтверждено)*
@@ -347,19 +347,19 @@ private int aiOrchestrationMaxConcurrent = 2;
 | # | Задача | Затраты | Влияние |
 |---|--------|---------|---------|
 | 4 | **Вынести `CoreAISettings` из статики** — создать `ICoreAISettings` интерфейс | 2-3 ч | Тестируемость, DI |
-| 5 | **Объединить `WorldTool` + `WorldLlmTool`** в один класс | 1 ч | Уменьшение дублирования |
-| 6 | **Удалить мёртвый `IWorldCommandExecutor`** из CoreAI.Core (заменён `ICoreAiWorldCommand`) | 15 мин | Чистота |
-| 7 | **Убрать VContainer** из CoreAI.Core asmdef references | 1-2 ч | Портативность ядра |
+| 5 | ~~**Объединить `WorldTool` + `WorldLlmTool`** в один класс~~ | ✅ Готово | Уменьшение дублирования |
+| 6 | ~~**Удалить мёртвый `IWorldCommandExecutor`** из CoreAI.Core~~ | ✅ Готово | Чистота |
+| 7 | ~~**Убрать VContainer** из CoreAI.Core asmdef references~~ | ✅ Готово | Портативность ядра |
 
 ### 🟡 Приоритет 3 — Чистка
 
 | # | Задача | Затраты | Влияние |
 |---|--------|---------|---------|
-| 8 | Удалить `WorkflowStep.cs` + `WorkflowContext.cs` (мёртвый код) | 10 мин | Чистота |
-| 9 | Удалить `SequenceStubLlmClient.cs` (неиспользуемый) | 5 мин | Чистота |
-| 10 | Решить судьбу `ICodeRefiner` + `CodeRefinerStub` (удалить или реализовать) | 15 мин | Чистота |
-| 11 | Решить судьбу `IAudioController`/`IUIController`/`IPhysicsController` | 15 мин | Ясность API |
-| 12 | Убрать LEGACY поля из `CoreAILifetimeScope` или вынести в `[Obsolete]` | 30 мин | Inspector чистота |
+| 8 | ~~Удалить `WorkflowStep.cs` + `WorkflowContext.cs`~~ | ✅ Готово | Чистота |
+| 9 | ~~Удалить `SequenceStubLlmClient.cs`~~ | ✅ Готово | Чистота |
+| 10 | ~~Удалить `ICodeRefiner` + `CodeRefinerStub`~~ | ✅ Готово | Чистота |
+| 11 | ~~Удалить `IAudioController`/`IUIController`/`IPhysicsController`~~ | ✅ Готово | Ясность API |
+| 12 | ~~Убрать LEGACY поля из `CoreAILifetimeScope`~~ | ✅ Готово | Inspector чистота |
 
 ### 🔵 Приоритет 4 — Тесты
 

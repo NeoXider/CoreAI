@@ -30,7 +30,6 @@ namespace CoreAI.Composition
             builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
             builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
-            builder.Register<CodeRefinerStub>(Lifetime.Singleton).As<ICodeRefiner>();
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);

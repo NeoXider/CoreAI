@@ -41,27 +41,9 @@ namespace CoreAI.Composition
         private AgentPromptsManifest agentPromptsManifest;
 
         [Tooltip(
-            "LEGACY: Если Use OpenAi Compatible Http включён — ILlmClient ходит в chat/completions. Лучше использовать CoreAI Settings.")]
-        [SerializeField]
-        private OpenAiHttpLlmSettings openAiHttpLlmSettings;
-
-        [Tooltip(
             "Опционально: маршрутизация ILlmClient по роли (Enable Role Routing). Иначе — только legacy Open Ai + LLMUnity.")]
         [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
-
-        [Tooltip("LEGACY: Автоотмена одного вызова ILlmClient.CompleteAsync, если модель «зависла». 0 — без ограничения. Лучше настраивать в CoreAI Settings.")]
-        [SerializeField]
-        private float llmRequestTimeoutSeconds = 15f;
-
-        [Tooltip("LEGACY: Максимум параллельных задач. Лучше настраивать в CoreAI Settings.")]
-        [SerializeField]
-        [Min(1)]
-        private int aiOrchestrationMaxConcurrent = 2;
-
-        [Tooltip("LEGACY: Писать метрики оркестратора в лог. Лучше настраивать в CoreAI Settings.")]
-        [SerializeField]
-        private bool logAiOrchestrationMetrics;
 
         [Header("World Commands (Lua → MessagePipe → main thread)")]
         [Tooltip("Whitelist префабов, которые разрешено спавнить из Lua.")]
@@ -146,13 +128,13 @@ namespace CoreAI.Composition
 
             // LLM Client регистрация с поддержкой CoreAISettingsAsset
             LlmRoutingManifest routingManifest = llmRoutingManifest;
-            float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : llmRequestTimeoutSeconds;
+            float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
             
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
                 reg.SetLegacyFallback(
-                    ResolveLlmClient(settings, openAiHttpLlmSettings, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
+                    ResolveLlmClient(settings, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
@@ -164,13 +146,13 @@ namespace CoreAI.Composition
                     llmTimeout), Lifetime.Singleton);
 
             // Orchestrator настройки
-            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : aiOrchestrationMaxConcurrent;
+            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
                 MaxConcurrent = maxConcurrent < 1 ? 1 : maxConcurrent
             });
             
-            bool logMetrics = settings != null ? settings.LogOrchestrationMetrics : logAiOrchestrationMetrics;
+            bool logMetrics = settings != null ? settings.LogOrchestrationMetrics : false;
             if (logMetrics)
             {
                 builder.Register<IAiOrchestrationMetrics>(c =>
@@ -214,12 +196,11 @@ namespace CoreAI.Composition
         }
 
         /// <summary>
-        /// Порядок выбора: CoreAISettingsAsset (Auto/LlmUnity/OpenAiHttp/NoLlm) → legacy OpenAiHttpLlmSettings → LLMUnity → Stub.
+        /// Порядок выбора: CoreAISettingsAsset (Auto/LlmUnity/OpenAiHttp/NoLlm) → LLMUnity → Stub.
         /// Дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.
         /// </summary>
         private static ILlmClient ResolveLlmClient(
             CoreAISettingsAsset settings,
-            OpenAiHttpLlmSettings legacyOpenAi,
             IGameLogger logger,
             IAgentMemoryStore memoryStore)
         {
@@ -234,19 +215,13 @@ namespace CoreAI.Composition
                         return new OfflineLlmClient(settings);
                     case LlmBackendType.Auto:
                         // Auto: пробуем LLMUnity, fallback на Stub
-                        return TryResolveAutoClient(settings, legacyOpenAi, logger, memoryStore);
+                        return TryResolveAutoClient(settings, logger, memoryStore);
                     case LlmBackendType.LlmUnity:
                         return ResolveLlmUnityClient(settings, logger, memoryStore);
                 }
             }
 
-            // Приоритет 2: Legacy OpenAiHttpLlmSettings
-            if (legacyOpenAi != null && legacyOpenAi.UseOpenAiCompatibleHttp)
-            {
-                return new OpenAiChatLlmClient(legacyOpenAi);
-            }
-
-            // Приоритет 3: LLMUnity или Stub
+            // Приоритет 2: LLMUnity или Stub
 #if COREAI_NO_LLM
             return new StubLlmClient();
 #else
@@ -259,7 +234,6 @@ namespace CoreAI.Composition
         /// </summary>
         private static ILlmClient TryResolveAutoClient(
             CoreAISettingsAsset settings,
-            OpenAiHttpLlmSettings legacyOpenAi,
             IGameLogger logger,
             IAgentMemoryStore memoryStore)
         {
