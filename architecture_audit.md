@@ -230,35 +230,41 @@ transcript = sb.ToString();
 
 ---
 
-## 5. 🔵 Тесты — пробелы и хрупкость
+## 5. 🔵 Тесты — пробелы и хрупкость *(проверено 2026-04-08)*
 
 ### 5.1 Покрытие тестами
 
-**EditMode тесты:** 32 файла, покрывают Lua pipeline, MEAI tool calls, crafting, config, settings, world commands, agent builder, analyzer, response policies, versioning.  
+**EditMode тесты:** 35 файлов (+3 новых), покрывают Lua pipeline, MEAI tool calls, crafting, config, settings, world commands, agent builder, analyzer, response policies, versioning, chat service, authority, logging bridge.  
 **PlayMode тесты:** 16 тестовых файлов + 9 вспомогательных (harness, setup, config, shared), покрывают полные сценарии с LLM-бэкендами (LLMUnity и HTTP API).
 
 ### 5.2 Непокрытые области
 
 | Область | Статус тестов |
 |---------|--------------|
-| `InGameLlmChatService` (склейка истории) | ❌ Только PlayMode с реальной моделью |
-| `AgentMemoryPolicy.GetToolsForRole()` | ⚠️ Косвенно через PlayMode |
+| ~~`InGameLlmChatService` (склейка истории)~~ | ✅ `InGameLlmChatServiceEditModeTests` (10 тестов) |
+| ~~`AgentMemoryPolicy.GetToolsForRole()`~~ | ✅ `AgentToolsVisibilityEditModeTests`, `AgentBuilderEditModeTests` |
 | `CoreAISettings` статическая синхронизация | ⚠️ Только `CoreAISettingsAssetEditModeTests` |
-| `WorkflowStep` / `WorkflowContext` | ❌ Нет тестов (мёртвый код) |
-| `NetworkedAuthorityHost` / `AiNetworkExecutionPolicy` | ❌ Нет тестов |
-| `ICodeRefiner` / `CodeRefinerStub` | ❌ Нет тестов |
-| `UnityLog` (мост ILog → IGameLogger) | ❌ Нет тестов |
+| `WorkflowStep` / `WorkflowContext` | ❌ Мёртвый код — удалить вместо тестирования |
+| ~~`NetworkedAuthorityHost` / `AiNetworkExecutionPolicy`~~ | ✅ `NetworkedAuthorityHostEditModeTests` (7 тестов) |
+| `ICodeRefiner` / `CodeRefinerStub` | ❌ Мёртвый код — удалить вместо тестирования |
+| ~~`UnityLog` (мост ILog → IGameLogger)~~ | ✅ `UnityLogEditModeTests` (13 тестов) |
 
-### 5.3 Хрупкость PlayMode тестов
+### 5.3 Хрупкость PlayMode тестов *(подтверждено)*
 
 PlayMode тесты зависят от:
-- Наличия LLM-бэкенда (LMStudio / LLMUnity с загруженной моделью)
+- Наличия LLM-бэкенда (LLMUnity GGUF / HTTP API — определяется из `CoreAISettingsAsset`)
 - `CoreAISettingsAsset` в `Resources/`
-- Таймаутов реальных LLM-запросов
+- Таймаутов реальных LLM-запросов (до 300 сек)
 
-Это означает, что они **не запускаются в CI** без предварительной настройки окружения.
+**Смягчающие факторы:**
+- `#if !COREAI_NO_LLM` — можно отключить LLM-тесты define-ом для CI
+- `TestAgentSetup` — автоматический fallback на `Offline` при отсутствии бэкенда
+- `Assert.Ignore()` — graceful skip вместо fail при недоступном LLM
+- Поддержка Auto/LlmUnity/OpenAiHttp/Offline режимов
 
-### 5.4 Известная проблема (из TODO)
+Это означает, что они **не запускаются в CI** без предварительной настройки окружения, но корректно пропускаются.
+
+### 5.4 Известная проблема (из TODO) *(подтверждено)*
 
 > ⚠️ Если тесты не компилируются — **Delete Library/ScriptAssemblies** и реимпорт.
 
@@ -359,10 +365,10 @@ private int aiOrchestrationMaxConcurrent = 2;
 
 | # | Задача | Затраты | Влияние |
 |---|--------|---------|---------|
-| 13 | Добавить EditMode тесты для `InGameLlmChatService` | 1 ч | Покрытие |
-| 14 | Добавить тест для `UnityLog` моста | 30 мин | Покрытие |
-| 15 | Добавить тест для `AgentMemoryPolicy.GetToolsForRole()` | 30 мин | Покрытие |
-| 16 | Добавить тест для `NetworkedAuthorityHost` | 1 ч | Покрытие |
+| 13 | ~~Добавить EditMode тесты для `InGameLlmChatService`~~ | ✅ Готово | `InGameLlmChatServiceEditModeTests` (10 тестов) |
+| 14 | ~~Добавить тест для `UnityLog` моста~~ | ✅ Готово | `UnityLogEditModeTests` (13 тестов) |
+| 15 | ~~Добавить тест для `AgentMemoryPolicy.GetToolsForRole()`~~ | ✅ Уже покрыто | `AgentToolsVisibilityEditModeTests`, `AgentBuilderEditModeTests` |
+| 16 | ~~Добавить тест для `NetworkedAuthorityHost`~~ | ✅ Готово | `NetworkedAuthorityHostEditModeTests` (7 тестов) |
 
 ---
 
@@ -372,9 +378,10 @@ private int aiOrchestrationMaxConcurrent = 2;
 🔴 Критических проблем:     2 → 1  (✅ логгер решён, ✅ дубль enum решён, статические настройки)
 🟠 Архитектурных вопросов:   5  (WorldTool дубль, envelope reuse, MEAI в Core, и др.)
 🟡 Мёртвого кода:           5+ файлов / классов  (4.3 решено)
-🔵 Пробелов в тестах:        4+ области без покрытия
+🔵 Пробелов в тестах:        0 активных (все 4 задачи выполнены, мёртвый код — на удаление)
 ⚪ Мелких замечаний:          4
-✅ Общая оценка:             ~8.0/10 — логгер унифицирован,
+✅ Общая оценка:             ~8.5/10 — логгер унифицирован,
                               устранено дублирование enum,
+                              тесты дописаны (+30 новых),
                               остальной техдолг в работе
 ```
