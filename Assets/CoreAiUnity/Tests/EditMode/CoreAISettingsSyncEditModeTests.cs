@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
             // 1. Arrange: создаём мок-настройки
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             Type type = typeof(CoreAISettingsAsset);
-            BindingFlags bf = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            BindingFlags bf = BindingFlags.NonPublic | BindingFlags.Instance;
             type.GetField("maxLuaRepairRetries", bf).SetValue(settings, 99);
             type.GetField("maxToolCallRetries", bf).SetValue(settings, 77);
             type.GetField("enableMeaiDebugLogging", bf).SetValue(settings, true);
@@ -38,12 +38,12 @@ namespace CoreAI.Tests.EditMode
             CoreAILifetimeScope scope = go.AddComponent<CoreAILifetimeScope>();
             typeof(CoreAILifetimeScope)
                 .GetField("coreAiSettings",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    BindingFlags.NonPublic | BindingFlags.Instance)
                 .SetValue(scope, settings);
 
             ContainerBuilder builder = new();
             MethodInfo configureMethod = typeof(CoreAILifetimeScope).GetMethod("Configure",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                BindingFlags.NonPublic | BindingFlags.Instance);
 
             // 3. Act: вызываем Configure
             configureMethod.Invoke(scope, new object[] { builder });

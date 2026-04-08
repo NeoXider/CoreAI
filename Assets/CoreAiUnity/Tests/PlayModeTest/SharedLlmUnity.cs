@@ -40,7 +40,7 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log("[SharedLlmUnity] Initializing...");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null,       // Из CoreAISettingsAsset
+                    null, // Из CoreAISettingsAsset
                     0f,
                     300,
                     out _handle,

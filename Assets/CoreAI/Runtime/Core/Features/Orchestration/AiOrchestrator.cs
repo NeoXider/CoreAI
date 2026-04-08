@@ -80,6 +80,26 @@ namespace CoreAI.Ai
             // MeaiToolsLlmClientDecorator will inject them into system prompt automatically
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
 
+            // ===== ТИП 2: ChatHistory — автоматическая история чата =====
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = null;
+            
+            if (roleConfig.WithChatHistory && _memoryStore != null)
+            {
+                ChatMessage[] history = _memoryStore.GetChatHistory(roleId);
+                if (history != null && history.Length > 0)
+                {
+                    chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
+                    foreach (ChatMessage msg in history)
+                    {
+                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user" 
+                            ? Microsoft.Extensions.AI.ChatRole.User 
+                            : Microsoft.Extensions.AI.ChatRole.Assistant;
+                        chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
+                    }
+                }
+            }
+
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = await _llm.CompleteAsync(
                 new LlmCompletionRequest
@@ -87,6 +107,7 @@ namespace CoreAI.Ai
                     AgentRoleId = roleId,
                     SystemPrompt = system,
                     UserPayload = user,
+                    ChatHistory = chatHistory,
                     TraceId = traceId,
                     Tools = tools
                 },
@@ -135,6 +156,12 @@ namespace CoreAI.Ai
             // ===== ОБРАБОТКА MemoryTool через MEAI function calling =====
             // Память уже сохранена через FunctionInvokingChatClient -> MemoryTool.ExecuteAsync()
             // Дополнительный fallback парсинг не нужен - всё через единый MEAI pipeline
+
+            if (roleConfig.WithChatHistory && _memoryStore != null)
+            {
+                _memoryStore.AppendChatMessage(roleId, "user", user, roleConfig.PersistChatHistory);
+                _memoryStore.AppendChatMessage(roleId, "assistant", content, roleConfig.PersistChatHistory);
+            }
 
             _commandSink.Publish(new ApplyAiGameCommand
             {

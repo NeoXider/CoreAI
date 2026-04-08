@@ -1,4 +1,4 @@
-# 📋 Tool Calling Specification v0.11.0
+# 📋 Tool Calling Specification v0.14.0
 
 ## Единый формат MEAI Tool Calls
 
@@ -41,11 +41,19 @@ CoreAI использует **двухуровневую архитектуру*
 - ✅ **Лёгкая портируемость** — новые движки реализуют те же интерфейсы
 - ✅ **Единый API** — LLM вызывает инструменты одинаково на всех платформах
 
-📖 **Полная документация:** [ENGINE_AGNOSTIC_TOOLS.md](../../CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md)
-
 ## Доступные Tools
 
-### 1. Memory Tool
+### 1. События и Экшены (DelegateLlmTool)
+
+**Назначение:** Динамическое превращение любого C# делегата (метода) в `ILlmTool` без написания классов. Модель автоматически получает правильный JSON-skeleton из сигнатуры делегата C#. Также это основа для триггера глобальных событий (`WithEventTool`).
+
+**Применение:**
+- `AgentBuilder.WithAction` (вызов конкретного делегата)
+- `AgentBuilder.WithEventTool` (публикация в `CoreAiEvents` для decoupling)
+
+> **💡 Важное правило промптинга:** Если вы добавляете агенту Action или EventTool, **настоятельно рекомендуется** в `WithSystemPrompt` прописать правило его использования. Например: `"If you want to alarm guards, call 'alarm_guards' tool"`.
+
+### 2. Memory Tool
 
 **Назначение:** Сохранение, добавление и очистка памяти агента.
 

@@ -41,7 +41,9 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 
@@ -414,6 +416,14 @@ namespace CoreAI.Tests.PlayMode
             AiPromptComposer composer,
             IAiGameCommandSink sink)
         {
+            policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[]
+            {
+                new DelegateLlmTool("execute_lua", "Execute lua code to create item", new System.Action<string>(code =>
+                {
+                    sink.Publish(new ApplyAiGameCommand { CommandTypeId = AiGameCommandTypeIds.Envelope, JsonPayload = code });
+                }))
+            });
+
             return new AiOrchestrator(
                 new SoloAuthorityHost(),
                 client,

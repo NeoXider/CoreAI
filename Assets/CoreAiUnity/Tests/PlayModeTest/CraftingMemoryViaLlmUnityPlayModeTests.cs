@@ -12,6 +12,7 @@ using CoreAI.Messaging;
 using CoreAI.Sandbox;
 using CoreAI.Session;
 using LLMUnity;
+using MoonSharp.Interpreter;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -46,13 +47,15 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 
             public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+                return Array.Empty<Ai.ChatMessage>();
             }
         }
 
@@ -98,6 +101,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
 
                 InMemoryStore store = new();
@@ -109,7 +113,7 @@ namespace CoreAI.Tests.PlayMode
                 AgentMemoryPolicy policy = new();
                 // Регистрируем execute_lua инструмент для CoreMechanic
                 policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
-                
+
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -130,7 +134,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -165,7 +170,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -193,7 +199,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -222,7 +229,8 @@ namespace CoreAI.Tests.PlayMode
                         store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -331,11 +339,11 @@ namespace CoreAI.Tests.PlayMode
             {
                 _sandbox = new SecureLuaEnvironment();
                 _registry = new LuaApiRegistry();
-                
+
                 // Регистрируем базовые API: report, create_item
-                _registry.Register("report", new Action<string>(msg => 
+                _registry.Register("report", new Action<string>(msg =>
                     Debug.Log($"[Lua.report] {msg}")));
-                _registry.Register("create_item", new Action<string, string, double>((name, type, quality) => 
+                _registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
                     Debug.Log($"[Lua.create_item] name={name}, type={type}, quality={quality}")));
                 _registry.Register("add", new Func<double, double, double>((a, b) => a + b));
             }
@@ -344,23 +352,23 @@ namespace CoreAI.Tests.PlayMode
             {
                 try
                 {
-                    var script = _sandbox.CreateScript(_registry);
-                    var result = _sandbox.RunChunk(script, code);
+                    Script script = _sandbox.CreateScript(_registry);
+                    DynValue result = _sandbox.RunChunk(script, code);
                     string output = result?.ToString() ?? "nil";
                     Debug.Log($"[RealLuaExecutor] SUCCESS: {output}");
-                    return Task.FromResult(new LuaTool.LuaResult 
-                    { 
-                        Success = true, 
-                        Output = output 
+                    return Task.FromResult(new LuaTool.LuaResult
+                    {
+                        Success = true,
+                        Output = output
                     });
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"[RealLuaExecutor] FAILED: {ex.Message}");
-                    return Task.FromResult(new LuaTool.LuaResult 
-                    { 
-                        Success = false, 
-                        Error = ex.Message 
+                    return Task.FromResult(new LuaTool.LuaResult
+                    {
+                        Success = false,
+                        Error = ex.Message
                     });
                 }
             }

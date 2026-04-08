@@ -10,7 +10,7 @@
 
 | Версия | Unity | Статус |
 |--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.12.0 — [CHANGELOG](CHANGELOG.md) |
+| См. `package.json` | `6000.0+` | ✅ v0.14.0 — [CHANGELOG](CHANGELOG.md) |
 
 ---
 

@@ -8,7 +8,7 @@
 >
 > 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
 
-**Version:** v0.12.0 | **Lua Sandbox Hardening & Engine-Agnostic Function Calling**
+**Version:** v0.14.0 | **Persistent Chat History & Session Survival**
 
 ---
 

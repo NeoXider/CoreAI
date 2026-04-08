@@ -40,11 +40,35 @@ namespace CoreAI.Ai
             /// <summary>Действие по умолчанию: write (перезаписать) или append (дополнить).</summary>
             public MemoryToolAction DefaultAction;
 
-            public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append)
+            /// <summary>Сохранять и использовать ли историю чата в контексте (Role: user/assistant).</summary>
+            public bool WithChatHistory;
+
+            /// <summary>Сохранять ли историю чата между сессиями (на диск).</summary>
+            public bool PersistChatHistory;
+
+            /// <summary>Бюджет токенов (опционально, если ChatHistory активна).</summary>
+            public int ContextTokens;
+
+            public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append, bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
+                WithChatHistory = withChatHistory;
+                PersistChatHistory = persistChatHistory;
+                ContextTokens = contextTokens;
             }
+        }
+
+        public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist)
+        {
+            if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
+            {
+                c = new RoleMemoryConfig();
+            }
+            c.WithChatHistory = enabled;
+            c.ContextTokens = tokens;
+            c.PersistChatHistory = persist;
+            _roleConfigs[roleId] = c;
         }
 
 

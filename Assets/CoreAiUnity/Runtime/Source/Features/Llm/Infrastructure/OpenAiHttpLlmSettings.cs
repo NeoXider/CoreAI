@@ -24,20 +24,16 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField] [Range(0f, 2f)] private float temperature = 0.2f;
 
         [SerializeField] [Min(5)] private int requestTimeoutSeconds = 120;
-        
+
         [SerializeField] [Min(64)] private int maxTokens = 4096;
 
-        [Header("🔧 Отладка")]
-        [Tooltip("Логировать входящие промпты (system, user) и инструменты.")]
-        [SerializeField]
+        [Header("🔧 Отладка")] [Tooltip("Логировать входящие промпты (system, user) и инструменты.")] [SerializeField]
         private bool logLlmInput = true;
 
-        [Tooltip("Логировать исходящие ответы модели и результаты tool calls.")]
-        [SerializeField]
+        [Tooltip("Логировать исходящие ответы модели и результаты tool calls.")] [SerializeField]
         private bool logLlmOutput = true;
 
-        [Tooltip("Логировать сырые HTTP request/response JSON.")]
-        [SerializeField]
+        [Tooltip("Логировать сырые HTTP request/response JSON.")] [SerializeField]
         private bool enableHttpDebugLogging = false;
 
         /// <summary>Использовать HTTP вместо LLMUnity для клиента, собранного из этого asset.</summary>
@@ -58,7 +54,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Таймаут UnityWebRequest в секундах.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds;
-        
+
         /// <summary>Максимум токенов в ответе.</summary>
         public int MaxTokens => maxTokens;
 

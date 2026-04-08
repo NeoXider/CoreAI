@@ -18,12 +18,19 @@ namespace CoreAI.Ai
         /// </summary>
         public static void Subscribe(string eventName, Action handler)
         {
-            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return;
-            
+            if (string.IsNullOrWhiteSpace(eventName) || handler == null)
+            {
+                return;
+            }
+
             if (_subscribers.ContainsKey(eventName))
+            {
                 _subscribers[eventName] += handler;
+            }
             else
+            {
                 _subscribers[eventName] = handler;
+            }
         }
 
         /// <summary>
@@ -31,12 +38,19 @@ namespace CoreAI.Ai
         /// </summary>
         public static void Subscribe(string eventName, Action<string> payloadHandler)
         {
-            if (string.IsNullOrWhiteSpace(eventName) || payloadHandler == null) return;
-            
+            if (string.IsNullOrWhiteSpace(eventName) || payloadHandler == null)
+            {
+                return;
+            }
+
             if (_payloadSubscribers.ContainsKey(eventName))
+            {
                 _payloadSubscribers[eventName] += payloadHandler;
+            }
             else
+            {
                 _payloadSubscribers[eventName] = payloadHandler;
+            }
         }
 
         /// <summary>
@@ -44,13 +58,18 @@ namespace CoreAI.Ai
         /// </summary>
         public static void Unsubscribe(string eventName, Action handler)
         {
-            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return;
-            
+            if (string.IsNullOrWhiteSpace(eventName) || handler == null)
+            {
+                return;
+            }
+
             if (_subscribers.ContainsKey(eventName))
             {
                 _subscribers[eventName] -= handler;
                 if (_subscribers[eventName] == null)
+                {
                     _subscribers.Remove(eventName);
+                }
             }
         }
 
@@ -59,13 +78,18 @@ namespace CoreAI.Ai
         /// </summary>
         public static void Unsubscribe(string eventName, Action<string> payloadHandler)
         {
-            if (string.IsNullOrWhiteSpace(eventName) || payloadHandler == null) return;
-            
+            if (string.IsNullOrWhiteSpace(eventName) || payloadHandler == null)
+            {
+                return;
+            }
+
             if (_payloadSubscribers.ContainsKey(eventName))
             {
                 _payloadSubscribers[eventName] -= payloadHandler;
                 if (_payloadSubscribers[eventName] == null)
+                {
                     _payloadSubscribers.Remove(eventName);
+                }
             }
         }
 
@@ -74,7 +98,10 @@ namespace CoreAI.Ai
         /// </summary>
         public static void Publish(string eventName, string payload = "")
         {
-            if (string.IsNullOrWhiteSpace(eventName)) return;
+            if (string.IsNullOrWhiteSpace(eventName))
+            {
+                return;
+            }
 
             if (_subscribers.TryGetValue(eventName, out Action action) && action != null)
             {

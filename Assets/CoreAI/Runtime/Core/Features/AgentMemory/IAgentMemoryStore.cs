@@ -12,6 +12,9 @@ namespace CoreAI.Ai
         /// <summary>Удалить память роли.</summary>
         void Clear(string roleId);
 
+        /// <summary>Удалить только историю чата (ChatHistory) роли.</summary>
+        void ClearChatHistory(string roleId);
+
         /// <summary>
         /// Добавить сообщение в историю чата (Тип 2: ChatHistory).
         /// Используется LLMAgent для сохранения полного контекста диалога.
@@ -19,7 +22,8 @@ namespace CoreAI.Ai
         /// <param name="roleId">ID роли агента.</param>
         /// <param name="role">"user" или "assistant".</param>
         /// <param name="content">Текст сообщения.</param>
-        void AppendChatMessage(string roleId, string role, string content);
+        /// <param name="persistToDisk">Сохранять ли на диск (если хранилище поддерживает).</param>
+        void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true);
 
         /// <summary>
         /// Получить историю чата (Тип 2: ChatHistory).
@@ -31,6 +35,7 @@ namespace CoreAI.Ai
     }
 
     /// <summary>Одно сообщение в истории чата.</summary>
+    [System.Serializable]
     public struct ChatMessage
     {
         public string Role; // "user" | "assistant" | "system"

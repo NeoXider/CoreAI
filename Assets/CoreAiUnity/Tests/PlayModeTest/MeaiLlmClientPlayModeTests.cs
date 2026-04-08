@@ -54,7 +54,7 @@ namespace CoreAI.Tests.PlayMode
             Task<LlmCompletionResult> task = client.CompleteAsync(request);
             yield return PlayModeTestAwait.WaitTask(task, 300f, "MeaiLlmClient HTTP request");
 
-            LlmCompletionResult result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
+            LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
             if (!result.Ok)
             {
                 Debug.LogWarning($"[MeaiLlmClient.HTTP] Request failed: {result.Error}");
@@ -129,7 +129,7 @@ namespace CoreAI.Tests.PlayMode
             Task<LlmCompletionResult> task = client.CompleteAsync(request);
             yield return PlayModeTestAwait.WaitTask(task, 240f, "MeaiLlmClient LLMUnity request");
 
-            LlmCompletionResult result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
+            LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
             if (!result.Ok)
             {
                 Debug.LogWarning($"[MeaiLlmClient.LLMUnity] Request failed: {result.Error}");

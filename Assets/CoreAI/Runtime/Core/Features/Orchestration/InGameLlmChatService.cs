@@ -70,12 +70,12 @@ namespace CoreAI.Ai
                 foreach ((string role, string text) in _turns)
                 {
                     ChatRole chatRole = role == "User"
-                        ? Microsoft.Extensions.AI.ChatRole.User
-                        : Microsoft.Extensions.AI.ChatRole.Assistant;
+                        ? ChatRole.User
+                        : ChatRole.Assistant;
                     history.Add(new Microsoft.Extensions.AI.ChatMessage(chatRole, text));
                 }
 
-                history.Add(new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, message));
+                history.Add(new Microsoft.Extensions.AI.ChatMessage(ChatRole.User, message));
             }
 
             LlmCompletionResult result = await _llm.CompleteAsync(

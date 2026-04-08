@@ -161,8 +161,8 @@ namespace CoreAI.Tests.EditMode
             string text = "```json\n{\"name\": \"memory\", \"arguments\": {\"action\": \"write\"}}\n```";
             Regex regex = new(
                 @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-                System.Text.RegularExpressions.RegexOptions.Singleline);
+                RegexOptions.IgnoreCase |
+                RegexOptions.Singleline);
 
             Assert.IsTrue(regex.IsMatch(text));
         }
@@ -173,8 +173,8 @@ namespace CoreAI.Tests.EditMode
             string text = "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\"}}";
             Regex regex = new(
                 @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-                System.Text.RegularExpressions.RegexOptions.Singleline);
+                RegexOptions.IgnoreCase |
+                RegexOptions.Singleline);
 
             Assert.IsTrue(regex.IsMatch(text));
         }
@@ -185,8 +185,8 @@ namespace CoreAI.Tests.EditMode
             string text = "Just regular text without any tool calls.";
             Regex regex = new(
                 @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-                System.Text.RegularExpressions.RegexOptions.Singleline);
+                RegexOptions.IgnoreCase |
+                RegexOptions.Singleline);
 
             Assert.IsFalse(regex.IsMatch(text));
         }
@@ -216,13 +216,15 @@ namespace CoreAI.Tests.EditMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 
             public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return Array.Empty<CoreAI.Ai.ChatMessage>();
+                return Array.Empty<Ai.ChatMessage>();
             }
         }
 
@@ -246,13 +248,15 @@ namespace CoreAI.Tests.EditMode
                 LastSaved = null;
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 
             public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return Array.Empty<CoreAI.Ai.ChatMessage>();
+                return Array.Empty<Ai.ChatMessage>();
             }
         }
 

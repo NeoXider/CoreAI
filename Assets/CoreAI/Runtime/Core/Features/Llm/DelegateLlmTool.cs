@@ -11,13 +11,13 @@ namespace CoreAI.Ai
     {
         public string Name { get; }
         public string Description { get; }
-        
+
         /// <summary>
         /// Всегда возвращает "{}" т.к. реальная схема генерируется в MeaiLlmClient 
         /// через AIFunctionFactory на основе Delegate.
         /// </summary>
         public string ParametersSchema => "{}";
-        
+
         public Delegate ActionDelegate { get; }
 
         public DelegateLlmTool(string name, string description, Delegate action)

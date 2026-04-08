@@ -70,7 +70,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             // В EditMode без LLM — ожидаем ошибку подключения, но не ArgumentNullException
-            Assert.IsTrue(task.IsCompleted || task.Status == System.Threading.Tasks.TaskStatus.WaitingForActivation);
+            Assert.IsTrue(task.IsCompleted || task.Status == TaskStatus.WaitingForActivation);
 
             Object.DestroyImmediate(settings);
         }
@@ -105,19 +105,19 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestLuaExecutor : LuaTool.ILuaExecutor
         {
-            public System.Threading.Tasks.Task<LuaTool.LuaResult> ExecuteAsync(string code,
+            public Task<LuaTool.LuaResult> ExecuteAsync(string code,
                 System.Threading.CancellationToken ct)
             {
-                return System.Threading.Tasks.Task.FromResult(new LuaTool.LuaResult { Success = true, Output = "" });
+                return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = "" });
             }
         }
 
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
-            public System.Threading.Tasks.Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
+            public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
                 System.Threading.CancellationToken ct)
             {
-                return System.Threading.Tasks.Task.FromResult(new List<InventoryTool.InventoryItem>());
+                return Task.FromResult(new List<InventoryTool.InventoryItem>());
             }
         }
 
@@ -140,7 +140,9 @@ namespace CoreAI.Tests.EditMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 

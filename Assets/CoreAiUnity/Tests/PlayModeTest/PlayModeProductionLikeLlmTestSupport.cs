@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -66,6 +67,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class InMemoryStore : IAgentMemoryStore
     {
         public readonly Dictionary<string, AgentMemoryState> States = new();
+        public readonly Dictionary<string, List<CoreAI.Ai.ChatMessage>> ChatHistories = new();
 
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
@@ -80,15 +82,33 @@ namespace CoreAI.Tests.PlayMode
         public void Clear(string roleId)
         {
             States.Remove(roleId);
+            ChatHistories.Remove(roleId);
         }
 
-        public void AppendChatMessage(string roleId, string role, string content)
+        public void ClearChatHistory(string roleId) { }
+
+        public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
+            if (!ChatHistories.TryGetValue(roleId, out List<CoreAI.Ai.ChatMessage> list))
+            {
+                list = new List<CoreAI.Ai.ChatMessage>();
+                ChatHistories[roleId] = list;
+            }
+            list.Add(new CoreAI.Ai.ChatMessage(role, content ?? ""));
         }
 
-        public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            return Array.Empty<Ai.ChatMessage>();
+            if (!ChatHistories.TryGetValue(roleId, out List<CoreAI.Ai.ChatMessage> list))
+            {
+                return Array.Empty<CoreAI.Ai.ChatMessage>();
+            }
+
+            if (maxMessages <= 0)
+                return list.ToArray();
+                
+            int count = Math.Min(maxMessages, list.Count);
+            return list.Skip(list.Count - count).ToArray();
         }
     }
 

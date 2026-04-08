@@ -86,7 +86,9 @@ namespace CoreAI.Tests.EditMode
             {
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 

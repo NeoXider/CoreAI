@@ -148,12 +148,14 @@ namespace CoreAI.Ai
         {
             if (hasStringPayload)
             {
-                _tools.Add(new DelegateLlmTool(name, description, new Action<string>((payload) => CoreAiEvents.Publish(name, payload))));
+                _tools.Add(new DelegateLlmTool(name, description,
+                    new Action<string>((payload) => CoreAiEvents.Publish(name, payload))));
             }
             else
             {
                 _tools.Add(new DelegateLlmTool(name, description, new Action(() => CoreAiEvents.Publish(name))));
             }
+
             return this;
         }
 
@@ -237,6 +239,8 @@ namespace CoreAI.Ai
             {
                 policy.DisableMemoryTool(RoleId);
             }
+            
+            policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens, PersistChatHistoryBetweenSessions);
         }
 
         private bool HasMemoryTool()

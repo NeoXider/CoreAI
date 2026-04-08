@@ -41,13 +41,15 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void AppendChatMessage(string roleId, string role, string content)
+            public void ClearChatHistory(string roleId) { }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
             }
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+                return System.Array.Empty<ChatMessage>();
             }
         }
 
@@ -105,7 +107,8 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Creator");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -141,7 +144,8 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "CoreMechanicAI");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -175,7 +179,7 @@ namespace CoreAI.Tests.PlayMode
                     if (string.IsNullOrEmpty(itemName))
                     {
                         // Пытаемся извлечь из памяти
-                        Match match = System.Text.RegularExpressions.Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
+                        Match match = Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
                         if (match.Success)
                         {
                             itemName = match.Groups[1].Value;
@@ -197,7 +201,8 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Programmer");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -231,7 +236,8 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -328,7 +334,8 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Creator");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -354,7 +361,8 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "CoreMechanicAI");
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
