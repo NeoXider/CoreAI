@@ -18,14 +18,13 @@ namespace CoreAI.Infrastructure.Llm
         private readonly MEAI.IChatClient _innerClient;
         private readonly IGameLogger _logger;
         private readonly int _maxConsecutiveErrors;
-        private readonly int _maxTotalIterations;
 
-        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, int maxConsecutiveErrors = 2, int maxTotalIterations = 10)
+        /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
+        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, int maxConsecutiveErrors = 3)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _maxConsecutiveErrors = maxConsecutiveErrors;
-            _maxTotalIterations = maxTotalIterations;
         }
 
         public async Task<MEAI.ChatResponse> GetResponseAsync(
@@ -35,21 +34,15 @@ namespace CoreAI.Infrastructure.Llm
         {
             var messages = chatMessages.ToList();
             int consecutiveErrors = 0;
-            int totalIterations = 0;
+            int iteration = 0;
 
             while (true)
             {
-                if (totalIterations >= _maxTotalIterations)
-                {
-                    _logger.LogWarning(GameLogFeature.Llm, $"[SmartToolCall] ⚠ Max total iterations ({_maxTotalIterations}) reached, stopping.");
-                    break;
-                }
-
-                totalIterations++;
+                iteration++;
                 if (CoreAISettings.LogMeaiToolCallingSteps)
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
-                        $"[SmartToolCall] Iteration {totalIterations}: consecutiveErrors={consecutiveErrors}, msgs={messages.Count}");
+                        $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={consecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
                 }
 
                 var response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
@@ -63,12 +56,12 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     // Модель вернула текст — выходим
                     if (CoreAISettings.LogMeaiToolCallingSteps)
-                        _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {totalIterations}: Text response, stopping.");
+                        _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
                     return response;
                 }
 
                 if (CoreAISettings.LogMeaiToolCallingSteps)
-                    _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {totalIterations}: {toolCalls.Count} tool call(s)");
+                    _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s)");
 
                 // Выполняем тулы
                 var toolResults = new List<MEAI.AIContent>();

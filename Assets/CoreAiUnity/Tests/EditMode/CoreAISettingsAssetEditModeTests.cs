@@ -32,8 +32,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1f, settings.LlmUnityStartupDelaySeconds);
             Assert.AreEqual(false, settings.LlmUnityKeepAlive);
             Assert.AreEqual(1, settings.LlmUnityMaxConcurrentChats);
-            Assert.AreEqual(3, settings.MaxLuaRepairGenerations);
-            Assert.AreEqual(2, settings.MaxToolCallIterations);
+            Assert.AreEqual(3, settings.MaxLuaRepairRetries);
             Assert.AreEqual(3, settings.MaxToolCallRetries);
             Assert.AreEqual(8192, settings.ContextWindowTokens);
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);

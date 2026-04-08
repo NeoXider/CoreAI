@@ -583,8 +583,8 @@ public void AgentBuilder_CreatesAgent_WithAllSettings()
 
 ```csharp
 // До инициализации системы:
-CoreAISettings.MaxLuaRepairGenerations = 5; // Лимит повторов Programmer (по умолчанию 3)
-CoreAISettings.MaxToolCallRetries = 5;      // Лимит повторов tool call (по умолчанию 3)
+CoreAISettings.MaxLuaRepairRetries = 5;        // Лимит подряд неудачных Lua repair (по умолчанию 3)
+CoreAISettings.MaxToolCallRetries = 5;      // Лимит подряд неудачных tool call (по умолчанию 3)
 CoreAISettings.EnableMeaiDebugLogging = true; // Отладка MEAI
 CoreAISettings.LlmRequestTimeoutSeconds = 600; // Таймаут LLM (по умолчанию 300)
 ```

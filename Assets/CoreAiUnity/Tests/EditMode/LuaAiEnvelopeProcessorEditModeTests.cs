@@ -147,8 +147,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Processor_ProgrammerAtMaxRepairGeneration_DoesNotScheduleAgain()
         {
-            int originalMax = CoreAISettings.MaxLuaRepairGenerations;
-            CoreAISettings.MaxLuaRepairGenerations = 3;
+            int originalMax = CoreAISettings.MaxLuaRepairRetries;
+            CoreAISettings.MaxLuaRepairRetries = 3;
 
             try
             {
@@ -175,7 +175,7 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
-                CoreAISettings.MaxLuaRepairGenerations = originalMax;
+                CoreAISettings.MaxLuaRepairRetries = originalMax;
             }
         }
     }

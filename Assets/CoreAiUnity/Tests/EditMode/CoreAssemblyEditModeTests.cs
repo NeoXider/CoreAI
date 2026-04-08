@@ -74,5 +74,20 @@ namespace CoreAI.Tests.EditMode
             Script script = env.CreateScript(new LuaApiRegistry());
             Assert.Throws<ScriptRuntimeException>(() => script.DoString("return require('x')"));
         }
+
+        [Test]
+        // Теперь наш SecureLuaEnvironment имеет пуленепробиваемую защиту через debug.sethook
+        // Поэтому этот тест больше не будет вешать саму Unity
+        public void SecureLuaEnvironment_InfiniteLoop_IsInterrupted()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+            
+            var ex = Assert.Throws<ScriptRuntimeException>(() => 
+                env.RunChunk(script, "while true do end")
+            );
+            
+            StringAssert.Contains("EXCEEDED_HARD_LIMIT_STEPS", ex.Message);
+        }
     }
 }

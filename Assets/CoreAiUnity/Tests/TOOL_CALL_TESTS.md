@@ -145,7 +145,7 @@ Unity Test Runner → PlayMode → AllToolCallsPlayModeTests
 
 ```csharp
 // До инициализации системы:
-CoreAISettings.MaxLuaRepairGenerations = 5; // Увеличить до 5
+CoreAISettings.MaxLuaRepairRetries = 5; // Увеличить до 5
 ```
 
 ### LLMUnity не загружается

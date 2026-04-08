@@ -142,17 +142,12 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string universalSystemPromptPrefix = "";
 
-        [Tooltip("Максимум автоматических повторов Programmer при ошибке Lua.")]
+        [Tooltip("Максимум подряд неудачных Lua repair до прерывания повторов Programmer. Счётчик сбрасывается при успехе.")]
         [SerializeField]
         [Min(1)]
-        private int maxLuaRepairGenerations = 3;
+        private int maxLuaRepairRetries = 3;
 
-        [Tooltip("Максимум итераций tool calling за один запрос (сколько раз модель может вызвать инструменты подряд).")]
-        [SerializeField]
-        [Min(1)]
-        private int maxToolCallIterations = 2;
-
-        [Tooltip("Максимум повторов при неудачном tool call (модель не распознала формат).")]
+        [Tooltip("Максимум подряд неудачных tool call до прерывания агента. Счётчик сбрасывается при успехе.")]
         [SerializeField]
         [Min(1)]
         private int maxToolCallRetries = 3;
@@ -339,13 +334,10 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Универсальный стартовый промпт для всех агентов.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";
 
-        /// <summary>Максимум повторов Lua repair.</summary>
-        public int MaxLuaRepairGenerations => maxLuaRepairGenerations < 1 ? 3 : maxLuaRepairGenerations;
+        /// <summary>Максимум подряд неудачных Lua repair попыток.</summary>
+        public int MaxLuaRepairRetries => maxLuaRepairRetries < 1 ? 3 : maxLuaRepairRetries;
 
-        /// <summary>Максимум итераций tool calling за один запрос.</summary>
-        public int MaxToolCallIterations => maxToolCallIterations < 1 ? 2 : maxToolCallIterations;
-
-        /// <summary>Максимум повторов tool call.</summary>
+        /// <summary>Максимум подряд неудачных tool call до прерывания агента.</summary>
         public int MaxToolCallRetries => maxToolCallRetries < 1 ? 3 : maxToolCallRetries;
 
         /// <summary>Контекстное окно.</summary>
@@ -460,8 +452,7 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public void SyncToStaticSettings()
         {
-            CoreAISettings.MaxLuaRepairGenerations = MaxLuaRepairGenerations;
-            CoreAISettings.MaxToolCallIterations = MaxToolCallIterations;
+            CoreAISettings.MaxLuaRepairRetries = MaxLuaRepairRetries;
             CoreAISettings.MaxToolCallRetries = MaxToolCallRetries;
             CoreAISettings.EnableMeaiDebugLogging = EnableMeaiDebugLogging;
             CoreAISettings.LlmRequestTimeoutSeconds = (int)LlmRequestTimeoutSeconds;
@@ -487,8 +478,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             // Валидация при изменении в Inspector
             if (requestTimeoutSeconds < 0) requestTimeoutSeconds = 120;
-            if (maxLuaRepairGenerations < 1) maxLuaRepairGenerations = 3;
-            if (maxToolCallIterations < 1) maxToolCallIterations = 2;
+            if (maxLuaRepairRetries < 1) maxLuaRepairRetries = 3;
             if (maxToolCallRetries < 1) maxToolCallRetries = 3;
             if (contextWindowTokens < 256) contextWindowTokens = 8192;
             if (maxConcurrentOrchestrations < 1) maxConcurrentOrchestrations = 2;

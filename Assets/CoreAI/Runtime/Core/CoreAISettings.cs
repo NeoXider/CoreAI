@@ -7,16 +7,13 @@ namespace CoreAI
     public static class CoreAISettings
     {
         /// <summary>
-        /// Максимум автоматических повторов Programmer при ошибке Lua.
-        /// По умолчанию: 3. Можно менять до инициализации.
+        /// Максимум подряд неудачных Lua repair до прерывания повторов Programmer.
+        /// Счётчик увеличивается при каждой ошибке Lua, сбрасывается при успешном выполнении.
+        /// По умолчанию: 3.
         /// </summary>
-        public static int MaxLuaRepairGenerations { get; set; } = 3;
+        public static int MaxLuaRepairRetries { get; set; } = 3;
 
-        /// <summary>
-        /// Максимум повторов при неудачном tool call (модель не распознала формат).
-        /// По умолчанию: 3. Можно менять до инициализации.
-        /// </summary>
-        public static int MaxToolCallRetries { get; set; } = 3;
+
 
         /// <summary>
         /// Включить подробное логирование MEAI pipeline.
@@ -85,10 +82,11 @@ namespace CoreAI
         public static float Temperature { get; set; } = 0.1f;
 
         /// <summary>
-        /// Максимум итераций tool calling за один запрос (сколько раз модель может вызвать инструменты подряд).
-        /// По умолчанию: 2. Можно менять до инициализации.
+        /// Максимум подряд неудачных tool call до прерывания агента.
+        /// Счётчик сбрасывается при каждом успешном вызове инструмента.
+        /// По умолчанию: 3.
         /// </summary>
-        public static int MaxToolCallIterations { get; set; } = 2;
+        public static int MaxToolCallRetries { get; set; } = 3;
 
         /// <summary>
         /// Логировать вызовы инструментов (название, успех/неудача).

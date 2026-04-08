@@ -11,8 +11,8 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class LuaAiEnvelopeProcessor
     {
-        /// <summary>Максимум автоматических повторов Programmer при ошибке Lua в одном конверте.</summary>
-        public const int DefaultMaxLuaRepairGenerations = 3; // Совместимо с CoreAISettings.MaxLuaRepairGenerations
+        /// <summary>Максимум подряд неудачных Lua repair попыток в одном конверте.</summary>
+        public const int DefaultMaxLuaRepairRetries = 3; // Совместимо с CoreAISettings.MaxLuaRepairRetries
 
         private readonly SecureLuaEnvironment _sandbox;
         private readonly IGameLuaRuntimeBindings _bindings;
@@ -20,7 +20,7 @@ namespace CoreAI.Ai
         private readonly Func<IAiOrchestrationService> _resolveOrchestrator;
         private readonly ILuaExecutionObserver _observer;
         private readonly ILuaScriptVersionStore _luaScriptVersions;
-        private readonly int _maxLuaRepairGenerationOnEnvelope;
+        private readonly int _maxLuaRepairRetries;
 
         public LuaAiEnvelopeProcessor(
             SecureLuaEnvironment sandbox,
@@ -37,7 +37,7 @@ namespace CoreAI.Ai
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
             _luaScriptVersions = luaScriptVersions ?? new NullLuaScriptVersionStore();
             // Важно: VContainer плохо резолвит optional-примитивы. Поэтому лимит берём из CoreAISettings.
-            _maxLuaRepairGenerationOnEnvelope = CoreAISettings.MaxLuaRepairGenerations;
+            _maxLuaRepairRetries = CoreAISettings.MaxLuaRepairRetries;
         }
 
         /// <summary>Обработать команду-конверт: извлечь Lua, выполнить, опубликовать результат или запланировать ремонт.</summary>
@@ -96,7 +96,7 @@ namespace CoreAI.Ai
                 _observer.OnLuaFailure(msg);
 
                 if (string.Equals(cmd.SourceRoleId, BuiltInAgentRoleIds.Programmer, StringComparison.Ordinal) &&
-                    cmd.LuaRepairGeneration < _maxLuaRepairGenerationOnEnvelope)
+                    cmd.LuaRepairGeneration < _maxLuaRepairRetries)
                 {
                     int next = cmd.LuaRepairGeneration + 1;
                     _observer.OnLuaRepairScheduled(next, msg);

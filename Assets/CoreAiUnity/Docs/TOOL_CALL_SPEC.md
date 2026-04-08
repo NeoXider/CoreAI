@@ -180,8 +180,8 @@ Merchant: "У меня есть Iron Sword за 50 монет..."
 
 ```csharp
 // До инициализации:
-CoreAISettings.MaxLuaRepairGenerations = 3;    // Лимит повторов Programmer
-CoreAISettings.MaxToolCallRetries = 3;         // Лимит повторов tool call
+CoreAISettings.MaxLuaRepairRetries = 3;        // Лимит подряд неудачных Lua repair
+CoreAISettings.MaxToolCallRetries = 3;         // Лимит подряд неудачных tool call
 CoreAISettings.EnableMeaiDebugLogging = true;  // Отладка MEAI
 CoreAISettings.LlmRequestTimeoutSeconds = 300; // Таймаут LLM
 ```
@@ -191,7 +191,7 @@ CoreAISettings.LlmRequestTimeoutSeconds = 300; // Таймаут LLM
 При неудачном tool call (модель вернула неправильный формат):
 1. Система возвращает ошибку модели: "ERROR: Tool call not recognized. Use this format..."
 2. Модель получает ещё одну попытку
-3. Повторяется до `MaxToolCallRetries` (по умолчанию 3)
+3. Повторяется до `MaxToolCallRetries` подряд неудач (по умолчанию 3), счётчик сбрасывается при успехе
 4. Если все попытки исчерпаны - ответ принимается как есть
 
 Это помогает маленьким моделям (Qwen3.5-2B) научиться правильному формату.

@@ -19,8 +19,7 @@ namespace CoreAI.Tests.EditMode
             var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             var type = typeof(CoreAISettingsAsset);
             var bf = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
-            type.GetField("maxLuaRepairGenerations", bf).SetValue(settings, 99);
-            type.GetField("maxToolCallIterations", bf).SetValue(settings, 88);
+            type.GetField("maxLuaRepairRetries", bf).SetValue(settings, 99);
             type.GetField("maxToolCallRetries", bf).SetValue(settings, 77);
             type.GetField("enableMeaiDebugLogging", bf).SetValue(settings, true);
             type.GetField("contextWindowTokens", bf).SetValue(settings, 12345);
@@ -43,8 +42,7 @@ namespace CoreAI.Tests.EditMode
             configureMethod.Invoke(scope, new object[] { builder });
             
             // 4. Assert: статическая структура должна обновиться
-            Assert.AreEqual(99, CoreAI.CoreAISettings.MaxLuaRepairGenerations);
-            Assert.AreEqual(88, CoreAI.CoreAISettings.MaxToolCallIterations);
+            Assert.AreEqual(99, CoreAI.CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(77, CoreAI.CoreAISettings.MaxToolCallRetries);
             Assert.AreEqual(true, CoreAI.CoreAISettings.EnableMeaiDebugLogging);
             Assert.AreEqual(12345, CoreAI.CoreAISettings.ContextWindowTokens);

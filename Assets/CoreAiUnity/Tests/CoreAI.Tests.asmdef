@@ -20,6 +20,7 @@
     "precompiledReferences": [
         "nunit.framework.dll",
         "Microsoft.Extensions.AI.Abstractions.dll",
+        "Microsoft.Bcl.AsyncInterfaces.dll",
         "Newtonsoft.Json.dll",
         "System.Text.Json.dll"
     ],

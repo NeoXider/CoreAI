@@ -267,8 +267,8 @@ namespace CoreAI.Tests.EditMode.Lua
         [Test]
         public void LuaExecution_MultipleRepairs_RespectsMaxGenerations()
         {
-            int originalMax = CoreAISettings.MaxLuaRepairGenerations;
-            CoreAISettings.MaxLuaRepairGenerations = 3;
+            int originalMax = CoreAISettings.MaxLuaRepairRetries;
+            CoreAISettings.MaxLuaRepairRetries = 3;
 
             try
             {
@@ -294,7 +294,7 @@ namespace CoreAI.Tests.EditMode.Lua
                 processor.Process(MakeEnvelope("error2()", "Programmer", 1));
                 Assert.AreEqual(2, repairCount);
 
-                // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairGenerations = 3)
+                // Generation 2 → repair 3 (ПОСЛЕДНИЙ, т.к. MaxLuaRepairRetries = 3)
                 processor.Process(MakeEnvelope("error3()", "Programmer", 2));
                 Assert.AreEqual(3, repairCount);
 
@@ -304,7 +304,7 @@ namespace CoreAI.Tests.EditMode.Lua
             }
             finally
             {
-                CoreAISettings.MaxLuaRepairGenerations = originalMax;
+                CoreAISettings.MaxLuaRepairRetries = originalMax;
             }
         }
 

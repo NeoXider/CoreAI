@@ -78,7 +78,7 @@
 #### Breaking Changes
 - **Programmer агент** теперь вызывает `execute_lua` tool вместо fenced ```lua блоков
 - **Memory tool** формат: `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
-- **MaxLuaRepairGenerations** изменён с 4 на 3
+- **MaxLuaRepairRetries** (ранее MaxLuaRepairGenerations) изменён с 4 на 3
 
 #### Тесты
 - ✨ **AgentBuilderEditModeTests** - 8 тестов на конструктор агентов

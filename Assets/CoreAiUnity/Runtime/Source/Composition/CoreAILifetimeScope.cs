@@ -83,8 +83,7 @@ namespace CoreAI.Composition
                 builder.RegisterInstance(settings);
 
                 // Синхронизируем статические CoreAISettings с asset
-                CoreAI.CoreAISettings.MaxLuaRepairGenerations = settings.MaxLuaRepairGenerations;
-                CoreAI.CoreAISettings.MaxToolCallIterations = settings.MaxToolCallIterations;
+                CoreAI.CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
                 CoreAI.CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
                 CoreAI.CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
                 CoreAI.CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;

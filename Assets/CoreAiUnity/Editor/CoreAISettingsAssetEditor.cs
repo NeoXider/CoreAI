@@ -135,12 +135,10 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.Space(2);
 
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxLuaRepairGenerations"),
-                    new GUIContent("Lua Repair Retries", "Повторы Programmer при ошибке Lua"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxToolCallIterations"),
-                    new GUIContent("Tool Call Iterations", "Макс. итераций tool calling за один запрос"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxLuaRepairRetries"),
+                    new GUIContent("Lua Repair Retries", "Максимум подряд неудачных Lua repair до прерывания Programmer"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxToolCallRetries"),
-                    new GUIContent("Tool Call Retries", "Повторы при неудачном tool call"));
+                    new GUIContent("Tool Call Retries", "Максимум подряд неудачных tool call до прерывания агента"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("contextWindowTokens"),
                     new GUIContent("Context Window", "Контекстное окно (токены)"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxConcurrentOrchestrations"),

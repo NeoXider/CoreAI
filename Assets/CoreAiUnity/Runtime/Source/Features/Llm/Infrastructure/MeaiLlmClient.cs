@@ -102,10 +102,10 @@ namespace CoreAI.Infrastructure.Llm
 
             if (CoreAISettings.LogMeaiToolCallingSteps)
             {
-                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={CoreAISettings.MaxToolCallRetries}, max total iterations={CoreAISettings.MaxToolCallIterations}");
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={CoreAISettings.MaxToolCallRetries}");
             }
 
-            var functionClient = new SmartToolCallingChatClient(_innerClient, _logger, CoreAISettings.MaxToolCallRetries, CoreAISettings.MaxToolCallIterations);
+            var functionClient = new SmartToolCallingChatClient(_innerClient, _logger, CoreAISettings.MaxToolCallRetries);
 
             var chatMessages = new List<MEAI.ChatMessage>
             {

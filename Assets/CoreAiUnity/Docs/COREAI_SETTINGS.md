@@ -163,9 +163,8 @@ var result = await client.CompleteAsync(new LlmCompletionRequest {
 |------|-------------|----------|
 | **Temperature** | `0.1` | 🆕 Общая температура генерации для всех агентов (0.0 = детерминировано, 2.0 = креативно) |
 | **Universal System Prompt Prefix** | _(пусто)_ | Универсальный стартовый промпт — идёт **ПЕРЕД** промптом каждого агента |
-| **Lua Repair Retries** | `3` | Повторы Programmer при ошибке Lua |
-| **Tool Call Iterations** | `2` | Макс. итераций tool calling за один запрос (сколько раз модель может вызвать инструменты подряд) |
-| **Tool Call Retries** | `3` | Повторы при неудачном tool call |
+| **Lua Repair Retries** | `3` | Максимум подряд неудачных Lua repair попыток Programmer (счётчик сбрасывается при успехе) |
+| **Tool Call Retries** | `3` | Максимум подряд неудачных tool call до прерывания агента (счётчик сбрасывается при успехе) |
 | **Context Window** | `8192` | Контекстное окно (токены) |
 | **Max Concurrent** | `2` | Параллельных задач оркестратора |
 | **LLM Timeout** | `15` | Таймаут запроса к LLM (сек) |
@@ -292,7 +291,7 @@ settings.ConfigureHttpApi("http://localhost:1234/v1", "", "qwen3.5-4b");
 ### Синхронизация
 При инициализации `CoreAILifetimeScope` синхронизирует Asset со статическими `CoreAISettings`:
 ```csharp
-CoreAI.CoreAISettings.MaxLuaRepairGenerations = settings.MaxLuaRepairGenerations;
+CoreAI.CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
 CoreAI.CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
 CoreAI.CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
 CoreAI.CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
