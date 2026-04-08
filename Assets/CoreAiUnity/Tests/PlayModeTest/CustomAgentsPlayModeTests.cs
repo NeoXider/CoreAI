@@ -41,7 +41,9 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void ClearChatHistory(string roleId) { }
+            public void ClearChatHistory(string roleId)
+            {
+            }
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
@@ -239,7 +241,8 @@ namespace CoreAI.Tests.PlayMode
                 AgentConfig helper = new AgentBuilder("TestHelper")
                     .WithSystemPrompt("Call the send_ping tool with the message 'hello'.")
                     .WithMode(AgentMode.ToolsOnly)
-                    .WithAction("send_ping", "Send a ping message", new Action<string>((string message) => {
+                    .WithAction("send_ping", "Send a ping message", new Action<string>((string message) =>
+                    {
                         triggerFired = true;
                         receivedMessage = message;
                     }))
@@ -247,10 +250,11 @@ namespace CoreAI.Tests.PlayMode
 
                 ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
                 Task<TestResult> task = RunAgentTestAsync(clientWithStore, helper, "Send ping");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "helper"); 
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "helper");
                 TestResult r = task.Result;
-                
-                Debug.Log($"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
+
+                Debug.Log(
+                    $"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
                 Assert.Greater(r.ToolsCount, 0);
                 Assert.IsTrue(triggerFired, "Delegate should have been triggered.");
                 Debug.Log("[CustomAgents] ✓ TEST 4 PASSED");

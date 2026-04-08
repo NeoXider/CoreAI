@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using CoreAI.Ai;
+using CoreAI.Logging;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.AiMemory
@@ -25,11 +26,13 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private readonly string _dir;
         private readonly Dictionary<string, List<ChatMessage>> _ephemeralHistory = new();
+        private readonly ILog _log;
 
         /// <summary>Каталог памяти: CoreAI/AgentMemory под persistentDataPath.</summary>
-        public FileAgentMemoryStore()
+        public FileAgentMemoryStore(ILog log = null)
         {
             _dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
+            _log = log;
         }
 
         /// <inheritdoc />
@@ -58,8 +61,9 @@ namespace CoreAI.Infrastructure.AiMemory
                 };
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _log?.Error($"[FileAgentMemoryStore] Failed to load memory for {roleId}: {ex.Message}");
                 return false;
             }
         }
@@ -69,32 +73,25 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             try
             {
-                Directory.CreateDirectory(_dir);
-
-                // Загружаем существующий файл чтобы сохранить chatHistory
+                EnsureDir();
                 string path = GetPath(roleId);
-                string existingChatJson = "";
+                Persisted p = new();
+
                 if (File.Exists(path))
                 {
-                    string json = File.ReadAllText(path);
-                    Persisted old = JsonUtility.FromJson<Persisted>(json);
-                    if (old != null)
-                    {
-                        existingChatJson = old.chatHistoryJson ?? "";
-                    }
+                    string existingJson = File.ReadAllText(path);
+                    p = JsonUtility.FromJson<Persisted>(existingJson) ?? new Persisted();
                 }
 
-                Persisted p = new()
-                {
-                    lastSystemPrompt = state?.LastSystemPrompt ?? "",
-                    memory = state?.Memory ?? "",
-                    chatHistoryJson = existingChatJson
-                };
+                p.lastSystemPrompt = state.LastSystemPrompt;
+                p.memory = state.Memory;
+
                 string newJson = JsonUtility.ToJson(p, true);
                 File.WriteAllText(path, newJson);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _log?.Error($"[FileAgentMemoryStore] Failed to save memory for {roleId}: {ex.Message}");
             }
         }
 
@@ -106,25 +103,39 @@ namespace CoreAI.Infrastructure.AiMemory
                 string path = GetPath(roleId);
                 if (File.Exists(path))
                 {
-                    File.Delete(path);
+                    string existingJson = File.ReadAllText(path);
+                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+                    if (p != null)
+                    {
+                        p.memory = "";
+                        p.lastSystemPrompt = ""; // Очищаем промпт
+                        File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                    }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _log?.Error($"[FileAgentMemoryStore] Failed to clear memory for {roleId}: {ex.Message}");
             }
         }
 
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
         {
-            _ephemeralHistory.Remove(roleId);
+            // Очищаем из оперативной памяти
+            if (_ephemeralHistory.ContainsKey(roleId))
+            {
+                _ephemeralHistory.Remove(roleId);
+            }
+
+            // Очищаем с диска
             try
             {
                 string path = GetPath(roleId);
                 if (File.Exists(path))
                 {
-                    string json = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(json);
+                    string existingJson = File.ReadAllText(path);
+                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
                     if (p != null)
                     {
                         p.chatHistoryJson = "";
@@ -132,140 +143,146 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-            }
-        }
-
-        /// <inheritdoc />
-        public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
-        {
-            try
-            {
-                Directory.CreateDirectory(_dir);
-                string path = GetPath(roleId);
-
-                // Загружаем существующую историю и стейт
-                List<ChatMessage> history = new();
-                string existingMemory = "";
-                string existingPrompt = "";
-
-                if (File.Exists(path))
-                {
-                    string json = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(json);
-                    if (p != null)
-                    {
-                        existingMemory = p.memory ?? "";
-                        existingPrompt = p.lastSystemPrompt ?? "";
-
-                        if (!string.IsNullOrEmpty(p.chatHistoryJson))
-                        {
-                            try
-                            {
-                                history = JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson)?.messages
-                                          ?? new List<ChatMessage>();
-                            }
-                            catch
-                            {
-                                history = new List<ChatMessage>();
-                            }
-                        }
-                    }
-                }
-                
-                // Fallback to ephemeral if disk hasn't persisted it but we have it
-                if (history.Count == 0 && _ephemeralHistory.TryGetValue(roleId, out List<ChatMessage> ephemeralStr))
-                {
-                    history = new List<ChatMessage>(ephemeralStr);
-                }
-
-                // Добавляем новое сообщение
-                history.Add(new ChatMessage(role, content ?? ""));
-                _ephemeralHistory[roleId] = history;
-
-                if (!persistToDisk)
-                {
-                    return;
-                }
-
-                // Сохраняем
-                Persisted persisted = new()
-                {
-                    lastSystemPrompt = existingPrompt,
-                    memory = existingMemory,
-                    chatHistoryJson = JsonUtility.ToJson(new ChatMessageArrayWrapper { messages = history })
-                };
-                File.WriteAllText(path, JsonUtility.ToJson(persisted, true));
-            }
-            catch (Exception)
-            {
-            }
-        }
-
-        /// <inheritdoc />
-        public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
-        {
-            try
-            {
-                List<ChatMessage> resultHistory = new();
-                string path = GetPath(roleId);
-                
-                if (File.Exists(path))
-                {
-                    string json = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(json);
-                    if (p != null && !string.IsNullOrEmpty(p.chatHistoryJson))
-                    {
-                        ChatMessageArrayWrapper wrapper = JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
-                        if (wrapper != null && wrapper.messages != null)
-                        {
-                            resultHistory = wrapper.messages;
-                        }
-                    }
-                }
-                
-                if (resultHistory.Count == 0 && _ephemeralHistory.TryGetValue(roleId, out List<ChatMessage> emph))
-                {
-                    resultHistory = new List<ChatMessage>(emph);
-                }
-
-                if (resultHistory.Count == 0)
-                {
-                    return Array.Empty<ChatMessage>();
-                }
-
-                if (maxMessages <= 0)
-                {
-                    return resultHistory.ToArray();
-                }
-
-                // Возвращаем N последних сообщений
-                int count = Math.Min(maxMessages, resultHistory.Count);
-                return resultHistory.Skip(resultHistory.Count - count).ToArray();
-            }
-            catch (Exception)
-            {
-                return Array.Empty<ChatMessage>();
+                _log?.Error($"[FileAgentMemoryStore] Failed to clear chat history for {roleId}: {ex.Message}");
             }
         }
 
         private string GetPath(string roleId)
         {
-            string safe = string.IsNullOrWhiteSpace(roleId) ? "Creator" : roleId.Trim();
-            foreach (char c in Path.GetInvalidFileNameChars())
+            // Упрощенная санитизация имени файла
+            string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
+            return Path.Combine(_dir, $"{safeName}.json");
+        }
+
+        private void EnsureDir()
+        {
+            if (!Directory.Exists(_dir))
             {
-                safe = safe.Replace(c.ToString(), "_");
+                Directory.CreateDirectory(_dir);
+            }
+        }
+
+        private readonly HashSet<string> _loadedRoles = new();
+
+        #region Chat History Methods
+
+        [Serializable]
+        private struct ChatMessageArrayWrapper
+        {
+            public ChatMessage[] Items;
+        }
+
+        private void EnsureHistoryLoaded(string roleId)
+        {
+            if (_loadedRoles.Contains(roleId))
+            {
+                return;
             }
 
-            return Path.Combine(_dir, safe + ".json");
+            _loadedRoles.Add(roleId);
+            if (!_ephemeralHistory.ContainsKey(roleId))
+            {
+                _ephemeralHistory[roleId] = new List<ChatMessage>();
+            }
+
+            try
+            {
+                string path = GetPath(roleId);
+                if (File.Exists(path))
+                {
+                    string existingJson = File.ReadAllText(path);
+                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+
+                    if (p != null && !string.IsNullOrEmpty(p.chatHistoryJson))
+                    {
+                        ChatMessageArrayWrapper wrapper =
+                            JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
+                        if (wrapper.Items != null)
+                        {
+                            // Вставляем дисковую историю в начало
+                            _ephemeralHistory[roleId].InsertRange(0, wrapper.Items);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error(
+                    $"[FileAgentMemoryStore] Failed to read chat history from disk for {roleId}: {ex.Message}");
+            }
         }
 
-        // Хелпер для сериализации List<ChatMessage> через JsonUtility
-        [Serializable]
-        private sealed class ChatMessageArrayWrapper
+        /// <summary>
+        /// Добавляет сообщение в историю.
+        /// persistToDisk=false используется для промежуточных tool call (сохраняется только в оперативку).
+        /// persistToDisk=true используется для финальных ответов (синхронизируется на диск).
+        /// </summary>
+        public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
-            public List<ChatMessage> messages = new();
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
+            EnsureHistoryLoaded(roleId);
+
+            ChatMessage newMsg = new()
+            {
+                Role = role,
+                Content = content,
+                // Используем миллисекунды для гарантии правильной сортировки при быстром добавлении
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            _ephemeralHistory[roleId].Add(newMsg);
+
+            if (persistToDisk)
+            {
+                try
+                {
+                    EnsureDir();
+                    string path = GetPath(roleId);
+                    Persisted p = new();
+
+                    if (File.Exists(path))
+                    {
+                        string existingJson = File.ReadAllText(path);
+                        p = JsonUtility.FromJson<Persisted>(existingJson) ?? new Persisted();
+                    }
+
+                    // Сохраняем ВЕСЬ массив актуальной истории на диск
+                    ChatMessageArrayWrapper newWrapper = new() { Items = _ephemeralHistory[roleId].ToArray() };
+                    p.chatHistoryJson = JsonUtility.ToJson(newWrapper);
+
+                    string newJson = JsonUtility.ToJson(p, true);
+                    File.WriteAllText(path, newJson);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error(
+                        $"[FileAgentMemoryStore] Failed to append chat history to disk for {roleId}: {ex.Message}");
+                }
+            }
         }
+
+        /// <summary>
+        /// Возвращает объединенную историю (с диска + из оперативки), отсортированную по времени.
+        /// </summary>
+        public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        {
+            EnsureHistoryLoaded(roleId);
+
+            List<ChatMessage> list = _ephemeralHistory[roleId];
+            if (maxMessages > 0 && list.Count > maxMessages)
+            {
+                return list.Skip(list.Count - maxMessages).ToArray();
+            }
+
+            return list.ToArray();
+        }
+
+        #endregion
     }
 }

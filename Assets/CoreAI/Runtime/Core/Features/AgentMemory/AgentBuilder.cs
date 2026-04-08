@@ -239,8 +239,9 @@ namespace CoreAI.Ai
             {
                 policy.DisableMemoryTool(RoleId);
             }
-            
-            policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens, PersistChatHistoryBetweenSessions);
+
+            policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
+                PersistChatHistoryBetweenSessions);
         }
 
         private bool HasMemoryTool()

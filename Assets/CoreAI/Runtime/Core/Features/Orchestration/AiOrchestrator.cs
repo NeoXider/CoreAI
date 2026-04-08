@@ -81,9 +81,10 @@ namespace CoreAI.Ai
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
 
             // ===== ТИП 2: ChatHistory — автоматическая история чата =====
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig = _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig =
+                _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory = null;
-            
+
             if (roleConfig.WithChatHistory && _memoryStore != null)
             {
                 ChatMessage[] history = _memoryStore.GetChatHistory(roleId);
@@ -92,28 +93,67 @@ namespace CoreAI.Ai
                     chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
                     foreach (ChatMessage msg in history)
                     {
-                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user" 
-                            ? Microsoft.Extensions.AI.ChatRole.User 
+                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
+                            ? Microsoft.Extensions.AI.ChatRole.User
                             : Microsoft.Extensions.AI.ChatRole.Assistant;
                         chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
                     }
                 }
             }
 
-            Stopwatch sw = Stopwatch.StartNew();
-            LlmCompletionResult result = await _llm.CompleteAsync(
-                new LlmCompletionRequest
+            int maxAttempts = CoreAISettings.MaxLlmRequestRetries > 0 ? CoreAISettings.MaxLlmRequestRetries : 2;
+            LlmCompletionResult result = null;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                using CancellationTokenSource delayCts = new();
+                if (CoreAISettings.LlmRequestTimeoutSeconds > 0)
                 {
-                    AgentRoleId = roleId,
-                    SystemPrompt = system,
-                    UserPayload = user,
-                    ChatHistory = chatHistory,
-                    TraceId = traceId,
-                    Tools = tools
-                },
-                cancellationToken).ConfigureAwait(false);
-            sw.Stop();
-            _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok, sw.Elapsed.TotalMilliseconds);
+                    delayCts.CancelAfter(TimeSpan.FromSeconds(CoreAISettings.LlmRequestTimeoutSeconds));
+                }
+
+                using CancellationTokenSource linkedCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, delayCts.Token);
+
+                try
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    result = await _llm.CompleteAsync(
+                        new LlmCompletionRequest
+                        {
+                            AgentRoleId = roleId,
+                            SystemPrompt = system,
+                            UserPayload = user,
+                            ChatHistory = chatHistory,
+                            TraceId = traceId,
+                            Tools = tools
+                        },
+                        linkedCts.Token).ConfigureAwait(false);
+                    sw.Stop();
+                    _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
+                        sw.Elapsed.TotalMilliseconds);
+
+                    if (result != null && result.Ok)
+                    {
+                        break;
+                    }
+                }
+                catch (OperationCanceledException) when (delayCts.IsCancellationRequested &&
+                                                         !cancellationToken.IsCancellationRequested)
+                {
+                    if (attempt == maxAttempts)
+                    {
+                        return;
+                    }
+                }
+                catch (Exception)
+                {
+                    if (attempt == maxAttempts)
+                    {
+                        return;
+                    }
+                }
+            }
 
             if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
             {
@@ -127,7 +167,7 @@ namespace CoreAI.Ai
                 _metrics.RecordStructuredRetry(roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(snap, retryTask);
-                sw = Stopwatch.StartNew();
+                Stopwatch sw = Stopwatch.StartNew();
                 LlmCompletionResult second = await _llm.CompleteAsync(
                     new LlmCompletionRequest
                     {

@@ -67,7 +67,7 @@ namespace CoreAI.Tests.PlayMode
     public sealed class InMemoryStore : IAgentMemoryStore
     {
         public readonly Dictionary<string, AgentMemoryState> States = new();
-        public readonly Dictionary<string, List<CoreAI.Ai.ChatMessage>> ChatHistories = new();
+        public readonly Dictionary<string, List<Ai.ChatMessage>> ChatHistories = new();
 
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
@@ -85,28 +85,33 @@ namespace CoreAI.Tests.PlayMode
             ChatHistories.Remove(roleId);
         }
 
-        public void ClearChatHistory(string roleId) { }
+        public void ClearChatHistory(string roleId)
+        {
+        }
 
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<CoreAI.Ai.ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<Ai.ChatMessage> list))
             {
-                list = new List<CoreAI.Ai.ChatMessage>();
+                list = new List<Ai.ChatMessage>();
                 ChatHistories[roleId] = list;
             }
-            list.Add(new CoreAI.Ai.ChatMessage(role, content ?? ""));
+
+            list.Add(new Ai.ChatMessage(role, content ?? ""));
         }
 
-        public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+        public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            if (!ChatHistories.TryGetValue(roleId, out List<CoreAI.Ai.ChatMessage> list))
+            if (!ChatHistories.TryGetValue(roleId, out List<Ai.ChatMessage> list))
             {
-                return Array.Empty<CoreAI.Ai.ChatMessage>();
+                return Array.Empty<Ai.ChatMessage>();
             }
 
             if (maxMessages <= 0)
+            {
                 return list.ToArray();
-                
+            }
+
             int count = Math.Min(maxMessages, list.Count);
             return list.Skip(list.Count - count).ToArray();
         }

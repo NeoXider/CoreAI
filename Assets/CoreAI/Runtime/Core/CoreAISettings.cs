@@ -27,6 +27,12 @@ namespace CoreAI
         public static int LlmRequestTimeoutSeconds { get; set; } = 300;
 
         /// <summary>
+        /// Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.
+        /// По умолчанию: 2.
+        /// </summary>
+        public static int MaxLlmRequestRetries { get; set; } = 2;
+
+        /// <summary>
         /// Логировать сырые HTTP request/response (заголовки, тело, код ответа).
         /// По умолчанию: false.
         /// </summary>

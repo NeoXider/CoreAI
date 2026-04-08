@@ -152,6 +152,11 @@ namespace CoreAI.Infrastructure.Llm
         [Min(1)]
         private int maxToolCallRetries = 3;
 
+        [Tooltip("Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.")]
+        [SerializeField]
+        [Min(1)]
+        private int maxLlmRequestRetries = 2;
+
         [Tooltip("Контекстное окно по умолчанию (токены).")] [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
 
@@ -342,8 +347,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Максимум подряд неудачных Lua repair попыток.</summary>
         public int MaxLuaRepairRetries => maxLuaRepairRetries < 1 ? 3 : maxLuaRepairRetries;
 
-        /// <summary>Максимум подряд неудачных tool call до прерывания агента.</summary>
+        /// <summary>Максимум подряд неудачных too call до прерывания агента.</summary>
         public int MaxToolCallRetries => maxToolCallRetries < 1 ? 3 : maxToolCallRetries;
+
+        /// <summary>Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.</summary>
+        public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 2 : maxLlmRequestRetries;
 
         /// <summary>Контекстное окно.</summary>
         public int ContextWindowTokens => contextWindowTokens < 256 ? 8192 : contextWindowTokens;
@@ -459,6 +467,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             CoreAISettings.MaxLuaRepairRetries = MaxLuaRepairRetries;
             CoreAISettings.MaxToolCallRetries = MaxToolCallRetries;
+            CoreAISettings.MaxLlmRequestRetries = MaxLlmRequestRetries;
             CoreAISettings.EnableMeaiDebugLogging = EnableMeaiDebugLogging;
             CoreAISettings.LlmRequestTimeoutSeconds = (int)LlmRequestTimeoutSeconds;
             CoreAISettings.EnableHttpDebugLogging = EnableHttpDebugLogging;
@@ -495,6 +504,11 @@ namespace CoreAI.Infrastructure.Llm
             if (maxToolCallRetries < 1)
             {
                 maxToolCallRetries = 3;
+            }
+
+            if (maxLlmRequestRetries < 1)
+            {
+                maxLlmRequestRetries = 2;
             }
 
             if (contextWindowTokens < 256)

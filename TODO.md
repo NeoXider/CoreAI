@@ -2,11 +2,13 @@
 
 **Обновлено:** 2026-04-09 | **Текущая версия:** v0.14.0
 
-## ✅ ВЫПОЛНЕНО В v0.14.0 — Persistent Chat History
+## ✅ ВЫПОЛНЕНО В v0.14.0 — Persistent Chat History & Stability
 
 - ✅ **`Persistent Chat History`**: Полное сохранение истории диалогов между сессиями (рестарт Unity/сцены не убивает память агентам).
 - ✅ **`AgentBuilder.WithChatHistory(persistToDisk: true)`**: Настроено включение постоянного сохранения контекста на диск в файлы.
 - ✅ **PlayMode тесты**: Написан `ChatHistoryPlayModeTests` с полной симуляцией PlayMode и проверкой памяти.
+- ✅ **Улучшения стабильности Orchestrator'а**: Введен таймаут `LlmRequestTimeoutSeconds` и количество попыток `MaxLlmRequestRetries` при обрывах связи к LLM (настраивается из `CoreAISettingsAsset`).
+- ✅ **Логирование FileAgentMemoryStore**: Логирование переведено с `Debug.LogError` на нативный `IGameLogger` (инъекция через DI).
 - 📖 **Актуализирована документация**: Обновлены CHANGELOG, README.md и секции про архитектуру.
 
 

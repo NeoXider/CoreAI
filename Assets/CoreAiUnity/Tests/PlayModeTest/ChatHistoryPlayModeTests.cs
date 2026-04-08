@@ -73,32 +73,38 @@ namespace CoreAI.Tests.PlayMode
                     .Build();
 
                 Debug.Log("[ChatHistory] ▶ STEP 1: Sending first message...");
-                
+
                 // === СЕССИЯ 1 ===
                 FileAgentMemoryStore store1 = new();
                 AgentMemoryPolicy policy1 = new();
                 chatAgent.ApplyToPolicy(policy1);
-                
+
                 AiOrchestrator orch1 = new(
-                    new SoloAuthorityHost(), 
-                    handle.Client, 
-                    new ListSink(), 
+                    new SoloAuthorityHost(),
+                    handle.Client,
+                    new ListSink(),
                     new SessionTelemetryCollector(),
                     new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                         new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                     store1, policy1, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
-                Task t1 = orch1.RunTaskAsync(new AiTaskRequest { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
+                Task t1 = orch1.RunTaskAsync(new AiTaskRequest
+                    { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
                 yield return PlayModeTestAwait.WaitTask(t1, 120f, "chat history part 1");
 
                 // === ПРОВЕРКА СОХРАНЕНИЯ ===
                 ChatMessage[] history1 = store1.GetChatHistory(chatAgent.RoleId);
-                Assert.GreaterOrEqual(history1.Length, 2, "History should contain at least 2 messages (user + assistant)");
+                Assert.GreaterOrEqual(history1.Length, 2,
+                    "History should contain at least 2 messages (user + assistant)");
                 bool foundSecret = false;
-                foreach (var m in history1)
+                foreach (ChatMessage m in history1)
                 {
-                    if (m.Content.Contains("Pineapple")) foundSecret = true;
+                    if (m.Content.Contains("Pineapple"))
+                    {
+                        foundSecret = true;
+                    }
                 }
+
                 Assert.IsTrue(foundSecret, "The secret word should be preserved in memory store history.");
 
                 Debug.Log("[ChatHistory] ▶ STEP 2: Restarting game (creating new orchestrator/store)...");
@@ -107,28 +113,29 @@ namespace CoreAI.Tests.PlayMode
                 FileAgentMemoryStore store2 = new();
                 AgentMemoryPolicy policy2 = new();
                 chatAgent.ApplyToPolicy(policy2);
-                
+
                 // Обернём клиент через перехватчик, чтобы залоггировать его ответ
                 CapturingLlmClient cap = new(handle.Client);
 
                 AiOrchestrator orch2 = new(
-                    new SoloAuthorityHost(), 
-                    cap, 
-                    new ListSink(), 
+                    new SoloAuthorityHost(),
+                    cap,
+                    new ListSink(),
                     new SessionTelemetryCollector(),
                     new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                         new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                     store2, policy2, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
 
-                Task t2 = orch2.RunTaskAsync(new AiTaskRequest { RoleId = chatAgent.RoleId, Hint = "What was my secret word?" });
+                Task t2 = orch2.RunTaskAsync(new AiTaskRequest
+                    { RoleId = chatAgent.RoleId, Hint = "What was my secret word?" });
                 yield return PlayModeTestAwait.WaitTask(t2, 120f, "chat history part 2");
-                
+
                 string response2 = cap.LastContent ?? "";
                 Debug.Log($"[ChatHistory] Final Response: {response2}");
 
-                Assert.IsTrue(response2.Contains("Pineapple", StringComparison.OrdinalIgnoreCase), 
+                Assert.IsTrue(response2.Contains("Pineapple", StringComparison.OrdinalIgnoreCase),
                     $"Agent did not remember the secret word. Response was: {response2}");
-                
+
                 Debug.Log("[ChatHistory] ✓ TEST PASSED");
             }
             finally
@@ -169,7 +176,12 @@ namespace CoreAI.Tests.PlayMode
         private sealed class CustomAgentPromptProvider : IAgentSystemPromptProvider
         {
             private readonly string _p;
-            public CustomAgentPromptProvider(string p) { _p = p; }
+
+            public CustomAgentPromptProvider(string p)
+            {
+                _p = p;
+            }
+
             public bool TryGetSystemPrompt(string roleId, out string prompt)
             {
                 prompt = _p;

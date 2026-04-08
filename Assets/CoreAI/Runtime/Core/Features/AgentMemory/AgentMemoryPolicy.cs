@@ -49,7 +49,8 @@ namespace CoreAI.Ai
             /// <summary>Бюджет токенов (опционально, если ChatHistory активна).</summary>
             public int ContextTokens;
 
-            public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append, bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192)
+            public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
+                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -65,6 +66,7 @@ namespace CoreAI.Ai
             {
                 c = new RoleMemoryConfig();
             }
+
             c.WithChatHistory = enabled;
             c.ContextTokens = tokens;
             c.PersistChatHistory = persist;

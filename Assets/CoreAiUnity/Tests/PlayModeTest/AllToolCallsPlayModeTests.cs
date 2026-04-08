@@ -49,7 +49,9 @@ namespace CoreAI.Tests.PlayMode
                 States.Remove(roleId);
             }
 
-            public void ClearChatHistory(string roleId) { }
+            public void ClearChatHistory(string roleId)
+            {
+            }
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
