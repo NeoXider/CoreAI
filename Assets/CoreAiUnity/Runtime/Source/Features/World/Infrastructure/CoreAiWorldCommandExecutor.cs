@@ -14,7 +14,6 @@ namespace CoreAI.Infrastructure.World
     {
         private readonly IGameLogger _logger;
         private readonly CoreAiPrefabRegistryAsset _prefabRegistry;
-        private readonly Dictionary<string, GameObject> _instances = new(StringComparer.Ordinal);
 
         public CoreAiWorldCommandExecutor(IGameLogger logger, CoreAiPrefabRegistryAsset prefabRegistry = null)
         {
@@ -60,8 +59,6 @@ namespace CoreAI.Infrastructure.World
                     return TryMove(env);
                 case "destroy":
                     return TryDestroy(env);
-                case "bind_by_name":
-                    return TryBindByName(env);
                 case "set_active":
                     return TrySetActive(env);
                 case "load_scene":
@@ -99,29 +96,22 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            string id = (env.instanceId ?? "").Trim();
-            if (string.IsNullOrEmpty(id))
+            string targetName = (env.targetName ?? "").Trim();
+            if (string.IsNullOrEmpty(targetName))
             {
-                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] spawn missing instanceId");
+                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] spawn missing targetName");
                 return false;
             }
 
             Vector3 pos = new(env.x, env.y, env.z);
             GameObject go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
-            go.name = $"{prefab.name}#{id}";
-            _instances[id] = go;
+            go.name = targetName;
             return true;
         }
 
         private bool TryMove(CoreAiWorldCommandEnvelope env)
         {
-            string id = (env.instanceId ?? "").Trim();
-            if (string.IsNullOrEmpty(id))
-            {
-                return false;
-            }
-
-            if (!_instances.TryGetValue(id, out GameObject go) || go == null)
+            if (!ResolveObject(env.targetName, out GameObject go))
             {
                 return false;
             }
@@ -132,19 +122,9 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryDestroy(CoreAiWorldCommandEnvelope env)
         {
-            string id = (env.instanceId ?? "").Trim();
-            if (string.IsNullOrEmpty(id))
+            if (ResolveObject(env.targetName, out GameObject go))
             {
-                return false;
-            }
-
-            if (_instances.TryGetValue(id, out GameObject go))
-            {
-                _instances.Remove(id);
-                if (go != null)
-                {
-                    UnityEngine.Object.Destroy(go);
-                }
+                UnityEngine.Object.Destroy(go);
             }
 
             return true;
@@ -174,34 +154,9 @@ namespace CoreAI.Infrastructure.World
             return true;
         }
 
-        private bool TryBindByName(CoreAiWorldCommandEnvelope env)
-        {
-            string name = (env.targetName ?? "").Trim();
-            string id = (env.instanceId ?? "").Trim();
-            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id))
-            {
-                return false;
-            }
-
-            GameObject go = GameObject.Find(name);
-            if (go == null)
-            {
-                return false;
-            }
-
-            _instances[id] = go;
-            return true;
-        }
-
         private bool TrySetActive(CoreAiWorldCommandEnvelope env)
         {
-            string id = (env.instanceId ?? "").Trim();
-            if (string.IsNullOrEmpty(id))
-            {
-                return false;
-            }
-
-            if (!_instances.TryGetValue(id, out GameObject go) || go == null)
+            if (!ResolveObject(env.targetName, out GameObject go))
             {
                 return false;
             }
@@ -212,25 +167,12 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryPlayAnimation(CoreAiWorldCommandEnvelope env)
         {
-            // Сначала пробуем найти по instanceId
-            string id = (env.instanceId ?? "").Trim();
-            if (!string.IsNullOrEmpty(id) && _instances.TryGetValue(id, out GameObject go) && go != null)
+            if (ResolveObject(env.targetName, out GameObject go))
             {
                 return TryPlayAnimationOnGameObject(go, env.stringValue);
             }
 
-            // Затем пробуем найти по targetName
-            string name = (env.targetName ?? "").Trim();
-            if (!string.IsNullOrEmpty(name))
-            {
-                GameObject foundGo = GameObject.Find(name);
-                if (foundGo != null)
-                {
-                    return TryPlayAnimationOnGameObject(foundGo, env.stringValue);
-                }
-            }
-
-            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_animation: object not found (id='{id}', name='{name}')");
+            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_animation: object not found (name='{env.targetName}')");
             return false;
         }
 
@@ -382,26 +324,7 @@ namespace CoreAI.Infrastructure.World
 
         private bool TryListAnimations(CoreAiWorldCommandEnvelope env)
         {
-            GameObject go = null;
-
-            // Сначала пробуем найти по instanceId
-            string id = (env.instanceId ?? "").Trim();
-            if (!string.IsNullOrEmpty(id) && _instances.TryGetValue(id, out go) && go == null)
-            {
-                go = null;
-            }
-
-            // Затем пробуем найти по targetName
-            if (go == null)
-            {
-                string name = (env.targetName ?? "").Trim();
-                if (!string.IsNullOrEmpty(name))
-                {
-                    go = GameObject.Find(name);
-                }
-            }
-
-            if (go == null)
+            if (!ResolveObject(env.targetName, out GameObject go))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] list_animations: object not found");
                 return false;
@@ -416,22 +339,11 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-        /// Разрешает объект по instanceId или targetName.
-        /// Сначала ищет в _instances по instanceId, затем GameObject.Find по targetName.
+        /// Разрешает объект по targetName.
         /// </summary>
-        private bool ResolveObject(string? instanceId, string? targetName, out GameObject gameObject)
+        private bool ResolveObject(string targetName, out GameObject gameObject)
         {
             gameObject = null;
-
-            // Сначала ищем по instanceId
-            string id = (instanceId ?? "").Trim();
-            if (!string.IsNullOrEmpty(id) && _instances.TryGetValue(id, out GameObject go))
-            {
-                gameObject = go;
-                return go != null;
-            }
-
-            // Затем ищем по targetName
             string name = (targetName ?? "").Trim();
             if (!string.IsNullOrEmpty(name))
             {

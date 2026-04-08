@@ -51,7 +51,7 @@ namespace CoreAI.Tests.EditMode
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor);
 
-            string resultJson = await tool.ExecuteAsync("move", instanceId: "obj1", x: 10f, y: 20f, z: 30f);
+            string resultJson = await tool.ExecuteAsync("move", targetName: "obj1", x: 10f, y: 20f, z: 30f);
             WorldLlmTool.WorldResult result = JsonSerializer.Deserialize<WorldLlmTool.WorldResult>(resultJson);
 
             Assert.IsTrue(result.Success);
@@ -66,7 +66,7 @@ namespace CoreAI.Tests.EditMode
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor);
 
-            string resultJson = await tool.ExecuteAsync("destroy", instanceId: "obj1");
+            string resultJson = await tool.ExecuteAsync("destroy", targetName: "obj1");
             WorldLlmTool.WorldResult result = JsonSerializer.Deserialize<WorldLlmTool.WorldResult>(resultJson);
 
             Assert.IsTrue(result.Success);
@@ -80,7 +80,7 @@ namespace CoreAI.Tests.EditMode
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor);
 
-            string resultJson = await tool.ExecuteAsync("spawn", instanceId: "obj1", x: 0f, y: 0f, z: 0f);
+            string resultJson = await tool.ExecuteAsync("spawn", targetName: "obj1", x: 0f, y: 0f, z: 0f);
             WorldLlmTool.WorldResult result = JsonSerializer.Deserialize<WorldLlmTool.WorldResult>(resultJson);
 
             Assert.IsFalse(result.Success);
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor);
 
-            string resultJson = await tool.ExecuteAsync("play_animation", instanceId: "enemy1", stringValue: "attack");
+            string resultJson = await tool.ExecuteAsync("play_animation", targetName: "enemy1", stringValue: "attack");
             WorldLlmTool.WorldResult result = JsonSerializer.Deserialize<WorldLlmTool.WorldResult>(resultJson);
 
             Assert.IsTrue(result.Success);
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.EditMode
             TestWorldExecutor executor = new();
             WorldLlmTool tool = new(executor);
 
-            string resultJson = await tool.ExecuteAsync("list_animations", instanceId: "enemy1");
+            string resultJson = await tool.ExecuteAsync("list_animations", targetName: "enemy1");
             WorldLlmTool.WorldResult result = JsonSerializer.Deserialize<WorldLlmTool.WorldResult>(resultJson);
 
             Assert.IsTrue(result.Success);

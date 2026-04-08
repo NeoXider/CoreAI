@@ -35,7 +35,7 @@ namespace CoreAI.Tests.PlayMode
             var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "Use the world_command tool to spawn an object. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"spawn\", \"prefabKey\": \"TestPrefab\", \"x\": 0, \"y\": 0, \"z\": 0, \"instanceId\": \"test_obj\"}}"
+                Hint = "Use the world_command tool to spawn an object. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"spawn\", \"prefabKey\": \"TestPrefab\", \"x\": 0, \"y\": 0, \"z\": 0, \"targetName\": \"test_obj\"}}"
             });
 
             yield return setup.RunAndWait(task, 240f, "world spawn");

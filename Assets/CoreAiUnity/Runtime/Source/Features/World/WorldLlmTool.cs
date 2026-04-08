@@ -30,18 +30,17 @@ namespace CoreAI.Infrastructure.Llm
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
-            "Actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, " +
+            "Actions: spawn, move, destroy, load_scene, reload_scene, " +
             "set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects. " +
             "Use 'spawn' to create objects, 'move' to reposition, 'destroy' to remove, " +
             "'play_animation' to play animations, 'list_animations' to get available animations, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
             "'show_text' to display notifications. " +
-            "Objects can be targeted by 'instanceId' or 'targetName'.";
+            "Objects are targeted by 'targetName'.";
 
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true, "Command: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects"),
-            ("instanceId", "string", false, "Instance ID of the target object"),
-            ("targetName", "string", false, "Object name to target (alternative to instanceId, works with move, destroy, set_active, play_animation, list_animations, etc.)"),
+            ("action", "string", true, "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects"),
+            ("targetName", "string", false, "Object name to target (required for move, destroy, set_active, play_animation, etc). Used to set a name for spawned objects."),
             ("x", "number", false, "X coordinate (for spawn, move, apply_force)"),
             ("y", "number", false, "Y coordinate (for spawn, move, apply_force)"),
             ("z", "number", false, "Z coordinate (for spawn, move, apply_force)"),
@@ -52,13 +51,12 @@ namespace CoreAI.Infrastructure.Llm
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, string?, float, float, float, string?, string?, string?, float, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string, float, float, float, string?, string?, string?, float, CancellationToken, Task<string>> func = ExecuteAsync;
             return AIFunctionFactory.Create(func, Name, Description);
         }
 
         public async Task<string> ExecuteAsync(
             string action,
-            string? instanceId = null,
             float x = 0f,
             float y = 0f,
             float z = 0f,
@@ -70,7 +68,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (string.IsNullOrEmpty(action))
             {
-                return SerializeResult(false, "Action is required. Valid actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, show_text, apply_force, spawn_particles, list_objects");
+                return SerializeResult(false, "Action is required. Valid actions: spawn, move, destroy, load_scene, reload_scene, set_active, show_text, apply_force, spawn_particles, list_objects");
             }
 
             if (CoreAISettings.LogToolCalls)
@@ -80,7 +78,6 @@ namespace CoreAI.Infrastructure.Llm
             if (CoreAISettings.LogToolCallArguments)
             {
                 var args = new System.Text.StringBuilder();
-                if (!string.IsNullOrEmpty(instanceId)) args.Append($" instanceId={instanceId}");
                 if (!string.IsNullOrEmpty(targetName)) args.Append($" targetName={targetName}");
                 if (!string.IsNullOrEmpty(prefabKey)) args.Append($" prefabKey={prefabKey}");
                 if (x != 0f || y != 0f || z != 0f) args.Append($" pos=({x},{y},{z})");
@@ -94,27 +91,25 @@ namespace CoreAI.Infrastructure.Llm
             {
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
-                    "spawn" => CreateSpawnCommand(prefabKey, instanceId, x, y, z),
-                    "move" => CreateMoveCommand(instanceId, targetName, x, y, z),
-                    "destroy" => CreateDestroyCommand(instanceId, targetName),
+                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z),
+                    "move" => CreateMoveCommand(targetName, x, y, z),
+                    "destroy" => CreateDestroyCommand(targetName),
                     "load_scene" => CreateLoadSceneCommand(stringValue),
                     "reload_scene" => CreateReloadSceneCommand(),
-                    "bind_by_name" => CreateBindByNameCommand(targetName, instanceId),
-                    "set_active" => CreateSetActiveCommand(instanceId, targetName, true),
-                    "play_animation" => CreatePlayAnimationCommand(instanceId, targetName, stringValue),
-                    "list_animations" => CreateListAnimationsCommand(instanceId, targetName),
+                    "set_active" => CreateSetActiveCommand(targetName, true),
+                    "play_animation" => CreatePlayAnimationCommand(targetName, stringValue),
+                    "list_animations" => CreateListAnimationsCommand(targetName),
                     "show_text" => CreateShowTextCommand(targetName, stringValue),
-                    "apply_force" => CreateApplyForceCommand(instanceId, targetName, x, y, z),
-                    "spawn_particles" => CreateSpawnParticlesCommand(instanceId, targetName, stringValue),
+                    "apply_force" => CreateApplyForceCommand(targetName, x, y, z),
+                    "spawn_particles" => CreateSpawnParticlesCommand(targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),
                     _ => null
                 };
 
                 if (envelope == null)
                 {
-                    // For unknown action, return error properly
-                    if (action != "spawn" && action != "move" && action != "destroy" && action != "load_scene" && action != "reload_scene" && action != "bind_by_name" && action != "set_active" && action != "play_animation" && action != "list_animations" && action != "show_text" && action != "apply_force" && action != "spawn_particles" && action != "list_objects")
-                        throw new ArgumentException($"Unknown action: '{action}'. Valid actions: spawn, move, destroy, load_scene, reload_scene, bind_by_name, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects");
+                    if (action != "spawn" && action != "move" && action != "destroy" && action != "load_scene" && action != "reload_scene" && action != "set_active" && action != "play_animation" && action != "list_animations" && action != "show_text" && action != "apply_force" && action != "spawn_particles" && action != "list_objects")
+                        throw new ArgumentException($"Unknown action: '{action}'. Valid actions: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects");
                     return SerializeResult(false, $"Missing required parameters for action '{action}'");
                 }
 
@@ -146,26 +141,22 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? instanceId, float x, float y, float z)
+        private static CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float x, float y, float z)
         {
             if (string.IsNullOrEmpty(prefabKey)) return null;
-            return CoreAiWorldCommandEnvelope.Spawn(prefabKey, instanceId ?? Guid.NewGuid().ToString("N"), new Vector3(x, y, z));
+            return CoreAiWorldCommandEnvelope.Spawn(prefabKey, targetName ?? Guid.NewGuid().ToString("N"), new Vector3(x, y, z));
         }
 
-        private static CoreAiWorldCommandEnvelope CreateMoveCommand(string? instanceId, string? targetName, float x, float y, float z)
+        private static CoreAiWorldCommandEnvelope CreateMoveCommand(string? targetName, float x, float y, float z)
         {
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.Move(instanceId ?? "", new Vector3(x, y, z));
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.Move(targetName, new Vector3(x, y, z));
         }
 
-        private static CoreAiWorldCommandEnvelope CreateDestroyCommand(string? instanceId, string? targetName)
+        private static CoreAiWorldCommandEnvelope CreateDestroyCommand(string? targetName)
         {
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.Destroy(instanceId ?? "");
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.Destroy(targetName);
         }
 
         private static CoreAiWorldCommandEnvelope CreateLoadSceneCommand(string? sceneName)
@@ -179,27 +170,17 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ReloadScene();
         }
 
-        private static CoreAiWorldCommandEnvelope CreateBindByNameCommand(string? targetName, string? instanceId)
+        private static CoreAiWorldCommandEnvelope CreateSetActiveCommand(string? targetName, bool active)
         {
             if (string.IsNullOrEmpty(targetName)) return null;
-            return CoreAiWorldCommandEnvelope.BindByName(targetName, instanceId ?? "");
+            return CoreAiWorldCommandEnvelope.SetActive(targetName, active);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateSetActiveCommand(string? instanceId, string? targetName, bool active)
-        {
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.SetActive(instanceId ?? "", active);
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
-        }
-
-        private static CoreAiWorldCommandEnvelope CreatePlayAnimationCommand(string? instanceId, string? targetName, string? animationName)
+        private static CoreAiWorldCommandEnvelope CreatePlayAnimationCommand(string? targetName, string? animationName)
         {
             if (string.IsNullOrEmpty(animationName)) return null;
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.PlayAnimation(instanceId ?? "", animationName);
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.PlayAnimation(targetName, animationName);
         }
 
         private static CoreAiWorldCommandEnvelope CreateShowTextCommand(string? targetName, string? text)
@@ -208,21 +189,17 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ShowText(targetName, text);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? instanceId, string? targetName, float x, float y, float z)
+        private static CoreAiWorldCommandEnvelope CreateApplyForceCommand(string? targetName, float x, float y, float z)
         {
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.ApplyForce(instanceId ?? "", new Vector3(x, y, z));
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.ApplyForce(targetName, new Vector3(x, y, z));
         }
 
-        private static CoreAiWorldCommandEnvelope CreateSpawnParticlesCommand(string? instanceId, string? targetName, string? effectName)
+        private static CoreAiWorldCommandEnvelope CreateSpawnParticlesCommand(string? targetName, string? effectName)
         {
             if (string.IsNullOrEmpty(effectName)) return null;
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            var env = CoreAiWorldCommandEnvelope.SpawnParticles(instanceId ?? "", effectName);
-            if (!string.IsNullOrEmpty(targetName)) env.targetName = targetName;
-            return env;
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.SpawnParticles(targetName, effectName);
         }
 
         private static CoreAiWorldCommandEnvelope CreateListObjectsCommand(string? searchPattern)
@@ -230,10 +207,10 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.ListObjects(searchPattern ?? "");
         }
 
-        private static CoreAiWorldCommandEnvelope CreateListAnimationsCommand(string? instanceId, string? targetName)
+        private static CoreAiWorldCommandEnvelope CreateListAnimationsCommand(string? targetName)
         {
-            if (string.IsNullOrEmpty(instanceId) && string.IsNullOrEmpty(targetName)) return null;
-            return CoreAiWorldCommandEnvelope.ListAnimations(instanceId ?? "", targetName ?? "");
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.ListAnimations(targetName);
         }
 
         private static string SerializeResult(bool success, string message, string? action = null)

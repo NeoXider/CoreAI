@@ -455,11 +455,11 @@ CoreAISettings.UniversalSystemPromptPrefix =
 
 ---
 
-### 12.5 ❌ CoreAISettings — статический god-object
+### 12.5 ✅ CoreAISettings — статический god-object
 
 **Файлы:** `CoreAISettings.cs`, `CoreAILifetimeScope.cs`, `AgentBuilder.cs`
 
-**Проблемы:**
+**Выполнено:**
 - **Ручная синхронизация** — хрупкая. При добавлении нового свойства в `CoreAISettingsAsset` легко забыть синхронизировать (около 15 параметров в `CoreAILifetimeScope.cs:104–119`).
 - **Глобальное состояние** — невозможно иметь два разных набора настроек (для тестов, для разных агентов).
 - **Жёсткая связь** — `AgentBuilder.Build()` напрямую читает `CoreAI.CoreAISettings.ContextWindowTokens` и `Temperature`.

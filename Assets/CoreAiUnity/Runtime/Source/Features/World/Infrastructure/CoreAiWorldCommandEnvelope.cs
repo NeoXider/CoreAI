@@ -10,7 +10,6 @@ namespace CoreAI.Infrastructure.World
         public string action = "";
 
         // Общие поля
-        public string instanceId = "";
         public string targetName = "";
         public int boolValue;
         public float floatValue;
@@ -27,37 +26,37 @@ namespace CoreAI.Infrastructure.World
         // Scene
         public string sceneName = "";
 
-        public static CoreAiWorldCommandEnvelope Spawn(string prefabKeyOrName, string instanceId, Vector3 pos)
+        public static CoreAiWorldCommandEnvelope Spawn(string prefabKeyOrName, string targetName, Vector3 pos)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "spawn",
                 prefabKeyOrName = prefabKeyOrName ?? "",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 x = pos.x,
                 y = pos.y,
                 z = pos.z
             };
         }
 
-        public static CoreAiWorldCommandEnvelope Move(string instanceId, Vector3 pos)
+        public static CoreAiWorldCommandEnvelope Move(string targetName, Vector3 pos)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "move",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 x = pos.x,
                 y = pos.y,
                 z = pos.z
             };
         }
 
-        public static CoreAiWorldCommandEnvelope Destroy(string instanceId)
+        public static CoreAiWorldCommandEnvelope Destroy(string targetName)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "destroy",
-                instanceId = instanceId ?? ""
+                targetName = targetName ?? ""
             };
         }
 
@@ -78,42 +77,32 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
-        public static CoreAiWorldCommandEnvelope BindByName(string targetName, string instanceId)
-        {
-            return new CoreAiWorldCommandEnvelope
-            {
-                action = "bind_by_name",
-                targetName = targetName ?? "",
-                instanceId = instanceId ?? ""
-            };
-        }
-
-        public static CoreAiWorldCommandEnvelope SetActive(string instanceId, bool active)
+        public static CoreAiWorldCommandEnvelope SetActive(string targetName, bool active)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "set_active",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 boolValue = active ? 1 : 0
             };
         }
 
-        public static CoreAiWorldCommandEnvelope PlayAnimation(string instanceId, string animationName)
+        public static CoreAiWorldCommandEnvelope PlayAnimation(string targetName, string animationName)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "play_animation",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 stringValue = animationName ?? ""
             };
         }
 
-        public static CoreAiWorldCommandEnvelope PlaySound(string instanceId, string clipName, float volume)
+        public static CoreAiWorldCommandEnvelope PlaySound(string targetName, string clipName, float volume)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "play_sound",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 stringValue = clipName ?? "",
                 floatValue = volume
             };
@@ -129,12 +118,12 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
-        public static CoreAiWorldCommandEnvelope ApplyForce(string instanceId, Vector3 force)
+        public static CoreAiWorldCommandEnvelope ApplyForce(string targetName, Vector3 force)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "apply_force",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 x = force.x,
                 y = force.y,
                 z = force.z
@@ -142,12 +131,12 @@ namespace CoreAI.Infrastructure.World
         }
 
 
-        public static CoreAiWorldCommandEnvelope SpawnParticles(string instanceId, string effectName)
+        public static CoreAiWorldCommandEnvelope SpawnParticles(string targetName, string effectName)
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "spawn_particles",
-                instanceId = instanceId ?? "",
+                targetName = targetName ?? "",
                 stringValue = effectName ?? ""
             };
         }
@@ -161,12 +150,11 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
-        public static CoreAiWorldCommandEnvelope ListAnimations(string instanceId = "", string targetName = "")
+        public static CoreAiWorldCommandEnvelope ListAnimations(string targetName = "")
         {
             return new CoreAiWorldCommandEnvelope
             {
                 action = "list_animations",
-                instanceId = instanceId ?? "",
                 targetName = targetName ?? ""
             };
         }
