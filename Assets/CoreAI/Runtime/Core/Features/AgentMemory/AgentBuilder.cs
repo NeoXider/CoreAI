@@ -132,6 +132,32 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Добавить метод/делегат как инструмент (MEAI автоматически сгенерирует JSON-схему аргументов по сигнатуре метода).
+        /// </summary>
+        public AgentBuilder WithAction(string name, string description, Delegate action)
+        {
+            _tools.Add(new DelegateLlmTool(name, description, action));
+            return this;
+        }
+
+        /// <summary>
+        /// Добавить инструмент, который публикует событие в CoreAiEvents. 
+        /// Отлично подходит для новичков (достаточно написать CoreAiEvents.Subscribe в любом скрипте).
+        /// </summary>
+        public AgentBuilder WithEventTool(string name, string description, bool hasStringPayload = false)
+        {
+            if (hasStringPayload)
+            {
+                _tools.Add(new DelegateLlmTool(name, description, new Action<string>((payload) => CoreAiEvents.Publish(name, payload))));
+            }
+            else
+            {
+                _tools.Add(new DelegateLlmTool(name, description, new Action(() => CoreAiEvents.Publish(name))));
+            }
+            return this;
+        }
+
+        /// <summary>
         /// Установить температуру генерации для конкретного агента.
         /// Переопределяет общую температуру из CoreAISettings.Temperature.
         /// <para>0.0 = детерминировано, 1.0 = креативно, 2.0 = максимально случайно.</para>

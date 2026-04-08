@@ -41,10 +41,12 @@ AI может вызывать инструменты для получения 
 
 | Инструмент | Что делает | Кто использует |
 |------------|-----------|----------------|
-| **🧠 MemoryTool** | Сохраняет/читает память между сессиями | Все агенты |
-| **📜 LuaTool** | Выполняет Lua скрипты | Programmer AI |
-| **🎒 InventoryTool** | Получает инвентарь NPC | Merchant AI |
-| **⚙️ GameConfigTool** | Читает/меняет конфиги игры | Creator AI |
+| 🌍 **WorldCommandTool** | Спавнит, двигает, меняет объекты в мире | Creator AI |
+| ⚡ **Action/Event Tool** | Вызывает любой C# метод или Event напрямую | Все агенты |
+| 🧠 **MemoryTool** | Сохраняет/читает память между сессиями | Все агенты |
+| 📜 **LuaTool** | Выполняет Lua скрипты | Programmer AI |
+| 🎒 **InventoryTool** | Получает инвентарь NPC | Merchant AI |
+| ⚙️ **GameConfigTool** | Читает/меняет конфиги игры | Creator AI |
 
 **Создай свой инструмент:**
 ```csharp
@@ -149,19 +151,23 @@ Attempt 2: Model fixes the format ✅
 ## 📦 Установка
 
 ### 1. Добавь ядро (CoreAI)
-```
-Window → Package Manager → + → Add package from git URL…
+**Путь в Unity:** Window → Package Manager → `+` → Add package from git URL…
+
+Ссылка для копирования:
+```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 ```
 
 ### 2. Добавь Unity-слой (CoreAIUnity)
-```
+Точно так же через `Add package from git URL…` добавь вторую ссылку:
+```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-### 3. Запусти сцену
-```
-Assets/CoreAiUnity/Scenes/_mainCoreAI.unity → Play
+### 3. Открой и запусти сцену
+Тестовая сцена со всеми агентами находится здесь:
+```text
+Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 ```
 
 **Готово!** AI-агенты работают. 🎉

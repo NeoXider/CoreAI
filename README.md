@@ -43,11 +43,13 @@ Automatically maps APIs like `time_delta()`, `time_scale()`, and hooks securely 
 AI doesn't just generate text — it **calls code** for real actions:
 
 | Tool | What it does | Who uses it |
-|------|-------------|-------------|
-| 🧠 **MemoryTool** | Persistent memory between sessions | All agents |
+|------|--------------|-------------|
+| 🌍 **WorldCommandTool** | Spawns, moves, modifies objects in the world | Creator AI |
+| ⚡ **Action/Event Tool** | Calls any C# method or triggers an Event | All Agents |
+| 🧠 **MemoryTool** | Saves/reads memory between sessions | All Agents |
 | 📜 **LuaTool** | Executes Lua scripts | Programmer AI |
 | 🎒 **InventoryTool** | Gets NPC inventory | Merchant AI |
-| ⚙️ **GameConfigTool** | Reads/writes game configs | Creator AI |
+| ⚙️ **GameConfigTool** | Reads/modifies game configs | Creator AI |
 
 **Create your own:**
 ```csharp
@@ -152,19 +154,24 @@ The repository consists of **two packages**:
 
 ## 🚀 Quick Start
 
-### 1. Install Packages (UPM)
+### 1. Add the Core engine (CoreAI)
+**Method:** Unity Editor → Window → Package Manager → `+` → Add package from git URL…
 
-```
-Window → Package Manager → + → Add package from git URL…
-
+URL to copy:
+```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
+```
+
+### 2. Add the Unity Layer (CoreAIUnity)
+Use the same `Add package from git URL…` method with this URL:
+```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-### 2. Open the Scene
-
-```
-Assets/CoreAiUnity/Scenes/_mainCoreAI.unity → Play
+### 3. Open the Scene
+Once installed, open and play the demo scene:
+```text
+Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 ```
 
 ### 3. Create Your Agent

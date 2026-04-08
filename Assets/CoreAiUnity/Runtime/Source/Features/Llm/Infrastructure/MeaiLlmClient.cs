@@ -267,6 +267,9 @@ namespace CoreAI.Infrastructure.Llm
                         case WorldLlmTool wt:
                             result.Add(wt.CreateAIFunction());
                             break;
+                        case DelegateLlmTool dt:
+                            result.Add(MEAI.AIFunctionFactory.Create(dt.ActionDelegate, dt.Name, dt.Description));
+                            break;
                         default:
                             MethodInfo m = tool.GetType().GetMethod("CreateAIFunction");
                             if (m != null)

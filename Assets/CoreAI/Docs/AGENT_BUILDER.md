@@ -216,7 +216,63 @@ var merchant = new AgentBuilder("Merchant")
 
 ---
 
-## Создание своего инструмента
+## Быстрое добавление Actions и Events (Без классов)
+
+### 1. WithEventTool (Для новичков)
+
+Позволяет агенту отправить глобальное событие `CoreAiEvents`, на которое можно подписаться из любого MonoBehaviour в игре.
+
+**Настройка агента (одна строчка):**
+```csharp
+var agent = new AgentBuilder("Storyteller")
+    .WithEventTool("trigger_scare", "Use this to scare the player suddenly") // Без payload
+    .WithEventTool("give_gold", "Give gold to player", hasStringPayload: true) // С payload
+    .Build();
+```
+
+**Любой скрипт в игре:**
+```csharp
+void Start() 
+{
+    // Агент вызвал событие без параметров:
+    CoreAiEvents.Subscribe("trigger_scare", () => {
+        audioSource.PlayOneShot(jumpscare);
+    });
+
+    // Агент вызвал событие с параметром:
+    CoreAiEvents.Subscribe("give_gold", (payload) => {
+        int amount = int.Parse(payload);
+        player.AddGold(amount);
+    });
+}
+```
+
+### 2. WithAction (Продвинутый)
+
+Позволяет прокинуть любой C# `Delegate` (`Action` или `Func`) прямо в агента! Библиотека **MEAI** сама распарсит аргументы делегата и отдаст ИИ правильную JSON-схему. Никаких классов создавать не нужно.
+
+```csharp
+var agent = new AgentBuilder("Helper")
+    // Метод без параметров
+    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
+    
+    // Метод с параметрами (Агент сам поймёт что нужны amount(int) и item(string))
+    .WithAction("give_item", "Gives an item", (int amount, string item) => {
+        inventory.Add(item, amount);
+    })
+    .Build();
+```
+
+> 💡 **Как модель понимает, когда вызывать Action/Event?**
+> Специального системного промпта для триггеров не генерируется — всё работает через встроенный **Tool Calling**.
+> Чтобы модель успешно вызвала ваш инструмент, достаточно сделать 2 вещи:
+> 1. **Дать чёткое описание (`description`) самому инструменту.** Модель читает его и понимает назначение (например: *"Use this ONLY IF player is dying"*).
+> 2. **Явно прописать правила в `WithSystemPrompt` агента.** Если триггер неочевидный, подскажите агенту текстом: 
+>    `.WithSystemPrompt("You are a guard. If the player admits to a crime, you MUST call the 'alarm' tool immediately.")`
+
+---
+
+## Создание сложного инструмента (Через классы)
 
 ### Пошаговая инструкция
 
@@ -470,6 +526,8 @@ async Task AskMerchant(string playerMessage)
 | `WithSystemPrompt(string)` | Установить системный промпт | `.WithSystemPrompt("You are...")` |
 | `WithTool(ILlmTool)` | Добавить инструмент | `.WithTool(new InventoryLlmTool(...))` |
 | `WithTools(IEnumerable<ILlmTool>)` | Добавить несколько инструментов | `.WithTools(tools)` |
+| `WithAction(string, string, Delegate)` | ДОБАВИТЬ инструмент из C# делегата | `.WithAction("heal", "desc", () => Heal())` |
+| `WithEventTool(string, string, bool)` | ДОБАВИТЬ инструмент публикующий событие | `.WithEventTool("alarm", "desc")` |
 | `WithMemory(MemoryToolAction)` | Включить память | `.WithMemory()` или `.WithMemory(MemoryToolAction.Write)` |
 | `WithChatHistory()` | Включить историю диалога | `.WithChatHistory()` |
 | `WithTemperature(float)` | Переопределить температуру | `.WithTemperature(0.0f)` |

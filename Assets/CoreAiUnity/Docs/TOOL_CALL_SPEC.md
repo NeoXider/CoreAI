@@ -174,6 +174,28 @@ Merchant: "У меня есть Iron Sword за 50 монет..."
 - `GameConfigTool.cs` - MEAI AIFunction
 - `GameConfigLlmTool.cs` - ILlmTool обёртка
 
+### 5. Action / Event Tool (DelegateLlmTool)
+
+**Назначение:** Прямой вызов C# методов или событий (Action/Func) без необходимости создавать классы `ILlmTool`. Идеально для привязки игровых механик.
+
+**Код:**
+- `DelegateLlmTool.cs`
+- Работает через `AIFunctionFactory` (MEAI), который автоматически парсит аргументы метода и отдаёт их LLM-модели как инструмент.
+
+**Формат:** Зависит от сигнатуры вашего метода!
+
+**Запуск через AgentBuilder:**
+```csharp
+var agent = new AgentBuilder("Helper")
+    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
+    .WithEventTool("trigger_scare", "Use to scare the player") // Публикует событие в CoreAiEvents
+    .Build();
+```
+
+> 💡 **Как модель понимает, когда использовать триггер?**
+> Функция автоматически становится доступной для LLM как обычный tool. Чтобы управлять её вызовом:
+> 1. **Пишите чёткий `description`** (второй параметр в `WithAction`), который объясняет, зачем нужна функция (например, *"Call this to heal the player"*).
+> 2. **Давайте указания в системном промпте:** В `WithSystemPrompt` агента прямо скажите: *"If the player asks for help, you MUST call heal_player"*.
 ## Настройки
 
 ### CoreAISettings
