@@ -63,6 +63,43 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        private sealed class TestLuaExecutor : LuaTool.ILuaExecutor
+        {
+            private readonly IAiGameCommandSink _sink;
+            private readonly CoreAI.Sandbox.SecureLuaEnvironment _sandbox;
+            private readonly CoreAI.Sandbox.LuaApiRegistry _registry;
+
+            public TestLuaExecutor(IAiGameCommandSink sink) 
+            { 
+                _sink = sink; 
+                _sandbox = new CoreAI.Sandbox.SecureLuaEnvironment();
+                _registry = new CoreAI.Sandbox.LuaApiRegistry();
+                _registry.Register("report", new Action<string>(msg =>
+                {
+                    _sink.Publish(new ApplyAiGameCommand { CommandTypeId = AiGameCommandTypeIds.Envelope, JsonPayload = "{\"action\":\"report\", \"message\":\"" + msg + "\"}" });
+                    Debug.Log($"[Lua.report] {msg}");
+                }));
+                _registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
+                {
+                    _sink.Publish(new ApplyAiGameCommand { CommandTypeId = AiGameCommandTypeIds.Envelope, JsonPayload = "{\"action\":\"create_item\", \"name\":\"" + name + "\"}" });
+                    Debug.Log($"[Lua.create_item] name={name}, type={type}, quality={quality}");
+                }));
+            }
+            public Task<LuaTool.LuaResult> ExecuteAsync(string code, System.Threading.CancellationToken ct)
+            {
+                try
+                {
+                    MoonSharp.Interpreter.Script script = _sandbox.CreateScript(_registry);
+                    MoonSharp.Interpreter.DynValue result = _sandbox.RunChunk(script, code);
+                    return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = result?.ToString() ?? "ok" });
+                }
+                catch (Exception ex)
+                {
+                    return Task.FromResult(new LuaTool.LuaResult { Success = false, Error = ex.Message });
+                }
+            }
+        }
+
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
@@ -359,6 +396,7 @@ namespace CoreAI.Tests.PlayMode
                     // Добавляем execute_lua tool для Programmer
                     AgentMemoryPolicy policyWithLua = new();
                     policyWithLua.EnableMemoryTool(BuiltInAgentRoleIds.Programmer);
+                    policyWithLua.SetToolsForRole(BuiltInAgentRoleIds.Programmer, new ILlmTool[] { new LuaLlmTool(new TestLuaExecutor(sink)) });
 
                     AiOrchestrator orch =
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);

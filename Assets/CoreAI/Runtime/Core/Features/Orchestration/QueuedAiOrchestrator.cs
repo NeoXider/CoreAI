@@ -82,7 +82,7 @@ namespace CoreAI.Ai
                     token = scopeLinked.Token;
                 }
 
-                await _inner.RunTaskAsync(w.Task, token).ConfigureAwait(false);
+                await _inner.RunTaskAsync(w.Task, token);
                 w.Tcs.TrySetResult(null);
             }
             catch (OperationCanceledException)

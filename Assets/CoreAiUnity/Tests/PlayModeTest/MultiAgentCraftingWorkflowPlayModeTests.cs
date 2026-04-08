@@ -213,8 +213,10 @@ namespace CoreAI.Tests.PlayMode
                                "- Use create_item('ItemName', 'weapon', quality)\n" +
                                "- Add special effect for fire damage\n" +
                                "- Use report() to log the result\n\n" +
-                               "Use the execute_lua tool:\n" +
-                               "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('...', 'weapon', quality)\\nadd_special_effect('fire_damage: 15')\\nreport('crafted ...')\"}}"
+                               "1. Use the execute_lua tool:\n" +
+                               "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('...', 'weapon', quality)\\nadd_special_effect('fire_damage: 15')\\nreport('crafted ...')\"}}\n\n" +
+                               "2. Also save to memory using memory tool:\n" +
+                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Programmer wrote Lua script\"}}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "programmer lua");
@@ -278,11 +280,13 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log($"[MultiAgent] Creator memory:      {creatorState.Memory}");
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
-                Debug.Log($"[MultiAgent] Programmer memory:  {programmerState?.Memory ?? "(not written)"}");
+                Debug.Log($"[MultiAgent] Programmer memory:  {programmerState.Memory}");
 
                 // Память разных агентов НЕ должна совпадать
                 Assert.AreNotEqual(creatorState.Memory, mechanicState.Memory,
                     "Creator and CoreMechanicAI must have DIFFERENT memory");
+                Assert.AreNotEqual(mechanicState.Memory, programmerState.Memory,
+                    "Mechanic and Programmer must have DIFFERENT memory");
 
                 Debug.Log("[MultiAgent] ✓ Memory isolation verified");
                 Debug.Log("[MultiAgent] ═══════════════════════════════════════");

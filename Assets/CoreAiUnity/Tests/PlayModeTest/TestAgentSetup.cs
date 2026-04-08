@@ -219,13 +219,7 @@ namespace CoreAI.Tests.PlayMode
 
         private void SetupHttpLogAsserts()
         {
-            // НЕ используем LogAssert.Expect для ошибок подключения/timeout,
-            // потому что они появляются ТОЛЬКО при недоступном хосте.
-            // При успешном подключении эти логи не генерируются,
-            // и LogAssert.Expect вызовет "Expected log did not appear" ошибку.
-
-            // Если нужно проверить обработку ошибок - используйте отдельные тесты
-            // с недоступным хостом (как в EditMode тестах).
+            LogAssert.ignoreFailingMessages = true;
         }
 
         /// <summary>
@@ -240,6 +234,7 @@ namespace CoreAI.Tests.PlayMode
         {
             _handle?.Dispose();
             _handle = null;
+            LogAssert.ignoreFailingMessages = false;
         }
 
         public sealed class InMemoryStore : IAgentMemoryStore

@@ -16,7 +16,7 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("time_now", new System.Func<float>(() => Time.time));
             registry.Register("time_realtime", new System.Func<float>(() => Time.realtimeSinceStartup));
             registry.Register("time_scale", new System.Func<float>(() => Time.timeScale));
-            registry.Register("time_set_scale", new System.Action<float>(v => Time.timeScale = v));
+            registry.Register("time_set_scale", new System.Action<double>(v => Time.timeScale = (float)v));
             registry.Register("time_frame_count", new System.Func<int>(() => Time.frameCount));
             registry.Register("time_fixed_delta", new System.Func<float>(() => Time.fixedDeltaTime));
         }

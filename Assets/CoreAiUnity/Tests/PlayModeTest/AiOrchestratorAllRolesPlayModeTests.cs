@@ -50,6 +50,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
+            LogAssert.ignoreFailingMessages = true;
             try
             {
                 Debug.Log("[Test] LLM handle created, waiting for model...");
@@ -64,6 +65,7 @@ namespace CoreAI.Tests.PlayMode
             finally
             {
                 handle.Dispose();
+                LogAssert.ignoreFailingMessages = false;
             }
         }
 

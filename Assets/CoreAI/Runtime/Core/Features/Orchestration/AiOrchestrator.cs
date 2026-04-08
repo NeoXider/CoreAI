@@ -128,7 +128,7 @@ namespace CoreAI.Ai
                             TraceId = traceId,
                             Tools = tools
                         },
-                        linkedCts.Token).ConfigureAwait(false);
+                        linkedCts.Token);
                     sw.Stop();
                     _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
                         sw.Elapsed.TotalMilliseconds);

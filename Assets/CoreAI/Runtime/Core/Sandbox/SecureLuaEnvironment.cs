@@ -16,7 +16,7 @@ namespace CoreAI.Sandbox
     public sealed class SecureLuaEnvironment
     {
         private static readonly CoreModules SandboxModules =
-            CoreModules.Preset_HardSandbox;
+            CoreModules.Preset_HardSandbox | CoreModules.Coroutine;
 
         /// <summary>Жёсткий лимит инструкций для one-shot скриптов (500K).</summary>
         public const int OneShotHardLimitSteps = 500_000;
