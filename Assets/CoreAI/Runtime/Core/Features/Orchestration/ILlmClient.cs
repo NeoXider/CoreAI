@@ -13,8 +13,11 @@ namespace CoreAI.Ai
         /// <summary>Системная инструкция модели.</summary>
         public string SystemPrompt { get; set; } = "";
 
-        /// <summary>User-часть: JSON телеметрии, hint, контекст ремонта Lua и т.д.</summary>
+        /// <summary>User-часть (опционально, если ChatHistory не используется или дополняет его).</summary>
         public string UserPayload { get; set; } = "";
+
+        /// <summary>История чата (опционально). Если задана, используется для MEAI.</summary>
+        public IList<Microsoft.Extensions.AI.ChatMessage> ChatHistory { get; set; }
 
         /// <summary>Сквозной id для логов (оркестратор / декоратор LLM / роутер команд).</summary>
         public string TraceId { get; set; } = "";

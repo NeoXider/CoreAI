@@ -18,14 +18,11 @@ namespace CoreAI.Infrastructure.World
 
         // Spawn
         public string prefabKeyOrName = "";
-        public float px;
-        public float py;
-        public float pz;
-
-        // Move
-        public float mx;
-        public float my;
-        public float mz;
+        
+        // Unified XYZ
+        public float x;
+        public float y;
+        public float z;
 
         // Scene
         public string sceneName = "";
@@ -37,9 +34,9 @@ namespace CoreAI.Infrastructure.World
                 action = "spawn",
                 prefabKeyOrName = prefabKeyOrName ?? "",
                 instanceId = instanceId ?? "",
-                px = pos.x,
-                py = pos.y,
-                pz = pos.z
+                x = pos.x,
+                y = pos.y,
+                z = pos.z
             };
         }
 
@@ -49,9 +46,9 @@ namespace CoreAI.Infrastructure.World
             {
                 action = "move",
                 instanceId = instanceId ?? "",
-                mx = pos.x,
-                my = pos.y,
-                mz = pos.z
+                x = pos.x,
+                y = pos.y,
+                z = pos.z
             };
         }
 
@@ -138,11 +135,12 @@ namespace CoreAI.Infrastructure.World
             {
                 action = "apply_force",
                 instanceId = instanceId ?? "",
-                px = force.x, // Reusing px, py, pz for a Vector3 generic param
-                py = force.y,
-                pz = force.z
+                x = force.x,
+                y = force.y,
+                z = force.z
             };
         }
+
 
         public static CoreAiWorldCommandEnvelope SpawnParticles(string instanceId, string effectName)
         {

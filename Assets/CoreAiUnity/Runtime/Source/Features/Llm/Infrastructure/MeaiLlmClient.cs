@@ -112,9 +112,21 @@ namespace CoreAI.Infrastructure.Llm
 
             var chatMessages = new List<MEAI.ChatMessage>
             {
-                new(MEAI.ChatRole.System, request.SystemPrompt ?? ""),
-                new(MEAI.ChatRole.User, request.UserPayload ?? "")
+                new(MEAI.ChatRole.System, request.SystemPrompt ?? "")
             };
+            
+            if (request.ChatHistory != null && request.ChatHistory.Count > 0)
+            {
+                chatMessages.AddRange(request.ChatHistory);
+                if (!string.IsNullOrWhiteSpace(request.UserPayload))
+                {
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
+                }
+            }
+            else
+            {
+                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
+            }
 
             // Логируем начальный промпт для отладки tool calling
             _logger.LogInfo(GameLogFeature.Llm,

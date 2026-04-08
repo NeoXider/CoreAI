@@ -63,17 +63,15 @@ namespace CoreAI.Ai
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
-            string transcript;
+            var history = new List<Microsoft.Extensions.AI.ChatMessage>();
             lock (_lock)
             {
-                StringBuilder sb = new();
                 foreach ((string role, string text) in _turns)
                 {
-                    sb.AppendLine($"{role}: {text}");
+                    var chatRole = role == "User" ? Microsoft.Extensions.AI.ChatRole.User : Microsoft.Extensions.AI.ChatRole.Assistant;
+                    history.Add(new Microsoft.Extensions.AI.ChatMessage(chatRole, text));
                 }
-
-                sb.AppendLine($"User: {message}");
-                transcript = sb.ToString();
+                history.Add(new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, message));
             }
 
             LlmCompletionResult result = await _llm.CompleteAsync(
@@ -81,7 +79,7 @@ namespace CoreAI.Ai
                 {
                     AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
                     SystemPrompt = system,
-                    UserPayload = transcript,
+                    ChatHistory = history,
                     TraceId = Guid.NewGuid().ToString("N")
                 },
                 cancellationToken).ConfigureAwait(false);

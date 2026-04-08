@@ -106,7 +106,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            Vector3 pos = new(env.px, env.py, env.pz);
+            Vector3 pos = new(env.x, env.y, env.z);
             GameObject go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
             go.name = $"{prefab.name}#{id}";
             _instances[id] = go;
@@ -126,7 +126,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            go.transform.position = new Vector3(env.mx, env.my, env.mz);
+            go.transform.position = new Vector3(env.x, env.y, env.z);
             return true;
         }
 
