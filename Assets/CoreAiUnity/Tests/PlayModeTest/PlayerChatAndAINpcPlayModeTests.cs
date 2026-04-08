@@ -68,6 +68,7 @@ namespace CoreAI.Tests.PlayMode
             public string LastSystemPrompt;
             public string LastUserPayload;
             public string LastRoleId;
+            public IList<Microsoft.Extensions.AI.ChatMessage> LastChatHistory;
             public LlmCompletionResult LastResult;
 
             private readonly ILlmClient _inner;
@@ -84,6 +85,7 @@ namespace CoreAI.Tests.PlayMode
                 LastSystemPrompt = request.SystemPrompt;
                 LastUserPayload = request.UserPayload;
                 LastRoleId = request.AgentRoleId;
+                LastChatHistory = request.ChatHistory;
 
                 LastResult = await _inner.CompleteAsync(request, cancellationToken);
                 return LastResult;
@@ -129,7 +131,9 @@ namespace CoreAI.Tests.PlayMode
                 InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
                 Debug.Log($"[PlayerChat] Sending: 'Hello, how are you?'");
-                LlmCompletionResult result = chatService.SendPlayerMessageAsync("Hello, how are you?").Result;
+                Task<LlmCompletionResult> task = chatService.SendPlayerMessageAsync("Hello, how are you?");
+                yield return PlayModeTestAwait.WaitTask(task, 120f, "Send message 1");
+                LlmCompletionResult result = task.Result;
 
                 Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
                 Debug.Log($"[PlayerChat] Role: {capturing.LastRoleId}");
@@ -184,15 +188,31 @@ namespace CoreAI.Tests.PlayMode
                 InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
                 // First message
-                LlmCompletionResult r1 = chatService.SendPlayerMessageAsync("My name is Adventurer").Result;
+                Task<LlmCompletionResult> t1 = chatService.SendPlayerMessageAsync("My name is Adventurer");
+                yield return PlayModeTestAwait.WaitTask(t1, 120f, "First message");
+                LlmCompletionResult r1 = t1.Result;
                 Assert.AreEqual(1, chatService.HistoryPairCount);
 
                 // Second message - should see history
-                LlmCompletionResult r2 = chatService.SendPlayerMessageAsync("What is my name?").Result;
+                Task<LlmCompletionResult> t2 = chatService.SendPlayerMessageAsync("What is my name?");
+                yield return PlayModeTestAwait.WaitTask(t2, 120f, "Second message");
+                LlmCompletionResult r2 = t2.Result;
                 Assert.AreEqual(2, chatService.HistoryPairCount);
 
                 // Verify history is in the prompt
-                StringAssert.Contains("Adventurer", capturing.LastUserPayload);
+                bool foundAdventurer = false;
+                if (capturing.LastChatHistory != null)
+                {
+                    foreach (var msg in capturing.LastChatHistory)
+                    {
+                        if (msg.Text != null && msg.Text.Contains("Adventurer"))
+                        {
+                            foundAdventurer = true;
+                            break;
+                        }
+                    }
+                }
+                Assert.IsTrue(foundAdventurer, "The chat history should contain the string 'Adventurer'");
 
                 Debug.Log($"[PlayerChat] ✓ History maintained: {chatService.HistoryPairCount} pairs");
                 Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
@@ -363,7 +383,10 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                {
+                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                }
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));

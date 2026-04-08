@@ -50,14 +50,15 @@ namespace CoreAI.Infrastructure.Llm
             ("fy", "number", false, "Force Y (for apply_force)"),
             ("fz", "number", false, "Force Z (for apply_force)"),
             ("prefabKey", "string", false, "Prefab key for spawn command"),
-            ("stringValue", "string", false,
-                "String value: animation name for play_animation, text for show_text, or search pattern for list_objects"),
+            ("animationName", "string", false, "Name of the animation to play for play_animation"),
+            ("textToDisplay", "string", false, "Text to display for show_text"),
+            ("stringValue", "string", false, "Generic string value (e.g. search pattern for list_objects)"),
             ("volume", "number", false, "Reserved for future use")
         );
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, float, float, float, float, float, float, string?, string?, string?, float, CancellationToken,
+            Func<string, float, float, float, float, float, float, string?, string?, string?, string?, string?, float, CancellationToken,
                 Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
@@ -78,6 +79,8 @@ namespace CoreAI.Infrastructure.Llm
             string? prefabKey = null,
             string? targetName = null,
             string? stringValue = null,
+            string? animationName = null,
+            string? textToDisplay = null,
             float volume = 1f,
             CancellationToken cancellationToken = default)
         {
@@ -120,6 +123,16 @@ namespace CoreAI.Infrastructure.Llm
                     args.Append($" stringValue={stringValue}");
                 }
 
+                if (!string.IsNullOrEmpty(animationName))
+                {
+                    args.Append($" animationName={animationName}");
+                }
+
+                if (!string.IsNullOrEmpty(textToDisplay))
+                {
+                    args.Append($" textToDisplay={textToDisplay}");
+                }
+
                 if (args.Length > 0)
                 {
                     Log.Instance.Info($"  args:{args}", LogTag.World);
@@ -138,9 +151,9 @@ namespace CoreAI.Infrastructure.Llm
                     "load_scene" => CreateLoadSceneCommand(stringValue),
                     "reload_scene" => CreateReloadSceneCommand(),
                     "set_active" => CreateSetActiveCommand(targetName, true),
-                    "play_animation" => CreatePlayAnimationCommand(targetName, stringValue),
+                    "play_animation" => CreatePlayAnimationCommand(targetName, animationName ?? stringValue),
                     "list_animations" => CreateListAnimationsCommand(targetName),
-                    "show_text" => CreateShowTextCommand(targetName, stringValue),
+                    "show_text" => CreateShowTextCommand(targetName, textToDisplay ?? stringValue),
                     "apply_force" => CreateApplyForceCommand(targetName, fx, fy, fz),
                     "spawn_particles" => CreateSpawnParticlesCommand(targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),

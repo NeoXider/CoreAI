@@ -40,7 +40,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to spawn an object. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"spawn\", \"prefabKey\": \"TestPrefab\", \"x\": 0, \"y\": 0, \"z\": 0, \"targetName\": \"test_obj\"}}"
+                    "Use the world_command tool to spawn a 'TestPrefab' object at coordinates (0, 0, 0) and name it 'test_obj'."
             });
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
@@ -77,7 +77,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to move an object. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"move\", \"targetName\": \"Player\", \"x\": 10, \"y\": 20, \"z\": 30}}"
+                    "Use the world_command tool to move the target named 'Player' to coordinates x=10, y=20, z=30."
             });
 
             yield return setup.RunAndWait(task, 240f, "world move");
@@ -113,7 +113,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to list all objects in the scene. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"list_objects\"}}"
+                    "Use the world_command tool to list all the objects currently in the scene."
             });
 
             yield return setup.RunAndWait(task, 240f, "world list_objects");
@@ -149,7 +149,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to play animation. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"play_animation\", \"targetName\": \"Enemy\", \"stringValue\": \"attack\"}}"
+                    "Use the world_command tool to play the 'attack' animation on the target named 'Enemy'."
             });
 
             yield return setup.RunAndWait(task, 240f, "world play_animation");
@@ -185,7 +185,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to list animations. Call: {\"name\": \"world_command\", \"arguments\": {\"action\": \"list_animations\", \"targetName\": \"Enemy\"}}"
+                    "Use the world_command tool to list the available animations for the target named 'Enemy'."
             });
 
             yield return setup.RunAndWait(task, 240f, "world list_animations");
