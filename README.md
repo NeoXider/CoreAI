@@ -4,6 +4,7 @@
 
 **Living NPCs, procedural content, dynamic mechanics** — all driven by AI, right during gameplay.
 
+Engineered for both rapid integration by beginners and complex systemic design by industry veterans, CoreAI scales with your ambition. Build everything from intelligent dialogue assistants and deeply autonomous NPCs to the ultimate frontier of game development: living worlds with adaptive mechanics that evolve in real-time!
 > Imagine a game that adapts not just with numbers, but with logic and situations: different threats, different pacing, different world "character". CoreAI makes this a reality.
 >
 > 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
