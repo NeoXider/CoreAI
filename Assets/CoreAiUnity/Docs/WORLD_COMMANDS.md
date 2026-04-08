@@ -24,18 +24,23 @@
 
 Доступные функции (встроенный набор):
 
-- `coreai_world_spawn(prefabKeyOrName, instanceId, x, y, z) -> instanceId`
-- `coreai_world_move(instanceId, x, y, z)`
-- `coreai_world_destroy(instanceId)`
-- `coreai_world_bind_by_name(targetName, instanceId)` — привязать существующий объект по имени
-- `coreai_world_set_active(instanceId, active)`
+- `coreai_world_spawn(prefabKeyOrName, targetName, x, y, z) -> bool`
+- `coreai_world_move(targetName, x, y, z)`
+- `coreai_world_destroy(targetName)`
+- `coreai_world_set_active(targetName, active)`
 - `coreai_world_load_scene(sceneName)`
 - `coreai_world_reload_scene()`
+- `coreai_world_play_animation(targetName, animationName)`
+- `coreai_world_list_animations(targetName)`
+- `coreai_world_show_text(targetName, textToDisplay)`
+- `coreai_world_apply_force(targetName, fx, fy, fz)`
+- `coreai_world_spawn_particles(targetName, prefabKeyOrName)`
+- `coreai_world_list_objects(searchPattern)`
 
 ### Рекомендация по ключам
 
-- **prefabKeyOrName**: лучше использовать **GUID‑строку** (или другое стабильное id).
-- **instanceId**: строковый id, который Lua хранит и использует для дальнейших команд.
+- **prefabKeyOrName**: лучше использовать **GUID‑строку** (или другое стабильное id) либо имя префаба из справочника.
+- **targetName**: строка с именем объекта в сцене (Unity GameObject name). Все команды резолвят объект динамически по `GameObject.Find()`.
 
 ---
 

@@ -292,14 +292,14 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public sealed class TestWorldCommandExecutor : ICoreAiWorldCommandExecutor
         {
-            public bool LastCommandWasCalled;
+            public volatile bool LastCommandWasCalled;
             public string LastCommandJson;
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
                 LastCommandWasCalled = true;
                 LastCommandJson = cmd.JsonPayload;
-                Debug.Log($"[WorldCommand] Executed: {cmd.JsonPayload}");
+                Debug.LogWarning($"[WorldCommand] Executed: {cmd.JsonPayload}");
                 return true;
             }
         }

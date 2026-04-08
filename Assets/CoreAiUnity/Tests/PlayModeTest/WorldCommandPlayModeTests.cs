@@ -45,11 +45,11 @@ namespace CoreAI.Tests.PlayMode
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
 
-            // Проверяем что команда была выполнена
+            // Проверяем что команда была выполнена (зачастую есть задержка между возвратом из Orchestrator и обновлением состояния)
+            // Пытаемся подождать до 5 секунд, так как tool execution работает через Task.Run.
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
-                Debug.LogWarning("[WorldTest] World command not executed. Model may not support tool-call format.");
-                Assert.Ignore("World command skipped - model may not support tool-call format");
+                yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f, "last command flag sync");
             }
 
             Debug.Log($"[WorldTest] SUCCESS! World command executed: {setup.WorldExecutor.LastCommandJson}");
@@ -156,8 +156,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
-                Debug.LogWarning("[WorldTest] Play animation command not executed.");
-                Assert.Ignore("World play_animation skipped - model may not support tool-call format");
+                yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f, "last command flag sync (play_animation)");
             }
 
             Debug.Log($"[WorldTest] SUCCESS! Play animation command executed: {setup.WorldExecutor.LastCommandJson}");
@@ -192,8 +191,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
-                Debug.LogWarning("[WorldTest] List animations command not executed.");
-                Assert.Ignore("World list_animations skipped - model may not support tool-call format");
+                yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f, "last command flag sync (list)");
             }
 
             Debug.Log($"[WorldTest] SUCCESS! List animations command executed: {setup.WorldExecutor.LastCommandJson}");
@@ -221,7 +219,7 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class TestWorldCommandExecutor : ICoreAiWorldCommandExecutor
         {
-            public bool LastCommandWasCalled;
+            public volatile bool LastCommandWasCalled;
             public string LastCommandJson;
 
             public bool TryExecute(ApplyAiGameCommand cmd)
