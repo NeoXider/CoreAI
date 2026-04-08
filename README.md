@@ -4,7 +4,7 @@
 
 > Imagine a game that adapts not just with numbers, but with logic and situations: different threats, different pacing, different world "character". CoreAI makes this a reality.
 
-**Версия:** v0.9.0 | **Единый MEAI pipeline** для HTTP API и LLMUnity
+**Версия:** v0.12.0 | **Lua Sandbox Hardening & Engine-Agnostic Function Calling**
 
 ---
 
@@ -23,7 +23,16 @@ var merchant = new AgentBuilder("Blacksmith")
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
 
----
+### ⏳ Powerful Lua Coroutine Execution
+Now CoreAI allows Lua scripts (like dynamically parsed world logic) to execute as asynchronous coroutines inside Unity:
+```lua
+-- Runs securely across multiple frames relying on Unity's Time
+local start_time = time_now()
+while time_now() - start_time < 2.0 do
+    coroutine.yield()
+end
+```
+Automatically maps APIs like `time_delta()`, `time_scale()`, and hooks securely via an internal `InstructionLimitDebugger` budget that yields processing back to Unity so you can run heavy computations forever without freezes!---
 
 ### 🔧 AI Calls Tools (Function Calling)
 

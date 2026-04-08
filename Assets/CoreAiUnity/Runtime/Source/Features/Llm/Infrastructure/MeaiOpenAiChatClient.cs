@@ -91,19 +91,62 @@ namespace CoreAI.Infrastructure.Llm
 
                 var msgDict = new Dictionary<string, object>
                 {
-                    { "role", msg.Role.ToString().ToLowerInvariant() },
-                    { "content", content }
+                    { "role", msg.Role.ToString().ToLowerInvariant() }
                 };
 
-                // Для tool messages добавляем tool_call_id (требуется для LM Studio!)
                 if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
                 {
-                    // Ищем FunctionResultContent который содержит tool_call_id
                     var functionResult = msg.Contents.OfType<MEAI.FunctionResultContent>().FirstOrDefault();
-                    if (functionResult != null && !string.IsNullOrEmpty(functionResult.CallId))
+                    if (functionResult != null)
                     {
-                        msgDict["tool_call_id"] = functionResult.CallId;
+                        if (!string.IsNullOrEmpty(functionResult.CallId))
+                            msgDict["tool_call_id"] = functionResult.CallId;
+
+                        string resultStr = functionResult.Result as string 
+                            ?? (functionResult.Result != null ? JsonConvert.SerializeObject(functionResult.Result) : "");
+                        
+                        msgDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
                     }
+                    else
+                    {
+                        msgDict["content"] = content;
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.Assistant && msg.Contents != null)
+                {
+                    var funcCalls = msg.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+                    
+                    if (funcCalls.Count > 0)
+                    {
+                        var toolCallsList = new List<Dictionary<string, object>>();
+                        foreach (var call in funcCalls)
+                        {
+                            toolCallsList.Add(new Dictionary<string, object>
+                            {
+                                { "id", call.CallId ?? Guid.NewGuid().ToString() },
+                                { "type", "function" },
+                                { "function", new Dictionary<string, object>
+                                    {
+                                        { "name", call.Name },
+                                        { "arguments", JsonConvert.SerializeObject(call.Arguments ?? new Dictionary<string, object?>()) }
+                                    }
+                                }
+                            });
+                        }
+                        msgDict["tool_calls"] = toolCallsList;
+                        
+                        // Если есть tool_calls, то в content обычно отправляем пустую строку или текст (если модель дала текст)
+                        var textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
+                        msgDict["content"] = textContent?.Text ?? "";
+                    }
+                    else
+                    {
+                        msgDict["content"] = content;
+                    }
+                }
+                else
+                {
+                    msgDict["content"] = content;
                 }
 
                 messages.Add(msgDict);

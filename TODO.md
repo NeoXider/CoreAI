@@ -52,7 +52,24 @@ CoreAISettings.UniversalSystemPromptPrefix =
 
 ---
 
-## 🚧 В РАБОТЕ — v0.10.0
+## ✅ ВЫПОЛНЕНО В v0.12.0 — Lua Time Bindings & Advanced Coroutines
+
+### Долгоживущие защищенные корутины и время Unity
+- ✅ `LuaTimeBindings.cs` — мост для `Time.timeScale`, `Time.deltaTime`, `Time.time` в Lua.
+  - Позволяет долгоживущим скриптам реагировать на паузы игры (`time_scale() == 0`).
+  - Функции: `time_delta()`, `time_unscaled_delta()`, `time_now()`, `time_scale()`, и др.
+- ✅ `SecureLuaEnvironment` полная защита (Anti-Freeze Sandbox):
+  - Интегрирован `InstructionLimitDebugger` в режиме `ActionType.StepIn` и `IsPauseRequested = true`, что гарантированно перехватывает даже пустые `while true do end` циклы на уровне виртуальной машины (MoonSharp больше не может зависнуть на байткоде).
+  - Установлены дублирующие таймауты (`timeoutMs`: wall-clock время) для предотвращения зависания движка.
+  - Кадрирует долгоживущие корутины (`__coreai_reset_budget` заменен на `InstructionLimitDebugger.Reset()`).
+- ✅ `MeaiOpenAiChatClient` фикс сериализации Function Calling:
+  - Устранена ошибка отправки внутреннего мусора (названия классов `Microsoft.Extensions.AI.*`) в `content` сообщений.
+  - LLM-модели (в т.ч. локальные Qwen через LM Studio) больше не запутываются в истории вызовов и мгновенно активируют инструменты (Memory, WorldCommand), соблюдая строгий OpenAI API формат.
+- ✅ `CoreAILifetimeScope` — регистрация `LuaTimeBindings`, и автоматическое создание `LuaCoroutineRunner`.
+
+---
+
+## 🚧 В РАБОТЕ — v0.11.0
 
 ### WorldCommand как MEAI tool call
 

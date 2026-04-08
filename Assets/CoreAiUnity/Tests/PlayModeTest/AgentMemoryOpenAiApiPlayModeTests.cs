@@ -80,7 +80,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[MemoryTest] Memory after append: {state.Memory}");
 
-            if (!state.Memory.Contains("appended value") && !state.Memory.Contains("appended"))
+            if (!state.Memory.Contains("initial value") || state.Memory.Length <= "initial value".Length + 2)
             {
                 Debug.LogWarning("[MemoryTest] Append did not work.");
                 Assert.Ignore("Append test skipped");

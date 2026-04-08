@@ -12,15 +12,18 @@ namespace CoreAI.Infrastructure.Lua
         private readonly IGameLogger _logger;
         private readonly CoreAiVersioningLuaRuntimeBindings _versioning;
         private readonly World.CoreAiWorldLuaRuntimeBindings _world;
+        private readonly LuaTimeBindings _time;
 
         public AggregatingGameLuaRuntimeBindings(
             IGameLogger logger,
             CoreAiVersioningLuaRuntimeBindings versioning,
-            World.CoreAiWorldLuaRuntimeBindings world)
+            World.CoreAiWorldLuaRuntimeBindings world,
+            LuaTimeBindings time = null)
         {
             _logger = logger;
             _versioning = versioning;
             _world = world;
+            _time = time ?? new LuaTimeBindings();
         }
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
@@ -28,6 +31,7 @@ namespace CoreAI.Infrastructure.Lua
             new LoggingLuaRuntimeBindings(_logger).RegisterGameplayApis(registry);
             _versioning.RegisterGameplayApis(registry);
             _world?.RegisterGameplayApis(registry);
+            _time.RegisterTimeApis(registry);
             GameLuaBindingsExtensibility.RegisterAll(registry);
         }
     }

@@ -13,21 +13,27 @@ namespace CoreAI.Sandbox
     /// </summary>
     internal sealed class InstructionLimitDebugger : IDebugger
     {
-        private readonly long _maxSteps;
-        private readonly int _timeoutMs;
+        private long _maxSteps;
+        private int _timeoutMs;
         private readonly Stopwatch _sw = new();
         private long _steps;
 
         public InstructionLimitDebugger(long maxSteps, int timeoutMs)
         {
+            Reset(maxSteps, timeoutMs);
+        }
+
+        public void Reset(long maxSteps, int timeoutMs)
+        {
             _maxSteps = maxSteps < 1 ? 1 : maxSteps;
             _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
-            _sw.Start();
+            _steps = 0;
+            _sw.Restart();
         }
 
         public DebuggerCaps GetDebuggerCaps()
         {
-            return DebuggerCaps.CanDebugSourceCode;
+            return DebuggerCaps.CanDebugSourceCode | DebuggerCaps.HasLineBasedBreakpoints;
         }
 
         public void SetDebugService(DebugService debugService)
@@ -48,7 +54,7 @@ namespace CoreAI.Sandbox
 
         public bool IsPauseRequested()
         {
-            return false;
+            return true;
         }
 
         public DebuggerAction GetAction(int ip, SourceRef sourceref)
@@ -56,7 +62,7 @@ namespace CoreAI.Sandbox
             long s = System.Threading.Interlocked.Increment(ref _steps);
             if (s > _maxSteps)
             {
-                throw new ScriptRuntimeException($"Lua exceeded max steps: {_maxSteps}");
+                throw new ScriptRuntimeException($"SecureLuaEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})");
             }
 
             if (_sw.ElapsedMilliseconds > _timeoutMs)
@@ -64,7 +70,7 @@ namespace CoreAI.Sandbox
                 throw new ScriptRuntimeException($"Lua exceeded {_timeoutMs} ms.");
             }
 
-            return new DebuggerAction { Action = DebuggerAction.ActionType.Run };
+            return new DebuggerAction { Action = DebuggerAction.ActionType.StepIn };
         }
 
         public bool SignalRuntimeException(ScriptRuntimeException ex)

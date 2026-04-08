@@ -122,8 +122,10 @@ namespace CoreAI.Composition
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton).As<IDataOverlayPayloadValidator>();
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
+            builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
+            builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton, "CoreAI_LuaCoroutineRunner");
 
             // LLM Client регистрация с поддержкой CoreAISettingsAsset
             LlmRoutingManifest routingManifest = llmRoutingManifest;

@@ -3,6 +3,7 @@
     "rootNamespace": "CoreAI",
     "references": [
         "CoreAI.Core",
+        "MoonSharp.Interpreter",
         "MessagePipe",
         "MessagePipe.VContainer",
         "Unity.TextMeshPro",
