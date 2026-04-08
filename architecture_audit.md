@@ -223,17 +223,10 @@ transcript = sb.ToString();
 > Эти интерфейсы — часть roadmap (TODO §12). Сами по себе не вредят, но создают ложное впечатление готовности.
 > **Решение:** либо удалить и создать при реализации, либо пометить `[Obsolete("Planned — not yet implemented")]`.
 
-### 4.3 Параметр `defaultAction` в `WithMemory()`
+### 4.3 ✅ ~~Параметр `defaultAction` в `WithMemory()`~~ — РЕШЕНО в v0.12.0
 
-```csharp
-public AgentBuilder WithMemory(MemoryToolAction defaultAction = MemoryToolAction.Append)
-{
-    _tools.Add(new MemoryLlmTool());  // defaultAction нигде не передаётся!
-    return this;
-}
-```
-
-Параметр принимается, но **выбрасывается**. Пользователь API видит параметр и думает, что он работает.
+> [!NOTE]
+> Эта проблема **исправлена**. Параметр `defaultAction` теперь сохраняется в `AgentBuilder` и корректно применяется к политике памяти через `AgentConfig.ApplyToPolicy()`.
 
 ---
 
@@ -241,8 +234,8 @@ public AgentBuilder WithMemory(MemoryToolAction defaultAction = MemoryToolAction
 
 ### 5.1 Покрытие тестами
 
-**EditMode тесты:** ~32 файла, покрывают Lua pipeline, MEAI tool calls, crafting, config, settings, world commands.  
-**PlayMode тесты:** ~26 файлов, покрывают полные сценарии с LLM-бэкендами.
+**EditMode тесты:** 32 файла, покрывают Lua pipeline, MEAI tool calls, crafting, config, settings, world commands, agent builder, analyzer, response policies, versioning.  
+**PlayMode тесты:** 16 тестовых файлов + 9 вспомогательных (harness, setup, config, shared), покрывают полные сценарии с LLM-бэкендами (LLMUnity и HTTP API).
 
 ### 5.2 Непокрытые области
 
@@ -340,8 +333,8 @@ private int aiOrchestrationMaxConcurrent = 2;
 | # | Задача | Затраты | Влияние |
 |---|--------|---------|---------|
 | 1 | ~~**Унифицировать логгер**~~ | ✅ Готово | ✅ v0.12.0 |
-| 2 | **Удалить дублированный `MemoryToolAction`** — оставить один enum, починить `WithMemory()` | 30 мин | Устранение путаницы |
-| 3 | **Починить `WithMemory(defaultAction)`** — либо передавать параметр в `MemoryLlmTool`, либо убрать | 30 мин | Корректность API |
+| 2 | ~~**Удалить дублированный `MemoryToolAction`**~~ | ✅ Готово | ✅ v0.12.0 |
+| 3 | ~~**Починить `WithMemory(defaultAction)`**~~ | ✅ Готово | ✅ v0.12.0 |
 
 ### 🟠 Приоритет 2 — Архитектурное
 
@@ -376,9 +369,9 @@ private int aiOrchestrationMaxConcurrent = 2;
 ## Итого
 
 ```
-🔴 Критических проблем:     3 → 1  (✅ логгер решён, ✅ дубль enum, статические настройки)
+🔴 Критических проблем:     2 → 1  (✅ логгер решён, ✅ дубль enum решён, статические настройки)
 🟠 Архитектурных вопросов:   5  (WorldTool дубль, envelope reuse, MEAI в Core, и др.)
-🟡 Мёртвого кода:           5+ файлов / классов  
+🟡 Мёртвого кода:           5+ файлов / классов  (4.3 решено)
 🔵 Пробелов в тестах:        4+ области без покрытия
 ⚪ Мелких замечаний:          4
 ✅ Общая оценка:             ~8.0/10 — логгер унифицирован,
