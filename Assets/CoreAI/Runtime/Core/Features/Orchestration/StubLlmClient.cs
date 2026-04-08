@@ -36,20 +36,20 @@ namespace CoreAI.Ai
             }
 
             int userLen = request.UserPayload?.Length ?? 0;
-            string modifierJson =
-                "{\"commandType\":\"ApplyWaveModifier\",\"payload\":{\"agentRole\":\"" + EscapeJson(role) +
-                "\",\"modifierId\":\"stub\",\"wave\":" + userLen + "}}";
-            return Task.FromResult(new LlmCompletionResult { Ok = true, Content = modifierJson });
-        }
-
-        private static string EscapeJson(string s)
-        {
-            if (string.IsNullOrEmpty(s))
+            
+            var payloadObj = new
             {
-                return "";
-            }
-
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                commandType = "ApplyWaveModifier",
+                payload = new
+                {
+                    agentRole = role,
+                    modifierId = "stub",
+                    wave = userLen
+                }
+            };
+            
+            string modifierJson = Newtonsoft.Json.JsonConvert.SerializeObject(payloadObj);
+            return Task.FromResult(new LlmCompletionResult { Ok = true, Content = modifierJson });
         }
     }
 }

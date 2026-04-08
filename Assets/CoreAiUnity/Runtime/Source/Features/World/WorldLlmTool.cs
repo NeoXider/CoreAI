@@ -1,5 +1,4 @@
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -121,7 +120,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // Выполняем команду через executor
-                string json = JsonUtility.ToJson(envelope);
+                string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
                 bool success = await Task.Run(() => _executor.TryExecute(new CoreAI.Messaging.ApplyAiGameCommand
                 {
                     CommandTypeId = CoreAI.Messaging.AiGameCommandTypeIds.WorldCommand,
@@ -222,7 +221,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string SerializeResult(bool success, string message, string? action = null)
         {
-            return JsonSerializer.Serialize(new WorldResult
+            return Newtonsoft.Json.JsonConvert.SerializeObject(new WorldResult
             {
                 Success = success,
                 Message = message,
