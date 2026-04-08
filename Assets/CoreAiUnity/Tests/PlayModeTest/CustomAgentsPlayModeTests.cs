@@ -217,6 +217,48 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        [UnityTest]
+        [Timeout(300000)]
+        public IEnumerator CustomAgent_Helper_WithAction()
+        {
+            Debug.Log("[CustomAgents] ═══ TEST 4: HELPER (WithAction) ═══");
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
+                    out string ignore))
+            {
+                Assert.Ignore(ignore);
+            }
+
+            try
+            {
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                bool triggerFired = false;
+                string receivedMessage = string.Empty;
+
+                AgentConfig helper = new AgentBuilder("TestHelper")
+                    .WithSystemPrompt("Call the send_ping tool with the message 'hello'.")
+                    .WithMode(AgentMode.ToolsOnly)
+                    .WithAction("send_ping", "Send a ping message", new Action<string>((string message) => {
+                        triggerFired = true;
+                        receivedMessage = message;
+                    }))
+                    .Build();
+
+                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+                Task<TestResult> task = RunAgentTestAsync(clientWithStore, helper, "Send ping");
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "helper"); 
+                TestResult r = task.Result;
+                
+                Debug.Log($"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
+                Assert.Greater(r.ToolsCount, 0);
+                Assert.IsTrue(triggerFired, "Delegate should have been triggered.");
+                Debug.Log("[CustomAgents] ✓ TEST 4 PASSED");
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
         private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg)
         {
             InMemoryStore store = new();

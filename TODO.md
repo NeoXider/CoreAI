@@ -1,6 +1,18 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
 
-**Обновлено:** 2026-04-07 | **Текущая версия:** v0.11.0
+**Обновлено:** 2026-04-09 | **Текущая версия:** v0.13.0
+
+## ✅ ВЫПОЛНЕНО В v0.13.0 — Dynamic Agent Events & Actions
+
+### DelegateLlmTool & CoreAiEvents
+- ✅ **`DelegateLlmTool`**: обертка над любым `Action/Func` делегатом для мгновенного биндинга метода C# в качестве инструмента LLM без создания классов `ILlmTool`.
+- ✅ **`CoreAiEvents`**: статическая, сверхлегкая шина событий (pub-sub). Подписки через `CoreAiEvents.Subscribe(...)` для компонентов Unity.
+- ✅ **Extensions в `AgentBuilder`**:
+  - `.WithAction(name, description, delegate)` — для передачи метода напрямую агенту.
+  - `.WithEventTool(name, description, hasStringPayload)` — для автоматической публикации событий в `CoreAiEvents`.
+- ✅ **PlayMode тесты**: добавлены `CustomAgent_Helper_WithAction` в `CustomAgentsPlayModeTests`.
+- ✅ **EditMode тесты**: добавлены `CoreAiEventsEditModeTests`.
+- 📖 **Актуализирована документация**: обновлены README, TOOL_CALL_SPEC.md, AGENT_BUILDER.md.
 
 ## ✅ ВЫПОЛНЕНО В v0.11.0 — Universal System Prompt Prefix + Общая температура
 

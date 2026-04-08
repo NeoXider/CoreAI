@@ -2,6 +2,14 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.13.0] - 2026-04-09
+
+### Action / Event System
+- ✨ Поддержка `DelegateLlmTool`, `CoreAiEvents` и расширений `AgentBuilder` (добавлено в `Dependencies: com.nexoider.coreai 0.13.0`).
+- 📝 Обновлены `TOOL_CALL_SPEC.md` и `AGENT_BUILDER.md` с примерами и механизмом промптинга триггеров.
+- 🧪 **EditMode Tests** для `CoreAiEvents` и `AgentBuilder.WithAction` внедрены и пройдены.
+- 🧪 **PlayMode Tests** для `DelegateLlmTool` вызова (тест `CustomAgentsPlayModeTests.CustomAgent_Helper_WithAction`).
+
 ## [0.12.0] - 2026-04-08
 
 ### Unified Logger (`ILog`)

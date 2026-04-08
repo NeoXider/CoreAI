@@ -2,6 +2,16 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.13.0] — 2026-04-09
+
+### Action / Event System
+- ✨ **`DelegateLlmTool`** — новый универсальный класс (наследник `ILlmTool`), позволяющий прокинуть любой C# делегат (Action, Func) напрямую в LLM через MEAI. Автоматическая генерация JSON-схемы из сигнатуры метода.
+- ✨ **`CoreAiEvents`** — встроенная сверхлегкая статическая шина событий (pub-sub) для связи агентов с игровой логикой без сторонних зависимостей.
+- ✨ **Extensions в `AgentBuilder`**:
+  - `WithAction(name, description, delegate)` — для передачи метода напрямую агенту.
+  - `WithEventTool(name, description, hasStringPayload)` — для создания триггеров в общую шину `CoreAiEvents`.
+- 🧪 Написаны EditorMode тесты (`CoreAiEventsEditModeTests`).
+
 ## [v0.12.0] — 2026-04-08
 
 ### Architecture
