@@ -3,6 +3,7 @@ using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Session;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -20,18 +21,22 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(900000)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()
         {
-            using var setup = new TestAgentSetup();
+            using TestAgentSetup setup = new();
             yield return setup.Initialize();
 
-            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+            if (!setup.IsReady)
+            {
+                Assert.Ignore("TestAgentSetup failed");
+            }
 
             Debug.Log($"[Test] Backend: {setup.BackendName}");
 
             // Task 1: Write memory
-            var t1 = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            Task t1 = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "IMPORTANT: Use the 'memory' tool to write data. DO NOT output JSON. CALL the memory tool now with action='write' and content='remember: apples'."
+                Hint =
+                    "IMPORTANT: Use the 'memory' tool to write data. DO NOT output JSON. CALL the memory tool now with action='write' and content='remember: apples'."
             });
             yield return setup.RunAndWait(t1, 300f, "creator memory write");
 
@@ -46,14 +51,14 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[Test] Memory stored: {st.Memory}");
 
             // Task 2: Recall memory
-            var sink2 = new TestAgentSetup.ListSink();
-            var telemetry2 = new CoreAI.Session.SessionTelemetryCollector();
-            var composer2 = new AiPromptComposer(
+            TestAgentSetup.ListSink sink2 = new();
+            SessionTelemetryCollector telemetry2 = new();
+            AiPromptComposer composer2 = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
-            var orch2 = new AiOrchestrator(
-                new CoreAI.Authority.SoloAuthorityHost(),
+            AiOrchestrator orch2 = new(
+                new Authority.SoloAuthorityHost(),
                 setup.Client,
                 sink2,
                 telemetry2,
@@ -63,7 +68,7 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics());
 
-            var t2 = orch2.RunTaskAsync(new AiTaskRequest
+            Task t2 = orch2.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint = "What is your available memory? Reply with exactly: I remember: apples"

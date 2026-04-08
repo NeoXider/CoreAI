@@ -27,9 +27,9 @@ namespace CoreAI.Sandbox
         {
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
-            
+
             // Назначаем отладчик для отслеживания шагов
-            var debugger = new InstructionLimitDebugger(OneShotHardLimitSteps, timeoutMs: 2000);
+            InstructionLimitDebugger debugger = new(OneShotHardLimitSteps, 2000);
             script.AttachDebugger(debugger);
 
             StripRiskyGlobals(script);
@@ -55,7 +55,7 @@ namespace CoreAI.Sandbox
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
 
-            var debugger = new InstructionLimitDebugger(budgetPerResume, timeoutMs: 500);
+            InstructionLimitDebugger debugger = new(budgetPerResume, 500);
             script.AttachDebugger(debugger);
 
             StripRiskyGlobals(script);
@@ -76,7 +76,9 @@ namespace CoreAI.Sandbox
                 {
                     g[name] = DynValue.Nil;
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             Remove("load");

@@ -27,7 +27,7 @@ namespace CoreAI.Ai
         public AIFunction CreateAIFunction()
         {
             Func<string, string?, CancellationToken, Task<string>> func = ExecuteAsync;
-            var options = new AIFunctionFactoryOptions
+            AIFunctionFactoryOptions options = new()
             {
                 Name = "memory",
                 Description = "Store, append, or clear persistent memory for agent recall across sessions."
@@ -43,13 +43,15 @@ namespace CoreAI.Ai
         {
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
+                Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
             }
+
             if (CoreAISettings.LogToolCallArguments && content != null)
             {
-                var preview = content.Length > 200 ? content.Substring(0, 200) : content;
-                Logging.Log.Instance.Info($"  content: {preview}", LogTag.Memory);
+                string preview = content.Length > 200 ? content.Substring(0, 200) : content;
+                Log.Instance.Info($"  content: {preview}", LogTag.Memory);
             }
+
             if (string.IsNullOrEmpty(action))
             {
                 return SerializeResult(new MemoryResult { Success = false, Error = "Action is required" });
@@ -64,7 +66,8 @@ namespace CoreAI.Ai
                     case "write":
                         if (string.IsNullOrEmpty(content))
                         {
-                            return SerializeResult(new MemoryResult { Success = false, Error = "Content is required for write action" });
+                            return SerializeResult(new MemoryResult
+                                { Success = false, Error = "Content is required for write action" });
                         }
 
                         // Записываем память (полная замена)
@@ -72,7 +75,8 @@ namespace CoreAI.Ai
 
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}", LogTag.Memory);
+                            Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}",
+                                LogTag.Memory);
                         }
 
                         return SerializeResult(new MemoryResult
@@ -99,7 +103,8 @@ namespace CoreAI.Ai
                             return SerializeResult(new MemoryResult
                             {
                                 Success = true,
-                                Message = $"Content already exists in memory for role: {_roleId}. Continue with your task."
+                                Message =
+                                    $"Content already exists in memory for role: {_roleId}. Continue with your task."
                             });
                         }
 
@@ -111,7 +116,8 @@ namespace CoreAI.Ai
 
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}", LogTag.Memory);
+                            Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}",
+                                LogTag.Memory);
                         }
 
                         return SerializeResult(new MemoryResult
@@ -125,7 +131,8 @@ namespace CoreAI.Ai
 
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}", LogTag.Memory);
+                            Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}",
+                                LogTag.Memory);
                         }
 
                         return SerializeResult(new MemoryResult
@@ -146,8 +153,9 @@ namespace CoreAI.Ai
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
+                    Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
                 }
+
                 return SerializeResult(new MemoryResult
                 {
                     Success = false,

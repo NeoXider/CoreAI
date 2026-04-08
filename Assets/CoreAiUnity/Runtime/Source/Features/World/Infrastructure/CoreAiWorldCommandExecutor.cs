@@ -73,7 +73,8 @@ namespace CoreAI.Infrastructure.World
                     return TryListAnimations(env);
                 case "show_text":
                     // TODO: Реализовать show_text с анимацией уведомления (2 секунды или настройка)
-                    _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] show_text: '{env.stringValue}' on '{env.targetName}' (not implemented yet)");
+                    _logger.LogInfo(GameLogFeature.MessagePipe,
+                        $"[World] show_text: '{env.stringValue}' on '{env.targetName}' (not implemented yet)");
                     return true;
                 default:
                     _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] unknown action '{env.action}'");
@@ -172,7 +173,8 @@ namespace CoreAI.Infrastructure.World
                 return TryPlayAnimationOnGameObject(go, env.stringValue);
             }
 
-            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_animation: object not found (name='{env.targetName}')");
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                $"[World] play_animation: object not found (name='{env.targetName}')");
             return false;
         }
 
@@ -185,49 +187,56 @@ namespace CoreAI.Infrastructure.World
             }
 
             // Ищем Animator компонент
-            var animator = go.GetComponent<Animator>();
+            Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.enabled)
             {
                 // Проверяем что анимация существует в контроллере
                 if (TryGetAnimationState(animator, animationName, out string statePath))
                 {
                     animator.Play(statePath);
-                    _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_animation: '{animationName}' on '{go.name}' (Animator)");
+                    _logger.LogInfo(GameLogFeature.MessagePipe,
+                        $"[World] play_animation: '{animationName}' on '{go.name}' (Animator)");
                     return true;
                 }
 
                 // Если не нашли состояние, пробуем просто Play (Unity может найти по имени)
                 animator.Play(animationName);
-                _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_animation: '{animationName}' on '{go.name}' (Animator, state not verified)");
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] play_animation: '{animationName}' on '{go.name}' (Animator, state not verified)");
                 return true;
             }
 
             // Legacy Animation компонент
-            var animation = go.GetComponent<Animation>();
+            Animation animation = go.GetComponent<Animation>();
             if (animation != null && animation.enabled)
             {
                 if (animation.clip != null && animation.GetClip(animationName) != null)
                 {
                     animation.Play(animationName);
-                    _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_animation: '{animationName}' on '{go.name}' (Animation)");
+                    _logger.LogInfo(GameLogFeature.MessagePipe,
+                        $"[World] play_animation: '{animationName}' on '{go.name}' (Animation)");
                     return true;
                 }
             }
 
-            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_animation: no Animator/Animation on '{go.name}'");
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                $"[World] play_animation: no Animator/Animation on '{go.name}'");
             return false;
         }
 
         private bool TryGetAnimationState(Animator animator, string animationName, out string statePath)
         {
             statePath = "";
-            if (animator.runtimeAnimatorController == null) return false;
+            if (animator.runtimeAnimatorController == null)
+            {
+                return false;
+            }
 
             // Получаем все анимационные клипы из контроллера
-            var clips = animator.runtimeAnimatorController.animationClips;
-            foreach (var clip in clips)
+            AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
+            foreach (AnimationClip clip in clips)
             {
-                if (clip.name.Equals(animationName, System.StringComparison.OrdinalIgnoreCase))
+                if (clip.name.Equals(animationName, StringComparison.OrdinalIgnoreCase))
                 {
                     statePath = animationName;
                     return true;
@@ -242,16 +251,19 @@ namespace CoreAI.Infrastructure.World
         /// </summary>
         public string[] GetAvailableAnimations(GameObject go)
         {
-            if (go == null) return Array.Empty<string>();
+            if (go == null)
+            {
+                return Array.Empty<string>();
+            }
 
-            var animationsList = new List<string>();
+            List<string> animationsList = new();
 
             // Animator компонент - получаем клипы из AnimatorController
-            var animator = go.GetComponent<Animator>();
+            Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.runtimeAnimatorController != null)
             {
-                var clips = animator.runtimeAnimatorController.animationClips;
-                foreach (var clip in clips)
+                AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
+                foreach (AnimationClip clip in clips)
                 {
                     if (!string.IsNullOrEmpty(clip.name))
                     {
@@ -261,7 +273,7 @@ namespace CoreAI.Infrastructure.World
             }
 
             // Legacy Animation компонент
-            var animation = go.GetComponent<Animation>();
+            Animation animation = go.GetComponent<Animation>();
             if (animation != null)
             {
                 foreach (AnimationState state in animation)
@@ -279,36 +291,46 @@ namespace CoreAI.Infrastructure.World
         private bool TryListObjects(CoreAiWorldCommandEnvelope env)
         {
             string searchPattern = (env.stringValue ?? "").Trim().ToLowerInvariant();
-            
+
             // Собираем все GameObject из сцены
-            var rootObjects = SceneManager.GetActiveScene().GetRootGameObjects();
-            var results = new List<Dictionary<string, object>>();
-            
-            foreach (var root in rootObjects)
+            GameObject[] rootObjects = SceneManager.GetActiveScene().GetRootGameObjects();
+            List<Dictionary<string, object>> results = new();
+
+            foreach (GameObject root in rootObjects)
             {
                 CollectObjectsRecursive(root, searchPattern, results);
             }
 
             // Сохраняем результат в последнюю known result для доступа извне
             LastListedObjects = results;
-            
+
             _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] list_objects: found {results.Count} objects");
             return true;
         }
 
-        private void CollectObjectsRecursive(GameObject parent, string searchPattern, List<Dictionary<string, object>> results)
+        private void CollectObjectsRecursive(GameObject parent, string searchPattern,
+            List<Dictionary<string, object>> results)
         {
-            if (parent == null) return;
+            if (parent == null)
+            {
+                return;
+            }
 
             // Проверяем имя на соответствие паттерну
-            if (string.IsNullOrEmpty(searchPattern) || 
+            if (string.IsNullOrEmpty(searchPattern) ||
                 parent.name.ToLowerInvariant().Contains(searchPattern))
             {
                 results.Add(new Dictionary<string, object>
                 {
                     { "name", parent.name },
                     { "active", parent.activeSelf },
-                    { "position", new float[] { parent.transform.position.x, parent.transform.position.y, parent.transform.position.z } },
+                    {
+                        "position",
+                        new float[]
+                        {
+                            parent.transform.position.x, parent.transform.position.y, parent.transform.position.z
+                        }
+                    },
                     { "tag", parent.tag },
                     { "layer", parent.layer },
                     { "childCount", parent.transform.childCount }
@@ -334,7 +356,8 @@ namespace CoreAI.Infrastructure.World
             string[] animations = GetAvailableAnimations(go);
             LastListedAnimations = animations;
 
-            _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] list_animations: found {animations.Length} animations on '{go.name}'");
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] list_animations: found {animations.Length} animations on '{go.name}'");
             return true;
         }
 

@@ -153,14 +153,14 @@ namespace CoreAI.Ai
         public AgentConfig Build()
         {
             // Размер контекста: 0 → минимальный, null → из CoreAISettings, явно → использовать явно
-            int ctxTokens = _contextWindowTokens ?? CoreAI.CoreAISettings.ContextWindowTokens;
+            int ctxTokens = _contextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
             // Температура: null → из CoreAISettings, явно → использовать явно
-            float temp = _temperature ?? CoreAI.CoreAISettings.Temperature;
+            float temp = _temperature ?? CoreAISettings.Temperature;
 
             // Применяем универсальный префикс к системному промпту
             string finalPrompt = _systemPrompt;
-            string prefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
+            string prefix = CoreAISettings.UniversalSystemPromptPrefix;
             if (!string.IsNullOrWhiteSpace(prefix) && !string.IsNullOrWhiteSpace(finalPrompt))
             {
                 finalPrompt = prefix.TrimEnd() + " " + finalPrompt;
@@ -202,7 +202,7 @@ namespace CoreAI.Ai
         public void ApplyToPolicy(AgentMemoryPolicy policy)
         {
             policy.SetToolsForRole(RoleId, Tools);
-            
+
             // Настраиваем действие памяти по умолчанию
             policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction);
 
@@ -215,10 +215,14 @@ namespace CoreAI.Ai
 
         private bool HasMemoryTool()
         {
-            foreach (var tool in Tools)
+            foreach (ILlmTool tool in Tools)
             {
-                if (tool is MemoryLlmTool) return true;
+                if (tool is MemoryLlmTool)
+                {
+                    return true;
+                }
             }
+
             return false;
         }
     }

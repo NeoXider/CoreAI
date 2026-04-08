@@ -25,24 +25,38 @@ namespace CoreAI.Tests.PlayMode
             public readonly Dictionary<string, AgentMemoryState> States = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
-                => States.TryGetValue(roleId, out state);
+            {
+                return States.TryGetValue(roleId, out state);
+            }
 
             public void Save(string roleId, AgentMemoryState state)
-                => States[roleId] = state;
+            {
+                States[roleId] = state;
+            }
 
             public void Clear(string roleId)
-                => States.Remove(roleId);
+            {
+                States.Remove(roleId);
+            }
 
-            public void AppendChatMessage(string roleId, string role, string content) { }
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
-                => Array.Empty<ChatMessage>();
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class CapturingLlmClient : ILlmClient
@@ -54,7 +68,10 @@ namespace CoreAI.Tests.PlayMode
 
             private readonly ILlmClient _inner;
 
-            public CapturingLlmClient(ILlmClient inner) => _inner = inner;
+            public CapturingLlmClient(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -68,7 +85,10 @@ namespace CoreAI.Tests.PlayMode
                 return LastResult;
             }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
         }
 
         [UnityTest]
@@ -90,25 +110,27 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
 
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var composer = new AiPromptComposer(
+                BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
+                AiPromptComposer composer = new(
                     systemPrompts,
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
+                InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
                 Debug.Log($"[PlayerChat] Sending: 'Hello, how are you?'");
                 LlmCompletionResult result = chatService.SendPlayerMessageAsync("Hello, how are you?").Result;
 
                 Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
                 Debug.Log($"[PlayerChat] Role: {capturing.LastRoleId}");
-                Debug.Log($"[PlayerChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
+                Debug.Log(
+                    $"[PlayerChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
                 Debug.Log($"[PlayerChat] Response: {result.Content}");
                 Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
 
@@ -120,7 +142,8 @@ namespace CoreAI.Tests.PlayMode
                 bool hasTextContent = result.Content.Length > 10;
                 Assert.IsTrue(hasTextContent, "Response should contain text");
 
-                Debug.Log($"[PlayerChat] ✓ PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
+                Debug.Log(
+                    $"[PlayerChat] ✓ PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
                 Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
             }
             finally
@@ -147,20 +170,21 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
 
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var chatService = new InGameLlmChatService(capturing, systemPrompts, maxMessages: 10);
+                BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
+                InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
                 // First message
-                var r1 = chatService.SendPlayerMessageAsync("My name is Adventurer").Result;
+                LlmCompletionResult r1 = chatService.SendPlayerMessageAsync("My name is Adventurer").Result;
                 Assert.AreEqual(1, chatService.HistoryPairCount);
 
                 // Second message - should see history
-                var r2 = chatService.SendPlayerMessageAsync("What is my name?").Result;
+                LlmCompletionResult r2 = chatService.SendPlayerMessageAsync("What is my name?").Result;
                 Assert.AreEqual(2, chatService.HistoryPairCount);
 
                 // Verify history is in the prompt
@@ -193,19 +217,20 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
                 ListSink sink = new();
 
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var composer = new AiPromptComposer(
+                BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
+                AiPromptComposer composer = new(
                     systemPrompts,
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                var orch = new AiOrchestrator(
+                AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     capturing,
                     sink,
@@ -262,26 +287,27 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
                 ListSink sink = new();
 
-                var policy = new AgentMemoryPolicy();
+                AgentMemoryPolicy policy = new();
                 policy.SetToolsForRole(BuiltInAgentRoleIds.AiNpc, new List<ILlmTool>
                 {
                     new MemoryLlmTool()
                 });
                 policy.EnableMemoryTool(BuiltInAgentRoleIds.AiNpc);
 
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var composer = new AiPromptComposer(
+                BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
+                AiPromptComposer composer = new(
                     systemPrompts,
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                var orch = new AiOrchestrator(
+                AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     capturing,
                     sink,
@@ -308,7 +334,7 @@ namespace CoreAI.Tests.PlayMode
 
                 // Should have called memory tool
                 bool usedMemory = capturing.LastResult.Content?.Contains("memory") == true ||
-                                 capturing.LastResult.Content?.Contains("remember") == true;
+                                  capturing.LastResult.Content?.Contains("remember") == true;
 
                 Debug.Log($"[AINpc] ✓ AINpc with ToolsAndChat mode completed");
                 Debug.Log("[AINpc] ═══ TEST PASSED ═══");
@@ -340,18 +366,18 @@ namespace CoreAI.Tests.PlayMode
                 ListSink sink = new();
 
                 // ChatOnly mode - no tools
-                var config = new AgentBuilder(BuiltInAgentRoleIds.AiNpc)
+                AgentConfig config = new AgentBuilder(BuiltInAgentRoleIds.AiNpc)
                     .WithMode(AgentMode.ChatOnly)
                     .WithSystemPrompt("You are a mysterious merchant.")
                     .Build();
 
-                var systemPrompts = new BuiltInDefaultAgentSystemPromptProvider();
-                var composer = new AiPromptComposer(
+                BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
+                AiPromptComposer composer = new(
                     systemPrompts,
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                var orch = new AiOrchestrator(
+                AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     capturing,
                     sink,

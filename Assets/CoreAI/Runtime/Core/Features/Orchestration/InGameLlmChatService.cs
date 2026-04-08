@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
 {
@@ -63,14 +64,17 @@ namespace CoreAI.Ai
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
-            var history = new List<Microsoft.Extensions.AI.ChatMessage>();
+            List<Microsoft.Extensions.AI.ChatMessage> history = new();
             lock (_lock)
             {
                 foreach ((string role, string text) in _turns)
                 {
-                    var chatRole = role == "User" ? Microsoft.Extensions.AI.ChatRole.User : Microsoft.Extensions.AI.ChatRole.Assistant;
+                    ChatRole chatRole = role == "User"
+                        ? Microsoft.Extensions.AI.ChatRole.User
+                        : Microsoft.Extensions.AI.ChatRole.Assistant;
                     history.Add(new Microsoft.Extensions.AI.ChatMessage(chatRole, text));
                 }
+
                 history.Add(new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, message));
             }
 

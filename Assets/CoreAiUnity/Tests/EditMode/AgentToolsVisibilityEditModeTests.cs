@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Config;
@@ -17,7 +18,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentBuilder_WithMultipleTools_AllToolsVisible()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test")
                 .WithTool(new MemoryLlmTool())
                 .WithTool(new LuaLlmTool(new TestLuaExecutor()))
@@ -31,11 +32,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentMemoryPolicy_SetToolsForRole_ToolsAreRetrievable()
         {
-            var policy = new AgentMemoryPolicy();
-            var tools = new List<ILlmTool> { new MemoryLlmTool(), new InventoryLlmTool(new TestInventoryProvider()) };
+            AgentMemoryPolicy policy = new();
+            List<ILlmTool> tools = new() { new MemoryLlmTool(), new InventoryLlmTool(new TestInventoryProvider()) };
             policy.SetToolsForRole("TestRole", tools);
 
-            var retrieved = policy.GetToolsForRole("TestRole");
+            IReadOnlyList<ILlmTool> retrieved = policy.GetToolsForRole("TestRole");
             // SetToolsForRole может добавить MemoryTool автоматически
             Assert.GreaterOrEqual(retrieved.Count, 2);
             Assert.AreEqual("memory", retrieved[0].Name);
@@ -44,15 +45,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MeaiLlmClient_BuildAIFunctions_CreatesAllFunctions()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test");
-            var logger = GameLoggerUnscopedFallback.Instance;
-            var memoryStore = new TestMemoryStore();
+            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
+            TestMemoryStore memoryStore = new();
 
-            var client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
 
             // Проверяем что BuildAIFunctions создаёт функции для каждого инструмента
-            var tools = new List<ILlmTool>
+            List<ILlmTool> tools = new()
             {
                 new MemoryLlmTool(),
                 new LuaLlmTool(new TestLuaExecutor())
@@ -60,7 +61,7 @@ namespace CoreAI.Tests.EditMode
 
             // Вызываем CompleteAsync чтобы проверить что инструменты обрабатываются
             // (в EditMode без реальной LLM — проверяем что код не падает)
-            var task = client.CompleteAsync(new LlmCompletionRequest
+            Task<LlmCompletionResult> task = client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "TestRole",
                 SystemPrompt = "test",
@@ -77,7 +78,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentBuilder_WithMemory_AddsMemoryTool()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test")
                 .WithMemory()
                 .Build();
@@ -89,7 +90,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentBuilder_WithToolsAndMemory_AllToolsVisible()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test")
                 .WithTool(new InventoryLlmTool(new TestInventoryProvider()))
                 .WithMemory()
@@ -104,7 +105,8 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestLuaExecutor : LuaTool.ILuaExecutor
         {
-            public System.Threading.Tasks.Task<LuaTool.LuaResult> ExecuteAsync(string code, System.Threading.CancellationToken ct)
+            public System.Threading.Tasks.Task<LuaTool.LuaResult> ExecuteAsync(string code,
+                System.Threading.CancellationToken ct)
             {
                 return System.Threading.Tasks.Task.FromResult(new LuaTool.LuaResult { Success = true, Output = "" });
             }
@@ -112,7 +114,8 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
-            public System.Threading.Tasks.Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(System.Threading.CancellationToken ct)
+            public System.Threading.Tasks.Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
+                System.Threading.CancellationToken ct)
             {
                 return System.Threading.Tasks.Task.FromResult(new List<InventoryTool.InventoryItem>());
             }
@@ -120,12 +123,31 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
-            public readonly System.Collections.Generic.Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<Ai.ChatMessage>();
+            public readonly Dictionary<string, AgentMemoryState> States = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<ChatMessage>();
+            }
         }
 
         #endregion

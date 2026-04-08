@@ -36,7 +36,7 @@ namespace CoreAI.Ai
             }
 
             int userLen = request.UserPayload?.Length ?? 0;
-            
+
             var payloadObj = new
             {
                 commandType = "ApplyWaveModifier",
@@ -47,7 +47,7 @@ namespace CoreAI.Ai
                     wave = userLen
                 }
             };
-            
+
             string modifierJson = Newtonsoft.Json.JsonConvert.SerializeObject(payloadObj);
             return Task.FromResult(new LlmCompletionResult { Ok = true, Content = modifierJson });
         }

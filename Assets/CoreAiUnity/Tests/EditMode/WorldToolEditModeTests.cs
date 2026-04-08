@@ -94,7 +94,8 @@ namespace CoreAI.Tests.EditMode
             CoreAISettings.LogToolCallResults = true;
             try
             {
-                UnityEngine.TestTools.LogAssert.Expect(UnityEngine.LogType.Error, new System.Text.RegularExpressions.Regex(".*Unknown action: 'invalid_action'.*"));
+                UnityEngine.TestTools.LogAssert.Expect(UnityEngine.LogType.Error,
+                    new System.Text.RegularExpressions.Regex(".*Unknown action: 'invalid_action'.*"));
                 TestWorldExecutor executor = new();
                 WorldLlmTool tool = new(executor);
 

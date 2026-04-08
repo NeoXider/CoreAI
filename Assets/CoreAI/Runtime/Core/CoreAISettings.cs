@@ -14,7 +14,6 @@ namespace CoreAI
         public static int MaxLuaRepairRetries { get; set; } = 3;
 
 
-
         /// <summary>
         /// Включить подробное логирование MEAI pipeline.
         /// По умолчанию: false (только ошибки).
@@ -69,10 +68,11 @@ namespace CoreAI
         ///     "Never break character. Use tools when appropriate.";
         /// </example>
         public static string UniversalSystemPromptPrefix { get; set; } =
-            "TOOL CALLING RULES: When tools/functions are provided in the request, you MUST use tool calls (function calling format) to invoke them. " +
-            "NEVER output JSON or structured data in your response text when tools are available - always call the appropriate tool instead. " +
-            "Only output plain text or JSON in your response when NO tools are provided. " +
-            "If a tool call succeeds, continue with your task. If it fails, analyze the error and retry with corrected parameters.";
+            "CRITICAL RULES FOR ALL AGENTS:\n" +
+            "1. TOOL CALLING: When tools/functions are available, you MUST use them (function calling format). NEVER output JSON in your text response if tools are available to do the job.\n" +
+            "2. STRICT ADHERENCE: You must follow the user's task or hint EXACTLY. Do not hallucinate, invent, or add creative flair to tool arguments unless strictly requested.\n" +
+            "3. NO CHIT-CHAT: Respond concisely. Do not explain what you are doing unless asked.\n" +
+            "4. TOOL LIFECYCLE: If a tool returns a success message, continue with the NEXT step of the task. Do not call the same tool again with the same arguments.";
 
         /// <summary>
         /// Общая температура генерации для всех агентов.

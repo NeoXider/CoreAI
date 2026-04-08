@@ -38,12 +38,16 @@ namespace CoreAI.Sandbox
         public DynValue Resume()
         {
             if (_disposed)
+            {
                 throw new ObjectDisposedException(nameof(LuaCoroutineHandle));
+            }
 
             if (!IsAlive)
+            {
                 throw new InvalidOperationException($"Cannot resume coroutine in state {_coroutine.Coroutine.State}.");
+            }
 
-            _debugger.Reset(_budgetPerResume, timeoutMs: 500);
+            _debugger.Reset(_budgetPerResume, 500);
 
             _lastResult = _coroutine.Coroutine.Resume();
             return _lastResult;
@@ -53,8 +57,14 @@ namespace CoreAI.Sandbox
         {
             if (!_disposed && IsAlive)
             {
-                try { } catch { }
+                try
+                {
+                }
+                catch
+                {
+                }
             }
+
             _disposed = true;
         }
     }

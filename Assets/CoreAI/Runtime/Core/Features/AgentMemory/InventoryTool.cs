@@ -24,10 +24,11 @@ namespace CoreAI.Ai
         public AIFunction CreateAIFunction()
         {
             Func<CancellationToken, Task<string>> func = ExecuteAsync;
-            var options = new AIFunctionFactoryOptions
+            AIFunctionFactoryOptions options = new()
             {
                 Name = "get_inventory",
-                Description = "Get current inventory items from an NPC or merchant. Call this before offering items to the player."
+                Description =
+                    "Get current inventory items from an NPC or merchant. Call this before offering items to the player."
             };
             return AIFunctionFactory.Create(func, options);
         }
@@ -36,7 +37,7 @@ namespace CoreAI.Ai
         {
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] get_inventory: fetching items", LogTag.Llm);
+                Log.Instance.Info($"[Tool Call] get_inventory: fetching items", LogTag.Llm);
             }
 
             try
@@ -45,7 +46,7 @@ namespace CoreAI.Ai
 
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items", LogTag.Llm);
+                    Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items", LogTag.Llm);
                 }
 
                 return SerializeResult(new InventoryResult
@@ -58,7 +59,7 @@ namespace CoreAI.Ai
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}", LogTag.Llm);
+                    Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}", LogTag.Llm);
                 }
 
                 return SerializeResult(new InventoryResult

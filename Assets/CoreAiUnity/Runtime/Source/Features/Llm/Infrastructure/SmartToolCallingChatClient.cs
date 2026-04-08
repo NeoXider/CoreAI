@@ -20,7 +20,8 @@ namespace CoreAI.Infrastructure.Llm
         private readonly int _maxConsecutiveErrors;
 
         /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
-        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, int maxConsecutiveErrors = 3)
+        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger,
+            int maxConsecutiveErrors = 3)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -32,7 +33,7 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
-            var messages = chatMessages.ToList();
+            List<MEAI.ChatMessage> messages = chatMessages.ToList();
             int consecutiveErrors = 0;
             int iteration = 0;
 
@@ -45,31 +46,40 @@ namespace CoreAI.Infrastructure.Llm
                         $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={consecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
                 }
 
-                var response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
+                MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
 
                 // Проверяем tool calls
-                var allContents = response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
-                                  ?? new List<MEAI.AIContent>();
+                List<MEAI.AIContent> allContents =
+                    response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
+                    ?? new List<MEAI.AIContent>();
 
-                var toolCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
+                List<MEAI.FunctionCallContent> toolCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
                 if (toolCalls.Count == 0)
                 {
                     // Модель вернула текст — выходим
                     if (CoreAISettings.LogMeaiToolCallingSteps)
-                        _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
+                    }
+
                     return response;
                 }
 
                 if (CoreAISettings.LogMeaiToolCallingSteps)
-                    _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s)");
+                {
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s)");
+                }
 
                 // Выполняем тулы
-                var toolResults = new List<MEAI.AIContent>();
+                List<MEAI.AIContent> toolResults = new();
                 bool anyFailed = false;
 
-                foreach (var fc in toolCalls)
+                foreach (MEAI.FunctionCallContent fc in toolCalls)
                 {
-                    var aiFunc = options?.Tools.OfType<MEAI.AIFunction>().FirstOrDefault(f => f.Name == fc.Name);
+                    MEAI.AIFunction aiFunc =
+                        options?.Tools.OfType<MEAI.AIFunction>().FirstOrDefault(f => f.Name == fc.Name);
                     if (aiFunc == null)
                     {
                         anyFailed = true;
@@ -79,18 +89,24 @@ namespace CoreAI.Infrastructure.Llm
 
                     try
                     {
-                        var args = fc.Arguments != null
+                        MEAI.AIFunctionArguments args = fc.Arguments != null
                             ? new MEAI.AIFunctionArguments(fc.Arguments)
                             : null;
-                        var result = await aiFunc.InvokeAsync(args, cancellationToken);
+                        object result = await aiFunc.InvokeAsync(args, cancellationToken);
                         string resultText = result?.ToString() ?? "";
                         bool succeeded = !resultText.Contains("\"Success\":false") &&
                                          !resultText.Contains("\"success\":false");
 
-                        if (!succeeded) anyFailed = true;
+                        if (!succeeded)
+                        {
+                            anyFailed = true;
+                        }
 
                         if (CoreAISettings.LogMeaiToolCallingSteps)
-                            _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
+                        {
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                $"[SmartToolCall] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
+                        }
 
                         toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
                     }
@@ -107,17 +123,24 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     consecutiveErrors = 0; // СБРОС при успехе
                     if (CoreAISettings.LogMeaiToolCallingSteps)
-                        _logger.LogInfo(GameLogFeature.Llm, "[SmartToolCall] ✓ All succeeded, error counter reset to 0");
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "[SmartToolCall] ✓ All succeeded, error counter reset to 0");
+                    }
                 }
                 else
                 {
                     consecutiveErrors++; // КОПИМ при ошибке
                     if (CoreAISettings.LogMeaiToolCallingSteps)
-                        _logger.LogInfo(GameLogFeature.Llm, $"[SmartToolCall] ✗ Some failed, error counter={consecutiveErrors}/{_maxConsecutiveErrors}");
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"[SmartToolCall] ✗ Some failed, error counter={consecutiveErrors}/{_maxConsecutiveErrors}");
+                    }
 
                     if (consecutiveErrors >= _maxConsecutiveErrors)
                     {
-                        _logger.LogWarning(GameLogFeature.Llm, $"[SmartToolCall] ⚠ Max consecutive errors ({_maxConsecutiveErrors}), stopping.");
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"[SmartToolCall] ⚠ Max consecutive errors ({_maxConsecutiveErrors}), stopping.");
                         break;
                     }
                 }
@@ -127,7 +150,7 @@ namespace CoreAI.Infrastructure.Llm
                 messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, toolResults));
             }
 
-            var lastAssistant = messages.LastOrDefault(m => m.Role == MEAI.ChatRole.Assistant);
+            MEAI.ChatMessage lastAssistant = messages.LastOrDefault(m => m.Role == MEAI.ChatRole.Assistant);
             return new MEAI.ChatResponse(lastAssistant ?? new MEAI.ChatMessage(MEAI.ChatRole.Assistant, ""))
             {
                 FinishReason = MEAI.ChatFinishReason.Stop
@@ -139,18 +162,32 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            await foreach (var u in _innerClient.GetStreamingResponseAsync(chatMessages, options, cancellationToken))
+            await foreach (MEAI.ChatResponseUpdate u in _innerClient.GetStreamingResponseAsync(chatMessages, options,
+                               cancellationToken))
+            {
                 yield return u;
+            }
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null)
         {
-            if (serviceType == typeof(SmartToolCallingChatClient)) return this;
-            if (serviceType == typeof(MEAI.IChatClient)) return _innerClient;
+            if (serviceType == typeof(SmartToolCallingChatClient))
+            {
+                return this;
+            }
+
+            if (serviceType == typeof(MEAI.IChatClient))
+            {
+                return _innerClient;
+            }
+
             return null;
         }
 
-        public void Dispose() => _innerClient.Dispose();
+        public void Dispose()
+        {
+            _innerClient.Dispose();
+        }
     }
 }
 #endif

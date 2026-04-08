@@ -16,32 +16,32 @@ namespace CoreAI.Tests.EditMode
         [SetUp]
         public void SetUp()
         {
-            _savedUniversalPrefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
-            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
+            _savedUniversalPrefix = CoreAISettings.UniversalSystemPromptPrefix;
+            CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
         }
 
         [TearDown]
         public void TearDown()
         {
-            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
+            CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
         }
 
         [Test]
         public void WithChatHistory_Default_ShouldUseSettingsContext()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
                 .WithChatHistory()
                 .Build();
 
             Assert.IsTrue(config.WithChatHistory);
-            Assert.AreEqual(CoreAI.CoreAISettings.ContextWindowTokens, config.ContextWindowTokens);
+            Assert.AreEqual(CoreAISettings.ContextWindowTokens, config.ContextWindowTokens);
         }
 
         [Test]
         public void WithChatHistory_WithCustomTokens_ShouldOverride()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
                 .WithChatHistory(4096)
                 .Build();
@@ -53,7 +53,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void WithChatHistory_ZeroTokens_ShouldUseZero()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
                 .WithChatHistory(0)
                 .Build();
@@ -65,9 +65,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void WithChatHistory_WithPersist_ShouldSetPersistFlag()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
-                .WithChatHistory(4096, persistBetweenSessions: true)
+                .WithChatHistory(4096, true)
                 .Build();
 
             Assert.IsTrue(config.WithChatHistory);
@@ -78,7 +78,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void WithoutChatHistory_ShouldHaveDefaults()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
                 .Build();
 
@@ -89,20 +89,20 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void WithChatHistory_OnlyPersist_ShouldUseDefaultTokens()
         {
-            var config = new AgentBuilder("TestAgent")
+            AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
                 .WithChatHistory(persistBetweenSessions: true)
                 .Build();
 
             Assert.IsTrue(config.WithChatHistory);
-            Assert.AreEqual(CoreAI.CoreAISettings.ContextWindowTokens, config.ContextWindowTokens);
+            Assert.AreEqual(CoreAISettings.ContextWindowTokens, config.ContextWindowTokens);
             Assert.IsTrue(config.PersistChatHistoryBetweenSessions);
         }
 
         [Test]
         public void Builder_Chaining_ShouldWorkCorrectly()
         {
-            var config = new AgentBuilder("Merchant")
+            AgentConfig config = new AgentBuilder("Merchant")
                 .WithSystemPrompt("You are a merchant")
                 .WithTool(new MemoryLlmTool())
                 .WithChatHistory(8192, true)

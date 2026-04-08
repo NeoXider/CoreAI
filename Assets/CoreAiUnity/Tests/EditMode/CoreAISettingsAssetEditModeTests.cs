@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CreateAsset_WithDefaults_ShouldHaveCorrectValues()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
             Assert.AreEqual(LlmAutoPriority.LlmUnityFirst, settings.AutoPriority);
@@ -47,7 +47,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BackendProperties_ShouldReturnCorrectBooleans()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             // По умолчанию Auto
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConfigureHttpApi_ShouldSetAllValues()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("https://api.test.com/v1", "sk-123", "test-model", 0.5f, 60, 2048);
 
             Assert.AreEqual(LlmBackendType.OpenAiHttp, settings.BackendType);
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConfigureLlmUnity_ShouldSetAllValues()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureLlmUnity("MyAgent", "model.gguf", true, 60f, 2f, false);
 
             Assert.AreEqual(LlmBackendType.LlmUnity, settings.BackendType);
@@ -116,18 +116,24 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void OfflineCustomResponse_ShouldMatchRoles()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             // По умолчанию — кастомный ответ выключен
             Assert.AreEqual(false, settings.ShouldUseOfflineCustomResponse("Creator"));
 
             // Включаем с wildcard
-            settings.GetType().GetField("offlineUseCustomResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
+            settings.GetType()
+                .GetField("offlineUseCustomResponse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Creator"));
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Programmer"));
 
             // Конкретные роли
-            settings.GetType().GetField("offlineCustomResponseRoles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "Creator,Programmer");
+            settings.GetType()
+                .GetField("offlineCustomResponseRoles",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "Creator,Programmer");
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Creator"));
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Programmer"));
             Assert.AreEqual(false, settings.ShouldUseOfflineCustomResponse("Merchant"));
@@ -140,7 +146,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Если есть Resources/CoreAISettings.asset — он загрузится
             // Если нет — вернётся null
-            var instance = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset instance = CoreAISettingsAsset.Instance;
             // Не Assert.IsNull — может быть загружен из Resources
             CoreAISettingsAsset.ResetInstance();
         }
@@ -148,7 +154,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void SetInstance_ShouldOverrideSingleton()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             CoreAISettingsAsset.SetInstance(settings);
 
             Assert.AreSame(settings, CoreAISettingsAsset.Instance);

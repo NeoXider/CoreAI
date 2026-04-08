@@ -70,7 +70,8 @@ namespace CoreAI.Tests.EditMode
             _policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" });
 
             GameConfigTool tool = new(_store, _policy, "Creator");
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
 
             Assert.IsTrue(result.Success);
             StringAssert.Contains("difficulty", result.ConfigJson);
@@ -83,7 +84,8 @@ namespace CoreAI.Tests.EditMode
         {
             _policy.SetKnownKeys(new[] { "session" });
             GameConfigTool tool = new(_store, _policy, "UnknownRole");
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("no allowed config", result.Error);
@@ -101,7 +103,9 @@ namespace CoreAI.Tests.EditMode
 
             GameConfigTool tool = new(_store, _policy, "Creator");
             string newConfig = "{\"difficulty\":3,\"enemy_hp_mult\":2.5}";
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", newConfig).Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", newConfig)
+                    .Result);
 
             Assert.IsTrue(result.Success);
             _store.TryLoad("session", out string savedJson);
@@ -115,7 +119,8 @@ namespace CoreAI.Tests.EditMode
         {
             _policy.GrantFullAccess("Creator");
             GameConfigTool tool = new(_store, _policy, "Creator");
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update").Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update").Result);
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("Content", result.Error);
@@ -126,7 +131,9 @@ namespace CoreAI.Tests.EditMode
         {
             _policy.GrantFullAccess("Creator");
             GameConfigTool tool = new(_store, _policy, "Creator");
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", "not json").Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", "not json")
+                    .Result);
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("JSON", result.Error);
@@ -136,7 +143,8 @@ namespace CoreAI.Tests.EditMode
         public void ConfigTool_UnknownAction_ReturnsError()
         {
             GameConfigTool tool = new(_store, _policy, "Creator");
-            GameConfigTool.GameConfigResult result = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("delete").Result);
+            GameConfigTool.GameConfigResult result =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("delete").Result);
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("Unknown action", result.Error);
@@ -157,7 +165,8 @@ namespace CoreAI.Tests.EditMode
             GameConfigTool tool = new(_store, _policy, "Creator");
 
             // Шаг 1: Читаем
-            GameConfigTool.GameConfigResult readResult = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
+            GameConfigTool.GameConfigResult readResult =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
             Assert.IsTrue(readResult.Success);
             StringAssert.Contains("difficulty", readResult.ConfigJson);
 
@@ -165,7 +174,9 @@ namespace CoreAI.Tests.EditMode
             string modifiedJson = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
 
             // Шаг 3: Сохраняем
-            GameConfigTool.GameConfigResult writeResult = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", modifiedJson).Result);
+            GameConfigTool.GameConfigResult writeResult =
+                JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("update", modifiedJson)
+                    .Result);
             Assert.IsTrue(writeResult.Success);
 
             // Шаг 4: Проверяем что сохранилось

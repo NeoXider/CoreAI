@@ -29,7 +29,11 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         public void Register(LuaCoroutineHandle handle)
         {
-            if (handle == null) throw new ArgumentNullException(nameof(handle));
+            if (handle == null)
+            {
+                throw new ArgumentNullException(nameof(handle));
+            }
+
             _handles.Add(handle);
         }
 
@@ -38,7 +42,11 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         public void Unregister(LuaCoroutineHandle handle)
         {
-            if (handle == null) return;
+            if (handle == null)
+            {
+                return;
+            }
+
             handle.Kill();
             _handles.Remove(handle);
         }
@@ -48,14 +56,20 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         public void UnregisterAll()
         {
-            foreach (var h in _handles)
+            foreach (LuaCoroutineHandle h in _handles)
+            {
                 h.Kill();
+            }
+
             _handles.Clear();
         }
 
         private void Update()
         {
-            if (_handles.Count == 0) return;
+            if (_handles.Count == 0)
+            {
+                return;
+            }
 
             _toRemove.Clear();
 

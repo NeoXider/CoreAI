@@ -24,14 +24,18 @@ namespace CoreAI.Tests.PlayMode
         /// Для LLMUnity — пересоздаёт MeaiLlmClient с правильным store.
         /// Для HTTP — возвращает как есть (HTTP клиент уже правильно создаётся с null store).
         /// </summary>
-        public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle, IAgentMemoryStore memoryStore)
+        public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle,
+            IAgentMemoryStore memoryStore)
         {
-            if (handle == null) throw new ArgumentNullException(nameof(handle));
+            if (handle == null)
+            {
+                throw new ArgumentNullException(nameof(handle));
+            }
 
             // LLMUnity клиент — пересоздаём с нужным MemoryStore
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                var llmUnityClient = handle.Client as MeaiLlmUnityClient;
+                MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
                 if (llmUnityClient != null)
                 {
                     return new MeaiLlmClient(
@@ -44,7 +48,7 @@ namespace CoreAI.Tests.PlayMode
             // HTTP клиент — создаём новый с MemoryStore через CreateHttp
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
             {
-                var settings = CoreAISettingsAsset.Instance;
+                CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
                 if (settings != null)
                 {
                     return MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, memoryStore);
@@ -55,6 +59,7 @@ namespace CoreAI.Tests.PlayMode
             return handle.Client;
         }
     }
+
     /// <summary>
     /// In-memory store for tests.
     /// </summary>
@@ -83,7 +88,7 @@ namespace CoreAI.Tests.PlayMode
 
         public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            return Array.Empty<Ai.ChatMessage>();
         }
     }
 
@@ -184,13 +189,14 @@ namespace CoreAI.Tests.PlayMode
         public static PlayModeProductionLikeLlmBackend ResolvePreference(
             PlayModeProductionLikeLlmBackend? explicitPreference)
         {
-            if (explicitPreference.HasValue && explicitPreference.Value != PlayModeProductionLikeLlmBackend.FromSettings)
+            if (explicitPreference.HasValue &&
+                explicitPreference.Value != PlayModeProductionLikeLlmBackend.FromSettings)
             {
                 return explicitPreference.Value;
             }
 
             // 1. Читаем CoreAISettingsAsset
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings != null)
             {
                 switch (settings.BackendType)
@@ -255,7 +261,7 @@ namespace CoreAI.Tests.PlayMode
             PlayModeProductionLikeLlmBackend pref = ResolvePreference(explicitPreference);
 
             // Получаем настройки из CoreAISettingsAsset
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
 
             switch (pref)
             {
@@ -271,6 +277,7 @@ namespace CoreAI.Tests.PlayMode
                         {
                             return true;
                         }
+
                         if (TryCreateLlmUnity(settings, out handle, out _))
                         {
                             return true;
@@ -283,6 +290,7 @@ namespace CoreAI.Tests.PlayMode
                         {
                             return true;
                         }
+
                         if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
                         {
                             return true;
@@ -298,7 +306,8 @@ namespace CoreAI.Tests.PlayMode
                     return true;
 
                 case PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp:
-                    return TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out ignoreReason);
+                    return TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle,
+                        out ignoreReason);
 
                 case PlayModeProductionLikeLlmBackend.LlmUnity:
                     return TryCreateLlmUnity(settings, out handle, out ignoreReason);
@@ -327,7 +336,8 @@ namespace CoreAI.Tests.PlayMode
             handle = null;
 
             // Пробуем CoreAISettingsAsset
-            if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) && !string.IsNullOrWhiteSpace(settings.ModelName))
+            if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
+                !string.IsNullOrWhiteSpace(settings.ModelName))
             {
                 OpenAiChatLlmClient client = new(settings);
                 handle = new PlayModeProductionLikeLlmHandle(
@@ -362,7 +372,7 @@ namespace CoreAI.Tests.PlayMode
             handle = new PlayModeProductionLikeLlmHandle(
                 client2,
                 PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                openAiSettings: legacySettings);
+                legacySettings);
             ignoreReason = null;
             return true;
         }
@@ -380,7 +390,8 @@ namespace CoreAI.Tests.PlayMode
             string agentName = settings?.LlmUnityAgentName;
             string ggufPath = settings?.GgufModelPath;
 
-            GameObject go = PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, out _, out LLMAgent agent);
+            GameObject go =
+                PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, out _, out LLMAgent agent);
             if (go == null || agent == null)
             {
                 ignoreReason =

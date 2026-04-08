@@ -27,16 +27,30 @@ namespace CoreAI.Infrastructure.Llm
             AgentMemoryPolicy? memoryPolicy = null,
             bool useChatHistory = false)
         {
-            if (unityAgent == null) throw new ArgumentNullException(nameof(unityAgent));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (unityAgent == null)
+            {
+                throw new ArgumentNullException(nameof(unityAgent));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
             _unityAgent = unityAgent;
             _client = MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore);
         }
 
-        public void SetTools(IReadOnlyList<ILlmTool> tools) => _client.SetTools(tools);
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _client.SetTools(tools);
+        }
 
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
-            CancellationToken cancellationToken = default) => _client.CompleteAsync(request, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            return _client.CompleteAsync(request, cancellationToken);
+        }
     }
 }
 #endif

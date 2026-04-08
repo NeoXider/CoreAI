@@ -27,7 +27,7 @@ namespace CoreAI.Ai
         public AIFunction CreateAIFunction()
         {
             Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
-            var options = new AIFunctionFactoryOptions
+            AIFunctionFactoryOptions options = new()
             {
                 Name = "execute_lua",
                 Description = "Execute Lua code. Use this to run game logic, create items, report events, etc."
@@ -51,33 +51,37 @@ namespace CoreAI.Ai
 
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}", LogTag.Lua);
+                Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}", LogTag.Lua);
             }
+
             if (CoreAISettings.LogToolCallArguments)
             {
-                var preview = code.Length > 150 ? code.Substring(0, 150) : code;
-                Logging.Log.Instance.Info($"  code preview: {preview}", LogTag.Lua);
+                string preview = code.Length > 150 ? code.Substring(0, 150) : code;
+                Log.Instance.Info($"  code preview: {preview}", LogTag.Lua);
             }
 
             try
             {
                 LuaResult result = await _executor.ExecuteAsync(code, cancellationToken);
-                
+
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    var outputPreview = result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
-                    Logging.Log.Instance.Info($"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}", LogTag.Lua);
+                    string outputPreview =
+                        result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
+                    Log.Instance.Info(
+                        $"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}",
+                        LogTag.Lua);
                 }
-                
+
                 return SerializeResult(result);
             }
             catch (Exception ex)
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}", LogTag.Lua);
+                    Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}", LogTag.Lua);
                 }
-                
+
                 return SerializeResult(new LuaResult
                 {
                     Success = false,

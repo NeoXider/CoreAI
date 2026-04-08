@@ -19,24 +19,34 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator MemoryTool_WritesMemory()
         {
-            using var setup = new TestAgentSetup();
+            using TestAgentSetup setup = new();
             yield return setup.Initialize();
-            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+            if (!setup.IsReady)
+            {
+                Assert.Ignore("TestAgentSetup failed");
+            }
 
             // Включаем debug логирование для этого теста
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings != null)
             {
-                settings.GetType().GetField("enableHttpDebugLogging", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
-                settings.GetType().GetField("logLlmInput", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
+                settings.GetType()
+                    .GetField("enableHttpDebugLogging",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .SetValue(settings, true);
+                settings.GetType()
+                    .GetField("logLlmInput",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    .SetValue(settings, true);
             }
 
             Debug.Log($"[MemoryTest] Backend: {setup.BackendName}, writing memory...");
 
-            var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='write' and content='qwen4b works great'."
+                Hint =
+                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='write' and content='qwen4b works great'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory write");
@@ -56,19 +66,23 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(180000)]
         public IEnumerator MemoryTool_AppendsMemory()
         {
-            using var setup = new TestAgentSetup();
+            using TestAgentSetup setup = new();
             yield return setup.Initialize();
-            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+            if (!setup.IsReady)
+            {
+                Assert.Ignore("TestAgentSetup failed");
+            }
 
             // Предварительно сохраняем начальное значение
             setup.MemoryStore.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "initial value" });
 
             Debug.Log("[MemoryTest] Testing append...");
 
-            var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='append' and content='appended value'."
+                Hint =
+                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='append' and content='appended value'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory append");
@@ -93,19 +107,24 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(180000)]
         public IEnumerator MemoryTool_ClearsMemory()
         {
-            using var setup = new TestAgentSetup();
+            using TestAgentSetup setup = new();
             yield return setup.Initialize();
-            if (!setup.IsReady) Assert.Ignore("TestAgentSetup failed");
+            if (!setup.IsReady)
+            {
+                Assert.Ignore("TestAgentSetup failed");
+            }
 
             // Предварительно сохраняем значение для удаления
-            setup.MemoryStore.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "this will be deleted" });
+            setup.MemoryStore.Save(BuiltInAgentRoleIds.Creator,
+                new AgentMemoryState { Memory = "this will be deleted" });
 
             Debug.Log("[MemoryTest] Testing clear...");
 
-            var task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint = "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='clear'."
+                Hint =
+                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='clear'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory clear");

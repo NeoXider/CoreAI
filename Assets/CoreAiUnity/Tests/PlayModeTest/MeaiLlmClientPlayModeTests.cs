@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
@@ -23,7 +24,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator MeaiLlmClient_CreateHttp_ShouldCreateAndConnect()
         {
             // Читаем настройки из CoreAISettingsAsset
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
@@ -36,31 +37,32 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log("[MeaiLlmClient.HTTP] Creating HTTP client...");
-            var logger = GameLoggerUnscopedFallback.Instance;
-            var store = new InMemoryStore();
+            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
+            InMemoryStore store = new();
 
-            var client = MeaiLlmClient.CreateHttp(settings, logger, store);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, store);
             Assert.IsNotNull(client, "MeaiLlmClient.CreateHttp should not return null");
 
             Debug.Log("[MeaiLlmClient.HTTP] Client created, sending request...");
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "TestAgent",
                 SystemPrompt = "You are a test agent. Respond with 'OK'.",
                 UserPayload = "Say OK"
             };
 
-            var task = client.CompleteAsync(request);
+            Task<LlmCompletionResult> task = client.CompleteAsync(request);
             yield return PlayModeTestAwait.WaitTask(task, 300f, "MeaiLlmClient HTTP request");
 
-            var result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
+            LlmCompletionResult result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
             if (!result.Ok)
             {
                 Debug.LogWarning($"[MeaiLlmClient.HTTP] Request failed: {result.Error}");
             }
             else
             {
-                Debug.Log($"[MeaiLlmClient.HTTP] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
+                Debug.Log(
+                    $"[MeaiLlmClient.HTTP] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
             }
         }
 
@@ -74,7 +76,7 @@ namespace CoreAI.Tests.PlayMode
 #if COREAI_NO_LLM
             Assert.Ignore("COREAI_NO_LLM defined");
 #else
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
@@ -108,31 +110,34 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
             }
 
-            var logger = GameLoggerUnscopedFallback.Instance;
-            var store = new InMemoryStore();
+            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
+            InMemoryStore store = new();
 
-            var client = MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger, store);
+            MeaiLlmClient client =
+                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger,
+                    store);
             Assert.IsNotNull(client, "MeaiLlmClient.CreateLlmUnity should not return null");
 
             Debug.Log("[MeaiLlmClient.LLMUnity] Client created, sending request...");
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "TestAgent",
                 SystemPrompt = "You are a test agent. Respond with 'OK'.",
                 UserPayload = "Say OK"
             };
 
-            var task = client.CompleteAsync(request);
+            Task<LlmCompletionResult> task = client.CompleteAsync(request);
             yield return PlayModeTestAwait.WaitTask(task, 240f, "MeaiLlmClient LLMUnity request");
 
-            var result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
+            LlmCompletionResult result = ((System.Threading.Tasks.Task<LlmCompletionResult>)task).Result;
             if (!result.Ok)
             {
                 Debug.LogWarning($"[MeaiLlmClient.LLMUnity] Request failed: {result.Error}");
             }
             else
             {
-                Debug.Log($"[MeaiLlmClient.LLMUnity] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
+                Debug.Log(
+                    $"[MeaiLlmClient.LLMUnity] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
             }
 
             handle.Dispose();
@@ -145,7 +150,7 @@ namespace CoreAI.Tests.PlayMode
         [Test]
         public void MeaiLlmClient_NullArguments_ShouldThrow()
         {
-            var logger = GameLoggerUnscopedFallback.Instance;
+            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
 
             Assert.Throws<System.ArgumentNullException>(() =>
                 MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null, logger));

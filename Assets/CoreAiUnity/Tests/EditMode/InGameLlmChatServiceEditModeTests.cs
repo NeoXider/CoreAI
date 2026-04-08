@@ -20,9 +20,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_EmptyMessage_ReturnsError()
         {
-            var llm = new StubLlmClient("response");
-            var prompts = new StubPromptProvider("You are a test bot.");
-            var service = new InGameLlmChatService(llm, prompts, maxMessages: 24);
+            StubLlmClient llm = new("response");
+            StubPromptProvider prompts = new("You are a test bot.");
+            InGameLlmChatService service = new(llm, prompts, 24);
 
             LlmCompletionResult result = await service.SendPlayerMessageAsync("");
 
@@ -34,9 +34,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_WhitespaceMessage_ReturnsError()
         {
-            var llm = new StubLlmClient("response");
-            var prompts = new StubPromptProvider("You are a test bot.");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("response");
+            StubPromptProvider prompts = new("You are a test bot.");
+            InGameLlmChatService service = new(llm, prompts);
 
             LlmCompletionResult result = await service.SendPlayerMessageAsync("   ");
 
@@ -46,9 +46,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_ValidMessage_CallsLlm()
         {
-            var llm = new StubLlmClient("Hello, player!");
-            var prompts = new StubPromptProvider("You are a test bot.");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("Hello, player!");
+            StubPromptProvider prompts = new("You are a test bot.");
+            InGameLlmChatService service = new(llm, prompts);
 
             LlmCompletionResult result = await service.SendPlayerMessageAsync("Hi");
 
@@ -60,9 +60,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_TracksHistoryPairCount()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("system");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts);
 
             Assert.AreEqual(0, service.HistoryPairCount);
 
@@ -76,9 +76,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendPlayerMessageAsync_IncludesHistoryInRequest()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("system");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts);
 
             await service.SendPlayerMessageAsync("first");
             await service.SendPlayerMessageAsync("second");
@@ -94,9 +94,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ClearHistory_ResetsHistoryPairCount()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("system");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts);
 
             await service.SendPlayerMessageAsync("msg1");
             await service.SendPlayerMessageAsync("msg2");
@@ -109,9 +109,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ClearHistory_NextRequestHasNoHistory()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("system");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts);
 
             await service.SendPlayerMessageAsync("msg1");
             service.ClearHistory();
@@ -128,10 +128,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task HistoryTrimming_TrimsOldestPairsWhenOverLimit()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("system");
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
             // maxMessages=4 → максимум 2 пары (user+assistant)
-            var service = new InGameLlmChatService(llm, prompts, maxMessages: 4);
+            InGameLlmChatService service = new(llm, prompts, 4);
 
             await service.SendPlayerMessageAsync("msg1");
             await service.SendPlayerMessageAsync("msg2");
@@ -147,9 +147,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SystemPrompt_UsesProviderPrompt()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider("Custom system prompt");
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("Custom system prompt");
+            InGameLlmChatService service = new(llm, prompts);
 
             await service.SendPlayerMessageAsync("hello");
 
@@ -159,9 +159,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SystemPrompt_FallsBackToDefault_WhenProviderReturnsNull()
         {
-            var llm = new StubLlmClient("reply");
-            var prompts = new StubPromptProvider(null);
-            var service = new InGameLlmChatService(llm, prompts);
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new(null);
+            InGameLlmChatService service = new(llm, prompts);
 
             await service.SendPlayerMessageAsync("hello");
 
@@ -179,7 +179,10 @@ namespace CoreAI.Tests.EditMode
             public string LastSystemPrompt;
             public int LastChatHistoryCount;
 
-            public StubLlmClient(string response) => _response = response;
+            public StubLlmClient(string response)
+            {
+                _response = response;
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -200,7 +203,11 @@ namespace CoreAI.Tests.EditMode
         private sealed class StubPromptProvider : IAgentSystemPromptProvider
         {
             private readonly string _prompt;
-            public StubPromptProvider(string prompt) => _prompt = prompt;
+
+            public StubPromptProvider(string prompt)
+            {
+                _prompt = prompt;
+            }
 
             public bool TryGetSystemPrompt(string roleId, out string prompt)
             {

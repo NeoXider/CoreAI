@@ -15,8 +15,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AllPeers_HostPeer_CanRunAiTasks()
         {
-            var peer = new TestPeer(isHost: true, isPureClient: false);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.AllPeers);
+            TestPeer peer = new(true, false);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.AllPeers);
 
             Assert.IsTrue(host.CanRunAiTasks);
         }
@@ -24,8 +24,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AllPeers_ClientPeer_CanRunAiTasks()
         {
-            var peer = new TestPeer(isHost: false, isPureClient: true);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.AllPeers);
+            TestPeer peer = new(false, true);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.AllPeers);
 
             Assert.IsTrue(host.CanRunAiTasks);
         }
@@ -37,8 +37,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void HostOnly_HostPeer_CanRunAiTasks()
         {
-            var peer = new TestPeer(isHost: true, isPureClient: false);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.HostOnly);
+            TestPeer peer = new(true, false);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.HostOnly);
 
             Assert.IsTrue(host.CanRunAiTasks);
         }
@@ -46,8 +46,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void HostOnly_ClientPeer_CannotRunAiTasks()
         {
-            var peer = new TestPeer(isHost: false, isPureClient: true);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.HostOnly);
+            TestPeer peer = new(false, true);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.HostOnly);
 
             Assert.IsFalse(host.CanRunAiTasks);
         }
@@ -59,8 +59,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ClientPeersOnly_ClientPeer_CanRunAiTasks()
         {
-            var peer = new TestPeer(isHost: false, isPureClient: true);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.ClientPeersOnly);
+            TestPeer peer = new(false, true);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.ClientPeersOnly);
 
             Assert.IsTrue(host.CanRunAiTasks);
         }
@@ -68,8 +68,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ClientPeersOnly_HostPeer_CannotRunAiTasks()
         {
-            var peer = new TestPeer(isHost: true, isPureClient: false);
-            var host = new NetworkedAuthorityHost(peer, AiNetworkExecutionPolicy.ClientPeersOnly);
+            TestPeer peer = new(true, false);
+            NetworkedAuthorityHost host = new(peer, AiNetworkExecutionPolicy.ClientPeersOnly);
 
             Assert.IsFalse(host.CanRunAiTasks);
         }

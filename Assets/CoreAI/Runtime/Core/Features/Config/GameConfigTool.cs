@@ -32,11 +32,12 @@ namespace CoreAI.Config
         public AIFunction CreateAIFunction()
         {
             Func<string, string?, CancellationToken, Task<string>> func = ExecuteAsync;
-            var options = new AIFunctionFactoryOptions
+            AIFunctionFactoryOptions options = new()
             {
                 Name = "game_config",
-                Description = "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
-                string.Join(", ", _policy.GetAllowedKeys(_roleId))
+                Description =
+                    "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
+                    string.Join(", ", _policy.GetAllowedKeys(_roleId))
             };
             return AIFunctionFactory.Create(func, options);
         }
@@ -54,16 +55,18 @@ namespace CoreAI.Config
         {
             if (string.IsNullOrEmpty(action))
             {
-                return SerializeResult(new GameConfigResult { Success = false, Error = "Action is required. Use 'read' or 'update'." });
+                return SerializeResult(new GameConfigResult
+                    { Success = false, Error = "Action is required. Use 'read' or 'update'." });
             }
 
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] game_config: action={action}", LogTag.Config);
+                Log.Instance.Info($"[Tool Call] game_config: action={action}", LogTag.Config);
             }
+
             if (CoreAISettings.LogToolCallArguments && !string.IsNullOrEmpty(content))
             {
-                Logging.Log.Instance.Info($"  content length={content.Length}", LogTag.Config);
+                Log.Instance.Info($"  content length={content.Length}", LogTag.Config);
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -90,7 +93,7 @@ namespace CoreAI.Config
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}", LogTag.Config);
+                    Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}", LogTag.Config);
                 }
 
                 return SerializeResult(new GameConfigResult
@@ -210,7 +213,7 @@ namespace CoreAI.Config
         /// Объединяет несколько JSON строк в один объект.
         /// Простая реализация: оборачивает каждый конфиг по ключу.
         /// </summary>
-        private static string CombineConfigsToJson(System.Collections.Generic.Dictionary<string, string> configs)
+        private static string CombineConfigsToJson(Dictionary<string, string> configs)
         {
             StringBuilder sb = new();
             sb.Append("{");

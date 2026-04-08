@@ -14,8 +14,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Constructor_ShouldNotThrow()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new OfflineLlmClient(settings);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
             Assert.IsNotNull(client);
             Object.DestroyImmediate(settings);
         }
@@ -23,10 +23,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_ShouldReturnDefaultResponse()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new OfflineLlmClient(settings);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
 
-            var result = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Creator",
                 SystemPrompt = "test",
@@ -43,10 +43,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_UnknownRole_ShouldReturnGenericResponse()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new OfflineLlmClient(settings);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
 
-            var result = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "UnknownRole",
                 SystemPrompt = "test",
@@ -54,7 +54,8 @@ namespace CoreAI.Tests.EditMode
             });
 
             Assert.IsTrue(result.Ok);
-            Assert.AreEqual("{\"status\": \"offline\", \"role\": \"unknownrole\", \"echo\": \"hello\"}", result.Content);
+            Assert.AreEqual("{\"status\": \"offline\", \"role\": \"unknownrole\", \"echo\": \"hello\"}",
+                result.Content);
 
             Object.DestroyImmediate(settings);
         }
@@ -62,10 +63,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_ProgrammerRole_ShouldReturnLua()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new OfflineLlmClient(settings);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
 
-            var result = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Programmer",
                 SystemPrompt = "test",
@@ -82,15 +83,21 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_CustomResponse_ShouldReturnCustomText()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             // Включаем кастомный ответ
-            settings.GetType().GetField("offlineUseCustomResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
-            settings.GetType().GetField("offlineCustomResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "Custom offline message");
+            settings.GetType()
+                .GetField("offlineUseCustomResponse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
+            settings.GetType()
+                .GetField("offlineCustomResponse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "Custom offline message");
 
-            var client = new OfflineLlmClient(settings);
+            OfflineLlmClient client = new(settings);
 
-            var result = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Creator",
                 SystemPrompt = "test",
@@ -106,16 +113,25 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_CustomResponseForSpecificRoles_ShouldApplyOnlyToThose()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            settings.GetType().GetField("offlineUseCustomResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
-            settings.GetType().GetField("offlineCustomResponse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "Custom");
-            settings.GetType().GetField("offlineCustomResponseRoles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "Creator");
+            settings.GetType()
+                .GetField("offlineUseCustomResponse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
+            settings.GetType()
+                .GetField("offlineCustomResponse",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "Custom");
+            settings.GetType()
+                .GetField("offlineCustomResponseRoles",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "Creator");
 
-            var client = new OfflineLlmClient(settings);
+            OfflineLlmClient client = new(settings);
 
             // Creator — кастомный
-            var result1 = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result1 = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Creator",
                 UserPayload = "test"
@@ -123,7 +139,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Custom", result1.Content);
 
             // Programmer — заглушка по ролям
-            var result2 = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result2 = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Programmer",
                 UserPayload = "test"

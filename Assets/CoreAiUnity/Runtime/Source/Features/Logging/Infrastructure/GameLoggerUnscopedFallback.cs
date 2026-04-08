@@ -17,7 +17,11 @@ namespace CoreAI.Infrastructure.Logging
         {
             get
             {
-                if (_instance != null) return _instance;
+                if (_instance != null)
+                {
+                    return _instance;
+                }
+
                 _instance = new FilteringGameLogger(new UnityGameLogSink(), new DefaultGameLogSettings());
 
                 // Если ILog ещё не установлен DI — предоставляем fallback
@@ -25,6 +29,7 @@ namespace CoreAI.Infrastructure.Logging
                 {
                     Log.Instance = new UnityLog(_instance);
                 }
+
                 return _instance;
             }
         }

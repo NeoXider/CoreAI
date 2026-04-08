@@ -34,11 +34,11 @@ namespace CoreAI.Tests.PlayMode
             // Убедимся, что timeScale = 1 перед началом
             Time.timeScale = 1f;
 
-            SecureLuaEnvironment env = new SecureLuaEnvironment();
-            LuaApiRegistry reg = new LuaApiRegistry();
-            
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
+
             // Регистрируем Time Bindings
-            LuaTimeBindings timeBindings = new LuaTimeBindings();
+            LuaTimeBindings timeBindings = new();
             timeBindings.RegisterTimeApis(reg);
 
             int iterations = 0;
@@ -54,11 +54,11 @@ namespace CoreAI.Tests.PlayMode
                 end
             ";
 
-            LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, budgetPerResume: 5000);
-            
+            LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, 5000);
+
             // Регистрируем корутину в раннер
             _runner.Register(handle);
-            
+
             Assert.IsTrue(handle.IsAlive);
             Assert.AreEqual(1, _runner.ActiveCount);
 
@@ -74,10 +74,10 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator CoroutineRunner_RespectsTimeScale()
         {
-            SecureLuaEnvironment env = new SecureLuaEnvironment();
-            LuaApiRegistry reg = new LuaApiRegistry();
-            
-            LuaTimeBindings timeBindings = new LuaTimeBindings();
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
+
+            LuaTimeBindings timeBindings = new();
             timeBindings.RegisterTimeApis(reg);
 
             bool reachedEnd = false;
@@ -92,18 +92,19 @@ namespace CoreAI.Tests.PlayMode
                 mark_done()
             ";
 
-            LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, budgetPerResume: 5000);
+            LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, 5000);
             _runner.Register(handle);
 
             // Первый кадр: скрипт ставит TimeScale = 0 и yield
             yield return null;
-            
+
             Assert.AreEqual(0f, Time.timeScale, "Lua script should have set timeScale to 0");
 
             // Второй кадр: скрипт получает unscaled_delta и yield с ним
             yield return null;
-            
-            Assert.IsTrue(handle.LastResult.Number > 0, "Unscaled delta should be greater than 0 even when timeScale is 0");
+
+            Assert.IsTrue(handle.LastResult.Number > 0,
+                "Unscaled delta should be greater than 0 even when timeScale is 0");
 
             // Третий кадр: завершается
             yield return null;

@@ -26,19 +26,19 @@ namespace CoreAI.Tests.EditMode
         {
             // Модель каждый раз вызывает тулзу "my_tool", тулза всегда возвращает failure
             int callCount = 0;
-            var fakeInner = new ScriptedChatClient(iteration =>
+            ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
                 return MakeToolCallResponse("my_tool", "call_" + callCount);
             });
 
-            var failTool = MakeAIFunction("my_tool", _ =>
+            MEAI.AIFunction failTool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":false,\"Error\":\"boom\"}"));
 
-            var client = new SmartToolCallingChatClient(fakeInner, new NullLogger(),
-                maxConsecutiveErrors: 3);
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { failTool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
             client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Wait();
 
             // Модель должна быть вызвана ровно 3 раза: ошибка 1, 2, 3 → break
@@ -55,16 +55,16 @@ namespace CoreAI.Tests.EditMode
         {
             int callCount = 0;
             // Последовательность: fail, fail, success, fail, fail, fail → stop
-            var sequence = new[] { false, false, true, false, false, false };
+            bool[] sequence = new[] { false, false, true, false, false, false };
 
-            var fakeInner = new ScriptedChatClient(iteration =>
+            ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
                 return MakeToolCallResponse("my_tool", "call_" + callCount);
             });
 
             int toolInvocation = 0;
-            var tool = MakeAIFunction("my_tool", _ =>
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
             {
                 bool success = sequence[toolInvocation];
                 toolInvocation++;
@@ -74,10 +74,10 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>(json);
             });
 
-            var client = new SmartToolCallingChatClient(fakeInner, new NullLogger(),
-                maxConsecutiveErrors: 3);
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { tool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Wait();
 
             // 2 ошибки (consecutiveErrors 1,2) + 1 успех (reset→0) + 3 ошибки (1,2,3→break) = 6
@@ -93,19 +93,22 @@ namespace CoreAI.Tests.EditMode
         {
             int callCount = 0;
             // fail, fail, success, fail, fail, text (модель отвечает текстом)
-            var sequence = new[] { false, false, true, false, false };
+            bool[] sequence = new[] { false, false, true, false, false };
 
-            var fakeInner = new ScriptedChatClient(iteration =>
+            ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
                 // После 5 тулзовых вызовов модель отвечает текстом
                 if (callCount > sequence.Length)
+                {
                     return MakeTextResponse("Done");
+                }
+
                 return MakeToolCallResponse("my_tool", "call_" + callCount);
             });
 
             int toolInvocation = 0;
-            var tool = MakeAIFunction("my_tool", _ =>
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
             {
                 bool success = sequence[toolInvocation];
                 toolInvocation++;
@@ -115,16 +118,16 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>(json);
             });
 
-            var client = new SmartToolCallingChatClient(fakeInner, new NullLogger(),
-                maxConsecutiveErrors: 3);
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { tool } };
-            var response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            MEAI.ChatResponse response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
 
             // 5 тулзовых итераций + 1 текстовый ответ = 6 вызовов innerClient
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 5 tool calls + 1 text response");
             // Последний ответ должен быть текстовым "Done", а не аварийный break
-            var lastText = response.Messages?.LastOrDefault()?.Text;
+            string lastText = response.Messages?.LastOrDefault()?.Text;
             Assert.IsTrue(lastText?.Contains("Done") == true, "Agent should have finished normally with text response");
         }
 
@@ -135,25 +138,28 @@ namespace CoreAI.Tests.EditMode
         public void AllSuccess_CompletesNormally()
         {
             int callCount = 0;
-            var fakeInner = new ScriptedChatClient(iteration =>
+            ScriptedChatClient fakeInner = new(iteration =>
             {
                 callCount++;
                 if (callCount <= 3)
+                {
                     return MakeToolCallResponse("my_tool", "call_" + callCount);
+                }
+
                 return MakeTextResponse("All done");
             });
 
-            var successTool = MakeAIFunction("my_tool", _ =>
+            MEAI.AIFunction successTool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
 
-            var client = new SmartToolCallingChatClient(fakeInner, new NullLogger(),
-                maxConsecutiveErrors: 3);
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { successTool } };
-            var response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { successTool } };
+            MEAI.ChatResponse response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
 
             Assert.AreEqual(4, callCount, "3 tool calls + 1 text response = 4 iterations");
-            var lastText = response.Messages?.LastOrDefault()?.Text;
+            string lastText = response.Messages?.LastOrDefault()?.Text;
             Assert.IsTrue(lastText?.Contains("All done") == true, "Should complete normally");
         }
 
@@ -164,8 +170,8 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName, string callId)
         {
-            var fc = new MEAI.FunctionCallContent(callId, toolName, new Dictionary<string, object>());
-            var msg = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc });
+            MEAI.FunctionCallContent fc = new(callId, toolName, new Dictionary<string, object>());
+            MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc });
             return new MEAI.ChatResponse(msg);
         }
 
@@ -174,18 +180,19 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         private static MEAI.ChatResponse MakeTextResponse(string text)
         {
-            var msg = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text);
+            MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, text);
             return new MEAI.ChatResponse(msg);
         }
 
         /// <summary>
         /// Создаёт простую AIFunction с заданной логикой.
         /// </summary>
-        private static MEAI.AIFunction MakeAIFunction(string name, Func<IEnumerable<KeyValuePair<string, object>>, Task<object>> handler)
+        private static MEAI.AIFunction MakeAIFunction(string name,
+            Func<IEnumerable<KeyValuePair<string, object>>, Task<object>> handler)
         {
             Func<CancellationToken, Task<string>> func = async (CancellationToken ct) =>
             {
-                var result = await handler(null);
+                object result = await handler(null);
                 return result?.ToString() ?? "";
             };
             return MEAI.AIFunctionFactory.Create(func,
@@ -223,8 +230,14 @@ namespace CoreAI.Tests.EditMode
                 throw new NotSupportedException();
             }
 
-            public object GetService(Type serviceType, object serviceKey = null) => null;
-            public void Dispose() { }
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
 
         /// <summary>
@@ -232,10 +245,21 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         private sealed class NullLogger : IGameLogger
         {
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
         }
 
         #endregion

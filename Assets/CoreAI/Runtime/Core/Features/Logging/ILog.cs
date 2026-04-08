@@ -33,10 +33,21 @@ namespace CoreAI.Logging
     {
         public static readonly NullLog Instance = new();
 
-        public void Debug(string message, string tag = null) { }
-        public void Info(string message, string tag = null) { }
-        public void Warn(string message, string tag = null) { }
-        public void Error(string message, string tag = null) { }
+        public void Debug(string message, string tag = null)
+        {
+        }
+
+        public void Info(string message, string tag = null)
+        {
+        }
+
+        public void Warn(string message, string tag = null)
+        {
+        }
+
+        public void Error(string message, string tag = null)
+        {
+        }
     }
 
     /// <summary>

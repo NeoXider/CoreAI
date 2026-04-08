@@ -47,7 +47,7 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public IEnumerator Initialize()
         {
-            var settings = CoreAISettingsAsset.Instance;
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
                 Debug.LogWarning("[TestAgentSetup] CoreAISettingsAsset not found in Resources");
@@ -96,7 +96,7 @@ namespace CoreAI.Tests.PlayMode
             yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
 
             // Пересоздаём клиент с нашим MemoryStore чтобы tool calls писали в правильный store
-            var llmUnityClient = _handle.Client as MeaiLlmUnityClient;
+            MeaiLlmUnityClient llmUnityClient = _handle.Client as MeaiLlmUnityClient;
             if (llmUnityClient != null)
             {
                 Client = new MeaiLlmClient(
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
 
                 // Пересоздаём клиент с нашим MemoryStore
-                var llmUnityClient = _handle.Client as MeaiLlmUnityClient;
+                MeaiLlmUnityClient llmUnityClient = _handle.Client as MeaiLlmUnityClient;
                 if (llmUnityClient != null)
                 {
                     Client = new MeaiLlmClient(
@@ -184,7 +184,7 @@ namespace CoreAI.Tests.PlayMode
         private void InitializeOffline()
         {
             Debug.Log("[TestAgentSetup] Using Offline (stub) client");
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureOffline();
             Client = new OfflineLlmClient(settings);
             BackendName = "Offline";
@@ -193,8 +193,8 @@ namespace CoreAI.Tests.PlayMode
 
         private void CreateOrchestrator()
         {
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
@@ -223,7 +223,7 @@ namespace CoreAI.Tests.PlayMode
             // потому что они появляются ТОЛЬКО при недоступном хосте.
             // При успешном подключении эти логи не генерируются,
             // и LogAssert.Expect вызовет "Expected log did not appear" ошибку.
-            
+
             // Если нужно проверить обработку ошибок - используйте отдельные тесты
             // с недоступным хостом (как в EditMode тестах).
         }
@@ -245,22 +245,47 @@ namespace CoreAI.Tests.PlayMode
         public sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void AppendChatMessage(string roleId, string role, string content) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         public sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class NullSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command) { }
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
         }
 
         /// <summary>

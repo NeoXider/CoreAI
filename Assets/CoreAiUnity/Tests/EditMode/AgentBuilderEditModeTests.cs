@@ -17,14 +17,14 @@ namespace CoreAI.Tests.EditMode
         [SetUp]
         public void SetUp()
         {
-            _savedUniversalPrefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
-            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
+            _savedUniversalPrefix = CoreAISettings.UniversalSystemPromptPrefix;
+            CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
         }
 
         [TearDown]
         public void TearDown()
         {
-            CoreAI.CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
+            CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
         }
 
         [Test]

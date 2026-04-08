@@ -18,8 +18,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Debug_DelegatesToGameLogger_LogDebug()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Debug("test message", LogTag.Core);
 
@@ -32,8 +32,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Info_DelegatesToGameLogger_LogInfo()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("info message", LogTag.Llm);
 
@@ -46,8 +46,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Warn_DelegatesToGameLogger_LogWarning()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Warn("warn message", LogTag.Metrics);
 
@@ -59,8 +59,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Error_DelegatesToGameLogger_LogError()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Error("error message", LogTag.Core);
 
@@ -75,8 +75,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void NullTag_MapsToCore()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Debug("msg", null);
 
@@ -86,8 +86,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void EmptyTag_MapsToCore()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Debug("msg", "");
 
@@ -97,8 +97,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void UnknownTag_MapsToCore()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Debug("msg", "SomeUnknownTag");
 
@@ -108,8 +108,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LlmTag_MapsToLlm()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.Llm);
 
@@ -119,8 +119,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MemoryTag_MapsToLlm()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.Memory);
 
@@ -130,8 +130,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CompositionTag_MapsToComposition()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.Composition);
 
@@ -141,8 +141,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LuaTag_MapsToMessagePipe()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.Lua);
 
@@ -152,8 +152,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MessagePipeTag_MapsToMessagePipe()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.MessagePipe);
 
@@ -163,8 +163,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MetricsTag_MapsToMetrics()
         {
-            var logger = new CapturingGameLogger();
-            var unityLog = new UnityLog(logger);
+            CapturingGameLogger logger = new();
+            UnityLog unityLog = new(logger);
 
             unityLog.Info("msg", LogTag.Metrics);
 
@@ -187,16 +187,24 @@ namespace CoreAI.Tests.EditMode
             public readonly List<LogEntry> Messages = new();
 
             public void LogDebug(GameLogFeature feature, string message, Object context = null)
-                => Messages.Add(new LogEntry { Level = "Debug", Feature = feature, Message = message });
+            {
+                Messages.Add(new LogEntry { Level = "Debug", Feature = feature, Message = message });
+            }
 
             public void LogInfo(GameLogFeature feature, string message, Object context = null)
-                => Messages.Add(new LogEntry { Level = "Info", Feature = feature, Message = message });
+            {
+                Messages.Add(new LogEntry { Level = "Info", Feature = feature, Message = message });
+            }
 
             public void LogWarning(GameLogFeature feature, string message, Object context = null)
-                => Messages.Add(new LogEntry { Level = "Warning", Feature = feature, Message = message });
+            {
+                Messages.Add(new LogEntry { Level = "Warning", Feature = feature, Message = message });
+            }
 
             public void LogError(GameLogFeature feature, string message, Object context = null)
-                => Messages.Add(new LogEntry { Level = "Error", Feature = feature, Message = message });
+            {
+                Messages.Add(new LogEntry { Level = "Error", Feature = feature, Message = message });
+            }
         }
 
         #endregion

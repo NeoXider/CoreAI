@@ -11,6 +11,7 @@ namespace CoreAI.Tests.PlayMode
     {
         /// <summary>Бэкап URL — НЕ используется по умолчанию. Только через env var.</summary>
         public const string FallbackLmStudioBaseUrl = "http://192.168.56.1:1234/v1";
+
         /// <summary>Бэкап модель — НЕ используется по умолчанию. Только через env var.</summary>
         public const string FallbackLmStudioModelId = "qwen3.5-35b-a3b-uncensored-hauhaucs-aggressive@iq4_xs";
 

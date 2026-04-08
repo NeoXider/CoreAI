@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -42,7 +43,8 @@ namespace CoreAI.Infrastructure.Llm
             _memoryStore = memoryStore;
         }
 
-        private MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, IOpenAiHttpSettings settings, IAgentMemoryStore? memoryStore = null)
+        private MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, IOpenAiHttpSettings settings,
+            IAgentMemoryStore? memoryStore = null)
             : this(innerClient, logger, memoryStore)
         {
             _settings = settings;
@@ -56,9 +58,17 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
-            var innerClient = new MeaiOpenAiChatClient(settings, logger);
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
+            MeaiOpenAiChatClient innerClient = new(settings, logger);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
         }
 
@@ -70,9 +80,17 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
-            var adapter = new HttpSettingsAdapter(settings);
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
+            HttpSettingsAdapter adapter = new(settings);
             return CreateHttp(adapter, logger, memoryStore);
         }
 
@@ -84,34 +102,45 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (unityAgent == null) throw new ArgumentNullException(nameof(unityAgent));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
-            var innerClient = new LlmUnityMeaiChatClient(unityAgent, logger);
+            if (unityAgent == null)
+            {
+                throw new ArgumentNullException(nameof(unityAgent));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
+            LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
             return new MeaiLlmClient(innerClient, logger, memoryStore);
         }
 
         /// <inheritdoc />
-        public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+        }
 
         /// <inheritdoc />
         public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
             _currentRoleId = request.AgentRoleId ?? "Unknown";
-            var aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
+            List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
 
             if (CoreAISettings.LogMeaiToolCallingSteps)
             {
-                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={CoreAISettings.MaxToolCallRetries}");
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={CoreAISettings.MaxToolCallRetries}");
             }
 
-            var functionClient = new SmartToolCallingChatClient(_innerClient, _logger, CoreAISettings.MaxToolCallRetries);
+            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, CoreAISettings.MaxToolCallRetries);
 
-            var chatMessages = new List<MEAI.ChatMessage>
+            List<MEAI.ChatMessage> chatMessages = new()
             {
-                new(MEAI.ChatRole.System, request.SystemPrompt ?? "")
+                new MEAI.ChatMessage(MEAI.ChatRole.System, request.SystemPrompt ?? "")
             };
-            
+
             if (request.ChatHistory != null && request.ChatHistory.Count > 0)
             {
                 chatMessages.AddRange(request.ChatHistory);
@@ -131,25 +160,30 @@ namespace CoreAI.Infrastructure.Llm
 
             if (aiTools.Count > 0)
             {
-                foreach (var tool in aiTools)
+                foreach (MEAI.AIFunction tool in aiTools)
                 {
                     _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Tool: {tool.Name}");
                 }
             }
 
-            var chatOptions = new MEAI.ChatOptions
+            MEAI.ChatOptions chatOptions = new()
             {
                 Temperature = request.Temperature,
                 MaxOutputTokens = request.MaxOutputTokens
             };
-            if (aiTools.Count > 0) chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
+            if (aiTools.Count > 0)
+            {
+                chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
+            }
 
             MEAI.ChatResponse response;
             try
             {
-                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Calling GetResponseAsync with {chatMessages.Count} messages, {aiTools.Count} tools");
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiLlmClient: Calling GetResponseAsync with {chatMessages.Count} messages, {aiTools.Count} tools");
                 response = await functionClient.GetResponseAsync(chatMessages, chatOptions, cancellationToken);
-                _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }
             catch (Exception ex)
             {
@@ -160,13 +194,14 @@ namespace CoreAI.Infrastructure.Llm
             // Логируем все сообщения в ответе для отладки tool calling
             if (response.Messages != null)
             {
-                foreach (var msg in response.Messages)
+                foreach (MEAI.ChatMessage msg in response.Messages)
                 {
-                    var role = msg.Role.ToString();
-                    var content = msg.Contents != null
+                    string role = msg.Role.ToString();
+                    string content = msg.Contents != null
                         ? string.Join(" | ", msg.Contents.Select(c => c.ToString()))
                         : "(empty)";
-                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Response message role={role}, content={content.Substring(0, System.Math.Min(200, content.Length))}...");
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiLlmClient: Response message role={role}, content={content.Substring(0, Math.Min(200, content.Length))}...");
                 }
             }
 
@@ -176,30 +211,37 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Final response: {response.Text}");
                 if (response.Usage != null)
                 {
-                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Tokens - Input: {response.Usage.InputTokenCount}, Output: {response.Usage.OutputTokenCount}, Total: {response.Usage.TotalTokenCount}");
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiLlmClient: Tokens - Input: {response.Usage.InputTokenCount}, Output: {response.Usage.OutputTokenCount}, Total: {response.Usage.TotalTokenCount}");
                 }
             }
 
             string text = response.Text;
             if (string.IsNullOrEmpty(text))
+            {
                 return new LlmCompletionResult { Ok = false, Error = "Empty response from LLM" };
+            }
 
-            var result = new LlmCompletionResult { Ok = true, Content = text };
+            LlmCompletionResult result = new() { Ok = true, Content = text };
             if (response.Usage != null)
             {
                 result.PromptTokens = (int)(response.Usage.InputTokenCount ?? 0);
                 result.CompletionTokens = (int)(response.Usage.OutputTokenCount ?? 0);
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
             }
+
             return result;
         }
 
         private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)
         {
-            var result = new List<MEAI.AIFunction>();
-            if (tools == null) return result;
+            List<MEAI.AIFunction> result = new();
+            if (tools == null)
+            {
+                return result;
+            }
 
-            foreach (var tool in tools)
+            foreach (ILlmTool tool in tools)
             {
                 try
                 {
@@ -208,9 +250,10 @@ namespace CoreAI.Infrastructure.Llm
                         case MemoryLlmTool:
                             if (_memoryStore != null)
                             {
-                                var mt = new MemoryTool(_memoryStore, roleId);
+                                MemoryTool mt = new(_memoryStore, roleId);
                                 result.Add(mt.CreateAIFunction());
                             }
+
                             break;
                         case LuaLlmTool lt:
                             result.Add(lt.CreateAIFunction());
@@ -225,12 +268,16 @@ namespace CoreAI.Infrastructure.Llm
                             result.Add(wt.CreateAIFunction());
                             break;
                         default:
-                            var m = tool.GetType().GetMethod("CreateAIFunction");
+                            MethodInfo m = tool.GetType().GetMethod("CreateAIFunction");
                             if (m != null)
                             {
-                                var f = m.Invoke(tool, null) as MEAI.AIFunction;
-                                if (f != null) result.Add(f);
+                                MEAI.AIFunction f = m.Invoke(tool, null) as MEAI.AIFunction;
+                                if (f != null)
+                                {
+                                    result.Add(f);
+                                }
                             }
+
                             break;
                     }
                 }
@@ -239,13 +286,19 @@ namespace CoreAI.Infrastructure.Llm
                     _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: Tool '{tool.Name}' failed: {ex.Message}");
                 }
             }
+
             return result;
         }
 
         private sealed class HttpSettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
-            public HttpSettingsAdapter(CoreAISettingsAsset s) => _s = s;
+
+            public HttpSettingsAdapter(CoreAISettingsAsset s)
+            {
+                _s = s;
+            }
+
             public string ApiBaseUrl => _s.ApiBaseUrl;
             public string ApiKey => _s.ApiKey;
             public string Model => _s.ModelName;

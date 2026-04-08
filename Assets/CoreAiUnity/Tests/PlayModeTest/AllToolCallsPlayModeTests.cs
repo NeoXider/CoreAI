@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -96,6 +97,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
@@ -105,21 +107,24 @@ namespace CoreAI.Tests.PlayMode
                 ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
 
                 // Получаем LLMAgent и LLM для keepModelLoaded (только для LLMUnity)
-                var llmUnityClient = handle.Client as MeaiLlmUnityClient;
-                var agent = llmUnityClient?.UnityAgent;
-                var llm = agent?.llm ?? agent?.GetComponent<LLM>();
+                MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
+                LLMAgent agent = llmUnityClient?.UnityAgent;
+                LLM llm = agent?.llm ?? agent?.GetComponent<LLM>();
                 if (llm != null)
                 {
                     try
                     {
-                        var keepProp = llm.GetType().GetProperty("keepModelLoaded");
+                        PropertyInfo keepProp = llm.GetType().GetProperty("keepModelLoaded");
                         if (keepProp != null)
                         {
                             keepProp.SetValue(llm, true);
                             Debug.Log("[AllToolCalls] keepModelLoaded = true (server stays running)");
                         }
                     }
-                    catch { Debug.Log("[AllToolCalls] keepModelLoaded property not found"); }
+                    catch
+                    {
+                        Debug.Log("[AllToolCalls] keepModelLoaded property not found");
+                    }
                 }
 
                 SessionTelemetryCollector telemetry = new();
@@ -167,6 +172,7 @@ namespace CoreAI.Tests.PlayMode
                     {
                         Debug.Log(capturingLlm.LastContent);
                     }
+
                     Debug.Log($"[AllToolCalls] ─────────────────────────────────────────");
 
                     // СТРОГАЯ проверка: память должна быть сохранена РЕАЛЬНЫМ tool call'ом
@@ -176,7 +182,7 @@ namespace CoreAI.Tests.PlayMode
                     if (!memorySaved)
                     {
                         Debug.LogError($"[AllToolCalls] ❌ WRITE FAILED: Memory NOT saved by tool call. " +
-                            $"Model responded with text instead of calling the memory tool.");
+                                       $"Model responded with text instead of calling the memory tool.");
                     }
                     else
                     {
@@ -219,15 +225,18 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
 
                     // СТРОГАЯ проверка: память должна содержать ОБА элемента
-                    bool memoryAppended = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
-                                          state2.Memory.Contains("Iron Sword") &&
-                                          state2.Memory.Contains("Steel Shield");
+                    bool memoryAppended =
+                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
+                        state2.Memory.Contains("Iron Sword") &&
+                        state2.Memory.Contains("Steel Shield");
 
                     if (!memoryAppended)
                     {
-                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var s) ? s.Memory : "(none)";
+                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState s)
+                            ? s.Memory
+                            : "(none)";
                         Debug.LogError($"[AllToolCalls] ❌ APPEND FAILED: Memory not appended by tool call. " +
-                            $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                                       $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
@@ -273,9 +282,11 @@ namespace CoreAI.Tests.PlayMode
 
                     if (!memoryCleared)
                     {
-                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out var s) ? s.Memory : "(none)";
+                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState s)
+                            ? s.Memory
+                            : "(none)";
                         Debug.LogError($"[AllToolCalls] ❌ CLEAR FAILED: Memory NOT cleared by tool call. " +
-                            $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                                       $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
@@ -321,6 +332,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
+
                 Debug.Log($"[AllToolCalls.ExecuteLua] Backend: {handle.ResolvedBackend}");
                 Debug.Log($"[AllToolCalls.ExecuteLua] Client: {handle.Client.GetType().Name}");
 
@@ -376,13 +388,13 @@ namespace CoreAI.Tests.PlayMode
                     if (sink.Items.Count == 0)
                     {
                         Debug.LogError($"[AllToolCalls] ❌ EXECUTE LUA FAILED: " +
-                            $"No commands produced. Model responded with text instead of calling execute_lua tool. " +
-                            $"Response: {capturingLlm.LastContent}");
+                                       $"No commands produced. Model responded with text instead of calling execute_lua tool. " +
+                                       $"Response: {capturingLlm.LastContent}");
                     }
                     else
                     {
                         Debug.Log($"[AllToolCalls] ✓ Lua executed, {sink.Items.Count} command(s) produced");
-                        foreach (var cmd in sink.Items)
+                        foreach (ApplyAiGameCommand cmd in sink.Items)
                         {
                             Debug.Log($"[AllToolCalls]   - Command: {cmd.CommandTypeId}");
                         }

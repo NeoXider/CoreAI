@@ -1,8 +1,11 @@
+using System;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using CoreAI.Composition;
 using VContainer;
 using CoreAI.Infrastructure.Llm;
+using Object = UnityEngine.Object;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -16,9 +19,9 @@ namespace CoreAI.Tests.EditMode
         public void Configure_ShouldSyncAssetToStaticSettings()
         {
             // 1. Arrange: создаём мок-настройки
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var type = typeof(CoreAISettingsAsset);
-            var bf = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            Type type = typeof(CoreAISettingsAsset);
+            BindingFlags bf = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
             type.GetField("maxLuaRepairRetries", bf).SetValue(settings, 99);
             type.GetField("maxToolCallRetries", bf).SetValue(settings, 77);
             type.GetField("enableMeaiDebugLogging", bf).SetValue(settings, true);
@@ -31,28 +34,32 @@ namespace CoreAI.Tests.EditMode
             type.GetField("logMeaiToolCallingSteps", bf).SetValue(settings, false);
 
             // 2. Arrange: создаём Scope
-            var go = new GameObject("TestScope");
-            var scope = go.AddComponent<CoreAILifetimeScope>();
-            typeof(CoreAILifetimeScope).GetField("coreAiSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(scope, settings);
+            GameObject go = new("TestScope");
+            CoreAILifetimeScope scope = go.AddComponent<CoreAILifetimeScope>();
+            typeof(CoreAILifetimeScope)
+                .GetField("coreAiSettings",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(scope, settings);
 
-            var builder = new ContainerBuilder();
-            var configureMethod = typeof(CoreAILifetimeScope).GetMethod("Configure", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
+            ContainerBuilder builder = new();
+            MethodInfo configureMethod = typeof(CoreAILifetimeScope).GetMethod("Configure",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
             // 3. Act: вызываем Configure
             configureMethod.Invoke(scope, new object[] { builder });
-            
+
             // 4. Assert: статическая структура должна обновиться
-            Assert.AreEqual(99, CoreAI.CoreAISettings.MaxLuaRepairRetries);
-            Assert.AreEqual(77, CoreAI.CoreAISettings.MaxToolCallRetries);
-            Assert.AreEqual(true, CoreAI.CoreAISettings.EnableMeaiDebugLogging);
-            Assert.AreEqual(12345, CoreAI.CoreAISettings.ContextWindowTokens);
-            Assert.AreEqual("TEST PREFIX", CoreAI.CoreAISettings.UniversalSystemPromptPrefix);
-            Assert.AreEqual(0.99f, CoreAI.CoreAISettings.Temperature);
-            Assert.AreEqual(false, CoreAI.CoreAISettings.LogToolCalls);
-            Assert.AreEqual(false, CoreAI.CoreAISettings.LogToolCallArguments);
-            Assert.AreEqual(false, CoreAI.CoreAISettings.LogToolCallResults);
-            Assert.AreEqual(false, CoreAI.CoreAISettings.LogMeaiToolCallingSteps);
-            
+            Assert.AreEqual(99, CoreAISettings.MaxLuaRepairRetries);
+            Assert.AreEqual(77, CoreAISettings.MaxToolCallRetries);
+            Assert.AreEqual(true, CoreAISettings.EnableMeaiDebugLogging);
+            Assert.AreEqual(12345, CoreAISettings.ContextWindowTokens);
+            Assert.AreEqual("TEST PREFIX", CoreAISettings.UniversalSystemPromptPrefix);
+            Assert.AreEqual(0.99f, CoreAISettings.Temperature);
+            Assert.AreEqual(false, CoreAISettings.LogToolCalls);
+            Assert.AreEqual(false, CoreAISettings.LogToolCallArguments);
+            Assert.AreEqual(false, CoreAISettings.LogToolCallResults);
+            Assert.AreEqual(false, CoreAISettings.LogMeaiToolCallingSteps);
+
             // Cleanup
             Object.DestroyImmediate(go);
             Object.DestroyImmediate(settings);

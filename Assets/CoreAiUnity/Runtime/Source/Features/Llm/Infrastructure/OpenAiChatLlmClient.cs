@@ -17,27 +17,50 @@ namespace CoreAI.Infrastructure.Llm
         private readonly MeaiLlmClient _client;
 
         public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings)
-            : this(settings, GameLoggerUnscopedFallback.Instance, null) { }
+            : this(settings, GameLoggerUnscopedFallback.Instance, null)
+        {
+        }
 
         public OpenAiChatLlmClient(CoreAISettingsAsset settings)
-            : this(new HttpSettingsAdapter(settings), GameLoggerUnscopedFallback.Instance, null) { }
+            : this(new HttpSettingsAdapter(settings), GameLoggerUnscopedFallback.Instance, null)
+        {
+        }
 
         public OpenAiChatLlmClient(IOpenAiHttpSettings settings, IGameLogger logger, IAgentMemoryStore? memoryStore)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
             _client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
         }
 
-        public void SetTools(IReadOnlyList<ILlmTool> tools) => _client.SetTools(tools);
+        public void SetTools(IReadOnlyList<ILlmTool> tools)
+        {
+            _client.SetTools(tools);
+        }
 
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
-            CancellationToken cancellationToken = default) => _client.CompleteAsync(request, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            return _client.CompleteAsync(request, cancellationToken);
+        }
 
         private sealed class HttpSettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
-            public HttpSettingsAdapter(CoreAISettingsAsset s) => _s = s;
+
+            public HttpSettingsAdapter(CoreAISettingsAsset s)
+            {
+                _s = s;
+            }
+
             public string ApiBaseUrl => _s.ApiBaseUrl;
             public string ApiKey => _s.ApiKey;
             public string Model => _s.ModelName;

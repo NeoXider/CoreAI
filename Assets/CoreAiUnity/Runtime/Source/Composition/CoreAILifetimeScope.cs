@@ -11,7 +11,6 @@ using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
-
 using LLMUnity;
 using UnityEngine;
 using VContainer;
@@ -66,7 +65,11 @@ namespace CoreAI.Composition
         {
             get
             {
-                if (coreAiSettings != null) return coreAiSettings;
+                if (coreAiSettings != null)
+                {
+                    return coreAiSettings;
+                }
+
                 coreAiSettings = CoreAISettingsAsset.Instance;
                 return coreAiSettings;
             }
@@ -83,23 +86,21 @@ namespace CoreAI.Composition
                 builder.RegisterInstance(settings);
 
                 // Синхронизируем статические CoreAISettings с asset
-                CoreAI.CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
-                CoreAI.CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
-                CoreAI.CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
-                CoreAI.CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;
-                CoreAI.CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
-                CoreAI.CoreAISettings.Temperature = settings.Temperature;
-                CoreAI.CoreAISettings.LogToolCalls = settings.LogToolCalls;
-                CoreAI.CoreAISettings.LogToolCallArguments = settings.LogToolCallArguments;
-                CoreAI.CoreAISettings.LogToolCallResults = settings.LogToolCallResults;
-                CoreAI.CoreAISettings.LogMeaiToolCallingSteps = settings.LogMeaiToolCallingSteps;
+                CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
+                CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
+                CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
+                CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;
+                CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
+                CoreAISettings.Temperature = settings.Temperature;
+                CoreAISettings.LogToolCalls = settings.LogToolCalls;
+                CoreAISettings.LogToolCallArguments = settings.LogToolCallArguments;
+                CoreAISettings.LogToolCallResults = settings.LogToolCallResults;
+                CoreAISettings.LogMeaiToolCallingSteps = settings.LogMeaiToolCallingSteps;
                 if (settings.RequestTimeoutSeconds > 0)
                 {
-                    CoreAI.CoreAISettings.LlmRequestTimeoutSeconds = settings.RequestTimeoutSeconds;
+                    CoreAISettings.LlmRequestTimeoutSeconds = settings.RequestTimeoutSeconds;
                 }
             }
-
-
 
 
             if (gameLogSettings != null)
@@ -125,12 +126,13 @@ namespace CoreAI.Composition
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
-            builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton, "CoreAI_LuaCoroutineRunner");
+            builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton,
+                "CoreAI_LuaCoroutineRunner");
 
             // LLM Client регистрация с поддержкой CoreAISettingsAsset
             LlmRoutingManifest routingManifest = llmRoutingManifest;
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
-            
+
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
@@ -139,7 +141,7 @@ namespace CoreAI.Composition
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
-            
+
             builder.Register<ILlmClient>(c =>
                 new LoggingLlmClientDecorator(
                     new RoutingLlmClient(c.Resolve<ILlmClientRegistry>()),
@@ -152,7 +154,7 @@ namespace CoreAI.Composition
             {
                 MaxConcurrent = maxConcurrent < 1 ? 1 : maxConcurrent
             });
-            
+
             bool logMetrics = settings != null ? settings.LogOrchestrationMetrics : false;
             if (logMetrics)
             {
@@ -246,13 +248,13 @@ namespace CoreAI.Composition
             if (httpFirst)
             {
                 // HTTP API → LLMUnity → Offline
-                var httpClient = TryResolveHttpApiClient(settings);
+                ILlmClient httpClient = TryResolveHttpApiClient(settings);
                 if (httpClient != null)
                 {
                     return httpClient;
                 }
 
-                var llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
+                ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
                 if (llmUnityClient != null)
                 {
                     return llmUnityClient;
@@ -263,13 +265,13 @@ namespace CoreAI.Composition
             else
             {
                 // LLMUnity → HTTP API → Offline (по умолчанию)
-                var llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
+                ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
                 if (llmUnityClient != null)
                 {
                     return llmUnityClient;
                 }
 
-                var httpClient2 = TryResolveHttpApiClient(settings);
+                ILlmClient httpClient2 = TryResolveHttpApiClient(settings);
                 if (httpClient2 != null)
                 {
                     return httpClient2;
@@ -285,10 +287,12 @@ namespace CoreAI.Composition
         /// </summary>
         private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings)
         {
-            if (settings != null && settings.UseHttpApi && !string.IsNullOrEmpty(settings.ApiBaseUrl) && !string.IsNullOrEmpty(settings.ModelName))
+            if (settings != null && settings.UseHttpApi && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
+                !string.IsNullOrEmpty(settings.ModelName))
             {
                 return new OpenAiChatLlmClient(settings);
             }
+
             return null;
         }
 
@@ -352,7 +356,7 @@ namespace CoreAI.Composition
             IGameLogger logger,
             IAgentMemoryStore memoryStore)
         {
-            var client = TryResolveLlmUnityClient(settings, logger, memoryStore);
+            ILlmClient client = TryResolveLlmUnityClient(settings, logger, memoryStore);
             return client ?? new StubLlmClient();
         }
     }

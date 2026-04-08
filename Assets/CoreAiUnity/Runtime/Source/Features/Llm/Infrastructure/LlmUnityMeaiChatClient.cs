@@ -35,38 +35,42 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
-            var msgs = new List<MEAI.ChatMessage>(chatMessages);
+            List<MEAI.ChatMessage> msgs = new(chatMessages);
             string userMessage = "";
-            foreach (var msg in msgs)
+            foreach (MEAI.ChatMessage msg in msgs)
             {
                 if (msg.Role == MEAI.ChatRole.User)
                 {
-                    foreach (var item in msg.Contents)
+                    foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.TextContent tc)
+                        {
                             userMessage += tc.Text + "\n";
+                        }
                     }
                 }
             }
 
             string result = await _unityAgent.Chat(userMessage.Trim(), addToHistory: false);
 
-            var responseContents = new List<MEAI.AIContent>();
-            var tools = options?.Tools?.ToList() ?? new List<MEAI.AITool>();
+            List<MEAI.AIContent> responseContents = new();
+            List<MEAI.AITool> tools = options?.Tools?.ToList() ?? new List<MEAI.AITool>();
 
             if (TryParseToolCallFromText(result, tools,
                     out List<MEAI.FunctionCallContent> toolCallContents, out string cleanedText))
             {
                 responseContents.AddRange(toolCallContents);
                 if (!string.IsNullOrEmpty(cleanedText))
+                {
                     responseContents.Add(new MEAI.TextContent(cleanedText));
+                }
             }
             else
             {
                 responseContents.Add(new MEAI.TextContent(result));
             }
 
-            var responseMsg = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, responseContents);
+            MEAI.ChatMessage responseMsg = new(MEAI.ChatRole.Assistant, responseContents);
             return new MEAI.ChatResponse(responseMsg)
             {
                 ModelId = options?.ModelId,
@@ -84,32 +88,36 @@ namespace CoreAI.Infrastructure.Llm
             cleanedText = text;
 
             if (string.IsNullOrEmpty(text) || availableTools == null || availableTools.Count == 0)
+            {
                 return false;
+            }
 
-            var jsonRegex = new Regex(
+            Regex jsonRegex = new(
                 @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
                 RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-            var match = jsonRegex.Match(text);
+            Match match = jsonRegex.Match(text);
             if (!match.Success)
+            {
                 return false;
+            }
 
             try
             {
                 string jsonStr = match.Groups[1].Success ? match.Groups[1].Value :
                     match.Groups[2].Success ? match.Groups[2].Value : "";
 
-                var json = JObject.Parse(jsonStr);
+                JObject json = JObject.Parse(jsonStr);
                 string functionName = null;
-                var argumentsDict = new Dictionary<string, object?>();
+                Dictionary<string, object> argumentsDict = new();
 
                 if (json["name"] != null && json["arguments"] != null)
                 {
                     functionName = json["name"]?.ToString()?.Trim();
-                    var argsObj = json["arguments"] as JObject;
+                    JObject argsObj = json["arguments"] as JObject;
                     if (argsObj != null)
                     {
-                        foreach (var prop in argsObj.Properties())
+                        foreach (JProperty prop in argsObj.Properties())
                         {
                             argumentsDict[prop.Name] = prop.Value?.Type == JTokenType.String
                                 ? prop.Value.ToString()
@@ -119,9 +127,11 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 if (functionName == null)
+                {
                     return false;
+                }
 
-                var functionCall = new MEAI.FunctionCallContent($"call_{functionName}_1", functionName, argumentsDict);
+                MEAI.FunctionCallContent functionCall = new($"call_{functionName}_1", functionName, argumentsDict);
                 toolCalls.Add(functionCall);
 
                 cleanedText = text.Substring(0, match.Index) + text.Substring(match.Index + match.Length);
@@ -141,15 +151,21 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            var response = await GetResponseAsync(chatMessages, options, cancellationToken);
-            foreach (var msg in response.Messages)
+            MEAI.ChatResponse response = await GetResponseAsync(chatMessages, options, cancellationToken);
+            foreach (MEAI.ChatMessage msg in response.Messages)
             {
                 yield return new MEAI.ChatResponseUpdate(msg.Role, msg.Text);
             }
         }
 
-        public object? GetService(Type serviceType, object? key) => null;
-        public void Dispose() { }
+        public object? GetService(Type serviceType, object? key)
+        {
+            return null;
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }
 #endif

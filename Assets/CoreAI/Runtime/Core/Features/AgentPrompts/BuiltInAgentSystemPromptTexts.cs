@@ -75,11 +75,12 @@ namespace CoreAI.Ai
         /// </summary>
         internal static string WithUniversalPrefix(string systemPrompt)
         {
-            string prefix = CoreAI.CoreAISettings.UniversalSystemPromptPrefix;
+            string prefix = CoreAISettings.UniversalSystemPromptPrefix;
             if (string.IsNullOrWhiteSpace(prefix))
             {
                 return systemPrompt;
             }
+
             return prefix.TrimEnd() + " " + systemPrompt;
         }
     }

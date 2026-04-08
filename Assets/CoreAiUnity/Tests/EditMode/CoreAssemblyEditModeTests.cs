@@ -80,11 +80,11 @@ namespace CoreAI.Tests.EditMode
         {
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(new LuaApiRegistry());
-            
-            var ex = Assert.Throws<ScriptRuntimeException>(() => 
+
+            ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
                 env.RunChunk(script, "while true do local x = 1 end")
             );
-            
+
             StringAssert.Contains("EXCEEDED_HARD_LIMIT_STEPS", ex.Message);
         }
     }

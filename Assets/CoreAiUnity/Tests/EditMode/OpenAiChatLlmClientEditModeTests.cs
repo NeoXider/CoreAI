@@ -17,10 +17,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Constructor_WithOpenAiHttpSettings_ShouldCreateClient()
         {
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType().GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            settings.GetType()
+                .GetField("useOpenAiCompatibleHttp",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
 
-            var client = new OpenAiChatLlmClient(settings);
+            OpenAiChatLlmClient client = new(settings);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -29,10 +32,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Constructor_WithCoreAiSettings_ShouldCreateClient()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test-model");
 
-            var client = new OpenAiChatLlmClient(settings);
+            OpenAiChatLlmClient client = new(settings);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -41,12 +44,20 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Constructor_WithFullParams_ShouldCreateClient()
         {
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType().GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
-            settings.GetType().GetField("apiBaseUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "http://localhost:1234/v1");
-            settings.GetType().GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "test-model");
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            settings.GetType()
+                .GetField("useOpenAiCompatibleHttp",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
+            settings.GetType()
+                .GetField("apiBaseUrl",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "http://localhost:1234/v1");
+            settings.GetType()
+                .GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "test-model");
 
-            var client = new OpenAiChatLlmClient(settings, GameLoggerUnscopedFallback.Instance, null);
+            OpenAiChatLlmClient client = new(settings, GameLoggerUnscopedFallback.Instance, null);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);
@@ -64,19 +75,32 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task CompleteAsync_WithoutRealBackend_ShouldReturnError()
         {
-            var settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType().GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, true);
-            settings.GetType().GetField("apiBaseUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "http://invalid-host-test:9999/v1");
-            settings.GetType().GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, "test");
-            settings.GetType().GetField("requestTimeoutSeconds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(settings, 5);
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            settings.GetType()
+                .GetField("useOpenAiCompatibleHttp",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
+            settings.GetType()
+                .GetField("apiBaseUrl",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "http://invalid-host-test:9999/v1");
+            settings.GetType()
+                .GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, "test");
+            settings.GetType().GetField("requestTimeoutSeconds",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, 5);
 
-            var client = new OpenAiChatLlmClient(settings);
+            OpenAiChatLlmClient client = new(settings);
 
             // Ожидаем ошибку подключения (Cannot resolve destination host или timeout)
-            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(".*\\[Llm\\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error).*"));
-            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(".*\\[Llm\\] MeaiLlmClient: HTTP error.*"));
+            LogAssert.Expect(LogType.Error,
+                new System.Text.RegularExpressions.Regex(
+                    ".*\\[Llm\\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error).*"));
+            LogAssert.Expect(LogType.Error,
+                new System.Text.RegularExpressions.Regex(".*\\[Llm\\] MeaiLlmClient: HTTP error.*"));
 
-            var result = await client.CompleteAsync(new LlmCompletionRequest
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Test",
                 SystemPrompt = "test",

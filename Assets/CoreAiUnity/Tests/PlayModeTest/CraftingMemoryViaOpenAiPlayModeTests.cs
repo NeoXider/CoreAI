@@ -47,7 +47,7 @@ namespace CoreAI.Tests.PlayMode
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return System.Array.Empty<CoreAI.Ai.ChatMessage>();
+                return System.Array.Empty<ChatMessage>();
             }
         }
 
@@ -116,7 +116,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -143,7 +144,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -170,7 +172,8 @@ namespace CoreAI.Tests.PlayMode
                     LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -198,7 +201,8 @@ namespace CoreAI.Tests.PlayMode
                         store);
 
                     ListSink sink = new();
-                    AiOrchestrator orch = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                    AiOrchestrator orch =
+                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
@@ -574,7 +578,7 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     internal static class CraftingMemoryItemNameExtractor
     {
-        private static readonly System.Text.RegularExpressions.Regex[] Patterns =
+        private static readonly Regex[] Patterns =
         {
             new("create_item\\s*\\(\\s*'([^']+)'"),
             new("create_item\\s*\\(\\s*\"([^\"]+)\""),

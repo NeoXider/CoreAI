@@ -17,12 +17,12 @@ namespace CoreAI.Infrastructure.World
 
         // Spawn
         public string prefabKeyOrName = "";
-        
+
         // Unified XYZ
         public float x;
         public float y;
         public float z;
-        
+
         // Force
         public float fx;
         public float fy;
