@@ -48,12 +48,12 @@ namespace CoreAI.Ai
 
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}");
+                Logging.Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}", LogTag.Lua);
             }
             if (CoreAISettings.LogToolCallArguments)
             {
                 var preview = code.Length > 150 ? code.Substring(0, 150) : code;
-                Logging.Log.Instance.Info($"  code preview: {preview}");
+                Logging.Log.Instance.Info($"  code preview: {preview}", LogTag.Lua);
             }
 
             try
@@ -63,7 +63,7 @@ namespace CoreAI.Ai
                 if (CoreAISettings.LogToolCallResults)
                 {
                     var outputPreview = result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
-                    Logging.Log.Instance.Info($"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}");
+                    Logging.Log.Instance.Info($"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}", LogTag.Lua);
                 }
                 
                 return result;
@@ -72,7 +72,7 @@ namespace CoreAI.Ai
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}");
+                    Logging.Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}", LogTag.Lua);
                 }
                 
                 return new LuaResult

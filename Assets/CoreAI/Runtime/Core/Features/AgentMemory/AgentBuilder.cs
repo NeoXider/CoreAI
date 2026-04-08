@@ -46,6 +46,7 @@ namespace CoreAI.Ai
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
         private float? _temperature;
+        private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
 
         public AgentBuilder(string roleId)
         {
@@ -126,6 +127,7 @@ namespace CoreAI.Ai
         public AgentBuilder WithMemory(MemoryToolAction defaultAction = MemoryToolAction.Append)
         {
             _tools.Add(new MemoryLlmTool());
+            _memoryDefaultAction = defaultAction;
             return this;
         }
 
@@ -173,7 +175,8 @@ namespace CoreAI.Ai
                 WithChatHistory = _withChatHistory,
                 ContextWindowTokens = ctxTokens,
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
-                Temperature = temp
+                Temperature = temp,
+                MemoryDefaultAction = _memoryDefaultAction
             };
         }
     }
@@ -191,6 +194,7 @@ namespace CoreAI.Ai
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
         public float Temperature { get; internal set; }
+        public MemoryToolAction MemoryDefaultAction { get; internal set; }
 
         /// <summary>
         /// Применить конфигурацию к политике.
@@ -198,27 +202,24 @@ namespace CoreAI.Ai
         public void ApplyToPolicy(AgentMemoryPolicy policy)
         {
             policy.SetToolsForRole(RoleId, Tools);
+            
+            // Настраиваем действие памяти по умолчанию
+            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction);
 
-            // Если нет инструментов, режим = ChatOnly
-            if (Tools.Count == 0)
+            // Если нет инструментов, отключаем MemoryTool
+            if (Tools.Count == 0 || !HasMemoryTool())
             {
                 policy.DisableMemoryTool(RoleId);
             }
         }
-    }
 
-    /// <summary>
-    /// Действия для MemoryTool.
-    /// </summary>
-    public enum MemoryToolAction
-    {
-        /// <summary>Полная замена памяти.</summary>
-        Write = 0,
-
-        /// <summary>Добавление к существующей памяти.</summary>
-        Append = 1,
-
-        /// <summary>Очистка памяти.</summary>
-        Clear = 2
+        private bool HasMemoryTool()
+        {
+            foreach (var tool in Tools)
+            {
+                if (tool is MemoryLlmTool) return true;
+            }
+            return false;
+        }
     }
 }

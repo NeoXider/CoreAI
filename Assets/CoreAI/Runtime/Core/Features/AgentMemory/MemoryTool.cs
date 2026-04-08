@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -41,12 +42,12 @@ namespace CoreAI.Ai
         {
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] memory: action={action}");
+                Logging.Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
             }
             if (CoreAISettings.LogToolCallArguments && content != null)
             {
                 var preview = content.Length > 200 ? content.Substring(0, 200) : content;
-                Logging.Log.Instance.Info($"  content: {preview}");
+                Logging.Log.Instance.Info($"  content: {preview}", LogTag.Memory);
             }
             if (string.IsNullOrEmpty(action))
             {
@@ -70,7 +71,7 @@ namespace CoreAI.Ai
                         
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}");
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}", LogTag.Memory);
                         }
                         
                         return SerializeResult(new MemoryResult
@@ -109,7 +110,7 @@ namespace CoreAI.Ai
                         
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}");
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}", LogTag.Memory);
                         }
                         
                         return SerializeResult(new MemoryResult
@@ -123,7 +124,7 @@ namespace CoreAI.Ai
                         
                         if (CoreAISettings.LogToolCallResults)
                         {
-                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}");
+                            Logging.Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}", LogTag.Memory);
                         }
                         
                         return SerializeResult(new MemoryResult
@@ -144,7 +145,7 @@ namespace CoreAI.Ai
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}");
+                    Logging.Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
                 }
                 return SerializeResult(new MemoryResult
                 {

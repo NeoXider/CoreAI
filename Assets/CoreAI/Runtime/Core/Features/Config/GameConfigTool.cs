@@ -56,11 +56,11 @@ namespace CoreAI.Config
 
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] game_config: action={action}");
+                Logging.Log.Instance.Info($"[Tool Call] game_config: action={action}", LogTag.Config);
             }
             if (CoreAISettings.LogToolCallArguments && !string.IsNullOrEmpty(content))
             {
-                Logging.Log.Instance.Info($"  content length={content.Length}");
+                Logging.Log.Instance.Info($"  content length={content.Length}", LogTag.Config);
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -87,7 +87,7 @@ namespace CoreAI.Config
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}");
+                    Logging.Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}", LogTag.Config);
                 }
 
                 return new GameConfigResult

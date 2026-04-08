@@ -1,12 +1,14 @@
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 
 namespace CoreAI.Unity.Logging
 {
     /// <summary>
-    /// Реализация ILog для Unity — делегирует к IGameLogger.
-    /// Используется для логирования tool call и других событий из CoreAI.Core.
+    /// Unity-реализация <see cref="ILog"/> — делегирует к <see cref="IGameLogger"/>.
+    /// Маппит строковые <see cref="LogTag"/> на <see cref="GameLogFeature"/> для фильтрации.
+    /// Устанавливается как <see cref="Log.Instance"/> при инициализации DI-контейнера.
     /// </summary>
-    public sealed class UnityLog : CoreAI.Logging.ILog
+    public sealed class UnityLog : ILog
     {
         private readonly IGameLogger _logger;
 
@@ -15,8 +17,40 @@ namespace CoreAI.Unity.Logging
             _logger = logger;
         }
 
-        public void Info(string message) => _logger.LogInfo(GameLogFeature.Llm, $"[CoreAI] {message}");
-        public void Warn(string message) => _logger.LogWarning(GameLogFeature.Llm, $"[CoreAI] {message}");
-        public void Error(string message) => _logger.LogError(GameLogFeature.Llm, $"[CoreAI] {message}");
+        public void Debug(string message, string tag = null)
+            => _logger.LogDebug(MapTag(tag), message);
+
+        public void Info(string message, string tag = null)
+            => _logger.LogInfo(MapTag(tag), message);
+
+        public void Warn(string message, string tag = null)
+            => _logger.LogWarning(MapTag(tag), message);
+
+        public void Error(string message, string tag = null)
+            => _logger.LogError(MapTag(tag), message);
+
+        /// <summary>
+        /// Маппинг строковых тегов <see cref="LogTag"/> → <see cref="GameLogFeature"/>.
+        /// Неизвестные теги → <see cref="GameLogFeature.Core"/>.
+        /// </summary>
+        private static GameLogFeature MapTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag))
+                return GameLogFeature.Core;
+
+            return tag switch
+            {
+                LogTag.Core        => GameLogFeature.Core,
+                LogTag.Composition => GameLogFeature.Composition,
+                LogTag.MessagePipe => GameLogFeature.MessagePipe,
+                LogTag.Llm         => GameLogFeature.Llm,
+                LogTag.Metrics     => GameLogFeature.Metrics,
+                LogTag.Lua         => GameLogFeature.MessagePipe, // Lua идёт через MessagePipe pipeline
+                LogTag.World       => GameLogFeature.Core,
+                LogTag.Memory      => GameLogFeature.Llm,         // Memory — часть LLM tool calling
+                LogTag.Config      => GameLogFeature.Core,
+                _                  => GameLogFeature.Core
+            };
+        }
     }
 }

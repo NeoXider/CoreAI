@@ -11,8 +11,7 @@ using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
-using CoreAI.Logging;
-using CoreAI.Unity.Logging;
+
 using LLMUnity;
 using UnityEngine;
 using VContainer;
@@ -119,12 +118,8 @@ namespace CoreAI.Composition
                 }
             }
 
-            // Устанавливаем логгер для CoreAI.Core (будет разрешён после построения контейнера)
-            builder.RegisterBuildCallback(resolver =>
-            {
-                var gameLogger = resolver.Resolve<IGameLogger>();
-                Log.Instance = new UnityLog(gameLogger);
-            });
+
+
 
             if (gameLogSettings != null)
             {

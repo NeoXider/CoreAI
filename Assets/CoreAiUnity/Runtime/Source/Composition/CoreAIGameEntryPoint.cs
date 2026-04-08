@@ -1,6 +1,6 @@
 using System;
 using CoreAI.Ai;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using VContainer.Unity;
 
 namespace CoreAI.Composition
@@ -10,11 +10,11 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAIGameEntryPoint : IStartable
     {
-        private readonly IGameLogger _logger;
+        private readonly ILog _logger;
         private readonly IAiOrchestrationService _orchestrator;
 
         /// <summary>DI: лог и оркестратор для опционального bootstrap-задачи.</summary>
-        public CoreAIGameEntryPoint(IGameLogger logger, IAiOrchestrationService orchestrator)
+        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -23,8 +23,9 @@ namespace CoreAI.Composition
         /// <summary>Вызывается VContainer после сборки контейнера; пишет в лог и запускает тестовую задачу Creator.</summary>
         public void Start()
         {
-            _logger.LogInfo(GameLogFeature.Composition,
-                "VContainer + MessagePipe (GlobalMessagePipe) + IGameLogger с фильтром по фичам готовы.");
+            _logger.Info(
+                "VContainer + MessagePipe (GlobalMessagePipe) + ILog с фильтром по тегам готовы.",
+                LogTag.Composition);
             FireBootstrapAiTask();
         }
 
@@ -40,7 +41,7 @@ namespace CoreAI.Composition
             }
             catch (Exception ex)
             {
-                _logger.LogError(GameLogFeature.Composition, $"Ai bootstrap: {ex.Message}");
+                _logger.Error($"Ai bootstrap: {ex.Message}", LogTag.Composition);
             }
         }
     }

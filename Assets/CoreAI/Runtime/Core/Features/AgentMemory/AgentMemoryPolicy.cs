@@ -47,14 +47,6 @@ namespace CoreAI.Ai
             }
         }
 
-        public enum MemoryToolAction
-        {
-            /// <summary>Перезаписать всю память.</summary>
-            Write,
-
-            /// <summary>Дополнить существующую память.</summary>
-            Append
-        }
 
         public AgentMemoryPolicy()
         {

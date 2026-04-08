@@ -2,6 +2,35 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.12.0] — 2026-04-08
+
+### Architecture
+- **Единый логгер `ILog`** — рефакторинг из «двух логгеров» в один
+  - `ILog` расширен: добавлены `Debug(msg, tag)`, `Info(msg, tag)`, `Warn(msg, tag)`, `Error(msg, tag)`
+  - `LogTag` constants — строковые теги подсистем (`Core`, `Llm`, `Lua`, `Memory`, `Config`, `World`, `Metrics`, `Composition`, `MessagePipe`)
+  - `Log.Instance` (статический) + DI-инъекция через VContainer — оба способа доступа работают
+  - `NullLog` — no-op реализация по умолчанию для тестов и до инициализации DI
+- **Унификация `MemoryToolAction`** — устранено дублирование enum
+  - `MemoryToolAction` вынесен в отдельный файл `MemoryToolAction.cs`
+  - Удалены дубликаты из `AgentBuilder.cs` и `AgentMemoryPolicy.cs`
+  - Исправлена работа `AgentBuilder.WithMemory(defaultAction)` — теперь настройка корректно применяется к агенту
+
+### Changed
+- **Все Tool-классы Core** мигрированы на `ILog` с тегами:
+  - `MemoryTool` → `LogTag.Memory`
+  - `LuaTool` → `LogTag.Lua`
+  - `GameConfigTool` → `LogTag.Config`
+  - `InventoryTool` → `LogTag.Llm`
+- `CoreAIGameEntryPoint` — мигрирован с `IGameLogger` на `ILog`
+- `CoreServicesInstaller` — регистрирует `ILog` (через `UnityLog`) + устанавливает `Log.Instance`
+- `GameLoggerUnscopedFallback` — автоматический fallback для `Log.Instance` до инициализации DI
+- Удалена ручная установка `Log.Instance` из `CoreAILifetimeScope` (перенесена в `CoreServicesInstaller`)
+
+### Unity Implementation
+- `UnityLog` — реализация `ILog`, маппит `LogTag` строки на `GameLogFeature` flags
+- `IGameLogger` сохранён как внутренний контракт Unity-слоя (для `FilteringGameLogger`, `GameLogSettingsAsset`)
+- Фильтрация по тегам через `GameLogSettingsAsset` в Inspector (как раньше)
+
 ## [v0.11.0] — 2026-04-07
 
 ### Added

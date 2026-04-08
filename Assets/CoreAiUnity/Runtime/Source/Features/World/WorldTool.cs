@@ -70,7 +70,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (CoreAISettings.LogToolCalls)
             {
-                CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: action={action}");
+                CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: action={action}", CoreAI.Logging.LogTag.World);
             }
             if (CoreAISettings.LogToolCallArguments)
             {
@@ -80,7 +80,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(prefabKey)) args.Append($" prefabKey={prefabKey}");
                 if (x != 0f || y != 0f || z != 0f) args.Append($" pos=({x},{y},{z})");
                 if (!string.IsNullOrEmpty(stringValue)) args.Append($" stringValue={stringValue}");
-                if (args.Length > 0) CoreAI.Logging.Log.Instance.Info($"  args:{args}");
+                if (args.Length > 0) CoreAI.Logging.Log.Instance.Info($"  args:{args}", CoreAI.Logging.LogTag.World);
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -120,7 +120,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
+                    CoreAI.Logging.Log.Instance.Info($"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}", CoreAI.Logging.LogTag.World);
                 }
 
                 return SerializeResult(success,
@@ -131,7 +131,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    CoreAI.Logging.Log.Instance.Error($"[Tool Call] world_command: FAILED - {ex.Message}");
+                    CoreAI.Logging.Log.Instance.Error($"[Tool Call] world_command: FAILED - {ex.Message}", CoreAI.Logging.LogTag.World);
                 }
                 
                 return SerializeResult(false, $"World command failed: {ex.Message}", action);

@@ -2,6 +2,25 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.12.0] - 2026-04-08
+
+### Unified Logger (`ILog`)
+
+- 🔧 **UnityLog** — реализация `ILog` из CoreAI.Core, маппит `LogTag` → `GameLogFeature`
+- 🔧 **CoreServicesInstaller** — регистрирует `ILog` (через `UnityLog`) как DI singleton + устанавливает `Log.Instance`
+- 🔧 **GameLoggerUnscopedFallback** — автоматический fallback `Log.Instance` до инициализации DI
+- 🔧 **CoreAIGameEntryPoint** — мигрирован с `IGameLogger` на `ILog`
+- 🔧 **WorldTool** — logging мигрирован на `ILog` с `LogTag.World`
+- ❌ Удалена ручная установка `Log.Instance` из `CoreAILifetimeScope`
+- 🔧 **Унификация `MemoryToolAction`** (через Core 0.12.0) — устранено дублирование enum, настройка в `AgentBuilder.WithMemory()` теперь корректно применяется в политике через `policy.ConfigureRole()`.
+- ℹ️ `IGameLogger` сохранён как внутренний интерфейс Unity-слоя (FilteringGameLogger, GameLogSettingsAsset — без изменений)
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.12.0**
+
+---
+
 ## [0.11.0] - 2026-04-07
 
 ### Universal System Prompt Prefix

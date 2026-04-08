@@ -33,7 +33,7 @@ namespace CoreAI.Ai
         {
             if (CoreAISettings.LogToolCalls)
             {
-                Logging.Log.Instance.Info($"[Tool Call] get_inventory: fetching items");
+                Logging.Log.Instance.Info($"[Tool Call] get_inventory: fetching items", LogTag.Llm);
             }
 
             try
@@ -42,7 +42,7 @@ namespace CoreAI.Ai
 
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items");
+                    Logging.Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items", LogTag.Llm);
                 }
 
                 return new InventoryResult
@@ -55,7 +55,7 @@ namespace CoreAI.Ai
             {
                 if (CoreAISettings.LogToolCallResults)
                 {
-                    Logging.Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}");
+                    Logging.Log.Instance.Error($"[Tool Call] get_inventory: FAILED - {ex.Message}", LogTag.Llm);
                 }
 
                 return new InventoryResult
