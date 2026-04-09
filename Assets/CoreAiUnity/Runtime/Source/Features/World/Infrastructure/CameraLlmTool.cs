@@ -19,6 +19,7 @@ namespace CoreAI.Infrastructure.World
     {
         public string Name => "camera_tool";
         public string Description => "Access scene cameras to take screenshots for visual analysis.";
+        public bool AllowDuplicates => false;
         public string ParametersSchema => "{}"; // managed by AIFunctionFactory
 
         public IEnumerable<AIFunction> CreateAIFunctions()

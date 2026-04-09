@@ -19,6 +19,7 @@ namespace CoreAI.Ai
     {
         public string Name => "scene_tool";
         public string Description => "Manipulate and inspect Unity GameObjects dynamically at runtime.";
+        public bool AllowDuplicates => false;
         public string ParametersSchema => "{}";
 
         public IEnumerable<AIFunction> CreateAIFunctions()

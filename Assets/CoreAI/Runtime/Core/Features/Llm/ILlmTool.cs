@@ -16,6 +16,9 @@ namespace CoreAI.Ai
 
         /// <summary>JSON schema параметров инструмента.</summary>
         string ParametersSchema { get; }
+
+        /// <summary>Разрешить модели вызывать этот инструмент с теми же параметрами несколько раз подряд.</summary>
+        bool AllowDuplicates { get; }
     }
 
     /// <summary>
@@ -26,6 +29,7 @@ namespace CoreAI.Ai
         public abstract string Name { get; }
         public abstract string Description { get; }
         public virtual string ParametersSchema => "{}";
+        public virtual bool AllowDuplicates => false;
 
         protected static string JsonParams(params (string name, string type, bool required, string desc)[] p)
         {

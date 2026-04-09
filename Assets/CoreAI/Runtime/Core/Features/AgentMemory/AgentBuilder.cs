@@ -46,6 +46,7 @@ namespace CoreAI.Ai
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
         private float? _temperature;
+        private bool? _allowDuplicateToolCalls;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
 
         public AgentBuilder(string roleId)
@@ -176,6 +177,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Разрешить/запретить этому агенту вызывать одни и те же инструменты с одинаковыми аргументами подряд.
+        /// Переопределяет глобальную настройку CoreAISettings.AllowDuplicateToolCalls.
+        /// </summary>
+        public AgentBuilder WithAllowDuplicateToolCalls(bool allow)
+        {
+            _allowDuplicateToolCalls = allow;
+            return this;
+        }
+
+        /// <summary>
         /// Сконфигурировать агента в политике.
         /// </summary>
         public AgentConfig Build()
@@ -204,6 +215,7 @@ namespace CoreAI.Ai
                 ContextWindowTokens = ctxTokens,
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
                 Temperature = temp,
+                AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 MemoryDefaultAction = _memoryDefaultAction
             };
         }
@@ -222,6 +234,7 @@ namespace CoreAI.Ai
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
         public float Temperature { get; internal set; }
+        public bool? AllowDuplicateToolCalls { get; internal set; }
         public MemoryToolAction MemoryDefaultAction { get; internal set; }
 
         /// <summary>
@@ -231,8 +244,8 @@ namespace CoreAI.Ai
         {
             policy.SetToolsForRole(RoleId, Tools);
 
-            // Настраиваем действие памяти по умолчанию
-            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction);
+            // Настраиваем действие памяти по умолчанию и дубликаты
+            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction, allowDuplicateToolCalls: AllowDuplicateToolCalls);
 
             // Если нет инструментов, отключаем MemoryTool
             if (Tools.Count == 0 || !HasMemoryTool())

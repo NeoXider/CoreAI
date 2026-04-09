@@ -36,6 +36,9 @@ namespace CoreAI.Ai
 
         /// <summary>Инструменты (tools), доступные модели для вызова.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }
+
+        /// <summary>Разрешить/запретить вызов одного и того же инструмента подряд (null = перекладывается на глобальные настройки).</summary>
+        public bool? AllowDuplicateToolCalls { get; set; }
     }
 
     /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>

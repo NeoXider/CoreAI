@@ -37,10 +37,10 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                3);
+                true, new List<CoreAI.Ai.ILlmTool>(), 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
-            client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Wait();
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
             // Модель должна быть вызвана ровно 3 раза: ошибка 1, 2, 3 → break
             Assert.AreEqual(3, callCount, "Agent must stop after 3 consecutive errors");
@@ -77,10 +77,10 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                3);
+                true, new List<CoreAI.Ai.ILlmTool>(), 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Wait();
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
             // 2 ошибки (consecutiveErrors 1,2) + 1 успех (reset→0) + 3 ошибки (1,2,3→break) = 6
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 2 fail + 1 success (reset) + 3 fail (stop)");
@@ -122,10 +122,10 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                3);
+                true, new List<CoreAI.Ai.ILlmTool>(), 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
-            MEAI.ChatResponse response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
+            MEAI.ChatResponse response = Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
             // 5 тулзовых итераций + 1 текстовый ответ = 6 вызовов innerClient
             Assert.AreEqual(6, callCount, "Expected 6 iterations: 5 tool calls + 1 text response");
@@ -157,10 +157,10 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                3);
+                true, new List<CoreAI.Ai.ILlmTool>(), 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { successTool } };
-            MEAI.ChatResponse response = client.GetResponseAsync(new List<MEAI.ChatMessage>(), options).Result;
+            MEAI.ChatResponse response = Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
             Assert.AreEqual(4, callCount, "3 tool calls + 1 text response = 4 iterations");
             string lastText = response.Messages?.LastOrDefault()?.Text;

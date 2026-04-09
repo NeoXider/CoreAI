@@ -26,6 +26,9 @@ namespace CoreAI.Ai
         public string Name => "execute_lua";
 
         /// <inheritdoc />
+        public bool AllowDuplicates => true;
+
+        /// <inheritdoc />
         public string Description =>
             "Execute Lua code to perform game actions, create items, modify state, report events. " +
             "Use functions like create_item(), report(), add(), etc. available in the Lua environment.";

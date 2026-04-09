@@ -60,7 +60,8 @@ namespace CoreAI.Ai
             {
                 RoleId = config.RoleId,
                 Hint = message,
-                Priority = priority
+                Priority = priority,
+                CancellationScope = config.RoleId // Автоматически отменяет предыдущий вызов этого же агента, если он ещё генерируется
             }, cancellationToken);
         }
 

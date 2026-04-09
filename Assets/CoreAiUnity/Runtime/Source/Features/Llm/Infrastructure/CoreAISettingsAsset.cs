@@ -162,6 +162,10 @@ namespace CoreAI.Infrastructure.Llm
         [Min(1)]
         private int maxToolCallRetries = 3;
 
+        [Tooltip("Если включено, агент сможет вызывать один инструмент с теми же аргументами дважды за одну сессию. Это полезно, если нужно несколько раз повторить одно действие.")]
+        [SerializeField]
+        private bool allowDuplicateToolCalls = false;
+
         [Tooltip("Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.")]
         [SerializeField]
         [Min(1)]
@@ -366,6 +370,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Максимум подряд неудачных too call до прерывания агента.</summary>
         public int MaxToolCallRetries => maxToolCallRetries < 1 ? 3 : maxToolCallRetries;
 
+        /// <summary>Разрешить повторный вызов инструмента.</summary>
+        public bool AllowDuplicateToolCalls => allowDuplicateToolCalls;
+
         /// <summary>Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.</summary>
         public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 2 : maxLlmRequestRetries;
 
@@ -499,6 +506,7 @@ namespace CoreAI.Infrastructure.Llm
             CoreAISettings.LogToolCallArguments = LogToolCallArguments;
             CoreAISettings.LogToolCallResults = LogToolCallResults;
             CoreAISettings.LogMeaiToolCallingSteps = LogMeaiToolCallingSteps;
+            CoreAISettings.AllowDuplicateToolCalls = AllowDuplicateToolCalls;
         }
 
         #endregion

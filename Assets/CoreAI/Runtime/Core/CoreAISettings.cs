@@ -117,5 +117,11 @@ namespace CoreAI
         /// По умолчанию: true.
         /// </summary>
         public static bool LogMeaiToolCallingSteps { get; set; } = true;
+
+        /// <summary>
+        /// Разрешить агенту вызывать один и тот же инструмент с теми же аргументами за одну сессию.
+        /// По умолчанию: false (чтобы защитить маленькие модели от зацикливания).
+        /// </summary>
+        public static bool AllowDuplicateToolCalls { get; set; } = false;
     }
 }

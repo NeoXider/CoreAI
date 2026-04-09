@@ -9,7 +9,7 @@ namespace CoreAI.Ai
     /// По умолчанию память ВКЛЮЧЕНА для всех ролей.
     /// Поддерживает 2 типа памяти:
     /// 1) MemoryTool (function call) — явное сохранение через {"tool":"memory","action":"write/append/clear"}
-    /// 2) Chat History (LLMUnity) — автоматическое сохранение всего диалога в LLMAgent
+    /// 2) Chat History — автоматическое сохранение всего диалога в контекст (работает как с локальными, так и с HTTP API моделями, сохраняется между сессиями!)
     /// </summary>
     public sealed class AgentMemoryPolicy
     {
@@ -40,6 +40,9 @@ namespace CoreAI.Ai
             /// <summary>Действие по умолчанию: write (перезаписать) или append (дополнить).</summary>
             public MemoryToolAction DefaultAction;
 
+            /// <summary>Разрешать ли дублированные вызовы инструментов (переопределяет глобальную настройку, если не null).</summary>
+            public bool? AllowDuplicateToolCalls;
+
             /// <summary>Сохранять и использовать ли историю чата в контексте (Role: user/assistant).</summary>
             public bool WithChatHistory;
 
@@ -50,13 +53,14 @@ namespace CoreAI.Ai
             public int ContextTokens;
 
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
-                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192)
+                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192, bool? allowDuplicateToolCalls = null)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
                 WithChatHistory = withChatHistory;
                 PersistChatHistory = persistChatHistory;
                 ContextTokens = contextTokens;
+                AllowDuplicateToolCalls = allowDuplicateToolCalls;
             }
         }
 
@@ -135,7 +139,8 @@ namespace CoreAI.Ai
         public void ConfigureRole(
             string roleId,
             bool? useMemoryTool = null,
-            MemoryToolAction? defaultAction = null)
+            MemoryToolAction? defaultAction = null,
+            bool? allowDuplicateToolCalls = null)
         {
             if (string.IsNullOrWhiteSpace(roleId))
             {
@@ -149,7 +154,11 @@ namespace CoreAI.Ai
             _roleConfigs[roleId] = new RoleMemoryConfig
             {
                 UseMemoryTool = useMemoryTool ?? existing.UseMemoryTool,
-                DefaultAction = defaultAction ?? existing.DefaultAction
+                DefaultAction = defaultAction ?? existing.DefaultAction,
+                AllowDuplicateToolCalls = allowDuplicateToolCalls ?? existing.AllowDuplicateToolCalls,
+                WithChatHistory = existing.WithChatHistory,
+                PersistChatHistory = existing.PersistChatHistory,
+                ContextTokens = existing.ContextTokens
             };
         }
 

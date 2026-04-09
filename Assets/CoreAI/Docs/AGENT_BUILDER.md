@@ -93,6 +93,10 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 });
 ```
 
+> 🛡️ **Встроенная защита от спама (Отмена вызовов):**
+> Оба метода (`Ask` и `AskAsync`) автоматически передают `CancellationScope = Agent.RoleId` в оркестратор. 
+> Это означает, что **если вы вызовете `merchant.Ask()` второй раз, пока первый запрос ещё генерируется, старый запрос будет принудительно остановлен (Cancelled)**, и начнёт выполняться новый. Это спасает процессор и токены при "дабл-кликах" или спаме сообщениями от игрока одному и тому же NPC.
+
 ---
 
 ## 📋 Готовые рецепты — скопируй и используй
@@ -162,6 +166,34 @@ var analyzer = new AgentBuilder("SessionAnalyzer")
     .Build();
 
 analyzer.ApplyToPolicy(policy);
+```
+
+### Рецепт 5: Игровой Мастер (Генерирует механику игры на лету)
+
+Связка `AgentBuilder` и `LuaLlmTool` позволяет агентам **прямо во время игры писать и изменять игровые правила на лету!** Если игра написана так, что некоторые функции хранятся в глобальном `SecureLuaEnvironment` (например, вычисление урона, вероятности спавна или цены товаров), вы можете предоставить этот энвайронмент агенту-Гейммастеру. 
+
+```csharp
+// 1. У вас есть общий Lua Sandbox, через который игра считает урон
+SecureLuaEnvironment sandbox = new();
+sandbox.RunChunk(sandbox.CreateScript(new LuaApiRegistry()), "function calculate_damage() return 10 end");
+
+// 2. Создаёте инструмент для агента с доступом к этому Sandbox
+var master = new AgentBuilder("GameMaster")
+    .WithSystemPrompt("You are the GameMaster. You manage game mechanics. Change lua functions on the fly based on player complaints.")
+    // Передаём наш executor
+    .WithTool(new LuaLlmTool(new MySharedLuaExecutor(sandbox), settings, logger))
+    // Разрешаем агенту несколько раз подряд менять механику
+    .WithAllowDuplicateToolCalls(true)
+    .WithMode(AgentMode.ToolsOnly)
+    .Build();
+
+master.ApplyToPolicy(CoreAIAgent.Policy);
+
+// В игре игрок ноет, что слишком тяжело...
+master.Ask("Игроки жалуются, что игра сложная. Подними урон в calculate_damage() в 5 раз!");
+
+// Модель сама вызовет execute_lua ("function calculate_damage() return 50 end")
+// И со следующего кадра в вашей игре урон станет 50!
 ```
 
 ---
@@ -422,7 +454,24 @@ var agent = new AgentBuilder("MyAgent")
     .WithMemory()
 ```
 
-### Температура генерации
+### Температура генерации и Дублирование инструментов
+
+#### Дубликаты инструментов (Duplicate Tool Calls)
+По умолчанию в CoreAI **запрещено** вызывать один и тот же инструмент с идентичными аргументами несколько раз подряд (`AllowDuplicateToolCalls = false`). Это сделано для защиты маленьких локальных моделей (2B, 4B) от бесконечного зацикливания. Однако для умных моделей (API-решения, 30B+ локально) дублирование бывает полезно. Вы можете глобально разрешить дубликаты в `CoreAISettings`, либо переопределить настройки **для конкретного агента**:
+
+```csharp
+var animAgent = new AgentBuilder("Dancer")
+    .WithAllowDuplicateToolCalls(true)  // Ему можно спамить анимациями
+    .Build();
+
+var smartAgent = new AgentBuilder("Programmer")
+    .WithAllowDuplicateToolCalls(false) // Явно запрещаем спам одним и тем же неверным кодом
+    .Build();
+```
+
+> 💡 *Примечание: Для некоторых инструментов (например, `world_command` -> play_animation или `execute_lua`) дубликаты разрешены на уровне самого инструмента всегда.*
+
+#### Температура генерации
 
 Температура управляет **креативностью** модели. Общая температура задаётся в `CoreAISettings.Temperature` (по умолчанию **0.1**), но может быть переопределена для конкретного агента.
 
@@ -634,6 +683,7 @@ async Task AskMerchant(string playerMessage)
 | `WithChatHistory()` | Включить историю диалога | `.WithChatHistory()` |
 | `WithTemperature(float)` | Переопределить температуру | `.WithTemperature(0.0f)` |
 | `WithMode(AgentMode)` | Установить режим | `.WithMode(AgentMode.ToolsAndChat)` |
+| `WithAllowDuplicateToolCalls(bool)` | Разрешить повторные одинаковые вызовы инструментов | `.WithAllowDuplicateToolCalls(true)` |
 | `Build()` | Создать AgentConfig | `.Build()` |
 
 ### AgentConfig

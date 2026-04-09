@@ -17,6 +17,8 @@ namespace CoreAI.Ai
         /// через AIFunctionFactory на основе Delegate.
         /// </summary>
         public string ParametersSchema => "{}";
+        
+        public bool AllowDuplicates { get; set; }
 
         public Delegate ActionDelegate { get; }
 

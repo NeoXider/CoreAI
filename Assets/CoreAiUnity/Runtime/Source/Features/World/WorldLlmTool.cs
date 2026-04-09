@@ -33,6 +33,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "world_command";
+        public override bool AllowDuplicates => true;
 
         public override string Description =>
             "Execute world commands to manipulate the game world. " +

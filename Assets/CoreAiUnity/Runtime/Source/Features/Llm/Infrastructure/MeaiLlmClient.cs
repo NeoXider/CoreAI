@@ -111,7 +111,8 @@ namespace CoreAI.Infrastructure.Llm
                     $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={_settings.MaxToolCallRetries}");
             }
 
-            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, _settings.MaxToolCallRetries);
+            bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
+            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, allowDuplicates, request.Tools, _settings.MaxToolCallRetries);
 
             List<MEAI.ChatMessage> chatMessages = new()
             {

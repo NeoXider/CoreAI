@@ -118,9 +118,8 @@ namespace CoreAI.Tests.PlayMode
                         Hint = "Design a crafting recipe for a weapon made from these ingredients:\n" +
                                "- Iron (metal, hardness:60, magic:5, rarity:1)\n" +
                                "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
-                               "Output JSON with: item_type, estimated_damage, estimated_fire_damage, quality.\n" +
-                               "Also save your design decision to memory using memory tool:\n" +
-                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon, damage ~45, fire ~15\"}}"
+                               "STEP 1: You must call the 'memory' tool (action: 'write', content: 'Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15').\n" +
+                               "STEP 2: Once the memory tool succeeds, stop calling tools and output a raw JSON response: {\"item_type\": \"weapon\", \"estimated_damage\": 45, \"estimated_fire_damage\": 15, \"quality\": 1}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "creator design");
@@ -152,12 +151,10 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = "Calculate the craft result for a weapon made from:\n" +
-                               "- Iron (metal, hardness:60, magic:5, rarity:1)\n" +
-                               "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
-                               "Output JSON: {\"item_name\": \"...\", \"damage\": N, \"fire_damage\": N, \"quality\": N}\n" +
-                               "Save to memory using memory tool:\n" +
-                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Craft#1: <item_name> damage:N fire:N quality:N\"}}"
+                        Hint = "Calculate craft result for Iron + Fire Crystal.\n" +
+                               "CRITICAL INSTRUCTION:\n" +
+                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Craft#1: weapon damage:45').\n" +
+                               "2. ONLY AFTER the tool succeeds, output JSON: {\"item_name\": \"Frostblade\", \"damage\": 45}"
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic calculation");
@@ -209,14 +206,10 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Programmer,
-                        Hint = "Generate Lua code for a crafted weapon:\n" +
-                               "- Use create_item('ItemName', 'weapon', quality)\n" +
-                               "- Add special effect for fire damage\n" +
-                               "- Use report() to log the result\n\n" +
-                               "1. Use the execute_lua tool:\n" +
-                               "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('...', 'weapon', quality)\\nadd_special_effect('fire_damage: 15')\\nreport('crafted ...')\"}}\n\n" +
-                               "2. Also save to memory using memory tool:\n" +
-                               "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Programmer wrote Lua script\"}}"
+                        Hint = "Generate Lua code for a weapon.\n" +
+                               "CRITICAL INSTRUCTION:\n" +
+                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Programmer wrote Lua script').\n" +
+                               "2. ONLY THEN call the 'execute_lua' tool to run the code."
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "programmer lua");
@@ -246,14 +239,11 @@ namespace CoreAI.Tests.PlayMode
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = "Calculate the craft result for the EXACT SAME ingredients:\n" +
-                               "- Iron (metal, hardness:60, magic:5, rarity:1)\n" +
-                               "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
+                        Hint = "Calculate craft result for Iron + Fire Crystal.\n" +
                                $"YOUR PREVIOUS CRAFT MEMORY: {craft1Memory}\n\n" +
-                               "IMPORTANT: These are the SAME ingredients as before. " +
-                               "Output the EXACT SAME result as your previous craft. " +
-                               "Same item name, same stats — deterministic behavior.\n\n" +
-                               "Save to memory and output JSON with the result."
+                               "CRITICAL INSTRUCTION:\n" +
+                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Craft#2: weapon').\n" +
+                               "2. ONLY THEN output EXACT SAME JSON as your previous craft."
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic repeat");
@@ -348,7 +338,8 @@ namespace CoreAI.Tests.PlayMode
                         RoleId = BuiltInAgentRoleIds.Creator,
                         Hint =
                             "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
-                            "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Design: Iron+Fire Crystal → weapon\"}}"
+                            "STEP 1: Call 'memory' tool (action: 'write', content: 'Design: Iron+Fire Crystal -> weapon').\n" +
+                            "STEP 2: Output JSON response."
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "creator");
@@ -374,8 +365,8 @@ namespace CoreAI.Tests.PlayMode
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate weapon from: Iron (hardness:60) + Fire Crystal (magic:85).\n" +
-                               "Output JSON with item_name, damage, fire_damage.\n" +
-                               "Save to memory: {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Craft#1: <name> damage:N fire:N\"}}"
+                               "STEP 1: Call 'memory' tool (action: 'write', content: 'Craft#1: weapon damage:20 fire:10').\n" +
+                               "STEP 2: Output JSON with item_name, damage, fire_damage."
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic");

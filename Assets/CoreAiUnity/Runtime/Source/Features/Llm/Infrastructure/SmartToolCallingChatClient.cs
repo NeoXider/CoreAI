@@ -19,14 +19,18 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IGameLogger _logger;
         private readonly int _maxConsecutiveErrors;
         private readonly ICoreAISettings _settings;
+        private readonly IReadOnlyList<CoreAI.Ai.ILlmTool> _originalTools;
+        private readonly bool _allowDuplicateToolCalls;
 
         /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            int maxConsecutiveErrors = 3)
+            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, int maxConsecutiveErrors = 3)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _allowDuplicateToolCalls = allowDuplicateToolCalls;
+            _originalTools = tools ?? new List<CoreAI.Ai.ILlmTool>();
             _maxConsecutiveErrors = maxConsecutiveErrors;
         }
 
@@ -78,10 +82,26 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // Защита от застревания: если агент вызывает ровно те же тулзы с теми же аргументами в рамках этой же сессии
-                string currentSignature = string.Join("|", toolCalls.Select(t =>
-                    $"{t.Name}:{string.Join(",", t.Arguments?.Select(a => $"{a.Key}={a.Value}") ?? Enumerable.Empty<string>())}"));
+                bool isDuplicate = false;
+                string currentSignature = "";
 
-                bool isDuplicate = !string.IsNullOrEmpty(currentSignature) && !executedSignatures.Add(currentSignature);
+                if (!_allowDuplicateToolCalls)
+                {
+                    // Исключаем из сигнатуры те инструменты, которым явно разрешено повторяться
+                    var toolsToCheck = toolCalls.Where(fc =>
+                    {
+                        var originalTool = _originalTools.FirstOrDefault(t => t.Name == fc.Name);
+                        return originalTool == null || !originalTool.AllowDuplicates;
+                    }).ToList();
+
+                    if (toolsToCheck.Count > 0)
+                    {
+                        currentSignature = string.Join("|", toolsToCheck.Select(t =>
+                            $"{t.Name}:{string.Join(",", t.Arguments?.Select(a => $"{a.Key}={a.Value}") ?? Enumerable.Empty<string>())}"));
+
+                        isDuplicate = !string.IsNullOrEmpty(currentSignature) && !executedSignatures.Add(currentSignature);
+                    }
+                }
 
                 // Выполняем тулы
                 List<MEAI.AIContent> toolResults = new();

@@ -129,7 +129,8 @@ namespace CoreAI.Ai
                             UserPayload = user,
                             ChatHistory = chatHistory,
                             TraceId = traceId,
-                            Tools = tools
+                            Tools = tools,
+                            AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls
                         },
                         linkedCts.Token);
                     sw.Stop();
@@ -177,7 +178,8 @@ namespace CoreAI.Ai
                         AgentRoleId = roleId,
                         SystemPrompt = system,
                         UserPayload = userRetry,
-                        TraceId = traceId
+                        TraceId = traceId,
+                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls
                     },
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();

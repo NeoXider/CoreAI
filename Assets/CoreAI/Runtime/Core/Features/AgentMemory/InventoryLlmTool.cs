@@ -17,6 +17,7 @@ namespace CoreAI.Ai
         }
 
         public string Name => "get_inventory";
+        public bool AllowDuplicates => false;
 
         public string Description =>
             "Get current inventory items from this NPC/merchant. " +

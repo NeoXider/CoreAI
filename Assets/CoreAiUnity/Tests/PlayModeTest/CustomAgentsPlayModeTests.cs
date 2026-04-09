@@ -312,6 +312,7 @@ namespace CoreAI.Tests.PlayMode
         {
             public string Name => "get_session_stats";
             public string Description => "Get session stats.";
+            public bool AllowDuplicates => false;
             public string ParametersSchema => "{}";
 
             public Microsoft.Extensions.AI.AIFunction CreateAIFunction()
