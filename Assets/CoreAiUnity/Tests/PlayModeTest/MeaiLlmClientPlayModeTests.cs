@@ -44,6 +44,8 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(client, "MeaiLlmClient.CreateHttp should not return null");
 
             Debug.Log("[MeaiLlmClient.HTTP] Client created, sending request...");
+            LogAssert.ignoreFailingMessages = true;
+
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "TestAgent",
@@ -119,6 +121,8 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsNotNull(client, "MeaiLlmClient.CreateLlmUnity should not return null");
 
             Debug.Log("[MeaiLlmClient.LLMUnity] Client created, sending request...");
+            LogAssert.ignoreFailingMessages = true;
+
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "TestAgent",

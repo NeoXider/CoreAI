@@ -2,6 +2,25 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.18.0] - 2026-04-10
+
+### Architecture — LifetimeScope Decomposition & DI Cleanup
+
+- 🔧 **`CoreAILifetimeScope.Configure()`** — декомпозиция из 200+ строк в модульные инсталлеры:
+  - `LlmPipelineInstaller` — LLM клиенты, маршрутизация, декоратор логирования, метрики оркестратора.
+  - `WorldCommandsInstaller` — Lua bindings, prefab registry, world executor, game config store.
+  - `Configure()` теперь ~40 строк с чёткими секциями.
+- ✨ **`ILlmAgentProvider` / `SceneLlmAgentProvider`** — абстракция поиска `LLMAgent` с lazy caching. Убран `FindFirstObjectByType<LLMAgent>` из DI composition root.
+- 🔧 **`CoreAISettings.Instance = settings`** — заменяет 17-строчный блок `SyncToStaticSettings()`. Статический прокси CoreAISettings теперь делегирует в DI-экземпляр автоматически.
+- ❌ **`SyncToStaticSettings()`** — удалён полностью (заменён одной строкой `CoreAISettings.Instance = settings`).
+- 🧪 **Тесты**:
+  - `CoreAISettingsSyncEditModeTests` — переписан на проверку Instance delegation (4 теста вместо 1).
+  - `LuaAiEnvelopeProcessorEditModeTests` — обновлён cleanup через `ResetOverrides()`.
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.18.0**
+
 ## [0.16.0] - 2026-04-09
 
 ### PlayMode Tools & Editor

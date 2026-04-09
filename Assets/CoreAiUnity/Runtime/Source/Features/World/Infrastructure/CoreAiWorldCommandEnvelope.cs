@@ -163,5 +163,55 @@ namespace CoreAI.Infrastructure.World
                 targetName = targetName ?? ""
             };
         }
+
+        public static CoreAiWorldCommandEnvelope StopAnimation(string targetName)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "stop_animation",
+                targetName = targetName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetVolume(string targetName, float volume)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_volume",
+                targetName = targetName ?? "",
+                floatValue = volume
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope HidePanel(string targetName)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "hide_panel",
+                targetName = targetName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope UpdateScore(string targetName, string scoreText)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "update_score",
+                targetName = targetName ?? "",
+                stringValue = scoreText ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetVelocity(string targetName, Vector3 velocity)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_velocity",
+                targetName = targetName ?? "",
+                fx = velocity.x,
+                fy = velocity.y,
+                fz = velocity.z
+            };
+        }
     }
 }

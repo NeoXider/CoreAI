@@ -73,11 +73,20 @@ namespace CoreAI.Infrastructure.World
                     return TryListAnimations(env);
                 case "play_sound":
                     return TryPlaySound(env);
+                case "stop_animation":
+                    return TryStopAnimation(env);
+                case "set_volume":
+                    return TrySetVolume(env);
                 case "show_text":
-                    // TODO: Реализовать show_text с анимацией уведомления (2 секунды или настройка)
-                    _logger.LogInfo(GameLogFeature.MessagePipe,
-                        $"[World] show_text: '{env.stringValue}' on '{env.targetName}' (not implemented yet)");
-                    return true;
+                    return TryShowText(env);
+                case "hide_panel":
+                    return TryHidePanel(env);
+                case "update_score":
+                    return TryUpdateScore(env);
+                case "apply_force":
+                    return TryApplyForce(env);
+                case "set_velocity":
+                    return TrySetVelocity(env);
                 default:
                     _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] unknown action '{env.action}'");
                     return false;
@@ -107,9 +116,248 @@ namespace CoreAI.Infrastructure.World
             }
 
             Vector3 pos = new(env.x, env.y, env.z);
+
+            // Валидация позиции спавна (проверка коллизий)
+            if (!ValidateSpawnPosition(pos, 0.5f))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] spawn blocked: position ({pos.x},{pos.y},{pos.z}) overlaps existing colliders");
+                return false;
+            }
+
             GameObject go = UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
             go.name = targetName;
             return true;
+        }
+
+        /// <summary>
+        /// Проверяет, свободна ли позиция для спавна (нет пересечений с существующими коллайдерами).
+        /// </summary>
+        private bool ValidateSpawnPosition(Vector3 position, float checkRadius)
+        {
+            Collider[] overlaps = Physics.OverlapSphere(position, checkRadius);
+            // Считаем только статические / не-trigger коллайдеры
+            foreach (Collider col in overlaps)
+            {
+                if (!col.isTrigger)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryApplyForce(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] apply_force: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            Rigidbody rb = go.GetComponent<Rigidbody>();
+            if (rb == null)
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] apply_force: no Rigidbody on '{go.name}'");
+                return false;
+            }
+
+            Vector3 force = new(env.fx, env.fy, env.fz);
+            rb.AddForce(force, ForceMode.Impulse);
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] apply_force: ({force.x},{force.y},{force.z}) on '{go.name}'");
+            return true;
+        }
+
+        private bool TrySetVelocity(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_velocity: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            Rigidbody rb = go.GetComponent<Rigidbody>();
+            if (rb == null)
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_velocity: no Rigidbody on '{go.name}'");
+                return false;
+            }
+
+            Vector3 velocity = new(env.fx, env.fy, env.fz);
+            rb.linearVelocity = velocity;
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] set_velocity: ({velocity.x},{velocity.y},{velocity.z}) on '{go.name}'");
+            return true;
+        }
+
+        private bool TryStopAnimation(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] stop_animation: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            Animator animator = go.GetComponent<Animator>();
+            if (animator != null && animator.enabled)
+            {
+                animator.StopPlayback();
+                animator.speed = 0f;
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] stop_animation: stopped on '{go.name}' (Animator)");
+                return true;
+            }
+
+            Animation animation = go.GetComponent<Animation>();
+            if (animation != null && animation.enabled)
+            {
+                animation.Stop();
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] stop_animation: stopped on '{go.name}' (Animation)");
+                return true;
+            }
+
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                $"[World] stop_animation: no Animator/Animation on '{go.name}'");
+            return false;
+        }
+
+        private bool TrySetVolume(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_volume: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            AudioSource[] sources = go.GetComponents<AudioSource>();
+            if (sources == null || sources.Length == 0)
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_volume: no AudioSource on '{go.name}'");
+                return false;
+            }
+
+            float volume = Mathf.Clamp01(env.floatValue);
+            foreach (AudioSource src in sources)
+            {
+                src.volume = volume;
+            }
+
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] set_volume: {volume} on '{go.name}' ({sources.Length} sources)");
+            return true;
+        }
+
+        private bool TryShowText(CoreAiWorldCommandEnvelope env)
+        {
+            if (string.IsNullOrEmpty(env.stringValue))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] show_text: text is empty");
+                return false;
+            }
+
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] show_text: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            // Пробуем UI Text (Canvas)
+            UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
+            if (uiText != null)
+            {
+                uiText.text = env.stringValue;
+                go.SetActive(true);
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] show_text: UI.Text set on '{go.name}'");
+                return true;
+            }
+
+            // Пробуем TextMesh (3D)
+            TextMesh textMesh = go.GetComponent<TextMesh>();
+            if (textMesh != null)
+            {
+                textMesh.text = env.stringValue;
+                go.SetActive(true);
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] show_text: TextMesh set on '{go.name}'");
+                return true;
+            }
+
+            // Если нет компонента текста — создаём TextMesh
+            TextMesh newMesh = go.AddComponent<TextMesh>();
+            newMesh.text = env.stringValue;
+            newMesh.fontSize = 24;
+            newMesh.characterSize = 0.1f;
+            go.SetActive(true);
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] show_text: TextMesh created on '{go.name}'");
+            return true;
+        }
+
+        private bool TryHidePanel(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] hide_panel: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            go.SetActive(false);
+            _logger.LogInfo(GameLogFeature.MessagePipe,
+                $"[World] hide_panel: '{go.name}' deactivated");
+            return true;
+        }
+
+        private bool TryUpdateScore(CoreAiWorldCommandEnvelope env)
+        {
+            if (string.IsNullOrEmpty(env.stringValue))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe, "[World] update_score: text is empty");
+                return false;
+            }
+
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] update_score: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            // Пробуем UI Text
+            UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
+            if (uiText != null)
+            {
+                uiText.text = env.stringValue;
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] update_score: UI.Text='{env.stringValue}' on '{go.name}'");
+                return true;
+            }
+
+            // Пробуем TextMesh
+            TextMesh textMesh = go.GetComponent<TextMesh>();
+            if (textMesh != null)
+            {
+                textMesh.text = env.stringValue;
+                _logger.LogInfo(GameLogFeature.MessagePipe,
+                    $"[World] update_score: TextMesh='{env.stringValue}' on '{go.name}'");
+                return true;
+            }
+
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                $"[World] update_score: no Text/TextMesh on '{go.name}'");
+            return false;
         }
 
         private bool TryMove(CoreAiWorldCommandEnvelope env)
@@ -325,10 +573,10 @@ namespace CoreAI.Infrastructure.World
             }
 
             // Legacy Animation компонент
-            Animation animation = go.GetComponent<Animation>();
-            if (animation != null)
+            Animation anim = go.GetComponent<Animation>();
+            if (anim != null)
             {
-                foreach (AnimationState state in animation)
+                foreach (AnimationState state in anim)
                 {
                     if (!string.IsNullOrEmpty(state.clip.name) && !animationsList.Contains(state.clip.name))
                     {

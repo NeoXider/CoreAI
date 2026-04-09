@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
             LogAssert.Expect(LogType.Error,
                 new System.Text.RegularExpressions.Regex(
                     ".*\\[Llm\\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error).*"));
-            LogAssert.Expect(LogType.Error,
+            LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(".*\\[Llm\\] MeaiLlmClient: HTTP error.*"));
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest

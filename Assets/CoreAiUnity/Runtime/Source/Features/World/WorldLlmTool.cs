@@ -38,16 +38,19 @@ namespace CoreAI.Infrastructure.Llm
         public override string Description =>
             "Execute world commands to manipulate the game world. " +
             "Actions: spawn, move, destroy, load_scene, reload_scene, " +
-            "set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects. " +
+            "set_active, play_animation, stop_animation, list_animations, show_text, " +
+            "play_sound, set_volume, hide_panel, update_score, " +
+            "apply_force, set_velocity, spawn_particles, list_objects. " +
             "Use 'spawn' to create objects, 'move' to reposition, 'destroy' to remove, " +
-            "'play_animation' to play animations, 'list_animations' to get available animations, " +
+            "'play_animation'/'stop_animation' to control animations, 'list_animations' to get available animations, " +
+            "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel'/'update_score' for UI, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
-            "'show_text' to display notifications. " +
+            "'apply_force'/'set_velocity' for physics. " +
             "Objects are targeted by 'targetName'.";
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true,
-                "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects"),
+                "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects"),
             ("targetName", "string", false,
                 "Object name to target (required for move, destroy, set_active, play_animation, etc). Used to set a name for spawned objects."),
             ("x", "number", false, "X coordinate (for spawn, move)"),
@@ -57,10 +60,10 @@ namespace CoreAI.Infrastructure.Llm
             ("fy", "number", false, "Force Y (for apply_force)"),
             ("fz", "number", false, "Force Z (for apply_force)"),
             ("prefabKey", "string", false, "Prefab key for spawn command"),
-            ("animationName", "string", false, "Name of the animation to play for play_animation"),
-            ("textToDisplay", "string", false, "Text to display for show_text"),
-            ("stringValue", "string", false, "Generic string value (e.g. search pattern for list_objects)"),
-            ("volume", "number", false, "Reserved for future use")
+            ("animationName", "string", false, "Name of the animation to play/stop"),
+            ("textToDisplay", "string", false, "Text for show_text / update_score"),
+            ("stringValue", "string", false, "Generic string value (e.g. search pattern for list_objects, clip name for play_sound)"),
+            ("volume", "number", false, "Volume level 0.0-1.0 for set_volume")
         );
 
         public AIFunction CreateAIFunction()
@@ -160,9 +163,15 @@ namespace CoreAI.Infrastructure.Llm
                     "reload_scene" => CreateReloadSceneCommand(),
                     "set_active" => CreateSetActiveCommand(targetName, true),
                     "play_animation" => CreatePlayAnimationCommand(targetName, animationName ?? stringValue),
+                    "stop_animation" => CreateStopAnimationCommand(targetName),
                     "list_animations" => CreateListAnimationsCommand(targetName),
+                    "play_sound" => CreatePlaySoundCommand(targetName, stringValue),
+                    "set_volume" => CreateSetVolumeCommand(targetName, volume),
                     "show_text" => CreateShowTextCommand(targetName, textToDisplay ?? stringValue),
+                    "hide_panel" => CreateHidePanelCommand(targetName),
+                    "update_score" => CreateUpdateScoreCommand(targetName, textToDisplay ?? stringValue),
                     "apply_force" => CreateApplyForceCommand(targetName, fx, fy, fz),
+                    "set_velocity" => CreateSetVelocityCommand(targetName, fx, fy, fz),
                     "spawn_particles" => CreateSpawnParticlesCommand(targetName, stringValue),
                     "list_objects" => CreateListObjectsCommand(stringValue),
                     _ => null
@@ -335,6 +344,42 @@ namespace CoreAI.Infrastructure.Llm
         private static CoreAiWorldCommandEnvelope CreateListObjectsCommand(string? searchPattern)
         {
             return CoreAiWorldCommandEnvelope.ListObjects(searchPattern ?? "");
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateStopAnimationCommand(string? targetName)
+        {
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.StopAnimation(targetName);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreatePlaySoundCommand(string? targetName, string? clipName)
+        {
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.PlaySound(targetName, clipName ?? "", 1f);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateSetVolumeCommand(string? targetName, float volume)
+        {
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.SetVolume(targetName, volume);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateHidePanelCommand(string? targetName)
+        {
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.HidePanel(targetName);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateUpdateScoreCommand(string? targetName, string? text)
+        {
+            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(text)) return null;
+            return CoreAiWorldCommandEnvelope.UpdateScore(targetName, text);
+        }
+
+        private static CoreAiWorldCommandEnvelope CreateSetVelocityCommand(string? targetName, float fx, float fy, float fz)
+        {
+            if (string.IsNullOrEmpty(targetName)) return null;
+            return CoreAiWorldCommandEnvelope.SetVelocity(targetName, new Vector3(fx, fy, fz));
         }
 
         private static CoreAiWorldCommandEnvelope CreateListAnimationsCommand(string? targetName)

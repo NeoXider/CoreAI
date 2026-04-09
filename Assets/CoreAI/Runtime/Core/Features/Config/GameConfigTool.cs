@@ -18,12 +18,14 @@ namespace CoreAI.Config
         private readonly IGameConfigStore _store;
         private readonly GameConfigPolicy _policy;
         private readonly string _roleId;
+        private readonly ICoreAISettings _settings;
 
-        public GameConfigTool(IGameConfigStore store, GameConfigPolicy policy, string roleId)
+        public GameConfigTool(IGameConfigStore store, GameConfigPolicy policy, string roleId, ICoreAISettings settings = null)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _policy = policy ?? throw new ArgumentNullException(nameof(policy));
             _roleId = roleId ?? throw new ArgumentNullException(nameof(roleId));
+            _settings = settings;
         }
 
         /// <summary>
@@ -59,12 +61,12 @@ namespace CoreAI.Config
                     { Success = false, Error = "Action is required. Use 'read' or 'update'." });
             }
 
-            if (CoreAISettings.LogToolCalls)
+            if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
                 Log.Instance.Info($"[Tool Call] game_config: action={action}", LogTag.Config);
             }
 
-            if (CoreAISettings.LogToolCallArguments && !string.IsNullOrEmpty(content))
+            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) && !string.IsNullOrEmpty(content))
             {
                 Log.Instance.Info($"  content length={content.Length}", LogTag.Config);
             }
@@ -91,7 +93,7 @@ namespace CoreAI.Config
             }
             catch (Exception ex)
             {
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                 {
                     Log.Instance.Error($"[Tool Call] game_config: FAILED - {ex.Message}", LogTag.Config);
                 }

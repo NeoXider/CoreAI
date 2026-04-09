@@ -1,4 +1,8 @@
-# 🤖 CoreAI — AI-агенты в Unity
+<p align="center">
+  <img src="Docs/Images/coreai_banner.png" alt="CoreAI Banner" width="100%">
+</p>
+
+# <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — AI-агенты в Unity
 
 *Читать на других языках: [English](README.md), [Русский](README_RU.md).*
 

@@ -15,10 +15,12 @@ namespace CoreAI.Ai
     public sealed class InventoryTool
     {
         private readonly IInventoryProvider _provider;
+        private readonly ICoreAISettings _settings;
 
-        public InventoryTool(IInventoryProvider provider)
+        public InventoryTool(IInventoryProvider provider, ICoreAISettings settings = null)
         {
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+            _settings = settings;
         }
 
         public AIFunction CreateAIFunction()
@@ -35,7 +37,7 @@ namespace CoreAI.Ai
 
         public async Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
         {
-            if (CoreAISettings.LogToolCalls)
+            if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
                 Log.Instance.Info($"[Tool Call] get_inventory: fetching items", LogTag.Llm);
             }
@@ -44,7 +46,7 @@ namespace CoreAI.Ai
             {
                 List<InventoryItem> items = await _provider.GetInventoryAsync(cancellationToken);
 
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                 {
                     Log.Instance.Info($"[Tool Call] get_inventory: SUCCESS - {items?.Count ?? 0} items", LogTag.Llm);
                 }

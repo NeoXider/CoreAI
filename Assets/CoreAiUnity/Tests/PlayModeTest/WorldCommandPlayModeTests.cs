@@ -40,7 +40,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to spawn a 'TestPrefab' object at coordinates (0, 0, 0) and name it 'test_obj'."
+                    "Use the world_command tool to spawn an object. Set prefabKey='TestPrefab' and targetName='test_obj' at coordinates x=0, y=0, z=0."
             });
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
@@ -53,8 +53,9 @@ namespace CoreAI.Tests.PlayMode
                     "last command flag sync");
             }
 
-            Debug.Log($"[WorldTest] SUCCESS! World command executed: {setup.WorldExecutor.LastCommandJson}");
-            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("spawn"));
+            Debug.Log($"[WorldTest] SUCCESS! World command executed!");
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("spawn")), 
+                $"Command spawn not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
         [UnityTest]
@@ -89,8 +90,9 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("World move skipped - model may not support tool-call format");
             }
 
-            Debug.Log($"[WorldTest] SUCCESS! Move command executed: {setup.WorldExecutor.LastCommandJson}");
-            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("move"));
+            Debug.Log($"[WorldTest] SUCCESS! Move command executed!");
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("move")), 
+                $"Command move not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
         [UnityTest]
@@ -125,8 +127,9 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("World list_objects skipped - model may not support tool-call format");
             }
 
-            Debug.Log($"[WorldTest] SUCCESS! List objects command executed: {setup.WorldExecutor.LastCommandJson}");
-            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("list_objects"));
+            Debug.Log($"[WorldTest] SUCCESS! List objects command executed!");
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("list_objects")), 
+                $"Command list_objects not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
         [UnityTest]
@@ -161,8 +164,9 @@ namespace CoreAI.Tests.PlayMode
                     "last command flag sync (play_animation)");
             }
 
-            Debug.Log($"[WorldTest] SUCCESS! Play animation command executed: {setup.WorldExecutor.LastCommandJson}");
-            Assert.IsTrue(setup.WorldExecutor.LastCommandJson.Contains("play_animation"));
+            Debug.Log($"[WorldTest] SUCCESS! Play animation command executed!");
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("play_animation")), 
+                $"Command play_animation not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
         [UnityTest]

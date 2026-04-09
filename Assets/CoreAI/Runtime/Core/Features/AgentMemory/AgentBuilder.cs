@@ -48,10 +48,12 @@ namespace CoreAI.Ai
         private float? _temperature;
         private bool? _allowDuplicateToolCalls;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
+        private readonly ICoreAISettings _settings;
 
-        public AgentBuilder(string roleId)
+        public AgentBuilder(string roleId, ICoreAISettings settings = null)
         {
             _roleId = roleId ?? throw new ArgumentNullException(nameof(roleId));
+            _settings = settings;
         }
 
         /// <summary>
@@ -192,14 +194,14 @@ namespace CoreAI.Ai
         public AgentConfig Build()
         {
             // Размер контекста: 0 → минимальный, null → из CoreAISettings, явно → использовать явно
-            int ctxTokens = _contextWindowTokens ?? CoreAISettings.ContextWindowTokens;
+            int ctxTokens = _contextWindowTokens ?? _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // Температура: null → из CoreAISettings, явно → использовать явно
-            float temp = _temperature ?? CoreAISettings.Temperature;
+            // Температура: null → из ICoreAISettings → из CoreAISettings, явно → использовать явно
+            float temp = _temperature ?? _settings?.Temperature ?? CoreAISettings.Temperature;
 
             // Применяем универсальный префикс к системному промпту
             string finalPrompt = _systemPrompt;
-            string prefix = CoreAISettings.UniversalSystemPromptPrefix;
+            string prefix = _settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
             if (!string.IsNullOrWhiteSpace(prefix) && !string.IsNullOrWhiteSpace(finalPrompt))
             {
                 finalPrompt = prefix.TrimEnd() + " " + finalPrompt;

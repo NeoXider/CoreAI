@@ -16,11 +16,13 @@ namespace CoreAI.Ai
     {
         private readonly IAgentMemoryStore _store;
         private readonly string _roleId;
+        private readonly ICoreAISettings _settings;
 
-        public MemoryTool(IAgentMemoryStore store, string roleId)
+        public MemoryTool(IAgentMemoryStore store, string roleId, ICoreAISettings settings = null)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _roleId = roleId ?? throw new ArgumentNullException(nameof(roleId));
+            _settings = settings;
         }
 
 
@@ -41,12 +43,12 @@ namespace CoreAI.Ai
             string? content = null,
             CancellationToken cancellationToken = default)
         {
-            if (CoreAISettings.LogToolCalls)
+            if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
                 Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
             }
 
-            if (CoreAISettings.LogToolCallArguments && content != null)
+            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) && content != null)
             {
                 string preview = content.Length > 200 ? content.Substring(0, 200) : content;
                 Log.Instance.Info($"  content: {preview}", LogTag.Memory);
@@ -73,7 +75,7 @@ namespace CoreAI.Ai
                         // Записываем память (полная замена)
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
 
-                        if (CoreAISettings.LogToolCallResults)
+                        if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                         {
                             Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory written for {_roleId}",
                                 LogTag.Memory);
@@ -114,7 +116,7 @@ namespace CoreAI.Ai
 
                         _store.Save(_roleId, new AgentMemoryState { Memory = newMemory });
 
-                        if (CoreAISettings.LogToolCallResults)
+                        if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                         {
                             Log.Instance.Info($"[Tool Call] memory: SUCCESS - Content appended for {_roleId}",
                                 LogTag.Memory);
@@ -129,7 +131,7 @@ namespace CoreAI.Ai
                     case "clear":
                         _store.Clear(_roleId);
 
-                        if (CoreAISettings.LogToolCallResults)
+                        if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                         {
                             Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}",
                                 LogTag.Memory);
@@ -151,7 +153,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                 {
                     Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
                 }

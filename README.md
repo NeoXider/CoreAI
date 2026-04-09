@@ -1,4 +1,8 @@
-# 🤖 CoreAI — AI Agents for Dynamic Games
+<p align="center">
+  <img src="Docs/Images/coreai_banner.png" alt="CoreAI Banner" width="100%">
+</p>
+
+# <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — AI Agents for Dynamic Games
 
 *Read this in other languages: [English](README.md), [Русский](README_RU.md).*
 

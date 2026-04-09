@@ -73,9 +73,9 @@ namespace CoreAI.Ai
         /// Если префикс пустой — возвращает промпт без изменений.
         /// Префикс добавляется в НАЧАЛО, за ним идёт оригинальный промпт.
         /// </summary>
-        internal static string WithUniversalPrefix(string systemPrompt)
+        internal static string WithUniversalPrefix(string systemPrompt, ICoreAISettings settings = null)
         {
-            string prefix = CoreAISettings.UniversalSystemPromptPrefix;
+            string prefix = settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
             if (string.IsNullOrWhiteSpace(prefix))
             {
                 return systemPrompt;

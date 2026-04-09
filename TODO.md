@@ -13,18 +13,18 @@
 - [x] Общая стабилизация тестов: обработка ошибок синтаксиса Lua без фейлов Unity Test Runner (возврат `[Error]` обратно в модель для авто-восстановления).
 
 ### Инфраструктура и Архитектура
-- [ ] Заменить статический god-object `CoreAISettings` на DI-интерфейс `ICoreAISettings`
-- [ ] Реализовать боевые метрики оркестрации (StatsD, Prometheus, Application Insights)
-- [ ] Добавить Dashboard для просмотра метрик (Alerting: «LLM не отвечает 5 минут»)
-- [ ] Реализовать версионирование системных промптов (для трекинга, A/B тестов и откатов)
-- [ ] Добавить Rate limiting (защиту от спама) для InGameLlmChatService
+- [x] Заменить статический god-object `CoreAISettings` на DI-интерфейс `ICoreAISettings` → MemoryTool, InventoryTool, GameConfigTool, AgentBuilder, BuiltInAgentSystemPromptTexts мигрированы
+- [x] Реализовать боевые метрики оркестрации → `InMemoryAiOrchestrationMetrics` (per-role, latency, health)
+- [x] Добавить Dashboard для просмотра метрик (Alerting: «LLM не отвечает 5 минут») → `OrchestrationDashboard` (OnGUI overlay, F9 toggle)
+- [x] Реализовать версионирование системных промптов → `IPromptVersionRegistry` + `InMemoryPromptVersionRegistry` (history, rollback, A/B variants)
+- [x] Добавить Rate limiting (защиту от спама) для InGameLlmChatService → sliding-window rate limiter (10 req/60s default)
 
 ### WorldCommand Executor (Расширение интеграции с Unity)
-- [ ] Анимации: `play_animation`, `stop_animation`
-- [ ] Звуки: `play_sound`, `set_volume`
-- [ ] UI команды: `show_text`, `hide_panel`, `update_score`
-- [ ] Физика: `apply_force`, `set_velocity`
-- [ ] Валидация параметров (защита от спавна объектов в стенах)
+- [x] Анимации: `play_animation`, `stop_animation`
+- [x] Звуки: `play_sound`, `set_volume`
+- [x] UI команды: `show_text`, `hide_panel`, `update_score`
+- [x] Физика: `apply_force`, `set_velocity`
+- [x] Валидация параметров (защита от спавна объектов в стенах) → `ValidateSpawnPosition` via Physics.OverlapSphere
 
 ### Продвинутые Инструменты Агентов
 - [ ] `CraftingTool` — специализированная функция для расчёта крафта для CoreMechanicAI
@@ -38,10 +38,15 @@
 - [ ] Условная логика вызова (если качество > 80, вызвать Programmer)
 - [ ] Параллельное исполнение задач несколькими агентами
 
+### Тесты
+- [x] `QueuedAiOrchestrator` — тест приоритета: задача с Priority=10 выполняется раньше Priority=1
+- [x] `QueuedAiOrchestrator` — тест CancellationScope: повторный запрос с тем же scope отменяет предыдущий
+- [x] `QueuedAiOrchestrator` — тест MaxConcurrent: не более N задач одновременно
+
 ### Документация и Примеры
-- [ ] Диаграмма: «Как команда от игрока проходит через всю систему»
-- [ ] Описание формата JSON команд для каждой роли
-- [ ] Troubleshooting guide: «Модель не отвечает», «Lua упала», «Память не пишется»
-- [ ] Quick Start: «Запуск LM Studio → запуск сцены → отправка команды»
-- [ ] Примеры: создание врага, крафт оружия, auto-repair кода
-- [ ] Подготовка видео/GIF демо работы системы
+- [x] Диаграмма: «Как команда от игрока проходит через всю систему» → [COMMAND_FLOW_DIAGRAM.md](Assets/CoreAiUnity/Docs/COMMAND_FLOW_DIAGRAM.md)
+- [x] Описание формата JSON команд для каждой роли → [JSON_COMMAND_FORMAT.md](Assets/CoreAiUnity/Docs/JSON_COMMAND_FORMAT.md)
+- [x] Troubleshooting guide: «Модель не отвечает», «Lua упала», «Память не пишется» → [TROUBLESHOOTING.md](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md)
+- [x] Quick Start: «Запуск LM Studio → запуск сцены → отправка команды» → [QUICK_START_FULL.md](Assets/CoreAiUnity/Docs/QUICK_START_FULL.md)
+- [x] Примеры: создание врага, крафт оружия, auto-repair кода → [EXAMPLES.md](Assets/CoreAiUnity/Docs/EXAMPLES.md)
+- [x] Подготовка видео/GIF демо работы системы → [DEMO_RECORDING_GUIDE.md](Assets/CoreAiUnity/Docs/DEMO_RECORDING_GUIDE.md)

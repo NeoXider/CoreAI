@@ -1,17 +1,14 @@
 using CoreAI;
 using CoreAI.Ai;
-using CoreAI.Config;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.AiMemory;
-using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Infrastructure.Prompts;
-using CoreAI.Authority;
 using CoreAI.Infrastructure.World;
-using LLMUnity;
+using CoreAI.Infrastructure.Lua;
+using CoreAI.Authority;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -78,31 +75,18 @@ namespace CoreAI.Composition
         /// <summary>Регистрирует лог, промпты, LLM (маршрутизация + таймаут), оркестратор, Lua, память и entry points.</summary>
         protected override void Configure(IContainerBuilder builder)
         {
-            // Инициализируем синглтон настроек
+            // ── 1. Settings ────────────────────────────────────────────────
             CoreAISettingsAsset settings = Settings;
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);
                 builder.RegisterInstance<ICoreAISettings>(settings);
 
-                // Синхронизируем статические CoreAISettings с asset
-                CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
-                CoreAISettings.MaxToolCallRetries = settings.MaxToolCallRetries;
-                CoreAISettings.EnableMeaiDebugLogging = settings.EnableMeaiDebugLogging;
-                CoreAISettings.ContextWindowTokens = settings.ContextWindowTokens;
-                CoreAISettings.UniversalSystemPromptPrefix = settings.UniversalSystemPromptPrefix;
-                CoreAISettings.Temperature = settings.Temperature;
-                CoreAISettings.LogToolCalls = settings.LogToolCalls;
-                CoreAISettings.LogToolCallArguments = settings.LogToolCallArguments;
-                CoreAISettings.LogToolCallResults = settings.LogToolCallResults;
-                CoreAISettings.LogMeaiToolCallingSteps = settings.LogMeaiToolCallingSteps;
-                if (settings.RequestTimeoutSeconds > 0)
-                {
-                    CoreAISettings.LlmRequestTimeoutSeconds = settings.RequestTimeoutSeconds;
-                }
+                // Статический прокси делегирует в DI-экземпляр автоматически
+                CoreAISettings.Instance = settings;
             }
 
-
+            // ── 2. Logging ─────────────────────────────────────────────────
             if (gameLogSettings != null)
             {
                 builder.RegisterInstance<IGameLogSettings>(gameLogSettings);
@@ -112,65 +96,17 @@ namespace CoreAI.Composition
                 builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             }
 
+            // ── 3. Agent Prompts ───────────────────────────────────────────
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            if (worldPrefabRegistry != null)
-            {
-                builder.RegisterInstance(worldPrefabRegistry);
-            }
-            else
-            {
-                builder.RegisterInstance(ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>());
-            }
+            // ── 4. World Commands (Lua, prefabs, config) ───────────────────
+            builder.RegisterWorldCommands(worldPrefabRegistry);
 
-            builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton).As<IDataOverlayPayloadValidator>();
-            builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
-            builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
-            builder.Register<LuaTimeBindings>(Lifetime.Singleton);
-            builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton).As<IGameLuaRuntimeBindings>();
-            builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton).As<ILuaExecutionObserver>();
-            builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton,
-                "CoreAI_LuaCoroutineRunner");
+            // ── 5. LLM Pipeline (clients, routing, orchestration) ──────────
+            builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 
-            // LLM Client регистрация с поддержкой CoreAISettingsAsset
-            LlmRoutingManifest routingManifest = llmRoutingManifest;
-            float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
-
-            builder.Register(c =>
-            {
-                LlmClientRegistry reg = new(c.Resolve<IGameLogger>(), settings);
-                reg.SetLegacyFallback(
-                    ResolveLlmClient(settings, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
-                reg.ApplyManifest(routingManifest);
-                return reg;
-            }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
-
-            builder.Register<ILlmClient>(c =>
-                new LoggingLlmClientDecorator(
-                    new RoutingLlmClient(c.Resolve<ILlmClientRegistry>()),
-                    c.Resolve<IGameLogger>(),
-                    llmTimeout), Lifetime.Singleton);
-
-            // Orchestrator настройки
-            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
-            builder.RegisterInstance(new AiOrchestrationQueueOptions
-            {
-                MaxConcurrent = maxConcurrent < 1 ? 1 : maxConcurrent
-            });
-
-            bool logMetrics = settings != null ? settings.LogOrchestrationMetrics : false;
-            if (logMetrics)
-            {
-                builder.Register<IAiOrchestrationMetrics>(c =>
-                        new LoggingAiOrchestrationMetrics(c.Resolve<IGameLogger>(), c.Resolve<IGameLogSettings>()),
-                    Lifetime.Singleton);
-            }
-            else
-            {
-                builder.Register<IAiOrchestrationMetrics, NullAiOrchestrationMetrics>(Lifetime.Singleton);
-            }
-
+            // ── 6. Network Authority ───────────────────────────────────────
             if (networkPeerBehaviour != null)
             {
                 builder.RegisterInstance<IAiNetworkPeer>(networkPeerBehaviour);
@@ -184,184 +120,19 @@ namespace CoreAI.Composition
                     new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), aiNetworkExecutionPolicy),
                 Lifetime.Singleton);
 
+            // ── 7. Core Portable (orchestrator, agent memory, Lua sandbox) ─
             builder.RegisterCorePortable();
-            // Runtime override: версии Lua Programmer на диск (оригинал / история / сброс).
+
+            // Runtime overrides: файловые версии скриптов и агентной памяти
             builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
-            // Runtime override: сохраняем память на диск (по умолчанию включена только для Creator).
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
-            builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton).As<ICoreAiWorldCommandExecutor>();
 
-            // Game Config: Unity SO-based config store (override NullGameConfigStore from CorePortable)
-            builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
-                .As<IGameConfigStore>();
-
+            // ── 8. Entry Points ────────────────────────────────────────────
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
-        }
-
-        /// <summary>
-        /// Порядок выбора: CoreAISettingsAsset (Auto/LlmUnity/OpenAiHttp/NoLlm) → LLMUnity → Stub.
-        /// Дублируется в Play Mode (сборка CoreAI.PlayModeTests): см. PlayModeProductionLikeLlmFactory.
-        /// </summary>
-        private static ILlmClient ResolveLlmClient(
-            CoreAISettingsAsset settings,
-            IGameLogger logger,
-            IAgentMemoryStore memoryStore)
-        {
-            // Приоритет 1: CoreAISettingsAsset
-            if (settings != null)
-            {
-                switch (settings.BackendType)
-                {
-                    case LlmBackendType.OpenAiHttp:
-                        return new OpenAiChatLlmClient(settings);
-                    case LlmBackendType.Offline:
-                        return new OfflineLlmClient(settings);
-                    case LlmBackendType.Auto:
-                        // Auto: пробуем LLMUnity, fallback на Stub
-                        return TryResolveAutoClient(settings, logger, memoryStore);
-                    case LlmBackendType.LlmUnity:
-                        return ResolveLlmUnityClient(settings, logger, memoryStore);
-                }
-            }
-
-            // Приоритет 2: LLMUnity или Stub
-#if COREAI_NO_LLM
-            return new StubLlmClient();
-#else
-            return ResolveLlmUnityClient(settings, logger, memoryStore);
-#endif
-        }
-
-        /// <summary>
-        /// Auto режим: приоритет из CoreAISettingsAsset.AutoPriority.
-        /// </summary>
-        private static ILlmClient TryResolveAutoClient(
-            CoreAISettingsAsset settings,
-            IGameLogger logger,
-            IAgentMemoryStore memoryStore)
-        {
-#if COREAI_NO_LLM
-            return new StubLlmClient();
-#else
-            bool httpFirst = settings != null && settings.AutoPriority == LlmAutoPriority.HttpFirst;
-
-            if (httpFirst)
-            {
-                // HTTP API → LLMUnity → Offline
-                ILlmClient httpClient = TryResolveHttpApiClient(settings);
-                if (httpClient != null)
-                {
-                    return httpClient;
-                }
-
-                ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
-                if (llmUnityClient != null)
-                {
-                    return llmUnityClient;
-                }
-
-                return new OfflineLlmClient(settings);
-            }
-            else
-            {
-                // LLMUnity → HTTP API → Offline (по умолчанию)
-                ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore);
-                if (llmUnityClient != null)
-                {
-                    return llmUnityClient;
-                }
-
-                ILlmClient httpClient2 = TryResolveHttpApiClient(settings);
-                if (httpClient2 != null)
-                {
-                    return httpClient2;
-                }
-
-                return new OfflineLlmClient(settings);
-            }
-#endif
-        }
-
-        /// <summary>
-        /// Попытка создать HTTP API клиент. Возвращает null если не удалось.
-        /// </summary>
-        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings)
-        {
-            if (settings != null && settings.UseHttpApi && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
-                !string.IsNullOrEmpty(settings.ModelName))
-            {
-                return new OpenAiChatLlmClient(settings);
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Попытка создать LLMUnity клиент. Возвращает null если не удалось.
-        /// </summary>
-        private static ILlmClient TryResolveLlmUnityClient(
-            CoreAISettingsAsset settings,
-            IGameLogger logger,
-            IAgentMemoryStore memoryStore)
-        {
-            LLMAgent agent = null;
-
-            // Если в настройках указано имя агента — ищем по имени
-            if (settings != null && !string.IsNullOrWhiteSpace(settings.LlmUnityAgentName))
-            {
-                GameObject go = GameObject.Find(settings.LlmUnityAgentName);
-                if (go != null)
-                {
-                    agent = go.GetComponent<LLMAgent>();
-                }
-            }
-
-            // Fallback: ищем первый LLMAgent на сцене
-            if (agent == null)
-            {
-                agent = FindFirstObjectByType<LLMAgent>();
-            }
-
-            if (agent == null)
-            {
-                return null;
-            }
-
-            LLM llm = agent.GetComponent<LLM>();
-            if (llm != null && settings != null && settings.LlmUnityDontDestroyOnLoad)
-            {
-                llm.dontDestroyOnLoad = true;
-            }
-
-            // Автоназначение модели из LLMUnity Model Manager
-            if (llm != null)
-            {
-                LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, logger);
-            }
-
-            // Если модель не назначена — не можем использовать LLMUnity
-            if (llm != null && string.IsNullOrWhiteSpace(llm.model))
-            {
-                return null;
-            }
-
-            return new MeaiLlmUnityClient(agent, settings, logger, memoryStore);
-        }
-
-        /// <summary>
-        /// Создать LLMUnity клиент. Fallback на Stub если не удалось.
-        /// </summary>
-        private static ILlmClient ResolveLlmUnityClient(
-            CoreAISettingsAsset settings,
-            IGameLogger logger,
-            IAgentMemoryStore memoryStore)
-        {
-            ILlmClient client = TryResolveLlmUnityClient(settings, logger, memoryStore);
-            return client ?? new StubLlmClient();
         }
     }
 }

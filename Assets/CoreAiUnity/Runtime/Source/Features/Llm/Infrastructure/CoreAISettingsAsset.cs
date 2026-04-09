@@ -484,31 +484,6 @@ namespace CoreAI.Infrastructure.Llm
             backendType = LlmBackendType.Auto;
         }
 
-        /// <summary>
-        /// Синхронизировать статические CoreAISettings с значениями этого ScriptableObject.
-        /// Вызывается при старте из CoreAILifetimeScope.
-        /// </summary>
-        public void SyncToStaticSettings()
-        {
-            CoreAISettings.MaxLuaRepairRetries = MaxLuaRepairRetries;
-            CoreAISettings.MaxToolCallRetries = MaxToolCallRetries;
-            CoreAISettings.MaxLlmRequestRetries = MaxLlmRequestRetries;
-            CoreAISettings.EnableMeaiDebugLogging = EnableMeaiDebugLogging;
-            CoreAISettings.LlmRequestTimeoutSeconds = (int)LlmRequestTimeoutSeconds;
-            CoreAISettings.EnableHttpDebugLogging = EnableHttpDebugLogging;
-            CoreAISettings.LogTokenUsage = LogTokenUsage;
-            CoreAISettings.LogLlmLatency = LogLlmLatency;
-            CoreAISettings.LogLlmConnectionErrors = LogLlmConnectionErrors;
-            CoreAISettings.ContextWindowTokens = ContextWindowTokens;
-            CoreAISettings.UniversalSystemPromptPrefix = UniversalSystemPromptPrefix;
-            CoreAISettings.Temperature = Temperature;
-            CoreAISettings.LogToolCalls = LogToolCalls;
-            CoreAISettings.LogToolCallArguments = LogToolCallArguments;
-            CoreAISettings.LogToolCallResults = LogToolCallResults;
-            CoreAISettings.LogMeaiToolCallingSteps = LogMeaiToolCallingSteps;
-            CoreAISettings.AllowDuplicateToolCalls = AllowDuplicateToolCalls;
-        }
-
         #endregion
 
         #region Unity Editor Helpers

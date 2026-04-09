@@ -1,0 +1,50 @@
+using LLMUnity;
+using UnityEngine;
+
+namespace CoreAI.Infrastructure.Llm
+{
+    /// <summary>
+    /// Абстракция для поиска <see cref="LLMAgent"/> без использования <c>FindFirstObjectByType</c> в DI composition root.
+    /// </summary>
+    public interface ILlmAgentProvider
+    {
+        /// <summary>Найти LLMAgent по имени (или первый доступный, если имя пустое). Null если не найден.</summary>
+        LLMAgent Resolve(string agentName);
+    }
+
+    /// <summary>
+    /// Реализация на основе <see cref="GameObject.Find"/> и <see cref="Object.FindFirstObjectByType{T}"/>.
+    /// Вызывается **лениво** при первом запросе LLM-клиента, а не в composition root.
+    /// </summary>
+    public sealed class SceneLlmAgentProvider : ILlmAgentProvider
+    {
+        private LLMAgent _cached;
+
+        /// <inheritdoc />
+        public LLMAgent Resolve(string agentName)
+        {
+            if (_cached != null)
+            {
+                return _cached;
+            }
+
+            // Если указано имя — ищем по имени
+            if (!string.IsNullOrWhiteSpace(agentName))
+            {
+                GameObject go = GameObject.Find(agentName);
+                if (go != null)
+                {
+                    _cached = go.GetComponent<LLMAgent>();
+                    if (_cached != null)
+                    {
+                        return _cached;
+                    }
+                }
+            }
+
+            // Fallback: первый активный LLMAgent на сцене
+            _cached = Object.FindFirstObjectByType<LLMAgent>(FindObjectsInactive.Exclude);
+            return _cached;
+        }
+    }
+}

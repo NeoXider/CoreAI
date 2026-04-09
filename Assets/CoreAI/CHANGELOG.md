@@ -2,6 +2,16 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.18.0] — 2026-04-10
+
+### Architecture — DI Migration
+
+- 🔧 **`CoreAISettings` → static proxy** — больше не хранит значения как независимые поля. Теперь делегирует чтение в `ICoreAISettings Instance` (DI-зарегистрированный экземпляр).
+  - Поддержка прямой записи сохранена для обратной совместимости (override prevails over Instance).
+  - Добавлен `CoreAISettings.ResetOverrides()` для очистки overrides в тестах.
+- 🔧 **`LuaAiEnvelopeProcessor`** — принимает `ICoreAISettings` через конструктор (optional param). Больше не читает `CoreAISettings.MaxLuaRepairRetries` при инициализации.
+- ❌ **Удалён** `SyncToStaticSettings()` полностью — заменён одной строкой `CoreAISettings.Instance = settings`.
+
 ## [v0.16.0] — 2026-04-09
 
 ### PlayMode Tools & Editor
