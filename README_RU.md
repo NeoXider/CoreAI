@@ -11,7 +11,7 @@ CoreAI сочетает низкий порог входа для новичко
 
 | Версия | Unity | Статус |
 |--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.14.0 — [CHANGELOG](CHANGELOG.md) |
+| См. `package.json` | `6000.0+` | ✅ v0.16.0 — [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -48,7 +48,9 @@ AI может вызывать инструменты для получения 
 | 📜 **LuaTool** | Выполняет Lua скрипты | Programmer AI |
 | 🎒 **InventoryTool** | Получает инвентарь NPC | Merchant AI |
 | ⚙️ **GameConfigTool** | Читает/меняет конфиги игры | Creator AI |
-| 🧩 *(Твой Инструмент)*| Добавь сюда (ваш кастомный инструмент) (либо для простого используйте ⚡ Action/Event Tool) | Ваш Агент |
+| 🎭 **SceneLlmTool** | Читает и меняет иерархию/transform в PlayMode | Все агенты |
+| 📸 **CameraLlmTool** | Делает скриншоты (Base64 JPEG) для Vision | Все агенты |
+| 🧩 *(Твой Инструмент)*| Добавь сюда (либо используй ⚡ Action/Event Tool) | Ваш Агент |
 
 **Создай свой инструмент:**
 ```csharp
@@ -58,9 +60,9 @@ public class WeatherLlmTool : ILlmTool
     public string Description => "Get current weather in game world.";
     public string ParametersSchema => "{}";
     
-    public AIFunction CreateAIFunction()
+    public IEnumerable<AIFunction> CreateAIFunctions()
     {
-        return AIFunctionFactory.Create(
+        yield return AIFunctionFactory.Create(
             async (CancellationToken ct) => await _provider.GetWeatherAsync(ct),
             "get_weather", "Get current weather.");
     }

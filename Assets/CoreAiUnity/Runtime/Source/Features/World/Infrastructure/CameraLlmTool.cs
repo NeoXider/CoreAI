@@ -57,7 +57,7 @@ namespace CoreAI.Infrastructure.World
                 if (targetCam == null)
                 {
                     // Fallback to first available camera
-                    targetCam = UnityEngine.Object.FindFirstObjectByType<Camera>();
+                    targetCam = UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
                     if (targetCam == null)
                     {
                         return SerializeError($"No camera perfectly matching '{cameraName}' and no active cameras found in the scene.");

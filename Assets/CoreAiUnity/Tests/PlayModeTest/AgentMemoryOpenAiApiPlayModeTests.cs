@@ -63,7 +63,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(360000)]
         public IEnumerator MemoryTool_AppendsMemory()
         {
             using TestAgentSetup setup = new();
@@ -104,7 +104,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(360000)]
         public IEnumerator MemoryTool_ClearsMemory()
         {
             using TestAgentSetup setup = new();

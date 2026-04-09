@@ -89,43 +89,23 @@ namespace CoreAI.Tests.PlayMode
                 return null;
             }
 
+            llm.flashAttention = true;
+            llm.numGPULayers = 99; // Offload all layers to GPU (same as LM Studio default)
             llm.enabled = true;
             agent.enabled = true;
             llm.dontDestroyOnLoad = false;
 
             Debug.Log("[TestHarness] GameObject created, model: " + llm.model);
 
+            // SetActive(true) triggers Unity lifecycle: LLM.Awake() and LLMAgent.Awake()
+            // are called automatically. DO NOT call them again via reflection — that creates
+            // a second llama.cpp server instance which replaces the first llmService,
+            // leaking the native context and causing the second Chat call to deadlock.
             go.SetActive(true);
+            Debug.Log("[TestHarness] GameObject activated (Awake called by Unity)");
 
-            if (!llm.started && s_LlmAwakeMethod != null)
-            {
-                Debug.Log("[TestHarness] Manually invoking LLM.Awake()...");
-                try
-                {
-                    s_LlmAwakeMethod.Invoke(llm, null);
-                    Debug.Log("[TestHarness] LLM.Awake() invoked");
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError("[TestHarness] Failed LLM.Awake(): " + ex.InnerException?.Message ?? ex.Message);
-                }
-            }
-
-            if (s_LlmClientAwakeMethod != null)
-            {
-                Debug.Log("[TestHarness] Manually invoking LLMAgent.Awake()...");
-                try
-                {
-                    s_LlmClientAwakeMethod.Invoke(agent, null);
-                    Debug.Log("[TestHarness] LLMAgent.Awake() invoked");
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError("[TestHarness] Failed LLMAgent.Awake(): " + ex.InnerException?.Message ??
-                                   ex.Message);
-                }
-            }
-
+            // Unity does NOT auto-call Start() on dynamically created components in PlayMode tests.
+            // We must invoke it manually so LLMClient sets up the caller object.
             if (s_LlmClientStartMethod != null)
             {
                 Debug.Log("[TestHarness] Manually invoking LLMAgent.Start()...");

@@ -4,7 +4,7 @@
 
 | Версия | Зависит от | Статус |
 |--------|-----------|--------|
-| См. `package.json` | `com.nexoider.coreai` v0.7.0 | ✅ Готово |
+| См. `package.json` | `com.nexoider.coreai` v0.16.0 | ✅ Готово |
 
 ---
 
@@ -31,6 +31,8 @@ var merchant = new AgentBuilder("Blacksmith")
 | 📜 **LuaTool** | Выполняет Lua код | `create_item("Sword")` |
 | 🎒 **InventoryTool** | Инвентарь NPC | Список товаров |
 | ⚙️ **GameConfigTool** | Конфиги игры | Баланс, настройки |
+| 🎭 **SceneLlmTool** | Иерархия/transform в PlayMode | Поворот GameObject |
+| 📸 **CameraLlmTool** | Base64 JPEG скриншоты для Vision | Снимок с Camera.main |
 
 ### Tool Call Retry
 

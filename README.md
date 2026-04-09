@@ -9,7 +9,7 @@ Engineered for both rapid integration by beginners and complex systemic design b
 >
 > 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
 
-**Version:** v0.14.0 | **Persistent Chat History & Session Survival**
+**Version:** v0.16.0 | **PlayMode Scene Tools & Vision Support**
 
 ---
 
@@ -51,6 +51,8 @@ AI doesn't just generate text — it **calls code** for real actions:
 | 📜 **LuaTool** | Executes Lua scripts | Programmer AI |
 | 🎒 **InventoryTool** | Gets NPC inventory | Merchant AI |
 | ⚙️ **GameConfigTool** | Reads/modifies game configs | Creator AI |
+| 🎭 **SceneLlmTool** | Read and change hierarchy/transform in PlayMode | All Agents |
+| 📸 **CameraLlmTool** | Captures screenshots (Base64 JPEG) for Vision | All Agents |
 
 **Create your own:**
 ```csharp
@@ -58,8 +60,11 @@ public class WeatherLlmTool : ILlmTool
 {
     public string Name => "get_weather";
     public string Description => "Get current weather.";
-    public AIFunction CreateAIFunction() => AIFunctionFactory.Create(
-        async ct => await _provider.GetWeatherAsync(ct), "get_weather", "Get weather.");
+    public IEnumerable<AIFunction> CreateAIFunctions() 
+    {
+        yield return AIFunctionFactory.Create(
+            async ct => await _provider.GetWeatherAsync(ct), "get_weather", "Get weather.");
+    }
 }
 ```
 

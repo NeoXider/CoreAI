@@ -26,6 +26,7 @@ MonoBehaviour:
   llmUnityStartupTimeoutSeconds: 300
   llmUnityStartupDelaySeconds: 1
   llmUnityKeepAlive: 1
+  enableReasoning: 0
   llmUnityMaxConcurrentChats: 1
   universalSystemPromptPrefix: "You are an AI agent in a Unity game. Keep all responses
     as concise as possible \u2014 brief answers save context tokens and respond faster.

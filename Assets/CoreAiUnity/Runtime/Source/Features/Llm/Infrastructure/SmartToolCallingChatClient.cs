@@ -40,6 +40,8 @@ namespace CoreAI.Infrastructure.Llm
             while (true)
             {
                 iteration++;
+                await Task.Yield(); // Force async boundary to ensure previous LLMUnity states (like isGenerating) are fully flushed
+
                 if (CoreAISettings.LogMeaiToolCallingSteps)
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
