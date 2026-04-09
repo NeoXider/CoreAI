@@ -63,7 +63,13 @@ namespace CoreAI.Tests.PlayMode
                 assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, ggufPath);
             }
 
-            // Fallback: ищем qwen + 2b
+            // Fallback: ищем qwen + 4b
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "4b");
+            }
+
+            // Fallback: ищем qwen + 2b если 4b нет
             if (!assigned)
             {
                 assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");

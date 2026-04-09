@@ -2,8 +2,28 @@
 
 Все значимые изменения проекта CoreAI.
 
-## [v0.14.0] — 2026-04-09
+## [v0.16.0] — 2026-04-09
 
+### PlayMode Tools & Editor
+- ✨ **`SceneLlmTool`** — новый инструмент для Runtime инспекции сцены. Позволяет LLM:
+  - `find_objects` (поиск GameObject по имени/тегу).
+  - `get_hierarchy` (получение дочерних элементов).
+  - `get_transform` и `set_transform` (манипуляции позицией, вращением, скейлом).
+- ✨ **`CameraLlmTool`** — инструмент зрения, позволяющий модели делать скриншоты в PlayMode (`capture_camera`) с возвратом `dataUri` (Base64 JPEG). Идеально для мультимодальных LLM (LLaVA/gpt-4o).
+- 🛠 **Многопоточность** — оба инструмента безопасно оборачивают вызовы к Unity API в `UniTask.SwitchToMainThread()`, предотвращая краши от фоновых потоков MEAI.
+- 🛠 **Автоматизация `CoreAiPrefabRegistryAsset`** — добавлен `OnValidate`, который автоматически проставляет `Key` (на основе AssetDatabase GUID) и стягивает `Name` при добавлении префаба в инспекторе.
+
+## [v0.15.0] — 2026-04-09
+
+### Tool Calling Engine
+- ✨ **Robust JSON Extraction** — полностью переписан механизм парсинга tool calls в `LlmUnityMeaiChatClient.TryParseToolCallFromText`. Старое хрупкое Regex вырезано; заменено на гибкий алгоритм поиска фигурных скобок (`IndexOf('{')`). Теперь модели могут забывать закрывающие бэктики (\`\`\`) или вставлять скобки в текстовые аргументы без поломки парсера. Тесты PlayMode (`MemoryTool_AppendsMemory`) успешно пройдены.
+- ⚙️ **Reasoning Mode Stripping** — добавлен препроцессинг ответов: парсинг tool calls теперь предварительно вырезает всю цепочку рассуждений `<think>...</think>`, предотвращая сбой JSON-парсера при "думанье" вслух (DeepSeek).
+
+### Editor UX
+- ✨ **Auto-Plugin Loading** — встроен механизм `[InitializeOnLoadMethod]` в `CoreAIBuildMenu`. При старте проекта или импорте плагина он автоматически генерирует полный набор необходимых `ScriptableObject` (`CoreAiSettingsAsset`, манифесты роутинга, пермишены) в `Settings/` и `Resources/`.
+- ✨ **Quick Settings Menu** — добавлено удобное меню **CoreAI → Settings** для быстрого доступа к глобальному синглтону `CoreAISettings.asset`.
+
+## [v0.14.0] — 2026-04-09
 ### Agent Memory & Persistence
 - ✨ **Persistent Chat History** — полная история диалога (контекст агентов) теперь сохраняется между игровыми сессиями.
   - `WithChatHistory(persistToDisk: true)` в `AgentBuilder` (или `RoleMemoryConfig`) — включение сохранения на диск.

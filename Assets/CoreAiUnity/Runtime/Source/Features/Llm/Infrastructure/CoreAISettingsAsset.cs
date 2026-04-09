@@ -131,6 +131,10 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Не останавливать LLMUnity сервер между запросами (keep-alive). Ускоряет тесты.")] [SerializeField]
         private bool llmUnityKeepAlive = false;
 
+        [Tooltip("Включить режим размышлений (thinking/reasoning). Поддерживается Qwen3.5, DeepSeek и др. Работает как для API так и для LLMUnity.")]
+        [SerializeField]
+        private bool enableReasoning = false;
+
         [Tooltip("Максимум параллельных чатов с LLMUnity. 1 = последовательно.")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
 
@@ -336,6 +340,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Не останавливать сервер между запросами.</summary>
         public bool LlmUnityKeepAlive => llmUnityKeepAlive;
+
+        /// <summary>Включить режим размышлений (thinking/reasoning). Для Qwen3.5, DeepSeek и др.</summary>
+        public bool EnableReasoning => enableReasoning;
 
         /// <summary>Максимум параллельных чатов.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;

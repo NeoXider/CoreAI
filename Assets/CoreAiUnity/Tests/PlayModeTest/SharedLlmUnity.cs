@@ -10,72 +10,97 @@ using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.PlayMode
 {
+    /// <summary>
+    /// Единый экземпляр LLM + LLMAgent на всю сессию PlayMode тестов.
+    /// Модель загружается один раз при первом вызове <see cref="EnsureInitialized"/>,
+    /// живёт через DontDestroyOnLoad и уничтожается только в <see cref="Cleanup"/>
+    /// (вызывается из <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>).
+    /// </summary>
     public static class SharedLlmUnity
     {
-        private static PlayModeProductionLikeLlmHandle _handle;
+        private static GameObject _rootGo;
+        private static LLM _llm;
+        private static LLMAgent _agent;
         private static bool _initialized;
-        private static string _error;
         private static bool _initializing;
+        private static string _error;
 
-        public static bool IsReady => _initialized && _handle?.Client != null && string.IsNullOrEmpty(_error);
+        public static bool IsReady => _initialized && _agent != null && _llm != null && _llm.started;
         public static string Error => _error;
-        public static ILlmClient Client => _handle?.Client;
+        public static LLMAgent Agent => _agent;
+        public static LLM Llm => _llm;
 
         /// <summary>
-        /// Получить клиент с правильным MemoryStore.
+        /// Создать <see cref="ILlmClient"/> с конкретным <see cref="IAgentMemoryStore"/>.
+        /// Каждый тест получает свой лёгкий клиент вокруг общего LLMAgent.
         /// </summary>
-        public static ILlmClient ClientWithMemoryStore(IAgentMemoryStore store)
+        public static ILlmClient CreateClientWithMemoryStore(IAgentMemoryStore store)
         {
-            return _handle?.WrapWithMemoryStore(store);
+            if (!IsReady) return null;
+            return new MeaiLlmClient(
+                new LlmUnityMeaiChatClient(_agent, GameLoggerUnscopedFallback.Instance),
+                GameLoggerUnscopedFallback.Instance,
+                store);
         }
 
-        public static IEnumerator Initialize()
+        /// <summary>
+        /// Инициализировать один раз. Повторные вызовы — no-op (yield break).
+        /// </summary>
+        public static IEnumerator EnsureInitialized()
         {
-            if (_initialized || _initializing)
+            if (_initialized)
             {
+                yield break;
+            }
+
+            if (_initializing)
+            {
+                // Другой тест уже инициализирует — ждём
+                while (_initializing)
+                {
+                    yield return null;
+                }
                 yield break;
             }
 
             _initializing = true;
-            Debug.Log("[SharedLlmUnity] Initializing...");
+            Debug.Log("[SharedLlmUnity] Initializing shared LLM instance...");
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null, // Из CoreAISettingsAsset
-                    0f,
-                    300,
-                    out _handle,
-                    out _error))
-            {
-                Debug.LogError("[SharedLlmUnity] Failed to create LLM: " + _error);
-                _initializing = false;
-                yield break;
-            }
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
+            string agentName = settings?.LlmUnityAgentName;
+            string ggufPath = settings?.GgufModelPath;
 
-            MeaiLlmUnityClient llmClient = _handle.Client as MeaiLlmUnityClient;
-            if (llmClient == null)
+            _rootGo = PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(
+                agentName, ggufPath, out _llm, out _agent);
+
+            if (_rootGo == null || _agent == null || _llm == null)
             {
-                _error = "Could not get LLM client";
+                _error = "Не удалось создать LLM+LLMAgent или назначить GGUF.";
                 Debug.LogError("[SharedLlmUnity] " + _error);
                 _initializing = false;
                 yield break;
             }
 
-            LLM llm = llmClient.LLM;
-            if (llm == null)
+            // DontDestroyOnLoad: живём до конца всех тестов
+            Object.DontDestroyOnLoad(_rootGo);
+
+            // Температура для стабильного tool calling
+            if (settings != null && settings.Temperature > 0f)
             {
-                _error = "LLM component is null";
-                Debug.LogError("[SharedLlmUnity] " + _error);
-                _initializing = false;
-                yield break;
+                _agent.temperature = settings.Temperature;
+            }
+            else
+            {
+                _agent.temperature = 0.2f;
             }
 
-            Debug.Log("[SharedLlmUnity] Waiting for model: " + llm.model);
+            Debug.Log($"[SharedLlmUnity] Waiting for model: {_llm.model}");
 
             float timeout = 600f;
             float startTime = Time.realtimeSinceStartup;
             float lastLog = startTime;
 
-            while (!llm.started && !llm.failed)
+            while (!_llm.started && !_llm.failed)
             {
                 float elapsed = Time.realtimeSinceStartup - startTime;
                 if (elapsed > timeout)
@@ -88,14 +113,14 @@ namespace CoreAI.Tests.PlayMode
 
                 if (Time.realtimeSinceStartup - lastLog > 5f)
                 {
-                    Debug.Log($"[SharedLlmUnity] Waiting... {elapsed:F1}s, started={llm.started}");
+                    Debug.Log($"[SharedLlmUnity] Waiting... {elapsed:F1}s, started={_llm.started}");
                     lastLog = Time.realtimeSinceStartup;
                 }
 
                 yield return new WaitForSecondsRealtime(1f);
             }
 
-            if (llm.failed)
+            if (_llm.failed)
             {
                 _error = "Model failed to load";
                 Debug.LogError("[SharedLlmUnity] " + _error);
@@ -103,20 +128,44 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            _initialized = true;
-            _initializing = false;
-            Debug.Log("[SharedLlmUnity] Ready! Model: " + llm.model);
-        }
-
-        public static void Cleanup()
-        {
-            if (_handle != null)
+            // Применяем reasoning ПОСЛЕ старта llmService (нельзя раньше — C++ ещё не готов)
+            if (settings != null && settings.EnableReasoning)
             {
-                Debug.Log("[SharedLlmUnity] Cleaning up...");
-                _handle.Dispose();
-                _handle = null;
+                _llm.reasoning = true;
+                Debug.Log("[SharedLlmUnity] Reasoning (think mode) enabled.");
             }
 
+            _initialized = true;
+            _initializing = false;
+            Debug.Log($"[SharedLlmUnity] Ready! Model: {_llm.model}");
+        }
+
+        /// <summary>
+        /// Полная очистка: остановить llama.cpp и уничтожить GameObject.
+        /// Вызывается ОДИН раз из <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>.
+        /// </summary>
+        public static void Cleanup()
+        {
+            Debug.Log("[SharedLlmUnity] Cleaning up...");
+
+            if (_agent != null)
+            {
+                _agent.CancelRequests();
+            }
+
+            if (_llm != null)
+            {
+                _llm.Destroy();
+            }
+
+            if (_rootGo != null)
+            {
+                Object.DestroyImmediate(_rootGo);
+                _rootGo = null;
+            }
+
+            _llm = null;
+            _agent = null;
             _initialized = false;
             _initializing = false;
             _error = null;

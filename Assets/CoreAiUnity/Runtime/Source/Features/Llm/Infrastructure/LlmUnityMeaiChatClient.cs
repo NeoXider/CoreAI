@@ -37,21 +37,106 @@ namespace CoreAI.Infrastructure.Llm
         {
             List<MEAI.ChatMessage> msgs = new(chatMessages);
             string userMessage = "";
+            string sysMessage = "";
+
             foreach (MEAI.ChatMessage msg in msgs)
             {
-                if (msg.Role == MEAI.ChatRole.User)
+                if (msg.Role == MEAI.ChatRole.System)
                 {
                     foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.TextContent tc)
                         {
-                            userMessage += tc.Text + "\n";
+                            sysMessage += tc.Text + "\n";
+                        }
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.User)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.TextContent tc)
+                        {
+                            userMessage += "User: " + tc.Text + "\n";
+                        }
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.Assistant)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.TextContent tc)
+                        {
+                            userMessage += "Assistant: " + tc.Text + "\n";
+                        }
+                        else if (item is MEAI.FunctionCallContent fcc)
+                        {
+                            // Simulate tool call for history context
+                            userMessage += $"Assistant Tool Call:\n```json\n{{\"name\": \"{fcc.Name}\", \"arguments\": {Newtonsoft.Json.JsonConvert.SerializeObject(fcc.Arguments)}}}\n```\n";
+                        }
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.Tool)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.FunctionResultContent frc)
+                        {
+                            userMessage += $"Tool Result: {frc.Result}\n";
                         }
                     }
                 }
             }
 
+            if (options?.Tools != null && options.Tools.Count > 0)
+            {
+                sysMessage += "\n\nCRITICAL SYSTEM RULES FOR TOOLS:\n";
+                sysMessage += "1. You have access to the following tools. You MUST use one if it matches the user request.\n";
+                sysMessage += "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n";
+                sysMessage += "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n";
+                
+                JArray toolNames = new JArray();
+                foreach (MEAI.AITool tool in options.Tools)
+                {
+                    toolNames.Add(tool.Name);
+                    sysMessage += $"- name: {tool.Name}\n  description: {tool.Description}\n";
+                    if (tool is MEAI.AIFunction fn)
+                    {
+                        sysMessage += $"  parameters schema: {fn.JsonSchema.ToString()}\n";
+                    }
+                }
+
+                // DO NOT restrict generation strictly to JSON! It prevents the LLM from outputting conversational text
+                // when a tool result is successfully executed, causing infinite loops of hallucinated tool calls.
+                _unityAgent.grammar = "";
+            }
+            else
+            {
+                _unityAgent.grammar = ""; // Clear grammar if no tools
+            }
+
+            if (!string.IsNullOrWhiteSpace(sysMessage))
+            {
+                _unityAgent.systemPrompt = sysMessage.TrimEnd();
+            }
+
+            if (options?.Temperature.HasValue == true)
+            {
+                _unityAgent.temperature = options.Temperature.Value;
+            }
+
+            if (options?.MaxOutputTokens.HasValue == true)
+            {
+                _unityAgent.numPredict = options.MaxOutputTokens.Value;
+            }
+
             string result = await _unityAgent.Chat(userMessage.Trim(), addToHistory: false);
+
+            // Strip <think>...</think> blocks produced by reasoning/thinking mode (Qwen3.5, DeepSeek, etc.)
+            if (!string.IsNullOrEmpty(result))
+            {
+                result = Regex.Replace(result, @"<think>[\s\S]*?</think>\s*", "", RegexOptions.IgnoreCase).Trim();
+            }
 
             List<MEAI.AIContent> responseContents = new();
             List<MEAI.AITool> tools = options?.Tools?.ToList() ?? new List<MEAI.AITool>();
@@ -85,6 +170,13 @@ namespace CoreAI.Infrastructure.Llm
             out string cleanedText)
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
+            
+            // Strip <think>...</think> blocks from text before parsing
+            if (!string.IsNullOrEmpty(text))
+            {
+                text = Regex.Replace(text, @"<think>[\s\S]*?</think>\s*", "", RegexOptions.IgnoreCase).Trim();
+            }
+            
             cleanedText = text;
 
             if (string.IsNullOrEmpty(text) || availableTools == null || availableTools.Count == 0)
@@ -92,22 +184,19 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            Regex jsonRegex = new(
-                @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            int firstBrace = text.IndexOf('{');
+            int lastBrace = text.LastIndexOf('}');
 
-            Match match = jsonRegex.Match(text);
-            if (!match.Success)
+            if (firstBrace == -1 || lastBrace == -1 || lastBrace <= firstBrace)
             {
                 return false;
             }
 
+            string possibleJson = text.Substring(firstBrace, lastBrace - firstBrace + 1);
+            
             try
             {
-                string jsonStr = match.Groups[1].Success ? match.Groups[1].Value :
-                    match.Groups[2].Success ? match.Groups[2].Value : "";
-
-                JObject json = JObject.Parse(jsonStr);
+                JObject json = JObject.Parse(possibleJson);
                 string functionName = null;
                 Dictionary<string, object> argumentsDict = new();
 
@@ -126,7 +215,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                if (functionName == null)
+                if (string.IsNullOrEmpty(functionName))
                 {
                     return false;
                 }
@@ -134,8 +223,9 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.FunctionCallContent functionCall = new($"call_{functionName}_1", functionName, argumentsDict);
                 toolCalls.Add(functionCall);
 
-                cleanedText = text.Substring(0, match.Index) + text.Substring(match.Index + match.Length);
-                cleanedText = cleanedText.Trim();
+                // Clean up the parsed JSON from the text
+                cleanedText = text.Substring(0, firstBrace) + text.Substring(lastBrace + 1);
+                cleanedText = cleanedText.Replace("```json", "").Replace("```", "").Trim();
 
                 return true;
             }

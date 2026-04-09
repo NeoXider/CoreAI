@@ -6,6 +6,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Prompts;
 using CoreAI.Infrastructure.World;
+using CoreAI.Presentation.AiDashboard;
 
 namespace CoreAI.Editor
 {
@@ -15,9 +16,11 @@ namespace CoreAI.Editor
         private const string RogueliteArenaScene = "Assets/_exampleGame/Scenes/RogueliteArena.unity";
         private const string SettingsRoot = "Assets/CoreAiUnity/Settings";
         private const string LogSettingsPath = SettingsRoot + "/GameLogSettings.asset";
-        private const string OpenAiSettingsPath = SettingsRoot + "/OpenAiHttpLlmSettings.asset";
+        private const string CoreAiSettingsPath = "Assets/Resources/CoreAISettings.asset";
         private const string PromptsManifestPath = SettingsRoot + "/AgentPromptsManifest.asset";
         private const string PrefabRegistryPath = SettingsRoot + "/CoreAiPrefabRegistry.asset";
+        private const string AiPermissionsPath = SettingsRoot + "/AiPermissions.asset";
+        private const string LlmRoutingPath = SettingsRoot + "/LlmRoutingManifest.asset";
 
         [MenuItem("CoreAI/Development/Set _mainCoreAI as first build scene")]
         public static void SetMainCoreAiFirstInBuild()
@@ -43,21 +46,46 @@ namespace CoreAI.Editor
             MoveSceneFirstInBuild(RogueliteArenaScene, "RogueliteArena");
         }
 
-        [MenuItem("CoreAI/Setup/Create Default Assets")]
+        [MenuItem("CoreAI/Settings", priority = 1)]
+        public static void OpenSettings()
+        {
+            EnsureFolder("Assets/Resources");
+            var settings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
+            Selection.activeObject = settings;
+            EditorGUIUtility.PingObject(settings);
+        }
+
+        [InitializeOnLoadMethod]
+        private static void AutoCreateDefaultAssetsOnLoad()
+        {
+            // Auto-create on first plugin load if missing
+            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) == null)
+            {
+                CreateDefaultAssets();
+            }
+        }
+
+        [MenuItem("CoreAI/Setup/Create Default Assets", priority = 2)]
         public static void CreateDefaultAssets()
         {
             EnsureFolder(SettingsRoot);
+            EnsureFolder("Assets/Resources");
+            
             GameLogSettingsAsset logSettings = EnsureAsset<GameLogSettingsAsset>(LogSettingsPath);
-            OpenAiHttpLlmSettings openAi = EnsureAsset<OpenAiHttpLlmSettings>(OpenAiSettingsPath);
+            CoreAISettingsAsset coreAiSettings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
             AgentPromptsManifest prompts = EnsureAsset<AgentPromptsManifest>(PromptsManifestPath);
             CoreAiPrefabRegistryAsset prefabs = EnsureAsset<CoreAiPrefabRegistryAsset>(PrefabRegistryPath);
-            TryAssignToScope(logSettings, openAi, prompts, prefabs);
+            AiPermissionsAsset permissions = EnsureAsset<AiPermissionsAsset>(AiPermissionsPath);
+            LlmRoutingManifest routing = EnsureAsset<LlmRoutingManifest>(LlmRoutingPath);
+            
+            TryAssignToScope(logSettings, coreAiSettings, prompts, prefabs);
+            
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            CoreAIEditorLog.Log("Default assets are created and assigned (if CoreAILifetimeScope exists).");
+            CoreAIEditorLog.Log("Default CoreAI assets auto-generated and configured.");
         }
 
-        [MenuItem("CoreAI/Setup/Validate Scene")]
+        [MenuItem("CoreAI/Setup/Validate Scene", priority = 3)]
         public static void ValidateScene()
         {
             CoreAILifetimeScope scope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
@@ -195,7 +223,7 @@ namespace CoreAI.Editor
 
         private static void TryAssignToScope(
             GameLogSettingsAsset logSettings,
-            OpenAiHttpLlmSettings openAi,
+            CoreAISettingsAsset coreAiSettings,
             AgentPromptsManifest prompts,
             CoreAiPrefabRegistryAsset prefabs)
         {
@@ -207,7 +235,11 @@ namespace CoreAI.Editor
 
             SerializedObject so = new(scope);
             so.FindProperty("gameLogSettings").objectReferenceValue = logSettings;
-            so.FindProperty("openAiHttpLlmSettings").objectReferenceValue = openAi;
+            
+            // Note: openAiHttpLlmSettings might still be the property name if not updated, but we don't strictly need to assign it since CoreAI prefers the singleton now.
+            var legacyOpenAiProp = so.FindProperty("openAiHttpLlmSettings");
+            if (legacyOpenAiProp != null) legacyOpenAiProp.objectReferenceValue = null;
+
             so.FindProperty("agentPromptsManifest").objectReferenceValue = prompts;
             so.FindProperty("worldPrefabRegistry").objectReferenceValue = prefabs;
             so.ApplyModifiedPropertiesWithoutUndo();

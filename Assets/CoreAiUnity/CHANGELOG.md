@@ -2,6 +2,23 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.16.0] - 2026-04-09
+
+### PlayMode Tools & Editor
+- ✨ **`SceneLlmTool`** — новый инструмент для Runtime инспекции сцены. Позволяет LLM искать, анализировать иерархию и менять `Transform` у GameObject, работая безопасно в главном потоке через UniTask.
+- ✨ **`CameraLlmTool`** — инструмент зрения, позволяющий модели делать скриншоты в PlayMode (`capture_camera`) с возвратом `dataUri` (Base64 JPEG).
+- 🛠 **Автоматизация `CoreAiPrefabRegistryAsset`** — добавлен `OnValidate`, который автоматически проставляет `Key` (на основе AssetDatabase GUID) и стягивает `Name` при добавлении префаба в инспекторе.
+
+## [0.15.0] - 2026-04-09
+
+### Tool Calling Engine
+- ✨ **Robust JSON Extraction** — полностью переписан механизм парсинга tool calls в `LlmUnityMeaiChatClient.TryParseToolCallFromText`. Старое хрупкое Regex вырезано; заменено на гибкий алгоритм поиска фигурных скобок (`IndexOf('{')`).
+- ⚙️ **Reasoning Mode Stripping** — добавлен препроцессинг ответов: парсинг tool calls теперь предварительно вырезает всю цепочку рассуждений `<think>...</think>`, предотвращая сбой JSON-парсера при "думанье" вслух (DeepSeek/Qwen).
+
+### Editor UX
+- ✨ **Auto-Plugin Loading** — встроен механизм `[InitializeOnLoadMethod]` в `CoreAIBuildMenu`. При старте проекта он автоматически генерирует полный набор необходимых `ScriptableObject`.
+- ✨ **Quick Settings Menu** — добавлено удобное меню **CoreAI → Settings** для быстрого доступа к глобальному синглтону `CoreAISettings.asset`.
+
 ## [0.13.0] - 2026-04-09
 
 ### Action / Event System

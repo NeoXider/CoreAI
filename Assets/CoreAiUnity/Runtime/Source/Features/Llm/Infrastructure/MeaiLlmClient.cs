@@ -267,6 +267,12 @@ namespace CoreAI.Infrastructure.Llm
                         case WorldLlmTool wt:
                             result.Add(wt.CreateAIFunction());
                             break;
+                        case CoreAI.Ai.SceneLlmTool slt:
+                            result.AddRange(slt.CreateAIFunctions());
+                            break;
+                        case CoreAI.Infrastructure.World.CameraLlmTool camt:
+                            result.AddRange(camt.CreateAIFunctions());
+                            break;
                         case DelegateLlmTool dt:
                             result.Add(MEAI.AIFunctionFactory.Create(dt.ActionDelegate, dt.Name, dt.Description));
                             break;

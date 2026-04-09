@@ -156,39 +156,48 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Regex_MatchesJsonInCodeBlock()
+        public void TryParseToolCallFromText_StripsThinkTagsBeforeParsing()
         {
-            string text = "```json\n{\"name\": \"memory\", \"arguments\": {\"action\": \"write\"}}\n```";
-            Regex regex = new(
-                @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                RegexOptions.IgnoreCase |
-                RegexOptions.Singleline);
+            // Симулируем ответ модели с Reasoning
+            string textWithReasoning = "<think>\nThinking about what to do...\nI will use the memory tool now.\n</think>\n" +
+                                       "{\"name\": \"memory\", \"arguments\": {\"action\": \"read\"}}";
+            
+            var dummyAction = new Action(() => {});
+            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction, "memory");
 
-            Assert.IsTrue(regex.IsMatch(text));
+            bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
+                textWithReasoning,
+                new[] { dummyTool },
+                out var calls,
+                out string cleanedText);
+                
+            Assert.IsTrue(success);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("memory", calls[0].Name);
+            // Убеждаемся что тег think был полностью удален, а не просто обойден regex
+            Assert.IsFalse(cleanedText.Contains("<think>"));
+            Assert.IsFalse(cleanedText.Contains("Thinking about what to do"));
         }
 
         [Test]
-        public void Regex_MatchesPlainJson()
+        public void TryParseToolCallFromText_HandlesMultipleThinkTagsOrMalformed()
         {
-            string text = "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\"}}";
-            Regex regex = new(
-                @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                RegexOptions.IgnoreCase |
-                RegexOptions.Singleline);
+            string text = "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
+            
+            var dummyAction = new Action(() => {});
+            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction, "memory");
 
-            Assert.IsTrue(regex.IsMatch(text));
-        }
-
-        [Test]
-        public void Regex_DoesNotMatchPlainEnglish()
-        {
-            string text = "Just regular text without any tool calls.";
-            Regex regex = new(
-                @"```json\s*(\{[^`]+\})\s*```|(\{[^{}]*""name""\s*:\s*""([^""]+)""[^{}]*""arguments""\s*:\s*\{[^{}]*\}[^{}]*\})",
-                RegexOptions.IgnoreCase |
-                RegexOptions.Singleline);
-
-            Assert.IsFalse(regex.IsMatch(text));
+            bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
+                text,
+                new[] { dummyTool },
+                out var calls,
+                out string cleanedText);
+                
+            Assert.IsTrue(success);
+            Assert.AreEqual(1, calls.Count);
+            Assert.IsFalse(cleanedText.Contains("<think>"));
+            Assert.IsTrue(cleanedText.Contains("Intermediate text"));
+            Assert.AreEqual("memory", calls[0].Name);
         }
 
         #endregion

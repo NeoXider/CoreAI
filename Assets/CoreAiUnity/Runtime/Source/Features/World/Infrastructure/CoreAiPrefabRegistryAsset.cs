@@ -81,5 +81,40 @@ namespace CoreAI.Infrastructure.World
                 }
             }
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (entries == null) return;
+            
+            bool changed = false;
+            foreach (var entry in entries)
+            {
+                if (entry.Prefab != null)
+                {
+                    if (string.IsNullOrWhiteSpace(entry.Name))
+                    {
+                        entry.Name = entry.Prefab.name;
+                        changed = true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(entry.Key))
+                    {
+                        string path = UnityEditor.AssetDatabase.GetAssetPath(entry.Prefab);
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            entry.Key = UnityEditor.AssetDatabase.AssetPathToGUID(path);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            
+            if (changed)
+            {
+                UnityEditor.EditorUtility.SetDirty(this);
+            }
+        }
+#endif
     }
 }

@@ -194,6 +194,10 @@ namespace CoreAI.Infrastructure.Llm
                 { "temperature", options?.Temperature ?? _settings.Temperature },
                 { "messages", messages }
             };
+            if (options?.MaxOutputTokens.HasValue == true)
+            {
+                req["max_tokens"] = options.MaxOutputTokens.Value;
+            }
             if (toolsList.Count > 0)
             {
                 req["tools"] = toolsList;
@@ -268,6 +272,13 @@ namespace CoreAI.Infrastructure.Llm
 
                 JToken msg = choices[0]["message"];
                 string content = msg?["content"]?.ToString() ?? "";
+
+                // Strip <think>...</think> blocks if any
+                if (!string.IsNullOrEmpty(content))
+                {
+                    content = System.Text.RegularExpressions.Regex.Replace(content, @"<think>[\s\S]*?</think>\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+                }
+
                 JArray toolCalls = msg?["tool_calls"] as JArray;
 
                 MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, content));

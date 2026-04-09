@@ -93,8 +93,65 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
+#if !COREAI_NO_LLM
+                SerializedProperty ggufPathProp = serializedObject.FindProperty("ggufModelPath");
+                
+                System.Collections.Generic.List<string> options = new System.Collections.Generic.List<string> { "[ Auto / Fallback ]" };
+                System.Collections.Generic.List<string> fileNames = new System.Collections.Generic.List<string> { "" };
+
+                try
+                {
+                    if (LLMManager.modelEntries != null)
+                    {
+                        foreach (var entry in LLMManager.modelEntries)
+                        {
+                            if (!entry.lora)
+                            {
+                                options.Add(entry.filename);
+                                fileNames.Add(entry.filename);
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                int currentIndex = fileNames.IndexOf(ggufPathProp.stringValue);
+                
+                // Если введено вручную, добавим в конец
+                if (currentIndex == -1 && !string.IsNullOrEmpty(ggufPathProp.stringValue))
+                {
+                    options.Add(ggufPathProp.stringValue + " (Ручной ввод)");
+                    fileNames.Add(ggufPathProp.stringValue);
+                    currentIndex = fileNames.Count - 1;
+                }
+                else if (currentIndex == -1)
+                {
+                    currentIndex = 0;
+                }
+
+                EditorGUILayout.BeginHorizontal();
+                int newIndex = EditorGUILayout.Popup(new GUIContent("GGUF Path", "Выбор модели из LLMUnity. Пусто = авто"), currentIndex, options.ToArray());
+                if (newIndex != currentIndex)
+                {
+                    ggufPathProp.stringValue = fileNames[newIndex];
+                }
+                
+                if (GUILayout.Button("Manual", GUILayout.Width(60)))
+                {
+                    string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        ggufPathProp.stringValue = System.IO.Path.GetFileName(path);
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+
+                // Даем возможность отредактировать ручками прямо тут
+                ggufPathProp.stringValue = EditorGUILayout.TextField(new GUIContent(" ", "Ручной вод имени файла"), ggufPathProp.stringValue);
+#else
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("ggufModelPath"),
                     new GUIContent("GGUF Path", "Путь к .gguf файлу. Пусто = авто"));
+#endif
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityDontDestroyOnLoad"),
                     new GUIContent("Dont Destroy On Load", "Не уничтожать при смене сцены"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityStartupTimeoutSeconds"),

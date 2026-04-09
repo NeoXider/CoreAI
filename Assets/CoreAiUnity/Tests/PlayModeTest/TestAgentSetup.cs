@@ -80,35 +80,28 @@ namespace CoreAI.Tests.PlayMode
 
         private IEnumerator InitializeLlmUnity(CoreAISettingsAsset settings)
         {
-            Debug.Log("[TestAgentSetup] Initializing LLMUnity...");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.LlmUnity,
-                    settings.Temperature,
-                    settings.RequestTimeoutSeconds,
-                    out _handle,
-                    out string ignore))
+            Debug.Log("[TestAgentSetup] Initializing LLMUnity via SharedLlmUnity...");
+
+            // SharedLlmUnity: один LLM на все тесты, никаких create/destroy между тестами
+            yield return SharedLlmUnity.EnsureInitialized();
+
+            if (!SharedLlmUnity.IsReady)
             {
-                Debug.LogWarning($"[TestAgentSetup] LLMUnity failed: {ignore}");
+                Debug.LogWarning($"[TestAgentSetup] SharedLlmUnity not ready: {SharedLlmUnity.Error}");
                 InitializeOffline();
                 yield break;
             }
 
-            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
-
-            // Пересоздаём клиент с нашим MemoryStore чтобы tool calls писали в правильный store
-            MeaiLlmUnityClient llmUnityClient = _handle.Client as MeaiLlmUnityClient;
-            if (llmUnityClient != null)
+            // Лёгкая обёртка вокруг общего LLMAgent с отдельным MemoryStore для этого теста
+            Client = SharedLlmUnity.CreateClientWithMemoryStore(MemoryStore);
+            if (Client == null)
             {
-                Client = new MeaiLlmClient(
-                    new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
-                    GameLoggerUnscopedFallback.Instance,
-                    MemoryStore);
-            }
-            else
-            {
-                Client = _handle.Client;
+                Debug.LogWarning("[TestAgentSetup] Failed to create client from SharedLlmUnity");
+                InitializeOffline();
+                yield break;
             }
 
+            // _handle НЕ выставляется — мы не владеем LLM, SharedLlmUnity управляет его жизненным циклом
             BackendName = "LLMUnity";
             CreateOrchestrator();
         }
@@ -143,34 +136,21 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[TestAgentSetup] HTTP not available, falling back to LLMUnity...");
             }
 
-            // LLMUnity First (или HTTP не подключился)
-            if (PlayModeProductionLikeLlmFactory.TryCreate(
-                    PlayModeProductionLikeLlmBackend.LlmUnity,
-                    settings.Temperature,
-                    settings.RequestTimeoutSeconds,
-                    out _handle,
-                    out _))
+            // LLMUnity через SharedLlmUnity
+            yield return SharedLlmUnity.EnsureInitialized();
+            if (SharedLlmUnity.IsReady)
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(_handle);
-
-                // Пересоздаём клиент с нашим MemoryStore
-                MeaiLlmUnityClient llmUnityClient = _handle.Client as MeaiLlmUnityClient;
-                if (llmUnityClient != null)
+                Client = SharedLlmUnity.CreateClientWithMemoryStore(MemoryStore);
+                if (Client != null)
                 {
-                    Client = new MeaiLlmClient(
-                        new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
-                        GameLoggerUnscopedFallback.Instance,
-                        MemoryStore);
+                    BackendName = "LLMUnity (Auto)";
+                    Debug.Log("[TestAgentSetup] Using SharedLlmUnity");
+                    CreateOrchestrator();
+                    yield break;
                 }
-                else
-                {
-                    Client = _handle.Client;
-                }
-
-                BackendName = "LLMUnity (Auto)";
-                Debug.Log("[TestAgentSetup] Using LLMUnity");
             }
-            else
+
+            if (!httpFirst)
             {
                 Debug.Log("[TestAgentSetup] LLMUnity not available, falling back to HTTP...");
                 SetupHttpLogAsserts();
@@ -232,6 +212,8 @@ namespace CoreAI.Tests.PlayMode
 
         public void Dispose()
         {
+            // Dispose только HTTP handle. SharedLlmUnity НЕ трогаем —
+            // он живёт до LlmUnityGlobalSetup.OneTimeTearDown.
             _handle?.Dispose();
             _handle = null;
             LogAssert.ignoreFailingMessages = false;

@@ -1,7 +1,15 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-04-09 | **Текущая версия:** v0.15.0
+**Обновлено:** 2026-04-09 | **Текущая версия:** v0.16.0
 
 ## 🎯 ПРИОРИТЕТНЫЕ ЗАДАЧИ
+
+### ✅ Сделано (Недавнее)
+- [x] SceneLlmTool — встроен инструмент Runtime инспекции сцен и манипуляций (find_objects, get_hierarchy, get_transform, set_transform).
+- [x] CameraLlmTool — инструмент получения Base64 JPEG снимков (render texture snapshot) прямо в PlayMode.
+- [x] Robust Tool Parsing — защита парсера JSON от забытых бэктиков у модели и обрезка тегов размышления `<think>`.
+- [x] Полный паритет HTTP API и LLMUnity (tools, memory, system prompt, temperature, max_tokens, reasoning).
+- [x] Поддержка режима размышлений (reasoning/thinking) для Qwen, DeepSeek для обоих бэкендов.
+- [x] Авто-заполнение GUID (`OnValidate`) для PrefabRegistry.
 
 ### Инфраструктура и Архитектура
 - [ ] Заменить статический god-object `CoreAISettings` на DI-интерфейс `ICoreAISettings`
@@ -15,7 +23,6 @@
 - [ ] Звуки: `play_sound`, `set_volume`
 - [ ] UI команды: `show_text`, `hide_panel`, `update_score`
 - [ ] Физика: `apply_force`, `set_velocity`
-- [ ] Партиклы: `spawn_particles`, `stop_particles`
 - [ ] Валидация параметров (защита от спавна объектов в стенах)
 
 ### Продвинутые Инструменты Агентов

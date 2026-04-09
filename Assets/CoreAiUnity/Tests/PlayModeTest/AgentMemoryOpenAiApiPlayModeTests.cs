@@ -46,7 +46,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='write' and content='qwen4b works great'."
+                    "Use the 'memory' tool to write new info. Call it with action='write' and content='qwen4b works great'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory write");
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='append' and content='appended value'."
+                    "Use the 'memory' tool to append info. Call it with action='append' and content='appended value'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory append");
@@ -124,7 +124,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "You have a 'memory' tool available. DO NOT output JSON commands. CALL the memory tool now with action='clear'."
+                    "Use the 'memory' tool to clear all info. Call it with action='clear'."
             });
 
             yield return setup.RunAndWait(task, 240f, "memory clear");

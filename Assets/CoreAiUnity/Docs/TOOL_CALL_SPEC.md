@@ -85,25 +85,23 @@ CoreAI использует **двухуровневую архитектуру*
 
 **Формат:**
 ```json
-{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "x": 0, "y": 0, "z": 0, "instanceId": "enemy_1"}}
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "targetName": "enemy_1", "x": 0, "y": 0, "z": 0}}
 ```
 
-**Доступные actions:**
 | Action | Описание | Обязательные параметры |
 |--------|----------|------------------------|
-| `spawn` | Создать объект | `prefabKey`, `x`, `y`, `z`, `instanceId` |
-| `move` | Переместить объект | `instanceId` или `targetName`, `x`, `y`, `z` |
-| `destroy` | Удалить объект | `instanceId` или `targetName` |
+| `spawn` | Создать объект | `prefabKey`, `targetName`, `x`, `y`, `z` |
+| `move` | Переместить объект | `targetName`, `x`, `y`, `z` |
+| `destroy` | Удалить объект | `targetName` |
 | `list_objects` | Получить список объектов | — (опционально: `stringValue` для поиска) |
 | `load_scene` | Загрузить сцену | `stringValue` (имя сцены) |
 | `reload_scene` | Перезагрузить сцену | — |
-| `bind_by_name` | Привязать по имени | `targetName`, `instanceId` |
-| `set_active` | Включить/выключить | `instanceId` или `targetName` |
-| `play_animation` | Проиграть анимацию | `instanceId` или `targetName`, `stringValue` (имя анимации) |
-| `list_animations` | Получить список анимаций | `instanceId` или `targetName` |
-| `show_text` | Показать текст | `targetName`, `stringValue` |
-| `apply_force` | Применить силу | `instanceId` или `targetName`, `x`, `y`, `z` |
-| `spawn_particles` | Создать частицы | `instanceId` или `targetName`, `stringValue` |
+| `set_active` | Включить/выключить | `targetName` |
+| `play_animation` | Проиграть анимацию | `targetName`, `animationName` |
+| `list_animations` | Получить список анимаций | `targetName` |
+| `show_text` | Показать текст | `targetName`, `textToDisplay` |
+| `apply_force` | Применить силу | `targetName`, `x`, `y`, `z` |
+| `spawn_particles` | Создать частицы | `targetName`, `stringValue` |
 
 **Код:**
 - `WorldTool.cs` - MEAI AIFunction
@@ -112,7 +110,7 @@ CoreAI использует **двухуровневую архитектуру*
 **Примеры:**
 ```json
 // Spawn enemy at position
-{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "x": 10, "y": 0, "z": 5, "instanceId": "enemy_1"}}
+{"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "targetName": "enemy_1", "x": 10, "y": 0, "z": 5}}
 
 // Move player to checkpoint (по targetName)
 {"name": "world_command", "arguments": {"action": "move", "targetName": "Player", "x": 100, "y": 0, "z": 50}}
@@ -127,10 +125,10 @@ CoreAI использует **двухуровневую архитектуру*
 {"name": "world_command", "arguments": {"action": "list_objects", "stringValue": "enemy"}}
 
 // Show text notification
-{"name": "world_command", "arguments": {"action": "show_text", "targetName": "Player", "stringValue": "Quest completed!"}}
+{"name": "world_command", "arguments": {"action": "show_text", "targetName": "Player", "textToDisplay": "Quest completed!"}}
 
 // Play animation on enemy
-{"name": "world_command", "arguments": {"action": "play_animation", "targetName": "Enemy1", "stringValue": "attack"}}
+{"name": "world_command", "arguments": {"action": "play_animation", "targetName": "Enemy1", "animationName": "attack"}}
 
 // List available animations
 {"name": "world_command", "arguments": {"action": "list_animations", "targetName": "Enemy1"}}

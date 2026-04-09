@@ -170,6 +170,21 @@ namespace CoreAI.Tests.PlayMode
         {
             if (_llmUnityHarnessRoot != null)
             {
+                // Manually stop LLM and clean up LLMAgent to prevent C++ thread locks/memory leaks during rapid test teardowns
+                // 1. First cancel any active background generations to prevent C++ thread deadlocks
+                LLMAgent agent = _llmUnityHarnessRoot.GetComponent<LLMAgent>();
+                if (agent != null)
+                {
+                    agent.CancelRequests();
+                }
+
+                // 2. Shut down the server immediately
+                LLM llm = _llmUnityHarnessRoot.GetComponent<LLM>();
+                if (llm != null)
+                {
+                    llm.Destroy();
+                }
+
 #if UNITY_EDITOR
                 if (!EditorApplication.isPlaying)
                 {
@@ -178,7 +193,7 @@ namespace CoreAI.Tests.PlayMode
                 else
 #endif
                 {
-                    UnityEngine.Object.Destroy(_llmUnityHarnessRoot);
+                    UnityEngine.Object.DestroyImmediate(_llmUnityHarnessRoot);
                 }
             }
 
@@ -192,7 +207,7 @@ namespace CoreAI.Tests.PlayMode
                 else
 #endif
                 {
-                    UnityEngine.Object.Destroy(_openAiSettings);
+                    UnityEngine.Object.DestroyImmediate(_openAiSettings);
                 }
             }
         }
