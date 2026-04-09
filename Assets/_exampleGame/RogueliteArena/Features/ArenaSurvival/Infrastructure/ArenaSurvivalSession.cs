@@ -23,6 +23,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         public bool RunEnded { get; private set; }
         public bool PlayerWon { get; private set; }
 
+        private readonly System.Collections.Generic.HashSet<ArenaEnemyBrain> _activeEnemiesList = new System.Collections.Generic.HashSet<ArenaEnemyBrain>();
+        public System.Collections.Generic.IReadOnlyCollection<ArenaEnemyBrain> ActiveEnemiesList => _activeEnemiesList;
+
         public event System.Action<int> AliveEnemiesChanged;
 
         /// <summary>Вызывается при смене номера волны (для вспомогательных LLM-задач в примере).</summary>
@@ -56,6 +59,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             KillsThisWave++;
             TotalKillsRun++;
         }
+
+        public void RegisterEnemy(ArenaEnemyBrain enemy) => _activeEnemiesList.Add(enemy);
+        public void UnregisterEnemy(ArenaEnemyBrain enemy) => _activeEnemiesList.Remove(enemy);
 
         public void ResetKillsThisWave() => KillsThisWave = 0;
 

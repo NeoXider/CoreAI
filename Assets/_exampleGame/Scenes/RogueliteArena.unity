@@ -732,13 +732,10 @@ MonoBehaviour:
     TypeName: 
   autoRun: 1
   autoInjectGameObjects: []
+  coreAiSettings: {fileID: 0}
   gameLogSettings: {fileID: 11400000, guid: 3ac91d868ba7d3e4b9a80217e205b9bc, type: 2}
   agentPromptsManifest: {fileID: 0}
-  openAiHttpLlmSettings: {fileID: 0}
   llmRoutingManifest: {fileID: 0}
-  llmRequestTimeoutSeconds: 15
-  aiOrchestrationMaxConcurrent: 2
-  logAiOrchestrationMetrics: 0
   worldPrefabRegistry: {fileID: 0}
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}

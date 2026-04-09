@@ -84,7 +84,6 @@ namespace CoreAI.Composition
             {
                 CoreAISettingsAsset.SetInstance(settings);
                 builder.RegisterInstance<ICoreAISettings>(settings);
-                builder.RegisterInstance(settings);
 
                 // Синхронизируем статические CoreAISettings с asset
                 CoreAISettings.MaxLuaRepairRetries = settings.MaxLuaRepairRetries;
@@ -119,6 +118,10 @@ namespace CoreAI.Composition
             if (worldPrefabRegistry != null)
             {
                 builder.RegisterInstance(worldPrefabRegistry);
+            }
+            else
+            {
+                builder.RegisterInstance(ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>());
             }
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton).As<IDataOverlayPayloadValidator>();

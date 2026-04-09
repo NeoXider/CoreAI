@@ -51,7 +51,18 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private void OnEnable()
         {
             if (_session is { IsAuthoritativeSimulation: true })
+            {
                 _session.NotifyEnemySpawned();
+                _session.RegisterEnemy(this);
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (_session is { IsAuthoritativeSimulation: true })
+            {
+                _session.UnregisterEnemy(this);
+            }
         }
 
         private void Update()

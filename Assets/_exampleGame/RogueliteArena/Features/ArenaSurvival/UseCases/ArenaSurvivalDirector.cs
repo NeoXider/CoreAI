@@ -22,29 +22,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
     /// </summary>
     public sealed class ArenaSurvivalDirector : MonoBehaviour
     {
-        [SerializeField] private int wavesToWin = 10;
-        [SerializeField] private float spawnInterval = 0.45f;
-        [SerializeField] private float pauseBetweenWaves = 2f;
-        [SerializeField] private float spawnRadius = 17.5f;
-
-        [Tooltip("Сколько секунд ждать ответ Creator (LLM) перед запасным планом из линейного расписания.")]
-        [SerializeField]
-        private float creatorPlanWaitSeconds = 14f;
-
-        [Header("Предзапрос плана следующей волны")]
-        [Tooltip("Когда оставшихся врагов не больше этого числа — запросить план волны N+1 (один раз за волну).")]
-        [SerializeField]
-        [Min(0)]
-        private int preRequestNextWaveWhenAliveAtMost = 2;
-
-        [Header("Пост-волна Analyzer")]
-        [SerializeField]
-        private bool runPostWaveAnalyzer = true;
-
-        [Header("Сложность волн (VS-style)")]
-        [Tooltip("Нелинейная кривая: суммарно сложнее к концу рана, отдельные волны мягче/жёстче. Пусто — только план / линейное расписание.")]
-        [SerializeField]
-        private ArenaVsStyleWaveDifficulty waveDifficultyProfile;
+        public ArenaDirectorSettings directorSettings;
 
         private IArenaSessionAuthority _session;
         private GameObject _enemyTemplate;
@@ -58,19 +36,23 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
         public void Init(
             IArenaSessionAuthority session,
             GameObject enemyTemplate,
-            IArenaWaveSchedule waveSchedule,
             ArenaCreatorWavePlanner creatorPlanner,
-            int winWaves,
-            IAiOrchestrationService aiOrchestration = null,
-            IArenaWaveDifficulty waveDifficultyOverride = null)
+            IAiOrchestrationService aiOrchestration = null)
         {
             _session = session;
             _enemyTemplate = enemyTemplate;
-            _waveSchedule = waveSchedule;
             _creatorPlanner = creatorPlanner;
-            wavesToWin = winWaves;
             _aiOrchestration = aiOrchestration;
-            _waveDifficulty = waveDifficultyOverride != null ? waveDifficultyOverride : waveDifficultyProfile;
+
+            if (directorSettings == null)
+            {
+                Debug.LogError("ArenaDirectorSettings is missing!");
+            }
+            else
+            {
+                _waveSchedule = directorSettings.WaveSchedule;
+                _waveDifficulty = directorSettings.WaveDifficultyProfile;
+            }
 
             // Если ILlmClient = StubLlmClient — используем локальный планировщик (пример),
             // чтобы Core оставался игронезависимым.
@@ -91,6 +73,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
         private IEnumerator RunWaves()
         {
+            if (directorSettings == null) yield break;
+
+            int wavesToWin = directorSettings.WavesToWin;
             for (var wave = 1; wave <= wavesToWin; wave++)
             {
                 if (_session.RunEnded)
@@ -109,7 +94,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                 {
                     _creatorPlanner.RequestWavePlan(wave, ArenaAiSourceTags.DirectorWaveStart);
                     var t = 0f;
-                    while (t < creatorPlanWaitSeconds && !_session.RunEnded)
+                    while (t < directorSettings.CreatorPlanWaitSeconds && !_session.RunEnded)
                     {
                         if (_creatorPlanner.TryConsumeLatestPlan(wave, out plan))
                             break;
@@ -125,14 +110,35 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                 var count = plan != null ? plan.enemyCount : _waveSchedule.GetEnemyCountForWave(wave);
                 count = Mathf.Clamp(Mathf.RoundToInt(count * vs.EnemyCountMultiplier), 1, 500);
 
+                // Multiplayer scaling: multiply by number of connected clients if Unity Netcode is active
+                int playersCount = 1;
+                var nmType = System.Type.GetType("Unity.Netcode.NetworkManager, Unity.Netcode.Runtime");
+                if (nmType != null)
+                {
+                    var singleton = nmType.GetProperty("Singleton", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
+                    if (singleton != null)
+                    {
+                        bool isListening = (bool)(nmType.GetProperty("IsListening")?.GetValue(singleton) ?? false);
+                        if (isListening)
+                        {
+                            var connectedClientsIds = nmType.GetProperty("ConnectedClientsIds")?.GetValue(singleton) as System.Collections.ICollection;
+                            if (connectedClientsIds != null)
+                            {
+                                playersCount = Mathf.Max(1, connectedClientsIds.Count);
+                            }
+                        }
+                    }
+                }
+                count *= playersCount;
+
                 var hpMult = Mathf.Clamp((plan != null ? plan.enemyHpMult : 1f) * vs.HpMultiplier, 0.25f, 5f);
                 var dmgMult = Mathf.Clamp((plan != null ? plan.enemyDamageMult : 1f) * vs.DamageMultiplier, 0.25f, 5f);
                 var msMult = Mathf.Clamp((plan != null ? plan.enemyMoveSpeedMult : 1f) * vs.MoveSpeedMultiplier, 0.25f, 3f);
                 var interval = Mathf.Clamp(
-                    (plan != null ? plan.spawnIntervalSeconds : spawnInterval) * vs.SpawnIntervalMultiplier,
+                    (plan != null ? plan.spawnIntervalSeconds : directorSettings.SpawnInterval) * vs.SpawnIntervalMultiplier,
                     0.05f,
                     3f);
-                var radius = plan != null ? plan.spawnRadius : spawnRadius;
+                var radius = plan != null ? plan.spawnRadius : directorSettings.SpawnRadius;
                 for (var i = 0; i < count; i++)
                 {
                     if (_session.RunEnded)
@@ -149,7 +155,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                         _creatorPlanner != null &&
                         !_creatorPlanner.ForceLinearWavePlans &&
                         wave < wavesToWin &&
-                        _session.AliveEnemies <= preRequestNextWaveWhenAliveAtMost)
+                        _session.AliveEnemies <= directorSettings.PreRequestNextWaveWhenAliveAtMost)
                     {
                         _creatorPlanner.RequestWavePlan(wave + 1, ArenaAiSourceTags.DirectorPreNextWave);
                         preRequested = true;
@@ -162,7 +168,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                     yield break;
                 PushLastWaveDurationTelemetry(Time.realtimeSinceStartup - waveStartRt);
                 TryRunPostWaveAnalyzer(wave);
-                yield return new WaitForSecondsRealtime(pauseBetweenWaves);
+                yield return new WaitForSeconds(directorSettings.PauseBetweenWaves);
             }
 
             if (!_session.RunEnded)
@@ -171,7 +177,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
         private void TryRunPostWaveAnalyzer(int completedWave)
         {
-            if (!runPostWaveAnalyzer || _useLocalCreator || _aiOrchestration == null)
+            if (!directorSettings.RunPostWaveAnalyzer || _useLocalCreator || _aiOrchestration == null)
                 return;
             _ = _aiOrchestration.RunTaskAsync(new AiTaskRequest
             {
@@ -202,14 +208,14 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
             collector.SetTelemetry("arena.wave_schedule.linear_enemy_count", _waveSchedule.GetEnemyCountForWave(wave));
             if (_waveDifficulty != null)
             {
-                var vs = _waveDifficulty.Evaluate(wave, wavesToWin);
+                var vs = _waveDifficulty.Evaluate(wave, directorSettings.WavesToWin);
                 collector.SetTelemetry("arena.wave.vs.enemy_count_mult", vs.EnemyCountMultiplier);
                 collector.SetTelemetry("arena.wave.vs.hp_mult", vs.HpMultiplier);
                 collector.SetTelemetry("arena.wave.vs.dmg_mult", vs.DamageMultiplier);
                 collector.SetTelemetry("arena.wave.vs.move_mult", vs.MoveSpeedMultiplier);
                 collector.SetTelemetry("arena.wave.vs.spawn_interval_mult", vs.SpawnIntervalMultiplier);
             }
-            if (wave < wavesToWin)
+            if (wave < directorSettings.WavesToWin)
                 collector.SetTelemetry("arena.next_wave_index", wave + 1);
             else
                 collector.SetTelemetry("arena.next_wave_index", "");

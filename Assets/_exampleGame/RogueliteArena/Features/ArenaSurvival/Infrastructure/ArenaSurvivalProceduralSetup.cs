@@ -24,9 +24,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
     public sealed class ArenaSurvivalProceduralSetup : MonoBehaviour
     {
         [SerializeField] private float arenaHalfSize = 22f;
-        [SerializeField] private int wavesToWin = 10;
         [SerializeField] private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
-        [SerializeField] private ArenaLinearWaveSchedule waveSchedule = new ArenaLinearWaveSchedule();
+        [SerializeField] private ArenaDirectorSettings directorSettings;
 
         [Tooltip("Если в сцене уже есть пол (Plane) с коллайдером — включите, чтобы не дублировать.")]
         [SerializeField]
@@ -75,10 +74,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
         [SerializeField] private ArenaUnitBaselineConfig arenaUnitBaselineConfig;
 
-        [Header("Волны — кривая сложности")]
-        [Tooltip("Нелинейная кривая в духе Vampire Survivors (рост к концу + «лёгкие» волны). Пусто — без множителей.")]
-        [SerializeField]
-        private ArenaVsStyleWaveDifficulty vsWaveDifficulty;
+
 
         private void Start()
         {
@@ -228,7 +224,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             var dirGo = new GameObject("ArenaSurvivalDirector");
             dirGo.transform.SetParent(root.transform, false);
             var director = dirGo.AddComponent<ArenaSurvivalDirector>();
-            director.Init(session, enemyTemplate, waveSchedule, planner, wavesToWin, orchestration, vsWaveDifficulty);
+            director.directorSettings = this.directorSettings;
+            director.Init(session, enemyTemplate, planner, orchestration);
 
             if (logOnStartRoles)
             {

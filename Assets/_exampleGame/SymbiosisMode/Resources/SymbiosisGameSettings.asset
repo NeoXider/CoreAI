@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3ec9cf469af5b7741a5f046b16850b61, type: 3}
+  m_Name: SymbiosisGameSettings
+  m_EditorClassIdentifier: Assembly-CSharp::CoreAI.ExampleGame.SymbiosisMode.Settings.SymbiosisGameSettings
+  WavesToWin: 10
+  SpawnInterval: 0.45
+  PauseBetweenWaves: 2
+  SpawnRadius: 17.5
+  CreatorPlanWaitSeconds: 14
+  PreRequestNextWaveWhenAliveAtMost: 2
+  RunPostWaveAnalyzer: 1
+  WaveDifficultyProfile: {fileID: 0}
+  GhostMaxHealth: 100
+  GhostMoveSpeed: 5
+  SkeletonFollowRadius: 2
+  SkeletonFollowSpeed: 4
+  SkeletonVampirismRatio: 0.5
+  SkeletonDamage: 10
+  SkeletonAttackCooldown: 2
+  SkeletonAttackRange: 3
+  AvailableUpgrades:
+  - {fileID: 11400000, guid: 75b47576cbba8d247878d51dfd19c3a3, type: 2}
+  - {fileID: 11400000, guid: 240ee1cb8477634408124be3f465e66d, type: 2}
