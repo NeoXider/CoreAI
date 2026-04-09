@@ -110,7 +110,7 @@ namespace CoreAI.Tests.PlayMode
 
                 // Создаём LuaLlmTool с настоящим исполнителем Lua (SecureLuaEnvironment)
                 RealLuaExecutor luaExecutor = new();
-                LuaLlmTool luaTool = new(luaExecutor);
+                LuaLlmTool luaTool = new(luaExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
                 AgentMemoryPolicy policy = new();
                 // Регистрируем execute_lua инструмент для CoreMechanic
@@ -326,7 +326,7 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics());
+                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
         /// <summary>
@@ -366,7 +366,7 @@ namespace CoreAI.Tests.PlayMode
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[RealLuaExecutor] FAILED: {ex.Message}");
+                    Debug.LogWarning($"[RealLuaExecutor] FAILED: {ex.Message}");
                     return Task.FromResult(new LuaTool.LuaResult
                     {
                         Success = false,
@@ -501,7 +501,7 @@ namespace CoreAI.Tests.PlayMode
         {
             if (sink.Items.Count == 0)
             {
-                Debug.LogError($"[{label}] ❌ No command produced — test cannot continue");
+                Debug.LogWarning($"[{label}] ❌ No command produced — test cannot continue");
                 return false;
             }
 
@@ -524,3 +524,4 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
+

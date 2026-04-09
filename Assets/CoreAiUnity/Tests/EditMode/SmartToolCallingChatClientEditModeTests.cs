@@ -36,6 +36,7 @@ namespace CoreAI.Tests.EditMode
                 Task.FromResult<object>("{\"Success\":false,\"Error\":\"boom\"}"));
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
@@ -75,6 +76,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
@@ -119,6 +121,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
@@ -153,6 +156,7 @@ namespace CoreAI.Tests.EditMode
                 Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { successTool } };

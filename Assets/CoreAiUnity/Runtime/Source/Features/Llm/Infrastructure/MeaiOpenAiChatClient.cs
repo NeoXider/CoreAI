@@ -198,6 +198,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 req["max_tokens"] = options.MaxOutputTokens.Value;
             }
+
             if (toolsList.Count > 0)
             {
                 req["tools"] = toolsList;
@@ -243,7 +244,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (webReq.result != UnityWebRequest.Result.Success)
             {
-                _logger.LogError(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {webReq.error}");
+                _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {webReq.error}");
                 throw new Exception($"HTTP error: {webReq.error}");
             }
 
@@ -276,7 +277,8 @@ namespace CoreAI.Infrastructure.Llm
                 // Strip <think>...</think> blocks if any
                 if (!string.IsNullOrEmpty(content))
                 {
-                    content = System.Text.RegularExpressions.Regex.Replace(content, @"<think>[\s\S]*?</think>\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+                    content = System.Text.RegularExpressions.Regex.Replace(content, @"<think>[\s\S]*?</think>\s*", "",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
                 }
 
                 JArray toolCalls = msg?["tool_calls"] as JArray;

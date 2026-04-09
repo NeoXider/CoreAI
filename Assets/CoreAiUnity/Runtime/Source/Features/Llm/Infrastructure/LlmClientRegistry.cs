@@ -18,6 +18,7 @@ namespace CoreAI.Infrastructure.Llm
     {
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
+        private readonly ICoreAISettings _settings;
         private readonly object _gate = new();
         private ILlmClient _legacyFallback = new StubLlmClient();
         private Dictionary<string, ILlmClient> _byProfileId = new(StringComparer.Ordinal);
@@ -26,9 +27,10 @@ namespace CoreAI.Infrastructure.Llm
         private bool _useManifestRouting;
 
         /// <param name="logger">Логи конфигурации маршрутизации (без прямого Unity Debug).</param>
-        public LlmClientRegistry(IGameLogger logger, IAgentMemoryStore memoryStore = null)
+        public LlmClientRegistry(IGameLogger logger, ICoreAISettings settings, IAgentMemoryStore memoryStore = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
         }
 
@@ -169,7 +171,7 @@ namespace CoreAI.Infrastructure.Llm
                         return new StubLlmClient();
                     }
 
-                    return new OpenAiChatLlmClient(p.httpSettings);
+                    return new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, _memoryStore);
                 case LlmBackendKind.LlmUnity:
 #if COREAI_NO_LLM
                     return new StubLlmClient();
@@ -201,7 +203,7 @@ namespace CoreAI.Infrastructure.Llm
                         return new StubLlmClient();
                     }
 
-                    return new MeaiLlmUnityClient(agent, _logger, _memoryStore);
+                    return new MeaiLlmUnityClient(agent, _settings, _logger, _memoryStore);
 #endif
                 default:
                     return new StubLlmClient();

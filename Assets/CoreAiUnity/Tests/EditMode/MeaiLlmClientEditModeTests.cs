@@ -9,9 +9,6 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
-    /// <summary>
-    /// EditMode тесты для MeaiLlmClient (фабричные методы).
-    /// </summary>
     public sealed class MeaiLlmClientEditModeTests
     {
         [Test]
@@ -19,12 +16,11 @@ namespace CoreAI.Tests.EditMode
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 .SetValue(settings, true);
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger);
 
             Assert.IsNotNull(client);
             Object.DestroyImmediate(settings);
@@ -36,8 +32,7 @@ namespace CoreAI.Tests.EditMode
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test-model");
 
-            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger);
+            OpenAiChatLlmClient client = new(settings);
 
             Assert.IsNotNull(client);
             Object.DestroyImmediate(settings);
@@ -48,22 +43,23 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.Throws<System.ArgumentNullException>(() =>
             {
-                MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance);
+                MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
             });
         }
 
         [Test]
         public void BuildAIFunctions_ShouldCreateMemoryTool()
         {
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test-model");
+            OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            settings.GetType()
+                .GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .SetValue(settings, true);
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             TestMemoryStore memoryStore = new();
 
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger, memoryStore);
 
-            // Проверяем что MemoryLlmTool создаёт AIFunction
             List<ILlmTool> tools = new() { new MemoryLlmTool() };
             client.SetTools(tools);
 
@@ -78,26 +74,11 @@ namespace CoreAI.Tests.EditMode
                 return true;
             }
 
-            public void Save(string roleId, AgentMemoryState state)
-            {
-            }
-
-            public void Clear(string roleId)
-            {
-            }
-
-            public void ClearChatHistory(string roleId)
-            {
-            }
-
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
-            {
-            }
-
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
-            {
-                return System.Array.Empty<ChatMessage>();
-            }
+            public void Save(string roleId, AgentMemoryState state) { }
+            public void Clear(string roleId) { }
+            public void ClearChatHistory(string roleId) { }
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<ChatMessage>();
         }
     }
 }

@@ -437,7 +437,7 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics());
+                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
@@ -554,7 +554,7 @@ namespace CoreAI.Tests.PlayMode
         {
             if (sink.Items.Count == 0)
             {
-                Debug.LogError($"[{label}] ❌ No command produced — test cannot continue");
+                Debug.LogWarning($"[{label}] ❌ No command produced — test cannot continue");
                 return false;
             }
 

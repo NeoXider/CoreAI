@@ -85,10 +85,13 @@ namespace CoreAI.Infrastructure.World
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            if (entries == null) return;
-            
+            if (entries == null)
+            {
+                return;
+            }
+
             bool changed = false;
-            foreach (var entry in entries)
+            foreach (Entry entry in entries)
             {
                 if (entry.Prefab != null)
                 {
@@ -109,7 +112,7 @@ namespace CoreAI.Infrastructure.World
                     }
                 }
             }
-            
+
             if (changed)
             {
                 UnityEditor.EditorUtility.SetDirty(this);

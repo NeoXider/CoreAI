@@ -203,7 +203,7 @@ namespace CoreAI.Tests.PlayMode
                 bool foundAdventurer = false;
                 if (capturing.LastChatHistory != null)
                 {
-                    foreach (var msg in capturing.LastChatHistory)
+                    foreach (Microsoft.Extensions.AI.ChatMessage msg in capturing.LastChatHistory)
                     {
                         if (msg.Text != null && msg.Text.Contains("Adventurer"))
                         {
@@ -212,6 +212,7 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
                 }
+
                 Assert.IsTrue(foundAdventurer, "The chat history should contain the string 'Adventurer'");
 
                 Debug.Log($"[PlayerChat] ✓ History maintained: {chatService.HistoryPairCount} pairs");
@@ -263,7 +264,7 @@ namespace CoreAI.Tests.PlayMode
                     store,
                     new AgentMemoryPolicy(),
                     new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics());
+                    new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
                 Debug.Log("[AINpc] Requesting NPC dialogue...");
                 Task t = orch.RunTaskAsync(new AiTaskRequest
@@ -340,7 +341,7 @@ namespace CoreAI.Tests.PlayMode
                     store,
                     policy,
                     new CompositeRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics());
+                    new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
                 Debug.Log("[AINpc] Requesting NPC with memory tool...");
                 Task t = orch.RunTaskAsync(new AiTaskRequest
@@ -413,7 +414,7 @@ namespace CoreAI.Tests.PlayMode
                     store,
                     new AgentMemoryPolicy(), // No tools
                     new AINpcResponsePolicy(),
-                    new NullAiOrchestrationMetrics());
+                    new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
                 Debug.Log("[AINpc] Testing ChatOnly mode...");
                 Task t = orch.RunTaskAsync(new AiTaskRequest
@@ -438,3 +439,4 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
+

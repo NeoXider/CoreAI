@@ -83,6 +83,7 @@ namespace CoreAI.Composition
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);
+                builder.RegisterInstance<ICoreAISettings>(settings);
                 builder.RegisterInstance(settings);
 
                 // Синхронизируем статические CoreAISettings с asset
@@ -135,7 +136,7 @@ namespace CoreAI.Composition
 
             builder.Register(c =>
             {
-                LlmClientRegistry reg = new(c.Resolve<IGameLogger>());
+                LlmClientRegistry reg = new(c.Resolve<IGameLogger>(), settings);
                 reg.SetLegacyFallback(
                     ResolveLlmClient(settings, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>()));
                 reg.ApplyManifest(routingManifest);
@@ -345,7 +346,7 @@ namespace CoreAI.Composition
                 return null;
             }
 
-            return new MeaiLlmUnityClient(agent, logger, memoryStore);
+            return new MeaiLlmUnityClient(agent, settings, logger, memoryStore);
         }
 
         /// <summary>

@@ -143,6 +143,9 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class NullWorldExecutor : Infrastructure.World.ICoreAiWorldCommandExecutor
         {
+            public string[] LastListedAnimations { get; } = System.Array.Empty<string>();
+            public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects { get; } = new();
+
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
                 return false;
@@ -224,7 +227,7 @@ namespace CoreAI.Tests.PlayMode
                 new NullAgentMemoryStore(),
                 new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics());
+                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
 
             LuaAiEnvelopeProcessor lua = new(
@@ -285,3 +288,4 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
+

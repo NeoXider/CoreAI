@@ -1,6 +1,8 @@
 using CoreAI.Ai;
 using Microsoft.Extensions.AI;
 
+using CoreAI.Logging;
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -10,10 +12,14 @@ namespace CoreAI.Ai
     public sealed class LuaLlmTool : ILlmTool
     {
         private readonly LuaTool.ILuaExecutor _executor;
+        private readonly ICoreAISettings _settings;
+        private readonly CoreAI.Logging.ILog _logger;
 
-        public LuaLlmTool(LuaTool.ILuaExecutor executor)
+        public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, CoreAI.Logging.ILog logger)
         {
             _executor = executor;
+            _settings = settings;
+            _logger = logger;
         }
 
         /// <inheritdoc />
@@ -39,7 +45,7 @@ namespace CoreAI.Ai
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            LuaTool tool = new(_executor);
+            LuaTool tool = new(_executor, _settings, _logger);
             return tool.CreateAIFunction();
         }
     }

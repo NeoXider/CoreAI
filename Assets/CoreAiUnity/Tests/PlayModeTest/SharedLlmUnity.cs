@@ -36,10 +36,15 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public static ILlmClient CreateClientWithMemoryStore(IAgentMemoryStore store)
         {
-            if (!IsReady) return null;
+            if (!IsReady)
+            {
+                return null;
+            }
+
             return new MeaiLlmClient(
                 new LlmUnityMeaiChatClient(_agent, GameLoggerUnscopedFallback.Instance),
                 GameLoggerUnscopedFallback.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 store);
         }
 
@@ -68,6 +73,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     yield return null;
                 }
+
                 yield break;
             }
 

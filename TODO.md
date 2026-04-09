@@ -1,15 +1,16 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-04-09 | **Текущая версия:** v0.16.0
+**Обновлено:** 2026-04-09 | **Текущая версия:** v0.16.1
 
 ## 🎯 ПРИОРИТЕТНЫЕ ЗАДАЧИ
 
 ### ✅ Сделано (Недавнее)
 - [x] SceneLlmTool — встроен инструмент Runtime инспекции сцен и манипуляций (find_objects, get_hierarchy, get_transform, set_transform).
 - [x] CameraLlmTool — инструмент получения Base64 JPEG снимков (render texture snapshot) прямо в PlayMode.
+- [x] Защита от реентерабельных дедлоков Unity Thread Context в MEAI pipeline (через Task.Yield).
+- [x] Поддержка конфигурации `numGPULayers` для значительного ускорения LLMUnity в PlayMode тестах.
+- [x] Умная защита от застревания в циклах: детектирование дубликатов `tool_call` в `SmartToolCallingChatClient` и блокировка бесконечных петель при галлюцинациях модели.
 - [x] Robust Tool Parsing — защита парсера JSON от забытых бэктиков у модели и обрезка тегов размышления `<think>`.
-- [x] Полный паритет HTTP API и LLMUnity (tools, memory, system prompt, temperature, max_tokens, reasoning).
-- [x] Поддержка режима размышлений (reasoning/thinking) для Qwen, DeepSeek для обоих бэкендов.
-- [x] Авто-заполнение GUID (`OnValidate`) для PrefabRegistry.
+- [x] Общая стабилизация тестов: обработка ошибок синтаксиса Lua без фейлов Unity Test Runner (возврат `[Error]` обратно в модель для авто-восстановления).
 
 ### Инфраструктура и Архитектура
 - [ ] Заменить статический god-object `CoreAISettings` на DI-интерфейс `ICoreAISettings`

@@ -72,7 +72,8 @@ namespace CoreAI.Infrastructure.Llm
                         else if (item is MEAI.FunctionCallContent fcc)
                         {
                             // Simulate tool call for history context
-                            userMessage += $"Assistant Tool Call:\n```json\n{{\"name\": \"{fcc.Name}\", \"arguments\": {Newtonsoft.Json.JsonConvert.SerializeObject(fcc.Arguments)}}}\n```\n";
+                            userMessage +=
+                                $"Assistant Tool Call:\n```json\n{{\"name\": \"{fcc.Name}\", \"arguments\": {Newtonsoft.Json.JsonConvert.SerializeObject(fcc.Arguments)}}}\n```\n";
                         }
                     }
                 }
@@ -91,11 +92,14 @@ namespace CoreAI.Infrastructure.Llm
             if (options?.Tools != null && options.Tools.Count > 0)
             {
                 sysMessage += "\n\nCRITICAL SYSTEM RULES FOR TOOLS:\n";
-                sysMessage += "1. You have access to the following tools. You MUST use one if it matches the user request.\n";
-                sysMessage += "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n";
-                sysMessage += "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n";
-                
-                JArray toolNames = new JArray();
+                sysMessage +=
+                    "1. You have access to the following tools. You MUST use one if it matches the user request.\n";
+                sysMessage +=
+                    "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n";
+                sysMessage +=
+                    "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n";
+
+                JArray toolNames = new();
                 foreach (MEAI.AITool tool in options.Tools)
                 {
                     toolNames.Add(tool.Name);
@@ -170,13 +174,13 @@ namespace CoreAI.Infrastructure.Llm
             out string cleanedText)
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
-            
+
             // Strip <think>...</think> blocks from text before parsing
             if (!string.IsNullOrEmpty(text))
             {
                 text = Regex.Replace(text, @"<think>[\s\S]*?</think>\s*", "", RegexOptions.IgnoreCase).Trim();
             }
-            
+
             cleanedText = text;
 
             if (string.IsNullOrEmpty(text) || availableTools == null || availableTools.Count == 0)
@@ -193,7 +197,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string possibleJson = text.Substring(firstBrace, lastBrace - firstBrace + 1);
-            
+
             try
             {
                 JObject json = JObject.Parse(possibleJson);

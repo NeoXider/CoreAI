@@ -114,7 +114,7 @@ namespace CoreAI.Tests.PlayMode
             InMemoryStore store = new();
 
             MeaiLlmClient client =
-                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger,
+                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger, settings,
                     store);
             Assert.IsNotNull(client, "MeaiLlmClient.CreateLlmUnity should not return null");
 
@@ -153,13 +153,10 @@ namespace CoreAI.Tests.PlayMode
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
 
             Assert.Throws<System.ArgumentNullException>(() =>
-                MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null, logger));
+                MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), logger));
 
             Assert.Throws<System.ArgumentNullException>(() =>
-                MeaiLlmClient.CreateHttp((CoreAISettingsAsset)null, logger));
-
-            Assert.Throws<System.ArgumentNullException>(() =>
-                MeaiLlmClient.CreateLlmUnity(null, logger));
+                MeaiLlmClient.CreateLlmUnity(null, logger, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>()));
         }
     }
 }

@@ -82,6 +82,30 @@ namespace CoreAI.Infrastructure.World
 
                 Publish(CoreAiWorldCommandEnvelope.SetActive(name, active));
             }));
+
+            registry.Register("coreai_world_play_animation", new Action<string, string>((targetName, animationName) =>
+            {
+                string name = (targetName ?? "").Trim();
+                string anim = (animationName ?? "").Trim();
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(anim))
+                {
+                    return;
+                }
+
+                Publish(CoreAiWorldCommandEnvelope.PlayAnimation(name, anim));
+            }));
+
+            registry.Register("coreai_world_play_sound", new Action<string, string, double>((targetName, clipName, volume) =>
+            {
+                string name = (targetName ?? "").Trim();
+                string clip = (clipName ?? "").Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    return;
+                }
+
+                Publish(CoreAiWorldCommandEnvelope.PlaySound(name, clip, (float)volume));
+            }));
         }
 
         private void Publish(CoreAiWorldCommandEnvelope env)

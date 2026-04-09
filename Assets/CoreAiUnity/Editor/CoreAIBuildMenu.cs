@@ -50,7 +50,7 @@ namespace CoreAI.Editor
         public static void OpenSettings()
         {
             EnsureFolder("Assets/Resources");
-            var settings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
+            CoreAISettingsAsset settings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
             Selection.activeObject = settings;
             EditorGUIUtility.PingObject(settings);
         }
@@ -70,16 +70,16 @@ namespace CoreAI.Editor
         {
             EnsureFolder(SettingsRoot);
             EnsureFolder("Assets/Resources");
-            
+
             GameLogSettingsAsset logSettings = EnsureAsset<GameLogSettingsAsset>(LogSettingsPath);
             CoreAISettingsAsset coreAiSettings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
             AgentPromptsManifest prompts = EnsureAsset<AgentPromptsManifest>(PromptsManifestPath);
             CoreAiPrefabRegistryAsset prefabs = EnsureAsset<CoreAiPrefabRegistryAsset>(PrefabRegistryPath);
             AiPermissionsAsset permissions = EnsureAsset<AiPermissionsAsset>(AiPermissionsPath);
             LlmRoutingManifest routing = EnsureAsset<LlmRoutingManifest>(LlmRoutingPath);
-            
+
             TryAssignToScope(logSettings, coreAiSettings, prompts, prefabs);
-            
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             CoreAIEditorLog.Log("Default CoreAI assets auto-generated and configured.");
@@ -235,10 +235,13 @@ namespace CoreAI.Editor
 
             SerializedObject so = new(scope);
             so.FindProperty("gameLogSettings").objectReferenceValue = logSettings;
-            
+
             // Note: openAiHttpLlmSettings might still be the property name if not updated, but we don't strictly need to assign it since CoreAI prefers the singleton now.
-            var legacyOpenAiProp = so.FindProperty("openAiHttpLlmSettings");
-            if (legacyOpenAiProp != null) legacyOpenAiProp.objectReferenceValue = null;
+            SerializedProperty legacyOpenAiProp = so.FindProperty("openAiHttpLlmSettings");
+            if (legacyOpenAiProp != null)
+            {
+                legacyOpenAiProp.objectReferenceValue = null;
+            }
 
             so.FindProperty("agentPromptsManifest").objectReferenceValue = prompts;
             so.FindProperty("worldPrefabRegistry").objectReferenceValue = prefabs;

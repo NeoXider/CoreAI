@@ -7,5 +7,8 @@ namespace CoreAI.Infrastructure.World
     {
         /// <summary>Попытаться применить команду; <c>false</c> если команда не WorldCommand или payload невалиден.</summary>
         bool TryExecute(ApplyAiGameCommand cmd);
+        
+        string[] LastListedAnimations { get; }
+        System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects { get; }
     }
 }

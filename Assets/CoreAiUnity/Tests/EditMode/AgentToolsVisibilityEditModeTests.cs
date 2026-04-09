@@ -21,7 +21,7 @@ namespace CoreAI.Tests.EditMode
             AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test")
                 .WithTool(new MemoryLlmTool())
-                .WithTool(new LuaLlmTool(new TestLuaExecutor()))
+                .WithTool(new LuaLlmTool(new TestLuaExecutor(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance))
                 .Build();
 
             Assert.AreEqual(2, config.Tools.Count);
@@ -56,7 +56,7 @@ namespace CoreAI.Tests.EditMode
             List<ILlmTool> tools = new()
             {
                 new MemoryLlmTool(),
-                new LuaLlmTool(new TestLuaExecutor())
+                new LuaLlmTool(new TestLuaExecutor(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance)
             };
 
             // Вызываем CompleteAsync чтобы проверить что инструменты обрабатываются

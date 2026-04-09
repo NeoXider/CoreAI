@@ -23,41 +23,47 @@
 
 ## 3. Выбрать сцену
 
-| Цель | Действие |
-|------|----------|
-| **Демо-арена + F9 (Programmer)** | Меню **CoreAI → Development → Example Game → Open RogueliteArena scene** *или* вручную `Assets/_exampleGame/Scenes/RogueliteArena.unity`. |
-| **Минимальная сцена ядра** | **CoreAI → Development → Open _mainCoreAI scene** (`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`). |
-
-Чтобы **Play** по умолчанию запускал арену: **CoreAI → Development → Example Game → Set RogueliteArena as first build scene** (первая сцена в **File → Build Settings**).
-
-Подробная настройка инспектора для примера игры: **[../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md)**.
+В Unity открой:
+**CoreAI → Development → Open _mainCoreAI scene** (`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`).
+На этой сцене уже есть всё необходимое для запуска AI.
 
 ---
 
 ## 4. Подключить LLM (выберите один вариант)
 
-### A. Локально — LLMUnity (по умолчанию в репозитории)
+Откройте `Resources/CoreAISettings` (или создайте через **Create → CoreAI → Core AI Settings**).
 
-На сцене должен быть **`LLM`** + **`LLMAgent`**, в **`CoreAILifetimeScope`** поле **Open Ai Http Llm Settings** пустое или в asset выключён **Use Open Ai Compatible Http**.
+### A. Локально — LLMUnity (рекомендуемый для тестов) или локальной работы прямо в игре (осторожно!)
 
-Кратко: назначьте **модель (GGUF)** на компоненте **LLM**, в **LLMAgent** укажите ссылку на этот **LLM**. Детали и модели: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1–2.
+> 📦 **LLMUnity устанавливается автоматически** вместе с пакетом CoreAI (через Unity Package Manager). Подробнее про плагин: [GitHub LLMUnity](https://github.com/undreamai/LLMUnity).
 
-### B. HTTP — LM Studio / OpenAI / vLLM
+1. Установите **Backend Type**: `LlmUnity` (или `Auto`).
+2. На объекте `LlmManager` на сцене выберите модель (например, Qwen 4B). Если моделей нет, скачайте их через интерфейс LLMUnity.
+3. При старте сцены `CoreAILifetimeScope` сам найдёт `LLMAgent` и подцепит его.
 
-1. **Create → CoreAI → LLM → OpenAI-compatible HTTP**.
-2. Заполните **Api Base Url** (с суффиксом `/v1`), **Model**, при необходимости **Api Key**.
-3. Включите **Use Open Ai Compatible Http**, перетащите asset в **`CoreAILifetimeScope` → Open Ai Http Llm Settings**.
+### B. HTTP API — LM Studio / OpenAI / vLLM / Ollama
 
-Инструкция: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §4.
+1. Установите **Backend Type**: `OpenAiHttp`.
+2. Заполните **Api Base Url** (например, `http://localhost:1234/v1` для LM Studio).
+3. Укажите название модели (например `Qwen`).
+4. Если нужен OpenAI — укажите **Api Key**.
+
+> 💡 **Что выбрать?** Для начала мы рекомендуем скачать [LM Studio](https://lmstudio.ai), загрузить там модель (Qwen 4B или Gemma 26B), включить локальный сервер и выбрать режим HTTP API в Unity. Это работает быстрее всего.
 
 ---
 
-## 5. Проверка в Play Mode
+## 5. Как создать агента?
 
-1. **Play** на настроенной сцене.
-2. В консоли — старт **`CoreAIGameEntryPoint`** (без критических ошибок DI).
-3. На **RogueliteArena**: прототип волновой арены; **F9** — задача **Programmer** (Lua + `report` в лог). **R** — перезапуск сцены.
-4. **Логи ядра:** **`[Llm]`** — запрос/ответ модели (**`LLM ▶`**, **`LLM ◀`**, при зависании — **`LLM ⏱`**); **`[MessagePipe]`** — **`ApplyAiGameCommand`** с тем же **`traceId`**. На **`CoreAILifetimeScope`**: **Llm Request Timeout Seconds** (по умолчанию **15**, **0** = без лимита). Категория **`Llm`** в **Game Log Settings** должна быть включена (или откройте asset в инспекторе — сработает миграция).
+Теперь всё готово! Можно создавать агентов. Посмотрите инструкцию и 4 копипаст-рецепта в главном гайде:
+
+👉 **[AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)**
+
+### Краткая проверка в Play Mode
+
+1. Нажмите **Play**.
+2. В консоли вы увидите: `VContainer + MessagePipe... готовы.`
+3. Вызовете агента из своего скрипта: `myAgent.Ask("Привет");`
+4. Логи покажут запросы к LLM и ответы.
 
 Если используете **World Commands** (управление миром из Lua): создайте `CoreAiPrefabRegistryAsset` и назначьте в `CoreAILifetimeScope → World Prefab Registry`, затем Lua сможет безопасно публиковать команды спавна/движения/сцен. Детали: **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
 

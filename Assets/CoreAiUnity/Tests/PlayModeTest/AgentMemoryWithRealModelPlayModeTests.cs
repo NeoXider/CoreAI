@@ -66,7 +66,7 @@ namespace CoreAI.Tests.PlayMode
                 setup.MemoryStore,
                 setup.Policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics());
+                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
             Task t2 = orch2.RunTaskAsync(new AiTaskRequest
             {
@@ -82,3 +82,4 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
+

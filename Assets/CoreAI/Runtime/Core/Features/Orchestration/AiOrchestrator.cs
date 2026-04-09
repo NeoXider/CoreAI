@@ -25,6 +25,7 @@ namespace CoreAI.Ai
         private readonly AgentMemoryPolicy _memoryPolicy;
         private readonly IRoleStructuredResponsePolicy _structuredPolicy;
         private readonly IAiOrchestrationMetrics _metrics;
+        private readonly ICoreAISettings _settings;
 
         /// <summary>Собирает зависимости оркестратора (регистрация через VContainer).</summary>
         public AiOrchestrator(
@@ -36,7 +37,8 @@ namespace CoreAI.Ai
             IAgentMemoryStore memoryStore,
             AgentMemoryPolicy memoryPolicy,
             IRoleStructuredResponsePolicy structuredPolicy,
-            IAiOrchestrationMetrics metrics)
+            IAiOrchestrationMetrics metrics,
+            ICoreAISettings settings)
         {
             _authority = authority;
             _llm = llm;
@@ -47,6 +49,7 @@ namespace CoreAI.Ai
             _memoryPolicy = memoryPolicy;
             _structuredPolicy = structuredPolicy ?? new NoOpRoleStructuredResponsePolicy();
             _metrics = metrics ?? new NullAiOrchestrationMetrics();
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
 
         /// <inheritdoc />
@@ -101,15 +104,15 @@ namespace CoreAI.Ai
                 }
             }
 
-            int maxAttempts = CoreAISettings.MaxLlmRequestRetries > 0 ? CoreAISettings.MaxLlmRequestRetries : 2;
+            int maxAttempts = _settings.MaxLlmRequestRetries > 0 ? _settings.MaxLlmRequestRetries : 2;
             LlmCompletionResult result = null;
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 using CancellationTokenSource delayCts = new();
-                if (CoreAISettings.LlmRequestTimeoutSeconds > 0)
+                if (_settings.LlmRequestTimeoutSeconds > 0)
                 {
-                    delayCts.CancelAfter(TimeSpan.FromSeconds(CoreAISettings.LlmRequestTimeoutSeconds));
+                    delayCts.CancelAfter(TimeSpan.FromSeconds(_settings.LlmRequestTimeoutSeconds));
                 }
 
                 using CancellationTokenSource linkedCts =

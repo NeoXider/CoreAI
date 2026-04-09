@@ -276,7 +276,7 @@ namespace CoreAI.Tests.PlayMode
                 new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
                 new AiPromptComposer(new CustomAgentPromptProvider(cfg.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
-                store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics());
+                store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
             return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };
@@ -329,3 +329,4 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
+

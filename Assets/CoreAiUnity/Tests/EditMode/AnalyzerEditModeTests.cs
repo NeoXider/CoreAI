@@ -167,7 +167,7 @@ namespace CoreAI.Tests.EditMode
                 memoryStore,
                 memoryPolicy,
                 structuredPolicy,
-                metrics);
+                metrics, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
             // Act
             orchestrator.RunTaskAsync(new AiTaskRequest

@@ -188,7 +188,7 @@ namespace CoreAI.Tests.PlayMode
                 MemoryStore,
                 Policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics());
+                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
         private void SetupLogAsserts()
@@ -276,11 +276,16 @@ namespace CoreAI.Tests.PlayMode
         {
             public volatile bool LastCommandWasCalled;
             public string LastCommandJson;
+            public System.Collections.Generic.List<string> AllCommandsJson = new();
+
+            public string[] LastListedAnimations { get; private set; } = System.Array.Empty<string>();
+            public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects { get; private set; } = new();
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
                 LastCommandWasCalled = true;
                 LastCommandJson = cmd.JsonPayload;
+                AllCommandsJson.Add(cmd.JsonPayload);
                 Debug.LogWarning($"[WorldCommand] Executed: {cmd.JsonPayload}");
                 return true;
             }

@@ -33,42 +33,31 @@ namespace CoreAI.Infrastructure.Llm
         private readonly MEAI.IChatClient _innerClient;
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore? _memoryStore;
-        private readonly IOpenAiHttpSettings? _settings;
+        private readonly ICoreAISettings _settings;
         private string _currentRoleId = "";
 
-        public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, IAgentMemoryStore? memoryStore = null)
+        public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings, IAgentMemoryStore? memoryStore = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
-        }
-
-        private MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, IOpenAiHttpSettings settings,
-            IAgentMemoryStore? memoryStore = null)
-            : this(innerClient, logger, memoryStore)
-        {
-            _settings = settings;
         }
 
         /// <summary>
         /// Создать HTTP клиент (OpenAI-compatible API).
         /// </summary>
         public static MeaiLlmClient CreateHttp(
-            IOpenAiHttpSettings settings,
+            IOpenAiHttpSettings openAiSettings,
+            ICoreAISettings settings,
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (settings == null)
-            {
-                throw new ArgumentNullException(nameof(settings));
-            }
+            if (openAiSettings == null) throw new ArgumentNullException(nameof(openAiSettings));
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (logger == null) throw new ArgumentNullException(nameof(logger));
 
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
-
-            MeaiOpenAiChatClient innerClient = new(settings, logger);
+            MeaiOpenAiChatClient innerClient = new(openAiSettings, logger);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
         }
 
@@ -80,18 +69,11 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (settings == null)
-            {
-                throw new ArgumentNullException(nameof(settings));
-            }
-
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (logger == null) throw new ArgumentNullException(nameof(logger));
 
             HttpSettingsAdapter adapter = new(settings);
-            return CreateHttp(adapter, logger, memoryStore);
+            return CreateHttp(adapter, settings, logger, memoryStore);
         }
 
         /// <summary>
@@ -100,20 +82,15 @@ namespace CoreAI.Infrastructure.Llm
         public static MeaiLlmClient CreateLlmUnity(
             LLMAgent unityAgent,
             IGameLogger logger,
+            ICoreAISettings settings,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (unityAgent == null)
-            {
-                throw new ArgumentNullException(nameof(unityAgent));
-            }
-
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
+            if (unityAgent == null) throw new ArgumentNullException(nameof(unityAgent));
+            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
 
             LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
-            return new MeaiLlmClient(innerClient, logger, memoryStore);
+            return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
         }
 
         /// <inheritdoc />
@@ -128,13 +105,13 @@ namespace CoreAI.Infrastructure.Llm
             _currentRoleId = request.AgentRoleId ?? "Unknown";
             List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
 
-            if (CoreAISettings.LogMeaiToolCallingSteps)
+            if (_settings.LogMeaiToolCallingSteps)
             {
                 _logger.LogInfo(GameLogFeature.Llm,
-                    $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={CoreAISettings.MaxToolCallRetries}");
+                    $"MeaiLlmClient: SmartToolCallingChatClient created with {aiTools.Count} tools, max consecutive errors={_settings.MaxToolCallRetries}");
             }
 
-            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, CoreAISettings.MaxToolCallRetries);
+            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, _settings.MaxToolCallRetries);
 
             List<MEAI.ChatMessage> chatMessages = new()
             {
@@ -187,7 +164,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                _logger.LogError(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
+                _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
                 return new LlmCompletionResult { Ok = false, Error = ex.Message };
             }
 
@@ -206,7 +183,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Логируем результат tool calling если включено
-            if (_settings?.LogLlmOutput == true)
+            if (_settings?.EnableMeaiDebugLogging == true)
             {
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Final response: {response.Text}");
                 if (response.Usage != null)
@@ -267,10 +244,10 @@ namespace CoreAI.Infrastructure.Llm
                         case WorldLlmTool wt:
                             result.Add(wt.CreateAIFunction());
                             break;
-                        case CoreAI.Ai.SceneLlmTool slt:
+                        case SceneLlmTool slt:
                             result.AddRange(slt.CreateAIFunctions());
                             break;
-                        case CoreAI.Infrastructure.World.CameraLlmTool camt:
+                        case CameraLlmTool camt:
                             result.AddRange(camt.CreateAIFunctions());
                             break;
                         case DelegateLlmTool dt:

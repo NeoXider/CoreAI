@@ -40,7 +40,7 @@ namespace CoreAI.Infrastructure.Llm
     /// Используется по всему проекту для получения API-ключа, URL, модели и других настроек.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/CoreAI Settings", fileName = "CoreAISettings")]
-    public sealed class CoreAISettingsAsset : ScriptableObject
+    public sealed class CoreAISettingsAsset : ScriptableObject, ICoreAISettings
     {
         #region Singleton
 
@@ -131,14 +131,17 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Не останавливать LLMUnity сервер между запросами (keep-alive). Ускоряет тесты.")] [SerializeField]
         private bool llmUnityKeepAlive = false;
 
-        [Tooltip("Включить режим размышлений (thinking/reasoning). Поддерживается Qwen3.5, DeepSeek и др. Работает как для API так и для LLMUnity.")]
+        [Tooltip(
+            "Включить режим размышлений (thinking/reasoning). Поддерживается Qwen3.5, DeepSeek и др. Работает как для API так и для LLMUnity.")]
         [SerializeField]
         private bool enableReasoning = false;
 
         [Tooltip("Максимум параллельных чатов с LLMUnity. 1 = последовательно.")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
 
-        [Tooltip("Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio).")] [SerializeField] [Min(0)]
+        [Tooltip("Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio).")]
+        [SerializeField]
+        [Min(0)]
         private int llmUnityNumGPULayers = 99;
 
         [Header("⚙️ Общие настройки")]

@@ -2,8 +2,8 @@ using System;
 using Newtonsoft.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using CoreAI.Logging;
 using Microsoft.Extensions.AI;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -14,10 +14,14 @@ namespace CoreAI.Ai
     public sealed class LuaTool
     {
         private readonly ILuaExecutor _executor;
+        private readonly ICoreAISettings _settings;
+        private readonly CoreAI.Logging.ILog _logger;
 
-        public LuaTool(ILuaExecutor executor)
+        public LuaTool(ILuaExecutor executor, ICoreAISettings settings, CoreAI.Logging.ILog logger)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>
@@ -49,37 +53,36 @@ namespace CoreAI.Ai
                 return SerializeResult(new LuaResult { Success = false, Error = "Lua code is required" });
             }
 
-            if (CoreAISettings.LogToolCalls)
+            if (_settings.LogToolCalls)
             {
-                Log.Instance.Info($"[Tool Call] execute_lua: code length={code.Length}", LogTag.Lua);
+                _logger.Info( $"[Tool Call] execute_lua: code length={code.Length}");
             }
 
-            if (CoreAISettings.LogToolCallArguments)
+            if (_settings.LogToolCallArguments)
             {
                 string preview = code.Length > 150 ? code.Substring(0, 150) : code;
-                Log.Instance.Info($"  code preview: {preview}", LogTag.Lua);
+                _logger.Info( $"  code preview: {preview}");
             }
 
             try
             {
                 LuaResult result = await _executor.ExecuteAsync(code, cancellationToken);
 
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings.LogToolCallResults)
                 {
                     string outputPreview =
                         result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
-                    Log.Instance.Info(
-                        $"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}",
-                        LogTag.Lua);
+                    _logger.Info( 
+                        $"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}");
                 }
 
                 return SerializeResult(result);
             }
             catch (Exception ex)
             {
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings.LogToolCallResults)
                 {
-                    Log.Instance.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}", LogTag.Lua);
+                    _logger.Error( $"[Tool Call] execute_lua: FAILED - {ex.Message}");
                 }
 
                 return SerializeResult(new LuaResult

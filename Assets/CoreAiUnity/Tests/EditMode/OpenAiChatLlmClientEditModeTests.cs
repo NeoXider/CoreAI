@@ -57,7 +57,7 @@ namespace CoreAI.Tests.EditMode
                 .GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 .SetValue(settings, "test-model");
 
-            OpenAiChatLlmClient client = new(settings, GameLoggerUnscopedFallback.Instance, null);
+            OpenAiChatLlmClient client = new(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance, null);
             Assert.IsNotNull(client);
 
             Object.DestroyImmediate(settings);

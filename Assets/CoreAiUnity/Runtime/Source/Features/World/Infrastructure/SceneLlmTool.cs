@@ -28,7 +28,8 @@ namespace CoreAI.Ai
                 new AIFunctionFactoryOptions
                 {
                     Name = "find_objects",
-                    Description = "Find game objects in the scene by name or tag. Returns a JSON array of their details."
+                    Description =
+                        "Find game objects in the scene by name or tag. Returns a JSON array of their details."
                 }
             );
 
@@ -37,7 +38,8 @@ namespace CoreAI.Ai
                 new AIFunctionFactoryOptions
                 {
                     Name = "get_hierarchy",
-                    Description = "Get the child hierarchy for a given GameObject instanceId. If null or 0, returns root objects."
+                    Description =
+                        "Get the child hierarchy for a given GameObject instanceId. If null or 0, returns root objects."
                 }
             );
 
@@ -51,11 +53,13 @@ namespace CoreAI.Ai
             );
 
             yield return AIFunctionFactory.Create(
-                (Func<int, float?, float?, float?, float?, float?, float?, float?, float?, float?, CancellationToken, Task<string>>)SetTransformAsync,
+                (Func<int, float?, float?, float?, float?, float?, float?, float?, float?, float?, CancellationToken,
+                    Task<string>>)SetTransformAsync,
                 new AIFunctionFactoryOptions
                 {
                     Name = "set_transform",
-                    Description = "Move, rotate, or scale a GameObject by its instanceId. Pass values for coordinates you want to change."
+                    Description =
+                        "Move, rotate, or scale a GameObject by its instanceId. Pass values for coordinates you want to change."
                 } // parameters: id, px,py,pz, rx,ry,rz, sx,sy,sz
             );
         }
@@ -81,7 +85,8 @@ namespace CoreAI.Ai
                     {
                         match = true;
                     }
-                    else if (searchMethod.Equals("tag", StringComparison.OrdinalIgnoreCase) && go.CompareTag(searchTerm))
+                    else if (searchMethod.Equals("tag", StringComparison.OrdinalIgnoreCase) &&
+                             go.CompareTag(searchTerm))
                     {
                         match = true;
                     }
@@ -122,7 +127,10 @@ namespace CoreAI.Ai
                 if (rootInstanceId.HasValue && rootInstanceId.Value != 0)
                 {
                     GameObject root = FindObjectById(rootInstanceId.Value);
-                    if (root == null) return SerializeError($"GameObject with ID {rootInstanceId.Value} not found.");
+                    if (root == null)
+                    {
+                        return SerializeError($"GameObject with ID {rootInstanceId.Value} not found.");
+                    }
 
                     for (int i = 0; i < root.transform.childCount; i++)
                     {
@@ -138,7 +146,8 @@ namespace CoreAI.Ai
                 else
                 {
                     // Return roots
-                    IEnumerable<GameObject> roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+                    IEnumerable<GameObject> roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene()
+                        .GetRootGameObjects();
                     foreach (GameObject r in roots)
                     {
                         children.Add(new
@@ -170,7 +179,10 @@ namespace CoreAI.Ai
             try
             {
                 GameObject go = FindObjectById(instanceId);
-                if (go == null) return SerializeError($"GameObject with ID {instanceId} not found.");
+                if (go == null)
+                {
+                    return SerializeError($"GameObject with ID {instanceId} not found.");
+                }
 
                 Transform t = go.transform;
                 var res = new
@@ -203,24 +215,60 @@ namespace CoreAI.Ai
             try
             {
                 GameObject go = FindObjectById(instanceId);
-                if (go == null) return SerializeError($"GameObject with ID {instanceId} not found.");
+                if (go == null)
+                {
+                    return SerializeError($"GameObject with ID {instanceId} not found.");
+                }
 
                 Transform t = go.transform;
                 Vector3 pos = t.position;
                 Vector3 rot = t.eulerAngles;
                 Vector3 scl = t.localScale;
 
-                if (px.HasValue) pos.x = px.Value;
-                if (py.HasValue) pos.y = py.Value;
-                if (pz.HasValue) pos.z = pz.Value;
+                if (px.HasValue)
+                {
+                    pos.x = px.Value;
+                }
 
-                if (rx.HasValue) rot.x = rx.Value;
-                if (ry.HasValue) rot.y = ry.Value;
-                if (rz.HasValue) rot.z = rz.Value;
+                if (py.HasValue)
+                {
+                    pos.y = py.Value;
+                }
 
-                if (sx.HasValue) scl.x = sx.Value;
-                if (sy.HasValue) scl.y = sy.Value;
-                if (sz.HasValue) scl.z = sz.Value;
+                if (pz.HasValue)
+                {
+                    pos.z = pz.Value;
+                }
+
+                if (rx.HasValue)
+                {
+                    rot.x = rx.Value;
+                }
+
+                if (ry.HasValue)
+                {
+                    rot.y = ry.Value;
+                }
+
+                if (rz.HasValue)
+                {
+                    rot.z = rz.Value;
+                }
+
+                if (sx.HasValue)
+                {
+                    scl.x = sx.Value;
+                }
+
+                if (sy.HasValue)
+                {
+                    scl.y = sy.Value;
+                }
+
+                if (sz.HasValue)
+                {
+                    scl.z = sz.Value;
+                }
 
                 t.position = pos;
                 t.eulerAngles = rot;
@@ -240,11 +288,16 @@ namespace CoreAI.Ai
 
         private GameObject FindObjectById(int instanceId)
         {
-            GameObject[] allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            foreach (var go in allObjects)
+            GameObject[] allObjects =
+                UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (GameObject go in allObjects)
             {
-                if (go.GetInstanceID() == instanceId) return go;
+                if (go.GetInstanceID() == instanceId)
+                {
+                    return go;
+                }
             }
+
             return null;
         }
 

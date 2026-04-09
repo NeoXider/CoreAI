@@ -18,13 +18,15 @@ namespace CoreAI.Infrastructure.Llm
         private readonly MEAI.IChatClient _innerClient;
         private readonly IGameLogger _logger;
         private readonly int _maxConsecutiveErrors;
+        private readonly ICoreAISettings _settings;
 
         /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
-        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger,
+        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
             int maxConsecutiveErrors = 3)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _maxConsecutiveErrors = maxConsecutiveErrors;
         }
 
@@ -36,13 +38,14 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.ChatMessage> messages = chatMessages.ToList();
             int consecutiveErrors = 0;
             int iteration = 0;
+            HashSet<string> executedSignatures = new();
 
             while (true)
             {
                 iteration++;
                 await Task.Yield(); // Force async boundary to ensure previous LLMUnity states (like isGenerating) are fully flushed
 
-                if (CoreAISettings.LogMeaiToolCallingSteps)
+                if (_settings.LogMeaiToolCallingSteps)
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
                         $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={consecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
@@ -59,7 +62,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (toolCalls.Count == 0)
                 {
                     // Модель вернула текст — выходим
-                    if (CoreAISettings.LogMeaiToolCallingSteps)
+                    if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
@@ -68,63 +71,84 @@ namespace CoreAI.Infrastructure.Llm
                     return response;
                 }
 
-                if (CoreAISettings.LogMeaiToolCallingSteps)
+                if (_settings.LogMeaiToolCallingSteps)
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
                         $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s)");
                 }
 
+                // Защита от застревания: если агент вызывает ровно те же тулзы с теми же аргументами в рамках этой же сессии
+                string currentSignature = string.Join("|", toolCalls.Select(t =>
+                    $"{t.Name}:{string.Join(",", t.Arguments?.Select(a => $"{a.Key}={a.Value}") ?? Enumerable.Empty<string>())}"));
+
+                bool isDuplicate = !string.IsNullOrEmpty(currentSignature) && !executedSignatures.Add(currentSignature);
+
                 // Выполняем тулы
                 List<MEAI.AIContent> toolResults = new();
                 bool anyFailed = false;
 
-                foreach (MEAI.FunctionCallContent fc in toolCalls)
+                if (isDuplicate)
                 {
-                    MEAI.AIFunction aiFunc =
-                        options?.Tools.OfType<MEAI.AIFunction>().FirstOrDefault(f => f.Name == fc.Name);
-                    if (aiFunc == null)
+                    anyFailed = true;
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"[SmartToolCall] ⚠ DUPLICATE TOOL CALL DETECTED: {currentSignature}. Rejecting.");
+                    foreach (MEAI.FunctionCallContent fc in toolCalls)
                     {
-                        anyFailed = true;
-                        toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"));
-                        continue;
-                    }
-
-                    try
-                    {
-                        MEAI.AIFunctionArguments args = fc.Arguments != null
-                            ? new MEAI.AIFunctionArguments(fc.Arguments)
-                            : null;
-                        object result = await aiFunc.InvokeAsync(args, cancellationToken);
-                        string resultText = result?.ToString() ?? "";
-                        bool succeeded = !resultText.Contains("\"Success\":false") &&
-                                         !resultText.Contains("\"success\":false");
-
-                        if (!succeeded)
-                        {
-                            anyFailed = true;
-                        }
-
-                        if (CoreAISettings.LogMeaiToolCallingSteps)
-                        {
-                            _logger.LogInfo(GameLogFeature.Llm,
-                                $"[SmartToolCall] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
-                        }
-
-                        toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
-                    }
-                    catch (Exception ex)
-                    {
-                        anyFailed = true;
-                        toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"));
-                        _logger.LogError(GameLogFeature.Llm, $"[SmartToolCall] {fc.Name} threw: {ex.Message}");
+                        toolResults.Add(new MEAI.FunctionResultContent(fc.CallId,
+                            "Error: You just executed this exact same tool call with the exact same arguments on the previous step. " +
+                            "Do not repeat identical steps. Proceed to the NEXT step or provide a final text response."));
                     }
                 }
+                else
+                {
+                    foreach (MEAI.FunctionCallContent fc in toolCalls)
+                    {
+                        MEAI.AIFunction aiFunc =
+                            options?.Tools.OfType<MEAI.AIFunction>().FirstOrDefault(f => f.Name == fc.Name);
+                        if (aiFunc == null)
+                        {
+                            anyFailed = true;
+                            toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"));
+                            continue;
+                        }
+
+                        try
+                        {
+                            MEAI.AIFunctionArguments args = fc.Arguments != null
+                                ? new MEAI.AIFunctionArguments(fc.Arguments)
+                                : null;
+                            object result = await aiFunc.InvokeAsync(args, cancellationToken);
+                            string resultText = result?.ToString() ?? "";
+                            bool succeeded = !resultText.Contains("\"Success\":false") &&
+                                             !resultText.Contains("\"success\":false");
+
+                            if (!succeeded)
+                            {
+                                anyFailed = true;
+                            }
+
+                            if (_settings.LogMeaiToolCallingSteps)
+                            {
+                                _logger.LogInfo(GameLogFeature.Llm,
+                                    $"[SmartToolCall] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
+                            }
+
+                            toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
+                        }
+                        catch (Exception ex)
+                        {
+                            anyFailed = true;
+                            toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"));
+                            _logger.LogError(GameLogFeature.Llm, $"[SmartToolCall] {fc.Name} threw: {ex.Message}");
+                        }
+                    }
+                } // Закрытие блока else (non duplicate)
 
                 // Обновляем счётчик
                 if (!anyFailed)
                 {
                     consecutiveErrors = 0; // СБРОС при успехе
-                    if (CoreAISettings.LogMeaiToolCallingSteps)
+                    if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
                             "[SmartToolCall] ✓ All succeeded, error counter reset to 0");
@@ -133,7 +157,7 @@ namespace CoreAI.Infrastructure.Llm
                 else
                 {
                     consecutiveErrors++; // КОПИМ при ошибке
-                    if (CoreAISettings.LogMeaiToolCallingSteps)
+                    if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"[SmartToolCall] ✗ Some failed, error counter={consecutiveErrors}/{_maxConsecutiveErrors}");
@@ -143,7 +167,12 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"[SmartToolCall] ⚠ Max consecutive errors ({_maxConsecutiveErrors}), stopping.");
-                        break;
+
+                        return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                            "{\"error\":\"Agent aborted due to hitting maximum consecutive tool processing errors.\"}"))
+                        {
+                            FinishReason = MEAI.ChatFinishReason.Stop
+                        };
                     }
                 }
 

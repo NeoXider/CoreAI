@@ -42,17 +42,22 @@ namespace CoreAI.Tests.PlayMode
                     return new MeaiLlmClient(
                         new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
                         GameLoggerUnscopedFallback.Instance,
+                        UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                         memoryStore);
                 }
             }
 
-            // HTTP клиент — создаём новый с MemoryStore через CreateHttp
+            // HTTP клиент — создаём новый через OpenAiChatLlmClient используя сохранённые настройки
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
             {
-                CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
-                if (settings != null)
+                if (handle._openAiSettings != null)
                 {
-                    return MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, memoryStore);
+                    return new OpenAiChatLlmClient(handle._openAiSettings, memoryStore);
+                }
+                
+                if (handle._coreAiSettings != null)
+                {
+                    return new OpenAiChatLlmClient(handle._coreAiSettings, memoryStore);
                 }
             }
 
@@ -148,8 +153,8 @@ namespace CoreAI.Tests.PlayMode
         public ILlmClient Client { get; }
         public PlayModeProductionLikeLlmBackend ResolvedBackend { get; }
 
-        private readonly OpenAiHttpLlmSettings _openAiSettings;
-        private readonly CoreAISettingsAsset _coreAiSettings;
+        internal readonly OpenAiHttpLlmSettings _openAiSettings;
+        internal readonly CoreAISettingsAsset _coreAiSettings;
         private readonly GameObject _llmUnityHarnessRoot;
 
         internal PlayModeProductionLikeLlmHandle(
@@ -432,7 +437,8 @@ namespace CoreAI.Tests.PlayMode
             int numGpuLayers = settings != null ? settings.NumGPULayers : 99;
 
             GameObject go =
-                PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, numGpuLayers, out _, out LLMAgent agent);
+                PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, numGpuLayers, out _,
+                    out LLMAgent agent);
             if (go == null || agent == null)
             {
                 ignoreReason =
@@ -447,7 +453,7 @@ namespace CoreAI.Tests.PlayMode
                 llm.dontDestroyOnLoad = true;
             }
 
-            MeaiLlmUnityClient client = new(agent, GameLoggerUnscopedFallback.Instance, new InMemoryStore());
+            MeaiLlmUnityClient client = new(agent, settings, GameLoggerUnscopedFallback.Instance, new InMemoryStore());
             handle = new PlayModeProductionLikeLlmHandle(
                 client,
                 PlayModeProductionLikeLlmBackend.LlmUnity,

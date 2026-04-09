@@ -43,9 +43,20 @@ namespace CoreAI.Tests.PlayMode
             }
 
             // Fallbacks
-            if (!assigned) assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "4b");
-            if (!assigned) assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");
-            if (!assigned) assigned = LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "4b");
+            }
+
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");
+            }
+
+            if (!assigned)
+            {
+                assigned = LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
+            }
 
             if (!assigned || string.IsNullOrWhiteSpace(llm.model))
             {

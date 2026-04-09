@@ -82,7 +82,7 @@ namespace CoreAI.Tests.EditMode
         public void LuaTool_CreateAIFunction_ReturnsNonNull()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor);
+            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
             AIFunction function = tool.CreateAIFunction();
 
@@ -94,7 +94,7 @@ namespace CoreAI.Tests.EditMode
         public async Task LuaTool_ExecuteAsync_EmptyCode_ReturnsError()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor);
+            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
             string resultJson = await tool.ExecuteAsync("");
             LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);
@@ -107,7 +107,7 @@ namespace CoreAI.Tests.EditMode
         public async Task LuaTool_ExecuteAsync_ValidCode_CallsExecutor()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor);
+            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
             string resultJson = await tool.ExecuteAsync("report('test')");
             LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);

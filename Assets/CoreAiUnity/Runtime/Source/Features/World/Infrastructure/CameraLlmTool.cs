@@ -28,7 +28,8 @@ namespace CoreAI.Infrastructure.World
                 new AIFunctionFactoryOptions
                 {
                     Name = "capture_camera",
-                    Description = "Take a screenshot from a specific camera (or 'main') and return it as a JPEG Base64 string."
+                    Description =
+                        "Take a screenshot from a specific camera (or 'main') and return it as a JPEG Base64 string."
                 } // arguments: cameraName, width, height
             );
         }
@@ -51,7 +52,10 @@ namespace CoreAI.Infrastructure.World
                 else
                 {
                     GameObject camObj = GameObject.Find(cameraName);
-                    if (camObj != null) targetCam = camObj.GetComponent<Camera>();
+                    if (camObj != null)
+                    {
+                        targetCam = camObj.GetComponent<Camera>();
+                    }
                 }
 
                 if (targetCam == null)
@@ -60,7 +64,8 @@ namespace CoreAI.Infrastructure.World
                     targetCam = UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
                     if (targetCam == null)
                     {
-                        return SerializeError($"No camera perfectly matching '{cameraName}' and no active cameras found in the scene.");
+                        return SerializeError(
+                            $"No camera perfectly matching '{cameraName}' and no active cameras found in the scene.");
                     }
                 }
 
@@ -68,21 +73,21 @@ namespace CoreAI.Infrastructure.World
                 width = Mathf.Clamp(width, 64, 1024);
                 height = Mathf.Clamp(height, 64, 1024);
 
-                RenderTexture rt = new RenderTexture(width, height, 24);
+                RenderTexture rt = new(width, height, 24);
                 RenderTexture previousRt = targetCam.targetTexture;
-                
+
                 targetCam.targetTexture = rt;
                 targetCam.Render();
                 targetCam.targetTexture = previousRt;
 
                 RenderTexture.active = rt;
-                Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                Texture2D tex = new(width, height, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
                 tex.Apply();
                 RenderTexture.active = null;
 
                 byte[] jpgBytes = tex.EncodeToJPG(75); // 75% quality to save tokens/memory
-                
+
                 UnityEngine.Object.Destroy(tex);
                 UnityEngine.Object.Destroy(rt);
 

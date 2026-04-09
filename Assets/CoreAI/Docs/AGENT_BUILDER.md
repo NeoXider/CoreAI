@@ -27,6 +27,9 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithMode(AgentMode.ToolsAndChat)
     .Build();
 
+// Регистрирует инструменты, память и историю чата агента в общей политике.
+// Оркестратор использует policy, чтобы при вызове роли "Blacksmith"
+// автоматически подключить правильные tools и настройки.
 merchant.ApplyToPolicy(policy);
 ```
 
@@ -42,23 +45,123 @@ Unity → Create → CoreAI → CoreAI Settings
 - **OpenAiHttp** — HTTP API (LM Studio, OpenAI, Qwen)
 - **Offline** — без модели (заглушка)
 
-### 3. Создай клиент и вызывай
+### 3. Вызови агента
+
+**🟢 Самый простой — `Ask` (fire-and-forget, без async):**
 
 ```csharp
-// HTTP API
+// Одна строка! Не нужен await, не нужен container.
+merchant.Ask("Show me your swords");
+
+// С callback по завершению:
+merchant.Ask("Show me your swords", onDone: () => Debug.Log("Ответ получен!"));
+```
+
+> 💡 `Ask` использует глобальный `CoreAIAgent.Orchestrator` — он автоматически инициализируется при старте сцены с `CoreAILifetimeScope`. Идеально для UI кнопок, событий, MonoBehaviour.
+
+**🟡 Async — `AskAsync` (с await):**
+
+```csharp
+// Без явного оркестратора (используется CoreAIAgent.Orchestrator):
+await merchant.AskAsync("Show me your swords");
+
+// С явным оркестратором (для тестов / кастомных сценариев):
+var orch = container.Resolve<IAiOrchestrationService>();
+await merchant.AskAsync(orch, "Show me your swords");
+```
+
+**🔴 Продвинутый — полный контроль:**
+
+```csharp
+// Через оркестратор напрямую:
+await orch.RunTaskAsync(new AiTaskRequest
+{
+    RoleId = "Blacksmith",
+    Hint = "Show me your swords",
+    Priority = 10,
+    SourceTag = "npc_dialogue"
+});
+
+// Или через ручной LLM клиент (для тестов / кастомного pipeline):
 var client = MeaiLlmClient.CreateHttp(coreAiSettings, logger, memoryStore);
-
-// LLMUnity (локальная модель)
-var client = MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore);
-
-// Вызов агента
 var result = await client.CompleteAsync(new LlmCompletionRequest
 {
     AgentRoleId = "Blacksmith",
     SystemPrompt = merchant.SystemPrompt,
     UserPayload = "Show me your swords",
-    Tools = merchant.Tools  // ILlmTool[] из AgentBuilder
+    Tools = merchant.Tools
 });
+```
+
+---
+
+## 📋 Готовые рецепты — скопируй и используй
+
+> 💡 Каждый рецепт — **полный** рабочий код. Скопируй, замени имена — готово.
+
+### Рецепт 1: Кузнец (продаёт предметы + помнит покупки)
+
+```csharp
+// 1. Создай агента
+var blacksmith = new AgentBuilder("Blacksmith")
+    .WithSystemPrompt(@"You are a blacksmith NPC. When player asks to buy, 
+FIRST call get_inventory tool. Then respond in-character with items and prices.
+Remember what the player bought using memory.")
+    .WithTool(new InventoryLlmTool(myInventoryProvider))
+    .WithMemory()
+    .WithChatHistory()
+    .Build();
+
+// 2. Зарегистрируй (через глобальный CoreAIAgent.Policy или свою policy)
+blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
+
+// 3. Вызови (одна строка!)
+blacksmith.Ask("Что у тебя есть?");
+```
+
+### Рецепт 2: Рассказчик (только чат, без инструментов)
+
+```csharp
+var storyteller = new AgentBuilder("Storyteller")
+    .WithSystemPrompt("You are a campfire storyteller. Share tales about the game world.")
+    .WithChatHistory()           // Помнит разговор
+    .WithTemperature(0.7f)       // Креативные ответы
+    .WithMode(AgentMode.ChatOnly)
+    .Build();
+
+storyteller.ApplyToPolicy(CoreAIAgent.Policy);
+
+// Fire-and-forget с callback:
+storyteller.Ask("Расскажи историю", onDone: () => Debug.Log("История готова!"));
+```
+
+### Рецепт 3: Охранник (вызывает действие при триггере)
+
+```csharp
+var guard = new AgentBuilder("Guard")
+    .WithSystemPrompt(@"You are a city guard. 
+If the player admits to a crime, you MUST call the 'alarm' tool immediately.")
+    .WithEventTool("alarm", "Sound the alarm when player confesses a crime")
+    .WithChatHistory()
+    .Build();
+
+guard.ApplyToPolicy(CoreAIAgent.Policy);
+
+// В любом скрипте подпишись на событие:
+CoreAiEvents.Subscribe("alarm", () => audioSource.PlayOneShot(alarmSound));
+```
+
+### Рецепт 4: Фоновый анализатор (только tool calls, без текста)
+
+```csharp
+var analyzer = new AgentBuilder("SessionAnalyzer")
+    .WithSystemPrompt("Analyze session telemetry. Save key observations to memory.")
+    .WithMemory(MemoryToolAction.Append)
+    .WithTemperature(0.0f)         // Строго детерминировано
+    .WithMode(AgentMode.ToolsOnly) // Не отвечает текстом
+    .Build();
+
+analyzer.ApplyToPolicy(policy);
 ```
 
 ---
@@ -509,12 +612,8 @@ void SetupAgents()
 async Task AskMerchant(string playerMessage)
 {
     var orch = container.Resolve<AiOrchestrator>();
-    
-    await orch.RunTaskAsync(new AiTaskRequest
-    {
-        RoleId = "Merchant",  // Кастомный агент
-        Hint = playerMessage
-    });
+    // Простой вызов через AskAsync:
+    await merchant.AskAsync(orch, playerMessage);
 }
 ```
 
@@ -545,7 +644,21 @@ async Task AskMerchant(string playerMessage)
 | `SystemPrompt` | string | Системный промпт (с Universal Prefix если задан) |
 | `Tools` | IReadOnlyList<ILlmTool> | Список инструментов |
 | `Mode` | AgentMode | Режим работы |
-| `Temperature` | float | Температура генерации (из CoreAISettings или переопределена) |
+| `Temperature` | float | Температура генерации |
+
+| Метод | Описание | Пример |
+|-------|----------|--------|
+| `ApplyToPolicy(policy)` | Зарегистрировать агента в политике | `merchant.ApplyToPolicy(CoreAIAgent.Policy)` |
+| `Ask(message, onDone?)` | 🟢 Fire-and-forget, опциональный callback | `merchant.Ask("Hi")` |
+| `AskAsync(message)` | 🟡 Async (использует CoreAIAgent.Orchestrator) | `await merchant.AskAsync("Hi")` |
+| `AskAsync(orch, message)` | 🔴 Async с явным оркестратором | `await merchant.AskAsync(orch, "Hi")` |
+
+### CoreAI (статический фасад)
+
+| Свойство | Тип | Описание |
+|----------|-----|----------|
+| `CoreAIAgent.Orchestrator` | IAiOrchestrationService | Глобальный оркестратор (auto-init) |
+| `CoreAIAgent.Policy` | AgentMemoryPolicy | Глобальная политика (auto-init) |
 
 ### AgentMode
 
@@ -678,10 +791,12 @@ Attempt 3: Final attempt
 |--------|--------|--------------|-------------------|
 | **Qwen3.5-4B** | 4B | ✅ Отлично | **Рекомендуемая** для локального запуска |
 | **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Превосходно | **Идеально** через API — быстро и точно |
-| Qwen3.5-2B | 2B | ⚠️ Работает | Минимальная, но может ошибаться |
+| **Gemma 4 26B** | 26B | ✅ Превосходно | Отличный выбор через LM Studio / HTTP API |
+| Qwen3.5-2B | 2B | ⚠️ Работает | Работает, но иногда ошибается в многошаговых |
+| Qwen3.5-0.8B | 0.8B | ⚠️ Базовый | Большинство тестов проходит, сложности с multi-step |
 
-> 💡 **Рекомендация: Qwen3.5-4B локально или Qwen3.5-35B (MoE) через API**  
-> MoE-модели активируют только часть параметров (3B) — быстрые как 4B, точные как 35B.
+> 🏆 **Qwen3.5-4B проходит ВСЕ PlayMode тесты.** Рекомендуемый минимум для продакшена.  
+> 💡 MoE-модели активируют только часть параметров (3B) — быстрые как 4B, точные как 35B.
 
 ---
 

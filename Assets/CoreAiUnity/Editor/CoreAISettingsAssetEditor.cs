@@ -95,15 +95,15 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
 #if !COREAI_NO_LLM
                 SerializedProperty ggufPathProp = serializedObject.FindProperty("ggufModelPath");
-                
-                System.Collections.Generic.List<string> options = new System.Collections.Generic.List<string> { "[ Auto / Fallback ]" };
-                System.Collections.Generic.List<string> fileNames = new System.Collections.Generic.List<string> { "" };
+
+                System.Collections.Generic.List<string> options = new() { "[ Auto / Fallback ]" };
+                System.Collections.Generic.List<string> fileNames = new() { "" };
 
                 try
                 {
                     if (LLMManager.modelEntries != null)
                     {
-                        foreach (var entry in LLMManager.modelEntries)
+                        foreach (ModelEntry entry in LLMManager.modelEntries)
                         {
                             if (!entry.lora)
                             {
@@ -113,10 +113,12 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         }
                     }
                 }
-                catch { }
+                catch
+                {
+                }
 
                 int currentIndex = fileNames.IndexOf(ggufPathProp.stringValue);
-                
+
                 // Если введено вручную, добавим в конец
                 if (currentIndex == -1 && !string.IsNullOrEmpty(ggufPathProp.stringValue))
                 {
@@ -130,12 +132,14 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 }
 
                 EditorGUILayout.BeginHorizontal();
-                int newIndex = EditorGUILayout.Popup(new GUIContent("GGUF Path", "Выбор модели из LLMUnity. Пусто = авто"), currentIndex, options.ToArray());
+                int newIndex =
+                    EditorGUILayout.Popup(new GUIContent("GGUF Path", "Выбор модели из LLMUnity. Пусто = авто"),
+                        currentIndex, options.ToArray());
                 if (newIndex != currentIndex)
                 {
                     ggufPathProp.stringValue = fileNames[newIndex];
                 }
-                
+
                 if (GUILayout.Button("Manual", GUILayout.Width(60)))
                 {
                     string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
@@ -144,18 +148,23 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         ggufPathProp.stringValue = System.IO.Path.GetFileName(path);
                     }
                 }
+
                 EditorGUILayout.EndHorizontal();
 
                 // Даем возможность отредактировать ручками прямо тут
-                ggufPathProp.stringValue = EditorGUILayout.TextField(new GUIContent(" ", "Ручной вод имени файла"), ggufPathProp.stringValue);
+                ggufPathProp.stringValue = EditorGUILayout.TextField(new GUIContent(" ", "Ручной вод имени файла"),
+                    ggufPathProp.stringValue);
 #else
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("ggufModelPath"),
                     new GUIContent("GGUF Path", "Путь к .gguf файлу. Пусто = авто"));
 #endif
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityDontDestroyOnLoad"),
                     new GUIContent("Dont Destroy On Load", "Не уничтожать при смене сцены"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityNumGPULayers"),
-                    new GUIContent("GPU Layers", "Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio)."));
+                SerializedProperty gpuLayersProp = serializedObject.FindProperty("llmUnityNumGPULayers");
+                gpuLayersProp.intValue = EditorGUILayout.IntSlider(
+                    new GUIContent("GPU Layers",
+                        "Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio)."),
+                    gpuLayersProp.intValue, 0, 99);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityStartupTimeoutSeconds"),
                     new GUIContent("Startup Timeout (sec)", "Таймаут запуска сервиса"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityStartupDelaySeconds"),
@@ -189,6 +198,11 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("temperature"),
                     new GUIContent("Temperature",
                         "Общая температура генерации (0.0 = детерминировано, 2.0 = креативно). Default: 0.1"));
+
+                EditorGUILayout.Space();
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableReasoning"),
+                    new GUIContent("Enable Reasoning",
+                        "Включить режим размышлений (thinking/reasoning). Поддерживается Qwen3.5, DeepSeek и др. Работает как для HTTP API так и для LLMUnity. Вставляет тег <think>"));
 
                 if (string.IsNullOrEmpty(settings.UniversalSystemPromptPrefix))
                 {

@@ -22,8 +22,15 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new InventoryLlmTool(myInventory))  // Knows their stock
     .WithMemory()                                  // Remembers buyers
-    .WithMode(AgentMode.ToolsAndChat)              // Tools + chat
     .Build();
+
+merchant.ApplyToPolicy(CoreAIAgent.Policy);
+
+// Call the agent — one line, zero boilerplate:
+merchant.Ask("Show me your swords");
+
+// Or with a callback:
+merchant.Ask("Show me your swords", onDone: () => Debug.Log("Done!"));
 ```
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
@@ -107,11 +114,32 @@ Small models (Qwen3.5-2B) sometimes forget the format. CoreAI automatically give
 |-------|------|--------------|-------------|
 | **Qwen3.5-4B** | 4B | ✅ Great | **Recommended** for local GGUF |
 | **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Excellent | **Ideal** via API — fast & accurate |
+| **Gemma 4 26B (via LM Studio)** | 26B | ✅ Excellent | Great via HTTP API |
 | **LM Studio / OpenAI API** | Any | ✅ Excellent | External models via HTTP — best choice |
-| Qwen3.5-2B | 2B | ⚠️ Works | Minimal, but may make mistakes |
+| Qwen3.5-2B | 2B | ⚠️ Works | Works, but sometimes makes mistakes |
+| Qwen3.5-0.8B | 0.8B | ⚠️ Basic | Most tests pass, struggles with multi-step |
 
 > 💡 **Recommendation: Qwen3.5-4B locally or Qwen3.5-35B (MoE) via API**  
 > MoE models (Mixture of Experts) activate only 3B parameters per inference — fast as 4B, accurate as 35B.
+
+### 🧪 PlayMode Test Results by Model Size
+
+All CoreAI PlayMode tests have been verified on real LLM backends. Results:
+
+| Test Category | 0.8B | 2B | 4B+ |
+|--------------|------|-----|------|
+| Memory Tool (write/append/clear) | ✅ Pass | ✅ Pass | ✅ Pass |
+| Custom Agents (tool calling) | ✅ Pass | ✅ Pass | ✅ Pass |
+| World Commands (list/play/spawn) | ✅ Pass | ✅ Pass | ✅ Pass |
+| Execute Lua (single tool) | ✅ Pass | ✅ Pass | ✅ Pass |
+| Multi-Agent Workflow (Creator→Mechanic→Programmer) | ⚠️ Partial | ✅ Pass | ✅ Pass |
+| Crafting Memory (multi-step: memory + lua) | ⚠️ Partial | ⚠️ Mostly | ✅ Pass |
+| Chat History (persistent context) | ❌ Too small | ⚠️ Mostly | ✅ Pass |
+| Player Chat (NPC dialogue) | ✅ Pass | ✅ Pass | ✅ Pass |
+
+> 🏆 **Qwen3.5-4B passes ALL tests.** This is the recommended minimum for production use.  
+> 📊 **Qwen3.5-0.8B passes most tests** — impressive for its size! Struggles only with complex multi-step tool calling chains.  
+> 📈 **2B is a solid middle ground** — occasional mistakes in multi-step scenarios, but mostly reliable.
 
 ---
 
@@ -190,6 +218,9 @@ var storyteller = new AgentBuilder("Storyteller")
     .WithMode(AgentMode.ChatOnly)
     .Build();
 ```
+
+> 📖 **Full setup guide with LLM configuration:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
+> 🏗️ **Agent Builder reference + ready recipes:** [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 ---
 

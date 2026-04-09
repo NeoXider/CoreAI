@@ -16,29 +16,23 @@ namespace CoreAI.Infrastructure.Llm
     {
         private readonly MeaiLlmClient _client;
 
-        public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings)
-            : this(settings, GameLoggerUnscopedFallback.Instance, null)
+        public OpenAiChatLlmClient(OpenAiHttpLlmSettings settings, IAgentMemoryStore? memoryStore = null)
+            : this(settings, CoreAISettingsAsset.Instance, GameLoggerUnscopedFallback.Instance, memoryStore)
         {
         }
 
-        public OpenAiChatLlmClient(CoreAISettingsAsset settings)
-            : this(new HttpSettingsAdapter(settings), GameLoggerUnscopedFallback.Instance, null)
+        public OpenAiChatLlmClient(CoreAISettingsAsset settings, IAgentMemoryStore? memoryStore = null)
+            : this(new HttpSettingsAdapter(settings), settings, GameLoggerUnscopedFallback.Instance, memoryStore)
         {
         }
 
-        public OpenAiChatLlmClient(IOpenAiHttpSettings settings, IGameLogger logger, IAgentMemoryStore? memoryStore)
+        public OpenAiChatLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings, IGameLogger logger, IAgentMemoryStore? memoryStore)
         {
-            if (settings == null)
-            {
-                throw new ArgumentNullException(nameof(settings));
-            }
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (coreSettings == null) throw new ArgumentNullException(nameof(coreSettings));
+            if (logger == null) throw new ArgumentNullException(nameof(logger));
 
-            if (logger == null)
-            {
-                throw new ArgumentNullException(nameof(logger));
-            }
-
-            _client = MeaiLlmClient.CreateHttp(settings, logger, memoryStore);
+            _client = MeaiLlmClient.CreateHttp(settings, coreSettings, logger, memoryStore);
         }
 
         public void SetTools(IReadOnlyList<ILlmTool> tools)

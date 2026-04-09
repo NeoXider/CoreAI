@@ -21,18 +21,27 @@ CoreAI сочетает низкий порог входа для новичко
 
 ```csharp
 var merchant = new AgentBuilder("Blacksmith")
-    .WithSystemPrompt("You are a blacksmith. Sell weapons and remember customer purchases.")
+    .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new InventoryLlmTool(myInventory))  // Знает свой ассортимент
-    .WithMemory()                                  // Помнит что купил игрок
-    .WithChatHistory()                             // Помнит контекст разговора (8192 токена)
-    .WithMode(AgentMode.ToolsAndChat)              // Вызывает инструменты + отвечает
+    .WithMemory()                                  // Помнит покупателей
     .Build();
+
+merchant.ApplyToPolicy(CoreAIAgent.Policy);
+
+// Вызови агента — одна строка, никакого бойлерплейта:
+merchant.Ask("Покажи мечи");
+
+// Или с callback:
+merchant.Ask("Покажи мечи", onDone: () => Debug.Log("Готово!"));
 ```
 
 **3 режима агентов:**
 - 🛒 **ToolsAndChat** — вызывает инструменты И отвечает текстом (Merchant, Crafter, Advisor)
 - 🤖 **ToolsOnly** — только инструменты, без текста (Background Analyzer)
 - 💬 **ChatOnly** — только текст, без инструментов (Storyteller, Guide)
+
+> 📖 **Полный гайд по настройке LLM:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
+> 🏗️ **Конструктор агентов + готовые рецепты:** [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 ---
 
@@ -144,11 +153,32 @@ Attempt 2: Model fixes the format ✅
 |--------|--------|--------------|-------------------|
 | **Qwen3.5-4B** | 4B | ✅ Отлично | **Рекомендуемая** для локального запуска |
 | **Qwen3.5-35B (MoE)** | 35B/3A | ✅ Превосходно | **Идеально** через API — быстро и точно |
+| **Gemma 4 26B (через LM Studio)** | 26B | ✅ Превосходно | Отличный выбор через HTTP API |
 | **LM Studio API** | Любая | ✅ Отлично | Внешние модели через HTTP — лучший выбор |
-| Qwen3.5-2B | 2B | ⚠️ Работает | Минимальная, но может ошибаться |
+| Qwen3.5-2B | 2B | ⚠️ Работает | Работает, но иногда ошибается |
+| Qwen3.5-0.8B | 0.8B | ⚠️ Базовый | Большинство тестов проходит, сложности с многошаговыми |
 
 > 💡 **Рекомендация: Qwen3.5-4B локально или Qwen3.5-35B (MoE) через API**  
 > MoE-модели (Mixture of Experts) используют только часть параметров при инференсе — быстрые как 4B, точные как 35B.
+
+### 🧪 Результаты PlayMode тестов по размерам моделей
+
+Все PlayMode тесты CoreAI проверены на реальных LLM бэкендах:
+
+| Категория тестов | 0.8B | 2B | 4B+ |
+|-----------------|------|-----|------|
+| Memory Tool (запись/добавление/очистка) | ✅ Пройден | ✅ Пройден | ✅ Пройден |
+| Custom Agents (вызов инструментов) | ✅ Пройден | ✅ Пройден | ✅ Пройден |
+| World Commands (list/play/spawn) | ✅ Пройден | ✅ Пройден | ✅ Пройден |
+| Execute Lua (один инструмент) | ✅ Пройден | ✅ Пройден | ✅ Пройден |
+| Multi-Agent (Creator→Mechanic→Programmer) | ⚠️ Частично | ✅ Пройден | ✅ Пройден |
+| Crafting Memory (многошаговый: memory + lua) | ⚠️ Частично | ⚠️ В основном | ✅ Пройден |
+| Chat History (постоянный контекст) | ❌ Слишком мала | ⚠️ В основном | ✅ Пройден |
+| Player Chat (диалоги NPC) | ✅ Пройден | ✅ Пройден | ✅ Пройден |
+
+> 🏆 **Qwen3.5-4B проходит ВСЕ тесты.** Рекомендуемый минимум для продакшена.  
+> 📊 **Qwen3.5-0.8B проходит большинство тестов** — впечатляюще для своего размера! Сложности только с многошаговыми цепочками tool calling.  
+> 📈 **2B — золотая середина** — редкие ошибки в многошаговых сценариях, но в целом надёжна.
 
 ---
 

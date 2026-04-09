@@ -71,6 +71,8 @@ namespace CoreAI.Infrastructure.World
                     return TryPlayAnimation(env);
                 case "list_animations":
                     return TryListAnimations(env);
+                case "play_sound":
+                    return TryPlaySound(env);
                 case "show_text":
                     // TODO: Реализовать show_text с анимацией уведомления (2 секунды или настройка)
                     _logger.LogInfo(GameLogFeature.MessagePipe,
@@ -243,6 +245,56 @@ namespace CoreAI.Infrastructure.World
                 }
             }
 
+            return false;
+        }
+
+        private bool TryPlaySound(CoreAiWorldCommandEnvelope env)
+        {
+            if (ResolveObject(env.targetName, out GameObject go))
+            {
+                // Ищем AudioSource
+                AudioSource[] audioSources = go.GetComponents<AudioSource>();
+                if (audioSources == null || audioSources.Length == 0)
+                {
+                    _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: no AudioSource on '{go.name}'");
+                    return false;
+                }
+
+                string clipName = (env.stringValue ?? "").Trim();
+                
+                // Если имя клипа не указано, просто проигрываем первый попавшийся AudioSource (если у него есть клип)
+                if (string.IsNullOrEmpty(clipName))
+                {
+                    foreach (AudioSource src in audioSources)
+                    {
+                        if (src.clip != null)
+                        {
+                            src.Play();
+                            _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_sound: playing existing clip '{src.clip.name}' on '{go.name}'");
+                            return true;
+                        }
+                    }
+                    _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: no predefined AudioClip found in any AudioSource on '{go.name}'");
+                    return false;
+                }
+
+                // Ищем конкретный клип
+                foreach (AudioSource src in audioSources)
+                {
+                    if (src.clip != null && src.clip.name.Equals(clipName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        src.Play();
+                        _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_sound: playing '{clipName}' on '{go.name}'");
+                        return true;
+                    }
+                }
+
+                // Поиск среди загруженных ресурсов (Resources / StreamingAssets) здесь можно добавить по желанию
+                _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: AudioClip '{clipName}' not found on '{go.name}'");
+                return false;
+            }
+
+            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: object not found (name='{env.targetName}')");
             return false;
         }
 

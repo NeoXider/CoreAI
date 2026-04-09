@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
-using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using UnityEngine;
 
@@ -20,10 +22,14 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class WorldLlmTool : LlmToolBase
     {
         private readonly ICoreAiWorldCommandExecutor _executor;
+        private readonly ICoreAISettings _settings;
+        private readonly IGameLogger _logger;
 
-        public WorldLlmTool(ICoreAiWorldCommandExecutor executor)
+        public WorldLlmTool(ICoreAiWorldCommandExecutor executor, ICoreAISettings settings, IGameLogger logger)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public override string Name => "world_command";
@@ -58,7 +64,8 @@ namespace CoreAI.Infrastructure.Llm
 
         public AIFunction CreateAIFunction()
         {
-            Func<string, float, float, float, float, float, float, string?, string?, string?, string?, string?, float, CancellationToken,
+            Func<string, float, float, float, float, float, float, string?, string?, string?, string?, string?, float,
+                CancellationToken,
                 Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
@@ -90,12 +97,12 @@ namespace CoreAI.Infrastructure.Llm
                     "Action is required. Valid actions: spawn, move, destroy, load_scene, reload_scene, set_active, show_text, apply_force, spawn_particles, list_objects");
             }
 
-            if (CoreAISettings.LogToolCalls)
+            if (_settings.LogToolCalls)
             {
-                Log.Instance.Info($"[Tool Call] world_command: action={action}", LogTag.World);
+                _logger.LogInfo(GameLogFeature.MessagePipe, $"[Tool Call] world_command: action={action}");
             }
 
-            if (CoreAISettings.LogToolCallArguments)
+            if (_settings.LogToolCallArguments)
             {
                 StringBuilder args = new();
                 if (!string.IsNullOrEmpty(targetName))
@@ -135,7 +142,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (args.Length > 0)
                 {
-                    Log.Instance.Info($"  args:{args}", LogTag.World);
+                    _logger.LogInfo(GameLogFeature.MessagePipe, $"  args:{args}");
                 }
             }
 
@@ -182,10 +189,22 @@ namespace CoreAI.Infrastructure.Llm
                     JsonPayload = json
                 }), cancellationToken);
 
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings.LogToolCallResults)
                 {
-                    Log.Instance.Info($"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}",
-                        LogTag.World);
+                    _logger.LogInfo(GameLogFeature.MessagePipe, $"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
+                }
+
+                if (success && action == "list_animations")
+                {
+                    string[] anims = _executor.LastListedAnimations ?? Array.Empty<string>();
+                    return SerializeResult(true, $"Found {anims.Length} animations: {string.Join(", ", anims)}", action);
+                }
+
+                if (success && action == "list_objects")
+                {
+                    var objs = _executor.LastListedObjects ?? new List<Dictionary<string, object>>();
+                    return SerializeResult(true, $"Found {objs.Count} matching objects.\n" + 
+                                                 Newtonsoft.Json.JsonConvert.SerializeObject(objs), action);
                 }
 
                 return SerializeResult(success,
@@ -196,9 +215,9 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                if (CoreAISettings.LogToolCallResults)
+                if (_settings.LogToolCallResults)
                 {
-                    Log.Instance.Error($"[Tool Call] world_command: FAILED - {ex.Message}", LogTag.World);
+                    _logger.LogError(GameLogFeature.MessagePipe, $"[Tool Call] world_command: FAILED - {ex.Message}");
                 }
 
                 return SerializeResult(false, $"World command failed: {ex.Message}", action);

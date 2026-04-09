@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using LLMUnity;
@@ -22,6 +23,7 @@ namespace CoreAI.Infrastructure.Llm
 
         public MeaiLlmUnityClient(
             LLMAgent unityAgent,
+            ICoreAISettings settings,
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null,
             AgentMemoryPolicy? memoryPolicy = null,
@@ -37,8 +39,13 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentNullException(nameof(logger));
             }
 
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
             _unityAgent = unityAgent;
-            _client = MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore);
+            _client = MeaiLlmClient.CreateLlmUnity(unityAgent, logger, settings, memoryStore);
         }
 
         public void SetTools(IReadOnlyList<ILlmTool> tools)
