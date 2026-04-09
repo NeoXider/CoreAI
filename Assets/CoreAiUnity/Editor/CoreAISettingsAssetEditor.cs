@@ -154,6 +154,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
 #endif
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityDontDestroyOnLoad"),
                     new GUIContent("Dont Destroy On Load", "Не уничтожать при смене сцены"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityNumGPULayers"),
+                    new GUIContent("GPU Layers", "Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio)."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityStartupTimeoutSeconds"),
                     new GUIContent("Startup Timeout (sec)", "Таймаут запуска сервиса"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityStartupDelaySeconds"),

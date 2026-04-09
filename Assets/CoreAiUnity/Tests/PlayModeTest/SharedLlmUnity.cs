@@ -48,6 +48,14 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public static IEnumerator EnsureInitialized()
         {
+            // У Unity объекты в DontDestroyOnLoad уничтожаются при остановке PlayMode,
+            // но статические переменные сохраняют значения (если не было Domain Reload).
+            // Защита от "потерянного" LLM.
+            if (_initialized && (_llm == null || !_llm.started))
+            {
+                _initialized = false;
+            }
+
             if (_initialized)
             {
                 yield break;
@@ -69,9 +77,10 @@ namespace CoreAI.Tests.PlayMode
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             string agentName = settings?.LlmUnityAgentName;
             string ggufPath = settings?.GgufModelPath;
+            int numGpuLayers = settings != null ? settings.NumGPULayers : 99;
 
             _rootGo = PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(
-                agentName, ggufPath, out _llm, out _agent);
+                agentName, ggufPath, numGpuLayers, out _llm, out _agent);
 
             if (_rootGo == null || _agent == null || _llm == null)
             {

@@ -429,9 +429,10 @@ namespace CoreAI.Tests.PlayMode
 #else
             string agentName = settings?.LlmUnityAgentName;
             string ggufPath = settings?.GgufModelPath;
+            int numGpuLayers = settings != null ? settings.NumGPULayers : 99;
 
             GameObject go =
-                PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, out _, out LLMAgent agent);
+                PlayModeLlmUnityTestHarness.CreateRuntimeLlmAndAgent(agentName, ggufPath, numGpuLayers, out _, out LLMAgent agent);
             if (go == null || agent == null)
             {
                 ignoreReason =

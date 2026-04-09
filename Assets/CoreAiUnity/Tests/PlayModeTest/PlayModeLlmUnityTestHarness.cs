@@ -1,6 +1,6 @@
 #if !COREAI_NO_LLM
 using System;
-using System.Reflection;
+using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -11,35 +11,14 @@ namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
     /// Play Mode: поднимает <see cref="LLM"/> + <see cref="LLMAgent"/> без сцены с префабом.
-    /// Manually invokes Awake()/Start() via reflection since Unity PlayMode tests don't always trigger them.
+    /// Больше не использует рефлексию, так как методы Awake/Start в LLMUnity публичные.
     /// </summary>
     internal static class PlayModeLlmUnityTestHarness
     {
-        private static readonly MethodInfo s_LlmAwakeMethod;
-        private static readonly MethodInfo s_LlmClientAwakeMethod;
-        private static readonly MethodInfo s_LlmClientStartMethod;
-
-        static PlayModeLlmUnityTestHarness()
-        {
-            s_LlmAwakeMethod = typeof(LLM).GetMethod("Awake",
-                                   BindingFlags.Public | BindingFlags.Instance) ??
-                               typeof(LLM).GetMethod("Awake",
-                                   BindingFlags.NonPublic | BindingFlags.Instance);
-
-            s_LlmClientAwakeMethod = typeof(LLMClient).GetMethod("Awake",
-                                         BindingFlags.Public | BindingFlags.Instance) ??
-                                     typeof(LLMClient).GetMethod("Awake",
-                                         BindingFlags.NonPublic | BindingFlags.Instance);
-
-            s_LlmClientStartMethod = typeof(LLMClient).GetMethod("Start",
-                                         BindingFlags.Public | BindingFlags.Instance) ??
-                                     typeof(LLMClient).GetMethod("Start",
-                                         BindingFlags.NonPublic | BindingFlags.Instance);
-        }
-
         public static GameObject CreateRuntimeLlmAndAgent(
             string agentName,
             string ggufPath,
+            int numGpuLayers,
             out LLM llm,
             out LLMAgent agent)
         {
@@ -63,23 +42,10 @@ namespace CoreAI.Tests.PlayMode
                 assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, ggufPath);
             }
 
-            // Fallback: ищем qwen + 4b
-            if (!assigned)
-            {
-                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "4b");
-            }
-
-            // Fallback: ищем qwen + 2b если 4b нет
-            if (!assigned)
-            {
-                assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");
-            }
-
-            // Fallback: авто-назначение
-            if (!assigned)
-            {
-                assigned = LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
-            }
+            // Fallbacks
+            if (!assigned) assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "4b");
+            if (!assigned) assigned = LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, "qwen", "2b");
+            if (!assigned) assigned = LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
 
             if (!assigned || string.IsNullOrWhiteSpace(llm.model))
             {
@@ -89,73 +55,43 @@ namespace CoreAI.Tests.PlayMode
                 return null;
             }
 
+            // Настройки производительности
             llm.flashAttention = true;
-            llm.numGPULayers = 99; // Offload all layers to GPU (same as LM Studio default)
+            llm.numGPULayers = numGpuLayers; // 0 = CPU, >0 = GPU ускорение (1-99)
             llm.enabled = true;
             agent.enabled = true;
             llm.dontDestroyOnLoad = false;
 
             Debug.Log("[TestHarness] GameObject created, model: " + llm.model);
 
-            // SetActive(true) triggers Unity lifecycle: LLM.Awake() and LLMAgent.Awake()
-            // are called automatically. DO NOT call them again via reflection — that creates
-            // a second llama.cpp server instance which replaces the first llmService,
-            // leaking the native context and causing the second Chat call to deadlock.
+            // SetActive(true) автоматически вызывает Awake() у LLM и LLMAgent.
+            // LLM.Awake() запускает асинхронное создание сервера llama.cpp.
             go.SetActive(true);
-            Debug.Log("[TestHarness] GameObject activated (Awake called by Unity)");
+            Debug.Log("[TestHarness] GameObject activated (Awake invoked by Unity naturally)");
 
-            // Unity does NOT auto-call Start() on dynamically created components in PlayMode tests.
-            // We must invoke it manually so LLMClient sets up the caller object.
-            if (s_LlmClientStartMethod != null)
-            {
-                Debug.Log("[TestHarness] Manually invoking LLMAgent.Start()...");
-                try
-                {
-                    object result = s_LlmClientStartMethod.Invoke(agent, null);
-                    if (result is Task task)
-                    {
-                        Debug.Log("[TestHarness] Waiting for LLMAgent.Start() async...");
-                        task.Wait(TimeSpan.FromSeconds(30));
-                        Debug.Log("[TestHarness] LLMAgent.Start() completed");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError("[TestHarness] Failed LLMAgent.Start(): " + ex.InnerException?.Message ??
-                                   ex.Message);
-                }
-            }
+            // Unity НЕ вызывает Start() автоматически для компонентов, добавленных через AddComponent 
+            // в том же кадре внутри теста. Вызываем вручную.
+            // Так как Start() это async void, мы просто запускаем его.
+            agent.Start();
+            Debug.Log("[TestHarness] agent.Start() invoked directly");
 
             return go;
         }
 
-        /// <summary>
-        /// Legacy overload — backwards compatibility.
-        /// </summary>
         public static GameObject CreateRuntimeLlmAndAgent(out LLM llm, out LLMAgent agent)
         {
-            return CreateRuntimeLlmAndAgent(null, null, out llm, out agent);
+            return CreateRuntimeLlmAndAgent(null, null, 99, out llm, out agent);
         }
 
+        /// <summary>
+        /// Устаревшее, оставлено для совместимости интерфейса, если нужно.
+        /// </summary>
         public static void TriggerAwakeIfNeeded(LLM llmComponent)
         {
-            if (llmComponent == null || llmComponent.started)
+            if (llmComponent != null && !llmComponent.started)
             {
-                return;
-            }
-
-            if (s_LlmAwakeMethod != null)
-            {
-                try
-                {
-                    Debug.Log("[TestHarness] Triggering Awake on existing LLM...");
-                    s_LlmAwakeMethod.Invoke(llmComponent, null);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError("[TestHarness] Failed to trigger Awake: " + ex.InnerException?.Message ??
-                                   ex.Message);
-                }
+                // Просто для страховки, хотя SetActive(true) уже всё сделал
+                // llmComponent.Awake(); // Можно вызвать напрямую, если очень надо
             }
         }
     }

@@ -138,6 +138,9 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Максимум параллельных чатов с LLMUnity. 1 = последовательно.")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
 
+        [Tooltip("Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio).")] [SerializeField] [Min(0)]
+        private int llmUnityNumGPULayers = 99;
+
         [Header("⚙️ Общие настройки")]
         [Tooltip(
             "Универсальный стартовый промпт — идёт ПЕРЕД промптом каждого агента. Задаёт общие правила для всех моделей.")]
@@ -347,6 +350,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Максимум параллельных чатов.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
 
+        /// <summary>Слоев выгружено на GPU (0 = CPU).</summary>
+        public int NumGPULayers => llmUnityNumGPULayers < 0 ? 0 : llmUnityNumGPULayers;
+
         // Общие
         /// <summary>Универсальный стартовый промпт для всех агентов.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";
@@ -439,7 +445,8 @@ namespace CoreAI.Infrastructure.Llm
             bool keepAlive = false,
             float startupTimeout = 120f,
             float startupDelay = 1f,
-            bool dontDestroyOnLoad = true)
+            bool dontDestroyOnLoad = true,
+            int numGpuLayers = 99)
         {
             backendType = LlmBackendType.LlmUnity;
             llmUnityAgentName = agentName ?? "";
@@ -448,6 +455,7 @@ namespace CoreAI.Infrastructure.Llm
             llmUnityStartupTimeoutSeconds = startupTimeout < 5f ? 120f : startupTimeout;
             llmUnityStartupDelaySeconds = startupDelay;
             llmUnityDontDestroyOnLoad = dontDestroyOnLoad;
+            llmUnityNumGPULayers = numGpuLayers < 0 ? 0 : numGpuLayers;
         }
 
         /// <summary>
@@ -546,6 +554,11 @@ namespace CoreAI.Infrastructure.Llm
             if (llmUnityMaxConcurrentChats < 1)
             {
                 llmUnityMaxConcurrentChats = 1;
+            }
+
+            if (llmUnityNumGPULayers < 0)
+            {
+                llmUnityNumGPULayers = 0;
             }
         }
 #endif
