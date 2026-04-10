@@ -2,6 +2,24 @@
 
 Все значимые изменения проекта CoreAI.
 
+## [v0.19.0] — 2026-04-10
+
+### Crafting & Validation
+
+- ✨ **`CompatibilityChecker`** — проверка совместимости ингредиентов для CoreMechanicAI
+  - Поддержка правил на произвольное количество элементов (пары, тройки, четвёрки и более)
+  - `CompatibilityRule.Pair()` и `CompatibilityRule.Group()` фабричные методы
+  - Группы элементов (IronOre → Metal, WaterFlask → Water) с автоматическим разрешением
+  - Кастомные валидаторы (`ICompatibilityValidator`) для игровой логики
+  - Взвешенное среднее: правила с большим количеством элементов имеют приоритет
+- ✨ **`CompatibilityLlmTool`** — ILlmTool обёртка для function calling (LLM может проверять совместимость перед крафтом)
+- ✨ **`JsonSchemaValidator`** — валидация JSON-ответов от LLM без внешних зависимостей
+  - Проверка обязательных полей, типов (string, number, integer, boolean, array, object)
+  - Числовые диапазоны (min/max) и enum-значения
+  - Автоматическая очистка markdown fences (`` `json...` ``)
+  - `ToPromptDescription()` — генерация описания схемы для system prompt
+- 🧪 **45+ EditMode тестов** для CompatibilityChecker, JsonSchemaValidator и CompatibilityLlmTool
+
 ## [v0.18.0] — 2026-04-10
 
 ### Architecture — DI Migration

@@ -2,6 +2,19 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.19.0] - 2026-04-10
+
+### Crafting & Validation
+
+- ✨ **`CompatibilityChecker`** — проверка совместимости ингредиентов (правила на 2/3/4+ элементов, группы, кастомные валидаторы)
+- ✨ **`CompatibilityLlmTool`** — ILlmTool обёртка для function calling
+- ✨ **`JsonSchemaValidator`** — валидация JSON-ответов от LLM (типы, диапазоны, enum)
+- 🧪 **45+ EditMode тестов** (`CompatibilityAndSchemaEditModeTests.cs`)
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.19.0**
+
 ## [0.18.0] - 2026-04-10
 
 ### Architecture — LifetimeScope Decomposition & DI Cleanup

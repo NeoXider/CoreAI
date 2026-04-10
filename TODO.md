@@ -28,9 +28,9 @@
 
 ### Продвинутые Инструменты Агентов
 - [ ] `CraftingTool` — специализированная функция для расчёта крафта для CoreMechanicAI
-- [ ] `LootRollTool` — функция броска лута
-- [ ] `CompatibilityChecker` — проверка совместимости ингредиентов (химия/физика)
-- [ ] JSON schema validation для строгих ответов CoreMechanicAI
+- [x] `CompatibilityChecker` — проверка совместимости ингредиентов (поддержка правил на 2/3/4+ элементов, группы, кастомные валидаторы)
+- [x] JSON schema validation (`JsonSchemaValidator`) для строгих ответов CoreMechanicAI (типы, диапазоны, enum значения)
+- [x] `CompatibilityLlmTool` — LLM tool wrapper для проверки совместимости через function calling
 
 ### Multi-Agent Orchestration v2.0
 - [ ] Автоматизированный `MultiAgentWorkflow` (чтобы агенты могли сами вызывать pipeline сабагентов, как в Claude Agent SDK)
