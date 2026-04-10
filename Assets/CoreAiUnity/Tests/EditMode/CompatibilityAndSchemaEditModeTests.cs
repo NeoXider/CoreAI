@@ -563,7 +563,7 @@ namespace CoreAI.Tests.EditMode
             CompatibilityChecker checker = new();
             CompatibilityLlmTool tool = new(checker);
 
-            string result = tool.ExecuteAsync("").Result;
+            string result = tool.ExecuteAsync(new string[0]).Result;
             Assert.IsTrue(result.Contains("\"Success\":false") || result.Contains("\"Success\": false"));
         }
 
@@ -573,7 +573,7 @@ namespace CoreAI.Tests.EditMode
             CompatibilityChecker checker = new();
             CompatibilityLlmTool tool = new(checker);
 
-            string result = tool.ExecuteAsync("OnlyOne").Result;
+            string result = tool.ExecuteAsync(new[] { "OnlyOne" }).Result;
             Assert.IsTrue(result.Contains("at least 2") || result.Contains("At least 2"));
         }
 
@@ -584,7 +584,7 @@ namespace CoreAI.Tests.EditMode
             checker.AddRule("Fire", "Earth", 1.5f, "Lava synergy");
             CompatibilityLlmTool tool = new(checker);
 
-            string result = tool.ExecuteAsync("Fire,Earth").Result;
+            string result = tool.ExecuteAsync(new[] { "Fire", "Earth" }).Result;
             Assert.IsTrue(result.Contains("\"Success\":true") || result.Contains("\"Success\": true"));
             Assert.IsTrue(result.Contains("\"IsCompatible\":true") || result.Contains("\"IsCompatible\": true"));
         }
@@ -596,7 +596,7 @@ namespace CoreAI.Tests.EditMode
             checker.AddGroupRule(0f, "Explosive combo!", "Fire", "Oil", "Gunpowder");
             CompatibilityLlmTool tool = new(checker);
 
-            string result = tool.ExecuteAsync("Fire, Oil, Gunpowder").Result;
+            string result = tool.ExecuteAsync(new[] { "Fire", "Oil", "Gunpowder" }).Result;
             Assert.IsTrue(result.Contains("\"IsCompatible\":false") || result.Contains("\"IsCompatible\": false"));
         }
 

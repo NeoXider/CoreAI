@@ -10,6 +10,7 @@
 - ✨ **`CompatibilityLlmTool`** — ILlmTool обёртка для function calling
 - ✨ **`JsonSchemaValidator`** — валидация JSON-ответов от LLM (типы, диапазоны, enum)
 - 🧪 **45+ EditMode тестов** (`CompatibilityAndSchemaEditModeTests.cs`)
+- 🧪 **3 PlayMode теста** (`CompatibilityToolPlayModeTests.cs`) с реальной LLM-моделью
 
 ### Dependencies
 

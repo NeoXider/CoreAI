@@ -32,7 +32,7 @@ namespace CoreAI.Crafting
             "Score 0 = incompatible, 1 = neutral, >1 = synergy bonus.";
 
         public override string ParametersSchema => JsonParams(
-            ("ingredients", "string", true, "Comma-separated ingredient names to check compatibility (e.g. 'IronOre,FireStone,WaterFlask')")
+            ("ingredients", "array", true, "Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")
         );
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace CoreAI.Crafting
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<object, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -52,29 +52,42 @@ namespace CoreAI.Crafting
         /// <summary>
         /// Выполняет проверку совместимости.
         /// </summary>
-        public Task<string> ExecuteAsync(string ingredients, CancellationToken cancellationToken = default)
+        public Task<string> ExecuteAsync(object ingredientsObj, CancellationToken cancellationToken = default)
         {
-            if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
+            string[] ingredients = null;
+
+            if (ingredientsObj != null)
             {
-                Log.Instance.Info($"[Tool Call] check_compatibility: ingredients={ingredients}", LogTag.Llm);
+                if (ingredientsObj is string[] arr)
+                    ingredients = arr;
+                else if (ingredientsObj is Newtonsoft.Json.Linq.JArray jArr)
+                    ingredients = jArr.ToObject<string[]>();
+                else if (ingredientsObj is string str)
+                {
+                    ingredients = str.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                }
             }
 
-            if (string.IsNullOrWhiteSpace(ingredients))
+            if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
+            {
+                Log.Instance.Info($"[Tool Call] check_compatibility: ingredients=[{string.Join(", ", ingredients ?? Array.Empty<string>())}]", LogTag.Llm);
+            }
+
+            if (ingredients == null || ingredients.Length == 0)
             {
                 return Task.FromResult(JsonConvert.SerializeObject(new CompatibilityToolResult
                 {
                     Success = false,
-                    Error = "Ingredients parameter is required. Provide comma-separated names."
+                    Error = "Ingredients parameter is required. Provide an array of names."
                 }));
             }
 
             try
             {
-                string[] items = ingredients.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
                 List<string> trimmed = new();
-                foreach (string item in items)
+                foreach (string item in ingredients)
                 {
-                    string t = item.Trim();
+                    string t = item?.Trim();
                     if (!string.IsNullOrEmpty(t))
                         trimmed.Add(t);
                 }
@@ -120,20 +133,6 @@ namespace CoreAI.Crafting
                     Error = $"Compatibility check failed: {ex.Message}"
                 }));
             }
-        }
-
-        /// <summary>
-        /// Результат проверки совместимости для LLM.
-        /// </summary>
-        public sealed class CompatibilityToolResult
-        {
-            public bool Success { get; set; }
-            public string Error { get; set; }
-            public bool IsCompatible { get; set; }
-            public float Score { get; set; }
-            public string Reason { get; set; }
-            public List<string> Warnings { get; set; } = new();
-            public List<string> Bonuses { get; set; } = new();
         }
     }
 }
