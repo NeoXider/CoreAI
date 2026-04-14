@@ -13,13 +13,15 @@ namespace CoreAI.Composition
         private readonly ILog _logger;
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _policy;
+        private readonly IAgentMemoryStore _memoryStore;
 
         /// <summary>DI: лог, оркестратор и политика для bootstrap + глобальный фасад CoreAI.</summary>
-        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy)
+        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)
         {
             _logger = logger;
             _orchestrator = orchestrator;
             _policy = policy;
+            _memoryStore = memoryStore;
         }
 
         /// <summary>Вызывается VContainer после сборки контейнера; инициализирует CoreAI фасад и запускает bootstrap.</summary>
@@ -27,7 +29,7 @@ namespace CoreAI.Composition
         {
             // Инициализируем глобальный фасад CoreAI — 
             // позволяет вызывать merchant.Ask("text") без DI/container
-            CoreAIAgent.Initialize(_orchestrator, _policy);
+            CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
 
             _logger.Info(
                 "VContainer + MessagePipe (GlobalMessagePipe) + ILog с фильтром по тегам готовы.",

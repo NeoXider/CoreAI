@@ -28,9 +28,9 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+        public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
-            TaskCompletionSource<object> tcs = new();
+            TaskCompletionSource<string> tcs = new();
             WorkItem work = new()
             {
                 Task = task ?? new AiTaskRequest(),
@@ -82,8 +82,8 @@ namespace CoreAI.Ai
                     token = scopeLinked.Token;
                 }
 
-                await _inner.RunTaskAsync(w.Task, token);
-                w.Tcs.TrySetResult(null);
+                string result = await _inner.RunTaskAsync(w.Task, token);
+                w.Tcs.TrySetResult(result);
             }
             catch (OperationCanceledException)
             {
@@ -121,7 +121,7 @@ namespace CoreAI.Ai
         {
             public AiTaskRequest Task;
             public CancellationToken OuterCt;
-            public TaskCompletionSource<object> Tcs;
+            public TaskCompletionSource<string> Tcs;
             public int Priority;
         }
     }

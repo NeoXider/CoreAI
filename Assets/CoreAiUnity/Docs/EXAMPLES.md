@@ -434,7 +434,7 @@ storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Использование:
 storyteller.Ask("The player defeated the dragon boss",
-    onDone: narration => ShowCinematicText(narration));
+    (narration) => ShowCinematicText(narration));
 ```
 
 ### Результат

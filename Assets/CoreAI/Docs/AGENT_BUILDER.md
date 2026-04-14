@@ -53,8 +53,8 @@ Unity → Create → CoreAI → CoreAI Settings
 // Одна строка! Не нужен await, не нужен container.
 merchant.Ask("Show me your swords");
 
-// С callback по завершению:
-merchant.Ask("Show me your swords", onDone: () => Debug.Log("Ответ получен!"));
+// С callback по завершению (отдаёт текстовый ответ):
+merchant.Ask("Show me your swords", (response) => Debug.Log(response));
 ```
 
 > 💡 `Ask` использует глобальный `CoreAIAgent.Orchestrator` — он автоматически инициализируется при старте сцены с `CoreAILifetimeScope`. Идеально для UI кнопок, событий, MonoBehaviour.
@@ -62,12 +62,13 @@ merchant.Ask("Show me your swords", onDone: () => Debug.Log("Ответ полу
 **🟡 Async — `AskAsync` (с await):**
 
 ```csharp
-// Без явного оркестратора (используется CoreAIAgent.Orchestrator):
-await merchant.AskAsync("Show me your swords");
+// Вернёт текстовый ответ от модели:
+string response = await merchant.AskAsync("Show me your swords");
+Debug.Log(response);
 
 // С явным оркестратором (для тестов / кастомных сценариев):
 var orch = container.Resolve<IAiOrchestrationService>();
-await merchant.AskAsync(orch, "Show me your swords");
+string response2 = await merchant.AskAsync(orch, "Show me your swords");
 ```
 
 **🔴 Продвинутый — полный контроль:**
@@ -135,8 +136,8 @@ var storyteller = new AgentBuilder("Storyteller")
 
 storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
-// Fire-and-forget с callback:
-storyteller.Ask("Расскажи историю", onDone: () => Debug.Log("История готова!"));
+// Fire-and-forget с callback (выведет ответ в лог):
+storyteller.Ask("Расскажи историю", (s) => Debug.Log(s));
 ```
 
 ### Рецепт 3: Охранник (вызывает действие при триггере)
@@ -661,8 +662,9 @@ void SetupAgents()
 async Task AskMerchant(string playerMessage)
 {
     var orch = container.Resolve<AiOrchestrator>();
-    // Простой вызов через AskAsync:
-    await merchant.AskAsync(orch, playerMessage);
+    // Ответ можно получить напрямую из AskAsync:
+    string response = await merchant.AskAsync(orch, playerMessage);
+    Debug.Log(response);
 }
 ```
 
@@ -699,8 +701,8 @@ async Task AskMerchant(string playerMessage)
 | Метод | Описание | Пример |
 |-------|----------|--------|
 | `ApplyToPolicy(policy)` | Зарегистрировать агента в политике | `merchant.ApplyToPolicy(CoreAIAgent.Policy)` |
-| `Ask(message, onDone?)` | 🟢 Fire-and-forget, опциональный callback | `merchant.Ask("Hi")` |
-| `AskAsync(message)` | 🟡 Async (использует CoreAIAgent.Orchestrator) | `await merchant.AskAsync("Hi")` |
+| `Ask(message, onDone?)` | 🟢 Fire-and-forget, опциональный `Action<string>` | `merchant.Ask("Hi", (s) => print(s))` |
+| `AskAsync(message)` | 🟡 Async (возвращает `Task<string>`) | `await merchant.AskAsync("Hi")` |
 | `AskAsync(orch, message)` | 🔴 Async с явным оркестратором | `await merchant.AskAsync(orch, "Hi")` |
 
 ### CoreAI (статический фасад)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Logging;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -28,6 +29,8 @@ namespace CoreAI.Infrastructure.Llm
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
+            Log.Instance.Warn("[OfflineLlmClient] На сцене нет активной LLM. CoreAI переключился на оффлайн-заглушку (Stub).", LogTag.Llm);
+
             string response;
             string roleId = request.AgentRoleId ?? "";
 

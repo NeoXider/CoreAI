@@ -15,7 +15,7 @@ CoreAI сочетает низкий порог входа для новичко
 
 | Версия | Unity | Статус |
 |--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.16.0 — [CHANGELOG](CHANGELOG.md) |
+| См. `package.json` | `6000.0+` | ✅ v0.19.0 — [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -36,7 +36,7 @@ merchant.ApplyToPolicy(CoreAIAgent.Policy);
 merchant.Ask("Покажи мечи");
 
 // Или с callback:
-merchant.Ask("Покажи мечи", onDone: () => Debug.Log("Готово!"));
+merchant.Ask("Покажи мечи", (response) => Debug.Log(response));
 ```
 
 **3 режима агентов:**

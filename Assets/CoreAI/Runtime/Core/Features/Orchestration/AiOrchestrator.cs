@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Logging;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -53,11 +54,11 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public async Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+        public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
             if (!_authority.CanRunAiTasks)
             {
-                return;
+                return null;
             }
 
             string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
@@ -147,21 +148,22 @@ namespace CoreAI.Ai
                 {
                     if (attempt == maxAttempts)
                     {
-                        return;
+                        return null;
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Log.Instance.Error($"[AiOrchestrator] Task execution failed (attempt {attempt}/{maxAttempts}): {ex.Message}", LogTag.Llm);
                     if (attempt == maxAttempts)
                     {
-                        return;
+                        return null;
                     }
                 }
             }
 
             if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
             {
-                return;
+                return null;
             }
 
             string content = result.Content;
@@ -188,13 +190,13 @@ namespace CoreAI.Ai
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
-                    return;
+                    return null;
                 }
 
                 content = second.Content;
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
                 {
-                    return;
+                    return null;
                 }
             }
 
@@ -221,6 +223,7 @@ namespace CoreAI.Ai
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             });
             _metrics.RecordCommandPublished(roleId, traceId);
+            return content;
         }
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)

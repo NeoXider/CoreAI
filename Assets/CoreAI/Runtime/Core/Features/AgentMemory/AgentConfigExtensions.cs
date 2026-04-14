@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -31,7 +32,7 @@ namespace CoreAI.Ai
         /// <example>
         /// await merchant.AskAsync("Show me your swords");
         /// </example>
-        public static Task AskAsync(
+        public static Task<string> AskAsync(
             this AgentConfig config,
             string message,
             int priority = 0,
@@ -43,7 +44,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Отправить запрос агенту (async, явный оркестратор).
         /// </summary>
-        public static Task AskAsync(
+        public static Task<string> AskAsync(
             this AgentConfig config,
             IAiOrchestrationService orchestrator,
             string message,
@@ -66,36 +67,52 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отправить запрос агенту (fire-and-forget, без await).
+        /// Отправить запрос агенту (fire-and-forget, без await) и получить текстовый ответ.
         /// Удобно для UI кнопок, событий и скриптов где async неудобен.
         /// <para>Использует <see cref="CoreAIAgent.Orchestrator"/> синглтон.</para>
         /// </summary>
         /// <param name="config">Конфигурация агента.</param>
         /// <param name="message">Сообщение/запрос.</param>
-        /// <param name="onDone">Опциональный callback по завершению.</param>
+        /// <param name="onDone">Опциональный callback по завершению с текстовым ответом модели.</param>
         /// <param name="priority">Приоритет в очереди.</param>
         /// <example>
         /// // Простой вызов:
         /// merchant.Ask("Покажи мечи");
         /// 
         /// // С callback:
-        /// merchant.Ask("Покажи мечи", onDone: () => Debug.Log("Готово!"));
+        /// merchant.Ask("Покажи мечи", (s) => Debug.Log("Ответ: " + s));
         /// </example>
         public static async void Ask(
             this AgentConfig config,
             string message,
-            Action onDone = null,
+            Action<string> onDone = null,
             int priority = 0)
         {
             try
             {
-                await AskAsync(config, message, priority);
-                onDone?.Invoke();
+                string result = await AskAsync(config, message, priority);
+                onDone?.Invoke(result);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Fire-and-forget: ошибки логируются на уровне оркестратора.
-                // Если нужна обработка — используйте AskAsync с await.
+                // Fire-and-forget: чтобы ошибки (например, неинициализированный Оркестратор) не съедались молча:
+                Log.Instance.Error($"Ask() failed for agent '{config.RoleId}': {ex.Message}", LogTag.Llm);
+            }
+        }
+
+        /// <summary>
+        /// Очистить память (историю диалога) для роли агента.
+        /// Требует инициализированного CoreAIAgent.MemoryStore.
+        /// </summary>
+        public static void ClearMemory(this AgentConfig config)
+        {
+            if (CoreAIAgent.MemoryStore != null)
+            {
+                CoreAIAgent.MemoryStore.ClearChatHistory(config.RoleId);
+            }
+            else
+            {
+                Log.Instance.Warn("Невозможно очистить память: CoreAIAgent.MemoryStore не инициализирован.", LogTag.Memory);
             }
         }
     }

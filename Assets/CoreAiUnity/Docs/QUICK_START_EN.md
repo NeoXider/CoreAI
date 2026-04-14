@@ -69,9 +69,9 @@ public class MyNpcScript : MonoBehaviour
             Debug.Log("Asking blacksmith...");
             
             // 3. Ask the agent (Fire-and-forget, non-blocking)
-            _blacksmith.Ask("What do you sell?", onDone: () =>
+            _blacksmith.Ask("What do you sell?", (response) =>
             {
-                Debug.Log("The Blacksmith answered! Check your CoreAI logs.");
+                Debug.Log("The Blacksmith answered: " + response);
             });
         }
     }

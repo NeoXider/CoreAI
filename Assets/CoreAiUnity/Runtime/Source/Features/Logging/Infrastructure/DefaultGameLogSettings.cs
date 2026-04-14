@@ -13,7 +13,7 @@ namespace CoreAI.Infrastructure.Logging
                 return false;
             }
 
-            return true;
+            return level >= GameLogLevel.Warning;
         }
     }
 }

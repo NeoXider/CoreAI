@@ -35,11 +35,17 @@ namespace CoreAI.Ai
         /// </summary>
         public static AgentMemoryPolicy Policy { get; private set; }
 
+        /// <summary>
+        /// Глобальное хранилище памяти. Устанавливается при инициализации CoreAILifetimeScope.
+        /// </summary>
+        public static IAgentMemoryStore MemoryStore { get; private set; }
+
         /// <summary>Инициализация (вызывается из CoreAILifetimeScope / CoreAIGameEntryPoint).</summary>
-        public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy)
+        public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)
         {
             Orchestrator = orchestrator;
             Policy = policy;
+            MemoryStore = memoryStore;
         }
 
         /// <summary>Очистка при выходе из Play Mode.</summary>
@@ -47,6 +53,7 @@ namespace CoreAI.Ai
         {
             Orchestrator = null;
             Policy = null;
+            MemoryStore = null;
         }
     }
 }

@@ -1,6 +1,11 @@
 using CoreAI.Logging;
 using CoreAI.Unity.Logging;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+using UnityEngine;
+
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
@@ -8,8 +13,21 @@ namespace CoreAI.Infrastructure.Logging
     /// тот же путь, что и в DI: <see cref="FilteringGameLogger"/> → <see cref="UnityGameLogSink"/>.
     /// Автоматически устанавливает <see cref="Log.Instance"/> при первом обращении.
     /// </summary>
+#if UNITY_EDITOR
+    [InitializeOnLoad]
+#endif
     public static class GameLoggerUnscopedFallback
     {
+        static GameLoggerUnscopedFallback()
+        {
+            Initialize();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void Initialize()
+        {
+            var _ = Instance;
+        }
         private static IGameLogger _instance;
 
         /// <summary>Синглтон с <see cref="DefaultGameLogSettings"/> (все категории).</summary>

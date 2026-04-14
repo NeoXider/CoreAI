@@ -232,7 +232,7 @@ var merchant = new AgentBuilder("Merchant")
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Отправьте сообщение:
-merchant.Ask("Покажи мечи", onDone: response => {
+merchant.Ask("Покажи мечи", (response) => {
     Debug.Log($"Торговец: {response}");
 });
 ```

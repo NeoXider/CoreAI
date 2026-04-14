@@ -13,7 +13,7 @@ Engineered for both rapid integration by beginners and complex systemic design b
 >
 > 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
 
-**Version:** v0.16.0 | **PlayMode Scene Tools & Vision Support**
+**Version:** v0.19.0 | **PlayMode Scene Tools & Vision Support**
 
 ---
 
@@ -34,7 +34,7 @@ merchant.ApplyToPolicy(CoreAIAgent.Policy);
 merchant.Ask("Show me your swords");
 
 // Or with a callback:
-merchant.Ask("Show me your swords", onDone: () => Debug.Log("Done!"));
+merchant.Ask("Show me your swords", (response) => Debug.Log(response));
 ```
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly

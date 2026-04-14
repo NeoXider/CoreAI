@@ -24,13 +24,13 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly object _lock = new();
             public List<string> ExecutionLog { get; } = new();
-            public List<TaskCompletionSource<object>> Gates { get; } = new();
+            public List<TaskCompletionSource<string>> Gates { get; } = new();
 
-            public async Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
                 string hint = task?.Hint ?? "";
 
-                TaskCompletionSource<object> gate = new();
+                TaskCompletionSource<string> gate = new();
                 lock (_lock)
                 {
                     ExecutionLog.Add(hint);
@@ -39,7 +39,7 @@ namespace CoreAI.Tests.EditMode
 
                 // Ждём, пока тест "откроет ворота" или CancellationToken сработает
                 using var reg = cancellationToken.Register(() => gate.TrySetCanceled());
-                await gate.Task;
+                return await gate.Task;
             }
         }
 
@@ -52,9 +52,9 @@ namespace CoreAI.Tests.EditMode
             public List<string> ExecutionLog { get; } = new();
 
             /// <summary>Delay перед завершением, чтобы Queue успел набрать элементы.</summary>
-            public TaskCompletionSource<object> StartGate { get; } = new();
+            public TaskCompletionSource<string> StartGate { get; } = new();
 
-            public async Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
                 // Ждём стартовый сигнал (только первый раз или всегда — зависит от теста)
                 await StartGate.Task;
@@ -65,6 +65,7 @@ namespace CoreAI.Tests.EditMode
                 {
                     ExecutionLog.Add(task?.Hint ?? "");
                 }
+                return null;
             }
         }
 

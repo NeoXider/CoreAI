@@ -38,11 +38,11 @@ namespace CoreAI.Tests.EditMode
             public int RunCount;
             public AiTaskRequest LastTask;
 
-            public Task RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
                 RunCount++;
                 LastTask = task;
-                return Task.CompletedTask;
+                return Task.FromResult<string>(null);
             }
         }
 

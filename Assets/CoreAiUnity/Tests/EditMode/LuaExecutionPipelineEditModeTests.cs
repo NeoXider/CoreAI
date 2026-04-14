@@ -374,11 +374,11 @@ namespace CoreAI.Tests.EditMode.Lua
                 _onTask = onTask;
             }
 
-            public System.Threading.Tasks.Task RunTaskAsync(AiTaskRequest task,
+            public System.Threading.Tasks.Task<string> RunTaskAsync(AiTaskRequest task,
                 System.Threading.CancellationToken cancellationToken = default)
             {
                 _onTask(task);
-                return System.Threading.Tasks.Task.CompletedTask;
+                return System.Threading.Tasks.Task.FromResult<string>(null);
             }
         }
 

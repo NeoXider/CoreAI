@@ -83,7 +83,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         if (item is MEAI.FunctionResultContent frc)
                         {
-                            userMessage += $"Tool Result: {frc.Result}\n";
+                            userMessage += $"\n[SYSTEM ERROR]: Your previous tool call failed: {frc.Result}\nPlease try again heavily verifying the tool name, or answer via normal text.\n";
                         }
                     }
                 }
@@ -119,10 +119,9 @@ namespace CoreAI.Infrastructure.Llm
                 _unityAgent.grammar = ""; // Clear grammar if no tools
             }
 
-            if (!string.IsNullOrWhiteSpace(sysMessage))
-            {
-                _unityAgent.systemPrompt = sysMessage.TrimEnd();
-            }
+            // Apply a strict system-level instruction to ban Markdown formatting globally in LlmUnity
+            sysMessage += "\n\nCRITICAL INSTRUCTION: NEVER use Markdown formatting (such as **, _, #). Output plain text ONLY.\n";
+            _unityAgent.systemPrompt = sysMessage.TrimStart().TrimEnd();
 
             if (options?.Temperature.HasValue == true)
             {
