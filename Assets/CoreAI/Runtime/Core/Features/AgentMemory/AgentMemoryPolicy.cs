@@ -52,8 +52,11 @@ namespace CoreAI.Ai
             /// <summary>Бюджет токенов (опционально, если ChatHistory активна).</summary>
             public int ContextTokens;
 
+            /// <summary>Максимальное количество сообщений для сохранения и отправки в модель.</summary>
+            public int MaxChatHistoryMessages;
+
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
-                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192, bool? allowDuplicateToolCalls = null)
+                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192, bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -61,10 +64,11 @@ namespace CoreAI.Ai
                 PersistChatHistory = persistChatHistory;
                 ContextTokens = contextTokens;
                 AllowDuplicateToolCalls = allowDuplicateToolCalls;
+                MaxChatHistoryMessages = maxChatHistoryMessages;
             }
         }
 
-        public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist)
+        public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist, int maxChatHistoryMessages = 30)
         {
             if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
             {
@@ -74,6 +78,7 @@ namespace CoreAI.Ai
             c.WithChatHistory = enabled;
             c.ContextTokens = tokens;
             c.PersistChatHistory = persist;
+            c.MaxChatHistoryMessages = maxChatHistoryMessages;
             _roleConfigs[roleId] = c;
         }
 

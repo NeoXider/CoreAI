@@ -91,11 +91,28 @@ namespace CoreAI.Ai
 
             if (roleConfig.WithChatHistory && _memoryStore != null)
             {
-                ChatMessage[] history = _memoryStore.GetChatHistory(roleId);
+                ChatMessage[] history = _memoryStore.GetChatHistory(roleId, roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30);
                 if (history != null && history.Length > 0)
                 {
                     chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
-                    foreach (ChatMessage msg in history)
+                    int maxTokens = roleConfig.ContextTokens > 0 ? roleConfig.ContextTokens : 8192;
+                    int budgetTokens = maxTokens / 2; // Резервируем половину бюджета для системного промпта и ответа модели
+
+                    List<ChatMessage> filteredHistory = new List<ChatMessage>();
+                    // Идем с конца (от свежих к старым), чтобы оставить самые актуальные
+                    for (int i = history.Length - 1; i >= 0; i--)
+                    {
+                        int estimatedTokens = string.IsNullOrEmpty(history[i].Content) ? 0 : history[i].Content.Length / 3;
+                        if (budgetTokens - estimatedTokens < 0 && filteredHistory.Count > 0)
+                        {
+                            break; // Лимит контекста исчерпан
+                        }
+                        
+                        budgetTokens -= estimatedTokens;
+                        filteredHistory.Insert(0, history[i]); // Вставляем в начало, восстанавливая порядок
+                    }
+
+                    foreach (ChatMessage msg in filteredHistory)
                     {
                         Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
                             ? Microsoft.Extensions.AI.ChatRole.User

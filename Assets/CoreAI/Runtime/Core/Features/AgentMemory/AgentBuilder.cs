@@ -45,6 +45,7 @@ namespace CoreAI.Ai
         private bool _withChatHistory;
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
+        private int _maxChatHistoryMessages = 30;
         private float? _temperature;
         private bool? _allowDuplicateToolCalls;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
@@ -110,17 +111,18 @@ namespace CoreAI.Ai
         /// <para>persistBetweenSessions: сохранять историю между сессиями (в JSON файл). По умолчанию false (только RAM).</para>
         /// </summary>
         /// <example>
-        /// .WithChatHistory()                    // 8192 из конфига, без сохранения
-        /// .WithChatHistory(4096)                // 4096 токенов, без сохранения
+        /// .WithChatHistory()                    // 8192 из конфига, без сохранения, 30 сообщений
+        /// .WithChatHistory(4096)                // 4096 токенов, без сохранения, 30 сообщений
         /// .WithChatHistory(0)                   // минимальный контекст, без сохранения
-        /// .WithChatHistory(persistBetweenSessions: true)  // 8192 из конфига, сохраняется между сессиями
-        /// .WithChatHistory(4096, true)          // 4096 токенов, сохраняется между сессиями
+        /// .WithChatHistory(persistBetweenSessions: true)  // 8192 из конфига, сохраняется, 30 сообщений
+        /// .WithChatHistory(4096, true, 50)      // 4096 токенов, сохраняется, 50 сообщений максимум
         /// </example>
-        public AgentBuilder WithChatHistory(int? contextWindowTokens = null, bool persistBetweenSessions = false)
+        public AgentBuilder WithChatHistory(int? contextWindowTokens = null, bool persistBetweenSessions = false, int maxChatHistoryMessages = 30)
         {
             _withChatHistory = true;
             _contextWindowTokens = contextWindowTokens;
             _persistChatHistory = persistBetweenSessions;
+            _maxChatHistoryMessages = maxChatHistoryMessages;
             return this;
         }
 
@@ -216,6 +218,7 @@ namespace CoreAI.Ai
                 WithChatHistory = _withChatHistory,
                 ContextWindowTokens = ctxTokens,
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
+                MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = temp,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 MemoryDefaultAction = _memoryDefaultAction
@@ -235,6 +238,7 @@ namespace CoreAI.Ai
         public bool WithChatHistory { get; internal set; }
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
+        public int MaxChatHistoryMessages { get; internal set; }
         public float Temperature { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
         public MemoryToolAction MemoryDefaultAction { get; internal set; }
@@ -256,7 +260,7 @@ namespace CoreAI.Ai
             }
 
             policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
-                PersistChatHistoryBetweenSessions);
+                PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
         }
 
         private bool HasMemoryTool()

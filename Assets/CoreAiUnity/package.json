@@ -1,11 +1,11 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool. Depends on com.nexoider.coreai 0.19.0+.",
   "dependencies": {
-    "com.nexoider.coreai": "0.19.1",
+    "com.nexoider.coreai": "0.19.2",
     "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
     "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",

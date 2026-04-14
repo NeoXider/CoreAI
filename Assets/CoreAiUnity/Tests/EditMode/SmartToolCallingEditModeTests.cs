@@ -41,7 +41,7 @@ namespace CoreAI.Tests.EditMode
         {
             public string Name => "dummy_tool";
             public string Description => "Dummy tool";
-            public object ParametersFormat => new { };
+            public string ParametersSchema => "{}";
             public bool AllowDuplicates => false;
         }
 
@@ -50,7 +50,7 @@ namespace CoreAI.Tests.EditMode
         {
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             _logger = new NullGameLogger();
-            _dummyFunc = AIFunctionFactory.Create(() => "Success", "dummy_tool");
+            _dummyFunc = AIFunctionFactory.Create((Func<string>)(() => "Success"), new AIFunctionFactoryOptions { Name = "dummy_tool" });
             _dummyLlmTool = new DummyLlmTool();
         }
 
@@ -70,7 +70,7 @@ namespace CoreAI.Tests.EditMode
             ChatResponse r1 = await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 1") }, options);
             
             // Запрос должен был успешно закончиться (mockInner возвращает Text "Stop" на 2-й итерации)
-            Assert.AreEqual("Stop", r1.Message.Text);
+            Assert.AreEqual("Stop", r1.Text);
 
             // Request 2 (Новый внешний запрос)
             // Мы вызываем ТОТ ЖЕ самый инструмент, это НЕ дубликат, т.к. это уже новый GetResponseAsync.
@@ -79,7 +79,7 @@ namespace CoreAI.Tests.EditMode
 
             // Если бы защита не сбросилась, r2 завершился бы ошибкой duplicate tool. 
             // Но мы ожидаем, что будет Text "Stop", так как цикл пройдёт успешно.
-            Assert.AreEqual("Stop", r2.Message.Text, "Защита дубликатов должна сбрасываться при новом вызове GetResponseAsync.");
+            Assert.AreEqual("Stop", r2.Text, "Защита дубликатов должна сбрасываться при новом вызове GetResponseAsync.");
         }
 
         [Test]
@@ -111,7 +111,7 @@ namespace CoreAI.Tests.EditMode
             // Давайте убедимся, что duplicate был заблокирован, запрашивая _any_ failed tool call block behavior. 
             // К счастью, SmartToolCallingChatClient возвращает финальный message (или падает по max errors).
             // Поскольку max errors (2) не был превышен до завершения, мы просто проверим историю, если это возможно, либо поведение.
-            Assert.AreEqual("Stop", result.Message.Text); // Если бы он застрял, выпала бы ошибка. Застрял он не стал.
+            Assert.AreEqual("Stop", result.Text); // Если бы он застрял, выпала бы ошибка. Застрял он не стал.
         }
 
         private ChatResponse CreateResponseWithToolCall(string toolName)

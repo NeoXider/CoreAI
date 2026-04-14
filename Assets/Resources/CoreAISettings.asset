@@ -12,11 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 0
+  backendType: 2
   autoPriority: 0
   apiBaseUrl: http://localhost:1234/v1
   apiKey: 
-  modelName: gpt-4o-mini
+  modelName: qwen3.5-4b
   temperature: 0.1
   maxTokens: 4096
   requestTimeoutSeconds: 120
@@ -32,6 +32,7 @@ MonoBehaviour:
   universalSystemPromptPrefix: 
   maxLuaRepairRetries: 3
   maxToolCallRetries: 3
+  allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
   contextWindowTokens: 8192
   offlineUseCustomResponse: 0

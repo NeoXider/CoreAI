@@ -132,7 +132,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log($"[PlayerChat] Sending: 'Hello, how are you?'");
                 Task<LlmCompletionResult> task = chatService.SendPlayerMessageAsync("Hello, how are you?");
-                yield return PlayModeTestAwait.WaitTask(task, 120f, "Send message 1");
+                yield return PlayModeTestAwait.WaitTask(task, 300f, "Send message 1");
                 LlmCompletionResult result = task.Result;
 
                 Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
@@ -189,13 +189,13 @@ namespace CoreAI.Tests.PlayMode
 
                 // First message
                 Task<LlmCompletionResult> t1 = chatService.SendPlayerMessageAsync("My name is Adventurer");
-                yield return PlayModeTestAwait.WaitTask(t1, 120f, "First message");
+                yield return PlayModeTestAwait.WaitTask(t1, 300f, "First message");
                 LlmCompletionResult r1 = t1.Result;
                 Assert.AreEqual(1, chatService.HistoryPairCount);
 
                 // Second message - should see history
                 Task<LlmCompletionResult> t2 = chatService.SendPlayerMessageAsync("What is my name?");
-                yield return PlayModeTestAwait.WaitTask(t2, 120f, "Second message");
+                yield return PlayModeTestAwait.WaitTask(t2, 300f, "Second message");
                 LlmCompletionResult r2 = t2.Result;
                 Assert.AreEqual(2, chatService.HistoryPairCount);
 

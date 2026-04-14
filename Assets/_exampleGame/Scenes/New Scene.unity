@@ -280,7 +280,7 @@ MonoBehaviour:
   autoRun: 1
   autoInjectGameObjects: []
   coreAiSettings: {fileID: 11400000, guid: 6668d56b353f2d74889a4d595a256951, type: 2}
-  gameLogSettings: {fileID: 0}
+  gameLogSettings: {fileID: 11400000, guid: a5ec9172eaa0cec4188a764046d7b73c, type: 2}
   agentPromptsManifest: {fileID: 0}
   llmRoutingManifest: {fileID: 0}
   worldPrefabRegistry: {fileID: 0}
@@ -341,14 +341,14 @@ MonoBehaviour:
   _parallelPrompts: 1
   _contextSize: 8192
   _batchSize: 512
-  _model: Qwen3.5-2B-Q4_K_M.gguf
+  _model: Qwen3.5-4B-Q4_K_M.gguf
   _flashAttention: 0
   _reasoning: 0
   _lora: 
   _loraWeights: 
   dontDestroyOnLoad: 1
   _embeddingsOnly: 0
-  _embeddingLength: 2048
+  _embeddingLength: 2560
   minContextLength: 0
   maxContextLength: 262144
 --- !u!4 &728615259
@@ -579,6 +579,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4f8d30f13a97f7d48b8eab7f489f3bac, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Agent
+  MessageWithTools: "\u041F\u0440\u0438\u0432\u0435\u0442! \u0417\u0430\u043F\u043E\u043C\u043D\u0438,
+    \u0447\u0442\u043E \u043C\u043E\u0439 \u043B\u044E\u0431\u0438\u043C\u044B\u0439
+    \u0446\u0432\u0435\u0442 \u043A\u0440\u0430\u0441\u043D\u044B\u0439."
+  MessageChatOnly: "\u0421\u0434\u0435\u043B\u0430\u0439 \u0442\u0435\u043A\u0441\u0442
+    \u0436\u0438\u0440\u043D\u044B\u043C: \u042F \u043E\u0447\u0435\u043D\u044C \u0440\u0430\u0434
+    \u0442\u0435\u0431\u044F \u0432\u0438\u0434\u0435\u0442\u044C!"
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
