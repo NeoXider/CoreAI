@@ -4,10 +4,7 @@
   "displayName": "CoreAI",
   "unity": "6000.0",
   "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI.",
-  "dependencies": {
-    "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
-    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0"
-  },
+  "dependencies": {},
   "nugetRefs": [
     "Microsoft.Extensions.AI@10.4.1",
     "Microsoft.Extensions.AI.Abstractions@10.4.1"

@@ -210,20 +210,32 @@ CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.E
 
 > 💡 **Easiest way:** Clone this repo and copy the entire `Assets/Packages/` folder into your project.
 
-### 2. Install Unity Packages via Git URL
+### 2. Add dependencies to manifest.json (required)
+Unity Package Manager does not support automatic downloading of Git dependencies from other packages. Open your project's `Packages/manifest.json` file and add these lines to the `"dependencies"` block:
+
+```json
+    "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
+    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
+    "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
+    "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
+```
+
+*(After saving the file, Unity will automatically download VContainer, MoonSharp, UniTask, MessagePipe, and LLMUnity).*
+
+### 3. Install CoreAI packages via Git URL
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
 
 **Step 1 — Core engine (pure C#, no UnityEngine):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 ```
-> This also installs: [VContainer](https://github.com/hadashiA/VContainer) (DI), [MoonSharp](https://github.com/moonsharp-devs/moonsharp) (Lua sandbox)
 
 **Step 2 — Unity layer (MonoBehaviour, LLM clients, tools):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
-> This also installs: [LLMUnity](https://github.com/undreamai/LLMUnity), [UniTask](https://github.com/Cysharp/UniTask), [MessagePipe](https://github.com/Cysharp/MessagePipe)
 
 ### 3. Setup Scene (one click)
 

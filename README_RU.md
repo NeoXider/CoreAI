@@ -206,20 +206,32 @@ CoreAI использует [Microsoft.Extensions.AI](https://www.nuget.org/pack
 
 > 💡 **Проще всего:** Клонируй этот репозиторий и скопируй всю папку `Assets/Packages/` в свой проект.
 
-### 2. Установи Unity-пакеты через Git URL
+### 2. Установи зависимости в manifest.json (обязательно)
+Unity Package Manager не поддерживает автоматическое скачивание Git-зависимостей из других пакетов. Открой файл `Packages/manifest.json` в своем проекте и добавь эти строки в блок `"dependencies"`:
+
+```json
+    "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
+    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
+    "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
+    "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
+```
+
+*(После сохранения файла Unity сама скачает все нужные библиотеки: VContainer, MoonSharp, UniTask, MessagePipe и LLMUnity)*
+
+### 3. Установи CoreAI пакеты через Git URL
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
 
 **Шаг 1 — Ядро (чистый C#, без UnityEngine):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 ```
-> Также установит: [VContainer](https://github.com/hadashiA/VContainer) (DI), [MoonSharp](https://github.com/moonsharp-devs/moonsharp) (Lua песочница)
 
 **Шаг 2 — Unity-слой (MonoBehaviour, LLM клиенты, инструменты):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
-> Также установит: [LLMUnity](https://github.com/undreamai/LLMUnity), [UniTask](https://github.com/Cysharp/UniTask), [MessagePipe](https://github.com/Cysharp/MessagePipe)
 
 ### 3. Настрой сцену (один клик)
 
