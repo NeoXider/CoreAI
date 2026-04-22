@@ -20,7 +20,7 @@ public class Agent : MonoBehaviour
         _agentWithTools = new AgentBuilder("агент_инструменты")
             .WithMode(AgentMode.ToolsAndChat)
             .WithMemory()
-            .WithSystemPrompt("Если просят что-то запомнить, вызови инструмент с именем 'memory'. Пример: ```json\n{\"name\": \"memory\", \"arguments\": {\"data\": \"твой текст\"}}\n```\nИначе отвечай обычным текстом, БЕЗ JSON.")
+            .WithSystemPrompt("Ты помощник. Используй инструмент memory чтобы запоминать информацию по просьбе пользователя. Отвечай коротко и ясно.")
             .Build();
 
         // 2. Агент без инструментов (чистый чат, проверяем запрет Markdown)

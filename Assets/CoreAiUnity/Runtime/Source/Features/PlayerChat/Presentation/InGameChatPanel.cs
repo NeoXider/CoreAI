@@ -67,32 +67,40 @@ namespace CoreAI.Presentation.PlayerChat
 
         private async void OnSendClicked()
         {
-            if (_chat == null)
+            try
             {
-                AppendLine("[CoreAI] Чат: контейнер не готов (нет CoreAILifetimeScope?).");
-                return;
-            }
+                if (_chat == null)
+                {
+                    AppendLine("[CoreAI] Чат: контейнер не готов (нет CoreAILifetimeScope?).");
+                    return;
+                }
 
-            string msg = inputField != null ? inputField.text.Trim() : string.Empty;
-            if (string.IsNullOrEmpty(msg))
-            {
-                return;
-            }
+                string msg = inputField != null ? inputField.text.Trim() : string.Empty;
+                if (string.IsNullOrEmpty(msg))
+                {
+                    return;
+                }
 
-            AppendLine("You: " + msg);
-            if (inputField != null)
-            {
-                inputField.text = string.Empty;
-            }
+                AppendLine("You: " + msg);
+                if (inputField != null)
+                {
+                    inputField.text = string.Empty;
+                }
 
-            LlmCompletionResult result = await _chat.SendPlayerMessageAsync(msg);
-            if (result.Ok)
-            {
-                AppendLine("Assistant: " + result.Content);
+                LlmCompletionResult result = await _chat.SendPlayerMessageAsync(msg);
+                if (result.Ok)
+                {
+                    AppendLine("Assistant: " + result.Content);
+                }
+                else
+                {
+                    AppendLine("[error] " + result.Error);
+                }
             }
-            else
+            catch (System.Exception ex)
             {
-                AppendLine("[error] " + result.Error);
+                AppendLine("[error] " + ex.Message);
+                UnityEngine.Debug.LogError($"[InGameChatPanel] Exception in OnSendClicked: {ex}");
             }
         }
 

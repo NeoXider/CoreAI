@@ -14,11 +14,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
   backendType: 2
   autoPriority: 0
-  apiBaseUrl: http://localhost:1234/v1
+  apiBaseUrl: http://127.0.0.1:1234/v1
   apiKey: 
-  modelName: qwen3.5-4b
+  modelName: qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive
   temperature: 0.1
-  maxTokens: 4096
+  maxTokens: 12288
   requestTimeoutSeconds: 120
   llmUnityAgentName: 
   ggufModelPath: Qwen3.5-2B-Q4_K_M.gguf

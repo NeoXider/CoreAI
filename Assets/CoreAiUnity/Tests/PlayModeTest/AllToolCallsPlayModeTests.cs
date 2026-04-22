@@ -192,11 +192,8 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    // Явный JSON шаблон + инструкция
-                    string prompt = "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'\n\n" +
-                                    "You MUST call the memory tool with this exact format:\n" +
-                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Test craft #1: Iron Sword\"}}\n\n" +
-                                    "DO NOT respond with text. CALL the memory tool now.";
+                    // Естественный запрос для native tool calling
+                    string prompt = "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
@@ -251,11 +248,8 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    // Явный JSON шаблон для append
-                    string prompt = "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'\n\n" +
-                                    "You MUST call the memory tool with this exact format:\n" +
-                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"append\", \"content\": \"Test craft #2: Steel Shield\"}}\n\n" +
-                                    "DO NOT respond with text. CALL the memory tool now.";
+                    // Естественный запрос для native tool calling
+                    string prompt = "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
@@ -304,11 +298,8 @@ namespace CoreAI.Tests.PlayMode
                     CapturingLlmClient capturingLlm = new(sharedClient);
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
-                    // Явный JSON шаблон для clear
-                    string prompt = "Clear all memory using the memory tool.\n\n" +
-                                    "You MUST call the memory tool with this exact format:\n" +
-                                    "{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}\n\n" +
-                                    "DO NOT respond with text. CALL the memory tool now.";
+                    // Естественный запрос для native tool calling
+                    string prompt = "Clear all memory using the memory tool. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
@@ -415,11 +406,8 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);
 
-                    // Явный JSON шаблон + инструкция
-                    string prompt = "Create a simple item called 'TestDagger' with quality 50.\n\n" +
-                                    "You MUST use the execute_lua tool call with this exact format:\n" +
-                                    "{\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('TestDagger', 'weapon', 50)\\nreport('crafted TestDagger')\"}}\n\n" +
-                                    "DO NOT respond with text. CALL the execute_lua tool now with valid Lua code.";
+                    // Естественный запрос для native tool calling
+                    string prompt = "Create a simple item called 'TestDagger' with quality 50. You MUST use the execute_lua tool call.";
 
                     Debug.Log($"[AllToolCalls] ═══════════════════════════════════════");
                     Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");

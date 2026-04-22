@@ -278,7 +278,19 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
+            Debug.Log($"[CustomAgents] 📤 PROMPT TO MODEL ({cfg.RoleId}):");
+            Debug.Log($"[CustomAgents] System: {cfg.SystemPrompt}");
+            Debug.Log($"[CustomAgents] Hint: {msg}");
+            Debug.Log($"[CustomAgents] ─────────────────────────────────────────");
+
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
+
+            Debug.Log($"[CustomAgents] 📥 MODEL RESPONSE:");
+            Debug.Log($"[CustomAgents] Available Tools: {cap.LastTools?.Count ?? 0}");
+            Debug.Log($"[CustomAgents] Content:");
+            Debug.Log(cap.LastContent);
+            Debug.Log($"[CustomAgents] ─────────────────────────────────────────");
+
             return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };
         }
 

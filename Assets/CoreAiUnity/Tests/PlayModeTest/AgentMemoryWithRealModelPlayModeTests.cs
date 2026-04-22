@@ -36,7 +36,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "IMPORTANT: Use the 'memory' tool to write data. DO NOT output JSON. CALL the memory tool now with action='write' and content='remember: apples'."
+                    "IMPORTANT: Use the 'memory' tool to write data. CALL the memory tool now with action='write' and content='remember: apples'."
             });
             yield return setup.RunAndWait(t1, 300f, "creator memory write");
 

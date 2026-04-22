@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.19.3] — 2026-04-22
+
+### Prompt Optimization
+- 🔧 **Убраны дублирующиеся tool-calling правила** из всех 7 встроенных промптов агентов (C# константы + `.txt` ресурсы). Экономия ~100-150 токенов на запрос — правила уже присутствуют в `UniversalSystemPromptPrefix`.
+- 📝 **Улучшены формулировки промптов:** добавлены лимиты длины ответов для AiNpc (1-3 предложения) и PlayerChat (1-5 предложений).
+- 🔧 **Native Tool Calling:** Удалены устаревшие инструкции по ручному JSON-форматированию инструментов из примеров `Agent.cs` и `AllToolCallsPlayModeTests.cs`. Агенты и тесты полностью переведены на использование нативного `MEAI` function calling.
+
+### Editor UX
+- ✨ **`CoreAI/Create Scene Setup`** — новая кнопка в меню Unity для быстрой настройки сцены:
+  - Создаёт `CoreAILifetimeScope` на сцене с назначенными ассетами
+  - Автоматически генерирует все default ассеты (Settings, LogSettings, PromptsManifest и др.)
+  - Создаёт `LLM` + `LLMAgent` объекты при бэкенде LLMUnity (или Auto+LlmUnityFirst)
+  - Защита от дублирования, поддержка Undo (Ctrl+Z)
+
+### Stability
+- 🐛 **HTTP timeout logging:** `MeaiOpenAiChatClient` — ошибки таймаута/сети понижены с `LogError` до `LogWarning`, чтобы не ломать PlayMode тесты в Unity Test Runner.
+- 🐛 **PlayMode Tests:** Исправлено падение теста `AllToolCalls_MemoryTool_WriteAppendClear`, вызванное конфликтом текстовых JSON-промптов и нативного вызова инструментов.
+- 🛡️ **UI Safety:** Добавлен `try-catch` блок в `async void OnSendClicked` (`InGameChatPanel.cs`) для предотвращения "тихих" падений UI при ошибках сети.
+
+### Documentation
+- 📚 **README обновлены** (EN + RU) — добавлена полная инструкция по установке зависимостей:
+  - NuGet DLL (Microsoft.Extensions.AI и др.) — таблица с версиями
+  - Git URL пакеты с описанием транзитивных зависимостей (VContainer, MoonSharp, LLMUnity, UniTask, MessagePipe)
+  - Новые шаги: Create Scene Setup, настройка LLM бэкенда
+- 🔗 **Исправление ссылок:** Исправлены битые относительные ссылки в `README_RU.md`, чтобы навигация по документации корректно работала на главной странице репозитория GitHub.
+
 ## [v0.19.2] — 2026-04-14
 
 ### Changed

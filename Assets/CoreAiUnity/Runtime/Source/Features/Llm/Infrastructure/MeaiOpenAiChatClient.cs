@@ -244,7 +244,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (webReq.result != UnityWebRequest.Result.Success)
             {
-                _logger.LogError(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {webReq.error}");
+                _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {webReq.error}");
                 throw new Exception($"HTTP error: {webReq.error}");
             }
 

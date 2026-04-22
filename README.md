@@ -13,7 +13,7 @@ Engineered for both rapid integration by beginners and complex systemic design b
 >
 > 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
 
-**Version:** v0.19.0 | **PlayMode Scene Tools & Vision Support**
+**Version:** v0.19.3 | **Prompt Optimization & Scene Setup**
 
 ---
 
@@ -192,27 +192,64 @@ The repository consists of **two packages**:
 
 ## 🚀 Quick Start
 
-### 1. Add the Core engine (CoreAI)
-**Method:** Unity Editor → Window → Package Manager → `+` → Add package from git URL…
+### 1. Install NuGet DLLs (required)
 
-URL to copy:
+CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) for the LLM pipeline. Copy these DLLs into your project's `Assets/Packages/` folder (download from NuGet or copy from this repo's `Assets/Packages/`):
+
+| NuGet Package | Version | Required by |
+|---------------|---------|-------------|
+| `Microsoft.Extensions.AI` | 10.4.1 | CoreAI Core |
+| `Microsoft.Extensions.AI.Abstractions` | 10.4.1 | CoreAI Core |
+| `Microsoft.Bcl.AsyncInterfaces` | 10.0.4 | System dependency |
+| `System.Text.Json` | 10.0.4 | JSON serialization |
+| `System.Text.Encodings.Web` | 10.0.4 | System dependency |
+| `System.Numerics.Tensors` | 10.0.4 | System dependency |
+| `Microsoft.Extensions.Logging.Abstractions` | 10.0.4 | Logging |
+| `Microsoft.Extensions.DependencyInjection.Abstractions` | 10.0.4 | DI |
+| `System.Diagnostics.DiagnosticSource` | 10.0.4 | System dependency |
+
+> 💡 **Easiest way:** Clone this repo and copy the entire `Assets/Packages/` folder into your project.
+
+### 2. Install Unity Packages via Git URL
+**Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
+
+**Step 1 — Core engine (pure C#, no UnityEngine):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 ```
+> This also installs: [VContainer](https://github.com/hadashiA/VContainer) (DI), [MoonSharp](https://github.com/moonsharp-devs/moonsharp) (Lua sandbox)
 
-### 2. Add the Unity Layer (CoreAIUnity)
-Use the same `Add package from git URL…` method with this URL:
+**Step 2 — Unity layer (MonoBehaviour, LLM clients, tools):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
+> This also installs: [LLMUnity](https://github.com/undreamai/LLMUnity), [UniTask](https://github.com/Cysharp/UniTask), [MessagePipe](https://github.com/Cysharp/MessagePipe)
 
-### 3. Open the Scene
-Once installed, open and play the demo scene:
-```text
-Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
+### 3. Setup Scene (one click)
+
+After installation, use the menu:
+
+```
+CoreAI → Create Scene Setup
 ```
 
-### 3. Create Your Agent
+This will automatically:
+- ✅ Create `CoreAILifetimeScope` on the scene
+- ✅ Generate all required settings assets (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest`, etc.)
+- ✅ Assign assets to the scope
+- ✅ Create `LLM` + `LLMAgent` objects (if backend is set to LLMUnity)
+
+### 4. Configure LLM Backend
+
+Open settings: **CoreAI → Settings** and choose your backend:
+
+| Backend | Setup |
+|---------|-------|
+| **LLMUnity** (local) | Download a GGUF model (e.g. Qwen3.5-4B) via LLMUnity Model Manager |
+| **HTTP API** (LM Studio, OpenAI) | Set `API Base URL` and `API Key` in Settings |
+| **Auto** | CoreAI picks the best available backend automatically |
+
+### 5. Create Your Agent
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")

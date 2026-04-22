@@ -132,6 +132,140 @@ namespace CoreAI.Editor
             }
         }
 
+        [MenuItem("CoreAI/Create Scene Setup", priority = 4)]
+        public static void CreateSceneSetup()
+        {
+            // 1. Проверка: не дублировать CoreAILifetimeScope
+            CoreAILifetimeScope existingScope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
+            if (existingScope != null)
+            {
+                if (!EditorUtility.DisplayDialog(
+                        "CoreAI — Scene Setup",
+                        "CoreAILifetimeScope уже существует на сцене.\nОткрыть его в Inspector?",
+                        "Открыть", "Отмена"))
+                {
+                    return;
+                }
+
+                Selection.activeGameObject = existingScope.gameObject;
+                EditorGUIUtility.PingObject(existingScope);
+                return;
+            }
+
+            // 2. Гарантируем наличие ассетов
+            CreateDefaultAssets();
+
+            // 3. Создаём GameObject с CoreAILifetimeScope
+            GameObject scopeGo = new("CoreAILifetimeScope");
+            Undo.RegisterCreatedObjectUndo(scopeGo, "Create CoreAI Scene Setup");
+            CoreAILifetimeScope scope = scopeGo.AddComponent<CoreAILifetimeScope>();
+
+            // 4. Назначаем ассеты
+            GameLogSettingsAsset logSettings =
+                AssetDatabase.LoadAssetAtPath<GameLogSettingsAsset>(LogSettingsPath);
+            CoreAISettingsAsset coreAiSettings =
+                AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
+            AgentPromptsManifest prompts =
+                AssetDatabase.LoadAssetAtPath<AgentPromptsManifest>(PromptsManifestPath);
+            CoreAiPrefabRegistryAsset prefabs =
+                AssetDatabase.LoadAssetAtPath<CoreAiPrefabRegistryAsset>(PrefabRegistryPath);
+            LlmRoutingManifest routing =
+                AssetDatabase.LoadAssetAtPath<LlmRoutingManifest>(LlmRoutingPath);
+
+            SerializedObject so = new(scope);
+            SetPropertyIfExists(so, "gameLogSettings", logSettings);
+            SetPropertyIfExists(so, "coreAiSettings", coreAiSettings);
+            SetPropertyIfExists(so, "agentPromptsManifest", prompts);
+            SetPropertyIfExists(so, "worldPrefabRegistry", prefabs);
+            SetPropertyIfExists(so, "llmRoutingManifest", routing);
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            // 5. Если бэкенд = LlmUnity (или Auto с LlmUnityFirst) — создать LLM + LLMAgent
+            bool needsLlmUnity = false;
+            if (coreAiSettings != null)
+            {
+                LlmBackendType backend = coreAiSettings.BackendType;
+                needsLlmUnity = backend == LlmBackendType.LlmUnity
+                                || (backend == LlmBackendType.Auto
+                                    && coreAiSettings.AutoPriority == LlmAutoPriority.LlmUnityFirst);
+            }
+
+            if (needsLlmUnity)
+            {
+                TryCreateLlmUnityObjects(scopeGo);
+            }
+
+            // 6. Финализация
+            EditorUtility.SetDirty(scope);
+            EditorSceneManager.MarkSceneDirty(scopeGo.scene);
+            Selection.activeGameObject = scopeGo;
+            EditorGUIUtility.PingObject(scopeGo);
+
+            CoreAIEditorLog.Log(
+                "Scene Setup: CoreAILifetimeScope создан" +
+                (needsLlmUnity ? " + LLM + LLMAgent." : "."));
+        }
+
+        private static void SetPropertyIfExists(SerializedObject so, string propertyName, Object value)
+        {
+            SerializedProperty prop = so.FindProperty(propertyName);
+            if (prop != null)
+            {
+                prop.objectReferenceValue = value;
+            }
+        }
+
+        /// <summary>Добавить LLM и LLMAgent на сцену (без compile-time зависимости через #if).</summary>
+        private static void TryCreateLlmUnityObjects(GameObject parentScope)
+        {
+#if !COREAI_NO_LLM
+            try
+            {
+                // Проверяем, нет ли уже LLM на сцене
+                if (TryFindMonoBehaviourByTypeName("LLM") != null)
+                {
+                    CoreAIEditorLog.Log("Scene Setup: LLM уже есть на сцене, пропускаем создание.");
+                    return;
+                }
+
+                GameObject llmGo = new("CoreAI_LLM");
+                Undo.RegisterCreatedObjectUndo(llmGo, "Create LLM + LLMAgent");
+
+                LLMUnity.LLM llm = llmGo.AddComponent<LLMUnity.LLM>();
+                LLMUnity.LLMAgent agent = llmGo.AddComponent<LLMUnity.LLMAgent>();
+
+                llm.dontDestroyOnLoad = false;
+                llm.flashAttention = true;
+                llm.numGPULayers = 99;
+
+                agent.remote = false;
+                agent.llm = llm;
+
+                // Попробовать назначить модель из настроек
+                CoreAISettingsAsset settings = AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
+                if (settings != null)
+                {
+                    string gguf = settings.GgufModelPath;
+                    if (!string.IsNullOrWhiteSpace(gguf))
+                    {
+                        IGameLogger log = GameLoggerUnscopedFallback.Instance;
+                        LlmUnityModelBootstrap.TryAssignModelMatchingFilename(llm, log, gguf);
+                    }
+                }
+
+                EditorUtility.SetDirty(llmGo);
+                CoreAIEditorLog.Log($"Scene Setup: LLM + LLMAgent созданы (модель: {llm.model ?? "не назначена"}).");
+            }
+            catch (System.Exception ex)
+            {
+                CoreAIEditorLog.LogWarning($"Scene Setup: не удалось создать LLM объекты: {ex.Message}");
+            }
+#else
+            CoreAIEditorLog.LogWarning(
+                "Scene Setup: LLMUnity не установлен (COREAI_NO_LLM). LLM и LLMAgent не созданы.");
+#endif
+        }
+
         private static void MoveSceneFirstInBuild(string path, string labelForLog)
         {
             EditorBuildSettingsScene[] scenes = EditorBuildSettings.scenes;

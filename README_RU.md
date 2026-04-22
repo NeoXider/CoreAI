@@ -15,7 +15,7 @@ CoreAI сочетает низкий порог входа для новичко
 
 | Версия | Unity | Статус |
 |--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.19.0 — [CHANGELOG](CHANGELOG.md) |
+| См. `package.json` | `6000.0+` | ✅ v0.19.3 — [CHANGELOG](CHANGELOG.md) |
 
 ---
 
@@ -188,25 +188,62 @@ Attempt 2: Model fixes the format ✅
 
 ## 📦 Установка
 
-### 1. Добавь ядро (CoreAI)
-**Путь в Unity:** Window → Package Manager → `+` → Add package from git URL…
+### 1. Установи NuGet DLL (обязательно)
 
-Ссылка для копирования:
+CoreAI использует [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) для LLM пайплайна. Скопируй эти DLL в папку `Assets/Packages/` своего проекта (скачай с NuGet или скопируй из `Assets/Packages/` этого репозитория):
+
+| NuGet пакет | Версия | Зачем нужен |
+|-------------|--------|-------------|
+| `Microsoft.Extensions.AI` | 10.4.1 | CoreAI Core |
+| `Microsoft.Extensions.AI.Abstractions` | 10.4.1 | CoreAI Core |
+| `Microsoft.Bcl.AsyncInterfaces` | 10.0.4 | Системная зависимость |
+| `System.Text.Json` | 10.0.4 | JSON сериализация |
+| `System.Text.Encodings.Web` | 10.0.4 | Системная зависимость |
+| `System.Numerics.Tensors` | 10.0.4 | Системная зависимость |
+| `Microsoft.Extensions.Logging.Abstractions` | 10.0.4 | Логирование |
+| `Microsoft.Extensions.DependencyInjection.Abstractions` | 10.0.4 | DI |
+| `System.Diagnostics.DiagnosticSource` | 10.0.4 | Системная зависимость |
+
+> 💡 **Проще всего:** Клонируй этот репозиторий и скопируй всю папку `Assets/Packages/` в свой проект.
+
+### 2. Установи Unity-пакеты через Git URL
+**Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
+
+**Шаг 1 — Ядро (чистый C#, без UnityEngine):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 ```
+> Также установит: [VContainer](https://github.com/hadashiA/VContainer) (DI), [MoonSharp](https://github.com/moonsharp-devs/moonsharp) (Lua песочница)
 
-### 2. Добавь Unity-слой (CoreAIUnity)
-Точно так же через `Add package from git URL…` добавь вторую ссылку:
+**Шаг 2 — Unity-слой (MonoBehaviour, LLM клиенты, инструменты):**
 ```text
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
+> Также установит: [LLMUnity](https://github.com/undreamai/LLMUnity), [UniTask](https://github.com/Cysharp/UniTask), [MessagePipe](https://github.com/Cysharp/MessagePipe)
 
-### 3. Открой и запусти сцену
-Тестовая сцена со всеми агентами находится здесь:
-```text
-Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
+### 3. Настрой сцену (один клик)
+
+После установки используй меню:
+
 ```
+CoreAI → Create Scene Setup
+```
+
+Это автоматически:
+- ✅ Создаст `CoreAILifetimeScope` на сцене
+- ✅ Сгенерирует все необходимые ассеты настроек (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest` и др.)
+- ✅ Назначит ассеты на scope
+- ✅ Создаст `LLM` + `LLMAgent` объекты (если бэкенд = LLMUnity)
+
+### 4. Настрой LLM бэкенд
+
+Открой настройки: **CoreAI → Settings** и выбери бэкенд:
+
+| Бэкенд | Настройка |
+|---------|----------|
+| **LLMUnity** (локально) | Скачай GGUF модель (напр. Qwen3.5-4B) через LLMUnity Model Manager |
+| **HTTP API** (LM Studio, OpenAI) | Укажи `API Base URL` и `API Key` в Settings |
+| **Auto** | CoreAI сам выберет лучший доступный бэкенд |
 
 **Готово!** AI-агенты работают. 🎉
 
@@ -237,11 +274,11 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 
 ### 3. Результат
 ```
-Blacksmith: "Welcome, traveler! I have these fine weapons:
-  • Iron Sword — 50 gold
-  • Steel Axe — 100 gold
-  • Flame Blade — 250 gold (enchanted!)
-What catches your eye?"
+Blacksmith: "Добро пожаловать, путник! Вот моё лучшее оружие:
+  • Железный меч — 50 золотых
+  • Стальной топор — 100 золотых
+  • Клинок Пламени — 250 золотых (зачарован!)
+Что приглянулось?"
 ```
 
 ---
@@ -250,15 +287,15 @@ What catches your eye?"
 
 | Документ | Что внутри |
 |----------|-----------|
-| 🏗️ [AGENT_BUILDER.md](Docs/AGENT_BUILDER.md) | Конструктор агентов, режимы, ChatHistory |
-| 🛠️ [MEAI_TOOL_CALLING.md](Docs/MEAI_TOOL_CALLING.md) | Архитектура MEAI pipeline |
-| 🔧 [TOOL_CALL_SPEC.md](../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спецификация tool calling |
-| 🛒 [CHAT_TOOL_CALLING.md](../CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC с инвентарём |
-| 🧠 [MemorySystem.md](../CoreAiUnity/Docs/MemorySystem.md) | Память и ChatHistory |
-| ⚙️ [COREAI_SETTINGS.md](../CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
-| 🗺️ [DEVELOPER_GUIDE.md](../CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, архитектура |
-| 🤖 [AI_AGENT_ROLES.md](../CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли агентов и промпты |
-| 📋 [CHANGELOG.md](CHANGELOG.md) | Все изменения по версиям |
+| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Конструктор агентов, режимы, ChatHistory |
+| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | Архитектура MEAI pipeline |
+| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спецификация tool calling |
+| 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC с инвентарём |
+| 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Память и ChatHistory |
+| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
+| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, архитектура |
+| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли агентов и промпты |
+| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | Все изменения по версиям |
 
 ---
 
