@@ -10,6 +10,12 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAIGameEntryPoint : IStartable
     {
+        /// <summary>
+        /// Если true — при старте автоматически запускается Creator-агент (bootstrap).
+        /// По умолчанию false — оркестратор не запускается сам, дочерний проект решает, когда и что запускать.
+        /// </summary>
+        public static bool AutoBootstrap { get; set; } = false;
+
         private readonly ILog _logger;
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _policy;
@@ -24,7 +30,7 @@ namespace CoreAI.Composition
             _memoryStore = memoryStore;
         }
 
-        /// <summary>Вызывается VContainer после сборки контейнера; инициализирует CoreAI фасад и запускает bootstrap.</summary>
+        /// <summary>Вызывается VContainer после сборки контейнера; инициализирует CoreAI фасад и опционально запускает bootstrap.</summary>
         public void Start()
         {
             // Инициализируем глобальный фасад CoreAI — 
@@ -34,7 +40,15 @@ namespace CoreAI.Composition
             _logger.Info(
                 "VContainer + MessagePipe (GlobalMessagePipe) + ILog с фильтром по тегам готовы.",
                 LogTag.Composition);
-            FireBootstrapAiTask();
+
+            if (AutoBootstrap)
+            {
+                FireBootstrapAiTask();
+            }
+            else
+            {
+                _logger.Info("AutoBootstrap отключён — оркестратор не запускает Creator-агента автоматически.", LogTag.Composition);
+            }
         }
 
         private async void FireBootstrapAiTask()

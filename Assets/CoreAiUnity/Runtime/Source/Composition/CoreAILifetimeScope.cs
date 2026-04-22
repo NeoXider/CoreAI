@@ -22,6 +22,14 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAILifetimeScope : LifetimeScope
     {
+        /// <summary>
+        /// По умолчанию autoRun = false. Дочерний проект (GameLifetimeScope)
+        /// должен вызвать Build() самостоятельно, чтобы оркестратор не запускался без необходимости.
+        /// </summary>
+        private void Reset()
+        {
+            autoRun = false;
+        }
         [Tooltip(
             "Единые настройки CoreAI: API-ключ, URL, модель, LLMUnity/HTTP переключение и др. Если null — ищется в Resources/CoreAISettings.")]
         [SerializeField]
