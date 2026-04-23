@@ -110,7 +110,14 @@ namespace CoreAI.Chat
             HeaderTitle      = Root.Q<Label>("coreai-chat-header-title");
             HeaderIcon       = Root.Q<VisualElement>("coreai-chat-header-icon");
 
-            if (SendButton != null) SendButton.RegisterCallback<ClickEvent>(OnSendClicked);
+            if (SendButton != null)
+            {
+                SendButton.RegisterCallback<ClickEvent>(OnSendClicked);
+                // Кнопка не должна перехватывать клавиатурный фокус: иначе после
+                // клика следующие нажатия клавиш уходят в button, а не в input,
+                // и пользователь теряет первые буквы следующего сообщения.
+                SendButton.focusable = false;
+            }
             if (InputField != null)
             {
                 // TrickleDown: перехватываем KeyDown ДО того как multiline TextField
