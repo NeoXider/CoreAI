@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -109,6 +110,97 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("t-out", joined);
             StringAssert.Contains("LLM ⏱", joined);
+        }
+
+        /// <summary>
+        /// Мок-клиент со своей реализацией стриминга: эмитит N чанков подряд.
+        /// Нужен чтобы проверить, что decorator/RoutingLlmClient не делают fallback
+        /// на default-реализацию (которая собрала бы всё в 1 чанк через CompleteAsync).
+        /// </summary>
+        private sealed class StreamingMockLlm : ILlmClient
+        {
+            private readonly string[] _parts;
+
+            public StreamingMockLlm(params string[] parts)
+            {
+                _parts = parts;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                // Если кто-то вызвал CompleteAsync вместо стриминга — тест это
+                // увидит через Ok=true и Content = concat(parts), но это будет
+                // единичный chunk (в fallback пути) — индикатор бага.
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = string.Concat(_parts)
+                });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                foreach (string part in _parts)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return new LlmStreamChunk { Text = part };
+                    await Task.Yield();
+                }
+
+                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+            }
+        }
+
+        [Test]
+        public async Task Streaming_DelegatesRealChunks_NotSingleShotFallback()
+        {
+            // Если LoggingLlmClientDecorator не переопределял CompleteStreamingAsync,
+            // дефолтная реализация интерфейса свернула бы всё в один chunk через
+            // CompleteAsync — стриминг «не был бы виден» (как в issue 2).
+            SpyLogger spy = new();
+            StreamingMockLlm inner = new("Hel", "lo,", " wo", "rld!");
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
+                new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s1", UserPayload = "hi" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            // 4 текстовых + 1 финальный = 5 чанков (не 1 как было при fallback)
+            Assert.AreEqual(5, chunks.Count, "Streaming должен прокидывать чанки по мере поступления");
+            Assert.AreEqual("Hel", chunks[0].Text);
+            Assert.AreEqual("lo,", chunks[1].Text);
+            Assert.AreEqual(" wo", chunks[2].Text);
+            Assert.AreEqual("rld!", chunks[3].Text);
+            Assert.IsTrue(chunks[4].IsDone, "Последний чанк должен быть терминальным");
+        }
+
+        [Test]
+        public async Task Streaming_LogsStartAndFinish()
+        {
+            SpyLogger spy = new();
+            StreamingMockLlm inner = new("a", "b");
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
+                new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s2", UserPayload = "hi" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            string joined = string.Join("\n", spy.Lines);
+            StringAssert.Contains("s2", joined, "Должен быть traceId");
+            StringAssert.Contains("(stream)", joined, "Маркер стримингового вызова");
+            StringAssert.Contains("LLM ▶", joined, "Лог старта");
+            StringAssert.Contains("LLM ◀", joined, "Лог успешного завершения");
+            StringAssert.Contains("chunks=2", joined, "Должно быть число текстовых чанков");
         }
     }
 }

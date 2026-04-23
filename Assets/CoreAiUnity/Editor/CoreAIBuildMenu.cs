@@ -58,11 +58,21 @@ namespace CoreAI.Editor
         [InitializeOnLoadMethod]
         private static void AutoCreateDefaultAssetsOnLoad()
         {
-            // Auto-create on first plugin load if missing
-            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) == null)
+            // Проверяем наличие ассета двумя способами:
+            // 1. По точному пути (Assets/Resources/CoreAISettings.asset)
+            // 2. Через Resources.Load — находит ассет даже если он в подпапке Resources/
+            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
+                return;
+
+            // Resources.Load ищет по всем папкам Resources/ в проекте
+            CoreAISettingsAsset existing = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
+            if (existing != null)
             {
-                CreateDefaultAssets();
+                CoreAIEditorLog.Log($"CoreAISettings already exists at: {AssetDatabase.GetAssetPath(existing)}. Skipping auto-create.");
+                return;
             }
+
+            CreateDefaultAssets();
         }
 
         [MenuItem("CoreAI/Setup/Create Default Assets", priority = 2)]
@@ -72,7 +82,15 @@ namespace CoreAI.Editor
             EnsureFolder("Assets/Resources");
 
             GameLogSettingsAsset logSettings = EnsureAsset<GameLogSettingsAsset>(LogSettingsPath);
-            CoreAISettingsAsset coreAiSettings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
+
+            // CoreAISettings: проверяем через Resources.Load, чтобы не перезаписать
+            // настройки пользователя, расположенные в другой папке Resources/
+            CoreAISettingsAsset coreAiSettings = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
+            if (coreAiSettings == null)
+            {
+                coreAiSettings = EnsureAsset<CoreAISettingsAsset>(CoreAiSettingsPath);
+            }
+
             AgentPromptsManifest prompts = EnsureAsset<AgentPromptsManifest>(PromptsManifestPath);
             CoreAiPrefabRegistryAsset prefabs = EnsureAsset<CoreAiPrefabRegistryAsset>(PrefabRegistryPath);
             AiPermissionsAsset permissions = EnsureAsset<AiPermissionsAsset>(AiPermissionsPath);

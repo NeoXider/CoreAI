@@ -71,122 +71,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            List<Dictionary<string, object>> messages = new();
-            foreach (MEAI.ChatMessage msg in msgs)
-            {
-                // Для tool messages нужно извлекать content и tool_call_id правильно
-                string content = msg.Text ?? "";
-                if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
-                {
-                    // Tool messages могут иметь content в Contents коллекции
-                    MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
-                    if (textContent != null)
-                    {
-                        content = textContent.Text;
-                    }
-                    else
-                    {
-                        // Fallback: сериализуем весь Contents
-                        content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
-                    }
-                }
-
-                Dictionary<string, object> msgDict = new()
-                {
-                    { "role", msg.Role.ToString().ToLowerInvariant() }
-                };
-
-                if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
-                {
-                    MEAI.FunctionResultContent functionResult =
-                        msg.Contents.OfType<MEAI.FunctionResultContent>().FirstOrDefault();
-                    if (functionResult != null)
-                    {
-                        if (!string.IsNullOrEmpty(functionResult.CallId))
-                        {
-                            msgDict["tool_call_id"] = functionResult.CallId;
-                        }
-
-                        string resultStr = functionResult.Result as string
-                                           ?? (functionResult.Result != null
-                                               ? JsonConvert.SerializeObject(functionResult.Result)
-                                               : "");
-
-                        msgDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
-                    }
-                    else
-                    {
-                        msgDict["content"] = content;
-                    }
-                }
-                else if (msg.Role == MEAI.ChatRole.Assistant && msg.Contents != null)
-                {
-                    List<MEAI.FunctionCallContent> funcCalls = msg.Contents.OfType<MEAI.FunctionCallContent>().ToList();
-
-                    if (funcCalls.Count > 0)
-                    {
-                        List<Dictionary<string, object>> toolCallsList = new();
-                        foreach (MEAI.FunctionCallContent call in funcCalls)
-                        {
-                            toolCallsList.Add(new Dictionary<string, object>
-                            {
-                                { "id", call.CallId ?? Guid.NewGuid().ToString() },
-                                { "type", "function" },
-                                {
-                                    "function", new Dictionary<string, object>
-                                    {
-                                        { "name", call.Name },
-                                        {
-                                            "arguments",
-                                            JsonConvert.SerializeObject(call.Arguments ??
-                                                                        new Dictionary<string, object?>())
-                                        }
-                                    }
-                                }
-                            });
-                        }
-
-                        msgDict["tool_calls"] = toolCallsList;
-
-                        // Если есть tool_calls, то в content обычно отправляем пустую строку или текст (если модель дала текст)
-                        MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
-                        msgDict["content"] = textContent?.Text ?? "";
-                    }
-                    else
-                    {
-                        msgDict["content"] = content;
-                    }
-                }
-                else
-                {
-                    msgDict["content"] = content;
-                }
-
-                messages.Add(msgDict);
-            }
-
-            List<Dictionary<string, object>> toolsList = new();
-            if (options?.Tools != null)
-            {
-                foreach (MEAI.AITool tool in options.Tools)
-                {
-                    if (tool is MEAI.AIFunction af)
-                    {
-                        toolsList.Add(new Dictionary<string, object>
-                        {
-                            { "type", "function" },
-                            {
-                                "function", new Dictionary<string, object>
-                                {
-                                    { "name", af.Name },
-                                    { "description", af.Description },
-                                    { "parameters", JsonConvert.DeserializeObject(af.JsonSchema.ToString()) }
-                                }
-                            }
-                        });
-                    }
-                }
-            }
+            List<Dictionary<string, object>> messages = BuildMessagesPayload(msgs);
+            List<Dictionary<string, object>> toolsList = BuildToolsPayload(options);
 
             Dictionary<string, object> req = new()
             {
@@ -334,11 +220,252 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            MEAI.ChatResponse response = await GetResponseAsync(chatMessages, options, cancellationToken);
-            if (!string.IsNullOrEmpty(response.Text))
+            List<MEAI.ChatMessage> msgs = chatMessages.ToList();
+            string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
+
+            // Build request JSON (reuse same logic as GetResponseAsync)
+            List<Dictionary<string, object>> messages = BuildMessagesPayload(msgs);
+            List<Dictionary<string, object>> toolsList = BuildToolsPayload(options);
+
+            Dictionary<string, object> req = new()
             {
-                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, response.Text);
+                { "model", _settings.Model },
+                { "temperature", options?.Temperature ?? _settings.Temperature },
+                { "messages", messages },
+                { "stream", true }
+            };
+            if (options?.MaxOutputTokens.HasValue == true)
+            {
+                req["max_tokens"] = options.MaxOutputTokens.Value;
             }
+            if (toolsList.Count > 0)
+            {
+                req["tools"] = toolsList;
+            }
+
+            string json = JsonConvert.SerializeObject(req);
+
+            // ВАЖНО: UnityWebRequest и DownloadHandlerBuffer создаются из нативного
+            // Unity API и требуют главного потока. Вызывающий код должен
+            // выполняться на main thread (например, через UniTask/coroutine),
+            // Task.Run приведёт к исключению "Create can only be called from the main thread".
+            using UnityWebRequest webReq = new(url, "POST");
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+            webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            webReq.downloadHandler = new DownloadHandlerBuffer();
+            webReq.SetRequestHeader("Content-Type", "application/json");
+            webReq.SetRequestHeader("Accept", "text/event-stream");
+
+            if (url.Contains("openrouter"))
+            {
+                webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                webReq.SetRequestHeader("X-Title", "CoreAI");
+            }
+            if (!string.IsNullOrEmpty(_settings.ApiKey))
+            {
+                webReq.SetRequestHeader("Authorization", "Bearer " + _settings.ApiKey);
+            }
+            webReq.timeout = _settings.RequestTimeoutSeconds;
+
+            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: POST (stream) {url}");
+
+            UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
+
+            // Poll for SSE chunks
+            int lastProcessed = 0;
+            while (!op.isDone)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    try { webReq.Abort(); } catch { /* ignore */ }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                string partial = webReq.downloadHandler?.text ?? "";
+                if (partial.Length > lastProcessed)
+                {
+                    string newData = partial.Substring(lastProcessed);
+                    lastProcessed = partial.Length;
+
+                    foreach (string chunk in ParseSseChunks(newData))
+                    {
+                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                    }
+                }
+
+                await Task.Yield();
+            }
+
+            // Process any remaining data after request completed
+            if (webReq.result == UnityWebRequest.Result.Success)
+            {
+                string fullText = webReq.downloadHandler?.text ?? "";
+                if (fullText.Length > lastProcessed)
+                {
+                    string remaining = fullText.Substring(lastProcessed);
+                    foreach (string chunk in ParseSseChunks(remaining))
+                    {
+                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                    }
+                }
+            }
+            else if (webReq.result != UnityWebRequest.Result.Success
+                     && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"MeaiOpenAiChatClient: stream error — {webReq.error}");
+            }
+        }
+
+        /// <summary>Парсит SSE data: строки и извлекает delta.content из JSON чанков.</summary>
+        private static IEnumerable<string> ParseSseChunks(string raw)
+        {
+            string[] lines = raw.Split('\n');
+            foreach (string line in lines)
+            {
+                string trimmed = line.Trim();
+                if (!trimmed.StartsWith("data: ")) continue;
+                string data = trimmed.Substring(6);
+                if (data == "[DONE]") yield break;
+
+                string content = ExtractDeltaContent(data);
+                if (!string.IsNullOrEmpty(content))
+                {
+                    yield return content;
+                }
+            }
+        }
+
+        /// <summary>Извлекает choices[0].delta.content из SSE JSON чанка.</summary>
+        private static string ExtractDeltaContent(string json)
+        {
+            try
+            {
+                JObject obj = JObject.Parse(json);
+                return obj?["choices"]?[0]?["delta"]?["content"]?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Строит массив messages для HTTP payload (переиспользуется в обоих методах).</summary>
+        private List<Dictionary<string, object>> BuildMessagesPayload(List<MEAI.ChatMessage> msgs)
+        {
+            List<Dictionary<string, object>> messages = new();
+            foreach (MEAI.ChatMessage msg in msgs)
+            {
+                string content = msg.Text ?? "";
+                if (string.IsNullOrEmpty(content) && msg.Contents != null && msg.Contents.Count > 0)
+                {
+                    MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
+                    if (textContent != null)
+                    {
+                        content = textContent.Text;
+                    }
+                    else
+                    {
+                        content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
+                    }
+                }
+
+                Dictionary<string, object> msgDict = new()
+                {
+                    { "role", msg.Role.ToString().ToLowerInvariant() }
+                };
+
+                if (msg.Role == MEAI.ChatRole.Tool && msg.Contents != null)
+                {
+                    MEAI.FunctionResultContent functionResult =
+                        msg.Contents.OfType<MEAI.FunctionResultContent>().FirstOrDefault();
+                    if (functionResult != null)
+                    {
+                        if (!string.IsNullOrEmpty(functionResult.CallId))
+                        {
+                            msgDict["tool_call_id"] = functionResult.CallId;
+                        }
+                        string resultStr = functionResult.Result as string
+                                           ?? (functionResult.Result != null
+                                               ? JsonConvert.SerializeObject(functionResult.Result)
+                                               : "");
+                        msgDict["content"] = string.IsNullOrEmpty(resultStr) ? "success" : resultStr;
+                    }
+                    else
+                    {
+                        msgDict["content"] = content;
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.Assistant && msg.Contents != null)
+                {
+                    List<MEAI.FunctionCallContent> funcCalls = msg.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+                    if (funcCalls.Count > 0)
+                    {
+                        List<Dictionary<string, object>> toolCallsList = new();
+                        foreach (MEAI.FunctionCallContent call in funcCalls)
+                        {
+                            toolCallsList.Add(new Dictionary<string, object>
+                            {
+                                { "id", call.CallId ?? Guid.NewGuid().ToString() },
+                                { "type", "function" },
+                                {
+                                    "function", new Dictionary<string, object>
+                                    {
+                                        { "name", call.Name },
+                                        {
+                                            "arguments",
+                                            JsonConvert.SerializeObject(call.Arguments ??
+                                                                        new Dictionary<string, object?>())
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        msgDict["tool_calls"] = toolCallsList;
+                        MEAI.TextContent textContent = msg.Contents.OfType<MEAI.TextContent>().FirstOrDefault();
+                        msgDict["content"] = textContent?.Text ?? "";
+                    }
+                    else
+                    {
+                        msgDict["content"] = content;
+                    }
+                }
+                else
+                {
+                    msgDict["content"] = content;
+                }
+
+                messages.Add(msgDict);
+            }
+            return messages;
+        }
+
+        /// <summary>Строит массив tools для HTTP payload.</summary>
+        private static List<Dictionary<string, object>> BuildToolsPayload(MEAI.ChatOptions? options)
+        {
+            List<Dictionary<string, object>> toolsList = new();
+            if (options?.Tools != null)
+            {
+                foreach (MEAI.AITool tool in options.Tools)
+                {
+                    if (tool is MEAI.AIFunction af)
+                    {
+                        toolsList.Add(new Dictionary<string, object>
+                        {
+                            { "type", "function" },
+                            {
+                                "function", new Dictionary<string, object>
+                                {
+                                    { "name", af.Name },
+                                    { "description", af.Description },
+                                    { "parameters", JsonConvert.DeserializeObject(af.JsonSchema.ToString()) }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            return toolsList;
         }
 
         public void Dispose()
@@ -351,4 +478,4 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 }
-#endif
+#endif

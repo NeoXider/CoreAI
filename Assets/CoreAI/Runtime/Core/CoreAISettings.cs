@@ -36,6 +36,7 @@ namespace CoreAI
         private static bool? _logToolCallResults;
         private static bool? _logMeaiToolCallingSteps;
         private static bool? _allowDuplicateToolCalls;
+        private static bool? _enableStreaming;
 
         #endregion
 
@@ -57,6 +58,7 @@ namespace CoreAI
         private const bool DefaultLogToolCallResults = true;
         private const bool DefaultLogMeaiToolCallingSteps = true;
         private const bool DefaultAllowDuplicateToolCalls = false;
+        private const bool DefaultEnableStreaming = true;
 
         internal const string DefaultUniversalSystemPromptPrefix =
             "CRITICAL RULES FOR ALL AGENTS:\n" +
@@ -251,6 +253,18 @@ namespace CoreAI
             set => _allowDuplicateToolCalls = value;
         }
 
+        /// <summary>
+        /// Глобальное включение стриминга ответов LLM. Может быть переопределено
+        /// на уровне роли через <see cref="AgentMemoryPolicy"/> или на уровне UI
+        /// через <c>CoreAiChatConfig.EnableStreaming</c>.
+        /// По умолчанию: true.
+        /// </summary>
+        public static bool EnableStreaming
+        {
+            get => _enableStreaming ?? Instance?.EnableStreaming ?? DefaultEnableStreaming;
+            set => _enableStreaming = value;
+        }
+
         #endregion
 
         /// <summary>
@@ -278,6 +292,7 @@ namespace CoreAI
             _logToolCallResults = null;
             _logMeaiToolCallingSteps = null;
             _allowDuplicateToolCalls = null;
+            _enableStreaming = null;
         }
     }
 }

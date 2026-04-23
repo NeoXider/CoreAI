@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -44,6 +46,32 @@ namespace CoreAI.Infrastructure.Llm
             request.RoutingProfileId = DescribeInner(inner);
             request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
             return inner.CompleteAsync(request, cancellationToken);
+        }
+
+        /// <summary>
+        /// Маршрутизируемый стриминг: выбирает клиент по <see cref="LlmCompletionRequest.AgentRoleId"/>
+        /// и делегирует <see cref="ILlmClient.CompleteStreamingAsync"/>. Без этого override'а
+        /// default-реализация интерфейса вызывала бы <see cref="CompleteAsync"/> и отдавала бы
+        /// весь ответ одним чанком — стриминг в UI был бы не виден.
+        /// </summary>
+        public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (request == null)
+            {
+                yield return new LlmStreamChunk { IsDone = true, Error = "LlmCompletionRequest is null" };
+                yield break;
+            }
+
+            ILlmClient inner = _registry.ResolveClientForRole(request.AgentRoleId);
+            request.RoutingProfileId = DescribeInner(inner);
+            request.ContextWindowTokens = _registry.ResolveContextWindowForRole(request.AgentRoleId);
+
+            await foreach (LlmStreamChunk chunk in inner.CompleteStreamingAsync(request, cancellationToken))
+            {
+                yield return chunk;
+            }
         }
 
         private static string DescribeInner(ILlmClient inner)

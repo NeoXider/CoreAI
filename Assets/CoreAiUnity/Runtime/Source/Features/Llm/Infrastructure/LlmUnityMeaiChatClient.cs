@@ -244,10 +244,109 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            MEAI.ChatResponse response = await GetResponseAsync(chatMessages, options, cancellationToken);
-            foreach (MEAI.ChatMessage msg in response.Messages)
+            // Подготавливаем промпт так же как в GetResponseAsync
+            List<MEAI.ChatMessage> msgs = new(chatMessages);
+            string userMessage = "";
+            string sysMessage = "";
+
+            foreach (MEAI.ChatMessage msg in msgs)
             {
-                yield return new MEAI.ChatResponseUpdate(msg.Role, msg.Text);
+                if (msg.Role == MEAI.ChatRole.System)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.TextContent tc) sysMessage += tc.Text + "\n";
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.User)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.TextContent tc) userMessage += "User: " + tc.Text + "\n";
+                    }
+                }
+                else if (msg.Role == MEAI.ChatRole.Assistant)
+                {
+                    foreach (MEAI.AIContent item in msg.Contents)
+                    {
+                        if (item is MEAI.TextContent tc) userMessage += "Assistant: " + tc.Text + "\n";
+                    }
+                }
+            }
+
+            sysMessage += "\nCRITICAL INSTRUCTION: NEVER use Markdown formatting (such as **, _, #). Output plain text ONLY.\n";
+            _unityAgent.systemPrompt = sysMessage.TrimStart().TrimEnd();
+
+            if (options?.Temperature.HasValue == true)
+                _unityAgent.temperature = options.Temperature.Value;
+            if (options?.MaxOutputTokens.HasValue == true)
+                _unityAgent.numPredict = options.MaxOutputTokens.Value;
+
+            // Настоящий стриминг через LLMAgent.Chat callback.
+            // Callback получает полный текст на данный момент — вычисляем дельту.
+            // ВАЖНО: <think>-блоки НЕ фильтруем здесь — это делает внешний
+            // stateful CoreAI.Ai.ThinkBlockStreamFilter в MeaiLlmClient.CompleteStreamingAsync.
+            var chunkQueue = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            bool isCompleted = false;
+            int previousLength = 0;
+            string previousText = "";
+            var deltaLock = new object();
+
+            _ = _unityAgent.Chat(userMessage.Trim(),
+                (string fullSoFar) =>
+                {
+                    if (string.IsNullOrEmpty(fullSoFar)) return;
+
+                    // Delta-диф под локом: LLMUnity может вызывать callback из worker-потока.
+                    string delta;
+                    lock (deltaLock)
+                    {
+                        if (fullSoFar.Length <= previousLength) return;
+                        delta = fullSoFar.Substring(previousLength);
+                        previousLength = fullSoFar.Length;
+                        previousText = fullSoFar;
+                    }
+
+                    if (!string.IsNullOrEmpty(delta))
+                    {
+                        chunkQueue.Enqueue(delta);
+                    }
+                },
+                () => { isCompleted = true; },
+                addToHistory: false);
+
+            try
+            {
+                while (!isCompleted || !chunkQueue.IsEmpty)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (chunkQueue.TryDequeue(out string chunk))
+                    {
+                        if (!string.IsNullOrEmpty(chunk))
+                        {
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                        }
+                    }
+                    else
+                    {
+                        await Task.Delay(10, cancellationToken);
+                    }
+                }
+            }
+            finally
+            {
+                // Для диагностики: если стрим отменён, сохраняем, сколько успели получить.
+                _ = previousText;
+            }
+
+            // Слив остаточной очереди (на случай гонки между isCompleted и Enqueue).
+            while (chunkQueue.TryDequeue(out string remaining))
+            {
+                if (!string.IsNullOrEmpty(remaining))
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, remaining);
+                }
             }
         }
 

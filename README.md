@@ -8,12 +8,55 @@
 
 **Living NPCs, procedural content, dynamic mechanics** — all driven by AI, right during gameplay.
 
-Engineered for both rapid integration by beginners and complex systemic design by industry veterans, CoreAI scales with your ambition. Build everything from intelligent dialogue assistants and deeply autonomous NPCs to the ultimate frontier of game development: living worlds with adaptive mechanics that evolve in real-time!
-> Imagine a game that adapts not just with numbers, but with logic and situations: different threats, different pacing, different world "character". CoreAI makes this a reality.
->
-> 🚀 **PROVEN ON SMALL MODELS:** All CoreAI PlayMode tests are fully verified and pass flawlessly on **Qwen3.5-4B** (running locally, with "Think" reasoning mode disabled). This proves you don't need expensive server APIs! CoreAI's robust orchestration and strict prompt engineering allow you to build incredibly smart, dynamic games with highly intelligent NPCs running entirely on consumer hardware.
+**One repo, two packages:** a portable C# core and a Unity layer with DI, chat UI, and tests. Whether you want a *demo running in five minutes* or a *multi-agent pipeline with tools and Lua*, the same building blocks apply.
 
-**Version:** v0.19.3 | **Prompt Optimization & Scene Setup**
+> **Why open this repo?** You get *agents that call your code*, *streaming that survives split tags*, *a chat panel in one click*, and optionally **`CoreAi.AskAsync("…")` from any script** — no DI homework required for your first feature.
+
+> 🚀 **Proven on small models:** many PlayMode scenarios pass on a local **Qwen3.5-4B** (e.g. with reasoning “Think” off). You are not forced into expensive cloud APIs to ship something that feels smart.
+
+**Version:** **v0.21.0** · `CoreAi` static API · orchestrator streaming · chat & streaming hardening
+
+[![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
+
+---
+
+## Contents
+
+| | Section |
+|---|---------|
+| [What’s new](#-whats-new-in-021) | 0.21 highlights |
+| [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
+| [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory |
+| [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
+| [Quick Start](#-quick-start) | NuGet, UPM, scene |
+| [Documentation](#-documentation) | Map of docs |
+| [Tests](#-tests) | EditMode & PlayMode |
+
+---
+
+## 🆕 What's new in 0.21
+
+- 🎯 **`CoreAi` static facade** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
+- 🌊 **Orchestrator streaming** — `IAiOrchestrationService.RunStreamingAsync` for token-by-token output with the same authority/queue/validation path as `RunTaskAsync` (see [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
+- 💬 **Chat UX** — multiline input + Shift+Enter / Enter behaviour fixed; typing indicator as animated dots; streaming visible through the full `ILlmClient` decorator chain.
+
+**Earlier 0.20.x (still in the box):** universal chat panel, HTTP + LLMUnity streaming, 3-layer streaming flags, one-click demo scene, broad EditMode coverage (Lua sandbox, tools, rate limit, filters).
+
+Full notes: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
+
+---
+
+## 🧭 Three ways in: UI · CoreAi · agents
+
+| You are building… | Start here | One line |
+|-------------------|------------|----------|
+| **In-game chat for players** | `CoreAI → Setup → Create Chat Demo Scene` + `CoreAiChatPanel` | Play and type |
+| **Any script, no DI yet** | `using CoreAI;` → `await CoreAi.AskAsync("…")` or `StreamAsync` | [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md) |
+| **Full agent + tools + orchestrator** | `AgentBuilder` + `IAiOrchestrationService` | [AGENT_BUILDER](Assets/CoreAI/Docs/AGENT_BUILDER.md) |
+
+All three paths share the same `CoreAILifetimeScope` and LLM backend when the scene is set up once.
 
 ---
 
@@ -39,6 +82,33 @@ merchant.Ask("Show me your swords", (response) => Debug.Log(response));
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
 
+### 💬 Drop-in Chat UI
+
+Add an NPC chat to any scene in minutes — no custom UI code required:
+
+```
+CoreAI → Setup → Create Chat Demo Scene
+```
+
+This generates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with a pre-wired `CoreAiChatPanel` (UI Toolkit + UXML/USS, dark theme by default), `CoreAiChatConfig_Demo.asset` and a fully configured `CoreAILifetimeScope` — press **Play** and chat.
+
+```csharp
+// Same stack as the panel — pick your style:
+await foreach (var chunk in CoreAi.StreamAsync("Hello", "PlayerChat"))
+    Debug.Log(chunk);
+
+// Or explicit service (e.g. from DI in tests):
+var service = CoreAiChatService.TryCreateFromScene();
+await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerChat"))
+    if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
+```
+
+**Streaming pipeline:** HTTP SSE **or** LLMUnity callback → stateful `ThinkBlockStreamFilter` (strips `<think>` blocks split across chunks) → typing indicator → bubble. Cancellation aborts the underlying `UnityWebRequest` for free.
+
+Docs: [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md)
+
+---
+
 ### ⏳ Powerful Lua Coroutine Execution
 Now CoreAI allows Lua scripts (like dynamically parsed world logic) to execute as asynchronous coroutines inside Unity:
 ```lua
@@ -48,7 +118,9 @@ while time_now() - start_time < 2.0 do
     coroutine.yield()
 end
 ```
-Automatically maps APIs like `time_delta()`, `time_scale()`, and hooks securely via an internal `InstructionLimitDebugger` budget that yields processing back to Unity so you can run heavy computations forever without freezes!---
+Automatically maps APIs like `time_delta()`, `time_scale()`, and hooks securely via an internal `InstructionLimitDebugger` budget that yields processing back to Unity so you can run heavy computations without freezing the main thread.
+
+---
 
 ### 🔧 AI Calls Tools (Function Calling)
 
@@ -279,18 +351,44 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ## 📚 Documentation
 
+Start from the index and pick the level that matches your goal:
+
+> 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — full documentation map (Beginner → Intermediate → Architecture).
+
+### Getting started
+
 | Document | What's inside |
 |----------|--------------|
-| 📖 [CoreAI README](Assets/CoreAI/README.md) | General overview + AgentBuilder |
-| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Agent builder guide + ChatHistory |
-| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Tool calling specification |
+| 🚀 [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md) | Install → open scene → connect LLM → Play |
+| 🚀 [QUICK_START_FULL.md](Assets/CoreAiUnity/Docs/QUICK_START_FULL.md) | Full 10-min walkthrough: LM Studio → Unity → first command |
+| 🎯 [COREAI_SINGLETON_API.md](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md) | **`CoreAi`** one-liners — beginners + pros |
+| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Build an NPC in 3 lines · modes · ready-made recipes |
+| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | Backends, models, timeout, streaming toggle |
+
+### Chat & streaming
+
+| Document | What's inside |
+|----------|--------------|
+| 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in `CoreAiChatPanel` + demo scene |
+| 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → filters → UI · orchestrator streaming |
+
+### Tools, memory, roles
+
+| Document | What's inside |
+|----------|--------------|
+| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Tool-calling specification |
 | 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC with inventory |
-| 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Agent memory system |
-| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, architecture |
-| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Agent roles and prompts |
-| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
-| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline architecture |
-| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | Version history |
+| 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Agent memory (disk + chat history) |
+| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Agent roles & prompts |
+
+### Architecture
+
+| Document | What's inside |
+|----------|--------------|
+| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, LLM→commands flow, PR checklist |
+| 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Normative spec: DI, threads, authority |
+| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
+| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) · [CHANGELOG (Unity)](Assets/CoreAiUnity/CHANGELOG.md) | Version history |
 
 ---
 
@@ -298,14 +396,11 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode — 215+ tests (fast, no LLM)
-  │   ├── CoreAISettingsAssetEditModeTests (7)
-  │   ├── AgentBuilderChatHistoryEditModeTests (7)
-  │   ├── OfflineLlmClientEditModeTests (5)
-  │   ├── MeaiLlmClientEditModeTests (4)
-  │   └── ... (other tests)
-  └── PlayMode — 12+ tests (with real LLM)
+  ├── EditMode — large fast suite (no real LLM): prompts, streaming, Lua sandbox, tools, rate limit, CoreAi facade, orchestrator streaming, …
+  └── PlayMode — integration tests with a configured HTTP or local GGUF backend
 ```
+
+Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for HTTP — see [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
 
 ---
 
@@ -328,4 +423,4 @@ Unity → Window → General → Test Runner
 
 ---
 
-> 🎮 **CoreAI** — Make your game smarter. One agent at a time.
+> 🎮 **CoreAI** — ship *playable* AI: one scene, one static call, or one agent — your call.

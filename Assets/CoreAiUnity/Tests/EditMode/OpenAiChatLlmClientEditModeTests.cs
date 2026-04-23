@@ -94,7 +94,8 @@ namespace CoreAI.Tests.EditMode
             OpenAiChatLlmClient client = new(settings);
 
             // Ожидаем ошибку подключения (Cannot resolve destination host или timeout)
-            LogAssert.Expect(LogType.Error,
+            // MeaiOpenAiChatClient логирует через LogWarning, MeaiLlmClient тоже Warning
+            LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(
                     ".*\\[Llm\\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error).*"));
             LogAssert.Expect(LogType.Warning,

@@ -35,6 +35,24 @@ namespace CoreAI.Composition
 
             builder.RegisterInstance<IAgentUserPromptTemplateProvider>(
                 new ChainedAgentUserPromptTemplateProvider(userChain));
+
+            // Применяем overrideUniversalPrefix из манифеста при старте контейнера
+            if (manifest != null)
+            {
+                builder.RegisterBuildCallback(container =>
+                {
+                    AgentMemoryPolicy policy = (AgentMemoryPolicy)container.Resolve(typeof(AgentMemoryPolicy));
+                    if (policy == null) return;
+
+                    foreach (AgentPromptsManifest.Entry entry in manifest.EnumerateEntries())
+                    {
+                        if (entry.overrideUniversalPrefix && !string.IsNullOrWhiteSpace(entry.roleId))
+                        {
+                            policy.SetOverrideUniversalPrefix(entry.roleId, true);
+                        }
+                    }
+                });
+            }
         }
     }
 }

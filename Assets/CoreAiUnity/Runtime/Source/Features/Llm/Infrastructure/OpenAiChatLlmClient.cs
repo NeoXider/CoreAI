@@ -46,6 +46,19 @@ namespace CoreAI.Infrastructure.Llm
             return _client.CompleteAsync(request, cancellationToken);
         }
 
+        /// <summary>
+        /// Делегирует реальный SSE-стриминг в <see cref="MeaiLlmClient.CompleteStreamingAsync"/>.
+        /// Без этого override'а default-реализация интерфейса сделала бы fallback к
+        /// <see cref="CompleteAsync"/> и выдала бы весь ответ одним чанком,
+        /// из-за чего streaming не был бы виден в UI.
+        /// </summary>
+        public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            return _client.CompleteStreamingAsync(request, cancellationToken);
+        }
+
         private sealed class HttpSettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;

@@ -211,6 +211,87 @@ namespace CoreAI.Infrastructure.Llm
             return result;
         }
 
+        /// <summary>
+        /// Стриминг ответа модели: возвращает чанки текста по мере генерации.
+        /// Не поддерживает tool calling (стриминг несовместим с multi-step MEAI tools).
+        /// <para>
+        /// Автоматически фильтрует <c>&lt;think&gt;...&lt;/think&gt;</c> блоки stateful-фильтром —
+        /// корректно работает, даже если тег разбит между чанками.
+        /// </para>
+        /// <para>
+        /// ВАЖНО: метод должен вызываться на главном потоке Unity (из coroutine, async void,
+        /// или UniTask). Оборачивание в <c>Task.Run</c> приведёт к исключению
+        /// "Create can only be called from the main thread" из-за создания
+        /// <c>UnityWebRequest</c>.
+        /// </para>
+        /// </summary>
+        public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
+            _currentRoleId = request.AgentRoleId ?? "Unknown";
+
+            List<MEAI.ChatMessage> chatMessages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.System, request.SystemPrompt ?? "")
+            };
+
+            if (request.ChatHistory != null && request.ChatHistory.Count > 0)
+            {
+                chatMessages.AddRange(request.ChatHistory);
+                if (!string.IsNullOrWhiteSpace(request.UserPayload))
+                {
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
+                }
+            }
+            else
+            {
+                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
+            }
+
+            MEAI.ChatOptions chatOptions = new()
+            {
+                Temperature = request.Temperature,
+                MaxOutputTokens = request.MaxOutputTokens
+            };
+
+            _logger.LogInfo(GameLogFeature.Llm,
+                $"MeaiLlmClient: Starting streaming with {chatMessages.Count} messages");
+
+            ThinkBlockStreamFilter thinkFilter = new();
+            System.Text.StringBuilder fullResponse = new();
+            int chunkCount = 0;
+
+            await foreach (MEAI.ChatResponseUpdate update in _innerClient
+                               .GetStreamingResponseAsync(chatMessages, chatOptions, cancellationToken))
+            {
+                string raw = update.Text;
+                if (string.IsNullOrEmpty(raw)) continue;
+
+                string visible = thinkFilter.ProcessChunk(raw);
+                if (string.IsNullOrEmpty(visible)) continue;
+
+                chunkCount++;
+                fullResponse.Append(visible);
+                yield return new LlmStreamChunk { Text = visible };
+            }
+
+            // Финальный буфер, если модель оборвала ответ с неполным тегом.
+            string tail = thinkFilter.Flush();
+            if (!string.IsNullOrEmpty(tail))
+            {
+                fullResponse.Append(tail);
+                yield return new LlmStreamChunk { Text = tail };
+            }
+
+            // Финальный чанк-маркер конца стрима.
+            yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+
+            _logger.LogInfo(GameLogFeature.Llm,
+                $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, total length={fullResponse.Length})");
+        }
+
         private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)
         {
             List<MEAI.AIFunction> result = new();

@@ -224,5 +224,120 @@ namespace CoreAI.Ai
 
             return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
         }
+
+        // ===== Дополнительные системные промпты (слой 3: AgentBuilder) =====
+        private readonly Dictionary<string, string> _additionalSystemPrompts = new();
+
+        // ===== Override Universal Prefix (per-role) =====
+        private readonly HashSet<string> _overrideUniversalPrefix = new();
+
+        // ===== Streaming override (per-role) =====
+        private readonly Dictionary<string, bool> _streamingOverrides = new();
+
+        /// <summary>
+        /// Установить дополнительный системный промпт для роли (из AgentBuilder).
+        /// Дополняется к базовому промпту из ManifestProvider/Resources.
+        /// </summary>
+        public void SetAdditionalSystemPrompt(string roleId, string prompt)
+        {
+            if (string.IsNullOrWhiteSpace(roleId)) return;
+            roleId = roleId.Trim();
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                _additionalSystemPrompts.Remove(roleId);
+            }
+            else
+            {
+                _additionalSystemPrompts[roleId] = prompt.Trim();
+            }
+        }
+
+        /// <summary>
+        /// Получить дополнительный системный промпт для роли (установленный через AgentBuilder).
+        /// </summary>
+        public bool TryGetAdditionalSystemPrompt(string roleId, out string prompt)
+        {
+            prompt = null;
+            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            return _additionalSystemPrompts.TryGetValue(roleId.Trim(), out prompt);
+        }
+
+        /// <summary>
+        /// Пометить роль как «переопределяющую universalPrefix».
+        /// Если true — universalPrefix из CoreAISettings НЕ будет применяться к этой роли.
+        /// Полезно когда нужен полностью кастомный системный промпт.
+        /// </summary>
+        public void SetOverrideUniversalPrefix(string roleId, bool shouldOverride)
+        {
+            if (string.IsNullOrWhiteSpace(roleId)) return;
+            roleId = roleId.Trim();
+
+            if (shouldOverride)
+                _overrideUniversalPrefix.Add(roleId);
+            else
+                _overrideUniversalPrefix.Remove(roleId);
+        }
+
+        /// <summary>
+        /// Проверить, переопределяет ли роль universalPrefix.
+        /// </summary>
+        public bool IsUniversalPrefixOverridden(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            return _overrideUniversalPrefix.Contains(roleId.Trim());
+        }
+
+        // ===== Streaming (per-role override) =====
+
+        /// <summary>
+        /// Задать per-role переопределение флага стриминга.
+        /// <paramref name="enabled"/> = null сбрасывает override — будет использован глобальный
+        /// <see cref="ICoreAISettings.EnableStreaming"/>.
+        /// </summary>
+        public void SetStreamingEnabled(string roleId, bool? enabled)
+        {
+            if (string.IsNullOrWhiteSpace(roleId)) return;
+            roleId = roleId.Trim();
+
+            if (enabled.HasValue)
+            {
+                _streamingOverrides[roleId] = enabled.Value;
+            }
+            else
+            {
+                _streamingOverrides.Remove(roleId);
+            }
+        }
+
+        /// <summary>
+        /// Получить per-role override флага стриминга, если он был задан.
+        /// </summary>
+        public bool TryGetStreamingOverride(string roleId, out bool enabled)
+        {
+            enabled = false;
+            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            return _streamingOverrides.TryGetValue(roleId.Trim(), out enabled);
+        }
+
+        /// <summary>
+        /// Вычислить эффективный флаг стриминга для роли.
+        /// Порядок приоритета: per-role override → <paramref name="globalFallback"/> →
+        /// <see cref="CoreAISettings.EnableStreaming"/> (глобальный статический прокси).
+        /// </summary>
+        public bool IsStreamingEnabled(string roleId, ICoreAISettings globalFallback = null)
+        {
+            if (TryGetStreamingOverride(roleId, out bool overriden))
+            {
+                return overriden;
+            }
+
+            if (globalFallback != null)
+            {
+                return globalFallback.EnableStreaming;
+            }
+
+            return CoreAISettings.EnableStreaming;
+        }
     }
 }

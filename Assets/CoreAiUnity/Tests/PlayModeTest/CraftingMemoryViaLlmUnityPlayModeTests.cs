@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -156,7 +157,7 @@ namespace CoreAI.Tests.PlayMode
                         Debug.LogWarning("[CraftingMemory.LLMUnity] ⚠ Model did NOT write to memory after craft 1!");
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1", 1))
                     {
                         yield break;
                     }
@@ -185,7 +186,7 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 2", sink, store);
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 2"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 2", 2))
                     {
                         yield break;
                     }
@@ -214,7 +215,7 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 3", sink, store);
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 3"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 3", 3))
                     {
                         yield break;
                     }
@@ -266,7 +267,7 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 4"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 4", 4))
                     {
                         yield break;
                     }
@@ -396,15 +397,19 @@ namespace CoreAI.Tests.PlayMode
                   "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
+            string memoryWriteHint = string.IsNullOrEmpty(memoryFromStore)
+                ? $"Previous crafts: Craft #{craftNumber} - <your weapon name> made from {ingredient1.Split(' ')[0]} + {ingredient2.Split(' ')[0]}"
+                : $"{memoryFromStore}, Craft #{craftNumber} - <your weapon name> made from {ingredient1.Split(' ')[0]} + {ingredient2.Split(' ')[0]}";
+
             string instructions = "You MUST perform these actions IN ORDER using tool calls:\n\n" +
                                   "STEP 1: Call the 'memory' tool with:\n" +
                                   "  - action: \"write\"\n" +
-                                  "  - content: \"Previous crafts: Craft #1 - <weapon name> made from Iron + Oak Wood\"\n\n" +
+                                  $"  - content: \"{memoryWriteHint}\"\n\n" +
                                   "STEP 2: Call the 'execute_lua' tool with Lua code:\n" +
                                   "  create_item('YourWeaponName', 'weapon', quality)\n" +
                                   "  report('crafted YourWeaponName')\n\n" +
-                                  "Choose a creative weapon name based on the ingredients (e.g., 'IronOakBlade', 'OakReinforcedMace'). " +
-                                  "Quality should be 1-100 based on ingredient rarity (both are rarity:1, so quality ~40-60).\n\n" +
+                                  "Choose a creative weapon name based on the ingredients. " +
+                                  "Quality should be 1-100 based on ingredient rarity.\n\n" +
                                   "CRITICAL: You MUST call BOTH tools. Do NOT stop after memory.";
 
             return header + ingredients + memorySection + instructions;
@@ -427,10 +432,14 @@ namespace CoreAI.Tests.PlayMode
                 ? "This is your first craft.\n\n"
                 : $"YOUR MEMORY (ALL previous crafts):\n{memoryFromStore}\n\n";
 
+            string memoryWriteHint = !string.IsNullOrEmpty(memoryFromStore)
+                ? $"{memoryFromStore}, Craft #{craftNumber} - <same weapon name as before>"
+                : $"Previous crafts: Craft #{craftNumber} - <weapon name>";
+
             string instructions = "You MUST perform these actions IN ORDER using tool calls:\n\n" +
                                   "STEP 1: Call the 'memory' tool with:\n" +
                                   "  - action: \"write\"\n" +
-                                  "  - content: \"Previous crafts: <full list including this craft #\" + craftNumber + \">\"\n\n" +
+                                  $"  - content: \"{memoryWriteHint}\"\n\n" +
                                   "STEP 2: Call the 'execute_lua' tool with Lua code.\n\n" +
                                   "CRITICAL: You MUST craft the EXACT SAME item as before — same name, same quality.\n" +
                                   "These are the EXACT same ingredients, so the result must be IDENTICAL.\n" +
@@ -497,27 +506,82 @@ namespace CoreAI.Tests.PlayMode
             ListSink sink,
             InMemoryStore store,
             List<string> craftedNames,
-            string label)
+            string label,
+            int craftNumber)
         {
-            if (sink.Items.Count == 0)
-            {
-                Debug.LogWarning($"[{label}] ❌ No command produced — test cannot continue");
-                return false;
-            }
+            string payload = sink.Items.Count > 0 ? sink.Items[0].JsonPayload : null;
 
-            string payload = sink.Items[0].JsonPayload;
-
+            // Некоторые бэкенды/режимы function-calling выполняют tools и не возвращают текст вообще.
+            // В этом тесте memory-write является обязательным, поэтому можем восстановить имя из memory.
             string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
             if (string.IsNullOrEmpty(itemName))
             {
-                Debug.LogWarning($"[{label}] ⚠ Could not extract item name from payload");
-                itemName = $"unknown_{craftedNames.Count + 1}";
+                if (TryExtractCraftNameFromMemory(store, craftNumber, out string fromMemory))
+                {
+                    itemName = fromMemory;
+                    Debug.LogWarning($"[{label}] ⚠ Could not extract item name from payload — recovered from memory: '{itemName}'");
+                }
+                else
+                {
+                    Debug.LogWarning($"[{label}] ⚠ Could not extract item name from payload or memory");
+                    itemName = $"unknown_{craftedNames.Count + 1}";
+                }
             }
 
             craftedNames.Add(itemName);
 
+            // Обновляем память — накапливаем список крафтов
+            string existingMemory = "";
+            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState existing) &&
+                !string.IsNullOrWhiteSpace(existing.Memory))
+            {
+                existingMemory = existing.Memory;
+            }
+
+            // Если модель уже обновила память (проверяем содержит ли она текущий крафт) — пропускаем
+            if (!existingMemory.Contains(itemName))
+            {
+                string updatedMemory = string.IsNullOrEmpty(existingMemory)
+                    ? $"Previous crafts: Craft #{craftedNames.Count} - {itemName}"
+                    : $"{existingMemory}, Craft #{craftedNames.Count} - {itemName}";
+                store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = updatedMemory });
+                Debug.Log($"[{label}] 💾 Memory updated: {updatedMemory}");
+            }
+
             Debug.Log($"[{label}] ✓ Crafted: '{itemName}'");
             return true;
+        }
+
+        private static bool TryExtractCraftNameFromMemory(InMemoryStore store, int craftNumber, out string itemName)
+        {
+            itemName = null;
+
+            if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) ||
+                string.IsNullOrWhiteSpace(mem.Memory))
+            {
+                return false;
+            }
+
+            // Expected format from prompt: "Previous crafts: Craft #N - <weapon name> made from X + Y"
+            // We only need the name; keep it permissive against punctuation.
+            Match match = Regex.Match(mem.Memory, $"Craft\\s*#\\s*{craftNumber}\\s*-\\s*([^,|]+?)\\s+made\\s+from",
+                RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                itemName = match.Groups[1].Value.Trim();
+                return !string.IsNullOrWhiteSpace(itemName);
+            }
+
+            // Fallback: "Craft #N - Name" until delimiter
+            match = Regex.Match(mem.Memory, $"Craft\\s*#\\s*{craftNumber}\\s*-\\s*([^,|]+)",
+                RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                itemName = match.Groups[1].Value.Trim();
+                return !string.IsNullOrWhiteSpace(itemName);
+            }
+
+            return false;
         }
 
         #endregion

@@ -1,0 +1,215 @@
+/* === CoreAI Universal Chat — Default Dark Theme === */
+
+.coreai-chat-container {
+    width: 500px;
+    height: 700px;
+    background-color: rgba(6, 14, 30, 0.93);
+    border-radius: 16px;
+    border-width: 2px;
+    border-color: rgba(17, 160, 181, 0.35);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+}
+
+/* Header */
+.coreai-chat-header {
+    height: 52px;
+    background-color: rgba(10, 22, 45, 0.95);
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(17, 160, 181, 0.3);
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.coreai-chat-header-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background-color: rgba(17, 160, 181, 0.25);
+    border-width: 1.5px;
+    border-color: rgba(77, 208, 225, 0.5);
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.coreai-chat-header-title {
+    color: rgb(77, 208, 225);
+    font-size: 15px;
+    -unity-font-style: bold;
+    letter-spacing: 2px;
+}
+
+/* Scroll area */
+.coreai-chat-scroll {
+    flex-grow: 1;
+    padding: 16px 14px;
+}
+
+/* Message rows */
+.coreai-message-row {
+    flex-direction: row;
+    margin-bottom: 14px;
+    align-items: flex-start;
+}
+
+.coreai-ai-row {
+    flex-direction: row;
+    justify-content: flex-start;
+}
+
+.coreai-user-row {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+}
+
+/* Avatars */
+.coreai-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    flex-shrink: 0;
+    border-width: 1.5px;
+}
+
+.coreai-ai-avatar {
+    background-color: rgba(17, 160, 181, 0.3);
+    border-color: rgba(77, 208, 225, 0.6);
+    margin-right: 10px;
+}
+
+.coreai-user-avatar {
+    background-color: rgba(0, 120, 215, 0.3);
+    border-color: rgba(0, 150, 255, 0.6);
+    margin-left: 10px;
+}
+
+/* Message bubbles */
+.coreai-chat-message {
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    white-space: normal;
+    color: rgb(220, 232, 240);
+    max-width: 380px;
+    border-width: 1px;
+    flex-shrink: 1;
+    -unity-paragraph-spacing: 4px;
+}
+
+.coreai-ai-message {
+    background-color: rgba(14, 30, 55, 0.85);
+    border-color: rgba(17, 160, 181, 0.25);
+    border-bottom-left-radius: 4px;
+}
+
+.coreai-user-message {
+    background-color: rgba(0, 90, 180, 0.45);
+    border-color: rgba(0, 120, 215, 0.6);
+    border-bottom-right-radius: 4px;
+}
+
+/* Streaming active indicator */
+.coreai-streaming-active {
+    border-color: rgba(77, 208, 225, 0.5);
+}
+
+/* Input area */
+.coreai-chat-input-container {
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 14px 16px 14px;
+    background-color: rgba(6, 14, 30, 0.97);
+    border-top-width: 1px;
+    border-top-color: rgba(17, 160, 181, 0.2);
+    border-bottom-left-radius: 14px;
+    border-bottom-right-radius: 14px;
+}
+
+.coreai-chat-input-field {
+    flex-grow: 1;
+    min-width: 0;
+    min-height: 40px;
+    max-height: 100px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: rgba(17, 160, 181, 0.35);
+    color: rgb(197, 220, 232);
+    padding: 8px 16px;
+    margin-right: 10px;
+    font-size: 14px;
+    white-space: normal;
+    overflow: hidden;
+}
+
+.coreai-chat-input-field > .unity-base-text-field__input {
+    background-color: transparent;
+    border-width: 0;
+    color: rgb(197, 220, 232);
+    -unity-text-align: middle-left;
+    font-size: 14px;
+}
+
+.coreai-chat-input-field:focus {
+    border-color: rgba(77, 208, 225, 0.7);
+}
+
+/* Send button */
+.coreai-chat-send-button {
+    width: 40px;
+    height: 40px;
+    background-color: rgba(17, 160, 181, 0.6);
+    color: white;
+    border-radius: 20px;
+    border-width: 0;
+    font-size: 18px;
+    -unity-font-style: bold;
+    flex-shrink: 0;
+    transition-duration: 0.15s;
+}
+
+.coreai-chat-send-button:hover {
+    background-color: rgba(77, 208, 225, 0.8);
+}
+
+.coreai-chat-send-button:active {
+    background-color: rgba(0, 120, 180, 0.8);
+}
+
+/* Scrollbar */
+.coreai-chat-scroll .unity-scroller--vertical {
+    width: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.coreai-chat-scroll:hover .unity-scroller--vertical {
+    opacity: 1;
+}
+
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__track {
+    background-color: transparent;
+}
+
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger {
+    background-color: rgba(77, 208, 225, 0.4);
+    border-radius: 2px;
+}
+
+/* Typing indicator */
+.coreai-typing-message {
+    color: rgba(77, 208, 225, 0.7);
+    font-size: 13px;
+    -unity-font-style: italic;
+    border-width: 0;
+    background-color: rgba(14, 30, 55, 0.5);
+    padding: 8px 14px;
+}

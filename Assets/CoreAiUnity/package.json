@@ -1,10 +1,10 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "0.19.4",
+  "version": "0.21.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool. Depends on com.nexoider.coreai 0.19.0+.",
+  "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API. Depends on com.nexoider.coreai 0.21.0+.",
   "dependencies": {
-    "com.nexoider.coreai": "0.19.3"
+    "com.nexoider.coreai": "0.21.0"
   }
 }

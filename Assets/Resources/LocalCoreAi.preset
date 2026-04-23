@@ -1,0 +1,194 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!181963792 &2655988077585873504
+Preset:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: LocalCoreAi
+  m_TargetType:
+    m_NativeTypeID: 114
+    m_ManagedTypePPtr: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
+    m_ManagedTypeFallback: 
+  m_Properties:
+  - target: {fileID: 0}
+    propertyPath: m_Enabled
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: m_EditorHideFlags
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: m_EditorClassIdentifier
+    value: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: backendType
+    value: 2
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: autoPriority
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: apiBaseUrl
+    value: http://192.168.1.154:1234/v1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: apiKey
+    value: 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
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: modelName
+    value: qwen/qwen3.6-27b
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: temperature
+    value: 0.1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: maxTokens
+    value: 2048
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: requestTimeoutSeconds
+    value: 240
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityAgentName
+    value: 
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: ggufModelPath
+    value: Qwen3.5-2B-Q4_K_M.gguf
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityDontDestroyOnLoad
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityStartupTimeoutSeconds
+    value: 120
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityStartupDelaySeconds
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityKeepAlive
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: enableReasoning
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityMaxConcurrentChats
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmUnityNumGPULayers
+    value: 99
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: universalSystemPromptPrefix
+    value: 'Respond concisely and to the point. Avoid unnecessary verbosity.
+
+'
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: maxLuaRepairRetries
+    value: 3
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: maxToolCallRetries
+    value: 3
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: allowDuplicateToolCalls
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: maxLlmRequestRetries
+    value: 2
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: contextWindowTokens
+    value: 8192
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: offlineUseCustomResponse
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: offlineCustomResponse
+    value: 'Offline mode: LLM unavailable'
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: offlineCustomResponseRoles
+    value: '*'
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: enableMeaiDebugLogging
+    value: 0
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: enableHttpDebugLogging
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logLlmInput
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logLlmOutput
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logTokenUsage
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logLlmLatency
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logLlmConnectionErrors
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logToolCalls
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logToolCallArguments
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logToolCallResults
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logMeaiToolCallingSteps
+    value: 1
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: llmRequestTimeoutSeconds
+    value: 15
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: maxConcurrentOrchestrations
+    value: 2
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: logOrchestrationMetrics
+    value: 0
+    objectReference: {fileID: 0}
+  m_ExcludedProperties: []
+  m_CoupledType:
+    m_NativeTypeID: 0
+    m_ManagedTypePPtr: {fileID: 0}
+    m_ManagedTypeFallback: 
+  m_CoupledProperties: []

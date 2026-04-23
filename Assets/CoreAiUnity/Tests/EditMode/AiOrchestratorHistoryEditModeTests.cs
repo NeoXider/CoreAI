@@ -93,6 +93,7 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCalls => false;
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
+            public bool EnableStreaming => true;
         }
 
         private sealed class NullSys : IAgentSystemPromptProvider

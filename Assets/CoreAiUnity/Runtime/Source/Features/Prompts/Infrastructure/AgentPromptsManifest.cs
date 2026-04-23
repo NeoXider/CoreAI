@@ -24,6 +24,13 @@ namespace CoreAI.Infrastructure.Prompts
             /// <summary>Шаблон пользовательского сообщения; плейсхолдеры: wave, mode, party, hint.</summary>
             [Tooltip("Шаблон user-сообщения для оркестратора; плейсхолдеры: {wave},{mode},{party},{hint}")]
             public TextAsset userPromptTemplate;
+
+            /// <summary>
+            /// Если true — universalSystemPromptPrefix из CoreAISettings НЕ применяется к этой роли.
+            /// Полезно когда роли нужен полностью кастомный промпт без общих правил.
+            /// </summary>
+            [Tooltip("Отключить universalSystemPromptPrefix для этой роли (полностью кастомный промпт).")]
+            public bool overrideUniversalPrefix;
         }
 
         /// <summary>Переопределения встроенных ролей CoreAI.</summary>

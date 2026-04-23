@@ -142,6 +142,94 @@ namespace CoreAI.Tests.EditMode
 
         #endregion
 
+        #region Rate Limiter Tests
+
+        [Test]
+        public async Task RateLimit_ExceededInWindow_ReturnsRateLimitedError()
+        {
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            // Лимит 2 запроса в окне 60 секунд
+            InGameLlmChatService service = new(llm, prompts, 24,
+                maxRequestsPerWindow: 2,
+                rateLimitWindowSeconds: 60);
+
+            LlmCompletionResult r1 = await service.SendPlayerMessageAsync("msg1");
+            LlmCompletionResult r2 = await service.SendPlayerMessageAsync("msg2");
+            LlmCompletionResult r3 = await service.SendPlayerMessageAsync("msg3");
+
+            Assert.IsTrue(r1.Ok);
+            Assert.IsTrue(r2.Ok);
+            Assert.IsFalse(r3.Ok, "Третий запрос должен быть отклонён rate limiter'ом");
+            StringAssert.StartsWith("rate_limited", r3.Error,
+                "Ошибка должна содержать 'rate_limited' префикс");
+            Assert.AreEqual(2, llm.CallCount,
+                "LLM не должен вызываться при срабатывании rate limiter'а");
+        }
+
+        [Test]
+        public async Task RateLimit_ZeroLimit_DisablesLimiter()
+        {
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts, 24,
+                maxRequestsPerWindow: 0,
+                rateLimitWindowSeconds: 60);
+
+            for (int i = 0; i < 20; i++)
+            {
+                LlmCompletionResult r = await service.SendPlayerMessageAsync("msg" + i);
+                Assert.IsTrue(r.Ok, $"Запрос {i} должен пройти, когда лимит = 0");
+            }
+
+            Assert.AreEqual(20, llm.CallCount);
+        }
+
+        [Test]
+        public async Task RateLimit_RejectedRequest_DoesNotAddToHistory()
+        {
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            InGameLlmChatService service = new(llm, prompts, 24,
+                maxRequestsPerWindow: 1,
+                rateLimitWindowSeconds: 60);
+
+            await service.SendPlayerMessageAsync("first");
+            Assert.AreEqual(1, service.HistoryPairCount);
+
+            LlmCompletionResult rejected = await service.SendPlayerMessageAsync("second");
+            Assert.IsFalse(rejected.Ok);
+
+            // История не должна расти, т.к. второй запрос отклонён
+            Assert.AreEqual(1, service.HistoryPairCount,
+                "Отклонённый rate limiter'ом запрос не должен попадать в историю");
+        }
+
+        [Test]
+        public async Task RateLimit_ShortWindow_SlidesAndUnblocks()
+        {
+            StubLlmClient llm = new("reply");
+            StubPromptProvider prompts = new("system");
+            // 1 запрос в окне 1 секунда — слишком жёстко, но для теста скользящего окна достаточно
+            InGameLlmChatService service = new(llm, prompts, 24,
+                maxRequestsPerWindow: 1,
+                rateLimitWindowSeconds: 1);
+
+            LlmCompletionResult first = await service.SendPlayerMessageAsync("msg1");
+            LlmCompletionResult blocked = await service.SendPlayerMessageAsync("msg2");
+
+            Assert.IsTrue(first.Ok);
+            Assert.IsFalse(blocked.Ok);
+
+            // Ждём больше окна, чтобы timestamp выпал из sliding window
+            await Task.Delay(1200);
+
+            LlmCompletionResult allowed = await service.SendPlayerMessageAsync("msg3");
+            Assert.IsTrue(allowed.Ok, "После истечения окна запрос снова проходит");
+        }
+
+        #endregion
+
         #region System Prompt Tests
 
         [Test]

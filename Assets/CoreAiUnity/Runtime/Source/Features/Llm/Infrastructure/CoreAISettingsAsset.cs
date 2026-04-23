@@ -149,7 +149,7 @@ namespace CoreAI.Infrastructure.Llm
             "Универсальный стартовый промпт — идёт ПЕРЕД промптом каждого агента. Задаёт общие правила для всех моделей.")]
         [TextArea(3, 6)]
         [SerializeField]
-        private string universalSystemPromptPrefix = "";
+        private string universalSystemPromptPrefix = "Respond concisely and to the point. Avoid unnecessary verbosity.";
 
         [Tooltip(
             "Максимум подряд неудачных Lua repair до прерывания повторов Programmer. Счётчик сбрасывается при успехе.")]
@@ -173,6 +173,12 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip("Контекстное окно по умолчанию (токены).")] [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
+
+        [Tooltip(
+            "Глобальное включение стриминга ответов LLM (SSE для HTTP API, callback для LLMUnity). " +
+            "Можно переопределить на уровне роли через AgentBuilder.WithStreaming() или на уровне UI через CoreAiChatConfig.EnableStreaming.")]
+        [SerializeField]
+        private bool enableStreaming = true;
 
         [Header("🔌 Offline режим (без LLM)")]
         [Tooltip("Возвращать кастомный текст вместо заглушки по ролям.")]
@@ -378,6 +384,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Контекстное окно.</summary>
         public int ContextWindowTokens => contextWindowTokens < 256 ? 8192 : contextWindowTokens;
+
+        /// <summary>Глобальное включение стриминга ответов LLM (по умолчанию true).</summary>
+        public bool EnableStreaming => enableStreaming;
 
         // Отладка
         /// <summary>MEAI debug logging.</summary>

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -133,6 +136,178 @@ namespace CoreAI.Infrastructure.Llm
                 $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
 
             return result;
+        }
+
+        /// <summary>
+        /// Декорированный стриминг: пробрасывает чанки наружу как есть (чтобы UI
+        /// видел токены по мере поступления), но параллельно накапливает превью
+        /// ответа для финального лога. Таймаут из <c>_requestTimeoutSeconds</c>
+        /// применяется ко всему стриму.
+        /// </summary>
+        /// <remarks>
+        /// Без этого override'а default-реализация <see cref="ILlmClient.CompleteStreamingAsync"/>
+        /// делала fallback к <see cref="CompleteAsync"/> и выдавала весь ответ одним
+        /// чанком в конце генерации — стриминг в UI не был виден.
+        /// </remarks>
+        public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (request == null)
+            {
+                _logger.LogWarning(GameLogFeature.Llm, $"LLM stream | backend={_backendLabel} | request=null");
+                yield return new LlmStreamChunk { IsDone = true, Error = "LlmCompletionRequest is null" };
+                yield break;
+            }
+
+            if (_inner is RoutingLlmClient routing)
+            {
+                routing.PreflightAnnotate(request);
+            }
+
+            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "—" : request.TraceId.Trim();
+            string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
+                ? "(роль не задана)"
+                : request.AgentRoleId.Trim();
+            string backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
+                ? _backendLabel
+                : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
+
+            _logger.LogInfo(GameLogFeature.Llm,
+                $"LLM ▶ (stream) traceId={trace} role={role} backend={backendLine}\n" +
+                $"  system ({(request.SystemPrompt ?? "").Length} симв.): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
+                $"  user ({(request.UserPayload ?? "").Length} симв.): {Preview(request.UserPayload, UserPreviewChars)}");
+
+            Stopwatch sw = Stopwatch.StartNew();
+            StringBuilder accumulated = new();
+            int chunkCount = 0;
+            int? promptTokens = null;
+            int? completionTokens = null;
+            int? totalTokens = null;
+            string terminalError = null;
+
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (_requestTimeoutSeconds > 0f)
+            {
+                linked.CancelAfter(TimeSpan.FromSeconds(_requestTimeoutSeconds));
+            }
+
+            IAsyncEnumerator<LlmStreamChunk> enumerator = null;
+            string initError = null;
+            try
+            {
+                enumerator = _inner.CompleteStreamingAsync(request, linked.Token).GetAsyncEnumerator(linked.Token);
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                initError = ex.Message;
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}");
+            }
+
+            if (initError != null)
+            {
+                yield return new LlmStreamChunk { IsDone = true, Error = initError };
+                yield break;
+            }
+
+            try
+            {
+                while (true)
+                {
+                    bool hasNext;
+                    LlmStreamChunk current = null;
+                    bool failedWithTimeout = false;
+                    bool failedWithException = false;
+                    string exceptionMessage = null;
+
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                        current = hasNext ? enumerator.Current : null;
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        failedWithTimeout = true;
+                        hasNext = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedWithException = true;
+                        exceptionMessage = ex.Message;
+                        hasNext = false;
+                    }
+
+                    if (failedWithTimeout)
+                    {
+                        terminalError = $"LLM stream timeout ({_requestTimeoutSeconds}s)";
+                        yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
+                        yield break;
+                    }
+
+                    if (failedWithException)
+                    {
+                        terminalError = exceptionMessage;
+                        yield return new LlmStreamChunk { IsDone = true, Error = exceptionMessage };
+                        yield break;
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+
+                    if (current != null && !string.IsNullOrEmpty(current.Text))
+                    {
+                        accumulated.Append(current.Text);
+                        chunkCount++;
+                    }
+
+                    if (current != null)
+                    {
+                        if (current.PromptTokens.HasValue) promptTokens = current.PromptTokens;
+                        if (current.CompletionTokens.HasValue) completionTokens = current.CompletionTokens;
+                        if (current.TotalTokens.HasValue) totalTokens = current.TotalTokens;
+                        if (!string.IsNullOrEmpty(current.Error)) terminalError = current.Error;
+                    }
+
+                    yield return current;
+                }
+            }
+            finally
+            {
+                sw.Stop();
+                if (enumerator != null)
+                {
+                    try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* swallow */ }
+                }
+
+                double wallMs = sw.Elapsed.TotalMilliseconds;
+                string content = accumulated.ToString();
+                LlmCompletionResult synthetic = new()
+                {
+                    Ok = string.IsNullOrEmpty(terminalError),
+                    Content = content,
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                    TotalTokens = totalTokens,
+                    Error = terminalError ?? ""
+                };
+                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length);
+
+                if (!string.IsNullOrEmpty(terminalError))
+                {
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}");
+                }
+                else
+                {
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}\n" +
+                        $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
+                }
+            }
         }
 
         private static string FormatTokenLine(LlmCompletionResult result, double wallMs, int outChars)

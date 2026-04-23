@@ -1,6 +1,7 @@
 #if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
@@ -57,6 +58,18 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             return _client.CompleteAsync(request, cancellationToken);
+        }
+
+        /// <summary>
+        /// Делегирует стриминг в <see cref="MeaiLlmClient.CompleteStreamingAsync"/>, который
+        /// использует LLMUnity callback для дельт. Без этого override'а default-реализация
+        /// интерфейса выдавала бы весь ответ одним чанком только после завершения генерации.
+        /// </summary>
+        public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            return _client.CompleteStreamingAsync(request, cancellationToken);
         }
     }
 }

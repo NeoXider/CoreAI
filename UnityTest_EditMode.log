@@ -1,0 +1,26 @@
+[Licensing::Module] Trying to connect to existing licensing client channel...
+Built from '6000.3/staging' branch; Version is '6000.3.8f1 (1c7db571dde0) revision 1867189'; Using compiler version '194234433'; Build Type 'Release'
+[Licensing::IpcConnector] Successfully connected to: "LicenseClient-Victor" at "2026-04-23T09:35:43.4521484Z"
+OS: 'Windows 11  (10.0.26200) Core' Language: 'en' Physical Memory: 15688 MB
+BatchMode: 1, IsHumanControllingUs: 0, StartBugReporterOnCrash: 0, Is64bit: 1
+System  architecture: x64
+Process architecture: x64
+Date: 2026-04-23T09:35:43Z
+
+COMMAND LINE ARGUMENTS:
+C:\Program Files\Unity\Hub\Editor\6000.3.8f1\Editor\Unity.exe
+-batchmode
+-nographics
+-quit
+-projectPath
+D:\GIT\CoreAI
+-runTests
+-testPlatform
+EditMode
+-testResults
+D:\GIT\CoreAI\TestResults_EditMode.xml
+-logFile
+D:\GIT\CoreAI\UnityTest_EditMode.log
+Successfully changed project path to: D:\GIT\CoreAI
+D:/GIT/CoreAI
+Exiting without the bug reporter. Application will terminate with return code 1

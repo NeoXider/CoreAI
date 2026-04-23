@@ -56,5 +56,14 @@ namespace CoreAI
         /// <summary>Разрешить агенту вызывать один и тот же инструмент с теми же аргументами подряд. 
         /// Если отключено - защищает от зацикливания, но мешает выполнять одно действие много раз.</summary>
         bool AllowDuplicateToolCalls { get; }
+
+        /// <summary>
+        /// Глобальное включение стриминга ответов LLM (SSE для HTTP, callback для LLMUnity).
+        /// Может быть переопределено на уровне роли через <c>AgentBuilder.WithStreaming()</c>
+        /// или <c>AgentMemoryPolicy.SetStreamingEnabled()</c>, а также на уровне UI
+        /// через <c>CoreAiChatConfig.EnableStreaming</c>.
+        /// По умолчанию: true.
+        /// </summary>
+        bool EnableStreaming { get; }
     }
 }

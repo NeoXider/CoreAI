@@ -37,6 +37,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(8192, settings.ContextWindowTokens);
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
+            Assert.AreEqual(true, settings.EnableStreaming, "Стриминг включён по умолчанию");
             Assert.AreEqual(false, settings.OfflineUseCustomResponse);
             Assert.AreEqual("Offline mode: LLM unavailable", settings.OfflineCustomResponse);
             Assert.AreEqual("*", settings.OfflineCustomResponseRoles);

@@ -1,52 +1,102 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-04-09 | **Текущая версия:** v0.16.1
+**Обновлено:** 2026-04-23 | **Текущая версия:** v0.20.2
 
 ## 🎯 ПРИОРИТЕТНЫЕ ЗАДАЧИ
 
-### ✅ Сделано (Недавнее)
-- [x] SceneLlmTool — встроен инструмент Runtime инспекции сцен и манипуляций (find_objects, get_hierarchy, get_transform, set_transform).
-- [x] CameraLlmTool — инструмент получения Base64 JPEG снимков (render texture snapshot) прямо в PlayMode.
-- [x] Защита от реентерабельных дедлоков Unity Thread Context в MEAI pipeline (через Task.Yield).
-- [x] Поддержка конфигурации `numGPULayers` для значительного ускорения LLMUnity в PlayMode тестах.
-- [x] Умная защита от застревания в циклах: детектирование дубликатов `tool_call` в `SmartToolCallingChatClient` и блокировка бесконечных петель при галлюцинациях модели.
-- [x] Robust Tool Parsing — защита парсера JSON от забытых бэктиков у модели и обрезка тегов размышления `<think>`.
-- [x] Общая стабилизация тестов: обработка ошибок синтаксиса Lua без фейлов Unity Test Runner (возврат `[Error]` обратно в модель для авто-восстановления).
+### ✅ Сделано (Недавнее — v0.20.x)
+
+- [x] **Streaming End-to-End** — работает для обоих бэкендов (HTTP API через SSE и LLMUnity через callback). Единый `ThinkBlockStreamFilter` (state-machine) корректно обрабатывает `<think>`/`</think>` разбитые между чанками. Правильная отмена через `webReq.Abort()` при `CancellationToken`.
+- [x] **Streaming config hierarchy** — 3 слоя: UI (`CoreAiChatConfig.EnableStreaming`) → per-agent (`AgentBuilder.WithStreaming`, `AgentMemoryPolicy.SetStreamingEnabled`) → global (`CoreAISettings.EnableStreaming`).
+- [x] **Universal Chat Module** — `CoreAiChatPanel` + `CoreAiChatService` + `CoreAiChatConfig` (ScriptableObject) + UXML/USS + авто-создание демо-сцены через меню `CoreAI → Setup → Create Chat Demo Scene`.
+- [x] **SceneLlmTool / CameraLlmTool** — инспекция сцен, снимки камеры в PlayMode.
+- [x] **Защита от реентерабельных дедлоков Unity Thread Context** в MEAI pipeline (через `Task.Yield()`).
+- [x] **Умная защита от застревания** — `SmartToolCallingChatClient`: детектирование дубликатов `tool_call`, блокировка бесконечных петель.
+- [x] **Robust Tool Parsing** — защита парсера JSON от забытых бэктиков, обрезка `<think>` тегов.
 
 ### Инфраструктура и Архитектура
+
 - [x] Заменить статический god-object `CoreAISettings` на DI-интерфейс `ICoreAISettings` → MemoryTool, InventoryTool, GameConfigTool, AgentBuilder, BuiltInAgentSystemPromptTexts мигрированы
 - [x] Реализовать боевые метрики оркестрации → `InMemoryAiOrchestrationMetrics` (per-role, latency, health)
-- [x] Добавить Dashboard для просмотра метрик (Alerting: «LLM не отвечает 5 минут») → `OrchestrationDashboard` (OnGUI overlay, F9 toggle)
-- [x] Реализовать версионирование системных промптов → `IPromptVersionRegistry` + `InMemoryPromptVersionRegistry` (history, rollback, A/B variants)
-- [x] Добавить Rate limiting (защиту от спама) для InGameLlmChatService → sliding-window rate limiter (10 req/60s default)
+- [x] Dashboard для метрик (`OrchestrationDashboard`, F9 toggle)
+- [x] Версионирование системных промптов → `IPromptVersionRegistry` (history, rollback, A/B variants)
+- [x] Rate limiting для `InGameLlmChatService` → sliding-window (10 req/60s default)
 
-### WorldCommand Executor (Расширение интеграции с Unity)
+### WorldCommand Executor
+
 - [x] Анимации: `play_animation`, `stop_animation`
 - [x] Звуки: `play_sound`, `set_volume`
-- [x] UI команды: `show_text`, `hide_panel`, `update_score`
+- [x] UI: `show_text`, `hide_panel`, `update_score`
 - [x] Физика: `apply_force`, `set_velocity`
-- [x] Валидация параметров (защита от спавна объектов в стенах) → `ValidateSpawnPosition` via Physics.OverlapSphere
+- [x] Валидация параметров (`ValidateSpawnPosition` via `Physics.OverlapSphere`)
 
 ### Продвинутые Инструменты Агентов
+
 - [ ] `CraftingTool` — специализированная функция для расчёта крафта для CoreMechanicAI
-- [x] `CompatibilityChecker` — проверка совместимости ингредиентов (поддержка правил на 2/3/4+ элементов, группы, кастомные валидаторы)
-- [x] JSON schema validation (`JsonSchemaValidator`) для строгих ответов CoreMechanicAI (типы, диапазоны, enum значения)
-- [x] `CompatibilityLlmTool` — LLM tool wrapper для проверки совместимости через function calling
+- [x] `CompatibilityChecker` — проверка совместимости ингредиентов
+- [x] `JsonSchemaValidator` для CoreMechanicAI
+- [x] `CompatibilityLlmTool` — LLM tool wrapper
 
 ### Multi-Agent Orchestration v2.0
-- [ ] Автоматизированный `MultiAgentWorkflow` (чтобы агенты могли сами вызывать pipeline сабагентов, как в Claude Agent SDK)
-- [ ] Передача результатов между суб-агентами без вызова из главного потока (tool_result)
+
+- [ ] Автоматизированный `MultiAgentWorkflow` (агенты сами вызывают pipeline сабагентов, как в Claude Agent SDK)
+- [ ] Передача результатов между суб-агентами без главного потока (tool_result)
 - [ ] Условная логика вызова (если качество > 80, вызвать Programmer)
 - [ ] Параллельное исполнение задач несколькими агентами
 
-### Тесты
-- [x] `QueuedAiOrchestrator` — тест приоритета: задача с Priority=10 выполняется раньше Priority=1
-- [x] `QueuedAiOrchestrator` — тест CancellationScope: повторный запрос с тем же scope отменяет предыдущий
-- [x] `QueuedAiOrchestrator` — тест MaxConcurrent: не более N задач одновременно
+---
 
-### Документация и Примеры
-- [x] Диаграмма: «Как команда от игрока проходит через всю систему» → [COMMAND_FLOW_DIAGRAM.md](Assets/CoreAiUnity/Docs/COMMAND_FLOW_DIAGRAM.md)
-- [x] Описание формата JSON команд для каждой роли → [JSON_COMMAND_FORMAT.md](Assets/CoreAiUnity/Docs/JSON_COMMAND_FORMAT.md)
-- [x] Troubleshooting guide: «Модель не отвечает», «Lua упала», «Память не пишется» → [TROUBLESHOOTING.md](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md)
-- [x] Quick Start: «Запуск LM Studio → запуск сцены → отправка команды» → [QUICK_START_FULL.md](Assets/CoreAiUnity/Docs/QUICK_START_FULL.md)
-- [x] Примеры: создание врага, крафт оружия, auto-repair кода → [EXAMPLES.md](Assets/CoreAiUnity/Docs/EXAMPLES.md)
-- [x] Подготовка видео/GIF демо работы системы → [DEMO_RECORDING_GUIDE.md](Assets/CoreAiUnity/Docs/DEMO_RECORDING_GUIDE.md)
+## 🔍 НАЙДЕНО ПРИ АУДИТЕ (v0.20.2)
+
+### 🛡️ Sandbox / Защиты / Безопасность
+
+- [ ] **`LuaCoroutineHandle.Kill()` не прерывает корутину по-настоящему** — сейчас внутри пустые `try {} catch {}` блоки, только выставляется `_disposed = true`. Если корутина уже выполняется в `Resume()` на другом стеке (не наш случай, но всё же), Kill не сработает. Нужно либо удалить мёртвый код, либо реально прервать через `ScriptRuntimeException` в debugger. Покрыто тестом `Kill_MarksHandleDisposed`, но реализация требует чистки.
+- [ ] **`SecureLuaEnvironment.CreateScript`** дважды цепляет `InstructionLimitDebugger` — сначала сам, потом `RunChunk → LuaExecutionGuard.Execute` цепляет ещё один и снимает его в finally. Нижний debugger уже сброшен. Это не баг (работает), но архитектурно неочевидно. Рефакторинг: вынести attach/detach целиком в `LuaExecutionGuard` или в `SecureLuaEnvironment.RunChunk`.
+- [ ] **Sandbox-тесты на побег через метатаблицы** — добавлен базовый тест на `getmetatable('')`, но не проверены другие векторы: `string.dump`, `coroutine.close`, `collectgarbage("count")` как timing-oracle, доступ к `_G` через `_ENV`. Нужна отдельная suite `LuaSandboxEscapeTests`.
+- [ ] **Нет таймаута по длине ответа модели** — если модель льёт бесконечный стрим, `IAsyncEnumerable` ничем не ограничен. Добавить `maxResponseTokens` / `maxResponseChars` с пробросом `CancellationToken` при превышении.
+
+### 🛠️ Tool Calling
+
+- [ ] **`SmartToolCallingChatClient.GetStreamingResponseAsync` — просто проксирует** `_innerClient.GetStreamingResponseAsync` без tool-calling loop, duplicate detection и consecutive-error защиты. Для стриминговых ответов защита от зацикливания ВЫКЛЮЧЕНА. Нужно либо реализовать streaming tool-calling (MEAI это поддерживает через `StreamingResponseUpdate.Contents`), либо явно документировать ограничение и форсить non-streaming при наличии тулов.
+- [ ] **`SmartToolCallingChatClient` определение успеха** — сейчас `string.Contains("\"Success\":false")`. Это бьётся на тулах, где в **аргументах** пользователь случайно попросил поиск строки `Success:false`, или когда результат содержит экранированный JSON. Нужен честный JSON parse (уже используется `Newtonsoft.Json` — можно попробовать `JObject.Parse().Value<bool>("Success")`).
+- [ ] **Tool result truncation** — длинные результаты тулов (например `get_hierarchy` в большой сцене) могут переполнить context window. Добавить `maxToolResultChars` с мягким truncation и префиксом `[...truncated]`.
+- [ ] **Tool timeout** — отдельный инструмент не имеет таймаута (пустой `CancellationToken` пробрасывается). Нужен per-tool timeout (`[LlmTool(TimeoutMs=5000)]`), особенно для внешних HTTP-вызовов.
+- [ ] **Tool-level AllowDuplicates** — работает только для проверки дубликатов, но не для tool-specific retry policy. Полезно было бы добавить `MaxConsecutiveErrors` на тул.
+
+### 🌀 Lua Runtime (async + coroutines)
+
+- [ ] **`LuaCoroutineRunner` нет лимита на количество корутин** — бесконечно растущий `_handles` при багах LLM (каждый Lua envelope создаёт корутину). Добавить `MaxActiveCoroutines = 64` с отклонением регистрации сверх лимита.
+- [ ] **Нет async-API для Lua** — из Lua нельзя дождаться async-операций C# (например, `await llm.complete(...)` из тула). Сейчас приходится делать polling через `coroutine.yield()` + проверку `is_ready()`. Желательно: `LuaAsyncBridge` с `await_task(task_id)` через Promise-семантику.
+- [ ] **Нет rate limit на создание Lua-скриптов** — Programmer может создать 1000 скриптов в секунду при зацикливании. Добавить sliding-window limiter на уровне `LuaAiEnvelopeProcessor`.
+- [ ] **Repair loop на CoreMechanicAI** — сейчас только Programmer триггерит `ScheduleProgrammerRepair`. Для ошибок Lua у CoreMechanicAI (когда он пытается выполнить формулу крафта, а она падает) нужно либо расширить поддержку, либо явно направлять в Programmer.
+
+### ⚡ Performance / Ресурсы
+
+- [ ] **Нет metrics для rate limiter'а** — сколько запросов было отклонено за последние N минут? Нужен `IRateLimiterMetrics` и отображение в `OrchestrationDashboard`.
+- [ ] **`InGameLlmChatService._lock` — coarse-grained** — блокирует и rate limiter, и историю. При пиковой нагрузке это может стать bottleneck. Разделить на `_rateLock` и `_historyLock`.
+- [ ] **Tool call history никогда не очищается** — `SmartToolCallingChatClient.executedSignatures` живёт только внутри одного `GetResponseAsync`, но `messages` в длинной сессии растёт (каждый вызов добавляет 2 сообщения). Добавить truncation старых tool calls через N раундов.
+
+### 🧪 Тесты
+
+- [x] **`SecureLuaSandboxEditModeTests`** — явные проверки вырезания `io`, `os`, `debug`, `load`, `loadfile`, `dofile`, `require`; `LuaExecutionGuard` (timeout / max steps / fast code / non-function arg); `LuaCoroutineHandle` (Resume, Kill, `ObjectDisposedException`, `budgetPerResume`).
+- [x] **`LuaToolEditModeTests`** — `LuaTool.ExecuteAsync` (success, empty, null, throws, cancellation), `CreateAIFunction`, валидация `null`-аргументов, `LuaLlmTool` metadata.
+- [x] **`SmartToolCallingChatClientEditModeTests`** — duplicate detection (`allowDuplicateToolCalls=false`), per-tool `AllowDuplicates=true` override, tool not found, tool throws exception.
+- [x] **`InGameLlmChatServiceEditModeTests`** — rate limiter: превышение окна, `maxRequestsPerWindow=0`, отклонённый запрос не попадает в историю, скольжение окна.
+- [x] **`ThinkBlockStreamFilterEditModeTests`** — полное покрытие production-класса.
+- [x] **`CoreAiChatServiceEditModeTests`** — 3-слойная иерархия streaming, SmartSend.
+- [ ] **`SmartToolCallingStreamingTests`** — когда реализуется streaming tool-calling (пункт выше).
+- [ ] **`LuaSandboxEscapeTests`** — попытки побега из sandbox через метатаблицы / `string.dump` / rebind `_G`.
+- [ ] **`MultiAgentWorkflowEndToEndTests`** — когда реализуется v2.0.
+- [ ] **`ToolTimeoutTests`** — когда появится per-tool timeout.
+- [x] `QueuedAiOrchestrator` — приоритет, CancellationScope, MaxConcurrent.
+
+### 📚 Документация
+
+- [x] `COMMAND_FLOW_DIAGRAM.md` (как команда игрока проходит через систему)
+- [x] `JSON_COMMAND_FORMAT.md` (формат JSON команд для каждой роли)
+- [x] `TROUBLESHOOTING.md` (модель не отвечает, Lua упала, память не пишется)
+- [x] `QUICK_START_FULL.md` (LM Studio → сцена → команда)
+- [x] `EXAMPLES.md` (враги, крафт, auto-repair)
+- [x] `DEMO_RECORDING_GUIDE.md`
+- [ ] **`STREAMING_ARCHITECTURE.md`** — описание SSE → `ThinkBlockStreamFilter` → `CoreAiChatPanel` pipeline, 3-слойная иерархия конфигурации, известные ограничения (streaming без tool-calling loop).
+- [ ] **`LUA_SANDBOX_SECURITY.md`** — что вырезано, какие защиты есть (steps / timeout), известные векторы атак, best practices для `LuaApiRegistry`.
+- [ ] **`TOOL_CALLING_BEST_PRACTICES.md`** — как делать идемпотентные тулы, когда ставить `AllowDuplicates=true`, как правильно возвращать ошибки.

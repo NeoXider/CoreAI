@@ -7,6 +7,10 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Сборка системного промпта через <see cref="IAgentSystemPromptProvider"/> и user через шаблон или дефолт.
+    /// 3-слойная архитектура системного промпта:
+    ///   Слой 1: universalSystemPromptPrefix (общие правила для ВСЕХ агентов)
+    ///   Слой 2: базовый промпт из Manifest/Resources (.txt файлы)
+    ///   Слой 3: дополнительный промпт из AgentBuilder (через AgentMemoryPolicy)
     /// </summary>
     public sealed class AiPromptComposer
     {
@@ -14,29 +18,78 @@ namespace CoreAI.Ai
         private readonly IAgentUserPromptTemplateProvider _userTemplates;
         private readonly ILuaScriptVersionStore _luaScriptVersions;
         private readonly IDataOverlayVersionStore _dataOverlayVersions;
+        private readonly AgentMemoryPolicy _memoryPolicy;
+        private readonly ICoreAISettings _settings;
 
         /// <summary>Создаёт композер с цепочкой провайдеров промптов из DI.</summary>
         public AiPromptComposer(
             IAgentSystemPromptProvider systemPrompts,
             IAgentUserPromptTemplateProvider userTemplates,
             ILuaScriptVersionStore luaScriptVersions,
-            IDataOverlayVersionStore dataOverlayVersions = null)
+            IDataOverlayVersionStore dataOverlayVersions = null,
+            AgentMemoryPolicy memoryPolicy = null,
+            ICoreAISettings settings = null)
         {
             _systemPrompts = systemPrompts;
             _userTemplates = userTemplates;
             _luaScriptVersions = luaScriptVersions ?? new NullLuaScriptVersionStore();
             _dataOverlayVersions = dataOverlayVersions ?? new NullDataOverlayVersionStore();
+            _memoryPolicy = memoryPolicy;
+            _settings = settings;
         }
 
-        /// <summary>Системный промпт для роли (манифест / Resources / встроенный fallback).</summary>
+        /// <summary>
+        /// Системный промпт для роли — 3-слойная сборка:
+        ///   Слой 1: universalSystemPromptPrefix
+        ///   Слой 2: манифест / Resources / встроенный fallback
+        ///   Слой 3: дополнительный промпт из AgentBuilder
+        /// </summary>
         public string GetSystemPrompt(string roleId)
         {
+            // Проверяем, переопределяет ли роль universalPrefix
+            bool skipPrefix = _memoryPolicy != null &&
+                              _memoryPolicy.IsUniversalPrefixOverridden(roleId);
+
+            // Слой 1: универсальный префикс из настроек (если не переопределён)
+            string prefix = skipPrefix
+                ? ""
+                : (_settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix);
+
+            // Слой 2: базовый промпт из провайдера (Manifest → Resources → fallback)
+            string basePrompt;
             if (_systemPrompts.TryGetSystemPrompt(roleId, out string s) && !string.IsNullOrWhiteSpace(s))
             {
-                return s.Trim();
+                basePrompt = s.Trim();
+            }
+            else
+            {
+                basePrompt = $"You are agent \"{roleId}\".";
             }
 
-            return $"You are agent \"{roleId}\".";
+            // Слой 3: дополнительный промпт из AgentBuilder (через AgentMemoryPolicy)
+            string additional = "";
+            if (_memoryPolicy != null &&
+                _memoryPolicy.TryGetAdditionalSystemPrompt(roleId, out string extra) &&
+                !string.IsNullOrWhiteSpace(extra))
+            {
+                additional = extra.Trim();
+            }
+
+            // Сборка: prefix + base + additional
+            System.Text.StringBuilder sb = new();
+            if (!string.IsNullOrWhiteSpace(prefix))
+            {
+                sb.Append(prefix.TrimEnd());
+                sb.Append('\n');
+            }
+            sb.Append(basePrompt);
+            if (!string.IsNullOrEmpty(additional))
+            {
+                sb.Append("\n\n");
+                sb.Append(additional);
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>User-часть для LLM: шаблон роли (<c>{telemetry}</c>, <c>{hint}</c>, <c>{ключ}</c> из телеметрии) или JSON по умолчанию, плюс контекст ремонта Lua.</summary>

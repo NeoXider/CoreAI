@@ -167,6 +167,185 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(lastText?.Contains("All done") == true, "Should complete normally");
         }
 
+        // ===================== Duplicate Detection =====================
+
+        /// <summary>
+        /// allowDuplicateToolCalls=false + модель вызывает один и тот же tool с одинаковыми
+        /// аргументами два раза подряд → второй вызов отклоняется как дубликат, в результат
+        /// возвращается сообщение "You just executed...".
+        /// </summary>
+        [Test]
+        public void DuplicateToolCallsRejected_WhenAllowDuplicatesFalse()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                if (callCount <= 2)
+                {
+                    // Одинаковый tool call с одинаковыми args
+                    return MakeToolCallResponse("my_tool", "call_" + callCount,
+                        new Dictionary<string, object> { { "x", 42 } });
+                }
+
+                return MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                allowDuplicateToolCalls: false,
+                new List<CoreAI.Ai.ILlmTool>(), 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            // Ожидаем 3 итерации: 1) успешный tool call, 2) дубликат (отклонён), 3) текст
+            Assert.AreEqual(3, callCount,
+                "После обнаружения дубликата должен сработать rejection, модель переходит к текстовому ответу");
+        }
+
+        /// <summary>
+        /// Разные аргументы → не дубликат, даже если allowDuplicateToolCalls=false.
+        /// </summary>
+        [Test]
+        public void DifferentArgumentsNotTreatedAsDuplicate()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                if (callCount <= 3)
+                {
+                    return MakeToolCallResponse("my_tool", "call_" + callCount,
+                        new Dictionary<string, object> { { "x", callCount } });
+                }
+
+                return MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                allowDuplicateToolCalls: false,
+                new List<CoreAI.Ai.ILlmTool>(), 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            Assert.AreEqual(4, callCount,
+                "Три разных аргумента + текстовый ответ = 4 итерации, блокировки не должно быть");
+        }
+
+        /// <summary>
+        /// ILlmTool.AllowDuplicates=true → инструмент исключается из проверки на дубликаты,
+        /// даже если allowDuplicateToolCalls=false.
+        /// </summary>
+        [Test]
+        public void PerToolAllowDuplicates_OverridesGlobal()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                if (callCount <= 3)
+                {
+                    return MakeToolCallResponse("always_ok", "call_" + callCount,
+                        new Dictionary<string, object> { { "x", 42 } });
+                }
+
+                return MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("always_ok", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                allowDuplicateToolCalls: false,
+                new List<CoreAI.Ai.ILlmTool> { new AllowDupTool("always_ok") }, 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            Assert.AreEqual(4, callCount,
+                "Инструмент с AllowDuplicates=true не триггерит rejection");
+        }
+
+        // ===================== Edge Cases =====================
+
+        /// <summary>
+        /// Модель вызывает несуществующий тул → возврат ошибки "not found" как результат,
+        /// счётчик ошибок увеличивается.
+        /// </summary>
+        [Test]
+        public void ToolNotFound_CountsAsError()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                return MakeToolCallResponse("missing_tool", "call_" + callCount);
+            });
+
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                allowDuplicateToolCalls: true, // отключаем дубликаты, чтобы увидеть именно not-found
+                new List<CoreAI.Ai.ILlmTool>(), 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
+            Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
+
+            Assert.AreEqual(3, callCount,
+                "3 попытки подряд вызвать несуществующий тул → прерывание");
+        }
+
+        /// <summary>
+        /// Инструмент бросает исключение → обработка catch-блоком, ошибка
+        /// добавляется как FunctionResultContent, счётчик ошибок растёт.
+        /// </summary>
+        [Test]
+        public void ToolThrowsException_HandledAsError()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                return MakeToolCallResponse("broken_tool", "call_" + callCount);
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("broken_tool",
+                _ => throw new InvalidOperationException("boom from tool"));
+
+            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                allowDuplicateToolCalls: true,
+                new List<CoreAI.Ai.ILlmTool>(), 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            MEAI.ChatResponse response = Task.Run(() =>
+                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+
+            Assert.AreEqual(3, callCount, "3 падения подряд → прерывание агента");
+            Assert.IsNotNull(response);
+        }
+
+        /// <summary>
+        /// Простой ILlmTool с AllowDuplicates=true для теста per-tool override.
+        /// </summary>
+        private sealed class AllowDupTool : CoreAI.Ai.ILlmTool
+        {
+            public AllowDupTool(string name) { Name = name; }
+            public string Name { get; }
+            public string Description => "";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+        }
+
         #region Helpers
 
         /// <summary>
@@ -175,6 +354,14 @@ namespace CoreAI.Tests.EditMode
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName, string callId)
         {
             MEAI.FunctionCallContent fc = new(callId, toolName, new Dictionary<string, object>());
+            MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc });
+            return new MEAI.ChatResponse(msg);
+        }
+
+        private static MEAI.ChatResponse MakeToolCallResponse(string toolName, string callId,
+            IDictionary<string, object> arguments)
+        {
+            MEAI.FunctionCallContent fc = new(callId, toolName, arguments);
             MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc });
             return new MEAI.ChatResponse(msg);
         }

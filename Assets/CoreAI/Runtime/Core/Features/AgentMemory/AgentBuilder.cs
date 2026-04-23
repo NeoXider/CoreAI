@@ -48,7 +48,9 @@ namespace CoreAI.Ai
         private int _maxChatHistoryMessages = 30;
         private float? _temperature;
         private bool? _allowDuplicateToolCalls;
+        private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
+        private bool _overrideUniversalPrefix;
         private readonly ICoreAISettings _settings;
 
         public AgentBuilder(string roleId, ICoreAISettings settings = null)
@@ -191,6 +193,38 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Включить/выключить стриминг ответов для этого агента.
+        /// Переопределяет глобальный <see cref="ICoreAISettings.EnableStreaming"/>.
+        /// Если не вызвано — используется глобальный флаг.
+        /// </summary>
+        /// <example>
+        /// new AgentBuilder("FastChat").WithStreaming(true).Build();
+        /// new AgentBuilder("StrictJsonRole").WithStreaming(false).Build();
+        /// </example>
+        public AgentBuilder WithStreaming(bool enabled)
+        {
+            _enableStreaming = enabled;
+            return this;
+        }
+
+        /// <summary>
+        /// Отключить universalSystemPromptPrefix из CoreAISettings для этой роли.
+        /// Полезно когда роли нужен полностью кастомный системный промпт
+        /// без общих правил (например, роль-парсер или роль-валидатор).
+        /// </summary>
+        /// <example>
+        /// new AgentBuilder("JsonParser")
+        ///     .WithSystemPrompt("You are a strict JSON parser.")
+        ///     .WithOverrideUniversalPrefix()
+        ///     .Build();
+        /// </example>
+        public AgentBuilder WithOverrideUniversalPrefix(bool shouldOverride = true)
+        {
+            _overrideUniversalPrefix = shouldOverride;
+            return this;
+        }
+
+        /// <summary>
         /// Сконфигурировать агента в политике.
         /// </summary>
         public AgentConfig Build()
@@ -201,18 +235,16 @@ namespace CoreAI.Ai
             // Температура: null → из ICoreAISettings → из CoreAISettings, явно → использовать явно
             float temp = _temperature ?? _settings?.Temperature ?? CoreAISettings.Temperature;
 
-            // Применяем универсальный префикс к системному промпту
-            string finalPrompt = _systemPrompt;
-            string prefix = _settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
-            if (!string.IsNullOrWhiteSpace(prefix) && !string.IsNullOrWhiteSpace(finalPrompt))
-            {
-                finalPrompt = prefix.TrimEnd() + " " + finalPrompt;
-            }
+            // Промпт НЕ включает universalPrefix — он приклеивается в AiPromptComposer
+            // при финальной сборке (3-слойная архитектура):
+            //   Слой 1: universalSystemPromptPrefix (общие правила)
+            //   Слой 2: базовый промпт из Manifest/Resources (.txt файлы)
+            //   Слой 3: дополнительный промпт из AgentBuilder (этот)
 
             return new AgentConfig
             {
                 RoleId = _roleId,
-                SystemPrompt = finalPrompt,
+                SystemPrompt = _systemPrompt,
                 Tools = new List<ILlmTool>(_tools),
                 Mode = _mode,
                 WithChatHistory = _withChatHistory,
@@ -221,7 +253,9 @@ namespace CoreAI.Ai
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = temp,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
-                MemoryDefaultAction = _memoryDefaultAction
+                EnableStreaming = _enableStreaming,
+                MemoryDefaultAction = _memoryDefaultAction,
+                OverrideUniversalPrefix = _overrideUniversalPrefix
             };
         }
     }
@@ -241,7 +275,12 @@ namespace CoreAI.Ai
         public int MaxChatHistoryMessages { get; internal set; }
         public float Temperature { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
+
+        /// <summary>Per-role override для стриминга; null = использовать глобальный <see cref="ICoreAISettings.EnableStreaming"/>.</summary>
+        public bool? EnableStreaming { get; internal set; }
+
         public MemoryToolAction MemoryDefaultAction { get; internal set; }
+        public bool OverrideUniversalPrefix { get; internal set; }
 
         /// <summary>
         /// Применить конфигурацию к политике.
@@ -261,6 +300,21 @@ namespace CoreAI.Ai
 
             policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
                 PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
+
+            // Регистрируем дополнительный системный промпт (слой 3)
+            if (!string.IsNullOrWhiteSpace(SystemPrompt))
+            {
+                policy.SetAdditionalSystemPrompt(RoleId, SystemPrompt);
+            }
+
+            // Регистрируем переопределение universalPrefix
+            if (OverrideUniversalPrefix)
+            {
+                policy.SetOverrideUniversalPrefix(RoleId, true);
+            }
+
+            // Регистрируем per-role override стриминга (если задан)
+            policy.SetStreamingEnabled(RoleId, EnableStreaming);
         }
 
         private bool HasMemoryTool()

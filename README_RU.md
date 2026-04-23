@@ -6,16 +6,58 @@
 
 *Читать на других языках: [English](README.md), [Русский](README_RU.md).*
 
-**Живые NPC, динамические механики, процедурный контент** — всё управляется AI через LLM.
+**Живые NPC, процедурный контент, динамика на лету** — всё это может идти от LLM, прямо во время игры.
 
-CoreAI сочетает низкий порог входа для новичков инди-разработки с безграничной архитектурной гибкостью для ветеранов индустрии. Система масштабируется вместе с вашими амбициями: от интеграции умных внутриигровых диалоговых помощников и глубоко проработанных автономных NPC — до абсолютной вершины геймдизайна: живых миров и адаптивных игровых механик, развивающихся в реальном времени!
-> 🌟 **СОЗДАВАЙТЕ ИГРЫ БУДУЩЕГО:** Представьте мир, который адаптируется не просто сухими цифрами, а логикой и живыми реакциями: уникальные диалоги, новые ситуации и процедурные квесты.
->
-> 🚀 **ДОКАЗАНА РАБОТА НА МАЛЕНЬКИХ МОДЕЛЯХ:** Все сложные PlayMode тесты CoreAI (с вызовами функций и памятью) успешно проходятся на локальной компактной модели **Qwen3.5-4B** (даже с выключенным режимом Think/Reasoning). Это мощнейшее доказательство жизнеспособности архитектуры! Вам не нужны дорогие облачные API — благодаря строгим системным правилам и оркестратору, вы можете создавать удивительные динамические игры с невероятно умными NPC-агентами, которые будут работать локально на железе игроков.
+**Одно хранилище, два пакета:** портативное ядро C# и Unity-слой с DI, панелью чата и тестами. Хотите *демо за пять минут* — или *многошаговый пайплайн с инструментами и Lua* — используются одни и те же кирпичики.
 
-| Версия | Unity | Статус |
-|--------|-------|--------|
-| См. `package.json` | `6000.0+` | ✅ v0.19.3 — [CHANGELOG](CHANGELOG.md) |
+> **Зачем открывать репозиторий?** Здесь *агенты, которые зовут ваш код*, *стриминг, переживший «разорванные» теги reason*, *чат панелью в один клик* — и по желанию **`CoreAi.AskAsync("…")` из любого скрипта** — без «домашки» по DI ради первой фичи.
+
+> 🚀 **Проверено на малых моделях:** многие сценарии PlayMode уверенно идут на локальной **Qwen3.5-4B** (например, с выключенным think/reasoning). Необязатели облачные API, чтобы в игре *ощущалось умом*.
+
+**Версия:** **v0.21.0** · статический API `CoreAi` · стриминг оркестратора · укреплённый чат и стриминг
+
+[![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
+
+---
+
+## Содержание
+
+| | Раздел |
+|---|--------|
+| [Что нового в 0.21](#-что-нового-в-021) | `CoreAi`, стрим оркестратора, чат |
+| [Три входа](#-три-входа-ui--coreai--агенты) | UI · `CoreAi` · агенты |
+| [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, чат, инструменты, память |
+| [Архитектура](#%EF%B8%8F-архитектура) | Два пакета, схема |
+| [Установка](#-установка) | NuGet, `manifest`, Git URL, сцена |
+| [Быстрый старт](#-быстрый-старт) | Первый агент |
+| [Документация](#-документация) | Карта гайдов |
+| [Тесты](#-тесты) | EditMode и PlayMode |
+
+---
+
+## 🆕 Что нового в 0.21
+
+- 🎯 **Статический фасад `CoreAi`** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
+- 🌊 **Стриминг в оркестраторе** — `IAiOrchestrationService.RunStreamingAsync`: тот же путь власти, очереди и валидации, что и у `RunTaskAsync`, но чанками (см. [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
+- 💬 **Чат** — многострочный ввод, Shift+Enter / Enter, анимированный индикатор печати; стрим виден через всю цепочку декораторов `ILlmClient`.
+
+**Ранее 0.20.x (всё ещё в коробке):** универсальная панель чата, стрим HTTP + LLMUnity, трёхслойные флаги, демо-сцена в один клик, широкое EditMode-покрытие (песочница Lua, инструменты, rate limit, фильтры).
+
+Полные заметки: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
+
+---
+
+## 🧭 Три входа: UI · CoreAi · агенты
+
+| Делаешь… | С чего начать | В одно предложение |
+|----------|---------------|-------------------|
+| **Внутриигровой чат для игрока** | `CoreAI → Setup → Create Chat Demo Scene` + `CoreAiChatPanel` | Включил Play — пишешь в чат |
+| **Любой скрипт, без DI в первый день** | `using CoreAI;` → `await CoreAi.AskAsync("…")` или `StreamAsync` | [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md) |
+| **Полноценного агента, инструменты, оркестратор** | `AgentBuilder` + `IAiOrchestrationService` | [AGENT_BUILDER](Assets/CoreAI/Docs/AGENT_BUILDER.md) |
+
+Все три пути при одной настройке сцены разделяют `CoreAILifetimeScope` и бэкенд LLM.
 
 ---
 
@@ -44,8 +86,34 @@ merchant.Ask("Покажи мечи", (response) => Debug.Log(response));
 - 🤖 **ToolsOnly** — только инструменты, без текста (Background Analyzer)
 - 💬 **ChatOnly** — только текст, без инструментов (Storyteller, Guide)
 
-> 📖 **Полный гайд по настройке LLM:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
-> 🏗️ **Конструктор агентов + готовые рецепты:** [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
+### 💬 Готовый чат без своего UI
+
+Сцена с NPC-чатом за минуты — без ручной вёрстки:
+
+```
+CoreAI → Setup → Create Chat Demo Scene
+```
+
+Получаешь `CoreAiChatDemo.unity` с `CoreAiChatPanel` (UI Toolkit, UXML/USS, тёмная тема), `CoreAiChatConfig_Demo` и настроенным `CoreAILifetimeScope` — **Play** и печатаешь.
+
+```csharp
+// Тот же стек, что у панели — выбери удобный API:
+await foreach (var chunk in CoreAi.StreamAsync("Привет", "PlayerChat"))
+    Debug.Log(chunk);
+
+// Или явно через сервис (например в тестах):
+var service = CoreAiChatService.TryCreateFromScene();
+await foreach (var chunk in service.SendMessageStreamingAsync("Привет", "PlayerChat"))
+    if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
+```
+
+**Цепочка стриминга:** SSE (HTTP) **или** callback LLMUnity → stateful `ThinkBlockStreamFilter` (срезает `<think>`, даже если тег разорван) → индикатор печати → пузырь. Отмена рвёт `UnityWebRequest` на HTTP.
+
+Доки: [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md)
+
+> 🎯 **Одна строка из скрипта:** [COREAI_SINGLETON_API.md](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md)  
+> 📖 **Быстрый путь: LLM и сцена:** [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
+> 🏗️ **Агенты + рецепты:** [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 ---
 
@@ -297,17 +365,42 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 ## 📚 Документация
 
-| Документ | Что внутри |
-|----------|-----------|
-| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Конструктор агентов, режимы, ChatHistory |
-| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | Архитектура MEAI pipeline |
-| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спецификация tool calling |
-| 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Merchant NPC с инвентарём |
+Сначала: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.
+
+### Старт
+
+| Документ | Содержание |
+|----------|------------|
+| 🚀 [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md) | Установка → сцена → LLM → Play |
+| 🚀 [QUICK_START_FULL.md](Assets/CoreAiUnity/Docs/QUICK_START_FULL.md) | 10-минутный путь: LM Studio → Unity → первая команда |
+| 🎯 [COREAI_SINGLETON_API.md](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md) | **`CoreAi`** в одну строку |
+| 🏗️ [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md) | Агент за три шага, режимы, рецепты |
+| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | Бэкенды, таймауты, стриминг |
+
+### Чат и стриминг
+
+| Документ | Содержание |
+|----------|------------|
+| 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel` + демо |
+| 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → фильтры → UI · стрим в оркестраторе |
+
+### Инструменты, память, роли
+
+| Документ | Содержание |
+|----------|------------|
+| 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI: `ILlmTool` → `AIFunction` |
+| 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спека tool calling |
+| 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Торговец с инвентарём |
 | 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Память и ChatHistory |
-| ⚙️ [COREAI_SETTINGS.md](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md) | CoreAISettingsAsset + tool calling |
-| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, архитектура |
-| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли агентов и промпты |
-| 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) | Все изменения по версиям |
+| 🤖 [AI_AGENT_ROLES.md](Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md) | Роли и промпты |
+
+### Архитектура
+
+| Документ | Содержание |
+|----------|------------|
+| 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, PR-чеклист |
+| 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Нормы: DI, потоки, власть |
+| 📋 [CHANGELOG](Assets/CoreAI/CHANGELOG.md) · [Unity](Assets/CoreAiUnity/CHANGELOG.md) | История версий |
 
 ---
 
@@ -315,15 +408,11 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode (215+ тестов) — быстрые, без LLM
-  └── PlayMode (12 тестов) — с реальной LLM
+  ├── EditMode — большой быстрый набор (без реального LLM): промпты, стрим, Lua, инструменты, rate limit, фасад CoreAi, стрим оркестратора, …
+  └── PlayMode — интеграция с настроенным HTTP или локальным GGUF
 ```
 
-**PlayMode тесты:**
-- ✅ `CustomAgentsPlayModeTests` — 3 кастомных агента (Merchant, Analyzer, Storyteller)
-- ✅ `AllToolCallsPlayModeTests` — Memory + Execute Lua
-- ✅ `CraftingMemoryViaLlmUnityPlayModeTests` — полный workflow крафта
-- ✅ `MerchantWithToolCallingPlayModeTests` — Merchant NPC с инвентарём
+В CI сначала гоняй EditMode. PlayMode опционален и требует бэкенд (для HTTP — переменные окружения, см. [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
 
 ---
 
@@ -373,4 +462,4 @@ Unity → Window → General → Test Runner
 
 ---
 
-> 🚀 **CoreAI** — сделай свою игру умнее. Один агент за раз.
+> 🎮 **CoreAI** — *играбельный* AI: сцена в один клик, один статический вызов или полноценный агент — как скажешь.

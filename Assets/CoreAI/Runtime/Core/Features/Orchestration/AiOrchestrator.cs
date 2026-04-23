@@ -53,6 +53,81 @@ namespace CoreAI.Ai
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
 
+        /// <summary>
+        /// Выделенная сборка запроса (переиспользуется в <see cref="RunTaskAsync"/>
+        /// и <see cref="RunStreamingAsync"/>).
+        /// </summary>
+        private RequestBundle BuildRequest(AiTaskRequest task)
+        {
+            string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
+            string traceId = string.IsNullOrWhiteSpace(task.TraceId)
+                ? Guid.NewGuid().ToString("N")
+                : task.TraceId.Trim();
+            GameSessionSnapshot snap = _telemetry.BuildSnapshot();
+            string systemBase = _promptComposer.GetSystemPrompt(roleId);
+
+            string system = systemBase;
+            bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
+            if (useMemoryTool &&
+                _memoryStore != null && _memoryStore.TryLoad(roleId, out AgentMemoryState mem) &&
+                !string.IsNullOrWhiteSpace(mem?.Memory))
+            {
+                system = systemBase.Trim() + "\n\n## Memory\n" + mem.Memory.Trim();
+            }
+
+            string user = _promptComposer.BuildUserPayload(snap, task);
+            IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
+
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig =
+                _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = null;
+
+            if (roleConfig.WithChatHistory && _memoryStore != null)
+            {
+                ChatMessage[] history = _memoryStore.GetChatHistory(roleId,
+                    roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30);
+                if (history != null && history.Length > 0)
+                {
+                    chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
+                    int maxTokens = roleConfig.ContextTokens > 0 ? roleConfig.ContextTokens : 8192;
+                    int budgetTokens = maxTokens / 2;
+
+                    List<ChatMessage> filteredHistory = new();
+                    for (int i = history.Length - 1; i >= 0; i--)
+                    {
+                        int estimatedTokens = string.IsNullOrEmpty(history[i].Content) ? 0 : history[i].Content.Length / 3;
+                        if (budgetTokens - estimatedTokens < 0 && filteredHistory.Count > 0)
+                        {
+                            break;
+                        }
+
+                        budgetTokens -= estimatedTokens;
+                        filteredHistory.Insert(0, history[i]);
+                    }
+
+                    foreach (ChatMessage msg in filteredHistory)
+                    {
+                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
+                            ? Microsoft.Extensions.AI.ChatRole.User
+                            : Microsoft.Extensions.AI.ChatRole.Assistant;
+                        chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
+                    }
+                }
+            }
+
+            return new RequestBundle
+            {
+                RoleId = roleId,
+                TraceId = traceId,
+                SystemPrompt = system,
+                UserPayload = user,
+                Tools = tools,
+                ChatHistory = chatHistory,
+                RoleConfig = roleConfig,
+                Task = task
+            };
+        }
+
         /// <inheritdoc />
         public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
         {
@@ -241,6 +316,193 @@ namespace CoreAI.Ai
             });
             _metrics.RecordCommandPublished(roleId, traceId);
             return content;
+        }
+
+        /// <inheritdoc />
+        public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+            AiTaskRequest task,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
+            if (!_authority.CanRunAiTasks)
+            {
+                yield return new LlmStreamChunk { IsDone = true, Error = "authority denied" };
+                yield break;
+            }
+
+            if (task == null)
+            {
+                yield return new LlmStreamChunk { IsDone = true, Error = "task is null" };
+                yield break;
+            }
+
+            RequestBundle bundle = BuildRequest(task);
+            System.Text.StringBuilder accumulated = new();
+            int chunkCount = 0;
+            string terminalError = null;
+
+            using CancellationTokenSource timeoutCts = new();
+            if (_settings.LlmRequestTimeoutSeconds > 0)
+            {
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(_settings.LlmRequestTimeoutSeconds));
+            }
+
+            using CancellationTokenSource linkedCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+            LlmCompletionRequest req = new()
+            {
+                AgentRoleId = bundle.RoleId,
+                SystemPrompt = bundle.SystemPrompt,
+                UserPayload = bundle.UserPayload,
+                ChatHistory = bundle.ChatHistory,
+                TraceId = bundle.TraceId,
+                Tools = bundle.Tools,
+                AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls
+            };
+
+            Stopwatch sw = Stopwatch.StartNew();
+            IAsyncEnumerator<LlmStreamChunk> enumerator = null;
+            string initError = null;
+            try
+            {
+                enumerator = _llm.CompleteStreamingAsync(req, linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
+            }
+            catch (Exception ex)
+            {
+                initError = ex.Message;
+            }
+
+            if (initError != null)
+            {
+                yield return new LlmStreamChunk { IsDone = true, Error = initError };
+                yield break;
+            }
+
+            try
+            {
+                while (true)
+                {
+                    bool hasNext;
+                    LlmStreamChunk current = null;
+                    bool failedTimeout = false;
+                    string exceptionMessage = null;
+
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                        current = hasNext ? enumerator.Current : null;
+                    }
+                    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested &&
+                                                              !cancellationToken.IsCancellationRequested)
+                    {
+                        failedTimeout = true;
+                        hasNext = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        exceptionMessage = ex.Message;
+                        hasNext = false;
+                    }
+
+                    if (failedTimeout)
+                    {
+                        terminalError = $"orchestrator stream timeout ({_settings.LlmRequestTimeoutSeconds}s)";
+                        yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
+                        yield break;
+                    }
+
+                    if (exceptionMessage != null)
+                    {
+                        terminalError = exceptionMessage;
+                        yield return new LlmStreamChunk { IsDone = true, Error = exceptionMessage };
+                        yield break;
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+
+                    if (current != null && !string.IsNullOrEmpty(current.Text))
+                    {
+                        accumulated.Append(current.Text);
+                        chunkCount++;
+                    }
+
+                    if (current != null && !string.IsNullOrEmpty(current.Error))
+                    {
+                        terminalError = current.Error;
+                    }
+
+                    yield return current;
+                }
+            }
+            finally
+            {
+                sw.Stop();
+                if (enumerator != null)
+                {
+                    try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* swallow */ }
+                }
+
+                _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
+                    string.IsNullOrEmpty(terminalError),
+                    sw.Elapsed.TotalMilliseconds);
+            }
+
+            // После окончания стрима — структурная валидация и публикация команды.
+            string content = accumulated.ToString();
+            if (string.IsNullOrEmpty(terminalError) && !string.IsNullOrEmpty(content))
+            {
+                if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
+                    !_structuredPolicy.TryValidate(bundle.RoleId, content, out string failReason))
+                {
+                    // Стриминг невозможно «переиграть» без второго стрима,
+                    // поэтому просто сообщаем ошибку валидации наружу.
+                    _metrics.RecordStructuredRetry(bundle.RoleId, bundle.TraceId, failReason ?? "");
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = "structured validation failed: " + (failReason ?? "")
+                    };
+                    yield break;
+                }
+
+                if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
+                {
+                    _memoryStore.AppendChatMessage(bundle.RoleId, "user", bundle.UserPayload,
+                        bundle.RoleConfig.PersistChatHistory);
+                    _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
+                        bundle.RoleConfig.PersistChatHistory);
+                }
+
+                _commandSink.Publish(new ApplyAiGameCommand
+                {
+                    CommandTypeId = Envelope,
+                    JsonPayload = content,
+                    SourceRoleId = bundle.RoleId,
+                    SourceTaskHint = task.Hint ?? "",
+                    SourceTag = task.SourceTag ?? "",
+                    LuaRepairGeneration = task.LuaRepairGeneration,
+                    TraceId = bundle.TraceId,
+                    LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
+                    DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
+                });
+                _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
+            }
+        }
+
+        private sealed class RequestBundle
+        {
+            public string RoleId;
+            public string TraceId;
+            public string SystemPrompt;
+            public string UserPayload;
+            public IReadOnlyList<ILlmTool> Tools;
+            public List<Microsoft.Extensions.AI.ChatMessage> ChatHistory;
+            public AgentMemoryPolicy.RoleMemoryConfig RoleConfig;
+            public AiTaskRequest Task;
         }
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)

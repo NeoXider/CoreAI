@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -108,10 +109,16 @@ namespace CoreAI.Tests.PlayMode
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
                 List<string> craftedNames = new();
+                // Каноническая "память" для промпта: строгое отображение craft# → имя → ингредиенты.
+                // Храним отдельно от store, чтобы:
+                // - промпт был стабильным (независимо от того, как модель отформатирует memory tool)
+                // - детерминизм (craft 4) был проверяемым
                 string memoryAccum = "";
 
                 // ===== КРАФТ 1: Iron + Oak =====
                 {
+                    const string ing1 = "Iron";
+                    const string ing2 = "Oak";
                     string prompt = BuildCraftPrompt(1,
                         "Iron (metal, hardness:60, magic:5, rarity:1)",
                         "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
@@ -132,7 +139,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
 
                     LogAfterModelCall("craft 1", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
                     {
                         yield break;
                     }
@@ -140,6 +147,8 @@ namespace CoreAI.Tests.PlayMode
 
                 // ===== КРАФТ 2: Steel + Hardwood =====
                 {
+                    const string ing1 = "Steel";
+                    const string ing2 = "Hardwood";
                     string prompt = BuildCraftPrompt(2,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
@@ -160,7 +169,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
 
                     LogAfterModelCall("craft 2", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
                     {
                         yield break;
                     }
@@ -168,6 +177,8 @@ namespace CoreAI.Tests.PlayMode
 
                 // ===== КРАФТ 3: Mithril + Enchanted Wood =====
                 {
+                    const string ing1 = "Mithril";
+                    const string ing2 = "Enchanted";
                     string prompt = BuildCraftPrompt(3,
                         "Mithril (metal, hardness:70, magic:60, rarity:4)",
                         "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
@@ -188,7 +199,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
 
                     LogAfterModelCall("craft 3", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
                     {
                         yield break;
                     }
@@ -196,6 +207,8 @@ namespace CoreAI.Tests.PlayMode
 
                 // ===== КРАФТ 4: Steel + Hardwood (ПОВТОР крафта #2) — проверка детерминизма =====
                 {
+                    const string ing1 = "Steel";
+                    const string ing2 = "Hardwood";
                     string prompt = BuildDeterministicCraftPrompt(4,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
@@ -241,7 +254,7 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4"))
+                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4", 4, ing1, ing2))
                     {
                         yield break;
                     }
@@ -266,7 +279,10 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
                 Debug.Log($"[CraftingMemory.OpenAI] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
                           $"→ {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? "✓ SAME" : "⚠ DIFFERENT")}");
-                Debug.Log($"[CraftingMemory.OpenAI] Full memory history:\n{memoryAccum}");
+                Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
+
+                Assert.AreEqual(craft2Final.ToLowerInvariant(), craft4Final.ToLowerInvariant(),
+                    $"Determinism failed: craft #4 must repeat craft #2 name. Craft2='{craft2Final}' Craft4='{craft4Final}'");
                 Debug.Log("[CraftingMemory.OpenAI] ═══════════════════════════════════════");
                 Debug.Log("[CraftingMemory.OpenAI] ═══ TEST PASSED ═══");
                 Debug.Log("[CraftingMemory.OpenAI] ═══════════════════════════════════════");
@@ -550,7 +566,10 @@ namespace CoreAI.Tests.PlayMode
             InMemoryStore store,
             List<string> craftedNames,
             ref string memoryAccum,
-            string label)
+            string label,
+            int craftNumber,
+            string ingredient1Short,
+            string ingredient2Short)
         {
             if (sink.Items.Count == 0)
             {
@@ -569,7 +588,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             craftedNames.Add(itemName);
-            memoryAccum += $"{itemName}, ";
+            memoryAccum = BuildCanonicalMemory(memoryAccum, craftNumber, itemName, ingredient1Short, ingredient2Short);
 
             // Обновляем память
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState existing))
@@ -584,20 +603,67 @@ namespace CoreAI.Tests.PlayMode
             return true;
         }
 
+        private static string BuildCanonicalMemory(
+            string existing,
+            int craftNumber,
+            string itemName,
+            string ingredient1Short,
+            string ingredient2Short)
+        {
+            string entry = $"Craft #{craftNumber} - {itemName} made from {ingredient1Short} + {ingredient2Short}";
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                return $"Previous crafts: {entry}";
+            }
+
+            // Avoid double-appending the same craft number if model spammed multiple tool calls.
+            if (existing.Contains($"Craft #{craftNumber} -", StringComparison.OrdinalIgnoreCase))
+            {
+                return existing;
+            }
+
+            return $"{existing}, {entry}";
+        }
+
         #endregion
     }
 
     /// <summary>
     /// Общий хелпер для извлечения имени предмета из payload.
+    /// Учитывает вольный текст модели: кавычки, «has been crafted with quality» (ложное совпадение <c>with</c> при IgnoreCase) и т.д.
     /// </summary>
     internal static class CraftingMemoryItemNameExtractor
     {
+        private static readonly HashSet<string> JunkSingleWordNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "with", "the", "a", "an", "and", "or", "for", "from", "to", "of", "in", "on", "at", "is", "it", "as", "be",
+            "quality", "weapon", "memory", "item" // line "- Weapon created…" (тип) vs кавычки с реальным именем
+        };
+
         private static readonly Regex[] Patterns =
         {
+            // Lua: create_item('Name', ...)
             new("create_item\\s*\\(\\s*'([^']+)'"),
             new("create_item\\s*\\(\\s*\"([^\"]+)\""),
+            // Prose: Created "IronOak Blade" weapon ...
+            new("Created\\s+\"([^\"]+)\"\\s+weapon", RegexOptions.IgnoreCase),
+            // Prose: memory line in these tests
+            new("details for \"([^\"]+)\""),
+            // e.g. **Memory updated** with Craft #3 entry for "MithrilEnchant Blade …"
+            new("entry for \"([^\"]+)\""),
+            // "The weapon "SteelHardwood Blade" has been crafted…"
+            new("(?:[Tt]he )?weapon\\s+\"([^\"]+)\""),
+            // "… with Craft #4 - SteelHardwood Blade (identical to …"
+            new("Craft #\\d+\\s*-\\s*([A-Za-z0-9][A-Za-z0-9_ ]*?)\\s*\\("),
+            // JSON: "name": "..."
             new("\"name\"\\s*:\\s*\"([^\"]+)\""),
-            new("Name\\s*=\\s*\"([^\"]+)\"")
+            new("Name\\s*=\\s*\"([^\"]+)\""),
+            // "… crafted with quality" must NOT match "with" as the name — (?!with\b)
+            new("\\bcrafted\\s+(?!with\\b)\\s*\\*{0,2}([A-Za-z][A-Za-z0-9_']*(?:\\s+[A-Za-z][A-Za-z0-9_']*)*)\\*{0,2}", RegexOptions.IgnoreCase),
+            // Freeform: "X created" (PascalCase multi-part)
+            new("\\*{0,2}([A-Z][A-Za-z]{2,}(?:[A-Z][a-z]+)+)\\*{0,2}\\s+(?:created|crafted|forged)", RegexOptions.IgnoreCase),
+            // Markdown bold: **WeaponName** (one word, after higher-priority patterns)
+            new("\\*\\*([A-Z][A-Za-z0-9_]{3,})\\*\\*"),
         };
 
         public static string ExtractName(string payload)
@@ -609,14 +675,40 @@ namespace CoreAI.Tests.PlayMode
 
             foreach (Regex regex in Patterns)
             {
-                Match match = regex.Match(payload);
-                if (match.Success)
+                foreach (Match match in regex.Matches(payload))
                 {
-                    return match.Groups[1].Value;
+                    if (!match.Success)
+                    {
+                        continue;
+                    }
+
+                    string name = match.Groups[1].Value.Trim();
+                    if (string.IsNullOrEmpty(name) || IsJunkName(name))
+                    {
+                        continue;
+                    }
+
+                    return name;
                 }
             }
 
             return null;
+        }
+
+        private static bool IsJunkName(string name)
+        {
+            if (JunkSingleWordNames.Contains(name))
+            {
+                return true;
+            }
+
+            // Один "мусорный" токен без букв
+            if (name.Length <= 1)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

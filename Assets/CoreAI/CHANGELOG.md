@@ -1,5 +1,65 @@
 # Changelog
 
+## [v0.21.0] — 2026-04-23
+
+### Orchestrator streaming
+
+- ✨ **`IAiOrchestrationService.RunStreamingAsync(AiTaskRequest, CancellationToken)`** — новый метод интерфейса (default-fallback в C# 8 default interface member: вызывает `RunTaskAsync` и выдаёт результат одним финальным чанком с `IsDone=true`).
+- ✨ **`AiOrchestrator.RunStreamingAsync`** — реальная стриминговая реализация. Проходит тот же путь что `RunTaskAsync` (prompt composer, authority, memory, tools, structured validation), но отдаёт чанки по мере поступления и публикует `ApplyAiGameCommand` только после завершения стрима. Общий код сборки запроса вынесен в приватный `BuildRequest`.
+- ✨ **Structured validation** в streaming-пути проверяется на полном накопленном тексте после окончания стрима. Если валидация провалилась — эмитится терминальный `LlmStreamChunk` с `Error = "structured validation failed: ..."` (повторить стрим автоматически нельзя, caller решает сам).
+- 📚 **Контракт** методов `RunStreamingAsync` дополнен предупреждением: любая обёртка над `IAiOrchestrationService` (очередь, логирование, таймаут, авторити) обязана явно переопределять этот метод, иначе default-fallback тихо убьёт стриминг.
+
+## [v0.20.3] — 2026-04-23
+
+### Streaming pipeline — end-to-end visibility fix
+- 🐛 **Критический баг: стриминг был не виден в UI.** `ILlmClient.CompleteStreamingAsync()` имеет default-реализацию в интерфейсе, которая делает fallback к `CompleteAsync()` и отдаёт весь ответ **одним** терминальным чанком после окончания генерации. Обёртки, не переопределявшие метод явно, «съедали» настоящий стрим. Исправлено в `CoreAiUnity` (см. соответствующий CHANGELOG).
+- 📝 Документация `ILlmClient.CompleteStreamingAsync()` дополнена предупреждением о том, что любая декорирующая обёртка (логирование, роутинг, тайм-ауты) **обязана** явно переопределять этот метод, иначе default-fallback тихо убивает стриминг.
+
+## [v0.20.2] — 2026-04-23
+
+### Streaming Configuration
+- ✨ **`ICoreAISettings.EnableStreaming`** — глобальный флаг включения стриминга ответов LLM (SSE для HTTP API, callback-очередь для LLMUnity). По умолчанию `true`.
+- ✨ **`AgentBuilder.WithStreaming(bool)`** — per-agent override глобального флага. Позволяет одной роли принудительно работать в стриминговом режиме (напр. чатовая NPC), а другой — в non-streaming (напр. строгий JSON-парсер, tool-only агент).
+- ✨ **`AgentMemoryPolicy.SetStreamingEnabled(roleId, bool?)`** и **`IsStreamingEnabled(roleId, fallback)`** — API для per-role хранения override и вычисления эффективного флага.
+- ✨ **`AgentConfig.EnableStreaming`** (`bool?`) — nullable override, пробрасывается в политику через `ApplyToPolicy()`.
+- 🔧 **Иерархия приоритетов** (от высшего к низшему): UI (`CoreAiChatConfig.EnableStreaming`) → per-agent (`AgentBuilder.WithStreaming`) → global (`CoreAISettings.EnableStreaming`).
+
+## [v0.20.1] — 2026-04-23
+
+### Streaming Robustness
+
+- ✨ **`ThinkBlockStreamFilter`** (`CoreAI.Ai`) — новый переиспользуемый stateful state-machine фильтр для корректного удаления `<think>...</think>` блоков из потока LLM. В отличие от старого regex-подхода, правильно обрабатывает ситуацию, когда открывающий или закрывающий тег разбит между чанками (типично для DeepSeek / Qwen).
+  - `ProcessChunk(string)` — обработать чанк, вернуть только видимую часть.
+  - `Flush()` — завершить стрим (вернуть остаточный «хвост», если модель оборвала ответ).
+  - `Reset()` — переиспользование экземпляра.
+
+### Streaming API
+- 📝 **Контракт потока** уточнён: метод `ILlmClient.CompleteStreamingAsync()` гарантированно завершает стрим финальным чанком `IsDone=true` (даже если модель ничего не вернула). Вызывающий код может полагаться на это для закрытия UI.
+- 📚 Документация `ILlmClient.CompleteStreamingAsync()` дополнена замечанием о том, что реализация должна вызываться на главном потоке Unity (из-за `UnityWebRequest`).
+
+## [v0.20.0] — 2026-04-23
+
+### Streaming API
+- ✨ **`LlmStreamChunk`** — новый класс для потокового получения ответов от LLM. Содержит `Text`, `IsDone`, `Error` и usage-статистику.
+- ✨ **`ILlmClient.CompleteStreamingAsync()`** — новый метод в интерфейсе, возвращает `IAsyncEnumerable<LlmStreamChunk>`. Дефолтная реализация делает fallback к `CompleteAsync()` и выдаёт результат одним чанком.
+- ✨ **`MeaiLlmClient.CompleteStreamingAsync()`** — реальный стриминг через `IChatClient.GetStreamingResponseAsync()` с автоматической фильтрацией `<think>` блоков.
+
+### 3-Layer Prompt Architecture
+- 🔧 **Исправлен баг**: `AgentBuilder.WithSystemPrompt()` ранее не регистрировал промпт в `IAgentSystemPromptProvider`, поэтому промпт из AgentBuilder игнорировался — AiOrchestrator всегда брал промпт из ManifestProvider.
+- ✨ **3-слойная сборка системного промпта** в `AiPromptComposer.GetSystemPrompt()`:
+  - **Слой 1**: `CoreAISettings.universalSystemPromptPrefix` — общие правила для ВСЕХ агентов
+  - **Слой 2**: Базовый промпт из ManifestProvider / ResourcesProvider (.txt файлы)
+  - **Слой 3**: Дополнительный промпт из `AgentBuilder.WithSystemPrompt()` (через `AgentMemoryPolicy`)
+- 🔧 **`AgentBuilder.Build()`** — больше не приклеивает `universalPrefix` (перенесено в `AiPromptComposer`)
+- 🔧 **`AgentConfig.ApplyToPolicy()`** — теперь регистрирует SystemPrompt через `policy.SetAdditionalSystemPrompt()`
+- ✨ **`AgentMemoryPolicy.SetAdditionalSystemPrompt()` / `TryGetAdditionalSystemPrompt()`** — хранение доп. промптов из AgentBuilder
+- ✨ **`AgentBuilder.WithOverrideUniversalPrefix()`** — отключение `universalPrefix` для конкретной роли (полезно для парсеров, валидаторов и ролей с полностью кастомным промптом)
+- ✨ **`AgentMemoryPolicy.SetOverrideUniversalPrefix()` / `IsUniversalPrefixOverridden()`** — per-role контроль применения universalPrefix
+
+### Breaking Changes
+- **`AiPromptComposer` конструктор** — добавлены optional параметры `AgentMemoryPolicy` и `ICoreAISettings` (обратно-совместимо через `= null`)
+- **`universalPrefix`** теперь применяется ко ВСЕМ ролям по умолчанию (отключается через `.WithOverrideUniversalPrefix()`)
+
 ## [v0.19.3] — 2026-04-22
 
 ### Prompt Optimization

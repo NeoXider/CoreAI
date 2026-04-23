@@ -85,7 +85,11 @@ namespace CoreAI.Tests.EditMode
                 env.RunChunk(script, "while true do local x = 1 end")
             );
 
-            StringAssert.Contains("EXCEEDED_HARD_LIMIT_STEPS", ex.Message);
+            // Может прерваться по лимиту шагов ИЛИ по wall-clock timeout — оба валидны
+            bool isStepLimit = ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS");
+            bool isTimeout = ex.Message.Contains("Lua exceeded");
+            Assert.IsTrue(isStepLimit || isTimeout,
+                $"Expected step limit or timeout, but got: {ex.Message}");
         }
     }
 }
