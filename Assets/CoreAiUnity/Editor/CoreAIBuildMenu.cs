@@ -236,7 +236,7 @@ namespace CoreAI.Editor
         /// <summary>Добавить LLM и LLMAgent на сцену (без compile-time зависимости через #if).</summary>
         private static void TryCreateLlmUnityObjects(GameObject parentScope)
         {
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
             try
             {
                 // Проверяем, нет ли уже LLM на сцене
@@ -280,7 +280,7 @@ namespace CoreAI.Editor
             }
 #else
             CoreAIEditorLog.LogWarning(
-                "Scene Setup: LLMUnity не установлен (COREAI_NO_LLM). LLM и LLMAgent не созданы.");
+                "Scene Setup: LLMUnity недоступен (COREAI_NO_LLM или UNITY_WEBGL). LLM и LLMAgent не созданы.");
 #endif
         }
 
