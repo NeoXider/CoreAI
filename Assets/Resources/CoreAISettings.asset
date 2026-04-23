@@ -15,11 +15,11 @@ MonoBehaviour:
   backendType: 2
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
-  apiKey: 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
+  apiKey: 
   modelName: qwen3.5-4b
   temperature: 0.1
-  maxTokens: 2048
-  requestTimeoutSeconds: 240
+  maxTokens: 4096
+  requestTimeoutSeconds: 120
   llmUnityAgentName: 
   ggufModelPath: Qwen3.5-2B-Q4_K_M.gguf
   llmUnityDontDestroyOnLoad: 1
@@ -29,20 +29,19 @@ MonoBehaviour:
   enableReasoning: 0
   llmUnityMaxConcurrentChats: 1
   llmUnityNumGPULayers: 99
-  universalSystemPromptPrefix: 'Respond concisely and to the point. Avoid unnecessary
+  universalSystemPromptPrefix: Respond concisely and to the point. Avoid unnecessary
     verbosity.
-
-'
   maxLuaRepairRetries: 3
   maxToolCallRetries: 3
   allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
   contextWindowTokens: 8192
+  enableStreaming: 1
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
   enableMeaiDebugLogging: 0
-  enableHttpDebugLogging: 1
+  enableHttpDebugLogging: 0
   logLlmInput: 1
   logLlmOutput: 1
   logTokenUsage: 1
@@ -52,6 +51,6 @@ MonoBehaviour:
   logToolCallArguments: 1
   logToolCallResults: 1
   logMeaiToolCallingSteps: 1
-  llmRequestTimeoutSeconds: 15
+  llmRequestTimeoutSeconds: 120
   maxConcurrentOrchestrations: 2
   logOrchestrationMetrics: 0

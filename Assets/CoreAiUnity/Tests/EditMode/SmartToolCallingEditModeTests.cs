@@ -10,6 +10,7 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
+#if !COREAI_NO_LLM
     [TestFixture]
     public sealed class SmartToolCallingEditModeTests
     {
@@ -121,4 +122,5 @@ namespace CoreAI.Tests.EditMode
             return new ChatResponse(msg);
         }
     }
+#endif
 }

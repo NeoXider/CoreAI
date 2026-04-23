@@ -5,7 +5,9 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using LLMUnity;
+#endif
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -28,6 +30,11 @@ namespace CoreAI.Tests.PlayMode
         public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle,
             IAgentMemoryStore memoryStore)
         {
+#if COREAI_NO_LLM || UNITY_WEBGL
+            // In this build target, we do not use LLMUnity and may not have HTTP client types compiled.
+            // Just return the resolved client as-is.
+            return handle.Client;
+#else
             if (handle == null)
             {
                 throw new ArgumentNullException(nameof(handle));
@@ -63,6 +70,7 @@ namespace CoreAI.Tests.PlayMode
 
             // Offline или другой — используем как есть
             return handle.Client;
+#endif
         }
     }
 
@@ -177,6 +185,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 // Manually stop LLM and clean up LLMAgent to prevent C++ thread locks/memory leaks during rapid test teardowns
                 // 1. First cancel any active background generations to prevent C++ thread deadlocks
+#if !COREAI_NO_LLM && !UNITY_WEBGL
                 LLMAgent agent = _llmUnityHarnessRoot.GetComponent<LLMAgent>();
                 if (agent != null)
                 {
@@ -189,6 +198,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     llm.Destroy();
                 }
+#endif
 
 #if UNITY_EDITOR
                 if (!EditorApplication.isPlaying)
@@ -379,6 +389,10 @@ namespace CoreAI.Tests.PlayMode
             out string ignoreReason)
         {
             handle = null;
+#if COREAI_NO_LLM
+            ignoreReason = "COREAI_NO_LLM: HTTP LLM clients are excluded from build.";
+            return false;
+#else
 
             // Пробуем CoreAISettingsAsset
             if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
@@ -420,6 +434,7 @@ namespace CoreAI.Tests.PlayMode
                 legacySettings);
             ignoreReason = null;
             return true;
+#endif
         }
 
         private static bool TryCreateLlmUnity(
@@ -428,7 +443,7 @@ namespace CoreAI.Tests.PlayMode
             out string ignoreReason)
         {
             handle = null;
-#if COREAI_NO_LLM
+#if COREAI_NO_LLM || UNITY_WEBGL
             ignoreReason = "Сборка с COREAI_NO_LLM — LLMUnity недоступен.";
             return false;
 #else

@@ -12,6 +12,7 @@ namespace CoreAI.Tests.EditMode
     /// <summary>
     /// EditMode тесты для OpenAiChatLlmClient (фабрика для MeaiLlmClient).
     /// </summary>
+#if !COREAI_NO_LLM
     public sealed class OpenAiChatLlmClientEditModeTests
     {
         [Test]
@@ -114,4 +115,5 @@ namespace CoreAI.Tests.EditMode
             Object.DestroyImmediate(settings);
         }
     }
+#endif
 }

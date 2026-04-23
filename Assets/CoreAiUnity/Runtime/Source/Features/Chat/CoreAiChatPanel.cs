@@ -38,6 +38,7 @@ namespace CoreAI.Chat
         // === Streaming state ===
         private Label _streamingLabel;
         private bool  _isStreaming;
+        private bool  _isSending; // prevents Shift+Enter sending while AI is busy
 
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
@@ -188,6 +189,13 @@ namespace CoreAI.Chat
 
         private void TrySendInput()
         {
+            // Even if the button is disabled, TextField key events can still fire.
+            // Prevent sending while an AI request/stream is in progress.
+            if (_isSending || _isStreaming || (SendButton != null && !SendButton.enabledSelf))
+            {
+                return;
+            }
+
             if (InputField == null || string.IsNullOrWhiteSpace(InputField.text)) return;
 
             string text = InputField.text.Trim();
@@ -222,6 +230,7 @@ namespace CoreAI.Chat
             }
 
             string roleId = config?.RoleId ?? "PlayerChat";
+            _isSending = true;
             SetSendEnabled(false);
 
             try
@@ -257,6 +266,7 @@ namespace CoreAI.Chat
             finally
             {
                 SetSendEnabled(true);
+                _isSending = false;
             }
         }
 

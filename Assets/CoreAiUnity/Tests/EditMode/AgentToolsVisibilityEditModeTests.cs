@@ -45,6 +45,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MeaiLlmClient_BuildAIFunctions_CreatesAllFunctions()
         {
+#if COREAI_NO_LLM
+            Assert.Ignore("COREAI_NO_LLM: MeaiLlmClient (HTTP/MEAI pipeline) is excluded from build.");
+#else
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("http://localhost:1234/v1", "", "test");
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
@@ -73,6 +76,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(task.IsCompleted || task.Status == TaskStatus.WaitingForActivation);
 
             Object.DestroyImmediate(settings);
+#endif
         }
 
         [Test]

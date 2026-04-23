@@ -14,6 +14,7 @@ namespace CoreAI.Tests.PlayMode
     /// PlayMode тест для MeaiLlmClient — единый MEAI клиент.
     /// Проверяет что оба бэкенда (HTTP и LLMUnity) работают через единый pipeline.
     /// </summary>
+#if !COREAI_NO_LLM
     public sealed class MeaiLlmClientPlayModeTests
     {
         /// <summary>
@@ -163,4 +164,5 @@ namespace CoreAI.Tests.PlayMode
                 MeaiLlmClient.CreateLlmUnity(null, logger, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>()));
         }
     }
+#endif
 }

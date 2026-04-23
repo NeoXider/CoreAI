@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -163,6 +163,9 @@ namespace CoreAI.Infrastructure.Llm
                 case LlmBackendKind.Stub:
                     return new StubLlmClient();
                 case LlmBackendKind.OpenAiHttp:
+#if COREAI_NO_LLM
+                    return new StubLlmClient();
+#else
                     if (p.httpSettings == null || !p.httpSettings.UseOpenAiCompatibleHttp)
                     {
                         _logger.LogWarning(
@@ -172,8 +175,9 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     return new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, _memoryStore);
+#endif
                 case LlmBackendKind.LlmUnity:
-#if COREAI_NO_LLM
+#if COREAI_NO_LLM || UNITY_WEBGL
                     return new StubLlmClient();
 #else
                     LLMAgent agent = null;

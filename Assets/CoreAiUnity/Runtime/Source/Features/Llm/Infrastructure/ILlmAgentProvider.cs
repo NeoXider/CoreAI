@@ -1,8 +1,10 @@
-using LLMUnity;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
+#if !UNITY_WEBGL && !COREAI_NO_LLM
+    using LLMUnity;
+
     /// <summary>
     /// Абстракция для поиска <see cref="LLMAgent"/> без использования <c>FindFirstObjectByType</c> в DI composition root.
     /// </summary>
@@ -47,4 +49,20 @@ namespace CoreAI.Infrastructure.Llm
             return _cached;
         }
     }
+#else
+    /// <summary>
+    /// WebGL / COREAI_NO_LLM: локальный LLMUnity бэкенд недоступен, провайдер агента не используется.
+    /// Оставляем интерфейс для DI без зависимости от пакета LLMUnity.
+    /// </summary>
+    public interface ILlmAgentProvider
+    {
+        /// <summary>Всегда возвращает <c>null</c> в WebGL/COREAI_NO_LLM.</summary>
+        Object Resolve(string agentName);
+    }
+
+    public sealed class SceneLlmAgentProvider : ILlmAgentProvider
+    {
+        public Object Resolve(string agentName) => null;
+    }
+#endif
 }

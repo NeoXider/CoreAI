@@ -1,6 +1,8 @@
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using LLMUnity;
+#endif
 using UnityEngine;
 using VContainer;
 
@@ -24,6 +26,10 @@ namespace CoreAI.Infrastructure.Llm
         {
             IGameLogger log = ResolveLogger();
 
+#if COREAI_NO_LLM || UNITY_WEBGL
+            // This guard is only relevant when LLMUnity package is present.
+            return;
+#else
             // Сначала LLM, привязанный к LLMAgent на сцене (избегаем «первого попавшегося» пустого LLM).
             LLMAgent agent = FindFirstObjectByType<LLMAgent>();
             LLM llm = agent != null ? agent.GetComponent<LLM>() : FindFirstObjectByType<LLM>();
@@ -52,6 +58,7 @@ namespace CoreAI.Infrastructure.Llm
                 "LLMUnity: поле LLM.model пусто в сохранённой сцене. В инспекторе нажмите радиокнопку у нужной модели " +
                 "(или «Load model») и сохраните сцену. Если в Model Manager несколько моделей — оставьте одну с реальным .gguf " +
                 "или явно выберите модель. Отключаем LLMUnity → StubLlmClient.");
+#endif
         }
 
         private static IGameLogger ResolveLogger()

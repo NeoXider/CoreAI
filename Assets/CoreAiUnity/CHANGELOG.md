@@ -2,6 +2,25 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.21.1] - 2026-04-23
+
+### 💬 Chat UI polish & layout stability
+
+- 💅 **ScrollView layout**: фикс overlap/сжатия — `ScrollView` корректно shrink'ится в колонке (min-height: 0), header/input/typing больше не уменьшаются при огромном контенте (`flex-shrink: 0`).
+- 💅 **Scrollbar theming (UI Toolkit / Unity 6)**: явные стили для `Scroller`-частей (`.unity-scroll-view__vertical-scroller`, `.unity-scroller__tracker`, `.unity-scroller__dragger`), скрыты arrow buttons (`.unity-scroller__low-button/.unity-scroller__high-button`) — дефолтный «белый» бар больше не пробивается.
+- 💅 **InputField readability**: усилены селекторы для внутренних классов `TextField` в разных версиях Unity, выставлены caret/selection colors — ввод игрока стабильно виден на тёмной теме.
+- 🔧 **Scroll bottom padding**: последний bubble не прячется под typing/input.
+
+### ⏱️ Timeouts
+
+- ⏱️ **CoreAISettingsAsset.LlmRequestTimeoutSeconds**: дефолт увеличен с **15s → 120s** (стриминг/tool-calling на локальных/медленных моделях часто требует больше времени).
+
+### 🧪 Tests (PlayMode)
+
+- 🧪 **CraftingMemoryViaLlmUnityPlayModeTests**: тест больше не падает, если бэкенд выполнил tool calls, но не прислал финальный `AiEnvelope` — имя предмета восстанавливается из memory (контракт промпта).
+- 🧪 **CraftingMemoryViaOpenAiPlayModeTests**: determinism-check теперь не просто логируется — добавлен `Assert` (craft #4 обязан повторить craft #2). Память для промпта приведена к каноническому формату `Craft #N - Name made from X + Y`, чтобы модель могла повторить результат по ингредиентам.
+- 🧪 **CraftingMemoryItemNameExtractor**: устойчивее к вольному тексту модели (кавычки, “crafted with quality”, жирный markdown и т.п.).
+
 ## [0.21.0] - 2026-04-23
 
 ### 🎯 `CoreAi` singleton — unified one-line entry point

@@ -9,6 +9,7 @@ using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
+#if !COREAI_NO_LLM
     public sealed class MeaiLlmClientEditModeTests
     {
         [Test]
@@ -81,4 +82,5 @@ namespace CoreAI.Tests.EditMode
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<ChatMessage>();
         }
     }
+#endif
 }

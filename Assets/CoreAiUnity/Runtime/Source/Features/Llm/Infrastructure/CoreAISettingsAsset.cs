@@ -226,8 +226,9 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Логировать внутренние шаги MEAI FunctionInvokingChatClient (итерации, retry).")] [SerializeField]
         private bool logMeaiToolCallingSteps = true;
 
-        [Tooltip("Таймаут LLM-запроса в LifetimeScope (секунды). 0 = без ограничения.")] [SerializeField] [Min(0f)]
-        private float llmRequestTimeoutSeconds = 15f;
+        [Tooltip("Таймаут LLM-запроса в LifetimeScope (секунды). 0 = без ограничения. " +
+                 "Важно: стриминг и tool-calling на локальных/медленных моделях часто требует 60–180с.")] [SerializeField] [Min(0f)]
+        private float llmRequestTimeoutSeconds = 120f;
 
         [Tooltip("Максимум параллельных задач оркестратора.")] [SerializeField] [Min(1)]
         private int maxConcurrentOrchestrations = 2;
@@ -533,7 +534,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (llmRequestTimeoutSeconds < 0f)
             {
-                llmRequestTimeoutSeconds = 15f;
+                llmRequestTimeoutSeconds = 120f;
             }
 
             if (llmUnityStartupTimeoutSeconds < 5f)

@@ -10,7 +10,9 @@ using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
+#if !UNITY_WEBGL
 using LLMUnity;
+#endif
 using LuaLlmTool = CoreAI.Ai.LuaLlmTool;
 using WorldLlmTool = CoreAI.Infrastructure.Llm.WorldLlmTool;
 using MEAI = Microsoft.Extensions.AI;
@@ -80,17 +82,25 @@ namespace CoreAI.Infrastructure.Llm
         /// Создать LLMUnity клиент (локальная GGUF модель).
         /// </summary>
         public static MeaiLlmClient CreateLlmUnity(
+#if UNITY_WEBGL
+            object unityAgent,
+#else
             LLMAgent unityAgent,
+#endif
             IGameLogger logger,
             ICoreAISettings settings,
             IAgentMemoryStore? memoryStore = null)
         {
+#if UNITY_WEBGL
+            throw new NotSupportedException("LLMUnity backend is not supported on WebGL.");
+#else
             if (unityAgent == null) throw new ArgumentNullException(nameof(unityAgent));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
 
             LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
+#endif
         }
 
         /// <inheritdoc />

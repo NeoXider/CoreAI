@@ -158,6 +158,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParseToolCallFromText_StripsThinkTagsBeforeParsing()
         {
+#if COREAI_NO_LLM || UNITY_WEBGL
+            Assert.Ignore("LlmUnityMeaiChatClient is not available in COREAI_NO_LLM or WebGL.");
+#else
             // Симулируем ответ модели с Reasoning
             string textWithReasoning = "<think>\nThinking about what to do...\nI will use the memory tool now.\n</think>\n" +
                                        "{\"name\": \"memory\", \"arguments\": {\"action\": \"read\"}}";
@@ -177,11 +180,15 @@ namespace CoreAI.Tests.EditMode
             // Убеждаемся что тег think был полностью удален, а не просто обойден regex
             Assert.IsFalse(cleanedText.Contains("<think>"));
             Assert.IsFalse(cleanedText.Contains("Thinking about what to do"));
+#endif
         }
 
         [Test]
         public void TryParseToolCallFromText_HandlesMultipleThinkTagsOrMalformed()
         {
+#if COREAI_NO_LLM || UNITY_WEBGL
+            Assert.Ignore("LlmUnityMeaiChatClient is not available in COREAI_NO_LLM or WebGL.");
+#else
             string text = "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
             
             var dummyAction = new Action(() => {});
@@ -198,6 +205,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(cleanedText.Contains("<think>"));
             Assert.IsTrue(cleanedText.Contains("Intermediate text"));
             Assert.AreEqual("memory", calls[0].Name);
+#endif
         }
 
         #endregion

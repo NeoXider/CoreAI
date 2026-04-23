@@ -2,7 +2,9 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using LLMUnity;
+#endif
 using UnityEngine;
 using VContainer;
 
@@ -72,6 +74,31 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
+#if UNITY_WEBGL
+            // WebGL: no local native LLMUnity backend. Allow HTTP/Offline only.
+            if (settings != null && settings.BackendType == LlmBackendType.OpenAiHttp)
+            {
+                return new OpenAiChatLlmClient(settings);
+            }
+
+            if (settings != null && settings.BackendType == LlmBackendType.Offline)
+            {
+                return new OfflineLlmClient(settings);
+            }
+
+            // Auto/LlmUnity/default → Stub in WebGL
+            return new StubLlmClient();
+#endif
+#if COREAI_NO_LLM
+            // Build without any external LLM dependencies (HTTP / LLMUnity).
+            // Keep the pipeline alive for UI smoke tests.
+            if (settings != null && settings.BackendType == LlmBackendType.Offline)
+            {
+                return new OfflineLlmClient(settings);
+            }
+
+            return new StubLlmClient();
+#else
             if (settings != null)
             {
                 switch (settings.BackendType)
@@ -87,9 +114,6 @@ namespace CoreAI.Composition
                 }
             }
 
-#if COREAI_NO_LLM
-            return new StubLlmClient();
-#else
             return ResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
 #endif
         }
@@ -100,8 +124,10 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
-#if COREAI_NO_LLM
-            return new StubLlmClient();
+#if UNITY_WEBGL
+            // WebGL: try HTTP only, otherwise Offline.
+            ILlmClient http = TryResolveHttpApiClient(settings);
+            return http ?? new OfflineLlmClient(settings);
 #else
             bool httpFirst = settings != null && settings.AutoPriority == LlmAutoPriority.HttpFirst;
 
@@ -130,6 +156,9 @@ namespace CoreAI.Composition
 
         private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings)
         {
+#if COREAI_NO_LLM
+            return null;
+#else
             if (settings != null && settings.UseHttpApi && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
                 !string.IsNullOrEmpty(settings.ModelName))
             {
@@ -137,6 +166,7 @@ namespace CoreAI.Composition
             }
 
             return null;
+#endif
         }
 
         private static ILlmClient TryResolveLlmUnityClient(
@@ -145,6 +175,9 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
+#if COREAI_NO_LLM || UNITY_WEBGL
+            return null;
+#else
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);
             if (agent == null) return null;
 
@@ -165,6 +198,7 @@ namespace CoreAI.Composition
             }
 
             return new MeaiLlmUnityClient(agent, settings, logger, memoryStore);
+#endif
         }
 
         private static ILlmClient ResolveLlmUnityClient(

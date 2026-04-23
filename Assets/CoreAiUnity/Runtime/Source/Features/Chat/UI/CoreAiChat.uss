@@ -27,6 +27,7 @@
     align-items: center;
     padding-left: 16px;
     padding-right: 16px;
+    flex-shrink: 0;
 }
 
 .coreai-chat-header-icon {
@@ -50,7 +51,20 @@
 /* Scroll area */
 .coreai-chat-scroll {
     flex-grow: 1;
+    flex-shrink: 1;
+    min-height: 0;
     padding: 16px 14px;
+}
+
+/* Leave space so the last bubble isn't hidden behind typing + input row */
+.coreai-chat-scroll > .unity-scroll-view__content-container {
+    padding-bottom: 110px;
+}
+
+/* UI Toolkit flexbox quirk: ensure ScrollView can shrink in a column layout.
+   Without min-height:0, large content may push/overlap the input row. */
+.coreai-chat-container > .coreai-chat-scroll {
+    min-height: 0;
 }
 
 /* Message rows */
@@ -58,6 +72,11 @@
     flex-direction: row;
     margin-bottom: 14px;
     align-items: flex-start;
+}
+
+/* Typing indicator row is part of the fixed bottom stack */
+#coreai-typing-indicator {
+    flex-shrink: 0;
 }
 
 .coreai-ai-row {
@@ -97,6 +116,7 @@
     border-radius: 14px;
     font-size: 14px;
     white-space: normal;
+    word-wrap: break-word;
     color: rgb(220, 232, 240);
     max-width: 380px;
     border-width: 1px;
@@ -124,17 +144,19 @@
 /* Input area */
 .coreai-chat-input-container {
     flex-direction: row;
-    align-items: center;
+    align-items: flex-end;
     padding: 12px 14px 16px 14px;
     background-color: rgba(6, 14, 30, 0.97);
     border-top-width: 1px;
     border-top-color: rgba(17, 160, 181, 0.2);
     border-bottom-left-radius: 14px;
     border-bottom-right-radius: 14px;
+    flex-shrink: 0;
 }
 
 .coreai-chat-input-field {
     flex-grow: 1;
+    flex-shrink: 1;
     min-width: 0;
     min-height: 40px;
     max-height: 100px;
@@ -156,6 +178,24 @@
     color: rgb(197, 220, 232);
     -unity-text-align: middle-left;
     font-size: 14px;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+/* Unity versions differ in internal class names; ensure typed text is always visible */
+.coreai-chat-input-field .unity-text-element,
+.coreai-chat-input-field .unity-base-text-field__text,
+.coreai-chat-input-field .unity-text-field__input,
+.coreai-chat-input-field .unity-text-input,
+.coreai-chat-input-field .unity-text-input__text {
+    color: rgb(197, 220, 232);
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+.coreai-chat-input-field .unity-text-field__placeholder,
+.coreai-chat-input-field .unity-base-text-field__placeholder {
+    color: rgba(197, 220, 232, 0.55);
 }
 
 .coreai-chat-input-field:focus {
@@ -173,6 +213,7 @@
     font-size: 18px;
     -unity-font-style: bold;
     flex-shrink: 0;
+    align-self: flex-end;
     transition-duration: 0.15s;
 }
 
@@ -189,6 +230,10 @@
     width: 4px;
     opacity: 0;
     transition: opacity 0.2s;
+    background-color: transparent;
+    margin-right: 2px;
+    align-self: stretch;
+    height: 100%;
 }
 
 .coreai-chat-scroll:hover .unity-scroller--vertical {
@@ -197,11 +242,252 @@
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__track {
     background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.28);
 }
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger {
-    background-color: rgba(77, 208, 225, 0.4);
-    border-radius: 2px;
+    background-color: rgba(77, 208, 225, 0.85);
+    border-radius: 4px;
+    border-width: 0;
+}
+
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger:hover,
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger:active {
+    background-color: rgba(77, 208, 225, 1.0);
+}
+
+.coreai-chat-scroll .unity-scroller--vertical .unity-scroller-button,
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__low-button,
+.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__high-button,
+.coreai-chat-scroll .unity-scroller--vertical .unity-scroller__low-button,
+.coreai-chat-scroll .unity-scroller--vertical .unity-scroller__high-button {
+    display: none;
+    height: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+/* Unity 6+ renamed scroll view scroller classes (keep design consistent) */
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller {
+    width: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    background-color: transparent;
+    margin-right: 2px;
+    align-self: stretch;
+    height: 100%;
+    flex-grow: 1;
+    flex-shrink: 0;
+}
+
+.coreai-chat-scroll:hover .unity-scroll-view__vertical-scroller {
+    opacity: 1;
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__track {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.28);
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger {
+    background-color: rgba(77, 208, 225, 0.85);
+    border-radius: 4px;
+    border-width: 0;
+}
+
+/* Prefer scroller's own parts when available */
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.28);
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger {
+    background-color: rgba(77, 208, 225, 0.22);
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+}
+
+/* Hide arrow buttons if present (Unity variants) */
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller-button,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__low-button,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__high-button,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__low-button,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__high-button {
+    display: none;
+    height: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+/* Official Scroller USS (Unity docs): style the scroller's slider parts explicitly */
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller.unity-scroller {
+    background-color: transparent;
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider {
+    background-color: transparent;
+    flex-grow: 1;
+    align-self: stretch;
+    margin: 0;
+    padding: 0;
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.28);
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__dragger {
+    background-color: rgba(77, 208, 225, 0.22);
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+}
+
+/* Some Unity versions use slider variants inside scroll views */
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger:active,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger:hover {
+    background-color: rgba(77, 208, 225, 1.0);
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger:active,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger:hover {
+    background-color: rgba(77, 208, 225, 1.0);
+}
+
+/* Ensure the vertical scroller spans the full scroll viewport height */
+.coreai-chat-scroll .unity-scroll-view__content-and-vertical-scroll-container {
+    align-items: stretch;
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider {
+    flex-grow: 1;
+    align-self: stretch;
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker,
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.28);
+}
+
+.coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger {
+    background-color: rgba(77, 208, 225, 0.85);
+    border-radius: 4px;
+    border-width: 0;
+}
+
+/* ===== Final overrides (high specificity) =====
+   Some Unity themes (e.g. DefaultRuntimeTheme) may override scroller visuals.
+   Use the ScrollView's name selector (#coreai-chat-scroll) to force our design. */
+#coreai-chat-scroll .unity-scroll-view__vertical-scroller,
+#coreai-chat-scroll .unity-scroller--vertical {
+    width: 6px;
+    opacity: 1;
+    background-color: transparent;
+    margin-right: 2px;
+    align-self: stretch;
+    height: 100%;
+    flex-grow: 1;
+    flex-shrink: 0;
+}
+
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller.unity-scroller {
+    width: 6px;
+    opacity: 1;
+    background-color: transparent;
+    margin-right: 2px;
+    align-self: stretch;
+    height: 100%;
+    flex-grow: 1;
+    flex-shrink: 0;
+}
+
+#coreai-chat-scroll .unity-scroller__low-button,
+#coreai-chat-scroll .unity-scroller__high-button,
+#coreai-chat-scroll .unity-scroller-button,
+#coreai-chat-scroll .unity-base-slider__low-button,
+#coreai-chat-scroll .unity-base-slider__high-button {
+    display: none;
+    height: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__low-button,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__high-button {
+    display: none;
+    height: 0;
+    width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+#coreai-chat-scroll .unity-scroller__tracker,
+#coreai-chat-scroll .unity-base-slider__track,
+#coreai-chat-scroll .unity-scroller__slider .unity-base-slider__track {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.65);
+    align-self: stretch;
+    flex-grow: 1;
+    padding-left: 1px;
+    padding-right: 1px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+}
+
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__tracker,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-base-slider__track,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
+    background-color: transparent;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.65);
+    align-self: stretch;
+    flex-grow: 1;
+    padding: 1px;
+}
+
+#coreai-chat-scroll .unity-scroller__dragger,
+#coreai-chat-scroll .unity-base-slider__dragger,
+#coreai-chat-scroll .unity-scroller__slider .unity-base-slider__dragger {
+    background-color: rgba(77, 208, 225, 0.85);
+    border-radius: 4px;
+    border-width: 0;
+    margin: 1px;
+}
+
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__dragger,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-base-slider__dragger,
+#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__dragger {
+    background-color: rgba(77, 208, 225, 0.85);
+    border-radius: 4px;
+    border-width: 0;
+    margin: 1px;
+}
+
+#coreai-chat-scroll .unity-scroller__dragger:hover,
+#coreai-chat-scroll .unity-base-slider__dragger:hover,
+#coreai-chat-scroll .unity-scroller__dragger:active,
+#coreai-chat-scroll .unity-base-slider__dragger:active {
+    background-color: rgba(77, 208, 225, 1.0);
 }
 
 /* Typing indicator */

@@ -81,11 +81,13 @@ namespace CoreAI.Infrastructure.Llm
                 return "?";
             }
 
+#if !COREAI_NO_LLM
             if (inner is OpenAiChatLlmClient)
             {
                 return "OpenAiHttp";
             }
-#if !COREAI_NO_LLM
+#endif
+#if !COREAI_NO_LLM && !UNITY_WEBGL
             if (inner is MeaiLlmUnityClient)
             {
                 return "LlmUnity";
