@@ -145,8 +145,7 @@ namespace CoreAI.Chat
             var container = Root.Q<VisualElement>("coreai-chat-root");
             if (container != null)
             {
-                container.style.width  = config.ChatWidth;
-                container.style.height = config.ChatHeight;
+                ApplyResponsiveSize(container);
             }
 
             // Приветствие
@@ -154,6 +153,50 @@ namespace CoreAI.Chat
             {
                 AddMessage(config.WelcomeMessage, isUser: false);
             }
+        }
+
+        /// <summary>
+        /// Подгоняет окно чата под экран устройства.
+        /// На маленьких экранах (телефоны/WebGL mobile) ограничивает размеры,
+        /// чтобы панель не выходила за границы viewport.
+        /// </summary>
+        private void ApplyResponsiveSize(VisualElement container)
+        {
+            // Базовые размеры из ScriptableObject-конфига.
+            float configuredWidth = config.ChatWidth;
+            float configuredHeight = config.ChatHeight;
+
+            // Runtime размеры рендера (в WebGL соответствуют текущему canvas viewport).
+            float screenWidth = Mathf.Max(1f, Screen.width);
+            float screenHeight = Mathf.Max(1f, Screen.height);
+
+            const float margin = 12f;
+            float maxWidth = Mathf.Max(280f, screenWidth - margin * 2f);
+            float maxHeight = Mathf.Max(320f, screenHeight - margin * 2f);
+
+            // На маленьких устройствах панель занимает почти весь экран
+            // с безопасным отступом, чтобы не обрезаться по правому краю.
+            bool useFullScreenLikeLayout = screenWidth <= 720f || screenHeight <= 560f;
+
+            if (useFullScreenLikeLayout)
+            {
+                container.style.left = margin;
+                container.style.right = margin;
+                container.style.top = margin;
+                container.style.bottom = margin;
+                container.style.width = StyleKeyword.Auto;
+                container.style.height = StyleKeyword.Auto;
+                return;
+            }
+
+            // Обычный desktop/tablet режим: сохраняем "плавающее" окно справа снизу,
+            // но не даём ему выйти за экран, если конфиг слишком большой.
+            container.style.left = StyleKeyword.Auto;
+            container.style.top = StyleKeyword.Auto;
+            container.style.right = 24f;
+            container.style.bottom = 24f;
+            container.style.width = Mathf.Min(configuredWidth, maxWidth);
+            container.style.height = Mathf.Min(configuredHeight, maxHeight);
         }
 
         protected virtual void InitService()
