@@ -117,6 +117,7 @@
     font-size: 14px;
     white-space: normal;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
     color: rgb(220, 232, 240);
     max-width: 380px;
     border-width: 1px;
@@ -180,6 +181,7 @@
     font-size: 14px;
     white-space: normal;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* Unity versions differ in internal class names; ensure typed text is always visible */
@@ -189,8 +191,12 @@
 .coreai-chat-input-field .unity-text-input,
 .coreai-chat-input-field .unity-text-input__text {
     color: rgb(197, 220, 232);
+    -unity-caret-color: rgb(220, 232, 240);
+    -unity-selection-color: rgb(6, 14, 30);
+    -unity-selection-background-color: rgba(77, 208, 225, 0.55);
     white-space: normal;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
 }
 
 .coreai-chat-input-field .unity-text-field__placeholder,
@@ -241,21 +247,14 @@
 }
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.28);
+    background-color: rgba(0, 0, 0, 0.22);
+    border-radius: 999px;
 }
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger {
     background-color: rgba(77, 208, 225, 0.85);
-    border-radius: 4px;
+    border-radius: 999px;
     border-width: 0;
-}
-
-.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger:hover,
-.coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__dragger:active {
-    background-color: rgba(77, 208, 225, 1.0);
 }
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-scroller-button,
@@ -288,24 +287,20 @@
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.28);
+    background-color: rgba(0, 0, 0, 0.22);
+    border-radius: 999px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__dragger {
     background-color: rgba(77, 208, 225, 0.85);
-    border-radius: 4px;
+    border-radius: 999px;
     border-width: 0;
 }
 
 /* Prefer scroller's own parts when available */
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.28);
+    background-color: rgba(77, 208, 225, 0.06);
+    border-radius: 6px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger {
@@ -342,10 +337,8 @@
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.28);
+    background-color: rgba(77, 208, 225, 0.06);
+    border-radius: 6px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__dragger {
@@ -378,116 +371,14 @@
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker,
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.28);
+    background-color: rgba(0, 0, 0, 0.22);
+    border-radius: 999px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger {
     background-color: rgba(77, 208, 225, 0.85);
-    border-radius: 4px;
+    border-radius: 999px;
     border-width: 0;
-}
-
-/* ===== Final overrides (high specificity) =====
-   Some Unity themes (e.g. DefaultRuntimeTheme) may override scroller visuals.
-   Use the ScrollView's name selector (#coreai-chat-scroll) to force our design. */
-#coreai-chat-scroll .unity-scroll-view__vertical-scroller,
-#coreai-chat-scroll .unity-scroller--vertical {
-    width: 6px;
-    opacity: 1;
-    background-color: transparent;
-    margin-right: 2px;
-    align-self: stretch;
-    height: 100%;
-    flex-grow: 1;
-    flex-shrink: 0;
-}
-
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller.unity-scroller {
-    width: 6px;
-    opacity: 1;
-    background-color: transparent;
-    margin-right: 2px;
-    align-self: stretch;
-    height: 100%;
-    flex-grow: 1;
-    flex-shrink: 0;
-}
-
-#coreai-chat-scroll .unity-scroller__low-button,
-#coreai-chat-scroll .unity-scroller__high-button,
-#coreai-chat-scroll .unity-scroller-button,
-#coreai-chat-scroll .unity-base-slider__low-button,
-#coreai-chat-scroll .unity-base-slider__high-button {
-    display: none;
-    height: 0;
-    width: 0;
-    margin: 0;
-    padding: 0;
-}
-
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__low-button,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__high-button {
-    display: none;
-    height: 0;
-    width: 0;
-    margin: 0;
-    padding: 0;
-}
-
-#coreai-chat-scroll .unity-scroller__tracker,
-#coreai-chat-scroll .unity-base-slider__track,
-#coreai-chat-scroll .unity-scroller__slider .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.65);
-    align-self: stretch;
-    flex-grow: 1;
-    padding-left: 1px;
-    padding-right: 1px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-}
-
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__tracker,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-base-slider__track,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
-    background-color: transparent;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: rgba(77, 208, 225, 0.65);
-    align-self: stretch;
-    flex-grow: 1;
-    padding: 1px;
-}
-
-#coreai-chat-scroll .unity-scroller__dragger,
-#coreai-chat-scroll .unity-base-slider__dragger,
-#coreai-chat-scroll .unity-scroller__slider .unity-base-slider__dragger {
-    background-color: rgba(77, 208, 225, 0.85);
-    border-radius: 4px;
-    border-width: 0;
-    margin: 1px;
-}
-
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__dragger,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-base-slider__dragger,
-#coreai-chat-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__dragger {
-    background-color: rgba(77, 208, 225, 0.85);
-    border-radius: 4px;
-    border-width: 0;
-    margin: 1px;
-}
-
-#coreai-chat-scroll .unity-scroller__dragger:hover,
-#coreai-chat-scroll .unity-base-slider__dragger:hover,
-#coreai-chat-scroll .unity-scroller__dragger:active,
-#coreai-chat-scroll .unity-base-slider__dragger:active {
-    background-color: rgba(77, 208, 225, 1.0);
 }
 
 /* Typing indicator */

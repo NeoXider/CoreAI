@@ -17,6 +17,8 @@ namespace CoreAI.Chat
     /// </summary>
     public class CoreAiChatPanel : MonoBehaviour
     {
+        private const string MobileClassName = "coreai-mobile";
+
         [Header("Config")]
         [Tooltip("Конфигурация чата (Assets → Create → CoreAI → Chat Config).")]
         [SerializeField] protected CoreAiChatConfig config;
@@ -63,6 +65,21 @@ namespace CoreAI.Chat
         protected virtual void Awake()
         {
             _cts = new CancellationTokenSource();
+            ConfigureWebGlKeyboardInput();
+        }
+
+        /// <summary>
+        /// В WebGL по умолчанию <c>WebGLInput.captureAllKeyboardInput = true</c>:
+        /// Unity перехватывает все клавиатурные события у браузера и пересылает их
+        /// в Input Manager. UI Toolkit-овские TextField в runtime-панели при этом
+        /// нередко «не видят» фокус корректно — фокус слетает, часть клавиш теряется.
+        /// Отключаем capture, чтобы native-фокус HTML/UITK работал штатно.
+        /// </summary>
+        private static void ConfigureWebGlKeyboardInput()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            WebGLInput.captureAllKeyboardInput = false;
+#endif
         }
 
         protected virtual void OnEnable()
@@ -88,7 +105,13 @@ namespace CoreAI.Chat
         protected virtual void OnDisable()
         {
             if (SendButton != null) SendButton.UnregisterCallback<ClickEvent>(OnSendClicked);
-            if (InputField != null) InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
+            if (InputField != null)
+            {
+                InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
+                InputField.UnregisterCallback<PointerDownEvent>(OnInputPointerDown, TrickleDown.TrickleDown);
+                InputField.UnregisterCallback<PointerUpEvent>(OnInputPointerUp, TrickleDown.TrickleDown);
+                InputField.UnregisterCallback<FocusOutEvent>(OnInputFocusOut);
+            }
             StopTypingAnimation();
         }
 
@@ -125,7 +148,20 @@ namespace CoreAI.Chat
                 // вставлен в текст, и нажатие "отправить по Shift+Enter"
                 // выглядело бы для пользователя как ничего не делающее.
                 InputField.RegisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
+                // Клик/тап по зоне поля — гарантированно ставим фокус на внутренний
+                // редактируемый элемент. В WebGL без этого фокус часто «прилипает»
+                // к внешнему композиту TextField, и первые клавиши теряются.
+                InputField.RegisterCallback<PointerDownEvent>(OnInputPointerDown, TrickleDown.TrickleDown);
+                InputField.RegisterCallback<PointerUpEvent>(OnInputPointerUp, TrickleDown.TrickleDown);
+                // Если фокус сам «слетел» (характерно для WebGL/multiline UITK),
+                // возвращаем его тиком позже — при условии, что мы не отправляем.
+                InputField.RegisterCallback<FocusOutEvent>(OnInputFocusOut);
             }
+
+            // Соседние элементы не должны воровать фокус у инпута при клике по ним.
+            if (MessageScroll != null) MessageScroll.focusable = false;
+            if (HeaderTitle != null)  HeaderTitle.focusable = false;
+            if (HeaderIcon != null)   HeaderIcon.focusable = false;
 
             if (TypingIndicator != null) TypingIndicator.style.display = DisplayStyle.None;
         }
@@ -180,6 +216,7 @@ namespace CoreAI.Chat
 
             if (useFullScreenLikeLayout)
             {
+                container.AddToClassList(MobileClassName);
                 container.style.left = margin;
                 container.style.right = margin;
                 container.style.top = margin;
@@ -191,6 +228,7 @@ namespace CoreAI.Chat
 
             // Обычный desktop/tablet режим: сохраняем "плавающее" окно справа снизу,
             // но не даём ему выйти за экран, если конфиг слишком большой.
+            container.RemoveFromClassList(MobileClassName);
             container.style.left = StyleKeyword.Auto;
             container.style.top = StyleKeyword.Auto;
             container.style.right = 24f;
@@ -211,6 +249,26 @@ namespace CoreAI.Chat
         // ===================== Input Handling =====================
 
         private void OnSendClicked(ClickEvent evt) => TrySendInput();
+
+        private void OnInputPointerDown(PointerDownEvent evt)
+        {
+            FocusInputField();
+        }
+
+        private void OnInputPointerUp(PointerUpEvent evt)
+        {
+            // После обработки UITK своего pointer-up возвращаем фокус —
+            // помогает против частых «слетаний» фокуса на WebGL/mobile.
+            InputField?.schedule.Execute(FocusInputField).StartingIn(1);
+        }
+
+        private void OnInputFocusOut(FocusOutEvent evt)
+        {
+            // Если пользователь НЕ отправляет сейчас сообщение, но фокус
+            // слетел сам (типично для WebGL multiline TextField) — возвращаем его.
+            if (_isSending) return;
+            InputField?.schedule.Execute(FocusInputField).StartingIn(1);
+        }
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {

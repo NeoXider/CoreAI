@@ -2,6 +2,15 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.21.4] - 2026-04-23
+
+### 💬 Chat UI — WebGL input focus hardening
+
+- 🐛 **`WebGLInput.captureAllKeyboardInput = false`** при Awake чата. В WebGL-сборке Unity по умолчанию забирает все клавиатурные события у браузера, из-за чего UI Toolkit TextField внутри runtime-панели терял фокус и «глотал» символы.
+- 🐛 **PointerDown/PointerUp на InputField**: гарантированный фокус на внутренний `unity-text-input` при любом клике/тапе по полю. Фокус больше не «прилипает» к внешнему композиту TextField.
+- 🐛 **`FocusOutEvent` авто-восстановление фокуса**: если фокус слетел не из-за отправки (характерно для multiline TextField в WebGL), он возвращается на следующий тик.
+- 🐛 **Не забирают фокус у инпута**: `ScrollView` с историей сообщений, заголовок и иконка header помечены `focusable = false`, чтобы клик по ним не уводил фокус с TextField.
+
 ## [0.21.3] - 2026-04-23
 
 ### 💬 Chat UI — WebGL typing stability

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.21.4] — 2026-04-23
+
+### Release sync
+
+- 🔧 Версия синхронизирована с `com.nexoider.coreaiunity` **0.21.4** (изменения релиза — в Unity-слое: WebGL input focus hardening в `CoreAiChatPanel`). Изменений в портативном ядре нет.
+
 ## [v0.21.3] — 2026-04-23
 
 ### Release sync
