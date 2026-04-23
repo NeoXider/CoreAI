@@ -207,7 +207,7 @@ namespace CoreAI.Chat
             }
 
             InputField.value = string.Empty;
-            InputField.schedule.Execute(() => InputField.Focus());
+            InputField.schedule.Execute(FocusInputField);
 
             // Hook: before sending
             text = OnMessageSending(text);
@@ -267,6 +267,30 @@ namespace CoreAI.Chat
             {
                 SetSendEnabled(true);
                 _isSending = false;
+                // Вернуть фокус во input после завершения AI-ответа,
+                // чтобы пользователь мог сразу печатать следующее сообщение.
+                InputField?.schedule.Execute(FocusInputField);
+            }
+        }
+
+        /// <summary>
+        /// Фокусирует именно внутренний редактируемый элемент <c>TextField</c>.
+        /// Прямой <c>InputField.Focus()</c> на multiline-поле в UI Toolkit
+        /// часто фокусит внешний композит, и клавиатурный ввод не уходит в редактор.
+        /// </summary>
+        private void FocusInputField()
+        {
+            if (InputField == null) return;
+
+            var inner = InputField.Q<VisualElement>(TextField.textInputUssName);
+            if (inner != null)
+            {
+                inner.focusable = true;
+                inner.Focus();
+            }
+            else
+            {
+                InputField.Focus();
             }
         }
 

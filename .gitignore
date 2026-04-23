@@ -88,3 +88,5 @@ FirebaseCppApp-*.so
 # LLMUnity — нативные бинарники LlamaLib в StreamingAssets (часто >100 MB, без Git LFS не пушится на GitHub)
 /[Aa]ssets/[Ss]treamingAssets/LlamaLib-*/
 /[Aa]ssets/[Ss]treamingAssets/LlamaLib-*.meta
+# LLMUnity build cache/artifacts (large native binaries)
+/LLMUnityBuild/

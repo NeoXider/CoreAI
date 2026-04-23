@@ -2,6 +2,13 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.21.2] - 2026-04-23
+
+### 💬 Chat UI — input focus
+
+- 🐛 **Фокус возвращается в текстовое поле после отправки.** `CoreAiChatPanel.TrySendInput` / `SendToAI.finally` теперь фокусят именно внутренний `unity-text-input` (а не внешний композит `TextField`). Ранее после 1-го отправленного сообщения в multi-line поле фокус «висел» на внешнем `TextField` и клавиатурный ввод не уходил в редактор — печатать можно было только повторным кликом в поле.
+- ✨ **`CoreAiChatPanel.FocusInputField()`** — приватный хелпер, инкапсулирует `TextField.textInputUssName` lookup. Используется и при очистке поля после отправки, и в `finally` SendToAI (чтобы после завершения AI-ответа можно было сразу продолжать печатать).
+
 ## [0.21.1] - 2026-04-23
 
 ### 💬 Chat UI polish & layout stability
