@@ -108,9 +108,6 @@ namespace CoreAI.Chat
             if (InputField != null)
             {
                 InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
-                InputField.UnregisterCallback<PointerDownEvent>(OnInputPointerDown, TrickleDown.TrickleDown);
-                InputField.UnregisterCallback<PointerUpEvent>(OnInputPointerUp, TrickleDown.TrickleDown);
-                InputField.UnregisterCallback<FocusOutEvent>(OnInputFocusOut);
             }
             StopTypingAnimation();
         }
@@ -148,17 +145,12 @@ namespace CoreAI.Chat
                 // вставлен в текст, и нажатие "отправить по Shift+Enter"
                 // выглядело бы для пользователя как ничего не делающее.
                 InputField.RegisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
-                // Клик/тап по зоне поля — гарантированно ставим фокус на внутренний
-                // редактируемый элемент. В WebGL без этого фокус часто «прилипает»
-                // к внешнему композиту TextField, и первые клавиши теряются.
-                InputField.RegisterCallback<PointerDownEvent>(OnInputPointerDown, TrickleDown.TrickleDown);
-                InputField.RegisterCallback<PointerUpEvent>(OnInputPointerUp, TrickleDown.TrickleDown);
-                // Если фокус сам «слетел» (характерно для WebGL/multiline UITK),
-                // возвращаем его тиком позже — при условии, что мы не отправляем.
-                InputField.RegisterCallback<FocusOutEvent>(OnInputFocusOut);
             }
 
             // Соседние элементы не должны воровать фокус у инпута при клике по ним.
+            // Принудительный Focus() вешать нельзя — UITK в WebGL по pointer-событиям
+            // начинает «моргать» фокусом между внешним TextField и внутренним
+            // unity-text-input, из-за чего пропадают каретка и клавиши.
             if (MessageScroll != null) MessageScroll.focusable = false;
             if (HeaderTitle != null)  HeaderTitle.focusable = false;
             if (HeaderIcon != null)   HeaderIcon.focusable = false;
@@ -249,26 +241,6 @@ namespace CoreAI.Chat
         // ===================== Input Handling =====================
 
         private void OnSendClicked(ClickEvent evt) => TrySendInput();
-
-        private void OnInputPointerDown(PointerDownEvent evt)
-        {
-            FocusInputField();
-        }
-
-        private void OnInputPointerUp(PointerUpEvent evt)
-        {
-            // После обработки UITK своего pointer-up возвращаем фокус —
-            // помогает против частых «слетаний» фокуса на WebGL/mobile.
-            InputField?.schedule.Execute(FocusInputField).StartingIn(1);
-        }
-
-        private void OnInputFocusOut(FocusOutEvent evt)
-        {
-            // Если пользователь НЕ отправляет сейчас сообщение, но фокус
-            // слетел сам (типично для WebGL multiline TextField) — возвращаем его.
-            if (_isSending) return;
-            InputField?.schedule.Execute(FocusInputField).StartingIn(1);
-        }
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
@@ -382,24 +354,16 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Фокусирует именно внутренний редактируемый элемент <c>TextField</c>.
-        /// Прямой <c>InputField.Focus()</c> на multiline-поле в UI Toolkit
-        /// часто фокусит внешний композит, и клавиатурный ввод не уходит в редактор.
+        /// Устанавливает фокус на TextField штатным способом.
+        /// Вызывается ТОЛЬКО после программной очистки поля (TrySendInput/SendToAI),
+        /// чтобы пользователь мог сразу печатать следующее сообщение.
+        /// В обычных взаимодействиях UI Toolkit сам ставит фокус по клику —
+        /// любые наши форсированные Focus() на pointer/focus событиях
+        /// вызывают «моргание» фокуса и пропажу каретки.
         /// </summary>
         private void FocusInputField()
         {
-            if (InputField == null) return;
-
-            var inner = InputField.Q<VisualElement>(TextField.textInputUssName);
-            if (inner != null)
-            {
-                inner.focusable = true;
-                inner.Focus();
-            }
-            else
-            {
-                InputField.Focus();
-            }
+            InputField?.Focus();
         }
 
         private async System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId)
