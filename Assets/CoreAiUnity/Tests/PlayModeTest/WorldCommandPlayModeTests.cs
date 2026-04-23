@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -14,8 +14,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты для WorldCommand tool calling через единый MEAI pipeline.
-    /// Бэкенд определяется из CoreAISettingsAsset.
+    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ WorldCommand tool calling С‡РµСЂРµР· РµРґРёРЅС‹Р№ MEAI pipeline.
+    /// Р‘СЌРєРµРЅРґ РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РёР· CoreAISettingsAsset.
     /// </summary>
     public sealed class WorldCommandPlayModeTests
     {
@@ -32,7 +32,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing spawn...");
 
-            // Регистрируем WorldTool для роли Creator
+            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -45,8 +45,8 @@ namespace CoreAI.Tests.PlayMode
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
 
-            // Проверяем что команда была выполнена (зачастую есть задержка между возвратом из Orchestrator и обновлением состояния)
-            // Пытаемся подождать до 5 секунд, так как tool execution работает через Task.Run.
+            // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РєРѕРјР°РЅРґР° Р±С‹Р»Р° РІС‹РїРѕР»РЅРµРЅР° (Р·Р°С‡Р°СЃС‚СѓСЋ РµСЃС‚СЊ Р·Р°РґРµСЂР¶РєР° РјРµР¶РґСѓ РІРѕР·РІСЂР°С‚РѕРј РёР· Orchestrator Рё РѕР±РЅРѕРІР»РµРЅРёРµРј СЃРѕСЃС‚РѕСЏРЅРёСЏ)
+            // РџС‹С‚Р°РµРјСЃСЏ РїРѕРґРѕР¶РґР°С‚СЊ РґРѕ 5 СЃРµРєСѓРЅРґ, С‚Р°Рє РєР°Рє tool execution СЂР°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· Task.Run.
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
                 yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f,
@@ -71,7 +71,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing move...");
 
-            // Регистрируем WorldTool для роли Creator
+            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -108,7 +108,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_objects...");
 
-            // Регистрируем WorldTool для роли Creator
+            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -145,7 +145,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing play_animation...");
 
-            // Регистрируем WorldTool для роли Creator
+            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -182,7 +182,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_animations...");
 
-            // Регистрируем WorldTool для роли Creator
+            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -240,7 +240,7 @@ namespace CoreAI.Tests.PlayMode
                 LastCommandJson = cmd.JsonPayload;
                 AllCommandsJson.Add(cmd.JsonPayload);
                 
-                // Мокаем ответы для тестов
+                // РњРѕРєР°РµРј РѕС‚РІРµС‚С‹ РґР»СЏ С‚РµСЃС‚РѕРІ
                 if (cmd.JsonPayload != null)
                 {
                     if (cmd.JsonPayload.Contains("list_animations"))

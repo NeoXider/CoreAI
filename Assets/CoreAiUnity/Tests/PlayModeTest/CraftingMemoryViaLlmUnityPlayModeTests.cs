@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,11 +21,11 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тест крафта с памятью — проверяет что модель использует инструмент memory
-    /// для сохранения состояния между вызовами. Тест НЕ передаёт предыдущие крафты в промпт,
-    /// модель должна сама сохранять и читать память через инструмент.
+    /// PlayMode С‚РµСЃС‚ РєСЂР°С„С‚Р° СЃ РїР°РјСЏС‚СЊСЋ вЂ” РїСЂРѕРІРµСЂСЏРµС‚ С‡С‚Рѕ РјРѕРґРµР»СЊ РёСЃРїРѕР»СЊР·СѓРµС‚ РёРЅСЃС‚СЂСѓРјРµРЅС‚ memory
+    /// РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ СЃРѕСЃС‚РѕСЏРЅРёСЏ РјРµР¶РґСѓ РІС‹Р·РѕРІР°РјРё. РўРµСЃС‚ РќР• РїРµСЂРµРґР°С‘С‚ РїСЂРµРґС‹РґСѓС‰РёРµ РєСЂР°С„С‚С‹ РІ РїСЂРѕРјРїС‚,
+    /// РјРѕРґРµР»СЊ РґРѕР»Р¶РЅР° СЃР°РјР° СЃРѕС…СЂР°РЅСЏС‚СЊ Рё С‡РёС‚Р°С‚СЊ РїР°РјСЏС‚СЊ С‡РµСЂРµР· РёРЅСЃС‚СЂСѓРјРµРЅС‚.
     /// </summary>
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class CraftingMemoryViaLlmUnityPlayModeTests
     {
         private sealed class InMemoryStore : IAgentMemoryStore
@@ -75,18 +75,18 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Полный воркфлоу крафта через LLMUnity: 3 итерации, AI запоминает каждый крафт
-        /// через инструмент memory и должен создавать уникальные предметы.
+        /// РџРѕР»РЅС‹Р№ РІРѕСЂРєС„Р»РѕСѓ РєСЂР°С„С‚Р° С‡РµСЂРµР· LLMUnity: 3 РёС‚РµСЂР°С†РёРё, AI Р·Р°РїРѕРјРёРЅР°РµС‚ РєР°Р¶РґС‹Р№ РєСЂР°С„С‚
+        /// С‡РµСЂРµР· РёРЅСЃС‚СЂСѓРјРµРЅС‚ memory Рё РґРѕР»Р¶РµРЅ СЃРѕР·РґР°РІР°С‚СЊ СѓРЅРёРєР°Р»СЊРЅС‹Рµ РїСЂРµРґРјРµС‚С‹.
         /// </summary>
         [UnityTest]
         [Timeout(2400000)]
         public IEnumerator CraftingMemoryLlmUnity_ThreeCrafts_AllUnique()
         {
-            Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
-            Debug.Log("[CraftingMemory.LLMUnity] ═══ TEST START ═══");
-            Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
+            Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+            Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
+            Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
 
-            // Backend из CoreAISettingsAsset (null = FromSettings)
+            // Backend РёР· CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                // Только для LLMUnity — ждём готовности модели. Для HTTP не нужно.
+                // РўРѕР»СЊРєРѕ РґР»СЏ LLMUnity вЂ” Р¶РґС‘Рј РіРѕС‚РѕРІРЅРѕСЃС‚Рё РјРѕРґРµР»Рё. Р”Р»СЏ HTTP РЅРµ РЅСѓР¶РЅРѕ.
                 if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
@@ -109,12 +109,12 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
 
-                // Создаём LuaLlmTool с настоящим исполнителем Lua (SecureLuaEnvironment)
+                // РЎРѕР·РґР°С‘Рј LuaLlmTool СЃ РЅР°СЃС‚РѕСЏС‰РёРј РёСЃРїРѕР»РЅРёС‚РµР»РµРј Lua (SecureLuaEnvironment)
                 RealLuaExecutor luaExecutor = new();
                 LuaLlmTool luaTool = new(luaExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
                 AgentMemoryPolicy policy = new();
-                // Регистрируем execute_lua инструмент для CoreMechanic
+                // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј execute_lua РёРЅСЃС‚СЂСѓРјРµРЅС‚ РґР»СЏ CoreMechanic
                 policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
 
                 SessionTelemetryCollector telemetry = new();
@@ -127,7 +127,7 @@ namespace CoreAI.Tests.PlayMode
 
                 List<string> craftedNames = new();
 
-                // ===== КРАФТ 1: Iron + Oak =====
+                // ===== РљР РђР¤Рў 1: Iron + Oak =====
                 {
                     string prompt = BuildCraftPrompt(1,
                         "Iron (metal, hardness:60, magic:5, rarity:1)",
@@ -150,11 +150,11 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 1", sink, store);
 
-                    // Проверяем что модель записала в память
+                    // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РјРѕРґРµР»СЊ Р·Р°РїРёСЃР°Р»Р° РІ РїР°РјСЏС‚СЊ
                     if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) ||
                         string.IsNullOrWhiteSpace(mem.Memory))
                     {
-                        Debug.LogWarning("[CraftingMemory.LLMUnity] ⚠ Model did NOT write to memory after craft 1!");
+                        Debug.LogWarning("[CraftingMemory.LLMUnity] вљ  Model did NOT write to memory after craft 1!");
                     }
 
                     if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1", 1))
@@ -163,7 +163,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // ===== КРАФТ 2: Steel + Hardwood =====
+                // ===== РљР РђР¤Рў 2: Steel + Hardwood =====
                 {
                     string prompt = BuildCraftPrompt(2,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
@@ -192,7 +192,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // ===== КРАФТ 3: Mithril + Enchanted Wood =====
+                // ===== РљР РђР¤Рў 3: Mithril + Enchanted Wood =====
                 {
                     string prompt = BuildCraftPrompt(3,
                         "Mithril (metal, hardness:70, magic:60, rarity:4)",
@@ -221,14 +221,14 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // ===== КРАФТ 4: Steel + Hardwood (ПОВТОР крафта #2) — проверка детерминизма =====
+                // ===== РљР РђР¤Рў 4: Steel + Hardwood (РџРћР’РўРћР  РєСЂР°С„С‚Р° #2) вЂ” РїСЂРѕРІРµСЂРєР° РґРµС‚РµСЂРјРёРЅРёР·РјР° =====
                 {
                     string prompt = BuildDeterministicCraftPrompt(4,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
                         store);
 
-                    LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2 — DETERMINISM CHECK)", prompt,
+                    LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2 вЂ” DETERMINISM CHECK)", prompt,
                         store);
 
                     ListSink sink = new();
@@ -258,12 +258,12 @@ namespace CoreAI.Tests.PlayMode
                         if (!isDeterministic)
                         {
                             Debug.LogWarning(
-                                $"[CraftingMemory.LLMUnity] ⚠ DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
+                                $"[CraftingMemory.LLMUnity] вљ  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
                         }
                         else
                         {
                             Debug.Log(
-                                $"[CraftingMemory.LLMUnity] ✓ DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
+                                $"[CraftingMemory.LLMUnity] вњ“ DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
                         }
                     }
 
@@ -273,36 +273,36 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // ===== ФИНАЛЬНАЯ ПРОВЕРКА =====
-                Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
-                Debug.Log("[CraftingMemory.LLMUnity] ═══ FINAL VALIDATION ═══");
-                Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
+                // ===== Р¤РРќРђР›Р¬РќРђРЇ РџР РћР’Р•Р РљРђ =====
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђ FINAL VALIDATION в•ђв•ђв•ђ");
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
 
                 Assert.AreEqual(4, craftedNames.Count, "Must have 4 crafted items");
 
-                // Крафты 1, 2, 3 — уникальны
+                // РљСЂР°С„С‚С‹ 1, 2, 3 вЂ” СѓРЅРёРєР°Р»СЊРЅС‹
                 HashSet<string> uniqueFirst3 = new(craftedNames.Take(3).Select(n => n.ToLowerInvariant()));
                 Assert.AreEqual(3, uniqueFirst3.Count,
                     $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames.Take(3))}");
 
-                Debug.Log("[CraftingMemory.LLMUnity] ✓ First 3 crafts are unique");
+                Debug.Log("[CraftingMemory.LLMUnity] вњ“ First 3 crafts are unique");
 
                 string craft2Final = craftedNames[1];
                 string craft4Final = craftedNames[3];
                 Debug.Log($"[CraftingMemory.LLMUnity] Crafted items: {string.Join(" | ", craftedNames)}");
                 Debug.Log(
                     $"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
-                    $"→ {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? "✓ SAME" : "⚠ DIFFERENT")}");
+                    $"в†’ {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? "вњ“ SAME" : "вљ  DIFFERENT")}");
 
-                // Проверяем финальное состояние памяти
+                // РџСЂРѕРІРµСЂСЏРµРј С„РёРЅР°Р»СЊРЅРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ РїР°РјСЏС‚Рё
                 if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))
                 {
                     Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
                 }
 
-                Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
-                Debug.Log("[CraftingMemory.LLMUnity] ═══ TEST PASSED ═══");
-                Debug.Log("[CraftingMemory.LLMUnity] ═══════════════════════════════════════");
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
+                Debug.Log("[CraftingMemory.LLMUnity] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
             }
             finally
             {
@@ -331,7 +331,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Настоящий ILuaExecutor через SecureLuaEnvironment — выполняет Lua код в песочнице.
+        /// РќР°СЃС‚РѕСЏС‰РёР№ ILuaExecutor С‡РµСЂРµР· SecureLuaEnvironment вЂ” РІС‹РїРѕР»РЅСЏРµС‚ Lua РєРѕРґ РІ РїРµСЃРѕС‡РЅРёС†Рµ.
         /// </summary>
         private sealed class RealLuaExecutor : LuaTool.ILuaExecutor
         {
@@ -343,7 +343,7 @@ namespace CoreAI.Tests.PlayMode
                 _sandbox = new SecureLuaEnvironment();
                 _registry = new LuaApiRegistry();
 
-                // Регистрируем базовые API: report, create_item
+                // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј Р±Р°Р·РѕРІС‹Рµ API: report, create_item
                 _registry.Register("report", new Action<string>(msg =>
                     Debug.Log($"[Lua.report] {msg}")));
                 _registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
@@ -383,7 +383,7 @@ namespace CoreAI.Tests.PlayMode
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
 
-            // Читаем память из store — это то, что модель должна была сохранить
+            // Р§РёС‚Р°РµРј РїР°РјСЏС‚СЊ РёР· store вЂ” СЌС‚Рѕ С‚Рѕ, С‡С‚Рѕ РјРѕРґРµР»СЊ РґРѕР»Р¶РЅР° Р±С‹Р»Р° СЃРѕС…СЂР°РЅРёС‚СЊ
             string memoryFromStore = "";
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
@@ -441,7 +441,7 @@ namespace CoreAI.Tests.PlayMode
                                   "  - action: \"write\"\n" +
                                   $"  - content: \"{memoryWriteHint}\"\n\n" +
                                   "STEP 2: Call the 'execute_lua' tool with Lua code.\n\n" +
-                                  "CRITICAL: You MUST craft the EXACT SAME item as before — same name, same quality.\n" +
+                                  "CRITICAL: You MUST craft the EXACT SAME item as before вЂ” same name, same quality.\n" +
                                   "These are the EXACT same ingredients, so the result must be IDENTICAL.\n" +
                                   "You MUST call BOTH tools. Do NOT stop after memory.";
 
@@ -452,54 +452,54 @@ namespace CoreAI.Tests.PlayMode
 
         private static void LogBeforeModelCall(string label, string prompt, InMemoryStore store)
         {
-            Debug.Log($"[CraftingMemory.LLMUnity] ┌─────────────────────────────────────────");
-            Debug.Log($"[CraftingMemory.LLMUnity] │ 📤 SENDING TO MODEL: {label}");
-            Debug.Log($"[CraftingMemory.LLMUnity] ├─────────────────────────────────────────");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“¤ SENDING TO MODEL: {label}");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
 
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
-                Debug.Log($"[CraftingMemory.LLMUnity] │ 📚 MEMORY VISIBLE TO MODEL:\n{mem.Memory}");
-                Debug.Log($"[CraftingMemory.LLMUnity] ├─────────────────────────────────────────");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“љ MEMORY VISIBLE TO MODEL:\n{mem.Memory}");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
             }
             else
             {
-                Debug.Log($"[CraftingMemory.LLMUnity] │ 📚 MEMORY: (empty — first craft)");
-                Debug.Log($"[CraftingMemory.LLMUnity] ├─────────────────────────────────────────");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“љ MEMORY: (empty вЂ” first craft)");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
             }
 
-            Debug.Log($"[CraftingMemory.LLMUnity] │ 📝 PROMPT ({prompt.Length} chars):\n{prompt}");
-            Debug.Log($"[CraftingMemory.LLMUnity] └─────────────────────────────────────────");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“ќ PROMPT ({prompt.Length} chars):\n{prompt}");
+            Debug.Log($"[CraftingMemory.LLMUnity] в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
         }
 
         private static void LogAfterModelCall(string label, ListSink sink, InMemoryStore store)
         {
-            Debug.Log($"[CraftingMemory.LLMUnity] ┌─────────────────────────────────────────");
-            Debug.Log($"[CraftingMemory.LLMUnity] │ 📥 MODEL RESPONSE: {label}");
-            Debug.Log($"[CraftingMemory.LLMUnity] ├─────────────────────────────────────────");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“Ґ MODEL RESPONSE: {label}");
+            Debug.Log($"[CraftingMemory.LLMUnity] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
 
             if (sink.Items.Count > 0)
             {
                 string payload = sink.Items[0].JsonPayload;
-                Debug.Log($"[CraftingMemory.LLMUnity] │ ✅ Command received: {sink.Items[0].CommandTypeId}");
-                Debug.Log($"[CraftingMemory.LLMUnity] │ 📦 RAW PAYLOAD ({payload.Length} chars):\n{payload}");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ вњ… Command received: {sink.Items[0].CommandTypeId}");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ“¦ RAW PAYLOAD ({payload.Length} chars):\n{payload}");
             }
             else
             {
-                Debug.Log($"[CraftingMemory.LLMUnity] │ ❌ NO COMMAND produced");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ вќЊ NO COMMAND produced");
             }
 
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
-                Debug.Log($"[CraftingMemory.LLMUnity] │ 💾 MEMORY AFTER:\n{mem.Memory}");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ’ѕ MEMORY AFTER:\n{mem.Memory}");
             }
             else
             {
-                Debug.Log($"[CraftingMemory.LLMUnity] │ 💾 MEMORY: (not written by model)");
+                Debug.Log($"[CraftingMemory.LLMUnity] в”‚ рџ’ѕ MEMORY: (not written by model)");
             }
 
-            Debug.Log($"[CraftingMemory.LLMUnity] └─────────────────────────────────────────");
+            Debug.Log($"[CraftingMemory.LLMUnity] в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
         }
 
         private static bool ExtractCraftInfo(
@@ -511,26 +511,26 @@ namespace CoreAI.Tests.PlayMode
         {
             string payload = sink.Items.Count > 0 ? sink.Items[0].JsonPayload : null;
 
-            // Некоторые бэкенды/режимы function-calling выполняют tools и не возвращают текст вообще.
-            // В этом тесте memory-write является обязательным, поэтому можем восстановить имя из memory.
+            // РќРµРєРѕС‚РѕСЂС‹Рµ Р±СЌРєРµРЅРґС‹/СЂРµР¶РёРјС‹ function-calling РІС‹РїРѕР»РЅСЏСЋС‚ tools Рё РЅРµ РІРѕР·РІСЂР°С‰Р°СЋС‚ С‚РµРєСЃС‚ РІРѕРѕР±С‰Рµ.
+            // Р’ СЌС‚РѕРј С‚РµСЃС‚Рµ memory-write СЏРІР»СЏРµС‚СЃСЏ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рј, РїРѕСЌС‚РѕРјСѓ РјРѕР¶РµРј РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РёРјСЏ РёР· memory.
             string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
             if (string.IsNullOrEmpty(itemName))
             {
                 if (TryExtractCraftNameFromMemory(store, craftNumber, out string fromMemory))
                 {
                     itemName = fromMemory;
-                    Debug.LogWarning($"[{label}] ⚠ Could not extract item name from payload — recovered from memory: '{itemName}'");
+                    Debug.LogWarning($"[{label}] вљ  Could not extract item name from payload вЂ” recovered from memory: '{itemName}'");
                 }
                 else
                 {
-                    Debug.LogWarning($"[{label}] ⚠ Could not extract item name from payload or memory");
+                    Debug.LogWarning($"[{label}] вљ  Could not extract item name from payload or memory");
                     itemName = $"unknown_{craftedNames.Count + 1}";
                 }
             }
 
             craftedNames.Add(itemName);
 
-            // Обновляем память — накапливаем список крафтов
+            // РћР±РЅРѕРІР»СЏРµРј РїР°РјСЏС‚СЊ вЂ” РЅР°РєР°РїР»РёРІР°РµРј СЃРїРёСЃРѕРє РєСЂР°С„С‚РѕРІ
             string existingMemory = "";
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState existing) &&
                 !string.IsNullOrWhiteSpace(existing.Memory))
@@ -538,17 +538,17 @@ namespace CoreAI.Tests.PlayMode
                 existingMemory = existing.Memory;
             }
 
-            // Если модель уже обновила память (проверяем содержит ли она текущий крафт) — пропускаем
+            // Р•СЃР»Рё РјРѕРґРµР»СЊ СѓР¶Рµ РѕР±РЅРѕРІРёР»Р° РїР°РјСЏС‚СЊ (РїСЂРѕРІРµСЂСЏРµРј СЃРѕРґРµСЂР¶РёС‚ Р»Рё РѕРЅР° С‚РµРєСѓС‰РёР№ РєСЂР°С„С‚) вЂ” РїСЂРѕРїСѓСЃРєР°РµРј
             if (!existingMemory.Contains(itemName))
             {
                 string updatedMemory = string.IsNullOrEmpty(existingMemory)
                     ? $"Previous crafts: Craft #{craftedNames.Count} - {itemName}"
                     : $"{existingMemory}, Craft #{craftedNames.Count} - {itemName}";
                 store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = updatedMemory });
-                Debug.Log($"[{label}] 💾 Memory updated: {updatedMemory}");
+                Debug.Log($"[{label}] рџ’ѕ Memory updated: {updatedMemory}");
             }
 
-            Debug.Log($"[{label}] ✓ Crafted: '{itemName}'");
+            Debug.Log($"[{label}] вњ“ Crafted: '{itemName}'");
             return true;
         }
 

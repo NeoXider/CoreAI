@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -11,10 +11,10 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Единый экземпляр LLM + LLMAgent на всю сессию PlayMode тестов.
-    /// Модель загружается один раз при первом вызове <see cref="EnsureInitialized"/>,
-    /// живёт через DontDestroyOnLoad и уничтожается только в <see cref="Cleanup"/>
-    /// (вызывается из <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>).
+    /// Р•РґРёРЅС‹Р№ СЌРєР·РµРјРїР»СЏСЂ LLM + LLMAgent РЅР° РІСЃСЋ СЃРµСЃСЃРёСЋ PlayMode С‚РµСЃС‚РѕРІ.
+    /// РњРѕРґРµР»СЊ Р·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ РѕРґРёРЅ СЂР°Р· РїСЂРё РїРµСЂРІРѕРј РІС‹Р·РѕРІРµ <see cref="EnsureInitialized"/>,
+    /// Р¶РёРІС‘С‚ С‡РµСЂРµР· DontDestroyOnLoad Рё СѓРЅРёС‡С‚РѕР¶Р°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РІ <see cref="Cleanup"/>
+    /// (РІС‹Р·С‹РІР°РµС‚СЃСЏ РёР· <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>).
     /// </summary>
     public static class SharedLlmUnity
     {
@@ -31,8 +31,8 @@ namespace CoreAI.Tests.PlayMode
         public static LLM Llm => _llm;
 
         /// <summary>
-        /// Создать <see cref="ILlmClient"/> с конкретным <see cref="IAgentMemoryStore"/>.
-        /// Каждый тест получает свой лёгкий клиент вокруг общего LLMAgent.
+        /// РЎРѕР·РґР°С‚СЊ <see cref="ILlmClient"/> СЃ РєРѕРЅРєСЂРµС‚РЅС‹Рј <see cref="IAgentMemoryStore"/>.
+        /// РљР°Р¶РґС‹Р№ С‚РµСЃС‚ РїРѕР»СѓС‡Р°РµС‚ СЃРІРѕР№ Р»С‘РіРєРёР№ РєР»РёРµРЅС‚ РІРѕРєСЂСѓРі РѕР±С‰РµРіРѕ LLMAgent.
         /// </summary>
         public static ILlmClient CreateClientWithMemoryStore(IAgentMemoryStore store)
         {
@@ -49,13 +49,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Инициализировать один раз. Повторные вызовы — no-op (yield break).
+        /// РРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°С‚СЊ РѕРґРёРЅ СЂР°Р·. РџРѕРІС‚РѕСЂРЅС‹Рµ РІС‹Р·РѕРІС‹ вЂ” no-op (yield break).
         /// </summary>
         public static IEnumerator EnsureInitialized()
         {
-            // У Unity объекты в DontDestroyOnLoad уничтожаются при остановке PlayMode,
-            // но статические переменные сохраняют значения (если не было Domain Reload).
-            // Защита от "потерянного" LLM.
+            // РЈ Unity РѕР±СЉРµРєС‚С‹ РІ DontDestroyOnLoad СѓРЅРёС‡С‚РѕР¶Р°СЋС‚СЃСЏ РїСЂРё РѕСЃС‚Р°РЅРѕРІРєРµ PlayMode,
+            // РЅРѕ СЃС‚Р°С‚РёС‡РµСЃРєРёРµ РїРµСЂРµРјРµРЅРЅС‹Рµ СЃРѕС…СЂР°РЅСЏСЋС‚ Р·РЅР°С‡РµРЅРёСЏ (РµСЃР»Рё РЅРµ Р±С‹Р»Рѕ Domain Reload).
+            // Р—Р°С‰РёС‚Р° РѕС‚ "РїРѕС‚РµСЂСЏРЅРЅРѕРіРѕ" LLM.
             if (_initialized && (_llm == null || !_llm.started))
             {
                 _initialized = false;
@@ -68,7 +68,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (_initializing)
             {
-                // Другой тест уже инициализирует — ждём
+                // Р”СЂСѓРіРѕР№ С‚РµСЃС‚ СѓР¶Рµ РёРЅРёС†РёР°Р»РёР·РёСЂСѓРµС‚ вЂ” Р¶РґС‘Рј
                 while (_initializing)
                 {
                     yield return null;
@@ -90,16 +90,16 @@ namespace CoreAI.Tests.PlayMode
 
             if (_rootGo == null || _agent == null || _llm == null)
             {
-                _error = "Не удалось создать LLM+LLMAgent или назначить GGUF.";
+                _error = "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ LLM+LLMAgent РёР»Рё РЅР°Р·РЅР°С‡РёС‚СЊ GGUF.";
                 Debug.LogError("[SharedLlmUnity] " + _error);
                 _initializing = false;
                 yield break;
             }
 
-            // DontDestroyOnLoad: живём до конца всех тестов
+            // DontDestroyOnLoad: Р¶РёРІС‘Рј РґРѕ РєРѕРЅС†Р° РІСЃРµС… С‚РµСЃС‚РѕРІ
             Object.DontDestroyOnLoad(_rootGo);
 
-            // Температура для стабильного tool calling
+            // РўРµРјРїРµСЂР°С‚СѓСЂР° РґР»СЏ СЃС‚Р°Р±РёР»СЊРЅРѕРіРѕ tool calling
             if (settings != null && settings.Temperature > 0f)
             {
                 _agent.temperature = settings.Temperature;
@@ -143,7 +143,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // Применяем reasoning ПОСЛЕ старта llmService (нельзя раньше — C++ ещё не готов)
+            // РџСЂРёРјРµРЅСЏРµРј reasoning РџРћРЎР›Р• СЃС‚Р°СЂС‚Р° llmService (РЅРµР»СЊР·СЏ СЂР°РЅСЊС€Рµ вЂ” C++ РµС‰С‘ РЅРµ РіРѕС‚РѕРІ)
             if (settings != null && settings.EnableReasoning)
             {
                 _llm.reasoning = true;
@@ -156,8 +156,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Полная очистка: остановить llama.cpp и уничтожить GameObject.
-        /// Вызывается ОДИН раз из <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>.
+        /// РџРѕР»РЅР°СЏ РѕС‡РёСЃС‚РєР°: РѕСЃС‚Р°РЅРѕРІРёС‚СЊ llama.cpp Рё СѓРЅРёС‡С‚РѕР¶РёС‚СЊ GameObject.
+        /// Р’С‹Р·С‹РІР°РµС‚СЃСЏ РћР”РРќ СЂР°Р· РёР· <see cref="LlmUnityGlobalSetup.OneTimeTearDown"/>.
         /// </summary>
         public static void Cleanup()
         {

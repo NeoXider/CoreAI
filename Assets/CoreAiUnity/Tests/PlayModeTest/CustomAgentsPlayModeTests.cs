@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -17,9 +17,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тест: Создание 3 типов кастомных агентов через AgentBuilder.
+    /// PlayMode С‚РµСЃС‚: РЎРѕР·РґР°РЅРёРµ 3 С‚РёРїРѕРІ РєР°СЃС‚РѕРјРЅС‹С… Р°РіРµРЅС‚РѕРІ С‡РµСЂРµР· AgentBuilder.
     /// </summary>
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class CustomAgentsPlayModeTests
     {
         private sealed class InMemoryStore : IAgentMemoryStore
@@ -110,7 +110,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator CustomAgent_Merchant_ToolsAndChat()
         {
-            Debug.Log("[CustomAgents] ═══ TEST 1: MERCHANT (ToolsAndChat) ═══");
+            Debug.Log("[CustomAgents] в•ђв•ђв•ђ TEST 1: MERCHANT (ToolsAndChat) в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 300, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -133,16 +133,16 @@ namespace CoreAI.Tests.PlayMode
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();
 
-                // Обернуть клиент для правильной работы MemoryTool
+                // РћР±РµСЂРЅСѓС‚СЊ РєР»РёРµРЅС‚ РґР»СЏ РїСЂР°РІРёР»СЊРЅРѕР№ СЂР°Р±РѕС‚С‹ MemoryTool
                 ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
                 Task<TestResult> task = RunAgentTestAsync(clientWithStore, merchant, "What items do you have?");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant"); // 240s для retry loop
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant"); // 240s РґР»СЏ retry loop
                 TestResult r = task.Result;
                 Debug.Log(
                     $"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Merchant should have tools");
                 Assert.IsNotNull(r.Response);
-                Debug.Log("[CustomAgents] ✓ TEST 1 PASSED");
+                Debug.Log("[CustomAgents] вњ“ TEST 1 PASSED");
             }
             finally
             {
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator CustomAgent_Analyzer_ToolsOnly()
         {
-            Debug.Log("[CustomAgents] ═══ TEST 2: ANALYZER (ToolsOnly) ═══");
+            Debug.Log("[CustomAgents] в•ђв•ђв•ђ TEST 2: ANALYZER (ToolsOnly) в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -172,12 +172,12 @@ namespace CoreAI.Tests.PlayMode
 
                 ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
                 Task<TestResult> task = RunAgentTestAsync(clientWithStore, analyzer, "Analyze session");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer"); // 240s для retry loop
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer"); // 240s РґР»СЏ retry loop
                 TestResult r = task.Result;
                 Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
                 Assert.AreEqual(AgentMode.ToolsOnly, analyzer.Mode);
                 Assert.Greater(r.ToolsCount, 0);
-                Debug.Log("[CustomAgents] ✓ TEST 2 PASSED");
+                Debug.Log("[CustomAgents] вњ“ TEST 2 PASSED");
             }
             finally
             {
@@ -189,7 +189,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator CustomAgent_Storyteller_ChatOnly()
         {
-            Debug.Log("[CustomAgents] ═══ TEST 3: STORYTELLER (ChatOnly) ═══");
+            Debug.Log("[CustomAgents] в•ђв•ђв•ђ TEST 3: STORYTELLER (ChatOnly) в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.4f, 300, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -207,13 +207,13 @@ namespace CoreAI.Tests.PlayMode
 
                 ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
                 Task<TestResult> task = RunAgentTestAsync(clientWithStore, storyteller, "Tell me a story");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller"); // 240s для retry loop
+                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller"); // 240s РґР»СЏ retry loop
                 TestResult r = task.Result;
                 Debug.Log(
                     $"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
                 Assert.AreEqual(AgentMode.ChatOnly, storyteller.Mode);
                 Assert.IsNotNull(r.Response);
-                Debug.Log("[CustomAgents] ✓ TEST 3 PASSED");
+                Debug.Log("[CustomAgents] вњ“ TEST 3 PASSED");
             }
             finally
             {
@@ -225,7 +225,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator CustomAgent_Helper_WithAction()
         {
-            Debug.Log("[CustomAgents] ═══ TEST 4: HELPER (WithAction) ═══");
+            Debug.Log("[CustomAgents] в•ђв•ђв•ђ TEST 4: HELPER (WithAction) в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -257,7 +257,7 @@ namespace CoreAI.Tests.PlayMode
                     $"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
                 Assert.Greater(r.ToolsCount, 0);
                 Assert.IsTrue(triggerFired, "Delegate should have been triggered.");
-                Debug.Log("[CustomAgents] ✓ TEST 4 PASSED");
+                Debug.Log("[CustomAgents] вњ“ TEST 4 PASSED");
             }
             finally
             {
@@ -278,18 +278,18 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
                 store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
-            Debug.Log($"[CustomAgents] 📤 PROMPT TO MODEL ({cfg.RoleId}):");
+            Debug.Log($"[CustomAgents] рџ“¤ PROMPT TO MODEL ({cfg.RoleId}):");
             Debug.Log($"[CustomAgents] System: {cfg.SystemPrompt}");
             Debug.Log($"[CustomAgents] Hint: {msg}");
-            Debug.Log($"[CustomAgents] ─────────────────────────────────────────");
+            Debug.Log($"[CustomAgents] в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
 
             await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
 
-            Debug.Log($"[CustomAgents] 📥 MODEL RESPONSE:");
+            Debug.Log($"[CustomAgents] рџ“Ґ MODEL RESPONSE:");
             Debug.Log($"[CustomAgents] Available Tools: {cap.LastTools?.Count ?? 0}");
             Debug.Log($"[CustomAgents] Content:");
             Debug.Log(cap.LastContent);
-            Debug.Log($"[CustomAgents] ─────────────────────────────────────────");
+            Debug.Log($"[CustomAgents] в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
 
             return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };
         }

@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -19,19 +19,19 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты для CompatibilityLlmTool с реальной LLM.
-    /// Проверяет что модель может вызвать check_compatibility tool и интерпретировать результат.
+    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ CompatibilityLlmTool СЃ СЂРµР°Р»СЊРЅРѕР№ LLM.
+    /// РџСЂРѕРІРµСЂСЏРµС‚ С‡С‚Рѕ РјРѕРґРµР»СЊ РјРѕР¶РµС‚ РІС‹Р·РІР°С‚СЊ check_compatibility tool Рё РёРЅС‚РµСЂРїСЂРµС‚РёСЂРѕРІР°С‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚.
     /// </summary>
     public sealed class CompatibilityToolPlayModeTests
     {
         /// <summary>
-        /// Тест: LLM вызывает check_compatibility для совместимых ингредиентов и сообщает результат.
+        /// РўРµСЃС‚: LLM РІС‹Р·С‹РІР°РµС‚ check_compatibility РґР»СЏ СЃРѕРІРјРµСЃС‚РёРјС‹С… РёРЅРіСЂРµРґРёРµРЅС‚РѕРІ Рё СЃРѕРѕР±С‰Р°РµС‚ СЂРµР·СѓР»СЊС‚Р°С‚.
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator CompatibilityTool_CompatibleIngredients_LlmReportsCompatible()
         {
-            Debug.Log("[CompatibilityTest] ═══ TEST 1: Compatible ingredients ═══");
+            Debug.Log("[CompatibilityTest] в•ђв•ђв•ђ TEST 1: Compatible ingredients в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
@@ -42,9 +42,9 @@ namespace CoreAI.Tests.PlayMode
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
-                // Создаём checker с синергией Fire+Earth
+                // РЎРѕР·РґР°С‘Рј checker СЃ СЃРёРЅРµСЂРіРёРµР№ Fire+Earth
                 CompatibilityChecker checker = new();
-                checker.AddRule("Fire", "Earth", 1.5f, "Fire and Earth create lava — bonus synergy");
+                checker.AddRule("Fire", "Earth", 1.5f, "Fire and Earth create lava вЂ” bonus synergy");
                 CompatibilityLlmTool tool = new(checker);
 
                 AgentConfig agent = new AgentBuilder("TestCompatChecker")
@@ -66,7 +66,7 @@ namespace CoreAI.Tests.PlayMode
                     $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
                 Assert.IsNotNull(r.Response, "Agent should return a response");
-                Debug.Log("[CompatibilityTest] ✓ TEST 1 PASSED");
+                Debug.Log("[CompatibilityTest] вњ“ TEST 1 PASSED");
             }
             finally
             {
@@ -75,13 +75,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тест: LLM вызывает check_compatibility для несовместимых ингредиентов.
+        /// РўРµСЃС‚: LLM РІС‹Р·С‹РІР°РµС‚ check_compatibility РґР»СЏ РЅРµСЃРѕРІРјРµСЃС‚РёРјС‹С… РёРЅРіСЂРµРґРёРµРЅС‚РѕРІ.
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible()
         {
-            Debug.Log("[CompatibilityTest] ═══ TEST 2: Incompatible ingredients ═══");
+            Debug.Log("[CompatibilityTest] в•ђв•ђв•ђ TEST 2: Incompatible ingredients в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
@@ -115,7 +115,7 @@ namespace CoreAI.Tests.PlayMode
                     $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
                 Assert.IsNotNull(r.Response, "Agent should return a response");
-                Debug.Log("[CompatibilityTest] ✓ TEST 2 PASSED");
+                Debug.Log("[CompatibilityTest] вњ“ TEST 2 PASSED");
             }
             finally
             {
@@ -124,13 +124,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тест: LLM проверяет 3 ингредиента с групповым правилом.
+        /// РўРµСЃС‚: LLM РїСЂРѕРІРµСЂСЏРµС‚ 3 РёРЅРіСЂРµРґРёРµРЅС‚Р° СЃ РіСЂСѓРїРїРѕРІС‹Рј РїСЂР°РІРёР»РѕРј.
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator CompatibilityTool_ThreeIngredients_GroupRule()
         {
-            Debug.Log("[CompatibilityTest] ═══ TEST 3: Three ingredients group rule ═══");
+            Debug.Log("[CompatibilityTest] в•ђв•ђв•ђ TEST 3: Three ingredients group rule в•ђв•ђв•ђ");
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
@@ -142,7 +142,7 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
                 CompatibilityChecker checker = new();
-                checker.AddGroupRule(1.8f, "Fire+Earth+Air create a volcanic eruption — amazing synergy!",
+                checker.AddGroupRule(1.8f, "Fire+Earth+Air create a volcanic eruption вЂ” amazing synergy!",
                     "Fire", "Earth", "Air");
                 CompatibilityLlmTool tool = new(checker);
 
@@ -164,7 +164,7 @@ namespace CoreAI.Tests.PlayMode
                     $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
                 Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
                 Assert.IsNotNull(r.Response, "Agent should return a response");
-                Debug.Log("[CompatibilityTest] ✓ TEST 3 PASSED");
+                Debug.Log("[CompatibilityTest] вњ“ TEST 3 PASSED");
             }
             finally
             {
@@ -172,9 +172,9 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        // ═══════════════════════════════════════════════════
+        // в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
         // Helpers
-        // ═══════════════════════════════════════════════════
+        // в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ
 
         private sealed class TestResult
         {

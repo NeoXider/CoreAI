@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -16,7 +16,7 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты: PlayerChat отвечает на вопрос игрока через InGameLlmChatService.
+    /// PlayMode С‚РµСЃС‚С‹: PlayerChat РѕС‚РІРµС‡Р°РµС‚ РЅР° РІРѕРїСЂРѕСЃ РёРіСЂРѕРєР° С‡РµСЂРµР· InGameLlmChatService.
     /// </summary>
     public sealed class PlayerChatPlayModeTests
     {
@@ -101,7 +101,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator PlayerChat_RespondsToGreeting()
         {
-            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+            Debug.Log("[PlayerChat] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -111,7 +111,7 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                // Только для LLMUnity — ждём готовности модели. Для HTTP не нужно.
+                // РўРѕР»СЊРєРѕ РґР»СЏ LLMUnity вЂ” Р¶РґС‘Рј РіРѕС‚РѕРІРЅРѕСЃС‚Рё РјРѕРґРµР»Рё. Р”Р»СЏ HTTP РЅРµ РЅСѓР¶РЅРѕ.
                 if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
@@ -135,24 +135,24 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeTestAwait.WaitTask(task, 300f, "Send message 1");
                 LlmCompletionResult result = task.Result;
 
-                Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
+                Debug.Log($"[PlayerChat] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
                 Debug.Log($"[PlayerChat] Role: {capturing.LastRoleId}");
                 Debug.Log(
                     $"[PlayerChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
                 Debug.Log($"[PlayerChat] Response: {result.Content}");
-                Debug.Log($"[PlayerChat] ═══════════════════════════════════════");
+                Debug.Log($"[PlayerChat] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
 
                 Assert.IsTrue(result.Ok, $"LLM call failed: {result.Error}");
                 Assert.AreEqual(BuiltInAgentRoleIds.PlayerChat, capturing.LastRoleId);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "Response should not be empty");
 
-                // Проверяем что в ответе есть осмысленный текст (не just tool call result)
+                // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РІ РѕС‚РІРµС‚Рµ РµСЃС‚СЊ РѕСЃРјС‹СЃР»РµРЅРЅС‹Р№ С‚РµРєСЃС‚ (РЅРµ just tool call result)
                 bool hasTextContent = result.Content.Length > 10;
                 Assert.IsTrue(hasTextContent, "Response should contain text");
 
                 Debug.Log(
-                    $"[PlayerChat] ✓ PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
-                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
+                    $"[PlayerChat] вњ“ PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
+                Debug.Log("[PlayerChat] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
             }
             finally
             {
@@ -164,7 +164,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator PlayerChat_MaintainsHistory()
         {
-            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+            Debug.Log("[PlayerChat] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -215,8 +215,8 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(foundAdventurer, "The chat history should contain the string 'Adventurer'");
 
-                Debug.Log($"[PlayerChat] ✓ History maintained: {chatService.HistoryPairCount} pairs");
-                Debug.Log("[PlayerChat] ═══ TEST PASSED ═══");
+                Debug.Log($"[PlayerChat] вњ“ History maintained: {chatService.HistoryPairCount} pairs");
+                Debug.Log("[PlayerChat] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
             }
             finally
             {
@@ -228,7 +228,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator PlayerChat_ClearHistory_Works()
         {
-            Debug.Log("[PlayerChat] ═══ TEST START ═══");
+            Debug.Log("[PlayerChat] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -275,18 +275,18 @@ namespace CoreAI.Tests.PlayMode
 
                 yield return PlayModeTestAwait.WaitTask(t, 300f, "AINpc dialogue");
 
-                Debug.Log($"[AINpc] ═══════════════════════════════════════");
+                Debug.Log($"[AINpc] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
                 Debug.Log($"[AINpc] Role: {capturing.LastRoleId}");
                 Debug.Log($"[AINpc] Response: {capturing.LastResult.Content}");
-                Debug.Log($"[AINpc] ═══════════════════════════════════════");
+                Debug.Log($"[AINpc] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
 
                 Assert.IsTrue(capturing.LastResult.Ok, $"LLM call failed: {capturing.LastResult.Error}");
                 Assert.AreEqual(BuiltInAgentRoleIds.AiNpc, capturing.LastRoleId);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));
 
                 // AINpcResponsePolicy validates: non-empty text passes
-                Debug.Log($"[AINpc] ✓ AINpc generated dialogue");
-                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+                Debug.Log($"[AINpc] вњ“ AINpc generated dialogue");
+                Debug.Log("[AINpc] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
             }
             finally
             {
@@ -298,7 +298,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator AINpc_ToolsAndChatMode_CanUseTools()
         {
-            Debug.Log("[AINpc] ═══ TEST START ═══");
+            Debug.Log("[AINpc] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 180,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -361,8 +361,8 @@ namespace CoreAI.Tests.PlayMode
                 bool usedMemory = capturing.LastResult.Content?.Contains("memory") == true ||
                                   capturing.LastResult.Content?.Contains("remember") == true;
 
-                Debug.Log($"[AINpc] ✓ AINpc with ToolsAndChat mode completed");
-                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+                Debug.Log($"[AINpc] вњ“ AINpc with ToolsAndChat mode completed");
+                Debug.Log("[AINpc] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
             }
             finally
             {
@@ -374,7 +374,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator AINpc_ChatOnlyMode_PlainTextOnly()
         {
-            Debug.Log("[AINpc] ═══ TEST START ═══");
+            Debug.Log("[AINpc] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -428,8 +428,8 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsTrue(capturing.LastResult.Ok);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));
 
-                Debug.Log($"[AINpc] ✓ AINpc ChatOnly mode works");
-                Debug.Log("[AINpc] ═══ TEST PASSED ═══");
+                Debug.Log($"[AINpc] вњ“ AINpc ChatOnly mode works");
+                Debug.Log("[AINpc] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
             }
             finally
             {

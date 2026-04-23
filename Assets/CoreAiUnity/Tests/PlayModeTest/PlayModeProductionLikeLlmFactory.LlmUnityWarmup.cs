@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEngine;
@@ -9,10 +9,10 @@ namespace CoreAI.Tests.PlayMode
 {
     public static partial class PlayModeProductionLikeLlmFactory
     {
-        /// <summary>После <see cref="TryCreate"/> для бэкенда LLMUnity — дождаться поднятия модели.</summary>
+        /// <summary>РџРѕСЃР»Рµ <see cref="TryCreate"/> РґР»СЏ Р±СЌРєРµРЅРґР° LLMUnity вЂ” РґРѕР¶РґР°С‚СЊСЃСЏ РїРѕРґРЅСЏС‚РёСЏ РјРѕРґРµР»Рё.</summary>
         public static IEnumerator EnsureLlmUnityModelReady(PlayModeProductionLikeLlmHandle handle)
         {
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
             if (handle == null || handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
             {
                 yield break;
@@ -25,7 +25,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // Температура настраивается в агенте
+            // РўРµРјРїРµСЂР°С‚СѓСЂР° РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РІ Р°РіРµРЅС‚Рµ
             LLMAgent agent = llmClient.UnityAgent;
             if (agent != null)
             {

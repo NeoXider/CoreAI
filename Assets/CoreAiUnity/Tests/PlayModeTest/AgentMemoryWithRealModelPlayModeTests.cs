@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -11,12 +11,12 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Память Creator через реальный ILlmClient — использует TestAgentSetup.
-    /// Бэкенд определяется из CoreAISettingsAsset.
+    /// РџР°РјСЏС‚СЊ Creator С‡РµСЂРµР· СЂРµР°Р»СЊРЅС‹Р№ ILlmClient вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚ TestAgentSetup.
+    /// Р‘СЌРєРµРЅРґ РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РёР· CoreAISettingsAsset.
     /// </summary>
     public sealed class AgentMemoryWithRealModelPlayModeTests
     {
-        /// <summary>Auto — из CoreAISettingsAsset.BackendType.</summary>
+        /// <summary>Auto вЂ” РёР· CoreAISettingsAsset.BackendType.</summary>
         [UnityTest]
         [Timeout(900000)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()

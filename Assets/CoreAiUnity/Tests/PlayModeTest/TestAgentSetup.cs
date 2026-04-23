@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -17,9 +17,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Универсальный setup агента для PlayMode тестов.
-    /// Читает CoreAISettingsAsset и создаёт правильный клиент (HTTP, LLMUnity или Offline).
-    /// Автоматически добавляет LogAssert.Expect для ошибок подключения.
+    /// РЈРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№ setup Р°РіРµРЅС‚Р° РґР»СЏ PlayMode С‚РµСЃС‚РѕРІ.
+    /// Р§РёС‚Р°РµС‚ CoreAISettingsAsset Рё СЃРѕР·РґР°С‘С‚ РїСЂР°РІРёР»СЊРЅС‹Р№ РєР»РёРµРЅС‚ (HTTP, LLMUnity РёР»Рё Offline).
+    /// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё РґРѕР±Р°РІР»СЏРµС‚ LogAssert.Expect РґР»СЏ РѕС€РёР±РѕРє РїРѕРґРєР»СЋС‡РµРЅРёСЏ.
     /// </summary>
     public sealed class TestAgentSetup : IDisposable
     {
@@ -43,7 +43,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Инициализирует агент из CoreAISettingsAsset.
+        /// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµС‚ Р°РіРµРЅС‚ РёР· CoreAISettingsAsset.
         /// </summary>
         public IEnumerator Initialize()
         {
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log("[TestAgentSetup] Initializing LLMUnity via SharedLlmUnity...");
 
-            // SharedLlmUnity: один LLM на все тесты, никаких create/destroy между тестами
+            // SharedLlmUnity: РѕРґРёРЅ LLM РЅР° РІСЃРµ С‚РµСЃС‚С‹, РЅРёРєР°РєРёС… create/destroy РјРµР¶РґСѓ С‚РµСЃС‚Р°РјРё
             yield return SharedLlmUnity.EnsureInitialized();
 
             if (!SharedLlmUnity.IsReady)
@@ -92,7 +92,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // Лёгкая обёртка вокруг общего LLMAgent с отдельным MemoryStore для этого теста
+            // Р›С‘РіРєР°СЏ РѕР±С‘СЂС‚РєР° РІРѕРєСЂСѓРі РѕР±С‰РµРіРѕ LLMAgent СЃ РѕС‚РґРµР»СЊРЅС‹Рј MemoryStore РґР»СЏ СЌС‚РѕРіРѕ С‚РµСЃС‚Р°
             Client = SharedLlmUnity.CreateClientWithMemoryStore(MemoryStore);
             if (Client == null)
             {
@@ -101,7 +101,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // _handle НЕ выставляется — мы не владеем LLM, SharedLlmUnity управляет его жизненным циклом
+            // _handle РќР• РІС‹СЃС‚Р°РІР»СЏРµС‚СЃСЏ вЂ” РјС‹ РЅРµ РІР»Р°РґРµРµРј LLM, SharedLlmUnity СѓРїСЂР°РІР»СЏРµС‚ РµРіРѕ Р¶РёР·РЅРµРЅРЅС‹Рј С†РёРєР»РѕРј
             BackendName = "LLMUnity";
             CreateOrchestrator();
         }
@@ -136,7 +136,7 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[TestAgentSetup] HTTP not available, falling back to LLMUnity...");
             }
 
-            // LLMUnity через SharedLlmUnity
+            // LLMUnity С‡РµСЂРµР· SharedLlmUnity
             yield return SharedLlmUnity.EnsureInitialized();
             if (SharedLlmUnity.IsReady)
             {
@@ -193,8 +193,8 @@ namespace CoreAI.Tests.PlayMode
 
         private void SetupLogAsserts()
         {
-            // Ошибки подключения ожидаем только если бэкенд HTTP
-            // Для LLMUnity эти ошибки не должны появляться
+            // РћС€РёР±РєРё РїРѕРґРєР»СЋС‡РµРЅРёСЏ РѕР¶РёРґР°РµРј С‚РѕР»СЊРєРѕ РµСЃР»Рё Р±СЌРєРµРЅРґ HTTP
+            // Р”Р»СЏ LLMUnity СЌС‚Рё РѕС€РёР±РєРё РЅРµ РґРѕР»Р¶РЅС‹ РїРѕСЏРІР»СЏС‚СЊСЃСЏ
         }
 
         private void SetupHttpLogAsserts()
@@ -203,7 +203,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Запустить задачу и дождаться результата.
+        /// Р—Р°РїСѓСЃС‚РёС‚СЊ Р·Р°РґР°С‡Сѓ Рё РґРѕР¶РґР°С‚СЊСЃСЏ СЂРµР·СѓР»СЊС‚Р°С‚Р°.
         /// </summary>
         public IEnumerator RunAndWait(Task task, float timeoutSeconds, string label)
         {
@@ -212,8 +212,8 @@ namespace CoreAI.Tests.PlayMode
 
         public void Dispose()
         {
-            // Dispose только HTTP handle. SharedLlmUnity НЕ трогаем —
-            // он живёт до LlmUnityGlobalSetup.OneTimeTearDown.
+            // Dispose С‚РѕР»СЊРєРѕ HTTP handle. SharedLlmUnity РќР• С‚СЂРѕРіР°РµРј вЂ”
+            // РѕРЅ Р¶РёРІС‘С‚ РґРѕ LlmUnityGlobalSetup.OneTimeTearDown.
             _handle?.Dispose();
             _handle = null;
             LogAssert.ignoreFailingMessages = false;
@@ -270,7 +270,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тестовый WorldCommand executor для PlayMode тестов.
+        /// РўРµСЃС‚РѕРІС‹Р№ WorldCommand executor РґР»СЏ PlayMode С‚РµСЃС‚РѕРІ.
         /// </summary>
         public sealed class TestWorldCommandExecutor : ICoreAiWorldCommandExecutor
         {

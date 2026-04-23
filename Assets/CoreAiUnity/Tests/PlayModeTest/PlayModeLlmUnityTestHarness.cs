@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Threading.Tasks;
@@ -10,8 +10,8 @@ using UnityEngine;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Play Mode: поднимает <see cref="LLM"/> + <see cref="LLMAgent"/> без сцены с префабом.
-    /// Больше не использует рефлексию, так как методы Awake/Start в LLMUnity публичные.
+    /// Play Mode: РїРѕРґРЅРёРјР°РµС‚ <see cref="LLM"/> + <see cref="LLMAgent"/> Р±РµР· СЃС†РµРЅС‹ СЃ РїСЂРµС„Р°Р±РѕРј.
+    /// Р‘РѕР»СЊС€Рµ РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚ СЂРµС„Р»РµРєСЃРёСЋ, С‚Р°Рє РєР°Рє РјРµС‚РѕРґС‹ Awake/Start РІ LLMUnity РїСѓР±Р»РёС‡РЅС‹Рµ.
     /// </summary>
     internal static class PlayModeLlmUnityTestHarness
     {
@@ -35,7 +35,7 @@ namespace CoreAI.Tests.PlayMode
 
             IGameLogger log = GameLoggerUnscopedFallback.Instance;
 
-            // Пробуем назначить модель из настроек
+            // РџСЂРѕР±СѓРµРј РЅР°Р·РЅР°С‡РёС‚СЊ РјРѕРґРµР»СЊ РёР· РЅР°СЃС‚СЂРѕРµРє
             bool assigned = false;
             if (!string.IsNullOrWhiteSpace(ggufPath))
             {
@@ -66,23 +66,23 @@ namespace CoreAI.Tests.PlayMode
                 return null;
             }
 
-            // Настройки производительности
+            // РќР°СЃС‚СЂРѕР№РєРё РїСЂРѕРёР·РІРѕРґРёС‚РµР»СЊРЅРѕСЃС‚Рё
             llm.flashAttention = true;
-            llm.numGPULayers = numGpuLayers; // 0 = CPU, >0 = GPU ускорение (1-99)
+            llm.numGPULayers = numGpuLayers; // 0 = CPU, >0 = GPU СѓСЃРєРѕСЂРµРЅРёРµ (1-99)
             llm.enabled = true;
             agent.enabled = true;
             llm.dontDestroyOnLoad = false;
 
             Debug.Log("[TestHarness] GameObject created, model: " + llm.model);
 
-            // SetActive(true) автоматически вызывает Awake() у LLM и LLMAgent.
-            // LLM.Awake() запускает асинхронное создание сервера llama.cpp.
+            // SetActive(true) Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РІС‹Р·С‹РІР°РµС‚ Awake() Сѓ LLM Рё LLMAgent.
+            // LLM.Awake() Р·Р°РїСѓСЃРєР°РµС‚ Р°СЃРёРЅС…СЂРѕРЅРЅРѕРµ СЃРѕР·РґР°РЅРёРµ СЃРµСЂРІРµСЂР° llama.cpp.
             go.SetActive(true);
             Debug.Log("[TestHarness] GameObject activated (Awake invoked by Unity naturally)");
 
-            // Unity НЕ вызывает Start() автоматически для компонентов, добавленных через AddComponent 
-            // в том же кадре внутри теста. Вызываем вручную.
-            // Так как Start() это async void, мы просто запускаем его.
+            // Unity РќР• РІС‹Р·С‹РІР°РµС‚ Start() Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РґР»СЏ РєРѕРјРїРѕРЅРµРЅС‚РѕРІ, РґРѕР±Р°РІР»РµРЅРЅС‹С… С‡РµСЂРµР· AddComponent 
+            // РІ С‚РѕРј Р¶Рµ РєР°РґСЂРµ РІРЅСѓС‚СЂРё С‚РµСЃС‚Р°. Р’С‹Р·С‹РІР°РµРј РІСЂСѓС‡РЅСѓСЋ.
+            // РўР°Рє РєР°Рє Start() СЌС‚Рѕ async void, РјС‹ РїСЂРѕСЃС‚Рѕ Р·Р°РїСѓСЃРєР°РµРј РµРіРѕ.
             agent.Start();
             Debug.Log("[TestHarness] agent.Start() invoked directly");
 
@@ -95,14 +95,14 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Устаревшее, оставлено для совместимости интерфейса, если нужно.
+        /// РЈСЃС‚Р°СЂРµРІС€РµРµ, РѕСЃС‚Р°РІР»РµРЅРѕ РґР»СЏ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё РёРЅС‚РµСЂС„РµР№СЃР°, РµСЃР»Рё РЅСѓР¶РЅРѕ.
         /// </summary>
         public static void TriggerAwakeIfNeeded(LLM llmComponent)
         {
             if (llmComponent != null && !llmComponent.started)
             {
-                // Просто для страховки, хотя SetActive(true) уже всё сделал
-                // llmComponent.Awake(); // Можно вызвать напрямую, если очень надо
+                // РџСЂРѕСЃС‚Рѕ РґР»СЏ СЃС‚СЂР°С…РѕРІРєРё, С…РѕС‚СЏ SetActive(true) СѓР¶Рµ РІСЃС‘ СЃРґРµР»Р°Р»
+                // llmComponent.Awake(); // РњРѕР¶РЅРѕ РІС‹Р·РІР°С‚СЊ РЅР°РїСЂСЏРјСѓСЋ, РµСЃР»Рё РѕС‡РµРЅСЊ РЅР°РґРѕ
             }
         }
     }

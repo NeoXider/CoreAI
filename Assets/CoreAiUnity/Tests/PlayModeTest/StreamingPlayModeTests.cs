@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -11,8 +11,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты для streaming API и 3-слойной архитектуры промптов.
-    /// Тестируют реальный LLM бэкенд (HTTP или LLMUnity).
+    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ streaming API Рё 3-СЃР»РѕР№РЅРѕР№ Р°СЂС…РёС‚РµРєС‚СѓСЂС‹ РїСЂРѕРјРїС‚РѕРІ.
+    /// РўРµСЃС‚РёСЂСѓСЋС‚ СЂРµР°Р»СЊРЅС‹Р№ LLM Р±СЌРєРµРЅРґ (HTTP РёР»Рё LLMUnity).
     /// </summary>
     public class StreamingPlayModeTests
     {
@@ -23,7 +23,7 @@ namespace CoreAI.Tests.PlayMode
         {
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
-            Assert.IsTrue(_setup.IsReady, $"LLM не доступен ({_setup.BackendName}). Пропуск теста.");
+            Assert.IsTrue(_setup.IsReady, $"LLM РЅРµ РґРѕСЃС‚СѓРїРµРЅ ({_setup.BackendName}). РџСЂРѕРїСѓСЃРє С‚РµСЃС‚Р°.");
         }
 
         [UnityTearDown]
@@ -48,9 +48,9 @@ namespace CoreAI.Tests.PlayMode
             var chunks = new List<LlmStreamChunk>();
             bool gotDone = false;
 
-            // ВАЖНО: стриминг должен идти на main thread — UnityWebRequest не создаётся из ThreadPool.
-            // Запускаем async-метод напрямую (без Task.Run), чтобы continuations
-            // возвращались на UnitySynchronizationContext.
+            // Р’РђР–РќРћ: СЃС‚СЂРёРјРёРЅРі РґРѕР»Р¶РµРЅ РёРґС‚Рё РЅР° main thread вЂ” UnityWebRequest РЅРµ СЃРѕР·РґР°С‘С‚СЃСЏ РёР· ThreadPool.
+            // Р—Р°РїСѓСЃРєР°РµРј async-РјРµС‚РѕРґ РЅР°РїСЂСЏРјСѓСЋ (Р±РµР· Task.Run), С‡С‚РѕР±С‹ continuations
+            // РІРѕР·РІСЂР°С‰Р°Р»РёСЃСЊ РЅР° UnitySynchronizationContext.
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
                 chunks, done => gotDone = done);
 
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
             var cts = new CancellationTokenSource();
             var counter = new StreamCancelCounter();
 
-            // Отменяем стрим после 3-х чанков. Запускаем на main thread.
+            // РћС‚РјРµРЅСЏРµРј СЃС‚СЂРёРј РїРѕСЃР»Рµ 3-С… С‡Р°РЅРєРѕРІ. Р—Р°РїСѓСЃРєР°РµРј РЅР° main thread.
             Task streamTask = CollectCancelStreamAsync(_setup.Client, request, cts, counter);
 
             yield return _setup.RunAndWait(streamTask, 30f, "Streaming_Cancel");
@@ -219,8 +219,8 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
                 _ => { });
 
-            // Таймаут 120с — reasoning-модели (DeepSeek/Qwen) могут генерировать
-            // тысячи чанков внутри <think> для простых вопросов.
+            // РўР°Р№РјР°СѓС‚ 120СЃ вЂ” reasoning-РјРѕРґРµР»Рё (DeepSeek/Qwen) РјРѕРіСѓС‚ РіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ
+            // С‚С‹СЃСЏС‡Рё С‡Р°РЅРєРѕРІ РІРЅСѓС‚СЂРё <think> РґР»СЏ РїСЂРѕСЃС‚С‹С… РІРѕРїСЂРѕСЃРѕРІ.
             yield return _setup.RunAndWait(streamTask, 120f, "Streaming_ThinkBlock");
 
             foreach (var c in chunks)

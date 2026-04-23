@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -11,27 +11,27 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тест для MeaiLlmClient — единый MEAI клиент.
-    /// Проверяет что оба бэкенда (HTTP и LLMUnity) работают через единый pipeline.
+    /// PlayMode С‚РµСЃС‚ РґР»СЏ MeaiLlmClient вЂ” РµРґРёРЅС‹Р№ MEAI РєР»РёРµРЅС‚.
+    /// РџСЂРѕРІРµСЂСЏРµС‚ С‡С‚Рѕ РѕР±Р° Р±СЌРєРµРЅРґР° (HTTP Рё LLMUnity) СЂР°Р±РѕС‚Р°СЋС‚ С‡РµСЂРµР· РµРґРёРЅС‹Р№ pipeline.
     /// </summary>
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MeaiLlmClientPlayModeTests
     {
         /// <summary>
-        /// Тест: MeaiLlmClient.CreateHttp — создаёт клиент и может отправить запрос.
+        /// РўРµСЃС‚: MeaiLlmClient.CreateHttp вЂ” СЃРѕР·РґР°С‘С‚ РєР»РёРµРЅС‚ Рё РјРѕР¶РµС‚ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°РїСЂРѕСЃ.
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator MeaiLlmClient_CreateHttp_ShouldCreateAndConnect()
         {
-            // Читаем настройки из CoreAISettingsAsset
+            // Р§РёС‚Р°РµРј РЅР°СЃС‚СЂРѕР№РєРё РёР· CoreAISettingsAsset
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
             }
 
-            // Если не HTTP режим — пропускаем
+            // Р•СЃР»Рё РЅРµ HTTP СЂРµР¶РёРј вЂ” РїСЂРѕРїСѓСЃРєР°РµРј
             if (settings.BackendType != LlmBackendType.OpenAiHttp && settings.BackendType != LlmBackendType.Auto)
             {
                 Assert.Ignore("Backend is not HTTP. Current: " + settings.BackendType);
@@ -70,7 +70,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тест: MeaiLlmClient.CreateLlmUnity — создаёт клиент с локальной моделью.
+        /// РўРµСЃС‚: MeaiLlmClient.CreateLlmUnity вЂ” СЃРѕР·РґР°С‘С‚ РєР»РёРµРЅС‚ СЃ Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»СЊСЋ.
         /// </summary>
         [UnityTest]
         [Timeout(600000)]
@@ -85,7 +85,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
             }
 
-            // Если не LLMUnity режим — пропускаем
+            // Р•СЃР»Рё РЅРµ LLMUnity СЂРµР¶РёРј вЂ” РїСЂРѕРїСѓСЃРєР°РµРј
             if (settings.BackendType != LlmBackendType.LlmUnity && settings.BackendType != LlmBackendType.Auto)
             {
                 Assert.Ignore("Backend is not LLMUnity. Current: " + settings.BackendType);
@@ -93,7 +93,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log("[MeaiLlmUnity.LLMUnity] Creating LLMUnity client...");
 
-            // Используем настройки из CoreAISettingsAsset
+            // РСЃРїРѕР»СЊР·СѓРµРј РЅР°СЃС‚СЂРѕР№РєРё РёР· CoreAISettingsAsset
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null, // from settings
                     0.2f,
@@ -106,7 +106,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
 
-            // Только для LLMUnity — ждём готовности модели
+            // РўРѕР»СЊРєРѕ РґР»СЏ LLMUnity вЂ” Р¶РґС‘Рј РіРѕС‚РѕРІРЅРѕСЃС‚Рё РјРѕРґРµР»Рё
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
                 Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
@@ -150,7 +150,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тест: Factory methods should throw on null arguments.
+        /// РўРµСЃС‚: Factory methods should throw on null arguments.
         /// </summary>
         [Test]
         public void MeaiLlmClient_NullArguments_ShouldThrow()

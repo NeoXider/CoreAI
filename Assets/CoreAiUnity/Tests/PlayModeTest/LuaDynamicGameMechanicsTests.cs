@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -17,11 +17,11 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Демонстрирует изменение игровой логики (написанной на Lua) прямо "на лету" с помощью агента.
-    /// Агент может переписать глобальные функции (например, формулу урона), 
-    /// что мгновенно отразится на правилах игры.
+    /// Р”РµРјРѕРЅСЃС‚СЂРёСЂСѓРµС‚ РёР·РјРµРЅРµРЅРёРµ РёРіСЂРѕРІРѕР№ Р»РѕРіРёРєРё (РЅР°РїРёСЃР°РЅРЅРѕР№ РЅР° Lua) РїСЂСЏРјРѕ "РЅР° Р»РµС‚Сѓ" СЃ РїРѕРјРѕС‰СЊСЋ Р°РіРµРЅС‚Р°.
+    /// РђРіРµРЅС‚ РјРѕР¶РµС‚ РїРµСЂРµРїРёСЃР°С‚СЊ РіР»РѕР±Р°Р»СЊРЅС‹Рµ С„СѓРЅРєС†РёРё (РЅР°РїСЂРёРјРµСЂ, С„РѕСЂРјСѓР»Сѓ СѓСЂРѕРЅР°), 
+    /// С‡С‚Рѕ РјРіРЅРѕРІРµРЅРЅРѕ РѕС‚СЂР°Р·РёС‚СЃСЏ РЅР° РїСЂР°РІРёР»Р°С… РёРіСЂС‹.
     /// </summary>
-#if !COREAI_NO_LLM
+#if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class LuaDynamicGameMechanicsTests
     {
         private sealed class SharedLuaExecutor : LuaTool.ILuaExecutor
@@ -79,7 +79,7 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(600000)]
         public IEnumerator GameMaster_ModifiesDamageFormula_AtRuntime()
         {
-            Debug.Log("[LuaDynamic] ═══ LUA MECHANICS MODIFICATION TEST START ═══");
+            Debug.Log("[LuaDynamic] в•ђв•ђв•ђ LUA MECHANICS MODIFICATION TEST START в•ђв•ђв•ђ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null, 0.1f, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -94,26 +94,26 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
 
-                // 1. Инициализируем общий Lua Executor с "моторной" логикой (изначальная механика)
+                // 1. РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РѕР±С‰РёР№ Lua Executor СЃ "РјРѕС‚РѕСЂРЅРѕР№" Р»РѕРіРёРєРѕР№ (РёР·РЅР°С‡Р°Р»СЊРЅР°СЏ РјРµС…Р°РЅРёРєР°)
                 SharedLuaExecutor executor = new();
                 const string INITIAL_LOGIC = @"
--- Базовый урон, который наносит игрок
+-- Р‘Р°Р·РѕРІС‹Р№ СѓСЂРѕРЅ, РєРѕС‚РѕСЂС‹Р№ РЅР°РЅРѕСЃРёС‚ РёРіСЂРѕРє
 function calculate_damage()
     return 10
 end
 ";
-                // Запускаем начальную логику
+                // Р—Р°РїСѓСЃРєР°РµРј РЅР°С‡Р°Р»СЊРЅСѓСЋ Р»РѕРіРёРєСѓ
                 executor.ExecuteAsync(INITIAL_LOGIC, default).GetAwaiter().GetResult();
 
-                // Проверяем, что до вмешательства агента урон равен 10
+                // РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РґРѕ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІР° Р°РіРµРЅС‚Р° СѓСЂРѕРЅ СЂР°РІРµРЅ 10
                 double initialDamage = executor.CallFunctionCurrent("calculate_damage");
                 Debug.Log($"[LuaDynamic] Initial calculate_damage() = {initialDamage}");
                 Assert.AreEqual(10.0, initialDamage, "Initial damage should be 10");
 
-                // 2. Настраиваем Агента-Гейммастера, который имеет доступ к execute_lua
+                // 2. РќР°СЃС‚СЂР°РёРІР°РµРј РђРіРµРЅС‚Р°-Р“РµР№РјРјР°СЃС‚РµСЂР°, РєРѕС‚РѕСЂС‹Р№ РёРјРµРµС‚ РґРѕСЃС‚СѓРї Рє execute_lua
                 CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
                 
-                // Добавляем инструмент
+                // Р”РѕР±Р°РІР»СЏРµРј РёРЅСЃС‚СЂСѓРјРµРЅС‚
                 AgentBuilder builder = new AgentBuilder("GameMaster")
                     .WithSystemPrompt("You are the GameMaster. You manage game mechanics.")
                     .WithTool(new LuaLlmTool(executor, settings, CoreAI.Logging.NullLog.Instance))
@@ -140,13 +140,13 @@ end
                     settings
                 );
 
-                // 3. Даём задание ИИ: "Игроки жалуются, что игра сложная. Подними урон в 5 раз."
+                // 3. Р”Р°С‘Рј Р·Р°РґР°РЅРёРµ РР: "РРіСЂРѕРєРё Р¶Р°Р»СѓСЋС‚СЃСЏ, С‡С‚Рѕ РёРіСЂР° СЃР»РѕР¶РЅР°СЏ. РџРѕРґРЅРёРјРё СѓСЂРѕРЅ РІ 5 СЂР°Р·."
                 string prompt = "Players are complaining that the game is too hard. " +
                                 "Change the 'calculate_damage()' lua function to return 50 instead of 10.\n" +
                                 "You MUST use the 'execute_lua' tool to redefine the function globally.\n" +
                                 "Example code: \nfunction calculate_damage() return 50 end";
 
-                Debug.Log($"[LuaDynamic] 📤 PROMPT: {prompt}");
+                Debug.Log($"[LuaDynamic] рџ“¤ PROMPT: {prompt}");
 
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
@@ -156,14 +156,14 @@ end
 
                 yield return PlayModeTestAwait.WaitTask(t, 240f, "modify lua mechanics");
 
-                // 4. Проверяем, что ИИ перезаписал функцию и логика игры изменилась!
+                // 4. РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РР РїРµСЂРµР·Р°РїРёСЃР°Р» С„СѓРЅРєС†РёСЋ Рё Р»РѕРіРёРєР° РёРіСЂС‹ РёР·РјРµРЅРёР»Р°СЃСЊ!
                 double modifiedDamage = executor.CallFunctionCurrent("calculate_damage");
                 Debug.Log($"[LuaDynamic] Modified calculate_damage() = {modifiedDamage}");
 
                 Assert.AreEqual(50.0, modifiedDamage, 
                     "AI must successfully rewrite the lua logic to return 50!");
 
-                Debug.Log("[LuaDynamic] ✓ AI successfully modified game logic at runtime!");
+                Debug.Log("[LuaDynamic] вњ“ AI successfully modified game logic at runtime!");
             }
             finally
             {

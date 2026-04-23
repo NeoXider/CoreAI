@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -10,8 +10,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты для Memory Tool через единый pipeline.
-    /// Бэкенд определяется из CoreAISettingsAsset.
+    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ Memory Tool С‡РµСЂРµР· РµРґРёРЅС‹Р№ pipeline.
+    /// Р‘СЌРєРµРЅРґ РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РёР· CoreAISettingsAsset.
     /// </summary>
     public sealed class AgentMemoryOpenAiApiPlayModeTests
     {
@@ -26,7 +26,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("TestAgentSetup failed");
             }
 
-            // Включаем debug логирование для этого теста
+            // Р’РєР»СЋС‡Р°РµРј debug Р»РѕРіРёСЂРѕРІР°РЅРёРµ РґР»СЏ СЌС‚РѕРіРѕ С‚РµСЃС‚Р°
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings != null)
             {
@@ -73,7 +73,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("TestAgentSetup failed");
             }
 
-            // Предварительно сохраняем начальное значение
+            // РџСЂРµРґРІР°СЂРёС‚РµР»СЊРЅРѕ СЃРѕС…СЂР°РЅСЏРµРј РЅР°С‡Р°Р»СЊРЅРѕРµ Р·РЅР°С‡РµРЅРёРµ
             setup.MemoryStore.Save(BuiltInAgentRoleIds.Creator, new AgentMemoryState { Memory = "initial value" });
 
             Debug.Log("[MemoryTest] Testing append...");
@@ -114,7 +114,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("TestAgentSetup failed");
             }
 
-            // Предварительно сохраняем значение для удаления
+            // РџСЂРµРґРІР°СЂРёС‚РµР»СЊРЅРѕ СЃРѕС…СЂР°РЅСЏРµРј Р·РЅР°С‡РµРЅРёРµ РґР»СЏ СѓРґР°Р»РµРЅРёСЏ
             setup.MemoryStore.Save(BuiltInAgentRoleIds.Creator,
                 new AgentMemoryState { Memory = "this will be deleted" });
 
