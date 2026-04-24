@@ -18,6 +18,8 @@ namespace CoreAI.Chat
     public class CoreAiChatPanel : MonoBehaviour
     {
         private const string MobileClassName = "coreai-mobile";
+        private const string CollapsedClassName = "coreai-collapsed";
+        private const string CollapsedPrefsKey = "CoreAI.Chat.Collapsed";
 
         [Header("Config")]
         [Tooltip("Конфигурация чата (Assets → Create → CoreAI → Chat Config).")]
@@ -29,13 +31,19 @@ namespace CoreAI.Chat
 
         // === UI Elements ===
         protected VisualElement  Root;
+        protected VisualElement  ChatContainer;
         protected ScrollView     MessageScroll;
         protected TextField      InputField;
         protected Button         SendButton;
+        protected Button         CollapseButton;
+        protected Button         FabButton;
         protected VisualElement  TypingIndicator;
         protected Label          TypingLabel;
         protected Label          HeaderTitle;
         protected VisualElement  HeaderIcon;
+
+        /// <summary>Whether the chat panel is currently collapsed into the FAB.</summary>
+        public bool IsCollapsed { get; private set; }
 
         // === Streaming state ===
         private Label _streamingLabel;
@@ -109,6 +117,8 @@ namespace CoreAI.Chat
             {
                 InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
             }
+            if (CollapseButton != null) CollapseButton.UnregisterCallback<ClickEvent>(OnCollapseClicked);
+            if (FabButton != null) FabButton.UnregisterCallback<ClickEvent>(OnFabClicked);
             StopTypingAnimation();
         }
 
@@ -122,9 +132,12 @@ namespace CoreAI.Chat
 
         protected virtual void BindUI()
         {
+            ChatContainer    = Root.Q<VisualElement>("coreai-chat-root");
             MessageScroll    = Root.Q<ScrollView>("coreai-chat-scroll");
             InputField       = Root.Q<TextField>("coreai-chat-input");
             SendButton       = Root.Q<Button>("coreai-chat-send");
+            CollapseButton   = Root.Q<Button>("coreai-chat-collapse");
+            FabButton        = Root.Q<Button>("coreai-chat-fab");
             TypingIndicator  = Root.Q<VisualElement>("coreai-typing-indicator");
             TypingLabel      = Root.Q<Label>("coreai-typing-label");
             HeaderTitle      = Root.Q<Label>("coreai-chat-header-title");
@@ -137,6 +150,16 @@ namespace CoreAI.Chat
                 // клика следующие нажатия клавиш уходят в button, а не в input,
                 // и пользователь теряет первые буквы следующего сообщения.
                 SendButton.focusable = false;
+            }
+            if (CollapseButton != null)
+            {
+                CollapseButton.RegisterCallback<ClickEvent>(OnCollapseClicked);
+                CollapseButton.focusable = false;
+            }
+            if (FabButton != null)
+            {
+                FabButton.RegisterCallback<ClickEvent>(OnFabClicked);
+                FabButton.focusable = false;
             }
             if (InputField != null)
             {
@@ -170,10 +193,9 @@ namespace CoreAI.Chat
             }
 
             // Размеры
-            var container = Root.Q<VisualElement>("coreai-chat-root");
-            if (container != null)
+            if (ChatContainer != null)
             {
-                ApplyResponsiveSize(container);
+                ApplyResponsiveSize(ChatContainer);
             }
 
             // Приветствие
@@ -181,6 +203,13 @@ namespace CoreAI.Chat
             {
                 AddMessage(config.WelcomeMessage, isUser: false);
             }
+
+            // По умолчанию на мобильных экранах чат стартует свёрнутым,
+            // чтобы не перекрывать игровой мир. Пользовательский выбор
+            // перекрывает это значение через PlayerPrefs.
+            bool defaultCollapsed = IsMobileScreen();
+            bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
+            SetCollapsed(collapsed, persist: false);
         }
 
         /// <summary>
@@ -204,7 +233,7 @@ namespace CoreAI.Chat
 
             // На маленьких устройствах панель занимает почти весь экран
             // с безопасным отступом, чтобы не обрезаться по правому краю.
-            bool useFullScreenLikeLayout = screenWidth <= 720f || screenHeight <= 560f;
+            bool useFullScreenLikeLayout = IsMobileScreen();
 
             if (useFullScreenLikeLayout)
             {
@@ -227,6 +256,58 @@ namespace CoreAI.Chat
             container.style.bottom = 24f;
             container.style.width = Mathf.Min(configuredWidth, maxWidth);
             container.style.height = Mathf.Min(configuredHeight, maxHeight);
+        }
+
+        // ===================== Collapse / FAB =====================
+
+        private static bool IsMobileScreen()
+        {
+            float w = Mathf.Max(1f, Screen.width);
+            float h = Mathf.Max(1f, Screen.height);
+            return w <= 720f || h <= 560f;
+        }
+
+        private void OnCollapseClicked(ClickEvent _) => SetCollapsed(true, persist: true);
+
+        private void OnFabClicked(ClickEvent _) => SetCollapsed(false, persist: true);
+
+        /// <summary>
+        /// Сворачивает/разворачивает чат. В свёрнутом состоянии контейнер
+        /// скрыт через USS-класс <c>coreai-collapsed</c>, вместо него
+        /// показывается плавающая круглая кнопка (<c>coreai-chat-fab</c>).
+        /// </summary>
+        public void SetCollapsed(bool collapsed, bool persist = true)
+        {
+            IsCollapsed = collapsed;
+
+            if (ChatContainer != null)
+            {
+                if (collapsed)
+                {
+                    ChatContainer.AddToClassList(CollapsedClassName);
+                }
+                else
+                {
+                    ChatContainer.RemoveFromClassList(CollapsedClassName);
+                }
+            }
+
+            if (FabButton != null)
+            {
+                FabButton.style.display = collapsed ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+
+            if (persist)
+            {
+                PlayerPrefs.SetInt(CollapsedPrefsKey, collapsed ? 1 : 0);
+            }
+
+            if (!collapsed)
+            {
+                // После разворачивания возвращаем фокус в поле ввода,
+                // чтобы пользователь сразу мог продолжить печатать.
+                InputField?.schedule.Execute(FocusInputField);
+            }
         }
 
         protected virtual void InitService()

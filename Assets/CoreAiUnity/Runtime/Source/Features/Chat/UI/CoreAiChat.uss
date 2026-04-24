@@ -46,6 +46,64 @@
     font-size: 15px;
     -unity-font-style: bold;
     letter-spacing: 2px;
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+/* Header action button (collapse) */
+.coreai-chat-header-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background-color: rgba(17, 160, 181, 0.2);
+    border-width: 1px;
+    border-color: rgba(77, 208, 225, 0.35);
+    color: rgb(197, 220, 232);
+    font-size: 16px;
+    -unity-font-style: bold;
+    padding: 0;
+    margin-left: 8px;
+    flex-shrink: 0;
+    transition-duration: 0.15s;
+}
+
+.coreai-chat-header-btn:hover {
+    background-color: rgba(77, 208, 225, 0.35);
+    border-color: rgba(77, 208, 225, 0.7);
+}
+
+/* Collapsed state — container hidden, FAB shown instead */
+.coreai-chat-container.coreai-collapsed {
+    display: none;
+}
+
+/* Floating action button (restore the chat) */
+.coreai-chat-fab {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 28px;
+    background-color: rgba(17, 160, 181, 0.95);
+    border-width: 2px;
+    border-color: rgba(77, 208, 225, 0.75);
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    transition-duration: 0.15s;
+}
+
+.coreai-chat-fab:hover {
+    background-color: rgba(77, 208, 225, 1);
+    border-color: rgba(200, 240, 255, 0.9);
+}
+
+.coreai-chat-fab-icon {
+    color: white;
+    font-size: 22px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
 }
 
 /* Scroll area */

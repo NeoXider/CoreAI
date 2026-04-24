@@ -14,7 +14,7 @@
 
 > 🚀 **Проверено на малых моделях:** многие сценарии PlayMode уверенно идут на локальной **Qwen3.5-4B** (например, с выключенным think/reasoning). Необязатели облачные API, чтобы в игре *ощущалось умом*.
 
-**Версия:** **v0.21.0** · статический API `CoreAi` · стриминг оркестратора · укреплённый чат и стриминг
+**Версия:** **v0.21.7** · статический API `CoreAi` · стриминг оркестратора · сворачивание чата в FAB · укреплённый чат и стриминг
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -41,7 +41,7 @@
 
 - 🎯 **Статический фасад `CoreAi`** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 - 🌊 **Стриминг в оркестраторе** — `IAiOrchestrationService.RunStreamingAsync`: тот же путь власти, очереди и валидации, что и у `RunTaskAsync`, но чанками (см. [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
-- 💬 **Чат** — многострочный ввод, Shift+Enter / Enter, анимированный индикатор печати; стрим виден через всю цепочку декораторов `ILlmClient`.
+- 💬 **Чат** — многострочный ввод, Shift+Enter / Enter, анимированный индикатор печати; стрим виден через всю цепочку декораторов `ILlmClient`; **0.21.7** — сворачивание в FAB (`SetCollapsed`, на мобильном layout по умолчанию свёрнут) — [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md).
 
 **Ранее 0.20.x (всё ещё в коробке):** универсальная панель чата, стрим HTTP + LLMUnity, трёхслойные флаги, демо-сцена в один клик, широкое EditMode-покрытие (песочница Lua, инструменты, rate limit, фильтры).
 

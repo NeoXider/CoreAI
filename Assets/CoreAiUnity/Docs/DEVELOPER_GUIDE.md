@@ -255,6 +255,7 @@ flowchart LR
 - **PlayMode:** при изменениях `CoreAILifetimeScope`, сцен, `OpenAiChatLlmClient` или PlayMode-тестов — прогнать `CoreAI.PlayModeTests`.
 - **Секреты:** не коммитить API-ключи, `.env` с ключами, локальные пути к моделям с персональными данными; для CI использовать переменные окружения (см. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
 - **Документация:** если меняется контракт или поток (§3 DGF / DI), обновить **DGF_SPEC** и при необходимости этот гайд в том же PR.
+- **Релиз UPM (любое изменение в `Assets/CoreAI` или `Assets/CoreAiUnity`):** поднять **`version`** в [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) и [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; зависимость = версии ядра); добавить запись в **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** и **[../CHANGELOG.md](../CHANGELOG.md)**; обновить документацию по затронутой фиче (корневые **README.md** / **README_RU.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md) и т.д.); при смене публичного API — при необходимости тесты.
 
 ---
 
@@ -262,4 +263,6 @@ flowchart LR
 
 Крупные изменения контрактов фиксируйте в **DGF_SPEC** (версия в шапке). **DEVELOPER_GUIDE** описывает текущую карту кода; при расхождении с кодом приоритет у репозитория — обновите гайд в том же PR.
 
-**Версия этого гайда:** 1.3 (апрель 2026) — TraceId, декоратор LLM, таймаут запроса, логи Llm/MessagePipe, Unwrap(stub).
+**Синхронизация с UPM:** номер в шапке README и в **QUICK_START** должен отражать актуальный **`package.json`**, иначе потребители пакета видят устаревшую версию.
+
+**Версия этого гайда:** 1.4 (апрель 2026) — чеклист UPM-релиза (version + CHANGELOG + доки), синхронизация README с `package.json`.

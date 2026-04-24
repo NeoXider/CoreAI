@@ -35,6 +35,19 @@
 4. Назначьте ваш `CoreAiChatConfig`
 5. **Готово!** Чат работает с текущим CoreAI бэкендом
 
+## Сворачивание панели (FAB) — с 0.21.7
+
+На узких экранах (ширина ≤ 720 или высота ≤ 560) чат по умолчанию **стартует свёрнутым**: видна только круглая кнопка **`coreai-chat-fab`** в правом нижнем углу. Кнопка **`coreai-chat-collapse`** (`—`) в шапке сворачивает панель обратно в FAB.
+
+- **Персист:** выбор «свернут / развёрнут» сохраняется в `PlayerPrefs` под ключом `CoreAI.Chat.Collapsed` (целое: `1` = свёрнут). Если ключ ещё не задан, на мобильном layout применяется дефолт «свёрнут».
+- **API из кода:**
+  - `bool IsCollapsed { get; }`
+  - `void SetCollapsed(bool collapsed, bool persist = true)` — развернуть перед катсценой или свернуть после неё; при `persist: false` состояние не пишется в `PlayerPrefs`.
+- **UXML:** элементы `coreai-chat-collapse` (в `coreai-chat-header`) и `coreai-chat-fab` (корень, до `coreai-chat-root`).
+- **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` на контейнере, `.coreai-chat-fab` / `.coreai-chat-fab-icon`.
+
+Кастомная вёрстка: если вы **копируете** UXML в свой проект, добавьте те же имена элементов или переопределите привязку в наследнике `CoreAiChatPanel` (переопределите `BindUI` и вызовите `base.BindUI()` либо продублируйте логику).
+
 ## Архитектура промптов (3 слоя)
 
 | Слой | Источник | Пример |
@@ -214,7 +227,11 @@ CoreAiChatPanel (UI) → события → ChatPresenter (VContainer)
 | Класс | Описание |
 |-------|----------|
 | `.coreai-chat-container` | Контейнер чата |
+| `.coreai-chat-container.coreai-collapsed` | Контейнер скрыт (режим FAB) |
 | `.coreai-chat-header` | Заголовок |
+| `.coreai-chat-header-btn` | Кнопка сворачивания в шапке |
+| `.coreai-chat-fab` | Плавающая кнопка «открыть чат» |
+| `.coreai-chat-fab-icon` | Иконка внутри FAB |
 | `.coreai-ai-message` | Пузырь AI |
 | `.coreai-user-message` | Пузырь пользователя |
 | `.coreai-streaming-active` | Активный стриминг |

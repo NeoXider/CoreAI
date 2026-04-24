@@ -14,7 +14,7 @@
 
 > 🚀 **Proven on small models:** many PlayMode scenarios pass on a local **Qwen3.5-4B** (e.g. with reasoning “Think” off). You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.21.0** · `CoreAi` static API · orchestrator streaming · chat & streaming hardening
+**Version:** **v0.21.7** · `CoreAi` static API · orchestrator streaming · chat collapse/FAB · WebGL input hardening
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -40,7 +40,7 @@
 
 - 🎯 **`CoreAi` static facade** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 - 🌊 **Orchestrator streaming** — `IAiOrchestrationService.RunStreamingAsync` for token-by-token output with the same authority/queue/validation path as `RunTaskAsync` (see [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
-- 💬 **Chat UX** — multiline input + Shift+Enter / Enter behaviour fixed; typing indicator as animated dots; streaming visible through the full `ILlmClient` decorator chain.
+- 💬 **Chat UX** — multiline input + Shift+Enter / Enter behaviour fixed; typing indicator as animated dots; streaming visible through the full `ILlmClient` decorator chain; **0.21.7** adds collapse-to-FAB (`SetCollapsed`, mobile default collapsed) — [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md).
 
 **Earlier 0.20.x (still in the box):** universal chat panel, HTTP + LLMUnity streaming, 3-layer streaming flags, one-click demo scene, broad EditMode coverage (Lua sandbox, tools, rate limit, filters).
 

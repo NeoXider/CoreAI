@@ -159,6 +159,6 @@ string json = await CoreAi.OrchestrateAsync(
 
 ---
 
-**Version:** 0.21.0 — `CoreAi` singleton API, orchestrator streaming, docs for beginners & pros.
+**Version:** 0.21.7 — `CoreAi` singleton API, orchestrator streaming, chat collapse/FAB on small screens, docs for beginners & pros.
 
 **First script from scratch?** Read [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — 3 steps + copy-paste `AskAsync` / `StreamAsync`.
