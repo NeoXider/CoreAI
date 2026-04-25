@@ -11,12 +11,12 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// РџР°РјСЏС‚СЊ Creator С‡РµСЂРµР· СЂРµР°Р»СЊРЅС‹Р№ ILlmClient вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚ TestAgentSetup.
-    /// Р‘СЌРєРµРЅРґ РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РёР· CoreAISettingsAsset.
+    ///  Creator   ILlmClient   TestAgentSetup.
+    ///    CoreAISettingsAsset.
     /// </summary>
     public sealed class AgentMemoryWithRealModelPlayModeTests
     {
-        /// <summary>Auto вЂ” РёР· CoreAISettingsAsset.BackendType.</summary>
+        /// <summary>Auto   CoreAISettingsAsset.BackendType.</summary>
         [UnityTest]
         [Timeout(900000)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()
@@ -82,4 +82,5 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
+
 

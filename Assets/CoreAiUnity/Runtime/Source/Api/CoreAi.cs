@@ -274,6 +274,84 @@ namespace CoreAI
             }
         }
 
+        // ===================== Tool Execution Event =====================
+
+        /// <summary>
+        /// Делегат для подписки на события вызова инструментов агентом.
+        /// </summary>
+        /// <param name="roleId">ID роли агента, вызвавшего инструмент.</param>
+        /// <param name="toolName">Имя вызванного инструмента.</param>
+        /// <param name="arguments">Аргументы, переданные модели (может быть null).</param>
+        /// <param name="result">Результат выполнения инструмента (может быть null).</param>
+        public delegate void ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result);
+
+        /// <summary>
+        /// Глобальное событие: модель вызвала инструмент через MEAI pipeline.
+        /// Подписывайтесь для проигрывания звуков, запуска эффектов, логирования.
+        /// <code>
+        /// CoreAi.OnToolExecuted += (role, tool, args, result) => Debug.Log($"{role} used {tool}");
+        /// </code>
+        /// </summary>
+        public static event ToolExecutedHandler? OnToolExecuted;
+
+        /// <summary>
+        /// Внутренний метод для SmartToolCallingChatClient: уведомить подписчиков о вызове инструмента.
+        /// </summary>
+        internal static void NotifyToolExecuted(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result)
+        {
+            try
+            {
+                OnToolExecuted?.Invoke(roleId, toolName, arguments, result);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[CoreAi] OnToolExecuted handler error: {ex.Message}");
+            }
+        }
+
+        // ===================== Control API =====================
+
+        /// <summary>
+        /// Остановить все текущие и ожидающие задачи для указанного scope (обычно это RoleId агента).
+        /// Отменяет CancellationToken и удаляет задачи из очереди оркестратора.
+        /// </summary>
+        public static void StopAgent(string cancellationScope)
+        {
+            if (TryGetOrchestrator(out IAiOrchestrationService? orchestrator) && orchestrator != null)
+            {
+                orchestrator.CancelTasks(cancellationScope);
+            }
+        }
+
+        /// <summary>
+        /// Очистить контекст агента (историю чата и/или память/MemoryTool) для указанной роли.
+        /// </summary>
+        /// <param name="roleId">ID роли</param>
+        /// <param name="clearChatHistory">Очищать ли историю чата (контекст сессии)</param>
+        /// <param name="clearLongTermMemory">Очищать ли долговременную память (стэйт агента)</param>
+        public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)
+        {
+            lock (SyncRoot)
+            {
+                if (TryResolve(out _, out _, out _) && _scope?.Container != null)
+                {
+                    try
+                    {
+                        var memStore = (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
+                        if (memStore != null)
+                        {
+                            if (clearLongTermMemory) memStore.Clear(roleId);
+                            if (clearChatHistory) memStore.ClearChatHistory(roleId);
+                        }
+                    }
+                    catch
+                    {
+                        // optional: memory store might not be registered
+                    }
+                }
+            }
+        }
+
         // ===================== Internals =====================
 
         private static CoreAiChatService RequireChatService()

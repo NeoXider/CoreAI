@@ -16,8 +16,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode С‚РµСЃС‚: Merchant (С‚РѕСЂРіРѕРІРµС†) РІС‹Р·С‹РІР°РµС‚ get_inventory РёРЅСЃС‚СЂСѓРјРµРЅС‚ РџР•Р Р•Р” РѕС‚РІРµС‚РѕРј РёРіСЂРѕРєСѓ.
-    /// Р”РµРјРѕРЅСЃС‚СЂРёСЂСѓРµС‚ РїРѕР»РЅРѕС†РµРЅРЅС‹Р№ NPC СЃ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°РјРё: РёРЅРІРµРЅС‚Р°СЂСЊ + РїР°РјСЏС‚СЊ.
+    /// PlayMode : Merchant ()  get_inventory    .
+    ///   NPC  :  + .
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MerchantWithToolCallingPlayModeTests
@@ -66,7 +66,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Fake inventory РїСЂРѕРІР°Р№РґРµСЂ РґР»СЏ С‚РµСЃС‚РѕРІ.
+        /// Fake inventory   .
         /// </summary>
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
@@ -115,13 +115,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// РўРµСЃС‚: РРіСЂРѕРє РіРѕРІРѕСЂРёС‚ "С…РѕС‡Сѓ РєСѓРїРёС‚СЊ", Chat Agent РІС‹Р·С‹РІР°РµС‚ get_inventory Рё РѕС‚РІРµС‡Р°РµС‚ СЃ СЂРµР°Р»СЊРЅС‹РјРё РїСЂРµРґРјРµС‚Р°РјРё.
+        /// :   " ", Chat Agent  get_inventory     .
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator ChatAgent_CallsInventoryTool_ThenRespondsWithItems()
         {
-            Debug.Log("[ChatWithToolCalling] в•ђв•ђв•ђ TEST START в•ђв•ђв•ђ");
+            Debug.Log("[ChatWithToolCalling]  TEST START ");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
@@ -138,7 +138,7 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log($"[ChatWithToolCalling] Backend: {handle.ResolvedBackend}");
 
-                // РќР°СЃС‚СЂР°РёРІР°РµРј С‚РµСЃС‚РѕРІС‹Р№ РёРЅРІРµРЅС‚Р°СЂСЊ
+                //   
                 TestInventoryProvider testInventory = new();
                 testInventory.Inventory.Add(new InventoryTool.InventoryItem
                     { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
@@ -157,21 +157,21 @@ namespace CoreAI.Tests.PlayMode
 
                 ListSink sink = new();
 
-                // РћР±РµСЂРЅСѓС‚СЊ РєР»РёРµРЅС‚ СЃ РїСЂР°РІРёР»СЊРЅС‹Рј MemoryStore Рё РґРѕР±Р°РІР»СЏРµРј capturing
+                //     MemoryStore   capturing
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
                 CapturingLlmClient capturingLlm = new(clientWithMemory);
 
-                // РЎРѕР·РґР°С‘Рј РѕСЂРєРµСЃС‚СЂР°С‚РѕСЂ СЃ InventoryTool
+                //    InventoryTool
                 AiOrchestrator orch = CreateOrchestratorWithInventory(
                     capturingLlm, store, policy, telemetry, composer, sink, testInventory);
 
-                // РРіСЂРѕРє С…РѕС‡РµС‚ РєСѓРїРёС‚СЊ
+                //   
                 string playerMessage = "I want to buy something. What do you have?";
 
-                Debug.Log($"[ChatWithToolCalling] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
-                Debug.Log($"[ChatWithToolCalling] рџ“¤ PLAYER MESSAGE:");
+                Debug.Log($"[ChatWithToolCalling] ");
+                Debug.Log($"[ChatWithToolCalling]  PLAYER MESSAGE:");
                 Debug.Log($"[ChatWithToolCalling] {playerMessage}");
-                Debug.Log($"[ChatWithToolCalling] в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+                Debug.Log($"[ChatWithToolCalling] ");
 
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
@@ -179,13 +179,13 @@ namespace CoreAI.Tests.PlayMode
                     Hint = playerMessage
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling"); // 240s РґР»СЏ retry loop
+                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling"); // 240s  retry loop
 
-                Debug.Log($"[ChatWithToolCalling] рџ“Ґ AGENT RESPONSE:");
+                Debug.Log($"[ChatWithToolCalling]  AGENT RESPONSE:");
                 Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
                 Debug.Log($"[ChatWithToolCalling] Commands produced: {sink.Items.Count}");
 
-                // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РѕС‚РІРµС‚ СЃРѕРґРµСЂР¶РёС‚ С‡С‚Рѕ-С‚Рѕ СЃРІСЏР·Р°РЅРЅРѕРµ СЃ РїСЂРµРґРјРµС‚Р°РјРё
+                //     -   
                 bool responseMentionsItems =
                     capturingLlm.LastContent?.Contains("Sword", StringComparison.OrdinalIgnoreCase) == true ||
                     capturingLlm.LastContent?.Contains("Potion", StringComparison.OrdinalIgnoreCase) == true ||
@@ -195,18 +195,18 @@ namespace CoreAI.Tests.PlayMode
 
                 if (responseMentionsItems)
                 {
-                    Debug.Log($"[ChatWithToolCalling] вњ“ Agent responded with inventory items!");
+                    Debug.Log($"[ChatWithToolCalling]  Agent responded with inventory items!");
                     Assert.Pass("Chat Agent called tool and responded with real items");
                 }
                 else
                 {
-                    Debug.LogWarning($"[ChatWithToolCalling] вљ  Agent did not mention items in response");
+                    Debug.LogWarning($"[ChatWithToolCalling]  Agent did not mention items in response");
                     Debug.LogWarning($"[ChatWithToolCalling] Response: {capturingLlm.LastContent}");
-                    // РќРµ С„РµР№Р»РёРј С‚РµСЃС‚ - РјРѕРґРµР»СЊ РјРѕРіР»Р° РЅРµ РІС‹Р·РІР°С‚СЊ РёРЅСЃС‚СЂСѓРјРµРЅС‚
+                    //    -     
                     Assert.Pass("Chat Agent responded (may not have called tool)");
                 }
 
-                Debug.Log("[ChatWithToolCalling] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
+                Debug.Log("[ChatWithToolCalling]  TEST PASSED ");
             }
             finally
             {
@@ -223,14 +223,14 @@ namespace CoreAI.Tests.PlayMode
             IAiGameCommandSink sink,
             InventoryTool.IInventoryProvider inventoryProvider)
         {
-            // Р”РѕР±Р°РІР»СЏРµРј InventoryTool Рё MemoryTool РґР»СЏ Merchant
+            //  InventoryTool  MemoryTool  Merchant
             policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
             {
                 new MemoryLlmTool(),
                 new InventoryLlmTool(inventoryProvider)
             });
 
-            // Р’РєР»СЋС‡Р°РµРј РїР°РјСЏС‚СЊ РґР»СЏ Merchant
+            //    Merchant
             policy.EnableMemoryTool(BuiltInAgentRoleIds.Merchant);
 
             return new AiOrchestrator(
@@ -247,3 +247,4 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
+

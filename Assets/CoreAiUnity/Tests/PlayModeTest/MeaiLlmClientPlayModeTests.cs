@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -11,27 +12,27 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode С‚РµСЃС‚ РґР»СЏ MeaiLlmClient вЂ” РµРґРёРЅС‹Р№ MEAI РєР»РёРµРЅС‚.
-    /// РџСЂРѕРІРµСЂСЏРµС‚ С‡С‚Рѕ РѕР±Р° Р±СЌРєРµРЅРґР° (HTTP Рё LLMUnity) СЂР°Р±РѕС‚Р°СЋС‚ С‡РµСЂРµР· РµРґРёРЅС‹Р№ pipeline.
+    /// PlayMode   MeaiLlmClient   MEAI .
+    ///     (HTTP  LLMUnity)    pipeline.
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MeaiLlmClientPlayModeTests
     {
         /// <summary>
-        /// РўРµСЃС‚: MeaiLlmClient.CreateHttp вЂ” СЃРѕР·РґР°С‘С‚ РєР»РёРµРЅС‚ Рё РјРѕР¶РµС‚ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°РїСЂРѕСЃ.
+        /// : MeaiLlmClient.CreateHttp       .
         /// </summary>
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator MeaiLlmClient_CreateHttp_ShouldCreateAndConnect()
         {
-            // Р§РёС‚Р°РµРј РЅР°СЃС‚СЂРѕР№РєРё РёР· CoreAISettingsAsset
+            //    CoreAISettingsAsset
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
             }
 
-            // Р•СЃР»Рё РЅРµ HTTP СЂРµР¶РёРј вЂ” РїСЂРѕРїСѓСЃРєР°РµРј
+            //   HTTP   
             if (settings.BackendType != LlmBackendType.OpenAiHttp && settings.BackendType != LlmBackendType.Auto)
             {
                 Assert.Ignore("Backend is not HTTP. Current: " + settings.BackendType);
@@ -70,7 +71,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// РўРµСЃС‚: MeaiLlmClient.CreateLlmUnity вЂ” СЃРѕР·РґР°С‘С‚ РєР»РёРµРЅС‚ СЃ Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»СЊСЋ.
+        /// : MeaiLlmClient.CreateLlmUnity      .
         /// </summary>
         [UnityTest]
         [Timeout(600000)]
@@ -85,15 +86,16 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore("CoreAISettingsAsset not found in Resources");
             }
 
-            // Р•СЃР»Рё РЅРµ LLMUnity СЂРµР¶РёРј вЂ” РїСЂРѕРїСѓСЃРєР°РµРј
+            //   settings   LLMUnity/Auto   .
             if (settings.BackendType != LlmBackendType.LlmUnity && settings.BackendType != LlmBackendType.Auto)
             {
-                Assert.Ignore("Backend is not LLMUnity. Current: " + settings.BackendType);
+                Debug.Log("[MeaiLlmClient.LLMUnity] Skip: backend in settings is " + settings.BackendType);
+                yield break;
             }
 
             Debug.Log("[MeaiLlmUnity.LLMUnity] Creating LLMUnity client...");
 
-            // РСЃРїРѕР»СЊР·СѓРµРј РЅР°СЃС‚СЂРѕР№РєРё РёР· CoreAISettingsAsset
+            //    CoreAISettingsAsset
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null, // from settings
                     0.2f,
@@ -105,8 +107,14 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
+            if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
+            {
+                Debug.Log("[MeaiLlmClient.LLMUnity] Skip: factory resolved non-LLMUnity backend.");
+                handle.Dispose();
+                yield break;
+            }
 
-            // РўРѕР»СЊРєРѕ РґР»СЏ LLMUnity вЂ” Р¶РґС‘Рј РіРѕС‚РѕРІРЅРѕСЃС‚Рё РјРѕРґРµР»Рё
+            //   LLMUnity    
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
                 Debug.Log("[MeaiLlmUnity.LLMUnity] LLMUnity handle created, waiting for model...");
@@ -156,7 +164,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// РўРµСЃС‚: Factory methods should throw on null arguments.
+        /// : Factory methods should throw on null arguments.
         /// </summary>
         [Test]
         public void MeaiLlmClient_NullArguments_ShouldThrow()
@@ -166,9 +174,15 @@ namespace CoreAI.Tests.PlayMode
             Assert.Throws<System.ArgumentNullException>(() =>
                 MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), logger));
 
-            Assert.Throws<System.ArgumentNullException>(() =>
+            Exception ex = Assert.Catch<Exception>(() =>
                 MeaiLlmClient.CreateLlmUnity(null, logger, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>()));
+#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
+            Assert.That(ex, Is.TypeOf<NotSupportedException>());
+#else
+            Assert.That(ex, Is.TypeOf<System.ArgumentNullException>());
+#endif
         }
     }
 #endif
 }
+

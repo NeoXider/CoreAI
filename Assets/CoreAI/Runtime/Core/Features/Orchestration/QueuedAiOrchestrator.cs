@@ -261,6 +261,52 @@ namespace CoreAI.Ai
             public int Priority;
         }
 
+        /// <inheritdoc />
+        public void CancelTasks(string cancellationScope)
+        {
+            if (string.IsNullOrWhiteSpace(cancellationScope)) return;
+            string scopeKey = cancellationScope.Trim();
+            List<WorkItem> removedPending = null;
+            List<StreamWorkItem> removedStreamPending = null;
+
+            // 1. Отменяем текущую запущенную задачу с этим scope
+            lock (_scopeLock)
+            {
+                if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
+                {
+                    prev.Cancel();
+                    _scopeTokens.Remove(scopeKey);
+                }
+            }
+
+            // 2. Удаляем все ожидающие задачи с этим scope из очередей
+            lock (_queueLock)
+            {
+                removedPending = _pending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                removedStreamPending = _streamPending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                _pending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                _streamPending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+            }
+
+            // 3. Завершаем удалённые pending-задачи, чтобы вызывающий не висел в ожидании.
+            if (removedPending != null)
+            {
+                foreach (WorkItem w in removedPending)
+                {
+                    w.Tcs.TrySetCanceled();
+                }
+            }
+
+            if (removedStreamPending != null)
+            {
+                foreach (StreamWorkItem w in removedStreamPending)
+                {
+                    w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
+                    w.Queue.Complete();
+                }
+            }
+        }
+
         /// <summary>
         /// Портативная async producer/consumer-очередь чанков. Работает без
         /// <c>System.Threading.Channels</c>. После <see cref="Complete"/> семафор

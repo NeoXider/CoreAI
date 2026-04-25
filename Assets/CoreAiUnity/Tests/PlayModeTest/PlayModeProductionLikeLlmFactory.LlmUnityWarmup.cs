@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEngine;
@@ -9,7 +9,7 @@ namespace CoreAI.Tests.PlayMode
 {
     public static partial class PlayModeProductionLikeLlmFactory
     {
-        /// <summary>РџРѕСЃР»Рµ <see cref="TryCreate"/> РґР»СЏ Р±СЌРєРµРЅРґР° LLMUnity вЂ” РґРѕР¶РґР°С‚СЊСЃСЏ РїРѕРґРЅСЏС‚РёСЏ РјРѕРґРµР»Рё.</summary>
+        /// <summary> <see cref="TryCreate"/>   LLMUnity    .</summary>
         public static IEnumerator EnsureLlmUnityModelReady(PlayModeProductionLikeLlmHandle handle)
         {
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -25,7 +25,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // РўРµРјРїРµСЂР°С‚СѓСЂР° РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РІ Р°РіРµРЅС‚Рµ
+            //    
             LLMAgent agent = llmClient.UnityAgent;
             if (agent != null)
             {

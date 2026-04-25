@@ -2,6 +2,64 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.22.0] - 2026-04-25
+
+### ✨ Agent Control API — Полноценное управление жизненным циклом агента
+
+Новый уровень контроля над агентами: остановка, очистка памяти, подписка на вызовы инструментов.
+
+### 💬 Chat UI — остановка генерации из интерфейса
+
+- 🛑 **Stop по кнопке отправки.** Пока модель генерирует ответ, `coreai-chat-send` переключается в режим остановки (`■`) и вызывает `CoreAi.StopAgent(roleId)` + отмену активного токена.
+- ⌨️ **Stop по `Esc`.** Во время активной генерации нажатие `Esc` в чате останавливает текущий запрос так же, как и кнопка.
+- 🎨 **Визуальный сигнал busy-state.** Кнопка отправки получает отдельный красный стиль (`.coreai-chat-send-button-stop`), чтобы явно показать, что это теперь кнопка остановки.
+- 🧪 **EditMode тесты.** Добавлен `CoreAiChatPanelEditModeTests` (Escape-детект и отображение send/stop состояния кнопки).
+- 📝 **Документация.** Обновлены `README_CHAT.md` и `DEVELOPER_GUIDE.md` (разделы по остановке генерации из UI).
+
+#### Остановка агента (`CoreAi.StopAgent`)
+- **`CoreAi.StopAgent(string cancellationScope)`** — атомарная отмена всех текущих и ожидающих задач оркестратора (`QueuedAiOrchestrator`).
+- Отменяет `CancellationToken` активных генераций и очищает внутреннюю очередь для указанного scope (обычно `roleId`).
+- Безопасен для вызова из любого потока.
+
+#### Очистка контекста (`CoreAi.ClearContext`)
+- **`CoreAi.ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)`** — гранулярный сброс памяти агента.
+- `clearChatHistory = true` — очищает краткосрочную историю чата (контекст сессии).
+- `clearLongTermMemory = true` — очищает долговременную память (стэйт/факты агента через `MemoryTool`).
+- Можно комбинировать: только чат, только память, или всё сразу.
+
+#### Подписка на инструменты (`CoreAi.OnToolExecuted`)
+- **`CoreAi.OnToolExecuted`** — глобальное событие, срабатывает когда модель вызывает инструмент через MEAI pipeline.
+- Делегат `ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?> arguments, object? result)`.
+- Идеально для: проигрывания звуков, запуска VFX, аналитики, логирования.
+- Обёрнуто в `try/catch` — ошибки подписчиков не роняют LLM pipeline.
+
+#### Кнопка очистки чата в UI
+- 🆕 Добавлена кнопка **🗑** в хеддер `CoreAiChatPanel` (справа, перед кнопкой сворачивания).
+- По умолчанию очищает UI-сообщения и краткосрочную историю чата (`ClearChat()` → `CoreAi.ClearContext(roleId, true, false)`).
+- Для полного сброса (чат + долговременная память) используйте `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
+- **`ClearChat(bool clearChatHistory, bool clearLongTermMemory)`** — новая перегрузка с гранулярным управлением.
+
+#### Конструктор `SmartToolCallingChatClient`
+- Добавлен обязательный параметр `roleId` — передаётся в `CoreAi.NotifyToolExecuted` при каждом вызове инструмента.
+- ⚠️ **Breaking:** все прямые создания `SmartToolCallingChatClient` теперь требуют `roleId` перед `maxConsecutiveErrors`.
+
+### 📝 Документация
+- Обновлён `DEVELOPER_GUIDE.md`: новая секция "Control API" с примерами кода для `StopAgent`, `ClearContext`, `OnToolExecuted`.
+
+### 🧪 Тесты
+- Новые EditMode-тесты: `ClearContext_ClearsOnlyChatHistory`, `ClearContext_ClearsOnlyLongTermMemory`, `OnToolExecuted_FiresOnToolCall`.
+- Обновлены все тесты `SmartToolCallingChatClient*` — добавлен параметр `roleId`.
+- Тест `CancelTasks_SpecificScope_CancelsActiveAndPendingTasks` для оркестратора.
+
+## [0.21.9] - 2026-04-25
+
+### ✨ Agent Control API (Отмена задач и Очистка контекста)
+
+- В ядро (через фасад `CoreAi`) добавлены публичные методы для остановки работы агента и сброса его памяти.
+- **`CoreAi.StopAgent(string cancellationScope)`**: Отменяет `CancellationToken` всех текущих генераций и очищает внутреннюю очередь `QueuedAiOrchestrator` для задач с переданным скоупом.
+- **`CoreAi.ClearContext(string roleId)`**: Программно очищает историю чата (`IAgentMemoryStore.ClearChatHistory`) и внутреннюю память (`MemoryTool`) для указанной роли агента.
+- Обновлена документация (`DEVELOPER_GUIDE.md`).
+
 ## [0.21.8] - 2026-04-25
 
 ### 🔧 LLMUnity — автоматическое определение пакета (COREAI_HAS_LLMUNITY)

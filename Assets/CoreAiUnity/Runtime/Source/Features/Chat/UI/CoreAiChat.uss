@@ -135,6 +135,8 @@
 /* Typing indicator row is part of the fixed bottom stack */
 #coreai-typing-indicator {
     flex-shrink: 0;
+    padding-left: 14px;
+    padding-right: 14px;
 }
 
 .coreai-ai-row {
@@ -287,6 +289,20 @@
 
 .coreai-chat-send-button:active {
     background-color: rgba(0, 120, 180, 0.8);
+}
+
+.coreai-chat-send-button-stop {
+    background-color: rgba(205, 46, 65, 0.95);
+    border-width: 1px;
+    border-color: rgba(255, 140, 140, 0.8);
+}
+
+.coreai-chat-send-button-stop:hover {
+    background-color: rgba(225, 60, 80, 1);
+}
+
+.coreai-chat-send-button-stop:active {
+    background-color: rgba(180, 32, 50, 1);
 }
 
 /* Scrollbar */

@@ -11,7 +11,7 @@ namespace CoreAI.Tests.EditMode
     /// EditMode-тесты для <see cref="CoreAiChatService"/>:
     /// — иерархия вычисления флага стриминга (UI → per-agent → global);
     /// — SmartSend (автоматический выбор streaming/non-streaming);
-    /// — базовые сценарии Send/Streaming с поддельным <see cref="ILlmClient"/>.
+    /// — базовые сценарии Send/Streaming с поддельным <see cref="IAiOrchestrationService"/>.
     /// </summary>
     [TestFixture]
     public sealed class CoreAiChatServiceEditModeTests
@@ -35,28 +35,27 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void IsStreamingEnabled_NoPolicyNoSettings_FallsBackToStaticDefault()
         {
-            CoreAiChatService service = new(new FakeLlmClient("ok"));
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
 
             // Default CoreAISettings.EnableStreaming = true
-            Assert.IsTrue(service.IsStreamingEnabled("AnyRole", uiFallback: true));
+            Assert.IsTrue(service.IsStreamingEnabled("AnyRole", uiOverride: true));
 
             CoreAISettings.EnableStreaming = false;
-            Assert.IsFalse(service.IsStreamingEnabled("AnyRole", uiFallback: true));
+            Assert.IsFalse(service.IsStreamingEnabled("AnyRole", uiOverride: true));
         }
 
         [Test]
         public void IsStreamingEnabled_WithSettingsOnly_UsesSettingsFlag()
         {
             StubSettings settings = new() { EnableStreaming = false };
-            CoreAiChatService service = new(new FakeLlmClient("ok"),
-                promptProvider: null,
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
                 memoryPolicy: null,
                 settings: settings);
 
-            Assert.IsFalse(service.IsStreamingEnabled("AnyRole", uiFallback: true));
+            Assert.IsFalse(service.IsStreamingEnabled("AnyRole", uiOverride: true));
 
             settings.EnableStreaming = true;
-            Assert.IsTrue(service.IsStreamingEnabled("AnyRole", uiFallback: true));
+            Assert.IsTrue(service.IsStreamingEnabled("AnyRole", uiOverride: true));
         }
 
         [Test]
@@ -66,13 +65,12 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             policy.SetStreamingEnabled("FastRole", true);
 
-            CoreAiChatService service = new(new FakeLlmClient("ok"),
-                promptProvider: null,
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
                 memoryPolicy: policy,
                 settings: settings);
 
-            Assert.IsTrue(service.IsStreamingEnabled("FastRole", uiFallback: true), "per-role override wins");
-            Assert.IsFalse(service.IsStreamingEnabled("OtherRole", uiFallback: true), "other roles → global");
+            Assert.IsTrue(service.IsStreamingEnabled("FastRole", uiOverride: true), "per-role override wins");
+            Assert.IsFalse(service.IsStreamingEnabled("OtherRole", uiOverride: true), "other roles → global");
         }
 
         // ===================== IsStreamingEnabled — UI layer =====================
@@ -84,21 +82,19 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             policy.SetStreamingEnabled("Role", true);
 
-            CoreAiChatService service = new(new FakeLlmClient("ok"),
-                promptProvider: null,
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
                 memoryPolicy: policy,
                 settings: settings);
 
             // UI слой выключил стриминг → всё остальное игнорируется
-            Assert.IsFalse(service.IsStreamingEnabled("Role", uiFallback: false));
+            Assert.IsFalse(service.IsStreamingEnabled("Role", uiOverride: false));
         }
 
         [Test]
         public void IsStreamingEnabled_UiOverrideFalse_ForcesOff()
         {
             StubSettings settings = new() { EnableStreaming = true };
-            CoreAiChatService service = new(new FakeLlmClient("ok"),
-                promptProvider: null,
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
                 memoryPolicy: null,
                 settings: settings);
 
@@ -113,21 +109,21 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendMessageAsync_NonStreaming_ReturnsContent()
         {
-            FakeLlmClient llm = new("Hello, world!");
-            CoreAiChatService service = new(llm);
+            FakeAiOrchestrator orchestrator = new("Hello, world!");
+            CoreAiChatService service = new(orchestrator);
 
             string response = await service.SendMessageAsync("hi", "TestRole");
 
             Assert.AreEqual("Hello, world!", response);
-            Assert.AreEqual(1, llm.CompleteCallCount);
-            Assert.AreEqual(0, llm.StreamingCallCount);
+            Assert.AreEqual(1, orchestrator.CompleteCallCount);
+            Assert.AreEqual(0, orchestrator.StreamingCallCount);
         }
 
         [Test]
         public async Task SendMessageAsync_Error_ReturnsNull()
         {
-            FakeLlmClient llm = new(null, errorMessage: "connection refused");
-            CoreAiChatService service = new(llm);
+            FakeAiOrchestrator orchestrator = new(null, errorMessage: "connection refused");
+            CoreAiChatService service = new(orchestrator);
 
             string response = await service.SendMessageAsync("hi", "TestRole");
             Assert.IsNull(response);
@@ -136,8 +132,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendMessageStreamingAsync_YieldsChunks_InOrder()
         {
-            FakeLlmClient llm = new(streamChunks: new[] { "Hel", "lo", " world" });
-            CoreAiChatService service = new(llm);
+            FakeAiOrchestrator orchestrator = new(streamChunks: new[] { "Hel", "lo", " world" });
+            CoreAiChatService service = new(orchestrator);
 
             List<string> visible = new();
             await foreach (LlmStreamChunk chunk in
@@ -147,7 +143,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             CollectionAssert.AreEqual(new[] { "Hel", "lo", " world" }, visible);
-            Assert.AreEqual(1, llm.StreamingCallCount);
+            Assert.AreEqual(1, orchestrator.StreamingCallCount);
         }
 
         // ===================== SendMessageSmartAsync — auto selection =====================
@@ -155,10 +151,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendSmart_StreamingEnabled_UsesStreamingPath()
         {
-            FakeLlmClient llm = new(streamChunks: new[] { "A", "B", "C" });
+            FakeAiOrchestrator orchestrator = new(streamChunks: new[] { "A", "B", "C" });
             StubSettings settings = new() { EnableStreaming = true };
-            CoreAiChatService service = new(llm,
-                promptProvider: null,
+            CoreAiChatService service = new(orchestrator,
                 memoryPolicy: null,
                 settings: settings);
 
@@ -169,17 +164,16 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("ABC", full);
             CollectionAssert.AreEqual(new[] { "A", "B", "C" }, chunks);
-            Assert.AreEqual(1, llm.StreamingCallCount);
-            Assert.AreEqual(0, llm.CompleteCallCount);
+            Assert.AreEqual(1, orchestrator.StreamingCallCount);
+            Assert.AreEqual(0, orchestrator.CompleteCallCount);
         }
 
         [Test]
         public async Task SendSmart_StreamingDisabled_UsesNonStreamingPath()
         {
-            FakeLlmClient llm = new("Full response text");
+            FakeAiOrchestrator orchestrator = new("Full response text");
             StubSettings settings = new() { EnableStreaming = false };
-            CoreAiChatService service = new(llm,
-                promptProvider: null,
+            CoreAiChatService service = new(orchestrator,
                 memoryPolicy: null,
                 settings: settings);
 
@@ -189,8 +183,8 @@ namespace CoreAI.Tests.EditMode
                 onChunk: c => { if (!string.IsNullOrEmpty(c.Text)) chunks.Add(c.Text); });
 
             Assert.AreEqual("Full response text", full);
-            Assert.AreEqual(1, llm.CompleteCallCount);
-            Assert.AreEqual(0, llm.StreamingCallCount);
+            Assert.AreEqual(1, orchestrator.CompleteCallCount);
+            Assert.AreEqual(0, orchestrator.StreamingCallCount);
 
             // onChunk должен быть вызван даже в non-streaming пути: 1 чанк с текстом + финал
             Assert.AreEqual(1, chunks.Count);
@@ -200,10 +194,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SendSmart_UiOverrideFalse_ForcesNonStreaming()
         {
-            FakeLlmClient llm = new("Non-streaming answer");
+            FakeAiOrchestrator orchestrator = new("Non-streaming answer");
             StubSettings settings = new() { EnableStreaming = true };
-            CoreAiChatService service = new(llm,
-                promptProvider: null,
+            CoreAiChatService service = new(orchestrator,
                 memoryPolicy: null,
                 settings: settings);
 
@@ -213,8 +206,30 @@ namespace CoreAI.Tests.EditMode
                 uiStreamingOverride: false);
 
             Assert.AreEqual("Non-streaming answer", full);
-            Assert.AreEqual(1, llm.CompleteCallCount);
-            Assert.AreEqual(0, llm.StreamingCallCount);
+            Assert.AreEqual(1, orchestrator.CompleteCallCount);
+            Assert.AreEqual(0, orchestrator.StreamingCallCount);
+        }
+
+        // ===================== Control API =====================
+
+        [Test]
+        public void ClearHistory_ClearsMemoryStore()
+        {
+            FakeMemoryStore store = new();
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
+
+            service.ClearHistory("Role123");
+            
+            Assert.AreEqual("Role123", store.ClearedRole);
+        }
+
+        [Test]
+        public void StopAgent_CallsFacade_DoesNotThrowWithoutScope()
+        {
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
+            
+            // В EditMode нет CoreAILifetimeScope — StopAgent должен отработать молча (graceful degradation).
+            Assert.DoesNotThrow(() => service.StopAgent("Role"));
         }
 
         // ===================== Helpers =====================
@@ -241,7 +256,19 @@ namespace CoreAI.Tests.EditMode
             public bool EnableStreaming { get; set; } = true;
         }
 
-        private sealed class FakeLlmClient : ILlmClient
+        private sealed class FakeMemoryStore : IAgentMemoryStore
+        {
+            public string ClearedRole { get; private set; }
+            
+            public void Clear(string roleId) { }
+            public void ClearChatHistory(string roleId) => ClearedRole = roleId;
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
+            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
+            public bool TryLoad(string roleId, out CoreAI.Ai.AgentMemoryState state) { state = null; return false; }
+            public void Save(string roleId, CoreAI.Ai.AgentMemoryState state) { }
+        }
+
+        private sealed class FakeAiOrchestrator : IAiOrchestrationService
         {
             private readonly string _content;
             private readonly string _error;
@@ -250,7 +277,7 @@ namespace CoreAI.Tests.EditMode
             public int CompleteCallCount { get; private set; }
             public int StreamingCallCount { get; private set; }
 
-            public FakeLlmClient(string content = "OK",
+            public FakeAiOrchestrator(string content = "OK",
                 string errorMessage = null,
                 string[] streamChunks = null)
             {
@@ -259,31 +286,22 @@ namespace CoreAI.Tests.EditMode
                 _streamChunks = streamChunks;
             }
 
-            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
-                CancellationToken cancellationToken = default)
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
             {
                 CompleteCallCount++;
 
                 if (_error != null)
                 {
-                    return Task.FromResult(new LlmCompletionResult
-                    {
-                        Ok = false,
-                        Error = _error
-                    });
+                    throw new System.Exception(_error);
                 }
 
-                return Task.FromResult(new LlmCompletionResult
-                {
-                    Ok = true,
-                    Content = _content ?? ""
-                });
+                return Task.FromResult(_content ?? "");
             }
 
-            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
-                LlmCompletionRequest request,
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
-                CancellationToken cancellationToken = default)
+                CancellationToken ct = default)
             {
                 StreamingCallCount++;
 
@@ -297,7 +315,7 @@ namespace CoreAI.Tests.EditMode
                 {
                     foreach (string c in _streamChunks)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        ct.ThrowIfCancellationRequested();
                         yield return new LlmStreamChunk { Text = c };
                         await Task.Yield();
                     }
@@ -309,7 +327,7 @@ namespace CoreAI.Tests.EditMode
                 yield return new LlmStreamChunk { IsDone = true };
             }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void CancelTasks(string scopeId) { }
         }
     }
 }

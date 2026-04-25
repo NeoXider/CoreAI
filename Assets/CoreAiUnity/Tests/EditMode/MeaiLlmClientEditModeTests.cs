@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -24,7 +25,7 @@ namespace CoreAI.Tests.EditMode
             MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger);
 
             Assert.IsNotNull(client);
-            Object.DestroyImmediate(settings);
+            UnityEngine.Object.DestroyImmediate(settings);
         }
 
         [Test]
@@ -36,16 +37,22 @@ namespace CoreAI.Tests.EditMode
             OpenAiChatLlmClient client = new(settings);
 
             Assert.IsNotNull(client);
-            Object.DestroyImmediate(settings);
+            UnityEngine.Object.DestroyImmediate(settings);
         }
 
         [Test]
         public void CreateLlmUnity_RequiresAgent()
         {
-            Assert.Throws<System.ArgumentNullException>(() =>
+            Exception ex = Assert.Catch<Exception>(() =>
             {
                 MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
             });
+
+#if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
+            Assert.That(ex, Is.TypeOf<NotSupportedException>());
+#else
+            Assert.That(ex, Is.TypeOf<System.ArgumentNullException>());
+#endif
         }
 
         [Test]
@@ -64,7 +71,7 @@ namespace CoreAI.Tests.EditMode
             List<ILlmTool> tools = new() { new MemoryLlmTool() };
             client.SetTools(tools);
 
-            Object.DestroyImmediate(settings);
+            UnityEngine.Object.DestroyImmediate(settings);
         }
 
         private sealed class TestMemoryStore : IAgentMemoryStore

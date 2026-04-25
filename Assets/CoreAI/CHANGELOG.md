@@ -1,5 +1,30 @@
 # Changelog
 
+## [v0.23.0] — 2026-04-25
+
+### Agent Control API UI
+- ✨ **UI чата обновлена.** В `CoreAiChatPanel` добавлена кнопка "Остановить" (⏹), прерывающая генерацию агента.
+- ✨ **Очистка чата по умолчанию.** Кнопка "Очистить" (🗑) в `CoreAiChatPanel` очищает UI и краткосрочную историю чата (`CoreAi.ClearContext(roleId, true, false)`). Для полного сброса (включая долговременную память) используется `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
+- 🔧 Синхронизированы версии пакетов `com.nexoider.coreai` и `com.nexoider.coreaiunity`.
+
+## [v0.22.0] — 2026-04-25
+
+### Agent Control API — Full Lifecycle Management
+
+- ✨ **Гранулярная очистка контекста.** `CoreAi.ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory)` — отдельные флаги для краткосрочной истории чата и долговременной памяти агента (MemoryTool).
+- ✨ **Подписка на вызовы инструментов.** `CoreAi.OnToolExecuted` — глобальное событие `ToolExecutedHandler(roleId, toolName, arguments, result)` для реактивной интеграции (звуки, VFX, аналитика). Безопасно: ошибки подписчиков не роняют LLM pipeline.
+- ✨ **`CoreAi.NotifyToolExecuted`** — internal метод, вызываемый из `SmartToolCallingChatClient` при каждом успешном вызове инструмента.
+- ⚠️ **Breaking:** конструктор `SmartToolCallingChatClient` теперь требует `roleId` (string) перед `maxConsecutiveErrors`.
+
+### Release sync
+
+- 🔧 Версия синхронизирована с `com.nexoider.coreaiunity` **0.22.0** (изменения релиза — в Unity-слое: `CoreAiChatPanel` поддерживает остановку генерации по `Esc` и повторному нажатию send-кнопки с красным stop-state и tooltip). Изменений в портативном ядре нет.
+
+## [v0.21.9] — 2026-04-25
+
+### Agent Control API
+- ✨ **Добавлено API остановки агента и очистки памяти.** В интерфейс `IAiOrchestrationService` добавлен метод `CancelTasks(string cancellationScope)`. Фасад `CoreAi` дополнен статическими методами `CoreAi.StopAgent(string roleId)` и `CoreAi.ClearContext(string roleId)` для программной отмены текущих LLM-генераций и сброса истории чата.
+
 ## [v0.21.8] — 2026-04-25
 
 ### Release sync

@@ -531,5 +531,12 @@ namespace CoreAI.Ai
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             };
         }
+
+        /// <inheritdoc />
+        public void CancelTasks(string cancellationScope)
+        {
+            // AiOrchestrator не управляет очередью и токенами (это делает QueuedAiOrchestrator),
+            // поэтому здесь метод пустой.
+        }
     }
 }

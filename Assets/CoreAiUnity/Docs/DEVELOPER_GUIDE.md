@@ -193,7 +193,97 @@ flowchart LR
 
 ---
 
-## 9.1 Где CoreAI обычно “сложный” и как упростить пайплайн (рекомендации)
+## 9.1 Управление Агентом (Control API)
+
+Для управления текущим состоянием агентов (отмена задач, сброс памяти, подписка на инструменты) используется статический фасад `CoreAI.Api.CoreAi`.
+
+### Остановка агента (Cancel Tasks)
+
+Если агент долго генерирует ответ или его задача больше не актуальна, вы можете программно прервать все его текущие и ожидающие задачи в очереди `QueuedAiOrchestrator`:
+
+```csharp
+// Остановить генерацию для конкретной роли (использует CancellationScope = roleId)
+CoreAi.StopAgent("Teacher");
+```
+*Также доступно через оркестратор напрямую для профессионалов:* `_orchestrator.CancelTasks("Teacher")`.
+
+### Остановка из встроенного Chat UI (`CoreAiChatPanel`)
+
+Во время генерации ответа в `CoreAiChatPanel` кнопка отправки `coreai-chat-send` автоматически переключается в режим `Stop`:
+
+- визуально меняется на красную (`.coreai-chat-send-button-stop`);
+- текст кнопки меняется с `➤` на `■`;
+- tooltip подсказывает `Остановить генерацию (Esc)`.
+
+Пользователь может прервать генерацию:
+
+- нажатием на эту кнопку (повторный клик);
+- клавишей `Esc` в активном чате.
+
+В обоих сценариях UI вызывает `CoreAi.StopAgent(roleId)` и отменяет активный токен запроса, что безопасно останавливает текущий ответ и связанные задачи роли в `QueuedAiOrchestrator`.
+
+### Очистка контекста (Clear Context)
+
+Сброс истории чата (краткосрочного контекста) и/или долговременной памяти агента (MemoryTool):
+
+```csharp
+// Полностью очистить контекст агента (историю сообщений и память)
+CoreAi.ClearContext("Teacher");
+
+// Очистить только историю чата (контекст сессии), оставив память агента нетронутой
+CoreAi.ClearContext("Teacher", clearChatHistory: true, clearLongTermMemory: false);
+
+// Очистить только долговременную память (факты, стэйт), оставив текущий диалог
+CoreAi.ClearContext("Teacher", clearChatHistory: false, clearLongTermMemory: true);
+```
+
+### Подписка на использование инструментов (Tool Execution Event)
+
+Для удобного встраивания (например, проигрывания звуков, запуска эффектов или логирования) вы можете подписаться на глобальное событие успешного вызова любого инструмента моделью (через MEAI):
+
+```csharp
+private void OnEnable()
+{
+    CoreAi.OnToolExecuted += HandleToolExecuted;
+}
+
+private void OnDisable()
+{
+    CoreAi.OnToolExecuted -= HandleToolExecuted;
+}
+
+private void HandleToolExecuted(string roleId, string toolName, IDictionary<string, object> args, object result)
+{
+    Debug.Log($"Agent {roleId} used tool {toolName}!");
+    
+    // Пример: реакция на конкретный инструмент
+    if (toolName == "spawn_item" && args != null && args.TryGetValue("item_id", out var itemId))
+    {
+        AudioSystem.PlaySound($"spawn_{itemId}");
+    }
+}
+```
+
+### Очистка чата из UI (`CoreAiChatPanel`)
+
+В хеддере встроенного чат-панели (`CoreAiChatPanel`) есть кнопка 🗑 — по нажатию очищает все сообщения из UI и сбрасывает **краткосрочный контекст** (историю чата) агента. Это поведение по умолчанию.
+
+Программно можно управлять детальнее:
+
+```csharp
+// Очистить сообщения в UI + историю чата (по умолчанию при нажатии 🗑)
+chatPanel.ClearChat();
+
+// Полная очистка: и чат, и долговременная память
+chatPanel.ClearChat(clearChatHistory: true, clearLongTermMemory: true);
+
+// Только долговременная память, сохраняя текущий диалог в UI
+chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
+```
+
+---
+
+## 9.2 Где CoreAI обычно “сложный” и как упростить пайплайн (рекомендации)
 
 Ниже — практические “узкие места” при интеграции и способы сделать CoreAI более автоматичным, но настраиваемым.
 

@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                true, new List<CoreAI.Ai.ILlmTool>(), 3);
+                true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { failTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -77,7 +77,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                true, new List<CoreAI.Ai.ILlmTool>(), 3);
+                true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -122,7 +122,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                true, new List<CoreAI.Ai.ILlmTool>(), 3);
+                true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             MEAI.ChatResponse response = Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
@@ -157,7 +157,7 @@ namespace CoreAI.Tests.EditMode
 
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
-                true, new List<CoreAI.Ai.ILlmTool>(), 3);
+                true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { successTool } };
             MEAI.ChatResponse response = Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
@@ -197,7 +197,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
-                new List<CoreAI.Ai.ILlmTool>(), 3);
+                new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -232,7 +232,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
-                new List<CoreAI.Ai.ILlmTool>(), 3);
+                new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -267,7 +267,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
-                new List<CoreAI.Ai.ILlmTool> { new AllowDupTool("always_ok") }, 3);
+                new List<CoreAI.Ai.ILlmTool> { new AllowDupTool("always_ok") }, "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -295,7 +295,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: true, // отключаем дубликаты, чтобы увидеть именно not-found
-                new List<CoreAI.Ai.ILlmTool>(), 3);
+                new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
@@ -324,7 +324,7 @@ namespace CoreAI.Tests.EditMode
             SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: true,
-                new List<CoreAI.Ai.ILlmTool>(), 3);
+                new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
             MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
             MEAI.ChatResponse response = Task.Run(() =>

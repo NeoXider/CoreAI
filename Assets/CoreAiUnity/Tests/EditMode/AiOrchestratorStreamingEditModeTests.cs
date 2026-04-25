@@ -29,6 +29,8 @@ namespace CoreAI.Tests.EditMode
             {
                 return Task.FromResult(_result);
             }
+
+            public void CancelTasks(string cancellationScope) { }
         }
 
         /// <summary>
@@ -63,6 +65,8 @@ namespace CoreAI.Tests.EditMode
 
                 yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
             }
+
+            public void CancelTasks(string cancellationScope) { }
         }
 
         [Test]
@@ -229,6 +233,8 @@ namespace CoreAI.Tests.EditMode
 
                 yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
             }
+
+            public void CancelTasks(string scopeId) {}
         }
     }
 }

@@ -61,7 +61,7 @@ namespace CoreAI.Tests.EditMode
             // Убеждаемся, что разные независимые вызовы (новые реквесты) могут использовать один и тот же инструмент.
             MockChatClient mockInner = new MockChatClient();
             SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }
+                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole"
             );
 
             ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };
@@ -90,7 +90,7 @@ namespace CoreAI.Tests.EditMode
             // это будет заблокировано внутри SmartToolCallingChatClient.
             MockChatClient mockInner = new MockChatClient();
             SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, maxConsecutiveErrors: 2
+                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole", maxConsecutiveErrors: 2
             );
 
             ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };

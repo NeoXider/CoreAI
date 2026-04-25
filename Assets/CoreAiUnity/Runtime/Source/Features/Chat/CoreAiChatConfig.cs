@@ -49,8 +49,8 @@ namespace CoreAI.Chat
         [SerializeField] private int _maxMessageLength = 2000;
 
         [Header("Ошибки")]
-        [SerializeField] private string _errorMessagePrefix = "⚠️ Ошибка: ";
-        [SerializeField] private string _timeoutMessage = "⏳ Запрос превысил лимит времени.";
+        [SerializeField] private string _errorMessagePrefix = "Error: ";
+        [SerializeField] private string _timeoutMessage = "Request timeout.";
         [SerializeField] private string _noResponseMessage = "Не удалось получить ответ. Попробуйте ещё раз.";
 
         // === Public API ===

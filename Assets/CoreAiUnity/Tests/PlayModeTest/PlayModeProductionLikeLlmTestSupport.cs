@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoreAI.AgentMemory;
@@ -16,16 +16,16 @@ using UnityEditor;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Helper для оборачивания ILlmClient с правильным IAgentMemoryStore.
-    /// Решает проблему: фабрика создаёт клиент со своим InMemoryStore,
-    /// а тест использует другой store в оркестраторе.
+    /// Helper   ILlmClient   IAgentMemoryStore.
+    ///  :      InMemoryStore,
+    ///     store  .
     /// </summary>
     public static class LlmClientTestHelpers
     {
         /// <summary>
-        /// Обернуть клиент из PlayModeProductionLikeLlmHandle с нужным IAgentMemoryStore.
-        /// Для LLMUnity — пересоздаёт MeaiLlmClient с правильным store.
-        /// Для HTTP — возвращает как есть (HTTP клиент уже правильно создаётся с null store).
+        ///    PlayModeProductionLikeLlmHandle   IAgentMemoryStore.
+        ///  LLMUnity   MeaiLlmClient   store.
+        ///  HTTP     (HTTP      null store).
         /// </summary>
         public static ILlmClient WrapWithMemoryStore(this PlayModeProductionLikeLlmHandle handle,
             IAgentMemoryStore memoryStore)
@@ -41,7 +41,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
 #if COREAI_HAS_LLMUNITY
-            // LLMUnity клиент — пересоздаём с нужным MemoryStore
+            // LLMUnity      MemoryStore
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
                 MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
@@ -56,7 +56,7 @@ namespace CoreAI.Tests.PlayMode
             }
 #endif
 
-            // HTTP клиент — создаём новый через OpenAiChatLlmClient используя сохранённые настройки
+            // HTTP      OpenAiChatLlmClient   
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
             {
                 if (handle._openAiSettings != null)
@@ -70,7 +70,7 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
 
-            // Offline или другой — используем как есть
+            // Offline      
             return handle.Client;
 #endif
         }
@@ -133,30 +133,30 @@ namespace CoreAI.Tests.PlayMode
     }
 
     /// <summary>
-    /// Какой бэкенд использовать в Play Mode тестах с реальной моделью (см. <see cref="PlayModeProductionLikeLlmFactory.TryCreate"/>).
-    /// Переменная окружения: <c>COREAI_PLAYMODE_LLM_BACKEND</c> = <c>auto</c> | <c>http</c> | <c>llmunity</c> | <c>offline</c> (без значения = auto из CoreAISettingsAsset).
-    /// Приоритет: 1) CoreAISettingsAsset  2) Env var  3) Auto fallback.
+    ///     Play Mode     (. <see cref="PlayModeProductionLikeLlmFactory.TryCreate"/>).
+    ///  : <c>COREAI_PLAYMODE_LLM_BACKEND</c> = <c>auto</c> | <c>http</c> | <c>llmunity</c> | <c>offline</c> (  = auto  CoreAISettingsAsset).
+    /// : 1) CoreAISettingsAsset  2) Env var  3) Auto fallback.
     /// </summary>
     public enum PlayModeProductionLikeLlmBackend
     {
-        /// <summary>Из CoreAISettingsAsset.BackendType. Если Auto: LLMUnity → HTTP API → Offline.</summary>
+        /// <summary> CoreAISettingsAsset.BackendType.  Auto: LLMUnity  HTTP API  Offline.</summary>
         FromSettings = -1,
 
-        /// <summary>Как <see cref="CoreAI.Composition.CoreAILifetimeScope"/>: LLMUnity → HTTP API → Offline.</summary>
+        /// <summary> <see cref="CoreAI.Composition.CoreAILifetimeScope"/>: LLMUnity  HTTP API  Offline.</summary>
         Auto = 0,
 
-        /// <summary>Только HTTP (LM Studio и т.д.).</summary>
+        /// <summary> HTTP (LM Studio  ..).</summary>
         OpenAiCompatibleHttp = 1,
 
-        /// <summary>Только локальный LLMUnity (рантайм LLM+LLMAgent).</summary>
+        /// <summary>  LLMUnity ( LLM+LLMAgent).</summary>
         LlmUnity = 2,
 
-        /// <summary>Офлайн режим — без подключений к LLM.</summary>
+        /// <summary>      LLM.</summary>
         Offline = 3
     }
 
     /// <summary>
-    /// <see cref="ILlmClient"/> как в игре (HTTP или LLMUnity). Освободить после теста — уничтожает временные объекты Unity.
+    /// <see cref="ILlmClient"/>    (HTTP  LLMUnity).        Unity.
     /// </summary>
     public sealed class PlayModeProductionLikeLlmHandle : IDisposable
     {
@@ -231,17 +231,17 @@ namespace CoreAI.Tests.PlayMode
     }
 
     /// <summary>
-    /// Единая точка создания «продакшен-подобного» <see cref="ILlmClient"/> для Play Mode:
-    /// использует <see cref="CoreAISettingsAsset"/> как источник истины для выбора бэкенда и настроек.
-    /// Приоритет: 1) CoreAISettingsAsset  2) Env var  3) Auto fallback.
+    ///    - <see cref="ILlmClient"/>  Play Mode:
+    ///  <see cref="CoreAISettingsAsset"/>        .
+    /// : 1) CoreAISettingsAsset  2) Env var  3) Auto fallback.
     /// </summary>
     public static partial class PlayModeProductionLikeLlmFactory
     {
         private const string EnvBackend = "COREAI_PLAYMODE_LLM_BACKEND";
 
         /// <summary>
-        /// Определить бэкенд: CoreAISettingsAsset → Env var → Auto.
-        /// Если <paramref name="explicitPreference"/> задан — он имеет приоритет.
+        ///  : CoreAISettingsAsset  Env var  Auto.
+        ///  <paramref name="explicitPreference"/>     .
         /// </summary>
         public static PlayModeProductionLikeLlmBackend ResolvePreference(
             PlayModeProductionLikeLlmBackend? explicitPreference)
@@ -252,7 +252,7 @@ namespace CoreAI.Tests.PlayMode
                 return explicitPreference.Value;
             }
 
-            // 1. Читаем CoreAISettingsAsset
+            // 1.  CoreAISettingsAsset
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings != null)
             {
@@ -304,7 +304,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Собирает клиент оркестратора. Для <see cref="PlayModeProductionLikeLlmBackend.LlmUnity"/> вызывайте затем <see cref="EnsureLlmUnityModelReady"/> из корутины.
+        ///   .  <see cref="PlayModeProductionLikeLlmBackend.LlmUnity"/>   <see cref="EnsureLlmUnityModelReady"/>  .
         /// </summary>
         public static bool TryCreate(
             PlayModeProductionLikeLlmBackend? explicitPreference,
@@ -317,19 +317,19 @@ namespace CoreAI.Tests.PlayMode
             ignoreReason = null;
             PlayModeProductionLikeLlmBackend pref = ResolvePreference(explicitPreference);
 
-            // Получаем настройки из CoreAISettingsAsset
+            //    CoreAISettingsAsset
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
 
             switch (pref)
             {
                 case PlayModeProductionLikeLlmBackend.FromSettings:
                 case PlayModeProductionLikeLlmBackend.Auto:
-                    // Auto: приоритет из CoreAISettingsAsset.AutoPriority
+                    // Auto:   CoreAISettingsAsset.AutoPriority
                     bool httpFirst = settings != null && settings.AutoPriority == LlmAutoPriority.HttpFirst;
 
                     if (httpFirst)
                     {
-                        // HTTP API → LLMUnity → Offline
+                        // HTTP API  LLMUnity  Offline
                         if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
                         {
                             return true;
@@ -342,7 +342,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                     else
                     {
-                        // LLMUnity → HTTP API → Offline (по умолчанию)
+                        // LLMUnity  HTTP API  Offline ( )
                         if (TryCreateLlmUnity(settings, out handle, out _))
                         {
                             return true;
@@ -354,7 +354,7 @@ namespace CoreAI.Tests.PlayMode
                         }
                     }
 
-                    // Fallback на Offline
+                    // Fallback  Offline
                     handle = new PlayModeProductionLikeLlmHandle(
                         new OfflineLlmClient(settings),
                         PlayModeProductionLikeLlmBackend.Offline,
@@ -378,7 +378,7 @@ namespace CoreAI.Tests.PlayMode
                     return true;
 
                 default:
-                    ignoreReason = "Неизвестный PlayModeProductionLikeLlmBackend.";
+                    ignoreReason = " PlayModeProductionLikeLlmBackend.";
                     return false;
             }
         }
@@ -396,7 +396,7 @@ namespace CoreAI.Tests.PlayMode
             return false;
 #else
 
-            // Пробуем CoreAISettingsAsset
+            //  CoreAISettingsAsset
             if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
                 !string.IsNullOrWhiteSpace(settings.ModelName))
             {
@@ -415,7 +415,7 @@ namespace CoreAI.Tests.PlayMode
             if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(model))
             {
                 ignoreReason =
-                    "OpenAI-compatible HTTP: нет настроек в CoreAISettingsAsset и не заданы COREAI_OPENAI_TEST_BASE/MODEL.";
+                    "OpenAI-compatible HTTP:    CoreAISettingsAsset    COREAI_OPENAI_TEST_BASE/MODEL.";
                 return false;
             }
 
@@ -446,7 +446,7 @@ namespace CoreAI.Tests.PlayMode
         {
             handle = null;
 #if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
-            ignoreReason = "Сборка с COREAI_NO_LLM — LLMUnity недоступен.";
+            ignoreReason = "  COREAI_NO_LLM  LLMUnity .";
             return false;
 #else
             string agentName = settings?.LlmUnityAgentName;
@@ -459,11 +459,11 @@ namespace CoreAI.Tests.PlayMode
             if (go == null || agent == null)
             {
                 ignoreReason =
-                    "LLMUnity: не удалось поднять LLM+LLMAgent или назначить GGUF.";
+                    "LLMUnity:    LLM+LLMAgent   GGUF.";
                 return false;
             }
 
-            // Применяем настройки из CoreAISettingsAsset
+            //    CoreAISettingsAsset
             LLM llm = go.GetComponent<LLM>();
             if (llm != null && settings != null && settings.LlmUnityDontDestroyOnLoad)
             {

@@ -63,6 +63,8 @@ await foreach (string part in CoreAi.StreamAsync("Расскажи про кве
 | `OrchestrateAsync` | `Task<string?>` | Полный **игровой пайплайн**: снимок сессии, authority, очередь, валидация, **публикация команды** в шину. |
 | `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | То же, но **токены по мере генерации** + финальная публикация после стрима. |
 | `OrchestrateStreamCollectAsync` | `Task<string>` | Стрим + **сборка полного текста** + `onChunk` для UI. |
+| `StopAgent` | `void` | **Отмена генерации** и выполняемых задач агента. |
+| `ClearContext` | `void` | **Очистка памяти** (чат + долговременная). |
 | `IsReady` | `bool` | Можно ли вызывать API (scope + сервисы). |
 | `Invalidate()` | `void` | После **смены сцены** или в тестах — сброс кэша. |
 | `TryGetChatService` / `TryGetOrchestrator` | `bool` | **Без исключений**: проверка перед кнопкой в UI или опциональным AI. |
@@ -144,6 +146,19 @@ else
 {
     // AI отключён или сцена без scope — показать дефолтный текст NPC
 }
+```
+
+### 3.4b. Управление агентом (Agent Control API)
+
+```csharp
+// Остановить генерацию (например, кнопка Stop в UI)
+CoreAi.StopAgent("PlayerChat");
+
+// Очистить историю чата, но оставить долговременные воспоминания (факты, квесты)
+CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: false);
+
+// Полный хард-ресет (амнезия)
+CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: true);
 ```
 
 ### 3.5. Оркестратор: команда в игру

@@ -14,8 +14,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ WorldCommand tool calling С‡РµСЂРµР· РµРґРёРЅС‹Р№ MEAI pipeline.
-    /// Р‘СЌРєРµРЅРґ РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РёР· CoreAISettingsAsset.
+    /// PlayMode   WorldCommand tool calling   MEAI pipeline.
+    ///    CoreAISettingsAsset.
     /// </summary>
     public sealed class WorldCommandPlayModeTests
     {
@@ -32,7 +32,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing spawn...");
 
-            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
+            //  WorldTool   Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -45,8 +45,8 @@ namespace CoreAI.Tests.PlayMode
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
 
-            // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РєРѕРјР°РЅРґР° Р±С‹Р»Р° РІС‹РїРѕР»РЅРµРЅР° (Р·Р°С‡Р°СЃС‚СѓСЋ РµСЃС‚СЊ Р·Р°РґРµСЂР¶РєР° РјРµР¶РґСѓ РІРѕР·РІСЂР°С‚РѕРј РёР· Orchestrator Рё РѕР±РЅРѕРІР»РµРЅРёРµРј СЃРѕСЃС‚РѕСЏРЅРёСЏ)
-            // РџС‹С‚Р°РµРјСЃСЏ РїРѕРґРѕР¶РґР°С‚СЊ РґРѕ 5 СЃРµРєСѓРЅРґ, С‚Р°Рє РєР°Рє tool execution СЂР°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· Task.Run.
+            //      (      Orchestrator   )
+            //    5 ,   tool execution   Task.Run.
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
                 yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f,
@@ -71,7 +71,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing move...");
 
-            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
+            //  WorldTool   Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -108,7 +108,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_objects...");
 
-            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
+            //  WorldTool   Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -145,7 +145,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing play_animation...");
 
-            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
+            //  WorldTool   Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -182,7 +182,7 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_animations...");
 
-            // Р РµРіРёСЃС‚СЂРёСЂСѓРµРј WorldTool РґР»СЏ СЂРѕР»Рё Creator
+            //  WorldTool   Creator
             List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
@@ -240,7 +240,7 @@ namespace CoreAI.Tests.PlayMode
                 LastCommandJson = cmd.JsonPayload;
                 AllCommandsJson.Add(cmd.JsonPayload);
                 
-                // РњРѕРєР°РµРј РѕС‚РІРµС‚С‹ РґР»СЏ С‚РµСЃС‚РѕРІ
+                //    
                 if (cmd.JsonPayload != null)
                 {
                     if (cmd.JsonPayload.Contains("list_animations"))
@@ -255,3 +255,4 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
+

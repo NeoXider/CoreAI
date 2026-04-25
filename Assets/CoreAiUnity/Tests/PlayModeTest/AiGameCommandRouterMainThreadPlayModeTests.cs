@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,9 +18,9 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Play Mode: проверка, что <see cref="AiGameCommandRouter"/> доставляет
-    /// <see cref="AiGameCommandRouter.CommandReceived"/> на главный поток Unity, даже если MessagePipe
-    /// вызывает подписчика с пула потоков (как после <c>ConfigureAwait(false)</c> в <see cref="QueuedAiOrchestrator"/>).
+    /// Play Mode: ,  <see cref="AiGameCommandRouter"/> 
+    /// <see cref="AiGameCommandRouter.CommandReceived"/>    Unity,   MessagePipe
+    ///      (  <c>ConfigureAwait(false)</c>  <see cref="QueuedAiOrchestrator"/>).
     /// </summary>
     public sealed class AiGameCommandRouterMainThreadPlayModeTests
     {
@@ -58,8 +58,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Минимальный pub/sub: <see cref="Publish"/> вызывает обработчик в том же потоке, что и вызов
-        /// (как <see cref="MessageBrokerCore{TMessage}.Publish"/>), без DI MessagePipe.
+        ///  pub/sub: <see cref="Publish"/>      ,   
+        /// ( <see cref="MessageBrokerCore{TMessage}.Publish"/>),  DI MessagePipe.
         /// </summary>
         private sealed class CurrentThreadPublishBus : IPublisher<ApplyAiGameCommand>, ISubscriber<ApplyAiGameCommand>
         {
@@ -93,7 +93,7 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        /// <summary>Имитирует доставку сообщения шины с пула (как после async без возврата на main thread).</summary>
+        /// <summary>      (  async    main thread).</summary>
         private sealed class ThreadPoolDeliverySubscriber : ISubscriber<ApplyAiGameCommand>
         {
             private IMessageHandler<ApplyAiGameCommand> _handler;
@@ -190,11 +190,11 @@ namespace CoreAI.Tests.PlayMode
                     yield return null;
                 }
 
-                Assert.IsTrue(received, "CommandReceived не вызван за отведённое время.");
+                Assert.IsTrue(received, "CommandReceived     .");
                 Assert.AreEqual(
                     mainThreadId,
                     receivedThreadId,
-                    "CommandReceived должен выполняться на главном потоке Unity после SwitchToMainThread.");
+                    "CommandReceived      Unity  SwitchToMainThread.");
             }
             finally
             {
@@ -265,7 +265,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return null;
                 }
 
-                Assert.IsTrue(run.IsCompleted, "Оркестратор не завершил задачу за отведённое время.");
+                Assert.IsTrue(run.IsCompleted, "      .");
                 Assert.IsFalse(run.IsFaulted, run.Exception?.ToString());
 
                 deadline = Time.realtimeSinceStartup + 8f;
@@ -274,11 +274,11 @@ namespace CoreAI.Tests.PlayMode
                     yield return null;
                 }
 
-                Assert.IsTrue(received, "CommandReceived не вызван после публикации из очереди оркестратора.");
+                Assert.IsTrue(received, "CommandReceived       .");
                 Assert.AreEqual(
                     mainThreadId,
                     receivedThreadId,
-                    "После QueuedAiOrchestrator колбэк CommandReceived должен быть на главном потоке.");
+                    " QueuedAiOrchestrator  CommandReceived     .");
             }
             finally
             {
@@ -288,4 +288,5 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
+
 

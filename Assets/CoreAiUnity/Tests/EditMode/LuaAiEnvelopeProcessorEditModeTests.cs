@@ -44,6 +44,8 @@ namespace CoreAI.Tests.EditMode
                 LastTask = task;
                 return Task.FromResult<string>(null);
             }
+
+            public void CancelTasks(string scopeId) {}
         }
 
         [Test]

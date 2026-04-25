@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -15,8 +15,8 @@ using VContainer.Unity;
 namespace CoreAI.Tests.PlayModeTest
 {
     /// <summary>
-    /// PlayMode тест: AI (Creator) читает конфиг, меняет его, и изменения сохраняются.
-    /// Использует StubLlmClient который возвращает предсказуемый JSON ответ.
+    /// PlayMode : AI (Creator)  ,  ,   .
+    ///  StubLlmClient    JSON .
     /// </summary>
     [TestFixture]
     public class GameConfigPlayModeTests
@@ -31,10 +31,10 @@ namespace CoreAI.Tests.PlayModeTest
             _testStore = new TestConfigStore();
             _policy = new GameConfigPolicy();
 
-            // Начальный конфиг сессии
+            //   
             _testStore.TrySave("session", "{\"difficulty\":1,\"enemy_hp_mult\":1.0,\"max_enemies\":50}");
 
-            // Creator имеет полный доступ
+            // Creator   
             _policy.GrantFullAccess("Creator");
             _policy.SetKnownKeys(new[] { "session" });
         }
@@ -46,32 +46,32 @@ namespace CoreAI.Tests.PlayModeTest
         }
 
         /// <summary>
-        /// Тест: AI читает конфиг и возвращает изменённый JSON.
-        /// Имитирует полный цикл: read → AI modifies → update.
+        /// : AI      JSON.
+        ///   : read  AI modifies  update.
         /// </summary>
         [UnityTest]
         public IEnumerator GameConfig_AI_ReadModifyWrite_FullCycle()
         {
-            yield return null; // Даём Unity инициализироваться
+            yield return null; //  Unity 
 
             // Arrange
             GameConfigTool tool = new(_testStore, _policy, "Creator");
 
-            // Act 1: AI читает текущий конфиг
+            // Act 1: AI   
             GameConfigTool.GameConfigResult readResult =
                 JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool.ExecuteAsync("read").Result);
             Assert.IsTrue(readResult.Success, $"Read failed: {readResult.Error}");
             Assert.IsTrue(readResult.ConfigJson.Contains("difficulty"));
             Assert.IsTrue(readResult.ConfigJson.Contains("1.0"), "Initial enemy_hp_mult should be 1.0");
 
-            // Act 2: AI возвращает изменённый конфиг (имитация ответа LLM)
+            // Act 2: AI    (  LLM)
             string modifiedConfig = "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}";
             GameConfigTool.GameConfigResult writeResult =
                 JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(tool
                     .ExecuteAsync("update", modifiedConfig).Result);
             Assert.IsTrue(writeResult.Success, $"Update failed: {writeResult.Error}");
 
-            // Assert: Проверяем что конфиг обновился
+            // Assert:    
             _testStore.TryLoad("session", out string finalJson);
             Assert.IsNotNull(finalJson);
             Assert.IsTrue(finalJson.Contains("2"), "Difficulty should be 2");
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayModeTest
         }
 
         /// <summary>
-        /// Тест: AI без доступа к конфигам получает ошибку.
+        /// : AI      .
         /// </summary>
         [UnityTest]
         public IEnumerator GameConfig_NoAccess_ReturnsError()
@@ -103,7 +103,7 @@ namespace CoreAI.Tests.PlayModeTest
         }
 
         /// <summary>
-        /// Тест: Multiple keys — AI читает несколько конфигов.
+        /// : Multiple keys  AI   .
         /// </summary>
         [UnityTest]
         public IEnumerator GameConfig_MultipleKeys_ReadAll()

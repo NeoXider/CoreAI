@@ -148,7 +148,7 @@ $env:COREAI_PLAYMODE_LLM_BACKEND = "http"    # или llmunity, auto
 
 - Оркестратор публикует **`AiEnvelope`** с **`JsonPayload`** = сырой ответ LLM и полями **`SourceRoleId`**, **`SourceTaskHint`**, **`LuaRepairGeneration`**, **`TraceId`** (сквозной id для логов и ремонта Lua).
 - **`LuaAiEnvelopeProcessor`** (Core) + **`AiGameCommandRouter`**: из конверта извлекается Lua (fenced-блок lua или JSON **ExecuteLua**) и выполняется в **`SecureLuaEnvironment`** с API **`report`**, **`add`** (см. `LoggingLuaRuntimeBindings`).
-- Лимиты: `LuaExecutionGuard` включает best-effort лимит wall‑clock и “шагов” (через `InstructionLimitDebugger`), чтобы бесконечные циклы Lua не могли зависнуть навсегда.
+- Лимиты: `LuaExecutionGuard` включает best-effort лимит wall-clock и "шагов" (через `InstructionLimitDebugger`), чтобы бесконечные циклы Lua не могли зависнуть навсегда.
 - Успех / ошибка публикуются как **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`**. При ошибке и роли **Programmer** оркестратор вызывается снова с **`lua_error`** / **`fix_this_lua`** в user payload (до **4** поколений ремонта).
 - **EditMode:** `LuaAiEnvelopeProcessorEditModeTests`, `AiLuaPayloadParserEditModeTests`, `ProgrammerLuaPipelineEditModeTests`.
 - В примере игры: **`CoreAiLuaHotkey`** на объекте с **`ExampleRogueliteEntry`** — клавиша **F9** ставит задачу Programmer.

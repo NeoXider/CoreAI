@@ -21,16 +21,18 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<CoreAI.Ai.ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
+        private readonly string _roleId;
 
         /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, int maxConsecutiveErrors = 3)
+            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _originalTools = tools ?? new List<CoreAI.Ai.ILlmTool>();
+            _roleId = roleId ?? "Unknown";
             _maxConsecutiveErrors = maxConsecutiveErrors;
         }
 
@@ -154,6 +156,16 @@ namespace CoreAI.Infrastructure.Llm
                             }
 
                             toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
+                            
+                            // Notify subscribers about the tool execution
+                            try
+                            {
+                                CoreAi.NotifyToolExecuted(_roleId, fc.Name, fc.Arguments, result);
+                            }
+                            catch (Exception notifyEx)
+                            {
+                                _logger.LogWarning(GameLogFeature.Llm, $"[SmartToolCall] Notification error for tool '{fc.Name}': {notifyEx.Message}");
+                            }
                         }
                         catch (Exception ex)
                         {

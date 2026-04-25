@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -15,7 +15,7 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Рантайм: контур оркестратора. Быстрый вариант — <see cref="StubLlmClient"/>; реальная модель — через <see cref="PlayModeProductionLikeLlmFactory"/> (Auto).
+    /// :  .    <see cref="StubLlmClient"/>;     <see cref="PlayModeProductionLikeLlmFactory"/> (Auto).
     /// </summary>
     public sealed class AiOrchestratorAllRolesPlayModeTests
     {
@@ -36,8 +36,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Тот же сценарий, что и со stub, но ответы идут с реального HTTP или LLMUnity (см. env и LLMUNITY_SETUP_AND_MODELS §7).
-        /// Модель должна вернуть непустой текст; при пустом/ошибке команда не публикуется — тест упадёт по счётчику.
+        ///   ,    stub,      HTTP  LLMUnity (. env  LLMUNITY_SETUP_AND_MODELS 7).
+        ///     ;  /        .
         /// </summary>
         [UnityTest]
         [Timeout(900000)]
@@ -57,7 +57,7 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 Debug.Log("[Test] Model ready, running orchestrator...");
 
-                // Обернуть клиент с NullAgentMemoryStore (тест не использует память, но для консистентности)
+                //    NullAgentMemoryStore (   ,   )
                 ILlmClient clientWithStore = handle.WrapWithMemoryStore(new NullAgentMemoryStore());
                 yield return RunEachBuiltInRoleScenario(clientWithStore);
                 Debug.Log("[Test] Orchestrator completed successfully");
@@ -102,8 +102,8 @@ namespace CoreAI.Tests.PlayMode
                         "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
                 });
 
-                // Programmer role может занять больше времени из-за сложности промпта и retry loop
-                // С retry (4 попытки) каждая занимает ~30-40с, поэтому даём больше времени
+                // Programmer role     -    retry loop
+                //  retry (4 )   ~30-40,    
                 float timeout = role == BuiltInAgentRoleIds.Programmer ? 300f : 180f;
                 yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'");
 
@@ -127,4 +127,5 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
+
 

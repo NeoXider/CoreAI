@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
@@ -13,8 +13,8 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode интеграционные тесты для Lua формул в реальном времени.
-    /// Проверяет что AI может модифицировать формулы боя во время игры.
+    /// PlayMode    Lua    .
+    ///   AI       .
     /// </summary>
     public sealed class LuaFormulaRuntimeIntegrationPlayModeTests
     {
@@ -127,7 +127,7 @@ namespace CoreAI.Tests.PlayMode
             RuntimeCombatStats stats = new() { CurrentHealth = 100, Armor = 10 };
             LuaEnv env = CreateEnv(stats);
 
-            // Наносим урон
+            //  
             env.Run(@"
                 local dmg = calc_phys(50, get_armor())
                 take_damage(dmg)
@@ -136,7 +136,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.Less(stats.CurrentHealth, 100);
             Assert.Greater(stats.CurrentHealth, 50);
 
-            // Исцеляем
+            // 
             env.Run(@"
                 heal(20)
             ");
@@ -158,7 +158,7 @@ namespace CoreAI.Tests.PlayMode
             LuaEnv env = CreateEnv(stats);
 
             DynValue result = env.Run(@"
-                -- Комбо: физ + маг урон
+                -- :  +  
                 local phys = calc_phys(60, get_armor())
                 local magic = calc_magic(40, get_resist())
                 local total = phys + magic
@@ -214,7 +214,7 @@ namespace CoreAI.Tests.PlayMode
                 apply_dot(10, get_armor(), 5)
             ");
 
-            // 5 тиков * (10 * 0.909) = 45.45
+            // 5  * (10 * 0.909) = 45.45
             // 100 - 45.45 = 54.55 HP
             Assert.Greater(stats.CurrentHealth, 53);
             Assert.Less(stats.CurrentHealth, 56);
@@ -229,7 +229,7 @@ namespace CoreAI.Tests.PlayMode
             LuaEnv env = CreateEnv(stats);
 
             env.Run(@"
-                -- Бафф здоровья
+                --  
                 set_hp(100)
                 log('health_buffed')
             ");
@@ -256,11 +256,11 @@ namespace CoreAI.Tests.PlayMode
                 local dmg = calc_phys(base, 10)
                 local heal_amount = dmg * get_lifesteal()
                 
-                take_damage(10) -- Получаем урон от врага
-                heal(heal_amount) -- Вампиризм
+                take_damage(10) --    
+                heal(heal_amount) -- 
             ");
 
-            // Должно остаться > 30 HP после вампиризма
+            //   > 30 HP  
             Assert.Greater(stats.CurrentHealth, 30);
         }
 
@@ -312,7 +312,7 @@ namespace CoreAI.Tests.PlayMode
             RuntimeCombatStats stats = new();
             LuaEnv env = CreateEnv(stats);
 
-            // Проверяем что опасные API заблокированы
+            //    API 
             Assert.Throws<ScriptRuntimeException>(() =>
                 env.Run("os.execute('dir')"));
 
@@ -341,7 +341,7 @@ namespace CoreAI.Tests.PlayMode
             ");
 
             Assert.IsNotNull(result);
-            // 20/100 = 20% < 25%, получаем 3x: 150
+            // 20/100 = 20% < 25%,  3x: 150
             Assert.AreEqual(150, (double)result.Number, 1);
         }
 

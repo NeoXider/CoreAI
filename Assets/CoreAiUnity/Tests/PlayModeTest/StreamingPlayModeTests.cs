@@ -11,8 +11,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode С‚РµСЃС‚С‹ РґР»СЏ streaming API Рё 3-СЃР»РѕР№РЅРѕР№ Р°СЂС…РёС‚РµРєС‚СѓСЂС‹ РїСЂРѕРјРїС‚РѕРІ.
-    /// РўРµСЃС‚РёСЂСѓСЋС‚ СЂРµР°Р»СЊРЅС‹Р№ LLM Р±СЌРєРµРЅРґ (HTTP РёР»Рё LLMUnity).
+    /// PlayMode   streaming API  3-  .
+    ///   LLM  (HTTP  LLMUnity).
     /// </summary>
     public class StreamingPlayModeTests
     {
@@ -23,7 +23,7 @@ namespace CoreAI.Tests.PlayMode
         {
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
-            Assert.IsTrue(_setup.IsReady, $"LLM РЅРµ РґРѕСЃС‚СѓРїРµРЅ ({_setup.BackendName}). РџСЂРѕРїСѓСЃРє С‚РµСЃС‚Р°.");
+            Assert.IsTrue(_setup.IsReady, $"LLM   ({_setup.BackendName}).  .");
         }
 
         [UnityTearDown]
@@ -48,9 +48,9 @@ namespace CoreAI.Tests.PlayMode
             var chunks = new List<LlmStreamChunk>();
             bool gotDone = false;
 
-            // Р’РђР–РќРћ: СЃС‚СЂРёРјРёРЅРі РґРѕР»Р¶РµРЅ РёРґС‚Рё РЅР° main thread вЂ” UnityWebRequest РЅРµ СЃРѕР·РґР°С‘С‚СЃСЏ РёР· ThreadPool.
-            // Р—Р°РїСѓСЃРєР°РµРј async-РјРµС‚РѕРґ РЅР°РїСЂСЏРјСѓСЋ (Р±РµР· Task.Run), С‡С‚РѕР±С‹ continuations
-            // РІРѕР·РІСЂР°С‰Р°Р»РёСЃСЊ РЅР° UnitySynchronizationContext.
+            // :     main thread  UnityWebRequest    ThreadPool.
+            //  async-  ( Task.Run),  continuations
+            //   UnitySynchronizationContext.
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
                 chunks, done => gotDone = done);
 
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
             var cts = new CancellationTokenSource();
             var counter = new StreamCancelCounter();
 
-            // РћС‚РјРµРЅСЏРµРј СЃС‚СЂРёРј РїРѕСЃР»Рµ 3-С… С‡Р°РЅРєРѕРІ. Р—Р°РїСѓСЃРєР°РµРј РЅР° main thread.
+            //    3- .   main thread.
             Task streamTask = CollectCancelStreamAsync(_setup.Client, request, cts, counter);
 
             yield return _setup.RunAndWait(streamTask, 30f, "Streaming_Cancel");
@@ -219,8 +219,8 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
                 _ => { });
 
-            // РўР°Р№РјР°СѓС‚ 120СЃ вЂ” reasoning-РјРѕРґРµР»Рё (DeepSeek/Qwen) РјРѕРіСѓС‚ РіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ
-            // С‚С‹СЃСЏС‡Рё С‡Р°РЅРєРѕРІ РІРЅСѓС‚СЂРё <think> РґР»СЏ РїСЂРѕСЃС‚С‹С… РІРѕРїСЂРѕСЃРѕРІ.
+            //  120  reasoning- (DeepSeek/Qwen)  
+            //    <think>   .
             yield return _setup.RunAndWait(streamTask, 120f, "Streaming_ThinkBlock");
 
             foreach (var c in chunks)
@@ -275,3 +275,4 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
+

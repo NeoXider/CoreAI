@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
 using NUnit.Framework;
@@ -31,21 +31,21 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator CoroutineRunner_TicksCoroutine_WithTimeBindings()
         {
-            // Убедимся, что timeScale = 1 перед началом
+            // ,  timeScale = 1  
             Time.timeScale = 1f;
 
             SecureLuaEnvironment env = new();
             LuaApiRegistry reg = new();
 
-            // Регистрируем Time Bindings
+            //  Time Bindings
             LuaTimeBindings timeBindings = new();
             timeBindings.RegisterTimeApis(reg);
 
             int iterations = 0;
             reg.Register("mark_iteration", new System.Action(() => iterations++));
 
-            // Простой скрипт: ждать пока time_now() не увеличится
-            // Это симулирует ожидание в игре (например, wait_seconds)
+            //  :   time_now()  
+            //      (, wait_seconds)
             string luaCode = @"
                 local start_time = time_now()
                 while time_now() - start_time < 0.1 do
@@ -56,16 +56,16 @@ namespace CoreAI.Tests.PlayMode
 
             LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, 5000);
 
-            // Регистрируем корутину в раннер
+            //    
             _runner.Register(handle);
 
             Assert.IsTrue(handle.IsAlive);
             Assert.AreEqual(1, _runner.ActiveCount);
 
-            // Даем Unity поработать ~0.15 секунд
+            //  Unity  ~0.15 
             yield return new WaitForSeconds(0.15f);
 
-            // Корутина должна была завершиться самостоятельно, когда time_now() вырос
+            //     ,  time_now() 
             Assert.IsFalse(handle.IsAlive);
             Assert.AreEqual(0, _runner.ActiveCount, "Runner should auto-remove dead coroutines");
             Assert.Greater(iterations, 0, "Coroutine should have been ticked multiple times");
@@ -83,7 +83,7 @@ namespace CoreAI.Tests.PlayMode
             bool reachedEnd = false;
             reg.Register("mark_done", new System.Action(() => reachedEnd = true));
 
-            // Мы ставим паузу через скрипт
+            //     
             string luaCode = @"
                 time_set_scale(0.0)
                 coroutine.yield()
@@ -95,24 +95,24 @@ namespace CoreAI.Tests.PlayMode
             LuaCoroutineHandle handle = env.CreateCoroutine(reg, luaCode, 5000);
             _runner.Register(handle);
 
-            // Первый кадр: скрипт ставит TimeScale = 0 и yield
+            //  :   TimeScale = 0  yield
             yield return null;
 
             Assert.AreEqual(0f, Time.timeScale, "Lua script should have set timeScale to 0");
 
-            // Второй кадр: скрипт получает unscaled_delta и yield с ним
+            //  :   unscaled_delta  yield  
             yield return null;
 
             Assert.IsTrue(handle.LastResult.Number > 0,
                 "Unscaled delta should be greater than 0 even when timeScale is 0");
 
-            // Третий кадр: завершается
+            //  : 
             yield return null;
 
             Assert.IsTrue(reachedEnd);
             Assert.IsFalse(handle.IsAlive);
 
-            // Сбрасываем TimeScale для других тестов
+            //  TimeScale   
             Time.timeScale = 1f;
         }
     }

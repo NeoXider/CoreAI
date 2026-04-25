@@ -15,9 +15,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// РџРѕР»РЅС‹Р№ РІРѕСЂРєС„Р»РѕСѓ РєСЂР°С„С‚Р° СЃ РќР•РЎРљРћР›Р¬РљРРњР РђР“Р•РќРўРђРњР:
-    /// Creator (РґРёР·Р°Р№РЅ) в†’ CoreMechanicAI (СЂР°СЃС‡С‘С‚) в†’ Programmer (Lua РєРѕРґ).
-    /// РљР°Р¶РґС‹Р№ Р°РіРµРЅС‚ РёСЃРїРѕР»СЊР·СѓРµС‚ СЃРІРѕСЋ РёР·РѕР»РёСЂРѕРІР°РЅРЅСѓСЋ РїР°РјСЏС‚СЊ, РѕРґРЅСѓ Рё С‚Сѓ Р¶Рµ РјРѕРґРµР»СЊ.
+    ///      :
+    /// Creator ()  CoreMechanicAI ()  Programmer (Lua ).
+    ///      ,     .
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MultiAgentCraftingWorkflowPlayModeTests
@@ -66,17 +66,17 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// РџРѕР»РЅС‹Р№ РІРѕСЂРєС„Р»РѕСѓ: Creator в†’ CoreMechanicAI в†’ Programmer
+        ///  : Creator  CoreMechanicAI  Programmer
         /// </summary>
         [UnityTest]
         [Timeout(1800000)]
         public IEnumerator MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow()
         {
-            Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
-            Debug.Log("[MultiAgent] в•ђв•ђв•ђ TEST START: Creator в†’ CoreMechanic в†’ Programmer в•ђв•ђв•ђ");
-            Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+            Debug.Log("[MultiAgent] ");
+            Debug.Log("[MultiAgent]  TEST START: Creator  CoreMechanic  Programmer ");
+            Debug.Log("[MultiAgent] ");
 
-            // Backend РёР· CoreAISettingsAsset (null = FromSettings)
+            // Backend  CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -97,14 +97,14 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                // РћР±РµСЂРЅСѓС‚СЊ РєР»РёРµРЅС‚ СЃ РїСЂР°РІРёР»СЊРЅС‹Рј MemoryStore
+                //     MemoryStore
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
-                // ===== РЁРђР“ 1: Creator СЂРµС€Р°РµС‚ С‡С‚Рѕ РєСЂР°С„С‚РёС‚СЊ =====
+                // =====  1: Creator    =====
                 {
-                    Debug.Log("[MultiAgent] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
-                    Debug.Log("[MultiAgent] в”‚ РЁРђР“ 1: Creator вЂ” РґРёР·Р°Р№РЅ РєСЂР°С„С‚Р°");
-                    Debug.Log("[MultiAgent] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+                    Debug.Log("[MultiAgent] ");
+                    Debug.Log("[MultiAgent]   1: Creator   ");
+                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "Creator");
 
@@ -127,20 +127,20 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("creator", sink);
                     LogAgentMemory(store, "Creator");
 
-                    // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ Creator Р·Р°РїРёСЃР°Р» РІ РїР°РјСЏС‚СЊ
+                    //   Creator   
                     Assert.IsTrue(
                         store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorMem) &&
                         !string.IsNullOrWhiteSpace(creatorMem.Memory),
                         "Creator did not write to memory");
 
-                    Debug.Log($"[MultiAgent] вњ“ Creator memory: {creatorMem.Memory}");
+                    Debug.Log($"[MultiAgent]  Creator memory: {creatorMem.Memory}");
                 }
 
-                // ===== РЁРђР“ 2: CoreMechanicAI СЃС‡РёС‚Р°РµС‚ СЂРµР·СѓР»СЊС‚Р°С‚ =====
+                // =====  2: CoreMechanicAI   =====
                 {
-                    Debug.Log("[MultiAgent] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
-                    Debug.Log("[MultiAgent] в”‚ РЁРђР“ 2: CoreMechanicAI вЂ” СЂР°СЃС‡С‘С‚ РјРµС…Р°РЅРёРєРё");
-                    Debug.Log("[MultiAgent] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+                    Debug.Log("[MultiAgent] ");
+                    Debug.Log("[MultiAgent]   2: CoreMechanicAI   ");
+                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "CoreMechanicAI");
 
@@ -168,16 +168,16 @@ namespace CoreAI.Tests.PlayMode
                         "CoreMechanicAI did not write to memory");
 
                     string mechanicMemory = mechanicMem.Memory;
-                    Debug.Log($"[MultiAgent] вњ“ CoreMechanicAI memory: {mechanicMemory}");
+                    Debug.Log($"[MultiAgent]  CoreMechanicAI memory: {mechanicMemory}");
 
-                    // РР·РІР»РµРєР°РµРј РёРјСЏ РїСЂРµРґРјРµС‚Р°
+                    //   
                     string itemName =
                         CraftingMemoryItemNameExtractor.ExtractName(sink.Items.Count > 0
                             ? sink.Items[0].JsonPayload
                             : "");
                     if (string.IsNullOrEmpty(itemName))
                     {
-                        // РџС‹С‚Р°РµРјСЃСЏ РёР·РІР»РµС‡СЊ РёР· РїР°РјСЏС‚Рё
+                        //    
                         Match match = Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
                         if (match.Success)
                         {
@@ -187,15 +187,15 @@ namespace CoreAI.Tests.PlayMode
 
                     if (!string.IsNullOrEmpty(itemName))
                     {
-                        Debug.Log($"[MultiAgent] вњ“ Item name from CoreMechanicAI: '{itemName}'");
+                        Debug.Log($"[MultiAgent]  Item name from CoreMechanicAI: '{itemName}'");
                     }
                 }
 
-                // ===== РЁРђР“ 3: Programmer РіРµРЅРµСЂРёСЂСѓРµС‚ Lua РєРѕРґ =====
+                // =====  3: Programmer  Lua  =====
                 {
-                    Debug.Log("[MultiAgent] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
-                    Debug.Log("[MultiAgent] в”‚ РЁРђР“ 3: Programmer вЂ” РіРµРЅРµСЂР°С†РёСЏ Lua");
-                    Debug.Log("[MultiAgent] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+                    Debug.Log("[MultiAgent] ");
+                    Debug.Log("[MultiAgent]   3: Programmer   Lua");
+                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "Programmer");
 
@@ -218,13 +218,13 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentMemory(store, "Programmer");
                 }
 
-                // ===== РЁРђР“ 4: CoreMechanicAI вЂ” РїРѕРІС‚РѕСЂРЅС‹Р№ РєСЂР°С„С‚ (РґРµС‚РµСЂРјРёРЅРёР·Рј) =====
+                // =====  4: CoreMechanicAI    () =====
                 {
-                    Debug.Log("[MultiAgent] в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
-                    Debug.Log("[MultiAgent] в”‚ РЁРђР“ 4: CoreMechanicAI вЂ” РїРѕРІС‚РѕСЂРЅС‹Р№ РєСЂР°С„С‚ (РґРµС‚РµСЂРјРёРЅРёР·Рј)");
-                    Debug.Log("[MultiAgent] в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ");
+                    Debug.Log("[MultiAgent] ");
+                    Debug.Log("[MultiAgent]   4: CoreMechanicAI    ()");
+                    Debug.Log("[MultiAgent] ");
 
-                    // РЎРѕС…СЂР°РЅСЏРµРј РёРјСЏ РёР· РїРµСЂРІРѕРіРѕ РєСЂР°С„С‚Р°
+                    //     
                     string craft1Memory = "";
                     if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem1))
                     {
@@ -251,19 +251,19 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("mechanic repeat", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
 
-                    // РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РїР°РјСЏС‚СЊ РѕР±РЅРѕРІР»РµРЅР°
+                    //    
                     if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem2))
                     {
                         Debug.Log($"[MultiAgent] Final CoreMechanicAI memory:\n{mem2.Memory}");
                     }
                 }
 
-                // ===== Р¤РРќРђР›Р¬РќРђРЇ РџР РћР’Р•Р РљРђ =====
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђ FINAL VALIDATION в•ђв•ђв•ђ");
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+                // =====   =====
+                Debug.Log("[MultiAgent] ");
+                Debug.Log("[MultiAgent]  FINAL VALIDATION ");
+                Debug.Log("[MultiAgent] ");
 
-                // РџСЂРѕРІРµСЂСЏРµРј РёР·РѕР»СЏС†РёСЋ РїР°РјСЏС‚Рё
+                //   
                 Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorState));
                 Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicState));
                 Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Programmer, out AgentMemoryState programmerState));
@@ -272,16 +272,16 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
                 Debug.Log($"[MultiAgent] Programmer memory:  {programmerState.Memory}");
 
-                // РџР°РјСЏС‚СЊ СЂР°Р·РЅС‹С… Р°РіРµРЅС‚РѕРІ РќР• РґРѕР»Р¶РЅР° СЃРѕРІРїР°РґР°С‚СЊ
+                //      
                 Assert.AreNotEqual(creatorState.Memory, mechanicState.Memory,
                     "Creator and CoreMechanicAI must have DIFFERENT memory");
                 Assert.AreNotEqual(mechanicState.Memory, programmerState.Memory,
                     "Mechanic and Programmer must have DIFFERENT memory");
 
-                Debug.Log("[MultiAgent] вњ“ Memory isolation verified");
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
-                Debug.Log("[MultiAgent] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+                Debug.Log("[MultiAgent]  Memory isolation verified");
+                Debug.Log("[MultiAgent] ");
+                Debug.Log("[MultiAgent]  TEST PASSED ");
+                Debug.Log("[MultiAgent] ");
             }
             finally
             {
@@ -290,18 +290,18 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// РЈРїСЂРѕС‰С‘РЅРЅС‹Р№ С‚РµСЃС‚: С‚РѕР»СЊРєРѕ Creator в†’ CoreMechanicAI (Р±РµР· Programmer)
-        /// Р‘С‹СЃС‚СЂРµРµ РґР»СЏ РѕС‚Р»Р°РґРєРё.
+        ///  :  Creator  CoreMechanicAI ( Programmer)
+        ///   .
         /// </summary>
         [UnityTest]
         [Timeout(900000)]
         public IEnumerator MultiAgent_CreatorThenMechanic_QuickWorkflow()
         {
-            Debug.Log("[MultiAgent.Quick] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
-            Debug.Log("[MultiAgent.Quick] в•ђв•ђв•ђ TEST START: Creator в†’ CoreMechanic в•ђв•ђв•ђ");
-            Debug.Log("[MultiAgent.Quick] в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ");
+            Debug.Log("[MultiAgent.Quick] ");
+            Debug.Log("[MultiAgent.Quick]  TEST START: Creator  CoreMechanic ");
+            Debug.Log("[MultiAgent.Quick] ");
 
-            // Backend РёР· CoreAISettingsAsset (null = FromSettings)
+            // Backend  CoreAISettingsAsset (null = FromSettings)
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -379,8 +379,8 @@ namespace CoreAI.Tests.PlayMode
                         "CoreMechanicAI did not write memory");
                 }
 
-                // ===== РџР РћР’Р•Р РљРђ РР—РћР›РЇР¦РР =====
-                Debug.Log("[MultiAgent.Quick] в•ђв•ђв•ђ MEMORY ISOLATION CHECK в•ђв•ђв•ђ");
+                // =====   =====
+                Debug.Log("[MultiAgent.Quick]  MEMORY ISOLATION CHECK ");
 
                 AgentMemoryState creatorMem = store.States[BuiltInAgentRoleIds.Creator];
                 AgentMemoryState mechanicMem = store.States[BuiltInAgentRoleIds.CoreMechanic];
@@ -391,8 +391,8 @@ namespace CoreAI.Tests.PlayMode
                 Assert.AreNotEqual(creatorMem.Memory, mechanicMem.Memory,
                     "Agents must have isolated memory");
 
-                Debug.Log("[MultiAgent.Quick] вњ“ Memory isolation verified");
-                Debug.Log("[MultiAgent.Quick] в•ђв•ђв•ђ TEST PASSED в•ђв•ђв•ђ");
+                Debug.Log("[MultiAgent.Quick]  Memory isolation verified");
+                Debug.Log("[MultiAgent.Quick]  TEST PASSED ");
             }
             finally
             {
@@ -426,11 +426,11 @@ namespace CoreAI.Tests.PlayMode
         {
             if (store.TryLoad(roleId, out AgentMemoryState mem) && !string.IsNullOrWhiteSpace(mem.Memory))
             {
-                Debug.Log($"[MultiAgent] рџ“љ {roleId} MEMORY: {mem.Memory}");
+                Debug.Log($"[MultiAgent]  {roleId} MEMORY: {mem.Memory}");
             }
             else
             {
-                Debug.Log($"[MultiAgent] рџ“љ {roleId} MEMORY: (empty)");
+                Debug.Log($"[MultiAgent]  {roleId} MEMORY: (empty)");
             }
         }
 
@@ -439,11 +439,11 @@ namespace CoreAI.Tests.PlayMode
             if (sink.Items.Count > 0)
             {
                 string payload = sink.Items[0].JsonPayload;
-                Debug.Log($"[MultiAgent] рџ“Ґ {label} RESPONSE ({payload.Length} chars):\n{payload}");
+                Debug.Log($"[MultiAgent]  {label} RESPONSE ({payload.Length} chars):\n{payload}");
             }
             else
             {
-                Debug.Log($"[MultiAgent] вљ  {label}: No response");
+                Debug.Log($"[MultiAgent]  {label}: No response");
             }
         }
 
@@ -451,3 +451,4 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
+

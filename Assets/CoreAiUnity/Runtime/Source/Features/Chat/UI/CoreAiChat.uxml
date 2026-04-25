@@ -1,22 +1,24 @@
 <ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements" noNamespaceSchemaLocation="../../../../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
     <Style src="project://database/Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss?fileID=7433441132597879392&amp;guid=54e4e52b0db8c294fb66ec9495faa77f&amp;type=3#CoreAiChat"/>
-    <ui:Button name="coreai-chat-fab" class="coreai-chat-fab" text="" tooltip="Открыть чат" style="display: none;">
-        <ui:Label name="coreai-chat-fab-icon" class="coreai-chat-fab-icon" text="💬"/>
+    <ui:Button name="coreai-chat-fab" class="coreai-chat-fab" text="" tooltip="Open chat" style="display: none;">
+        <ui:Label name="coreai-chat-fab-icon" class="coreai-chat-fab-icon" text="C"/>
     </ui:Button>
     <ui:VisualElement name="coreai-chat-root" class="coreai-chat-container">
         <ui:VisualElement name="coreai-chat-header" class="coreai-chat-header">
             <ui:VisualElement name="coreai-chat-header-icon" class="coreai-chat-header-icon"/>
             <ui:Label name="coreai-chat-header-title" class="coreai-chat-header-title"/>
-            <ui:Button name="coreai-chat-collapse" text="—" class="coreai-chat-header-btn" tooltip="Свернуть чат"/>
+            <ui:Button name="coreai-chat-stop" text="⏹" class="coreai-chat-header-btn" tooltip="Остановить агента и генерацию"/>
+            <ui:Button name="coreai-chat-clear" text="C" class="coreai-chat-header-btn" tooltip="Clear chat history"/>
+            <ui:Button name="coreai-chat-collapse" text="-" class="coreai-chat-header-btn" tooltip="Collapse chat"/>
         </ui:VisualElement>
         <ui:ScrollView name="coreai-chat-scroll" vertical-scroller-visibility="Auto" class="coreai-chat-scroll"/>
         <ui:VisualElement name="coreai-typing-indicator" class="coreai-message-row coreai-ai-row" style="display: none;">
-            <ui:VisualElement class="coreai-avatar coreai-ai-avatar"/>
+            <ui:VisualElement name="coreai-typing-avatar" class="coreai-avatar coreai-ai-avatar"/>
             <ui:Label name="coreai-typing-label" text="..." class="coreai-chat-message coreai-ai-message coreai-typing-message"/>
         </ui:VisualElement>
         <ui:VisualElement class="coreai-chat-input-container">
             <ui:TextField name="coreai-chat-input" multiline="true" class="coreai-chat-input-field"/>
-            <ui:Button name="coreai-chat-send" text="➤" class="coreai-chat-send-button"/>
+            <ui:Button name="coreai-chat-send" text=">" class="coreai-chat-send-button"/>
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

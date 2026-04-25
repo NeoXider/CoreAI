@@ -42,5 +42,11 @@ namespace CoreAI.Ai
             yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
         }
 #endif
+
+        /// <summary>
+        /// Отменяет все текущие и ожидающие задачи для указанного scope.
+        /// Удобно для ручной остановки агента.
+        /// </summary>
+        void CancelTasks(string cancellationScope);
     }
 }

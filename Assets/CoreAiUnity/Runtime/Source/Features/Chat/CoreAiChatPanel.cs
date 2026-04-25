@@ -20,6 +20,7 @@ namespace CoreAI.Chat
         private const string MobileClassName = "coreai-mobile";
         private const string CollapsedClassName = "coreai-collapsed";
         private const string CollapsedPrefsKey = "CoreAI.Chat.Collapsed";
+        private const string SendButtonStopClassName = "coreai-chat-send-button-stop";
 
         [Header("Config")]
         [Tooltip("Конфигурация чата (Assets → Create → CoreAI → Chat Config).")]
@@ -35,9 +36,12 @@ namespace CoreAI.Chat
         protected ScrollView     MessageScroll;
         protected TextField      InputField;
         protected Button         SendButton;
+        protected Button         ClearButton;
+        protected Button         StopButton;
         protected Button         CollapseButton;
         protected Button         FabButton;
         protected VisualElement  TypingIndicator;
+        protected VisualElement  TypingAvatar;
         protected Label          TypingLabel;
         protected Label          HeaderTitle;
         protected VisualElement  HeaderIcon;
@@ -49,6 +53,7 @@ namespace CoreAI.Chat
         private Label _streamingLabel;
         private bool  _isStreaming;
         private bool  _isSending; // prevents Shift+Enter sending while AI is busy
+        private bool _stopRequestedByUser;
 
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
@@ -61,6 +66,7 @@ namespace CoreAI.Chat
         // === Service ===
         private CoreAiChatService _chatService;
         private CancellationTokenSource _cts;
+        private CancellationTokenSource _activeRequestCts;
 
         /// <summary>Событие: пользователь отправил сообщение (после добавления в UI).</summary>
         public event Action<string> OnUserMessageSent;
@@ -113,10 +119,13 @@ namespace CoreAI.Chat
         protected virtual void OnDisable()
         {
             if (SendButton != null) SendButton.UnregisterCallback<ClickEvent>(OnSendClicked);
+            if (ClearButton != null) ClearButton.UnregisterCallback<ClickEvent>(OnClearClicked);
+            if (StopButton != null) StopButton.UnregisterCallback<ClickEvent>(OnStopClicked);
             if (InputField != null)
             {
                 InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
             }
+            Root?.UnregisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
             if (CollapseButton != null) CollapseButton.UnregisterCallback<ClickEvent>(OnCollapseClicked);
             if (FabButton != null) FabButton.UnregisterCallback<ClickEvent>(OnFabClicked);
             StopTypingAnimation();
@@ -126,6 +135,8 @@ namespace CoreAI.Chat
         {
             _cts?.Cancel();
             _cts?.Dispose();
+            _activeRequestCts?.Cancel();
+            _activeRequestCts?.Dispose();
         }
 
         // ===================== UI Binding =====================
@@ -136,9 +147,12 @@ namespace CoreAI.Chat
             MessageScroll    = Root.Q<ScrollView>("coreai-chat-scroll");
             InputField       = Root.Q<TextField>("coreai-chat-input");
             SendButton       = Root.Q<Button>("coreai-chat-send");
+            ClearButton      = Root.Q<Button>("coreai-chat-clear");
+            StopButton       = Root.Q<Button>("coreai-chat-stop");
             CollapseButton   = Root.Q<Button>("coreai-chat-collapse");
             FabButton        = Root.Q<Button>("coreai-chat-fab");
             TypingIndicator  = Root.Q<VisualElement>("coreai-typing-indicator");
+            TypingAvatar     = Root.Q<VisualElement>("coreai-typing-avatar");
             TypingLabel      = Root.Q<Label>("coreai-typing-label");
             HeaderTitle      = Root.Q<Label>("coreai-chat-header-title");
             HeaderIcon       = Root.Q<VisualElement>("coreai-chat-header-icon");
@@ -150,6 +164,16 @@ namespace CoreAI.Chat
                 // клика следующие нажатия клавиш уходят в button, а не в input,
                 // и пользователь теряет первые буквы следующего сообщения.
                 SendButton.focusable = false;
+            }
+            if (ClearButton != null)
+            {
+                ClearButton.RegisterCallback<ClickEvent>(OnClearClicked);
+                ClearButton.focusable = false;
+            }
+            if (StopButton != null)
+            {
+                StopButton.RegisterCallback<ClickEvent>(OnStopClicked);
+                StopButton.focusable = false;
             }
             if (CollapseButton != null)
             {
@@ -169,6 +193,7 @@ namespace CoreAI.Chat
                 // выглядело бы для пользователя как ничего не делающее.
                 InputField.RegisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
             }
+            Root?.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
 
             // Соседние элементы не должны воровать фокус у инпута при клике по ним.
             // Принудительный Focus() вешать нельзя — UITK в WebGL по pointer-событиям
@@ -179,6 +204,7 @@ namespace CoreAI.Chat
             if (HeaderIcon != null)   HeaderIcon.focusable = false;
 
             if (TypingIndicator != null) TypingIndicator.style.display = DisplayStyle.None;
+            UpdateSendButtonVisualState();
         }
 
         protected virtual void ApplyConfig()
@@ -190,6 +216,11 @@ namespace CoreAI.Chat
             if (HeaderIcon != null && config.AiAvatarIcon != null)
             {
                 HeaderIcon.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
+            }
+
+            if (TypingAvatar != null && config.AiAvatarIcon != null)
+            {
+                TypingAvatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
             }
 
             // Размеры
@@ -258,7 +289,7 @@ namespace CoreAI.Chat
             container.style.height = Mathf.Min(configuredHeight, maxHeight);
         }
 
-        // ===================== Collapse / FAB =====================
+        // ===================== Collapse / FAB / Stop =====================
 
         private static bool IsMobileScreen()
         {
@@ -266,6 +297,10 @@ namespace CoreAI.Chat
             float h = Mathf.Max(1f, Screen.height);
             return w <= 720f || h <= 560f;
         }
+
+        private void OnClearClicked(ClickEvent _) => ClearChat();
+
+        private void OnStopClicked(ClickEvent _) => StopAgent();
 
         private void OnCollapseClicked(ClickEvent _) => SetCollapsed(true, persist: true);
 
@@ -325,6 +360,17 @@ namespace CoreAI.Chat
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
+            if (IsEscape(evt))
+            {
+                if (IsRequestInProgress())
+                {
+                    evt.StopImmediatePropagation();
+                    evt.PreventDefault();
+                    StopActiveGeneration();
+                }
+                return;
+            }
+
             // В UI Toolkit multi-line TextField на Shift+Enter иногда приходит
             // character = '\n', а keyCode = None. Поэтому проверяем оба поля.
             bool isEnter =
@@ -348,8 +394,41 @@ namespace CoreAI.Chat
             TrySendInput();
         }
 
+        private void OnRootKeyDown(KeyDownEvent evt)
+        {
+            if (!IsEscape(evt) || !IsRequestInProgress())
+            {
+                return;
+            }
+
+            evt.StopImmediatePropagation();
+            evt.PreventDefault();
+            StopActiveGeneration();
+        }
+
+        private static bool IsEscape(KeyDownEvent evt)
+        {
+            return IsEscapeKey(evt.keyCode, evt.character);
+        }
+
+        internal static bool IsEscapeKey(KeyCode keyCode, char character)
+        {
+            return keyCode == KeyCode.Escape || character == 27;
+        }
+
+        private bool IsRequestInProgress()
+        {
+            return _isSending || _isStreaming;
+        }
+
         private void TrySendInput()
         {
+            if (IsRequestInProgress())
+            {
+                StopActiveGeneration();
+                return;
+            }
+
             // Even if the button is disabled, TextField key events can still fire.
             // Prevent sending while an AI request/stream is in progress.
             if (_isSending || _isStreaming || (SendButton != null && !SendButton.enabledSelf))
@@ -392,7 +471,10 @@ namespace CoreAI.Chat
 
             string roleId = config?.RoleId ?? "PlayerChat";
             _isSending = true;
-            SetSendEnabled(false);
+            _stopRequestedByUser = false;
+            UpdateSendButtonVisualState();
+            _activeRequestCts?.Dispose();
+            _activeRequestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
 
             try
             {
@@ -406,17 +488,25 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    await SendStreamingAsync(userText, roleId);
+                    await SendStreamingAsync(userText, roleId, _activeRequestCts.Token);
                 }
                 else
                 {
-                    await SendNonStreamingAsync(userText, roleId);
+                    await SendNonStreamingAsync(userText, roleId, _activeRequestCts.Token);
                 }
             }
             catch (OperationCanceledException)
             {
                 FinishStreaming();
-                AddMessage(config?.TimeoutMessage ?? "⏳ Timeout.", isUser: false);
+                HideTypingIndicator();
+                if (_stopRequestedByUser)
+                {
+                    AddMessage(config?.ErrorMessagePrefix + "Генерация остановлена.", isUser: false);
+                }
+                else
+                {
+                    AddMessage(config?.TimeoutMessage ?? "Timeout.", isUser: false);
+                }
             }
             catch (Exception ex)
             {
@@ -426,8 +516,11 @@ namespace CoreAI.Chat
             }
             finally
             {
-                SetSendEnabled(true);
                 _isSending = false;
+                _stopRequestedByUser = false;
+                _activeRequestCts?.Dispose();
+                _activeRequestCts = null;
+                UpdateSendButtonVisualState();
                 // Вернуть фокус во input после завершения AI-ответа,
                 // чтобы пользователь мог сразу печатать следующее сообщение.
                 InputField?.schedule.Execute(FocusInputField);
@@ -447,14 +540,14 @@ namespace CoreAI.Chat
             InputField?.Focus();
         }
 
-        private async System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId)
+        private async System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId, CancellationToken ct)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
 
             string fullResponse = "";
-            await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(userText, roleId, _cts.Token))
+            await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(userText, roleId, ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Error))
                 {
@@ -504,11 +597,11 @@ namespace CoreAI.Chat
             }
         }
 
-        private async System.Threading.Tasks.Task SendNonStreamingAsync(string userText, string roleId)
+        private async System.Threading.Tasks.Task SendNonStreamingAsync(string userText, string roleId, CancellationToken ct)
         {
             ShowTypingIndicator();
 
-            string response = await _chatService.SendMessageAsync(userText, roleId, _cts.Token);
+            string response = await _chatService.SendMessageAsync(userText, roleId, ct);
             HideTypingIndicator();
 
             if (string.IsNullOrEmpty(response))
@@ -625,6 +718,51 @@ namespace CoreAI.Chat
             if (SendButton != null) SendButton.SetEnabled(enabled);
         }
 
+        private void StopActiveGeneration()
+        {
+            if (!IsRequestInProgress())
+            {
+                return;
+            }
+
+            _stopRequestedByUser = true;
+            string roleId = config?.RoleId ?? "PlayerChat";
+            _chatService?.StopAgent(roleId);
+            _activeRequestCts?.Cancel();
+        }
+
+        private void UpdateSendButtonVisualState()
+        {
+            if (SendButton == null)
+            {
+                return;
+            }
+
+            bool isBusy = IsRequestInProgress();
+            SendButton.text = GetSendButtonText(isBusy);
+            SendButton.tooltip = GetSendButtonTooltip(isBusy);
+            SendButton.SetEnabled(true);
+
+            if (isBusy)
+            {
+                SendButton.AddToClassList(SendButtonStopClassName);
+            }
+            else
+            {
+                SendButton.RemoveFromClassList(SendButtonStopClassName);
+            }
+        }
+
+        internal static string GetSendButtonText(bool isBusy)
+        {
+            return isBusy ? "X" : ">";
+        }
+
+        internal static string GetSendButtonTooltip(bool isBusy)
+        {
+            return isBusy ? "Остановить генерацию (Esc)" : "Отправить сообщение";
+        }
+
         public void ShowTypingIndicator()
         {
             if (TypingIndicator == null) return;
@@ -718,15 +856,68 @@ namespace CoreAI.Chat
             });
         }
 
-        /// <summary>Очистить все сообщения и историю.</summary>
-        public void ClearChat()
+        /// <summary>
+        /// Очистить все сообщения из UI и сбросить контекст агента.
+        /// По умолчанию очищает только краткосрочную историю чата.
+        /// Для точечного сброса используйте <see cref="ClearChat(bool,bool)"/>.
+        /// </summary>
+        public void ClearChat() => ClearChat(clearChatHistory: true, clearLongTermMemory: false);
+
+        /// <summary>
+        /// Очистить все сообщения из UI и сбросить контекст агента с детальным управлением.
+        /// </summary>
+        /// <param name="clearChatHistory">Очищать ли историю чата (контекст сессии).</param>
+        /// <param name="clearLongTermMemory">Очищать ли долговременную память (стэйт/факты агента).</param>
+        public void ClearChat(bool clearChatHistory, bool clearLongTermMemory)
         {
             if (MessageScroll != null) MessageScroll.Clear();
-            _chatService?.ClearHistory(config?.RoleId ?? "PlayerChat");
+
+            string roleId = config?.RoleId ?? "PlayerChat";
+
+            // Используем универсальный API для очистки контекста (если scope доступен)
+            try
+            {
+                CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory);
+            }
+            catch
+            {
+                // Fallback: очищаем только через локальный ChatService (если CoreAi scope не доступен)
+                if (clearChatHistory) _chatService?.ClearHistory(roleId);
+            }
 
             if (config != null && !string.IsNullOrEmpty(config.WelcomeMessage))
             {
                 AddMessage(config.WelcomeMessage, isUser: false);
+            }
+        }
+
+        /// <summary>
+        /// Остановить генерацию текущего ответа и отменить выполняемые задачи агента.
+        /// </summary>
+        public void StopAgent()
+        {
+            string roleId = config?.RoleId ?? "PlayerChat";
+            try
+            {
+                CoreAi.StopAgent(roleId);
+            }
+            catch
+            {
+                _chatService?.StopAgent(roleId);
+            }
+
+            if (_isSending || _isStreaming)
+            {
+                _cts?.Cancel();
+                _cts?.Dispose();
+                _cts = new CancellationTokenSource();
+
+                FinishStreaming();
+                HideTypingIndicator();
+                SetSendEnabled(true);
+                _isSending = false;
+
+                AddMessage(config?.ErrorMessagePrefix + "Остановлено пользователем.", isUser: false);
             }
         }
     }

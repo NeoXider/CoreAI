@@ -41,6 +41,8 @@ namespace CoreAI.Tests.EditMode
                 using var reg = cancellationToken.Register(() => gate.TrySetCanceled());
                 return await gate.Task;
             }
+
+            public void CancelTasks(string cancellationScope) { }
         }
 
         /// <summary>
@@ -67,6 +69,8 @@ namespace CoreAI.Tests.EditMode
                 }
                 return null;
             }
+
+            public void CancelTasks(string cancellationScope) { }
         }
 
         #endregion
@@ -212,6 +216,50 @@ namespace CoreAI.Tests.EditMode
             inner.Gates[2].TrySetResult(null);
             inner.Gates[3].TrySetResult(null);
             await Task.WhenAll(t1, t2, t3, t4);
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // Тест 4: CancelTasks — отменяет текущие и удаляет из очереди задачи указанного scope
+        // ──────────────────────────────────────────────────────────
+
+        [Test]
+        public async Task CancelTasks_SpecificScope_CancelsActiveAndPendingTasks()
+        {
+            // Arrange: MaxConcurrent = 1
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            // Задача 1 (active)
+            Task t1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t1", CancellationScope = "NPC1" });
+            
+            // Задача 2 (pending)
+            Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2", CancellationScope = "NPC1" });
+            
+            // Задача 3 (pending, другой scope)
+            Task t3 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t3", CancellationScope = "NPC2" });
+
+            await Task.Delay(100);
+            
+            // Assert: только t1 стартовала
+            Assert.AreEqual(1, inner.Gates.Count);
+            
+            // Act: Отменяем все задачи для NPC1
+            queue.CancelTasks("NPC1");
+            await Task.Delay(100);
+            
+            // t1 должна быть отменена (IsCanceled)
+            Assert.IsTrue(t1.IsCanceled || t1.IsFaulted || (t1.IsCompleted && inner.Gates[0].Task.IsCanceled), "t1 (active) должна быть отменена");
+            
+            // t2 должна быть отменена без запуска
+            Assert.IsTrue(t2.IsCanceled || t2.IsFaulted, "t2 (pending) должна быть отменена");
+            
+            // t3 (NPC2) должна была начать выполняться, так как слот освободился!
+            Assert.AreEqual(2, inner.Gates.Count, "t3 (NPC2) должна стартовать после отмены NPC1");
+            Assert.AreEqual("t3", inner.ExecutionLog[1]);
+            
+            // Cleanup
+            inner.Gates[1].TrySetResult(null);
+            await Task.WhenAll(t3);
         }
     }
 }
