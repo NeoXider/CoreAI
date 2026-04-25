@@ -6,15 +6,19 @@
 
 *Читать на других языках: [English](README.md), [Русский](README_RU.md).*
 
-**Живые NPC, процедурный контент, динамика на лету** — всё это может идти от LLM, прямо во время игры.
+> ### 🎬 Представьте
+> Игрок подходит к кузнецу-NPC и пишет: _«Есть огненные мечи?»_. Кузнец **вызывает ваш код инвентаря**, ничего не находит, и **отвечает по роли**: _«Огненных клинков нет, но могу выковать, если принесёшь Кристалл Огня.»_ Игрок крафтит — **Programmer-агент пишет Lua**, **CoreMechanic считает статы**, и уникальный _Меч Пламени_ падает в инвентарь. Всё в рантайме, стримингом токен за токеном в чат-пузырь, на **локальной модели 4 ГБ**. Без облачных ключей. Без скриптовых деревьев диалогов. **Это CoreAI.**
 
 **Одно хранилище, два пакета:** портативное ядро C# и Unity-слой с DI, панелью чата и тестами. Хотите *демо за пять минут* — или *многошаговый пайплайн с инструментами и Lua* — используются одни и те же кирпичики.
 
-> **Зачем открывать репозиторий?** Здесь *агенты, которые зовут ваш код*, *стриминг, переживший «разорванные» теги reason*, *чат панелью в один клик* — и по желанию **`CoreAi.AskAsync("…")` из любого скрипта** — без «домашки» по DI ради первой фичи.
+- 🧠 **Агенты, которые вызывают ваш код** — не просто генерация текста, а реальный function calling с ретраем и памятью.
+- 🌊 **Стриминг, переживший разорванные теги** — stateful SSE-аккумуляция собирает фрагментированные `<think>` блоки и tool calls.
+- 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
+- ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
 
-> 🚀 **Проверено на малых моделях:** многие сценарии PlayMode уверенно идут на локальной **Qwen3.5-4B** (например, с выключенным think/reasoning). Необязатели облачные API, чтобы в игре *ощущалось умом*.
+> 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** **v0.21.8** · статический API `CoreAi` · стриминг оркестратора · авто-определение LLMUnity (`COREAI_HAS_LLMUNITY`)
+**Версия:** **v0.24.2** · диагностика HTTP-ошибок · `ToolExecutionPolicy` hardening · SSE tool-call accumulation · Agent Control API
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -26,7 +30,7 @@
 
 | | Раздел |
 |---|--------|
-| [Что нового в 0.21](#-что-нового-в-021) | `CoreAi`, стрим оркестратора, чат |
+| [Что нового (0.22 → 0.24)](#-что-нового-022--024) | Последние изменения |
 | [Три входа](#-три-входа-ui--coreai--агенты) | UI · `CoreAi` · агенты |
 | [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, чат, инструменты, память |
 | [Архитектура](#%EF%B8%8F-архитектура) | Два пакета, схема |
@@ -37,13 +41,13 @@
 
 ---
 
-## 🆕 Что нового в 0.21
+## 🆕 Что нового (0.22 → 0.24)
 
-- 🎯 **Статический фасад `CoreAi`** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
-- 🌊 **Стриминг в оркестраторе** — `IAiOrchestrationService.RunStreamingAsync`: тот же путь власти, очереди и валидации, что и у `RunTaskAsync`, но чанками (см. [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
-- 💬 **Чат** — многострочный ввод, Shift+Enter / Enter, анимированный индикатор печати; стрим виден через всю цепочку декораторов `ILlmClient`; **0.21.7** — сворачивание в FAB (`SetCollapsed`, на мобильном layout по умолчанию свёрнут) — [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md).
-
-**Ранее 0.20.x (всё ещё в коробке):** универсальная панель чата, стрим HTTP + LLMUnity, трёхслойные флаги, демо-сцена в один клик, широкое EditMode-покрытие (песочница Lua, инструменты, rate limit, фильтры).
+- 🔧 **0.24.2** — HTTP-ошибки теперь показывают тело ответа API (не только `400 Bad Request`); `ToolExecutionPolicy.maxConsecutiveErrors` нормализуется до ≥ 1; обновление документации.
+- 🧩 **0.24.0–0.24.1** — `SseToolCallAccumulator` для облачного SSE (OpenAI, Anthropic), `ToolExecutionPolicy` единая для streaming/non-streaming, защита JSON-извлечения от code-блоков, дедупликация UI stop.
+- 🎮 **0.22** — Agent Control API: `StopAgent`, `ClearContext`, `OnToolExecuted`, кнопка очистки чата 🗑, Escape-to-stop.
+- 🎯 **0.21** — Статический фасад `CoreAi` (`AskAsync`/`StreamAsync`), стриминг оркестратора, сворачивание в FAB.
+- 💬 **0.20** — Универсальная панель чата, стриминг HTTP+LLMUnity, `ThinkBlockStreamFilter`, трёхслойные флаги.
 
 Полные заметки: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
 
@@ -149,6 +153,8 @@ public class WeatherLlmTool : ILlmTool
     }
 }
 ```
+
+> 💡 **Дизайн инструментов для экономии токенов:** используйте короткие ключи параметров (`q` вместо `question_text`), краткие описания, индексы вместо строк и умные дефолты. Подробнее: [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md)
 
 ---
 
@@ -462,4 +468,4 @@ Unity → Window → General → Test Runner
 
 ---
 
-> 🎮 **CoreAI** — *играбельный* AI: сцена в один клик, один статический вызов или полноценный агент — как скажешь.
+> 🎮 **CoreAI** — хватит писать деревья диалогов. Выпускайте агентов, которые *думают*, *вызывают ваш код* и *помнят* — на локальной 4B-модели или через облачный API, ваш выбор.

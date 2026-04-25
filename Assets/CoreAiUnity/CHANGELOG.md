@@ -2,6 +2,71 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.24.2] - 2026-04-26
+
+### HTTP error diagnostics & policy hardening
+
+- **HTTP 400 response body logging** — `MeaiOpenAiChatClient` now includes the API's response body in error messages for both non-streaming and SSE paths. Previously, only the status code was logged (e.g., `HTTP/1.1 400 Bad Request`), making it impossible to diagnose *why* the API rejected a request. Now the full rejection reason (e.g., `model not found`, `invalid tool schema`) is visible in the log.
+- **`ToolExecutionPolicy` safety normalization** — `maxConsecutiveErrors` is now clamped to `Math.Max(1, value)` in the constructor. Passing `0` or negative values previously made `IsMaxErrorsReached` immediately `true`, causing agents to abort before executing any tools.
+- **Documentation refresh** — both root `README.md` and `Assets/CoreAiUnity/README.md` updated to v0.24.2 with vivid "imagine this" descriptions of the AI pipeline, accurate version badges, and production-ready framing.
+- Bumped package versions to `0.24.2`.
+
+## [0.24.1] - 2026-04-26
+
+### SSE tool-call accumulation & UI stop fix
+
+- **`SseToolCallAccumulator`** — new stateful accumulator in `MeaiOpenAiChatClient` that properly collects `delta.tool_calls` spread across multiple SSE chunks (cloud providers like OpenAI split `id`+`name` in chunk 1 and `arguments` fragments across chunks 2..N). Flushed at stream end into `FunctionCallContent`. Removes the "Partial SSE tool_calls" known limitation.
+- **UI stop deduplication** — removed redundant `AddMessage("Остановлено пользователем")` from `StopAgent()`. The `OperationCanceledException` handler in `SendToAI` already displays the stop message via `_stopRequestedByUser` flag, eliminating double feedback.
+- **New PlayMode tests** — `StreamingToolCallingPlayModeTests`:
+  - `Streaming_WithToolCapablePrompt_CompletesSuccessfully` — smoke test for full tool-capable pipeline.
+  - `Streaming_EarlyCancellation_StopsCleanly` — validates clean cancellation mid-stream.
+  - `Streaming_ThenNonStreaming_NoStateContamination` — verifies no state leaks between streaming and non-streaming modes.
+- Updated `STREAMING_ARCHITECTURE.md` — removed "not yet implemented" known limitation for partial SSE accumulation, documented `SseToolCallAccumulator` lifecycle.
+- Bumped package versions to `0.24.1`.
+
+## [0.24.0] - 2026-04-26
+
+### Streaming tool-calling hardening
+
+- **`ToolExecutionPolicy`** — new shared class for tool execution guarantees (duplicate detection, consecutive error tracking, `CoreAi.NotifyToolExecuted`). Both streaming (`MeaiLlmClient`) and non-streaming (`SmartToolCallingChatClient`) paths now delegate to this single policy, eliminating behavior divergence.
+- **Hardened `TryExtractToolCallsFromText`** — pattern-aware JSON parser replaces naive `firstBrace/lastBrace` approach:
+  - Supports multiple tool calls in a single text response.
+  - Ignores JSON inside fenced code blocks (` ```...``` `) to prevent false positives.
+  - Only matches JSON objects containing both `"name"` and `"arguments"` keys.
+  - Gracefully skips malformed/partial JSON.
+- **Native SSE `delta.tool_calls`** — `MeaiOpenAiChatClient` now parses `choices[0].delta.tool_calls` from cloud providers (OpenAI, Anthropic via OpenRouter). Text-based extraction remains the primary fallback for local models (Ollama, llama.cpp, LM Studio).
+- **Stop/Clear race fix** — unified `StopActiveGeneration()` with `_isStopping` reentrance guard; `StopAgent()` now delegates to the same internal path, eliminating potential double-stop from concurrent Escape + button click.
+- **New tests:**
+  - `ToolExecutionPolicyEditModeTests` — 14 tests: duplicate detection (global, per-tool, reset), error counter, batch execution, max errors, safety normalization.
+  - `TryExtractToolCallsFromTextTests` — 11 tests: single/multi tool, code block protection, malformed JSON, nested braces, edge cases.
+- Updated `STREAMING_ARCHITECTURE.md` — new §7 "Streaming tool-calling" documenting dual-path architecture and execution policy guarantees.
+- Bumped package versions to `0.24.0` (`com.nexoider.coreaiunity` and dependency on `com.nexoider.coreai`).
+
+## [0.23.3] - 2026-04-26
+
+### Composition stability and streaming test coverage
+
+- Fixed duplicate CoreAI bootstrap in `CoreAIGameEntryPoint`: repeated `Start()` calls are now idempotent and do not reinitialize `CoreAIAgent`.
+- Added graceful duplicate-start warning in Composition logs to make accidental double-container startup visible.
+- Added new EditMode tests for composition guard: `CoreAIGameEntryPointEditModeTests`.
+- Expanded streaming + tool-calling tests in `MeaiLlmClientEditModeTests`:
+  - keeps visible prefix text while suppressing tool JSON from UI;
+  - terminates with explicit terminal error when tool-loop iteration limit is exceeded.
+- Bumped package version to `0.23.3` and synced dependency to `com.nexoider.coreai` `0.23.3`.
+
+## [0.23.2] - 2026-04-26
+
+### Chat stop reliability
+
+- Fixed non-stream HTTP cancellation in `MeaiOpenAiChatClient.GetResponseAsync`: when `Esc` or stop button cancels the active request, UnityWebRequest is now aborted immediately instead of waiting for full response timeout.
+
+## [0.23.1] - 2026-04-26
+
+### Packaging and release pin
+
+- Bumped `com.nexoider.coreaiunity` to `0.23.1`.
+- Pinned dependency `com.nexoider.coreai` to `0.23.1` to force package consumers to pick the build with streaming/tool-calling reliability fixes.
+
 ## [0.23.0] - 2026-04-26
 
 ### LLM Streaming + Tool Calling (single cycle)

@@ -125,13 +125,22 @@ namespace CoreAI.Infrastructure.Llm
             UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
             while (!op.isDone)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    try { webReq.Abort(); } catch { /* ignore */ }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
                 await Task.Yield();
             }
 
             if (webReq.result != UnityWebRequest.Result.Success)
             {
-                _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {webReq.error}");
-                throw new Exception($"HTTP error: {webReq.error}");
+                string responseBody = webReq.downloadHandler?.text ?? "";
+                string errorDetail = !string.IsNullOrEmpty(responseBody)
+                    ? $"{webReq.error} | Body: {responseBody}"
+                    : webReq.error;
+                _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {errorDetail}");
+                throw new Exception($"HTTP error: {errorDetail}");
             }
 
             // Логируем ответ от модели если включено
@@ -272,6 +281,7 @@ namespace CoreAI.Infrastructure.Llm
             UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
             int lastProcessed = 0;
             bool cancelled = false;
+            SseToolCallAccumulator toolAccumulator = new();
             try
             {
                 // Poll for SSE chunks
@@ -290,9 +300,9 @@ namespace CoreAI.Infrastructure.Llm
                         string newData = partial.Substring(lastProcessed);
                         lastProcessed = partial.Length;
 
-                        foreach (string chunk in ParseSseChunks(newData))
+                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(newData, toolAccumulator))
                         {
-                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                            yield return update;
                         }
                     }
 
@@ -306,17 +316,28 @@ namespace CoreAI.Infrastructure.Llm
                     if (fullText.Length > lastProcessed)
                     {
                         string remaining = fullText.Substring(lastProcessed);
-                        foreach (string chunk in ParseSseChunks(remaining))
+                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(remaining, toolAccumulator))
                         {
-                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                            yield return update;
                         }
+                    }
+
+                    // Flush any accumulated partial tool calls at stream end
+                    MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
+                    if (flushed != null)
+                    {
+                        yield return flushed;
                     }
                 }
                 else if (webReq.result != UnityWebRequest.Result.Success && !cancelled &&
                          !cancellationToken.IsCancellationRequested)
                 {
+                    string streamBody = webReq.downloadHandler?.text ?? "";
+                    string streamErr = !string.IsNullOrEmpty(streamBody)
+                        ? $"{webReq.error} | Body: {streamBody}"
+                        : webReq.error;
                     _logger.LogWarning(GameLogFeature.Llm,
-                        $"MeaiOpenAiChatClient: stream error — {webReq.error}");
+                        $"MeaiOpenAiChatClient: stream error — {streamErr}");
                 }
             }
             finally
@@ -329,8 +350,12 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Парсит SSE data: строки и извлекает delta.content из JSON чанков.</summary>
-        private static IEnumerable<string> ParseSseChunks(string raw)
+        /// <summary>
+        /// Парсит SSE data: строки и извлекает delta.content и delta.tool_calls из JSON чанков.
+        /// Returns ChatResponseUpdate objects that may contain text. Tool calls are accumulated
+        /// in the <paramref name="accumulator"/> and flushed when complete.
+        /// </summary>
+        private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw, SseToolCallAccumulator accumulator)
         {
             string[] lines = raw.Split('\n');
             foreach (string line in lines)
@@ -340,25 +365,126 @@ namespace CoreAI.Infrastructure.Llm
                 string data = trimmed.Substring(6);
                 if (data == "[DONE]") yield break;
 
-                string content = ExtractDeltaContent(data);
-                if (!string.IsNullOrEmpty(content))
+                MEAI.ChatResponseUpdate update = ExtractDeltaUpdate(data, accumulator);
+                if (update != null)
                 {
-                    yield return content;
+                    yield return update;
                 }
             }
         }
 
-        /// <summary>Извлекает choices[0].delta.content из SSE JSON чанка.</summary>
-        private static string ExtractDeltaContent(string json)
+        /// <summary>
+        /// Извлекает choices[0].delta.content из SSE JSON чанка.
+        /// Tool call deltas are accumulated in the <paramref name="accumulator"/> rather than
+        /// emitted immediately, because cloud providers split name/arguments across chunks.
+        /// </summary>
+        private static MEAI.ChatResponseUpdate ExtractDeltaUpdate(string json, SseToolCallAccumulator accumulator)
         {
             try
             {
                 JObject obj = JObject.Parse(json);
-                return obj?["choices"]?[0]?["delta"]?["content"]?.ToString();
+                JToken delta = obj?["choices"]?[0]?["delta"];
+                if (delta == null) return null;
+
+                string content = delta["content"]?.ToString();
+                JArray toolCallsArray = delta["tool_calls"] as JArray;
+
+                // Accumulate tool call deltas (they arrive spread across multiple SSE chunks)
+                if (toolCallsArray != null && toolCallsArray.Count > 0)
+                {
+                    foreach (JToken tc in toolCallsArray)
+                    {
+                        int index = tc["index"]?.Value<int>() ?? 0;
+                        string callId = tc["id"]?.ToString();
+                        JToken func = tc["function"];
+                        string name = func?["name"]?.ToString();
+                        string argsFrag = func?["arguments"]?.ToString();
+
+                        accumulator.Feed(index, callId, name, argsFrag);
+                    }
+                }
+
+                // Only return an update if there's visible text content
+                if (!string.IsNullOrEmpty(content))
+                {
+                    return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, content);
+                }
+
+                return null;
             }
             catch
             {
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Accumulates partial SSE delta.tool_calls across multiple chunks.
+        /// OpenAI streams tool calls as: chunk 1 has id+name, chunks 2..N have arguments fragments.
+        /// Call <see cref="Flush"/> at stream end to emit completed FunctionCallContent.
+        /// </summary>
+        private sealed class SseToolCallAccumulator
+        {
+            private readonly Dictionary<int, (string id, string name, StringBuilder args)> _pending = new();
+
+            /// <summary>Feed one delta.tool_calls entry. Safe to call with all-null values.</summary>
+            public void Feed(int index, string callId, string name, string argumentsFragment)
+            {
+                if (!_pending.TryGetValue(index, out var entry))
+                {
+                    entry = (callId, name, new StringBuilder());
+                    _pending[index] = entry;
+                }
+                else
+                {
+                    // Update id/name if provided (first chunk has them, subsequent don't)
+                    if (!string.IsNullOrEmpty(callId)) entry.id = callId;
+                    if (!string.IsNullOrEmpty(name)) entry.name = name;
+                    _pending[index] = entry;
+                }
+
+                if (!string.IsNullOrEmpty(argumentsFragment))
+                {
+                    _pending[index] = (_pending[index].id, _pending[index].name, _pending[index].args);
+                    _pending[index].args.Append(argumentsFragment);
+                }
+            }
+
+            /// <summary>
+            /// Flush all accumulated tool calls into a single ChatResponseUpdate.
+            /// Returns null if no tool calls were accumulated.
+            /// </summary>
+            public MEAI.ChatResponseUpdate Flush()
+            {
+                if (_pending.Count == 0) return null;
+
+                MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
+                update.Contents = new List<MEAI.AIContent>();
+
+                foreach (var kvp in _pending)
+                {
+                    var (id, name, argsBuilder) = kvp.Value;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    Dictionary<string, object> args = null;
+                    string argsStr = argsBuilder.ToString();
+                    if (!string.IsNullOrEmpty(argsStr))
+                    {
+                        try
+                        {
+                            args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argsStr);
+                        }
+                        catch { /* Malformed JSON accumulated — skip this tool call */ }
+                    }
+
+                    args ??= new Dictionary<string, object>();
+                    update.Contents.Add(new MEAI.FunctionCallContent(
+                        id ?? $"sse_{name}_{Guid.NewGuid():N}",
+                        name, args));
+                }
+
+                _pending.Clear();
+                return update.Contents.Count > 0 ? update : null;
             }
         }
 

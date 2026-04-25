@@ -1,10 +1,10 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "0.23.1",
+  "version": "0.24.2",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted). Depends on com.nexoider.coreai 0.22.0+.",
+  "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted). Depends on com.nexoider.coreai 0.24.2+.",
   "dependencies": {
-    "com.nexoider.coreai": "0.23.1"
+    "com.nexoider.coreai": "0.24.2"
   }
 }

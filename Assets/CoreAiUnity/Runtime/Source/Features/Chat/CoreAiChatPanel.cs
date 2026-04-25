@@ -54,6 +54,8 @@ namespace CoreAI.Chat
         private bool  _isStreaming;
         private bool  _isSending; // prevents Shift+Enter sending while AI is busy
         private bool _stopRequestedByUser;
+        private bool _isStopping;
+        private bool _isClearing;
 
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
@@ -421,8 +423,23 @@ namespace CoreAI.Chat
             return _isSending || _isStreaming;
         }
 
+        private bool IsActionInProgress()
+        {
+            return IsChatInputLocked(_isSending, _isStreaming, _isStopping, _isClearing);
+        }
+
+        internal static bool IsChatInputLocked(bool isSending, bool isStreaming, bool isStopping, bool isClearing)
+        {
+            return isSending || isStreaming || isStopping || isClearing;
+        }
+
         private void TrySendInput()
         {
+            if (IsActionInProgress())
+            {
+                return;
+            }
+
             if (IsRequestInProgress())
             {
                 StopActiveGeneration();
@@ -431,7 +448,7 @@ namespace CoreAI.Chat
 
             // Even if the button is disabled, TextField key events can still fire.
             // Prevent sending while an AI request/stream is in progress.
-            if (_isSending || _isStreaming || (SendButton != null && !SendButton.enabledSelf))
+            if (_isSending || _isStreaming || IsActionInProgress() || (SendButton != null && !SendButton.enabledSelf))
             {
                 return;
             }
@@ -720,15 +737,46 @@ namespace CoreAI.Chat
 
         private void StopActiveGeneration()
         {
-            if (!IsRequestInProgress())
+            // Reentrance guard — prevents double-stop from concurrent Escape + button click.
+            if (_isStopping || !IsRequestInProgress())
             {
                 return;
             }
 
-            _stopRequestedByUser = true;
-            string roleId = config?.RoleId ?? "PlayerChat";
-            _chatService?.StopAgent(roleId);
-            _activeRequestCts?.Cancel();
+            _isStopping = true;
+            UpdateControlButtonsState();
+            UpdateSendButtonVisualState();
+            try
+            {
+                _stopRequestedByUser = true;
+                string roleId = config?.RoleId ?? "PlayerChat";
+
+                // Cancel orchestrator tasks first
+                try
+                {
+                    CoreAi.StopAgent(roleId);
+                }
+                catch
+                {
+                    _chatService?.StopAgent(roleId);
+                }
+
+                // Cancel the active HTTP/streaming request
+                _activeRequestCts?.Cancel();
+            }
+            finally
+            {
+                _isStopping = false;
+                UpdateControlButtonsState();
+                UpdateSendButtonVisualState();
+            }
+        }
+
+        private void UpdateControlButtonsState()
+        {
+            bool actionInProgress = IsActionInProgress();
+            if (ClearButton != null) ClearButton.SetEnabled(!actionInProgress);
+            if (StopButton != null) StopButton.SetEnabled(!actionInProgress);
         }
 
         private void UpdateSendButtonVisualState()
@@ -741,7 +789,7 @@ namespace CoreAI.Chat
             bool isBusy = IsRequestInProgress();
             SendButton.text = GetSendButtonText(isBusy);
             SendButton.tooltip = GetSendButtonTooltip(isBusy);
-            SendButton.SetEnabled(true);
+            SendButton.SetEnabled(!IsActionInProgress());
 
             if (isBusy)
             {
@@ -870,54 +918,73 @@ namespace CoreAI.Chat
         /// <param name="clearLongTermMemory">Очищать ли долговременную память (стэйт/факты агента).</param>
         public void ClearChat(bool clearChatHistory, bool clearLongTermMemory)
         {
-            if (MessageScroll != null) MessageScroll.Clear();
+            if (_isClearing)
+            {
+                return;
+            }
 
-            string roleId = config?.RoleId ?? "PlayerChat";
-
-            // Используем универсальный API для очистки контекста (если scope доступен)
+            _isClearing = true;
+            UpdateControlButtonsState();
+            UpdateSendButtonVisualState();
             try
             {
-                CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory);
-            }
-            catch
-            {
-                // Fallback: очищаем только через локальный ChatService (если CoreAi scope не доступен)
-                if (clearChatHistory) _chatService?.ClearHistory(roleId);
-            }
+                // Любая очистка контекста должна останавливать активную генерацию.
+                StopActiveGeneration();
 
-            if (config != null && !string.IsNullOrEmpty(config.WelcomeMessage))
+                if (MessageScroll != null) MessageScroll.Clear();
+
+                string roleId = config?.RoleId ?? "PlayerChat";
+
+                // Используем универсальный API для очистки контекста (если scope доступен)
+                try
+                {
+                    CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory);
+                }
+                catch
+                {
+                    // Fallback: очищаем только через локальный ChatService (если CoreAi scope не доступен)
+                    if (clearChatHistory) _chatService?.ClearHistory(roleId);
+                }
+
+                if (config != null && !string.IsNullOrEmpty(config.WelcomeMessage))
+                {
+                    AddMessage(config.WelcomeMessage, isUser: false);
+                }
+            }
+            finally
             {
-                AddMessage(config.WelcomeMessage, isUser: false);
+                _isClearing = false;
+                UpdateControlButtonsState();
+                UpdateSendButtonVisualState();
             }
         }
 
         /// <summary>
         /// Остановить генерацию текущего ответа и отменить выполняемые задачи агента.
+        /// Delegates to the unified <see cref="StopActiveGeneration"/> path and
+        /// additionally forces immediate UI cleanup when a request is in progress.
+        /// NOTE: The stop message is NOT added here — the OperationCanceledException
+        /// handler in SendToAI adds it when _stopRequestedByUser is true.
         /// </summary>
         public void StopAgent()
         {
-            string roleId = config?.RoleId ?? "PlayerChat";
-            try
-            {
-                CoreAi.StopAgent(roleId);
-            }
-            catch
-            {
-                _chatService?.StopAgent(roleId);
-            }
+            bool wasInProgress = IsRequestInProgress();
+            StopActiveGeneration();
 
-            if (_isSending || _isStreaming)
+            if (wasInProgress)
             {
+                // Force-reset the root CTS so any linked tokens are fully dead.
                 _cts?.Cancel();
                 _cts?.Dispose();
                 _cts = new CancellationTokenSource();
 
                 FinishStreaming();
                 HideTypingIndicator();
-                SetSendEnabled(true);
                 _isSending = false;
 
-                AddMessage(config?.ErrorMessagePrefix + "Остановлено пользователем.", isUser: false);
+                // No AddMessage here — SendToAI's OperationCanceledException handler
+                // will display the stop message based on _stopRequestedByUser flag.
+                UpdateSendButtonVisualState();
             }
         }
     }

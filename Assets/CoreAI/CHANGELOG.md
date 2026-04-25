@@ -1,5 +1,39 @@
 # Changelog
 
+## [v0.24.2] — 2026-04-26
+
+### Release sync
+
+- 🔧 Version bumped to `0.24.2` to match `com.nexoider.coreaiunity` `0.24.2`.
+- 🔧 Synced Unity-layer hardening: HTTP error response body logging in `MeaiOpenAiChatClient` (both non-streaming and SSE paths), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to `Math.Max(1, value)`.
+
+## [v0.24.0] — 2026-04-26
+
+### Streaming tool-calling hardening (release sync)
+
+- 🔧 Version bumped to `0.24.0` to match `com.nexoider.coreaiunity` `0.24.0`.
+- 🔧 Synced Unity-layer hardening: `ToolExecutionPolicy` (shared duplicate detection / error tracking), pattern-aware text JSON parser with multi-tool and code-block protection, native SSE `delta.tool_calls` parsing, stop/clear race condition fix.
+
+## [v0.23.3] — 2026-04-26
+
+### Release sync
+
+- 🔧 Version bumped to `0.23.3` to match `com.nexoider.coreaiunity` `0.23.3`.
+- 🔧 Synced Unity-layer reliability update: idempotent `CoreAIGameEntryPoint` startup guard prevents duplicate CoreAI initialization in scenes with accidental double composition.
+- 🧪 Synced test coverage additions in Unity host: `CoreAIGameEntryPointEditModeTests` and additional streaming/tool-cycle guards in `MeaiLlmClientEditModeTests`.
+
+## [v0.23.2] — 2026-04-26
+
+### Release sync
+
+- 🔧 Version bumped to `0.23.2` to match `com.nexoider.coreaiunity` `0.23.2` (includes non-stream HTTP cancellation fix used by Chat stop / Esc).
+
+## [v0.23.1] — 2026-04-26
+
+### Release sync
+
+- 🔧 Version bumped to `0.23.1` to match `com.nexoider.coreaiunity` `0.23.1` and ensure downstream projects resolve the latest reliability fixes.
+
 ## [v0.23.0] — 2026-04-25
 
 ### Agent Control API UI

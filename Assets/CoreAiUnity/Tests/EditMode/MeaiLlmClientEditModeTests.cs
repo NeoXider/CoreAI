@@ -112,6 +112,82 @@ namespace CoreAI.Tests.EditMode
             Assert.GreaterOrEqual(inner.StreamCalls, 2, "Tool cycle should trigger second stream call.");
         }
 
+        [Test]
+        public async Task CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson()
+        {
+            StreamingScriptedChatClient inner = new(
+                new[] { "Working... {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Prefix persisted\"}}" },
+                new[] { "Done." });
+
+            StatefulMemoryStore memoryStore = new();
+            StubCoreSettings settings = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "You are test agent.",
+                UserPayload = "Create quiz",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            };
+
+            List<string> textChunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    textChunks.Add(chunk.Text);
+                }
+            }
+
+            string full = string.Concat(textChunks);
+            Assert.That(full, Does.Contain("Working..."));
+            Assert.That(full, Does.Contain("Done."));
+            Assert.That(full, Does.Not.Contain("\"name\":\"memory\""));
+            Assert.IsTrue(memoryStore.TryLoad("Teacher", out AgentMemoryState state));
+            Assert.That(state.Memory, Does.Contain("Prefix persisted"));
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError()
+        {
+            string toolJson = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"loop\"}}";
+            StreamingScriptedChatClient inner = new(
+                new[] { toolJson },
+                new[] { toolJson },
+                new[] { toolJson },
+                new[] { toolJson },
+                new[] { toolJson },
+                new[] { toolJson });
+
+            StatefulMemoryStore memoryStore = new();
+            StubCoreSettings settings = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "You are test agent.",
+                UserPayload = "Create quiz",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            };
+
+            LlmStreamChunk last = null;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                last = chunk;
+            }
+
+            Assert.IsNotNull(last);
+            Assert.IsTrue(last.IsDone);
+            // ToolExecutionPolicy detects duplicate tool calls and increments consecutive errors,
+            // so the error comes from the policy's max-errors guard rather than the loop counter.
+            Assert.IsTrue(
+                last.Error.Contains("max consecutive tool errors") ||
+                last.Error.Contains("tool loop exceeded"),
+                $"Unexpected error: {last.Error}");
+        }
+
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public bool TryLoad(string roleId, out AgentMemoryState state)
@@ -198,6 +274,128 @@ namespace CoreAI.Tests.EditMode
 
             public object GetService(Type serviceType, object serviceKey = null) => null;
             public void Dispose() { }
+        }
+    }
+
+    /// <summary>
+    /// Tests for the hardened TryExtractToolCallsFromText parser.
+    /// Covers: multi-tool, code block false-positives, partial JSON, edge cases.
+    /// </summary>
+    [TestFixture]
+    public sealed class TryExtractToolCallsFromTextTests
+    {
+        [Test]
+        public void SingleToolCall_ExtractedCorrectly()
+        {
+            string text = "Here is the result: {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"hello\"}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("memory", calls[0].Name);
+            Assert.That(cleaned, Does.Contain("Here is the result:"));
+            Assert.That(cleaned, Does.Not.Contain("\"name\":\"memory\""));
+        }
+
+        [Test]
+        public void MultipleToolCalls_AllExtracted()
+        {
+            string text = "{\"name\":\"tool_a\",\"arguments\":{\"x\":1}} some text {\"name\":\"tool_b\",\"arguments\":{\"y\":2}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(2, calls.Count);
+            Assert.AreEqual("tool_a", calls[0].Name);
+            Assert.AreEqual("tool_b", calls[1].Name);
+            Assert.That(cleaned, Does.Contain("some text"));
+        }
+
+        [Test]
+        public void JsonInCodeBlock_NotExtracted()
+        {
+            string text = "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\nDone.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsFalse(found, "JSON inside code blocks should be ignored");
+            Assert.AreEqual(0, calls.Count);
+        }
+
+        [Test]
+        public void MalformedJson_GracefullySkipped()
+        {
+            string text = "Partial: {\"name\":\"tool\",\"arguments\":{\"broken";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsFalse(found, "Unclosed JSON should not produce tool calls");
+            Assert.AreEqual(0, calls.Count);
+        }
+
+        [Test]
+        public void JsonWithoutNameAndArguments_NotExtracted()
+        {
+            string text = "Config: {\"key\":\"value\",\"count\":42}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsFalse(found, "Regular JSON without name+arguments keys should be ignored");
+        }
+
+        [Test]
+        public void EmptyText_ReturnsFalse()
+        {
+            Assert.IsFalse(MeaiLlmClient.TryExtractToolCallsFromText("", out _, out _));
+            Assert.IsFalse(MeaiLlmClient.TryExtractToolCallsFromText(null, out _, out _));
+            Assert.IsFalse(MeaiLlmClient.TryExtractToolCallsFromText("   ", out _, out _));
+        }
+
+        [Test]
+        public void NestedBracesInArguments_HandledCorrectly()
+        {
+            string text = "{\"name\":\"config\",\"arguments\":{\"data\":{\"nested\":true}}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("config", calls[0].Name);
+        }
+
+        [Test]
+        public void StripCodeBlocks_PreservesPositions()
+        {
+            string text = "Before ```code``` After";
+            string stripped = MeaiLlmClient.StripCodeBlocks(text);
+
+            Assert.AreEqual(text.Length, stripped.Length, "Stripped text should have same length");
+            Assert.That(stripped, Does.StartWith("Before "));
+            Assert.That(stripped, Does.EndWith(" After"));
+        }
+
+        [Test]
+        public void IsValidToolCallJson_RequiresBothKeys()
+        {
+            Assert.IsTrue(MeaiLlmClient.IsValidToolCallJson("{\"name\":\"x\",\"arguments\":{}}"));
+            Assert.IsFalse(MeaiLlmClient.IsValidToolCallJson("{\"name\":\"x\"}"));
+            Assert.IsFalse(MeaiLlmClient.IsValidToolCallJson("{\"arguments\":{}}"));
+            Assert.IsFalse(MeaiLlmClient.IsValidToolCallJson(""));
+        }
+
+        [Test]
+        public void FindToolCallJsonSpans_MultipleSpans()
+        {
+            string text = "A {\"name\":\"a\",\"arguments\":{}} B {\"name\":\"b\",\"arguments\":{\"x\":1}}";
+            var spans = MeaiLlmClient.FindToolCallJsonSpans(text);
+
+            Assert.AreEqual(2, spans.Count);
+        }
+
+        [Test]
+        public void ToolCallWithStringContainingBraces_HandledCorrectly()
+        {
+            string text = "{\"name\":\"tool\",\"arguments\":{\"code\":\"function() { return {}; }\"}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("tool", calls[0].Name);
         }
     }
 #endif

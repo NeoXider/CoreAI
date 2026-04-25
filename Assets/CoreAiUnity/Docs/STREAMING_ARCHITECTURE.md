@@ -46,6 +46,8 @@ Key files:
 | Wrapper | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs` |
 | HTTP SSE | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` |
 | LLMUnity | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityMeaiChatClient.cs` |
+| Tool Execution Policy | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/ToolExecutionPolicy.cs` |
+| Non-streaming tool loop | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/SmartToolCallingChatClient.cs` |
 | UI | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs` |
 | Service | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs` |
 
@@ -187,10 +189,47 @@ Stream идёт не только через `CoreAiChatService`, но и чер
 
 ---
 
-## 7. Known limitations
+## 7. Streaming tool-calling (v0.24.0+)
 
-- **Streaming + tool calling** — `SmartToolCallingChatClient.GetStreamingResponseAsync` currently proxies to the inner client. Duplicate detection, retry policy and consecutive-error defence only apply to the non-streaming path. Full tool-calling over a streaming transport is tracked in `TODO.md` (v2.1 roadmap).
+Since v0.24.0, streaming tool-calling uses a **dual-path architecture**:
+
+### Path 1: Text-based JSON extraction (primary)
+
+The primary mechanism, designed for local models (Ollama, llama.cpp, LM Studio) that output tool calls as text.
+`MeaiLlmClient.TryExtractToolCallsFromText` scans the accumulated visible text for JSON objects containing both `"name"` and `"arguments"` keys.
+
+- ✅ Multi-tool: extracts multiple tool calls from a single response
+- ✅ False-positive protection: ignores JSON inside fenced code blocks (` ```...``` `)
+- ✅ Pattern-aware: only matches JSON with required `name` + `arguments` structure
+- ✅ Graceful: partial/malformed JSON is silently skipped
+
+### Path 2: Native SSE `delta.tool_calls` (enhancement)
+
+For cloud providers (OpenAI, Anthropic via OpenRouter) that emit `delta.tool_calls` in SSE chunks.
+`MeaiOpenAiChatClient.ExtractDeltaUpdate` parses `choices[0].delta.tool_calls` and emits `FunctionCallContent` in `ChatResponseUpdate`.
+
+If the SSE stream contains `FunctionCallContent`, `MeaiLlmClient` uses native detection instead of text extraction.
+
+### Shared execution policy
+
+Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
+
+| Guarantee | Description |
+|-----------|-------------|
+| Duplicate detection | Signature-based (name + arguments hash). Blocks repeated identical calls within one request cycle. Per-tool `AllowDuplicates` flag overrides. |
+| Consecutive error tracking | Counter resets on success, increments on failure. Agent aborts at `MaxToolCallRetries` threshold. |
+| Notification | Every tool execution fires `CoreAi.NotifyToolExecuted(roleId, toolName, args, result)`. |
+
+### Stop / Clear guarantees
+
+- **StopActiveGeneration()** has a `_isStopping` reentrance guard — concurrent Escape + button click cannot double-fire.
+- **StopAgent()** delegates to `StopActiveGeneration()` and additionally resets the root CTS and cleans up UI.
+- **ClearChat()** calls `StopActiveGeneration()` before clearing history.
+
+## 8. Known limitations
+
 - **No output-length timeout** — there is a per-request cancellation token but no *total response length* guard. Add one externally if you need it.
 - **Mobile** — `UnityWebRequest` SSE streaming has been tested on Desktop and Editor. On mobile, behaviour depends on the OS HTTP stack; measure before shipping.
+- **Partial SSE tool_calls** — Cloud providers may split tool call arguments across multiple SSE chunks. The current implementation only handles complete `delta.tool_calls` with both `name` and fully-formed `arguments` in a single chunk. Progressive accumulation across chunks is not yet implemented.
 
 Related deep dives: [LUA_SANDBOX_SECURITY (TODO)](LUA_SANDBOX_SECURITY.md) · [TOOL_CALLING_BEST_PRACTICES (TODO)](TOOL_CALLING_BEST_PRACTICES.md).

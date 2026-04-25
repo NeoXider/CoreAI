@@ -41,5 +41,31 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("X", CoreAiChatPanel.GetSendButtonText(isBusy: true));
             Assert.AreEqual("Остановить генерацию (Esc)", CoreAiChatPanel.GetSendButtonTooltip(isBusy: true));
         }
+
+        [Test]
+        public void IsChatInputLocked_WhenStoppingOrClearing_ReturnsTrue()
+        {
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(
+                isSending: false,
+                isStreaming: false,
+                isStopping: true,
+                isClearing: false));
+
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(
+                isSending: false,
+                isStreaming: false,
+                isStopping: false,
+                isClearing: true));
+        }
+
+        [Test]
+        public void IsChatInputLocked_WhenNoBusyFlags_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.IsChatInputLocked(
+                isSending: false,
+                isStreaming: false,
+                isStopping: false,
+                isClearing: false));
+        }
     }
 }

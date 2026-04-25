@@ -1,10 +1,12 @@
 # 🎮 CoreAI Unity — where the LLM meets your scene
 
-This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolkit chat, streaming filters, EditMode safety nets, and Editor menus that spare you copy-paste.
+> **Imagine:** your NPC merchant checks inventory, haggles on price, applies a discount, and processes the purchase — all through real function calls to your game code, streamed token-by-token into a chat bubble. No scripted branches. No fake replies. **That's this package.**
+
+This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolkit chat, streaming filters, production error diagnostics, and Editor menus that spare you copy-paste.
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.nexoider.coreaiunity` — [`package.json`](package.json) | `com.nexoider.coreai` **v0.21.8** | ✅ Stable |
+| `com.nexoider.coreaiunity` — [`package.json`](package.json) | `com.nexoider.coreai` **v0.24.2** | ✅ Production |
 
 *Languages:* [English](../../README.md) · [Русский](../../README_RU.md)
 
@@ -41,15 +43,13 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 ---
 
-## 🆕 0.21 (and what 0.20 already gave you)
+## 🆕 What's new (0.22 → 0.24)
 
-- 🎯 **`CoreAi`** — `AskAsync`, `StreamAsync`, `SmartAskAsync`, `Orchestrate*`, `TryGet*`, `Invalidate` — no DI ceremony for the first prototype.
-- 🌊 **Orchestrator streaming** — `RunStreamingAsync` shares the same authority/queue path as `RunTaskAsync` ([STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md) §6).
-- 💬 **Chat hardening** — multiline input, Enter/Shift+Enter, animated typing dots; streaming survives the full `ILlmClient` decorator stack.
-- 💬 **Chat panel** (`CoreAiChatPanel`) — UI Toolkit + UXML/USS, one-click demo scene.
-- 🌊 **HTTP + LLMUnity streaming** with stateful `ThinkBlockStreamFilter` for split tags.
-- ⚙️ **3-layer streaming:** UI → `AgentBuilder.WithStreaming` → `CoreAISettings.EnableStreaming`.
-- 🧪 **Large EditMode suite** — streaming, Lua sandbox, tools, rate limit, `CoreAi`, orchestrator streaming, …
+- 🔧 **0.24.2** — HTTP errors now show the API response body (not just `400 Bad Request`); `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1; docs refresh.
+- 🧩 **0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE, `ToolExecutionPolicy` shared between streaming/non-streaming, hardened JSON extraction with code-block protection, UI stop deduplication.
+- 🎮 **0.22** — Agent Control API: `StopAgent`, `ClearContext`, `OnToolExecuted`, chat clear 🗑 button, Escape-to-stop.
+- 🎯 **0.21** — `CoreAi` static facade (`AskAsync`/`StreamAsync`), orchestrator streaming, collapse-to-FAB.
+- 💬 **0.20** — Universal chat panel, HTTP+LLMUnity streaming, `ThinkBlockStreamFilter`, 3-layer streaming flags.
 
 Full list: [CHANGELOG.md](CHANGELOG.md).
 
@@ -169,4 +169,4 @@ NuGet DLLs and Git dependencies for VContainer/MoonSharp/UniTask/MessagePipe/LLM
 
 [Neoxider](https://github.com/NeoXider) · [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools) · License: [PolyForm Noncommercial 1.0](../../LICENSE)
 
-> 🎮 **CoreAI Unity** — wire the model once; ship chat, tools, and streaming without losing weekends to plumbing.
+> 🎮 **CoreAI Unity** — stop writing dialogue trees. Wire the model once — ship chat, tools, and streaming without losing weekends to plumbing.

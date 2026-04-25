@@ -8,8 +8,11 @@ namespace CoreAI.Composition
     /// <summary>
     /// Точка старта после построения контейнера (аналог раннего bootstrap без MonoBehaviour).
     /// </summary>
-    public sealed class CoreAIGameEntryPoint : IStartable
+    public sealed class CoreAIGameEntryPoint : IStartable, IDisposable
     {
+        private static readonly object StartGate = new();
+        private static bool _isInitialized;
+
         /// <summary>
         /// Если true — при старте автоматически запускается Creator-агент (bootstrap).
         /// По умолчанию false — оркестратор не запускается сам, дочерний проект решает, когда и что запускать.
@@ -20,6 +23,7 @@ namespace CoreAI.Composition
         private readonly IAiOrchestrationService _orchestrator;
         private readonly AgentMemoryPolicy _policy;
         private readonly IAgentMemoryStore _memoryStore;
+        private bool _started;
 
         /// <summary>DI: лог, оркестратор и политика для bootstrap + глобальный фасад CoreAI.</summary>
         public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)
@@ -33,6 +37,25 @@ namespace CoreAI.Composition
         /// <summary>Вызывается VContainer после сборки контейнера; инициализирует CoreAI фасад и опционально запускает bootstrap.</summary>
         public void Start()
         {
+            lock (StartGate)
+            {
+                if (_started)
+                {
+                    return;
+                }
+
+                if (_isInitialized)
+                {
+                    _logger.Warn(
+                        "CoreAI already initialized in this process. Duplicate CoreAIGameEntryPoint start skipped.",
+                        LogTag.Composition);
+                    return;
+                }
+
+                _isInitialized = true;
+                _started = true;
+            }
+
             // Инициализируем глобальный фасад CoreAI — 
             // позволяет вызывать merchant.Ask("text") без DI/container
             CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
@@ -48,6 +71,30 @@ namespace CoreAI.Composition
             else
             {
                 _logger.Info("AutoBootstrap отключён — оркестратор не запускает Creator-агента автоматически.", LogTag.Composition);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (StartGate)
+            {
+                if (!_started)
+                {
+                    return;
+                }
+
+                _started = false;
+                _isInitialized = false;
+            }
+
+            CoreAIAgent.Reset();
+        }
+
+        internal static void ResetInitializationGuardForTests()
+        {
+            lock (StartGate)
+            {
+                _isInitialized = false;
             }
         }
 

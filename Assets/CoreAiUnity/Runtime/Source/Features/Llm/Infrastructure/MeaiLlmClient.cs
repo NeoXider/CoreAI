@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -16,8 +17,6 @@ using LLMUnity;
 using LuaLlmTool = CoreAI.Ai.LuaLlmTool;
 using WorldLlmTool = CoreAI.Infrastructure.Llm.WorldLlmTool;
 using MEAI = Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -225,7 +224,13 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Стриминг ответа модели: возвращает чанки текста по мере генерации.
-        /// Не поддерживает tool calling (стриминг несовместим с multi-step MEAI tools).
+        /// <para>
+        /// Поддерживает tool calling двумя способами:
+        /// <list type="number">
+        /// <item>Native: если <c>ChatResponseUpdate</c> содержит <c>FunctionCallContent</c> (облачные провайдеры).</item>
+        /// <item>Text fallback: извлечение tool-call JSON из текста (Ollama, llama.cpp, LM Studio, etc.).</item>
+        /// </list>
+        /// </para>
         /// <para>
         /// Автоматически фильтрует <c>&lt;think&gt;...&lt;/think&gt;</c> блоки stateful-фильтром —
         /// корректно работает, даже если тег разбит между чанками.
@@ -279,6 +284,11 @@ namespace CoreAI.Infrastructure.Llm
             int maxToolIterations = Math.Max(1, _settings.MaxToolCallRetries + 1);
             int toolIteration = 0;
 
+            // Shared policy for the entire streaming session
+            bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
+            ToolExecutionPolicy policy = new(_logger, _settings, request.Tools, allowDuplicates,
+                _currentRoleId, _settings.MaxToolCallRetries);
+
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -292,11 +302,24 @@ namespace CoreAI.Infrastructure.Llm
                 ThinkBlockStreamFilter thinkFilter = new();
                 List<string> visibleChunks = new();
                 System.Text.StringBuilder iterationVisible = new();
+                List<MEAI.FunctionCallContent> nativeToolCalls = new();
                 int chunkCount = 0;
 
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
                                    .GetStreamingResponseAsync(chatMessages, chatOptions, cancellationToken))
                 {
+                    // Check for native tool calls in the update (from providers that support delta.tool_calls)
+                    if (update.Contents != null)
+                    {
+                        foreach (MEAI.AIContent content in update.Contents)
+                        {
+                            if (content is MEAI.FunctionCallContent fcc)
+                            {
+                                nativeToolCalls.Add(fcc);
+                            }
+                        }
+                    }
+
                     string raw = update.Text;
                     if (string.IsNullOrEmpty(raw)) continue;
 
@@ -316,12 +339,57 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 string visibleText = iterationVisible.ToString();
+
+                // === Path 1: Native tool calls from SSE delta.tool_calls ===
+                if (nativeToolCalls.Count > 0 && aiTools.Count > 0)
+                {
+                    if (_settings.LogMeaiToolCallingSteps)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Streaming detected {nativeToolCalls.Count} NATIVE tool call(s), executing...");
+                    }
+
+                    // Emit any visible text that preceded the tool calls
+                    if (!string.IsNullOrWhiteSpace(visibleText))
+                    {
+                        yield return new LlmStreamChunk { Text = visibleText };
+                    }
+
+                    List<MEAI.AIContent> assistantContents = nativeToolCalls.Cast<MEAI.AIContent>().ToList();
+                    if (!string.IsNullOrWhiteSpace(visibleText))
+                    {
+                        assistantContents.Add(new MEAI.TextContent(visibleText));
+                    }
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
+
+                    // Execute through shared policy
+                    ToolExecutionPolicy.BatchToolCallResult batch =
+                        await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+
+                    if (policy.IsMaxErrorsReached)
+                    {
+                        yield return new LlmStreamChunk { IsDone = true, Error = "max consecutive tool errors reached" };
+                        yield break;
+                    }
+
+                    continue;
+                }
+
+                // === Path 2: Text-based tool call extraction (primary for local models) ===
                 if (aiTools.Count > 0 && TryExtractToolCallsFromText(visibleText, out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
                 {
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
-                            $"MeaiLlmClient: Streaming detected {toolCalls.Count} tool call(s), executing...");
+                            $"MeaiLlmClient: Streaming detected {toolCalls.Count} text-extracted tool call(s), executing...");
+                    }
+
+                    // Важно: текст до JSON tool-call должен быть виден пользователю.
+                    // Иначе "префикс" ответа (например, "Working...") теряется в UI.
+                    if (!string.IsNullOrWhiteSpace(cleanedText))
+                    {
+                        yield return new LlmStreamChunk { Text = cleanedText };
                     }
 
                     List<MEAI.AIContent> assistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
@@ -331,11 +399,21 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
 
-                    List<MEAI.AIContent> toolResults = await ExecuteToolCallsAsync(toolCalls, chatOptions, cancellationToken);
-                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, toolResults));
+                    // Execute through shared policy (same as non-streaming)
+                    ToolExecutionPolicy.BatchToolCallResult batch =
+                        await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+
+                    if (policy.IsMaxErrorsReached)
+                    {
+                        yield return new LlmStreamChunk { IsDone = true, Error = "max consecutive tool errors reached" };
+                        yield break;
+                    }
+
                     continue;
                 }
 
+                // === No tool calls — emit text chunks to consumer ===
                 foreach (string chunk in visibleChunks)
                 {
                     yield return new LlmStreamChunk { Text = chunk };
@@ -348,42 +426,13 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private async Task<List<MEAI.AIContent>> ExecuteToolCallsAsync(
-            List<MEAI.FunctionCallContent> toolCalls,
-            MEAI.ChatOptions chatOptions,
-            CancellationToken cancellationToken)
-        {
-            List<MEAI.AIContent> toolResults = new();
-            foreach (MEAI.FunctionCallContent fc in toolCalls)
-            {
-                MEAI.AIFunction aiFunc = chatOptions?.Tools?.OfType<MEAI.AIFunction>()
-                    .FirstOrDefault(f => string.Equals(f.Name, fc.Name, StringComparison.Ordinal));
-                if (aiFunc == null)
-                {
-                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"));
-                    continue;
-                }
-
-                try
-                {
-                    MEAI.AIFunctionArguments args = fc.Arguments != null
-                        ? new MEAI.AIFunctionArguments(fc.Arguments)
-                        : null;
-                    object result = await aiFunc.InvokeAsync(args, cancellationToken);
-                    string resultText = result?.ToString() ?? string.Empty;
-                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
-                    CoreAi.NotifyToolExecuted(_currentRoleId, fc.Name, fc.Arguments, result);
-                }
-                catch (Exception ex)
-                {
-                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"));
-                }
-            }
-
-            return toolResults;
-        }
-
-        private static bool TryExtractToolCallsFromText(
+        /// <summary>
+        /// Pattern-aware tool call extraction from text.
+        /// Only matches JSON objects that contain both "name" and "arguments" keys.
+        /// Supports multiple tool calls in a single text. Ignores JSON inside
+        /// fenced code blocks (```...```) to avoid false positives.
+        /// </summary>
+        internal static bool TryExtractToolCallsFromText(
             string text,
             out List<MEAI.FunctionCallContent> toolCalls,
             out string cleanedText)
@@ -395,36 +444,156 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            int firstBrace = text.IndexOf('{');
-            int lastBrace = text.LastIndexOf('}');
-            if (firstBrace < 0 || lastBrace <= firstBrace)
+            // Strip fenced code blocks to avoid matching JSON inside them
+            string textForSearch = StripCodeBlocks(text);
+
+            // Find all balanced JSON objects that look like tool calls
+            List<JsonSpan> candidates = FindToolCallJsonSpans(textForSearch);
+            if (candidates.Count == 0)
             {
                 return false;
             }
 
-            string possibleJson = text.Substring(firstBrace, lastBrace - firstBrace + 1).Trim();
-            try
+            // Build cleaned text by removing all found tool-call JSON spans (from original text)
+            // We need to map positions from stripped text back — since code blocks are only
+            // *hidden* from search, the positions still correspond to the original text.
+            System.Text.StringBuilder cleanBuilder = new(text.Length);
+            int lastEnd = 0;
+            foreach (JsonSpan span in candidates)
             {
-                JObject json = JObject.Parse(possibleJson);
-                string functionName = json["name"]?.ToString()?.Trim();
-                JToken argsToken = json["arguments"];
-                if (string.IsNullOrWhiteSpace(functionName) || argsToken == null)
+                // Verify span is valid in original text too
+                if (span.Start >= text.Length || span.Start + span.Length > text.Length) continue;
+                string originalFragment = text.Substring(span.Start, span.Length);
+
+                // Re-validate the fragment in the original text
+                if (!IsValidToolCallJson(originalFragment)) continue;
+
+                try
                 {
-                    return false;
+                    JObject json = JObject.Parse(originalFragment);
+                    string functionName = json["name"]?.ToString()?.Trim();
+                    JToken argsToken = json["arguments"];
+                    if (string.IsNullOrWhiteSpace(functionName) || argsToken == null) continue;
+
+                    Dictionary<string, object?> arguments =
+                        JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsToken.ToString())
+                        ?? new Dictionary<string, object?>();
+
+                    string callId = $"stream_call_{functionName}_{Guid.NewGuid():N}";
+                    toolCalls.Add(new MEAI.FunctionCallContent(callId, functionName, arguments));
+
+                    cleanBuilder.Append(text, lastEnd, span.Start - lastEnd);
+                    lastEnd = span.Start + span.Length;
+                }
+                catch
+                {
+                    // Malformed JSON — skip this candidate
+                }
+            }
+
+            if (toolCalls.Count == 0)
+            {
+                return false;
+            }
+
+            // Append remaining text after last tool call
+            if (lastEnd < text.Length)
+            {
+                cleanBuilder.Append(text, lastEnd, text.Length - lastEnd);
+            }
+
+            cleanedText = cleanBuilder.ToString().Trim();
+            return true;
+        }
+
+        /// <summary>Removes fenced code blocks (```...```) from text to prevent false positive tool call detection.</summary>
+        internal static string StripCodeBlocks(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            // Replace ```...``` blocks with whitespace of the same length to preserve positions
+            return Regex.Replace(text, @"```[\s\S]*?```", m => new string(' ', m.Length));
+        }
+
+        /// <summary>Checks if a JSON string looks like a tool call (has "name" and "arguments").</summary>
+        internal static bool IsValidToolCallJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            // Quick heuristic before parsing: must contain both key patterns
+            return json.Contains("\"name\"") && json.Contains("\"arguments\"");
+        }
+
+        /// <summary>
+        /// Find balanced JSON object spans in text that look like tool calls.
+        /// Uses brace-counting to find balanced {} regions, then validates structure.
+        /// </summary>
+        internal static List<JsonSpan> FindToolCallJsonSpans(string text)
+        {
+            List<JsonSpan> spans = new();
+            if (string.IsNullOrEmpty(text)) return spans;
+
+            int i = 0;
+            while (i < text.Length)
+            {
+                int braceStart = text.IndexOf('{', i);
+                if (braceStart < 0) break;
+
+                // Try to find matching closing brace
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                int j = braceStart;
+
+                for (; j < text.Length; j++)
+                {
+                    char c = text[j];
+
+                    if (escaped)
+                    {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (c == '\\' && inString)
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString) continue;
+
+                    if (c == '{') depth++;
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            string candidate = text.Substring(braceStart, j - braceStart + 1);
+                            if (IsValidToolCallJson(candidate))
+                            {
+                                spans.Add(new JsonSpan { Start = braceStart, Length = j - braceStart + 1 });
+                            }
+                            break;
+                        }
+                    }
                 }
 
-                Dictionary<string, object?> arguments = JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsToken.ToString())
-                    ?? new Dictionary<string, object?>();
+                i = (depth == 0 && j < text.Length) ? j + 1 : braceStart + 1;
+            }
 
-                string callId = $"stream_call_{functionName}_{Guid.NewGuid():N}";
-                toolCalls.Add(new MEAI.FunctionCallContent(callId, functionName, arguments));
-                cleanedText = (text.Substring(0, firstBrace) + text.Substring(lastBrace + 1)).Trim();
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return spans;
+        }
+
+        /// <summary>Represents a span of JSON text within a larger string.</summary>
+        internal struct JsonSpan
+        {
+            public int Start;
+            public int Length;
         }
 
         private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)

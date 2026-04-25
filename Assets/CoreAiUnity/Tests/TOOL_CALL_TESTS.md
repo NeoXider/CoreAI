@@ -18,6 +18,51 @@
 | `TryParseToolCallFromText_MemoryTool_ParsesCorrectly` | Парсинг memory tool call | `MeaiToolCallsEditModeTests.cs` |
 | `TryParseToolCallFromText_LuaTool_ParsesCorrectly` | Парсинг execute_lua tool call | `MeaiToolCallsEditModeTests.cs` |
 | `TryParseToolCallFromText_NoToolCall_ReturnsFalse` | Отсутствует tool call | `MeaiToolCallsEditModeTests.cs` |
+| `CompleteStreamingAsync_ToolJsonInStream_ExecutesToolAndReturnsFinalText` | Streaming tool cycle: tool JSON → execute → continued text | `MeaiLlmClientEditModeTests.cs` |
+| `CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` | В стриме префиксный текст виден, tool JSON скрыт из UI | `MeaiLlmClientEditModeTests.cs` |
+| `CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` | Защита от бесконечного streaming tool-loop | `MeaiLlmClientEditModeTests.cs` |
+
+### EditMode Tests (v0.24.0 — parser hardening)
+
+| Тест | Что тестирует | Файл |
+|------|---------------|------|
+| `SingleToolCall_ExtractedCorrectly` | Одиночный tool call с prefix text | `MeaiLlmClientEditModeTests.cs` |
+| `MultipleToolCalls_AllExtracted` | Несколько tool calls в одном тексте | `MeaiLlmClientEditModeTests.cs` |
+| `JsonInCodeBlock_NotExtracted` | JSON в code block игнорируется (false positive protection) | `MeaiLlmClientEditModeTests.cs` |
+| `MalformedJson_GracefullySkipped` | Неполный JSON не вызывает ошибку | `MeaiLlmClientEditModeTests.cs` |
+| `JsonWithoutNameAndArguments_NotExtracted` | Обычный JSON без name+arguments — не tool call | `MeaiLlmClientEditModeTests.cs` |
+| `EmptyText_ReturnsFalse` | Пустая строка/null → false | `MeaiLlmClientEditModeTests.cs` |
+| `NestedBracesInArguments_HandledCorrectly` | Вложенные JSON объекты в arguments | `MeaiLlmClientEditModeTests.cs` |
+| `StripCodeBlocks_PreservesPositions` | Удаление code blocks сохраняет позиции | `MeaiLlmClientEditModeTests.cs` |
+| `IsValidToolCallJson_RequiresBothKeys` | Валидация наличия name+arguments | `MeaiLlmClientEditModeTests.cs` |
+| `FindToolCallJsonSpans_MultipleSpans` | Поиск нескольких JSON spans | `MeaiLlmClientEditModeTests.cs` |
+| `ToolCallWithStringContainingBraces_HandledCorrectly` | Строка с {} в аргументах | `MeaiLlmClientEditModeTests.cs` |
+
+### EditMode Tests (v0.24.0 — ToolExecutionPolicy)
+
+| Тест | Что тестирует | Файл |
+|------|---------------|------|
+| `CheckDuplicate_FirstCall_ReturnsNull` | Первый вызов не блокируется | `ToolExecutionPolicyEditModeTests.cs` |
+| `CheckDuplicate_SameSignatureTwice_BlocksSecond` | Повторный одинаковый вызов заблокирован | `ToolExecutionPolicyEditModeTests.cs` |
+| `CheckDuplicate_DifferentArgs_Allowed` | Разные аргументы — не дубликат | `ToolExecutionPolicyEditModeTests.cs` |
+| `CheckDuplicate_AllowDuplicatesGlobal_NeverBlocks` | Глобальный AllowDuplicates=true | `ToolExecutionPolicyEditModeTests.cs` |
+| `CheckDuplicate_PerToolAllowDuplicates_Respected` | Per-tool AllowDuplicates flag | `ToolExecutionPolicyEditModeTests.cs` |
+| `RecordSuccess_ResetsCounter` | Успех сбрасывает счётчик ошибок | `ToolExecutionPolicyEditModeTests.cs` |
+| `RecordFailure_IncrementsCounter` | Провал инкрементирует счётчик | `ToolExecutionPolicyEditModeTests.cs` |
+| `IsMaxErrorsReached_AtThreshold_ReturnsTrue` | Порог ошибок работает | `ToolExecutionPolicyEditModeTests.cs` |
+| `Reset_ClearsEverything` | Reset сбрасывает и дубликаты и счётчик | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteSingle_ToolFound_ReturnsResult` | Найденный инструмент возвращает результат | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteSingle_ToolNotFound_ReturnsFailed` | Ненайденный инструмент → failed | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteBatch_AllSucceed_ResetsErrorCounter` | Пакетный успех сбрасывает ошибки | `ToolExecutionPolicyEditModeTests.cs` |
+| `ExecuteBatch_DuplicateBlocked_ReturnsFailed` | Пакетный дубликат блокируется | `ToolExecutionPolicyEditModeTests.cs` |
+| `BuildMaxErrorsResponse_ContainsErrorText` | Ответ при max errors содержит ошибку | `ToolExecutionPolicyEditModeTests.cs` |
+
+### EditMode Tests (composition reliability)
+
+| Тест | Что тестирует | Файл |
+|------|---------------|------|
+| `Start_FirstEntryPoint_InitializesCoreAiFacade` | Первый старт инициализирует фасад CoreAI | `CoreAIGameEntryPointEditModeTests.cs` |
+| `Start_SecondEntryPoint_IsSkippedAndDoesNotOverrideFacade` | Повторный старт не переинициализирует CoreAI и не перетирает зависимости | `CoreAIGameEntryPointEditModeTests.cs` |
 
 ### PlayMode Tests (с реальной LLM)
 
@@ -92,17 +137,20 @@ Unity Test Runner → PlayMode → AllToolCallsPlayModeTests
 ┌─────────────────────────────────────────────────────────┐
 │                Tool Call Tests                          │
 ├──────────────────┬──────────────────┬───────────────────┤
-│   EditMode       │   PlayMode       │   PlayMode        │
-│   (unit)         │   (LLM)          │   (LLM)           │
+│   EditMode       │   EditMode       │   PlayMode        │
+│   (unit)         │   (policy/parser)│   (LLM)           │
 ├──────────────────┼──────────────────┼───────────────────┤
-│ MemoryTool       │ Memory Write     │ Crafting Memory   │
-│ LuaTool          │ Memory Append    │ Workflow          │
-│ JSON Parsing     │ Memory Clear     │                   │
-│                  │ Execute Lua      │                   │
+│ MemoryTool       │ ToolExecPolicy   │ Memory Write      │
+│ LuaTool          │  └ Duplicates    │ Memory Append     │
+│ JSON Parsing     │  └ Error Countr  │ Memory Clear      │
+│ Streaming cycle  │  └ Batch exec    │ Execute Lua       │
+│ Code block guard │ TryExtractToolC  │ Crafting Memory   │
+│ Multi-tool       │  └ Multi-tool    │ Workflow          │
+│                  │  └ Code blocks   │                   │
 ├──────────────────┼──────────────────┼───────────────────┤
-│ Быстрые (1-2с)   │ Медленные (1-5м) │ Медленные (5-10м) │
-│ Без Unity LLM    │ LLMUnity/GGUF    │ LLMUnity/GGUF     │
-│                  │ или HTTP API     │ или HTTP API      │
+│ Быстрые (1-2с)   │ Быстрые (1-2с)   │ Медленные (1-5м)  │
+│ Без Unity LLM    │ Без Unity LLM    │ LLMUnity/GGUF     │
+│                  │                  │ или HTTP API      │
 └──────────────────┴──────────────────┴───────────────────┘
 ```
 

@@ -6,15 +6,19 @@
 
 *Read this in other languages: [English](README.md), [Русский](README_RU.md).*
 
-**Living NPCs, procedural content, dynamic mechanics** — all driven by AI, right during gameplay.
+> ### 🎬 Imagine this
+> A player walks up to a blacksmith NPC. They type _"Got any fire swords?"_. The NPC **calls your inventory code**, finds nothing, then **replies in-character**: _"Fresh out of fire blades, but I can forge one if you bring me a Fire Crystal."_ The player crafts it — the **Programmer agent writes Lua**, the **CoreMechanic agent rolls stats**, and a unique _Flame Sword_ lands in their inventory. All of this happens at runtime, with streaming token-by-token into a chat bubble, powered by a **local 4 GB model** on their machine. No cloud keys. No scripted dialogue trees. **That's CoreAI.**
 
 **One repo, two packages:** a portable C# core and a Unity layer with DI, chat UI, and tests. Whether you want a *demo running in five minutes* or a *multi-agent pipeline with tools and Lua*, the same building blocks apply.
 
-> **Why open this repo?** You get *agents that call your code*, *streaming that survives split tags*, *a chat panel in one click*, and optionally **`CoreAi.AskAsync("…")` from any script** — no DI homework required for your first feature.
+- 🧠 **Agents that call your code** — not just text generation, but real function calling with tool retry and memory.
+- 🌊 **Streaming that survives split tags** — stateful SSE accumulation handles fragmented `<think>` blocks and tool calls across chunks.
+- 💬 **Chat panel in one click** — `CoreAI → Setup → Create Chat Demo Scene` → Press Play.
+- ⚡ **One-liner from any script** — `await CoreAi.AskAsync("…")` — no DI boilerplate for your first feature.
 
-> 🚀 **Proven on small models:** many PlayMode scenarios pass on a local **Qwen3.5-4B** (e.g. with reasoning “Think” off). You are not forced into expensive cloud APIs to ship something that feels smart.
+> 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.21.8** · `CoreAi` static API · orchestrator streaming · chat collapse/FAB · auto `COREAI_HAS_LLMUNITY` define
+**Version:** **v0.24.2** · HTTP error diagnostics · `ToolExecutionPolicy` hardening · SSE tool-call accumulation · agent control API
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -26,7 +30,7 @@
 
 | | Section |
 |---|---------|
-| [What’s new](#-whats-new-in-021) | 0.21 highlights |
+| [What's new](#-whats-new-022--024) | 0.22 → 0.24 highlights |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory |
 | [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
@@ -36,13 +40,14 @@
 
 ---
 
-## 🆕 What's new in 0.21
+## 🆕 What's new (0.22 → 0.24)
 
-- 🎯 **`CoreAi` static facade** — `AskAsync` / `StreamAsync` / `SmartAskAsync` / `Orchestrate*` / `TryGet*` / `Invalidate` — [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
-- 🌊 **Orchestrator streaming** — `IAiOrchestrationService.RunStreamingAsync` for token-by-token output with the same authority/queue/validation path as `RunTaskAsync` (see [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) §6).
-- 💬 **Chat UX** — multiline input + Shift+Enter / Enter behaviour fixed; typing indicator as animated dots; streaming visible through the full `ILlmClient` decorator chain; **0.21.7** adds collapse-to-FAB (`SetCollapsed`, mobile default collapsed) — [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md).
+- 🔧 **v0.24.2** — HTTP error responses now include the API body (not just `400 Bad Request`), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1, docs refresh.
+- 🧩 **v0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE (OpenAI, Anthropic), `ToolExecutionPolicy` shared across streaming/non-streaming paths, hardened `TryExtractToolCallsFromText` with code-block protection, UI stop deduplication.
+- 🎮 **v0.22** — Agent Control API: `CoreAi.StopAgent()`, `CoreAi.ClearContext()`, `CoreAi.OnToolExecuted` event, chat clear button, Escape-to-stop.
+- 🎯 **v0.21** — `CoreAi` static facade (`AskAsync` / `StreamAsync`), orchestrator streaming, chat collapse-to-FAB.
 
-**Earlier 0.20.x (still in the box):** universal chat panel, HTTP + LLMUnity streaming, 3-layer streaming flags, one-click demo scene, broad EditMode coverage (Lua sandbox, tools, rate limit, filters).
+**Foundation (0.20.x):** universal chat panel, HTTP + LLMUnity streaming, `ThinkBlockStreamFilter`, 3-layer streaming flags, one-click demo scene.
 
 Full notes: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
 
@@ -150,6 +155,8 @@ public class WeatherLlmTool : ILlmTool
     }
 }
 ```
+
+> 💡 **Design tools for token economy:** use short parameter keys (`q` instead of `question_text`), concise descriptions, indexes instead of strings, and smart defaults. Details: [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md)
 
 ---
 
@@ -423,4 +430,4 @@ Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for
 
 ---
 
-> 🎮 **CoreAI** — ship *playable* AI: one scene, one static call, or one agent — your call.
+> 🎮 **CoreAI** — stop writing dialogue trees. Ship agents that *think*, *call your code*, and *remember* — from a local 4B model or a cloud API, your choice.
