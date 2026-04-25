@@ -18,6 +18,8 @@ using WorldLlmTool = CoreAI.Infrastructure.Llm.WorldLlmTool;
 using MEAI = Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -260,46 +262,169 @@ namespace CoreAI.Infrastructure.Llm
                 chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
             }
 
+            List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
             MEAI.ChatOptions chatOptions = new()
             {
                 Temperature = request.Temperature,
                 MaxOutputTokens = request.MaxOutputTokens
             };
+            if (aiTools.Count > 0)
+            {
+                chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
+            }
 
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Starting streaming with {chatMessages.Count} messages");
 
-            ThinkBlockStreamFilter thinkFilter = new();
-            System.Text.StringBuilder fullResponse = new();
-            int chunkCount = 0;
+            int maxToolIterations = Math.Max(1, _settings.MaxToolCallRetries + 1);
+            int toolIteration = 0;
 
-            await foreach (MEAI.ChatResponseUpdate update in _innerClient
-                               .GetStreamingResponseAsync(chatMessages, chatOptions, cancellationToken))
+            while (true)
             {
-                string raw = update.Text;
-                if (string.IsNullOrEmpty(raw)) continue;
+                cancellationToken.ThrowIfCancellationRequested();
+                toolIteration++;
+                if (toolIteration > maxToolIterations + 1)
+                {
+                    yield return new LlmStreamChunk { IsDone = true, Error = "tool loop exceeded max iterations" };
+                    yield break;
+                }
 
-                string visible = thinkFilter.ProcessChunk(raw);
-                if (string.IsNullOrEmpty(visible)) continue;
+                ThinkBlockStreamFilter thinkFilter = new();
+                List<string> visibleChunks = new();
+                System.Text.StringBuilder iterationVisible = new();
+                int chunkCount = 0;
 
-                chunkCount++;
-                fullResponse.Append(visible);
-                yield return new LlmStreamChunk { Text = visible };
+                await foreach (MEAI.ChatResponseUpdate update in _innerClient
+                                   .GetStreamingResponseAsync(chatMessages, chatOptions, cancellationToken))
+                {
+                    string raw = update.Text;
+                    if (string.IsNullOrEmpty(raw)) continue;
+
+                    string visible = thinkFilter.ProcessChunk(raw);
+                    if (string.IsNullOrEmpty(visible)) continue;
+
+                    chunkCount++;
+                    iterationVisible.Append(visible);
+                    visibleChunks.Add(visible);
+                }
+
+                string tail = thinkFilter.Flush();
+                if (!string.IsNullOrEmpty(tail))
+                {
+                    iterationVisible.Append(tail);
+                    visibleChunks.Add(tail);
+                }
+
+                string visibleText = iterationVisible.ToString();
+                if (aiTools.Count > 0 && TryExtractToolCallsFromText(visibleText, out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
+                {
+                    if (_settings.LogMeaiToolCallingSteps)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Streaming detected {toolCalls.Count} tool call(s), executing...");
+                    }
+
+                    List<MEAI.AIContent> assistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
+                    if (!string.IsNullOrWhiteSpace(cleanedText))
+                    {
+                        assistantContents.Add(new MEAI.TextContent(cleanedText));
+                    }
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
+
+                    List<MEAI.AIContent> toolResults = await ExecuteToolCallsAsync(toolCalls, chatOptions, cancellationToken);
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, toolResults));
+                    continue;
+                }
+
+                foreach (string chunk in visibleChunks)
+                {
+                    yield return new LlmStreamChunk { Text = chunk };
+                }
+
+                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, total length={visibleText.Length})");
+                yield break;
+            }
+        }
+
+        private async Task<List<MEAI.AIContent>> ExecuteToolCallsAsync(
+            List<MEAI.FunctionCallContent> toolCalls,
+            MEAI.ChatOptions chatOptions,
+            CancellationToken cancellationToken)
+        {
+            List<MEAI.AIContent> toolResults = new();
+            foreach (MEAI.FunctionCallContent fc in toolCalls)
+            {
+                MEAI.AIFunction aiFunc = chatOptions?.Tools?.OfType<MEAI.AIFunction>()
+                    .FirstOrDefault(f => string.Equals(f.Name, fc.Name, StringComparison.Ordinal));
+                if (aiFunc == null)
+                {
+                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"));
+                    continue;
+                }
+
+                try
+                {
+                    MEAI.AIFunctionArguments args = fc.Arguments != null
+                        ? new MEAI.AIFunctionArguments(fc.Arguments)
+                        : null;
+                    object result = await aiFunc.InvokeAsync(args, cancellationToken);
+                    string resultText = result?.ToString() ?? string.Empty;
+                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, resultText));
+                    CoreAi.NotifyToolExecuted(_currentRoleId, fc.Name, fc.Arguments, result);
+                }
+                catch (Exception ex)
+                {
+                    toolResults.Add(new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"));
+                }
             }
 
-            // Финальный буфер, если модель оборвала ответ с неполным тегом.
-            string tail = thinkFilter.Flush();
-            if (!string.IsNullOrEmpty(tail))
+            return toolResults;
+        }
+
+        private static bool TryExtractToolCallsFromText(
+            string text,
+            out List<MEAI.FunctionCallContent> toolCalls,
+            out string cleanedText)
+        {
+            toolCalls = new List<MEAI.FunctionCallContent>();
+            cleanedText = text ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
             {
-                fullResponse.Append(tail);
-                yield return new LlmStreamChunk { Text = tail };
+                return false;
             }
 
-            // Финальный чанк-маркер конца стрима.
-            yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+            int firstBrace = text.IndexOf('{');
+            int lastBrace = text.LastIndexOf('}');
+            if (firstBrace < 0 || lastBrace <= firstBrace)
+            {
+                return false;
+            }
 
-            _logger.LogInfo(GameLogFeature.Llm,
-                $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, total length={fullResponse.Length})");
+            string possibleJson = text.Substring(firstBrace, lastBrace - firstBrace + 1).Trim();
+            try
+            {
+                JObject json = JObject.Parse(possibleJson);
+                string functionName = json["name"]?.ToString()?.Trim();
+                JToken argsToken = json["arguments"];
+                if (string.IsNullOrWhiteSpace(functionName) || argsToken == null)
+                {
+                    return false;
+                }
+
+                Dictionary<string, object?> arguments = JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsToken.ToString())
+                    ?? new Dictionary<string, object?>();
+
+                string callId = $"stream_call_{functionName}_{Guid.NewGuid():N}";
+                toolCalls.Add(new MEAI.FunctionCallContent(callId, functionName, arguments));
+                cleanedText = (text.Substring(0, firstBrace) + text.Substring(lastBrace + 1)).Trim();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)

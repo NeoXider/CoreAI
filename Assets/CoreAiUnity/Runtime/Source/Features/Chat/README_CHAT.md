@@ -117,6 +117,17 @@ new AgentBuilder("JsonParser")
 | **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → парсинг `data:` чанков | ✅ Да |
 | **LLMUnity** (локальная GGUF) | `LLMAgent.Chat(callback)` → дельта через ConcurrentQueue | ✅ Да |
 
+### Streaming + Tool Calling (single-cycle)
+
+Если в стриминговом ответе модель сначала отдает tool-call JSON, CoreAI выполняет единый цикл:
+
+1. получает стрим-ответ и детектит tool-call payload;
+2. выполняет соответствующий tool;
+3. добавляет результат tool в историю диалога;
+4. продолжает генерацию следующим стриминговым шагом.
+
+Tool JSON в UI не рендерится: игрок видит только итоговый читаемый ответ ассистента.
+
 ### Иерархия настроек стриминга
 
 Порядок приоритета (от высшего к низшему):
@@ -152,7 +163,7 @@ bool useStream = chatService.IsStreamingEnabled("PlayerChat", uiFallback: true);
 Модели с reasoning (DeepSeek, Qwen3) генерируют `<think>...</think>` блоки. CoreAI автоматически:
 - **При стриминге**: общий stateful-фильтр `CoreAI.Ai.ThinkBlockStreamFilter` корректно удаляет блоки, **даже если открывающий/закрывающий тег разбит между SSE-чанками**. Пока модель «думает», показывается typing indicator.
 - **Без стриминга**: regex убирает `<think>` блоки из финального ответа.
-- **Tool calls**: не отображаются в чате (обрабатываются внутри MEAI pipeline).
+- **Tool calls**: не отображаются в чате (обрабатываются внутри MEAI pipeline, включая streaming single-cycle).
 
 > Стриминг должен вызываться с **main thread Unity** (из coroutine, `async void`, `UniTask` или обычного async-метода в UI). Оборачивание `CompleteStreamingAsync` в `Task.Run` приведёт к исключению `"Create can only be called from the main thread"` из-за создания `UnityWebRequest`.
 

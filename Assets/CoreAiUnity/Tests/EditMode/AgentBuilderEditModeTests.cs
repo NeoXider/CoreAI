@@ -141,5 +141,61 @@ namespace CoreAI.Tests.EditMode
             Assert.AreSame(builder, result2);
             Assert.AreSame(builder, result3);
         }
+
+        [Test]
+        public void ApplyToPolicy_ToolsAndChat_DefaultsStreamingOverrideToTrue()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig config = new AgentBuilder("ChatWithToolsRole")
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
+
+            config.ApplyToPolicy(policy);
+
+            Assert.IsTrue(policy.TryGetStreamingOverride("ChatWithToolsRole", out bool enabled));
+            Assert.IsTrue(enabled);
+        }
+
+        [Test]
+        public void ApplyToPolicy_ChatOnly_LeavesStreamingOnGlobalFallback()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig config = new AgentBuilder("ChatOnlyRole")
+                .WithMode(AgentMode.ChatOnly)
+                .Build();
+
+            config.ApplyToPolicy(policy);
+
+            Assert.IsFalse(policy.TryGetStreamingOverride("ChatOnlyRole", out _));
+        }
+
+        [Test]
+        public void ApplyToPolicy_ExplicitWithStreamingFalse_WinsOverModeDefault()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig config = new AgentBuilder("ExplicitOffRole")
+                .WithMode(AgentMode.ToolsAndChat)
+                .WithStreaming(false)
+                .Build();
+
+            config.ApplyToPolicy(policy);
+
+            Assert.IsTrue(policy.TryGetStreamingOverride("ExplicitOffRole", out bool enabled));
+            Assert.IsFalse(enabled);
+        }
+
+        [Test]
+        public void ApplyToPolicy_ToolsOnly_DefaultsStreamingOverrideToTrue()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig config = new AgentBuilder("ToolsOnlyRole")
+                .WithMode(AgentMode.ToolsOnly)
+                .Build();
+
+            config.ApplyToPolicy(policy);
+
+            Assert.IsTrue(policy.TryGetStreamingOverride("ToolsOnlyRole", out bool enabled));
+            Assert.IsTrue(enabled);
+        }
     }
 }

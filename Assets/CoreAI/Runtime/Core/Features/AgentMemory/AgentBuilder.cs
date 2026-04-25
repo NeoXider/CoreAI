@@ -313,8 +313,18 @@ namespace CoreAI.Ai
                 policy.SetOverrideUniversalPrefix(RoleId, true);
             }
 
-            // Регистрируем per-role override стриминга (если задан)
-            policy.SetStreamingEnabled(RoleId, EnableStreaming);
+            // Регистрируем per-role override стриминга:
+            // - явный WithStreaming(...) всегда приоритетен;
+            // - для режимов с инструментами (ToolsAndChat/ToolsOnly) по умолчанию включаем стриминг,
+            //   чтобы работал streaming + tool-calling single-cycle без дополнительной настройки;
+            // - для остальных режимов оставляем глобальный fallback.
+            bool? streamingOverride = EnableStreaming;
+            if (!streamingOverride.HasValue &&
+                (Mode == AgentMode.ToolsAndChat || Mode == AgentMode.ToolsOnly))
+            {
+                streamingOverride = true;
+            }
+            policy.SetStreamingEnabled(RoleId, streamingOverride);
         }
 
         private bool HasMemoryTool()

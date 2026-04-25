@@ -6,6 +6,8 @@
 - ✨ **UI чата обновлена.** В `CoreAiChatPanel` добавлена кнопка "Остановить" (⏹), прерывающая генерацию агента.
 - ✨ **Очистка чата по умолчанию.** Кнопка "Очистить" (🗑) в `CoreAiChatPanel` очищает UI и краткосрочную историю чата (`CoreAi.ClearContext(roleId, true, false)`). Для полного сброса (включая долговременную память) используется `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
 - 🔧 Синхронизированы версии пакетов `com.nexoider.coreai` и `com.nexoider.coreaiunity`.
+- 🔧 Релиз синхронизирован с Unity-слоем по стримингу + tool-calling (`MeaiLlmClient` single-cycle: tool JSON не попадает в UI, инструменты исполняются в том же стриминговом пайплайне).
+- 🔧 Для ролей с инструментами (`AgentMode.ToolsAndChat`, `AgentMode.ToolsOnly`) стриминг теперь включается per-role по умолчанию; `ChatOnly` сохраняет поведение через глобальный/явный override.
 
 ## [v0.22.0] — 2026-04-25
 

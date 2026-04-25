@@ -2,6 +2,16 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.23.0] - 2026-04-26
+
+### LLM Streaming + Tool Calling (single cycle)
+
+- Added unified streaming tool-cycle in `MeaiLlmClient.CompleteStreamingAsync`: stream assistant output, detect tool-call JSON, execute tools, append tool result messages, continue generation in the same request flow.
+- Tool-call JSON is now suppressed from chat UI during streaming; the user sees only human-readable assistant text.
+- Added EditMode coverage in `MeaiLlmClientEditModeTests` for scenario: `streamed tool JSON -> tool execution -> continued streamed text`.
+- Updated agent defaults for tool modes: `ToolsAndChat` and `ToolsOnly` now enable per-role streaming by default (can still be overridden with `AgentBuilder.WithStreaming(...)`).
+- Updated package versions to `0.23.0` (`com.nexoider.coreaiunity` and dependency on `com.nexoider.coreai`).
+
 ## [0.22.0] - 2026-04-25
 
 ### ✨ Agent Control API — Полноценное управление жизненным циклом агента
