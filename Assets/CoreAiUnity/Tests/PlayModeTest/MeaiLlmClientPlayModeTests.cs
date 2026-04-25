@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -116,9 +116,15 @@ namespace CoreAI.Tests.PlayMode
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             InMemoryStore store = new();
 
+#if COREAI_HAS_LLMUNITY
             MeaiLlmClient client =
                 MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger, settings,
                     store);
+#else
+            MeaiLlmClient client =
+                MeaiLlmClient.CreateLlmUnity(null, logger, settings,
+                    store);
+#endif
             Assert.IsNotNull(client, "MeaiLlmClient.CreateLlmUnity should not return null");
 
             Debug.Log("[MeaiLlmClient.LLMUnity] Client created, sending request...");

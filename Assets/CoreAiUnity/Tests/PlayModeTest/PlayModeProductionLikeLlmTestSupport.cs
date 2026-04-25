@@ -5,7 +5,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -40,6 +40,7 @@ namespace CoreAI.Tests.PlayMode
                 throw new ArgumentNullException(nameof(handle));
             }
 
+#if COREAI_HAS_LLMUNITY
             // LLMUnity клиент — пересоздаём с нужным MemoryStore
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
@@ -53,6 +54,7 @@ namespace CoreAI.Tests.PlayMode
                         memoryStore);
                 }
             }
+#endif
 
             // HTTP клиент — создаём новый через OpenAiChatLlmClient используя сохранённые настройки
             if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp)
@@ -185,7 +187,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 // Manually stop LLM and clean up LLMAgent to prevent C++ thread locks/memory leaks during rapid test teardowns
                 // 1. First cancel any active background generations to prevent C++ thread deadlocks
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
                 LLMAgent agent = _llmUnityHarnessRoot.GetComponent<LLMAgent>();
                 if (agent != null)
                 {
@@ -443,7 +445,7 @@ namespace CoreAI.Tests.PlayMode
             out string ignoreReason)
         {
             handle = null;
-#if COREAI_NO_LLM || UNITY_WEBGL
+#if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
             ignoreReason = "Сборка с COREAI_NO_LLM — LLMUnity недоступен.";
             return false;
 #else

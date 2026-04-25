@@ -214,7 +214,7 @@ flowchart LR
 - **Цели:** демо- и тест-сборки, CI без Ollama, дистрибутив меньшего размера, сценарий «хост без GPU / без скачанных весов», магазины с политикой «без сетевых вызовов к LLM».
 - **Направление реализации (не обязательство текущего кода):**
   - Регистрация в DI **`ILlmClient`** реализации-**заглушки** (`NullLlmClient` / `HeuristicLlmClient`), выдающей **детерминированные** или **табличные** ответы по роли (fallback из ScriptableObject / seed).
-  - Опционально символ компиляции (**Scripting Define**), например `COREAI_NO_LLM`, чтобы **исключить** тяжёлые зависимости LLM-пакета из конкретного билда, если пакет это допускает.
+  - Опционально символ компиляции (**Scripting Define**) **`COREAI_NO_LLM`** — ручной opt-out для **полного** отключения LLM (HTTP + LLMUnity). Символ **`COREAI_HAS_LLMUNITY`** определяется **автоматически** через `versionDefines` в asmdef при наличии пакета `undream.llmunity` — код, зависящий от типов LLMUnity, компилируется только при его наличии.
   - Оркестратор в режиме «без LLM» **не падает**: задачи либо маппятся на эвристики, либо помечаются «пропущено» с логом; **MessagePipe** и игровая логика остаются рабочими.
   - Клиенты в NGO по-прежнему получают **реплицированное состояние**; отличие только в том, что **источник** решений на хосте — не нейросеть, а заглушка/дизайнерские данные.
 - Детали контрактов fallback — по мере появления `ILlmClient` в коде; этот подпункт фиксирует **требование к дизайну** шаблона.
@@ -413,7 +413,7 @@ flowchart LR
 
 ## 14. Саммари для вставки в контекст (копипаст)
 
-**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** **`CoreAI.Core`** в **`Assets/CoreAI`**, **`CoreAI.Source`** в **`Assets/CoreAiUnity`** (маршрутизация LLM **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, метрики **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity в manifest проекта; хост **`Assets/CoreAiUnity`** (сцена **`Scenes/_mainCoreAI`**, промпты в **`Resources`**); пример **`RogueliteArena`**. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`. **Define:** `COREAI_NO_LLM` (§5.2).
+**CoreAI:** шаблон Unity-ядра под процедурную логику и ИИ. **Сделано:** **`CoreAI.Core`** в **`Assets/CoreAI`**, **`CoreAI.Source`** в **`Assets/CoreAiUnity`** (маршрутизация LLM **`RoutingLlmClient`**, **`QueuedAiOrchestrator`**, **`IRoleStructuredResponsePolicy`**, метрики **`GameLogFeature.Metrics`**); VContainer + MessagePipe + MoonSharp + LLMUnity + MCPForUnity в manifest проекта; хост **`Assets/CoreAiUnity`** (сцена **`Scenes/_mainCoreAI`**, промпты в **`Resources`**); пример **`RogueliteArena`**. **Сеть:** NGO (§5.1). **Роли:** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md). **Гайд:** [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). **Тесты:** `CoreAI.Tests`, `CoreAI.PlayModeTests`. **Define:** `COREAI_NO_LLM` (ручной opt-out, §5.2), `COREAI_HAS_LLMUNITY` (авто, versionDefines).
 
 ---
 

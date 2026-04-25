@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.21.8] — 2026-04-25
+
+### Release sync
+
+- 🔧 Версия синхронизирована с `com.nexoider.coreaiunity` **0.21.8** (изменения релиза — в Unity-слое: рефакторинг preprocessor guards для LLMUnity, автоматический `COREAI_HAS_LLMUNITY` через `versionDefines`, фикс `CS0246` в проектах без LLMUnity). Изменений в портативном ядре нет.
+
 ## [v0.21.7] — 2026-04-23
 
 ### Release sync

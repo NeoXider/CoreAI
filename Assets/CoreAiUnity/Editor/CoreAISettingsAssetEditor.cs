@@ -4,7 +4,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
 
@@ -95,7 +95,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
                 SerializedProperty ggufPathProp = serializedObject.FindProperty("ggufModelPath");
 
                 System.Collections.Generic.List<string> options = new() { "[ Auto / Fallback ]" };
@@ -685,7 +685,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
         /// </summary>
         private void TestLlmUnityConnection(CoreAISettingsAsset settings)
         {
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             LLMAgent agent = null;
 
             // Ищем по имени если указано
@@ -752,7 +752,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 #else
             _testResultMessage =
- "⚠️ LLMUnity недоступен в текущей конфигурации (COREAI_NO_LLM и/или UNITY_WEBGL). Используйте HTTP API или No LLM.";
+ "⚠️ LLMUnity недоступен в текущей конфигурации (пакет не установлен и/или UNITY_WEBGL). Используйте HTTP API или No LLM.";
             _testResultType = MessageType.Warning;
 #endif
         }
@@ -771,7 +771,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             messages.AppendLine($"Auto приоритет: {priorityText}");
             messages.AppendLine();
 
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             // 1. Проверяем LLMUnity
             LLMAgent agent = null;
             if (!string.IsNullOrEmpty(settings.LlmUnityAgentName))

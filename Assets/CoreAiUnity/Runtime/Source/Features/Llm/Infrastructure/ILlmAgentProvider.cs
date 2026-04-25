@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
-#if !UNITY_WEBGL && !COREAI_NO_LLM
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
     using LLMUnity;
 
     /// <summary>
@@ -51,12 +51,12 @@ namespace CoreAI.Infrastructure.Llm
     }
 #else
     /// <summary>
-    /// WebGL / COREAI_NO_LLM: локальный LLMUnity бэкенд недоступен, провайдер агента не используется.
+    /// WebGL / no LLMUnity: локальный LLMUnity бэкенд недоступен, провайдер агента не используется.
     /// Оставляем интерфейс для DI без зависимости от пакета LLMUnity.
     /// </summary>
     public interface ILlmAgentProvider
     {
-        /// <summary>Всегда возвращает <c>null</c> в WebGL/COREAI_NO_LLM.</summary>
+        /// <summary>Всегда возвращает <c>null</c> когда LLMUnity не установлен.</summary>
         Object Resolve(string agentName);
     }
 

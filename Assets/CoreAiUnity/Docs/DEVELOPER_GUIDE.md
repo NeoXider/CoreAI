@@ -111,7 +111,9 @@ flowchart LR
 | **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если HTTP выключен: фактический клиент — **`MeaiLlmUnityClient`**, в контейнере обёрнут в **`LoggingLlmClientDecorator`**. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
 | **OpenAI-compatible HTTP** | Asset **CoreAI → LLM → OpenAI-compatible HTTP**, поле на **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — тогда внутри декоратора реализация — **`OpenAiChatLlmClient`**. |
 
-Символ **`COREAI_NO_LLM`**: в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
+Символ **`COREAI_NO_LLM`** (ручной opt-out): в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
+
+Символ **`COREAI_HAS_LLMUNITY`** (автоматический): определяется через `versionDefines` в asmdef, когда пакет `undream.llmunity` установлен. Код, зависящий от типов LLMUnity (`MeaiLlmUnityClient`, `LLMAgent`, `LLMManager`), компилируется **только** при наличии этого символа. Пользователю не нужно задавать его вручную.
 
 **Наблюдаемость:** **`GameLogFeature.Llm`** (запросы LLM); **`GameLogFeature.Metrics`** (метрики оркестратора, не входит в **`AllBuiltIn`** — включите вручную в ассете). Старые **Game Log Settings** без бита **Llm** дополняются при **`OnValidate`**. Фильтр по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
 

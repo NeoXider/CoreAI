@@ -4,7 +4,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.nexoider.coreaiunity` — [`package.json`](package.json) | `com.nexoider.coreai` **v0.21.7** | ✅ Stable |
+| `com.nexoider.coreaiunity` — [`package.json`](package.json) | `com.nexoider.coreai` **v0.21.8** | ✅ Stable |
 
 *Languages:* [English](../../README.md) · [Русский](../../README_RU.md)
 

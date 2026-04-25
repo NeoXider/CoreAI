@@ -158,8 +158,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParseToolCallFromText_StripsThinkTagsBeforeParsing()
         {
-#if COREAI_NO_LLM || UNITY_WEBGL
-            Assert.Ignore("LlmUnityMeaiChatClient is not available in COREAI_NO_LLM or WebGL.");
+#if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
+            Assert.Ignore("LlmUnityMeaiChatClient is not available (COREAI_NO_LLM, WebGL, or LLMUnity package missing).");
 #else
             // Симулируем ответ модели с Reasoning
             string textWithReasoning = "<think>\nThinking about what to do...\nI will use the memory tool now.\n</think>\n" +
@@ -186,8 +186,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryParseToolCallFromText_HandlesMultipleThinkTagsOrMalformed()
         {
-#if COREAI_NO_LLM || UNITY_WEBGL
-            Assert.Ignore("LlmUnityMeaiChatClient is not available in COREAI_NO_LLM or WebGL.");
+#if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
+            Assert.Ignore("LlmUnityMeaiChatClient is not available (COREAI_NO_LLM, WebGL, or LLMUnity package missing).");
 #else
             string text = "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
             

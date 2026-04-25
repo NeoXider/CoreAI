@@ -115,7 +115,8 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 **Почему выбрался Stub:**
 1. Backend = Auto, но ни LLMUnity, ни HTTP не доступны
 2. LLMAgent не найден на сцене и HTTP URL не настроен
-3. Определитель `COREAI_NO_LLM` включён
+3. Определитель `COREAI_NO_LLM` включён (ручной opt-out)
+4. Пакет `undream.llmunity` не установлен (`COREAI_HAS_LLMUNITY` не определён) — LLMUnity-бэкенд недоступен
 
 **Решение:**
 ```

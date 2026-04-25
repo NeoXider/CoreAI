@@ -2,7 +2,7 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -114,7 +114,11 @@ namespace CoreAI.Composition
                 }
             }
 
+#if COREAI_HAS_LLMUNITY
             return ResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
+#else
+            return new StubLlmClient();
+#endif
 #endif
         }
 
@@ -175,7 +179,7 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider)
         {
-#if COREAI_NO_LLM || UNITY_WEBGL
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL
             return null;
 #else
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);

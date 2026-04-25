@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -10,7 +10,9 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Messaging;
 using CoreAI.Session;
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
+#endif
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -158,9 +160,14 @@ namespace CoreAI.Tests.PlayMode
                 ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
 
                 // РџРѕР»СѓС‡Р°РµРј LLMAgent Рё LLM РґР»СЏ keepModelLoaded (С‚РѕР»СЊРєРѕ РґР»СЏ LLMUnity)
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
                 MeaiLlmUnityClient llmUnityClient = handle.Client as MeaiLlmUnityClient;
                 LLMAgent agent = llmUnityClient?.UnityAgent;
                 LLM llm = agent?.llm ?? agent?.GetComponent<LLM>();
+#else
+                object llmUnityClient = null;
+                object llm = null;
+#endif
                 if (llm != null)
                 {
                     try

@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -80,9 +80,10 @@ namespace CoreAI.Tests.PlayMode
 
         private IEnumerator InitializeLlmUnity(CoreAISettingsAsset settings)
         {
+#if COREAI_HAS_LLMUNITY
             Debug.Log("[TestAgentSetup] Initializing LLMUnity via SharedLlmUnity...");
 
-            // SharedLlmUnity: РѕРґРёРЅ LLM РЅР° РІСЃРµ С‚РµСЃС‚С‹, РЅРёРєР°РєРёС… create/destroy РјРµР¶РґСѓ С‚РµСЃС‚Р°РјРё
+            // SharedLlmUnity: один LLM на все тесты, никаких create/destroy между тестами
             yield return SharedLlmUnity.EnsureInitialized();
 
             if (!SharedLlmUnity.IsReady)
@@ -92,7 +93,7 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // Р›С‘РіРєР°СЏ РѕР±С‘СЂС‚РєР° РІРѕРєСЂСѓРі РѕР±С‰РµРіРѕ LLMAgent СЃ РѕС‚РґРµР»СЊРЅС‹Рј MemoryStore РґР»СЏ СЌС‚РѕРіРѕ С‚РµСЃС‚Р°
+            // Лёгкая обёртка вокруг общего LLMAgent с отдельным MemoryStore для этого теста
             Client = SharedLlmUnity.CreateClientWithMemoryStore(MemoryStore);
             if (Client == null)
             {
@@ -101,9 +102,14 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            // _handle РќР• РІС‹СЃС‚Р°РІР»СЏРµС‚СЃСЏ вЂ” РјС‹ РЅРµ РІР»Р°РґРµРµРј LLM, SharedLlmUnity СѓРїСЂР°РІР»СЏРµС‚ РµРіРѕ Р¶РёР·РЅРµРЅРЅС‹Рј С†РёРєР»РѕРј
+            // _handle НЕ выставляется — мы не владеем LLM, SharedLlmUnity управляет его жизненным циклом
             BackendName = "LLMUnity";
             CreateOrchestrator();
+#else
+            Debug.LogWarning("[TestAgentSetup] LLMUnity package not available, falling back to Offline");
+            InitializeOffline();
+            yield break;
+#endif
         }
 
         private void InitializeHttp(CoreAISettingsAsset settings)
@@ -136,7 +142,8 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[TestAgentSetup] HTTP not available, falling back to LLMUnity...");
             }
 
-            // LLMUnity С‡РµСЂРµР· SharedLlmUnity
+            // LLMUnity через SharedLlmUnity
+#if COREAI_HAS_LLMUNITY
             yield return SharedLlmUnity.EnsureInitialized();
             if (SharedLlmUnity.IsReady)
             {
@@ -149,6 +156,10 @@ namespace CoreAI.Tests.PlayMode
                     yield break;
                 }
             }
+#else
+            Debug.Log("[TestAgentSetup] LLMUnity package not available, skipping.");
+            yield return null;
+#endif
 
             if (!httpFirst)
             {

@@ -14,7 +14,7 @@
 
 > 🚀 **Proven on small models:** many PlayMode scenarios pass on a local **Qwen3.5-4B** (e.g. with reasoning “Think” off). You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.21.7** · `CoreAi` static API · orchestrator streaming · chat collapse/FAB · WebGL input hardening
+**Version:** **v0.21.8** · `CoreAi` static API · orchestrator streaming · chat collapse/FAB · auto `COREAI_HAS_LLMUNITY` define
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

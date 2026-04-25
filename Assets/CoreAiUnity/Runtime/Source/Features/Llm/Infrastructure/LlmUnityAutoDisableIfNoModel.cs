@@ -1,6 +1,6 @@
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
 using UnityEngine;
@@ -26,7 +26,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             IGameLogger log = ResolveLogger();
 
-#if COREAI_NO_LLM || UNITY_WEBGL
+#if !COREAI_HAS_LLMUNITY || UNITY_WEBGL
             // This guard is only relevant when LLMUnity package is present.
             return;
 #else

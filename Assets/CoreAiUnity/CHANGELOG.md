@@ -2,6 +2,29 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.21.8] - 2026-04-25
+
+### 🔧 LLMUnity — автоматическое определение пакета (COREAI_HAS_LLMUNITY)
+
+- 🐛 **Исправлена ошибка компиляции `CS0246: MeaiLlmUnityClient` в проектах без LLMUnity.** Ранее код, зависящий от `undream.llmunity`, был скрыт за отрицательным символом `#if !COREAI_NO_LLM`, который нигде не определялся автоматически. В результате, если пакет LLMUnity не был установлен (но `COREAI_NO_LLM` не был задан вручную), ссылки на типы `LLMUnity` проходили компиляцию и падали.
+- ✨ **`versionDefines` в asmdef.** Во все 4 assembly definition файла (`CoreAI.Source`, `CoreAI.Editor`, `CoreAI.Tests`, `PlayModeTest`) добавлен блок `versionDefines`, который автоматически определяет символ `COREAI_HAS_LLMUNITY`, когда пакет `undream.llmunity` установлен в проекте.
+- ♻️ **Рефакторинг preprocessor guards.** Все LLMUnity-зависимые `#if` заменены с `!COREAI_NO_LLM && !UNITY_WEBGL` на `COREAI_HAS_LLMUNITY && !UNITY_WEBGL`:
+  - `MeaiLlmUnityClient.cs`, `LlmUnityModelBootstrap.cs`, `LlmUnityMeaiChatClient.cs`, `LlmUnityAutoDisableIfNoModel.cs` — полная обёртка файла.
+  - `MeaiLlmClient.cs` — `using LLMUnity` и метод `CreateLlmUnity()`.
+  - `ILlmAgentProvider.cs` — `SceneLlmAgentProvider`.
+  - `LlmPipelineInstaller.cs` — fallback при отсутствии LLMUnity → `StubLlmClient`.
+  - `RoutingLlmClient.cs` — определение типа inner client.
+  - `LlmClientRegistry.cs` — case `LlmBackendKind.LlmUnity`.
+  - `CoreAISettingsAssetEditor.cs` — Editor-специфичные `LLMManager` / `LLMAgent` проверки.
+  - `CoreAIBuildMenu.cs` — `TryCreateLlmUnityObjects`.
+  - **PlayMode-тесты:** `AllToolCallsPlayModeTests`, `PlayModeLlmUnityTestHarness`, `PlayModeProductionLikeLlmFactory.LlmUnityWarmup`, `MeaiLlmClientPlayModeTests`, `SharedLlmUnity`, `PlayModeProductionLikeLlmTestSupport`, `LlmUnityGlobalSetup`, `TestAgentSetup`.
+  - **EditMode-тесты:** `MeaiToolCallsEditModeTests` — `#if` guard для `LlmUnityMeaiChatClient.TryParseToolCallFromText`.
+- 📝 **`COREAI_NO_LLM` сохранён** как ручной opt-out для полного отключения LLM-функциональности (HTTP + LLMUnity). Новый `COREAI_HAS_LLMUNITY` — автоматическое определение окружения.
+
+### Dependencies
+
+- Обновлена зависимость от `com.nexoider.coreai` до **0.21.8**
+
 ## [0.21.7] - 2026-04-23
 
 ### 💬 Chat UI — сворачивание в плавающую кнопку (FAB)

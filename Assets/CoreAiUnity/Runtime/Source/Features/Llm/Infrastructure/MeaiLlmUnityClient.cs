@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;

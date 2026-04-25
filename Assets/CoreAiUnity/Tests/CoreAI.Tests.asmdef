@@ -28,6 +28,12 @@
   "defineConstraints": [
     "UNITY_INCLUDE_TESTS"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "undream.llmunity",
+      "expression": "",
+      "define": "COREAI_HAS_LLMUNITY"
+    }
+  ],
   "noEngineReferences": false
 }

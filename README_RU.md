@@ -14,7 +14,7 @@
 
 > 🚀 **Проверено на малых моделях:** многие сценарии PlayMode уверенно идут на локальной **Qwen3.5-4B** (например, с выключенным think/reasoning). Необязатели облачные API, чтобы в игре *ощущалось умом*.
 
-**Версия:** **v0.21.7** · статический API `CoreAi` · стриминг оркестратора · сворачивание чата в FAB · укреплённый чат и стриминг
+**Версия:** **v0.21.8** · статический API `CoreAi` · стриминг оркестратора · авто-определение LLMUnity (`COREAI_HAS_LLMUNITY`)
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
