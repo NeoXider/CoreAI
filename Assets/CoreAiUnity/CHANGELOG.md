@@ -10,6 +10,9 @@
 - Tool-call JSON is now suppressed from chat UI during streaming; the user sees only human-readable assistant text.
 - Added EditMode coverage in `MeaiLlmClientEditModeTests` for scenario: `streamed tool JSON -> tool execution -> continued streamed text`.
 - Updated agent defaults for tool modes: `ToolsAndChat` and `ToolsOnly` now enable per-role streaming by default (can still be overridden with `AgentBuilder.WithStreaming(...)`).
+- Strengthened HTTP streaming cancellation in `MeaiOpenAiChatClient`: active request is aborted both on token cancellation and on early enumerator disposal.
+- Stabilized PlayMode tests: `Streaming_CancellationToken_StopsStream` uses fallback timed cancellation; `MemoryTool_AppendsMemory` now retries with strict tool-only prompt before failing.
+- Added complex behavior scenario test in dedicated folder: `Tests/PlayModeTest/Scenarios/Complex/MerchantBehaviorChatWithToolsPlayModeTests.cs`.
 - Updated package versions to `0.23.0` (`com.nexoider.coreaiunity` and dependency on `com.nexoider.coreai`).
 
 ## [0.22.0] - 2026-04-25

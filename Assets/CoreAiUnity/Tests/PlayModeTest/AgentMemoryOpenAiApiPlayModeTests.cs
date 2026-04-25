@@ -89,18 +89,38 @@ namespace CoreAI.Tests.PlayMode
 
             if (!setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState state))
             {
-                Assert.Ignore("Append test skipped");
+                Assert.Fail("Memory state is missing after append attempt.");
             }
 
             Debug.Log($"[MemoryTest] Memory after append: {state.Memory}");
 
-            if (!state.Memory.Contains("initial value") || state.Memory.Length <= "initial value".Length + 2)
+            bool appendApplied = state.Memory.Contains("initial value") &&
+                               state.Memory.Contains("appended value");
+
+            if (!appendApplied)
             {
-                Debug.LogWarning("[MemoryTest] Append did not work.");
-                Assert.Ignore("Append test skipped");
+                Debug.LogWarning("[MemoryTest] First append attempt did not update memory. Retrying with strict prompt...");
+
+                Task retryTask = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.Creator,
+                    Hint =
+                        "IMPORTANT: Call ONLY memory tool now. action='append', content='appended value'. " +
+                        "Do not explain. Do not answer with text before the tool call."
+                });
+                yield return setup.RunAndWait(retryTask, 240f, "memory append retry");
+
+                if (!setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out state))
+                {
+                    Assert.Fail("Memory state is missing after append retry.");
+                }
+
+                Debug.Log($"[MemoryTest] Memory after append retry: {state.Memory}");
             }
 
             Assert.IsTrue(state.Memory.Contains("initial value"), "Initial value should be preserved");
+            Assert.IsTrue(state.Memory.Contains("appended value"),
+                "Appended value should be present after append call.");
         }
 
         [UnityTest]

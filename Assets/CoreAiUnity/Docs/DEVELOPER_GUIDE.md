@@ -118,6 +118,7 @@ flowchart LR
 **Наблюдаемость:** **`GameLogFeature.Llm`** (запросы LLM); **`GameLogFeature.Metrics`** (метрики оркестратора, не входит в **`AllBuiltIn`** — включите вручную в ассете). Старые **Game Log Settings** без бита **Llm** дополняются при **`OnValidate`**. Фильтр по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
 
 Для стриминга с tool-calling используется single-cycle в `MeaiLlmClient.CompleteStreamingAsync`: если модель выдала tool JSON, он исполняется внутри цикла и не рендерится в UI, после чего генерация продолжается следующим стриминговым шагом.
+По умолчанию per-role streaming override включается для ролей с инструментами (`AgentMode.ToolsAndChat` и `AgentMode.ToolsOnly`); для `AgentMode.ChatOnly` остаётся стандартный fallback по настройкам.
 
 ---
 

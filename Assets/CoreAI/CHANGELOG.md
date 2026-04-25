@@ -8,6 +8,7 @@
 - 🔧 Синхронизированы версии пакетов `com.nexoider.coreai` и `com.nexoider.coreaiunity`.
 - 🔧 Релиз синхронизирован с Unity-слоем по стримингу + tool-calling (`MeaiLlmClient` single-cycle: tool JSON не попадает в UI, инструменты исполняются в том же стриминговом пайплайне).
 - 🔧 Для ролей с инструментами (`AgentMode.ToolsAndChat`, `AgentMode.ToolsOnly`) стриминг теперь включается per-role по умолчанию; `ChatOnly` сохраняет поведение через глобальный/явный override.
+- 🔧 Синхронизированы улучшения PlayMode reliability: более жёсткая отмена HTTP stream-запроса и стабилизация сценариев `Streaming_CancellationToken_StopsStream` и `MemoryTool_AppendsMemory`.
 
 ## [v0.22.0] — 2026-04-25
 

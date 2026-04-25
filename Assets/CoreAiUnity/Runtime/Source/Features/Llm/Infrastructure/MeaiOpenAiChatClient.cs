@@ -270,50 +270,62 @@ namespace CoreAI.Infrastructure.Llm
             _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: POST (stream) {url}");
 
             UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
-
-            // Poll for SSE chunks
             int lastProcessed = 0;
-            while (!op.isDone)
+            bool cancelled = false;
+            try
             {
-                if (cancellationToken.IsCancellationRequested)
+                // Poll for SSE chunks
+                while (!op.isDone)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        cancelled = true;
+                        try { webReq.Abort(); } catch { /* ignore */ }
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    string partial = webReq.downloadHandler?.text ?? "";
+                    if (partial.Length > lastProcessed)
+                    {
+                        string newData = partial.Substring(lastProcessed);
+                        lastProcessed = partial.Length;
+
+                        foreach (string chunk in ParseSseChunks(newData))
+                        {
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                        }
+                    }
+
+                    await Task.Yield();
+                }
+
+                // Process any remaining data after request completed
+                if (webReq.result == UnityWebRequest.Result.Success)
+                {
+                    string fullText = webReq.downloadHandler?.text ?? "";
+                    if (fullText.Length > lastProcessed)
+                    {
+                        string remaining = fullText.Substring(lastProcessed);
+                        foreach (string chunk in ParseSseChunks(remaining))
+                        {
+                            yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
+                        }
+                    }
+                }
+                else if (webReq.result != UnityWebRequest.Result.Success && !cancelled &&
+                         !cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"MeaiOpenAiChatClient: stream error — {webReq.error}");
+                }
+            }
+            finally
+            {
+                // If consumer stops enumeration early (or token cancels), close request aggressively.
+                if (!op.isDone)
                 {
                     try { webReq.Abort(); } catch { /* ignore */ }
-                    cancellationToken.ThrowIfCancellationRequested();
                 }
-
-                string partial = webReq.downloadHandler?.text ?? "";
-                if (partial.Length > lastProcessed)
-                {
-                    string newData = partial.Substring(lastProcessed);
-                    lastProcessed = partial.Length;
-
-                    foreach (string chunk in ParseSseChunks(newData))
-                    {
-                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
-                    }
-                }
-
-                await Task.Yield();
-            }
-
-            // Process any remaining data after request completed
-            if (webReq.result == UnityWebRequest.Result.Success)
-            {
-                string fullText = webReq.downloadHandler?.text ?? "";
-                if (fullText.Length > lastProcessed)
-                {
-                    string remaining = fullText.Substring(lastProcessed);
-                    foreach (string chunk in ParseSseChunks(remaining))
-                    {
-                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, chunk);
-                    }
-                }
-            }
-            else if (webReq.result != UnityWebRequest.Result.Success
-                     && !cancellationToken.IsCancellationRequested)
-            {
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"MeaiOpenAiChatClient: stream error — {webReq.error}");
             }
         }
 
@@ -478,4 +490,4 @@ namespace CoreAI.Infrastructure.Llm
         }
     }
 }
-#endif
+#endif
