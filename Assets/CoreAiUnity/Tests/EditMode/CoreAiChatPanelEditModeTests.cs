@@ -29,6 +29,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void IsOpenChatHotkeyFromKeys_C_ReturnsTrue()
+        {
+            Assert.IsTrue(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.C, '\0', false, false, false));
+            Assert.IsTrue(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.None, 'c', false, false, false));
+            Assert.IsTrue(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.None, 'C', false, false, false));
+        }
+
+        [Test]
+        public void IsOpenChatHotkeyFromKeys_CustomLetter_MatchesKeyOrCharacter()
+        {
+            Assert.IsTrue(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.T, KeyCode.T, '\0', false, false, false));
+            Assert.IsTrue(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.T, KeyCode.None, 't', false, false, false));
+        }
+
+        [Test]
+        public void IsOpenChatHotkeyFromKeys_None_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.None, KeyCode.C, '\0', false, false, false));
+        }
+
+        [Test]
+        public void IsOpenChatHotkeyFromKeys_WithCtrl_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.C, '\0', ctrlHeld: true, false, false));
+        }
+
+        [Test]
+        public void IsOpenChatHotkeyFromKeys_OtherKey_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.V, '\0', false, false, false));
+        }
+
+        [Test]
         public void GetSendButtonPresentation_WhenIdle_ReturnsSendState()
         {
             Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(isBusy: false));

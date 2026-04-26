@@ -2,6 +2,19 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.3] - 2026-04-26
+
+### 💬 Chat UI — горячие клавиши C / Esc, глобальный poll и фокус UITK
+
+- ✨ **`CoreAiChatPanel`** — пока чат **свёрнут** (FAB), **C** (латинская, без Ctrl/Cmd/Alt) открывает панель; пока **развёрнут**, **Esc** останавливает активную генерацию (если идёт запрос/стрим) иначе **сворачивает** чат. Обработка **Esc** на фазе `TrickleDown` с корня (`OnRootKeyDown`), чтобы не дублировать логику в `TextField`.
+- ✨ **`Update()`** вызывается на **всех** платформах: внутри — `PollChatToggleShortcuts()` (Legacy `Input.*`), когда у корня UITK **нет** сфокусированного элемента (`Root.focusController.focusedElement`) — чтобы сочетаться с управлением персонажем вне фокуса UI. На WebGL по-прежнему сбрасывается `WebGLInput.captureAllKeyboardInput`. Наследники **`Update()`** должны вызывать `base.Update()` первым, если переопределяют.
+- 🐛 **Совместимость API UITK:** вместо несуществующего на части версий `IPanel.focusedElement` используется **`Root.focusController.focusedElement`**.
+- ✨ **Хук для приложений:** `protected virtual void OnCollapsedStateChanged(bool collapsed)` — вызывается после каждого `SetCollapsed` (связка с геймплеем/курсором — вне пакета, через наследника или DI).
+- 📝 **`CoreAiChat.uxml`** — подсказки: «Открыть чат (C)», «Свернуть чат (Esc)», «Очистить историю»; кнопка очистки истории — символ **`*`**, чтобы не путать с горячей **C** чата.
+- 🧪 **Тесты:** `CoreAiChatPanelEditModeTests` — `IsOpenChatHotkeyFromKeys` (C / модификаторы / прочие клавиши).
+- ⚙️ **`CoreAiChatConfig`** — опции **«Горячие клавиши»**: включить/выключить открытие свёрнутого чата с клавиатуры, выбор **`OpenChatHotkey`** (`KeyCode`, по умолчанию `C`), включить/выключить **Esc** (стоп генерации / сворачивание). Подсказки FAB и буква на FAB обновляются из конфига.
+- ⚙️ **`CoreAiChatPanel` runtime API** — `SetRuntimeOpenChatKeyboardShortcutEnabled` / `SetRuntimeOpenChatHotkey` / `SetRuntimeEscapeChatShortcutsEnabled` (`null` = снова из конфига), `ClearRuntimeHotkeyOverrides()`, свойства **`Effective*`** для итогового поведения.
+
 ## [0.25.2] - 2026-04-26
 
 ### 💬 Chat UI — emoji glyphs в header-кнопках заменены на ASCII (фикс пустых кнопок в WebGL)

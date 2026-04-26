@@ -151,7 +151,7 @@ string json = await CoreAi.OrchestrateAsync(
 |-----|----------------|
 | [DOCS_INDEX](DOCS_INDEX.md) | Full documentation map |
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | One-line `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Customising `CoreAiChatPanel`, styles, events |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, styles, events, FAB/hotkeys ([§ chat-hotkeys](../Runtime/Source/Features/Chat/README_CHAT.md#chat-hotkeys)) |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | How streaming works end-to-end |
 | [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | Architecture, data flow, PR checklist |
 | [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | Roles, model selection strategy |

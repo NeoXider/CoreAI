@@ -57,6 +57,12 @@ namespace CoreAI.Chat
         private bool _isStopping;
         private bool _isClearing;
 
+        /// <summary>Runtime overrides for hotkeys. <c>null</c> = follow <see cref="config"/> (or built-in defaults if config is null).</summary>
+        private bool? _runtimeOverrideOpenChatShortcutEnabled;
+
+        private KeyCode? _runtimeOverrideOpenChatHotkey;
+        private bool? _runtimeOverrideEscapeChatShortcuts;
+
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // true после первого видимого текста
@@ -98,23 +104,20 @@ namespace CoreAI.Chat
 #endif
         }
 
-#if UNITY_WEBGL && !UNITY_EDITOR
         /// <summary>
-        /// На WebGL Unity-плагин периодически возвращает <c>WebGLInput.captureAllKeyboardInput</c>
-        /// в <c>true</c> (триггеры: re-attach JS keyboard handler при фокусе на canvas, переключение
-        /// сцены, отдельные операции с DOM-инпутом, который UITK создаёт под фокус TextField).
-        /// Симптом — фокус в TextField «держится 1 кадр и слетает», ввод недоступен.
-        /// Удерживаем флаг в <c>false</c> каждый кадр: операция дешёвая (один bool-сравнение),
-        /// в Editor/Standalone-сборках полностью stripped через <c>#if</c>.
+        /// WebGL: удерживаем <c>WebGLInput.captureAllKeyboardInput = false</c> (см. <see cref="ConfigureWebGlKeyboardInput"/>).
+        /// Все платформы: глобальные горячие клавиши чата (C / Esc), когда фокус не на UI Toolkit.
         /// </summary>
         protected virtual void Update()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
             if (WebGLInput.captureAllKeyboardInput)
             {
                 WebGLInput.captureAllKeyboardInput = false;
             }
-        }
 #endif
+            PollChatToggleShortcuts();
+        }
 
         protected virtual void OnEnable()
         {
@@ -225,6 +228,7 @@ namespace CoreAI.Chat
 
             if (TypingIndicator != null) TypingIndicator.style.display = DisplayStyle.None;
             UpdateSendButtonVisualState();
+            ApplyShortcutTooltips();
         }
 
         protected virtual void ApplyConfig()
@@ -261,6 +265,86 @@ namespace CoreAI.Chat
             bool defaultCollapsed = IsMobileScreen();
             bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
             SetCollapsed(collapsed, persist: false);
+
+            ApplyShortcutTooltips();
+        }
+
+        /// <summary>
+        /// Подсказки FAB / сворачивания и буква на FAB согласно <see cref="CoreAiChatConfig"/> (горячие клавиши).
+        /// </summary>
+        private void ApplyShortcutTooltips()
+        {
+            if (FabButton != null)
+            {
+                FabButton.tooltip = IsOpenChatKeyboardShortcutEnabled()
+                    ? $"Открыть чат ({FormatHotkeyForTooltip(ResolvedOpenChatHotkey())})"
+                    : "Открыть чат";
+            }
+
+            if (CollapseButton != null)
+            {
+                CollapseButton.tooltip = IsEscapeChatShortcutEnabled()
+                    ? "Свернуть чат (Esc)"
+                    : "Свернуть чат";
+            }
+
+            var fabIcon = Root?.Q<Label>("coreai-chat-fab-icon");
+            if (fabIcon != null)
+            {
+                fabIcon.text = IsOpenChatKeyboardShortcutEnabled()
+                    ? FormatHotkeyFabGlyph(ResolvedOpenChatHotkey())
+                    : "…";
+            }
+        }
+
+        private bool IsOpenChatKeyboardShortcutEnabled()
+        {
+            if (_runtimeOverrideOpenChatShortcutEnabled.HasValue)
+            {
+                return _runtimeOverrideOpenChatShortcutEnabled.Value;
+            }
+
+            return config == null || config.EnableOpenChatKeyboardShortcut;
+        }
+
+        private bool IsEscapeChatShortcutEnabled()
+        {
+            if (_runtimeOverrideEscapeChatShortcuts.HasValue)
+            {
+                return _runtimeOverrideEscapeChatShortcuts.Value;
+            }
+
+            return config == null || config.EnableEscapeChatShortcuts;
+        }
+
+        private KeyCode ResolvedOpenChatHotkey()
+        {
+            if (_runtimeOverrideOpenChatHotkey.HasValue)
+            {
+                return _runtimeOverrideOpenChatHotkey.Value;
+            }
+
+            return config != null ? config.OpenChatHotkey : KeyCode.C;
+        }
+
+        private static string FormatHotkeyForTooltip(KeyCode key)
+        {
+            if (key >= KeyCode.A && key <= KeyCode.Z)
+            {
+                return ((char)('A' + (key - KeyCode.A))).ToString();
+            }
+
+            return key.ToString();
+        }
+
+        private static string FormatHotkeyFabGlyph(KeyCode key)
+        {
+            if (key >= KeyCode.A && key <= KeyCode.Z)
+            {
+                return ((char)('A' + (key - KeyCode.A))).ToString();
+            }
+
+            return key == KeyCode.None ? "…" : (key.ToString().Length <= 3 ? key.ToString() : "…");
         }
 
         /// <summary>
@@ -363,6 +447,64 @@ namespace CoreAI.Chat
                 // чтобы пользователь сразу мог продолжить печатать.
                 InputField?.schedule.Execute(FocusInputField);
             }
+
+            OnCollapsedStateChanged(collapsed);
+        }
+
+        /// <summary>
+        /// Вызывается после каждого изменения свёрнутости панели (в т.ч. из <see cref="SetCollapsed"/>).
+        /// Наследники могут синхронизировать FPS-управление, курсор и т.п.
+        /// </summary>
+        /// <param name="collapsed"><c>true</c> — панель свернута в FAB; <c>false</c> — развёрнута.</param>
+        protected virtual void OnCollapsedStateChanged(bool collapsed)
+        {
+        }
+
+        // ===================== Hotkeys — runtime API (поверх CoreAiChatConfig) =====================
+
+        /// <summary>Эффективное значение после слияния <see cref="config"/> и runtime-переопределений.</summary>
+        public bool EffectiveOpenChatKeyboardShortcutEnabled => IsOpenChatKeyboardShortcutEnabled();
+
+        /// <summary>Эффективная клавиша открытия свёрнутого чата.</summary>
+        public KeyCode EffectiveOpenChatHotkey => ResolvedOpenChatHotkey();
+
+        /// <summary>Эффективно ли панель обрабатывает Esc (стоп / сворачивание).</summary>
+        public bool EffectiveEscapeChatShortcutsEnabled => IsEscapeChatShortcutEnabled();
+
+        /// <summary>
+        /// Переопределить, разрешено ли открывать чат с клавиатуры в свёрнутом виде. <c>null</c> — снова из <see cref="config"/>.
+        /// </summary>
+        public void SetRuntimeOpenChatKeyboardShortcutEnabled(bool? enabled)
+        {
+            _runtimeOverrideOpenChatShortcutEnabled = enabled;
+            ApplyShortcutTooltips();
+        }
+
+        /// <summary>
+        /// Переопределить клавишу открытия (свёрнутый чат). <c>null</c> — снова из <see cref="config"/> (или <see cref="KeyCode.C"/>).
+        /// </summary>
+        public void SetRuntimeOpenChatHotkey(KeyCode? hotkey)
+        {
+            _runtimeOverrideOpenChatHotkey = hotkey;
+            ApplyShortcutTooltips();
+        }
+
+        /// <summary>
+        /// Переопределить обработку Esc развёрнутой панелью. <c>false</c> — Esc не трогает чат (удобно для FPS). <c>null</c> — из <see cref="config"/>.
+        /// </summary>
+        public void SetRuntimeEscapeChatShortcutsEnabled(bool? enabled)
+        {
+            _runtimeOverrideEscapeChatShortcuts = enabled;
+            ApplyShortcutTooltips();
+        }
+
+        /// <summary>Сбросить все runtime-переопределения горячих клавиш.</summary>
+        public void ClearRuntimeHotkeyOverrides()
+        {
+            _runtimeOverrideOpenChatShortcutEnabled = null;
+            _runtimeOverrideOpenChatHotkey = null;
+            _runtimeOverrideEscapeChatShortcuts = null;
+            ApplyShortcutTooltips();
         }
 
         protected virtual void InitService()
@@ -380,16 +522,8 @@ namespace CoreAI.Chat
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
-            if (IsEscape(evt))
-            {
-                if (IsRequestInProgress())
-                {
-                    evt.StopImmediatePropagation();
-                    evt.PreventDefault();
-                    StopActiveGeneration();
-                }
-                return;
-            }
+            // Esc обрабатывается в OnRootKeyDown (фаза TrickleDown с корня), чтобы один раз
+            // свернуть чат / остановить генерацию и не дублировать логику здесь.
 
             // В UI Toolkit multi-line TextField на Shift+Enter иногда приходит
             // character = '\n', а keyCode = None. Поэтому проверяем оба поля.
@@ -416,14 +550,115 @@ namespace CoreAI.Chat
 
         private void OnRootKeyDown(KeyDownEvent evt)
         {
-            if (!IsEscape(evt) || !IsRequestInProgress())
+            if (IsCollapsed && IsOpenChatKeyboardShortcutEnabled() &&
+                IsOpenChatHotkeyFromKeys(ResolvedOpenChatHotkey(), evt.keyCode, evt.character, evt.ctrlKey, evt.commandKey, evt.altKey))
             {
+                evt.StopImmediatePropagation();
+                evt.PreventDefault();
+                SetCollapsed(false, persist: true);
                 return;
             }
 
-            evt.StopImmediatePropagation();
-            evt.PreventDefault();
-            StopActiveGeneration();
+            if (!IsCollapsed && IsEscapeChatShortcutEnabled() && IsEscape(evt))
+            {
+                evt.StopImmediatePropagation();
+                evt.PreventDefault();
+                if (IsRequestInProgress())
+                {
+                    StopActiveGeneration();
+                }
+                else
+                {
+                    SetCollapsed(true, persist: true);
+                }
+            }
+        }
+
+        /// <summary>Сопоставление нажатия с выбранной в конфиге клавишей открытия (без модификаторов).</summary>
+        internal static bool IsOpenChatHotkeyFromKeys(
+            KeyCode openHotkey,
+            KeyCode keyCode,
+            char character,
+            bool ctrlHeld,
+            bool commandHeld,
+            bool altHeld)
+        {
+            if (ctrlHeld || commandHeld || altHeld)
+            {
+                return false;
+            }
+
+            if (openHotkey == KeyCode.None)
+            {
+                return false;
+            }
+
+            if (keyCode == openHotkey)
+            {
+                return true;
+            }
+
+            if (openHotkey >= KeyCode.A && openHotkey <= KeyCode.Z)
+            {
+                char expectedLower = (char)('a' + (openHotkey - KeyCode.A));
+                return char.ToLowerInvariant(character) == expectedLower;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Legacy Input: C / Esc когда фокус не на UITK (например, управление персонажем).
+        /// При активном только New Input System вызов тихо пропускается — тогда работают события <see cref="OnRootKeyDown"/>.
+        /// </summary>
+        private void PollChatToggleShortcuts()
+        {
+            try
+            {
+                // IPanel не всегда имеет focusedElement — используем FocusController с корня UIDocument.
+                bool noUitkKeyboardFocus =
+                    Root == null ||
+                    Root.focusController == null ||
+                    Root.focusController.focusedElement == null;
+
+                if (!noUitkKeyboardFocus)
+                {
+                    return;
+                }
+
+                if (IsCollapsed)
+                {
+                    if (IsOpenChatKeyboardShortcutEnabled() &&
+                        Input.GetKeyDown(ResolvedOpenChatHotkey()) &&
+                        !Input.GetKey(KeyCode.LeftControl) &&
+                        !Input.GetKey(KeyCode.RightControl) &&
+                        !Input.GetKey(KeyCode.LeftCommand) &&
+                        !Input.GetKey(KeyCode.RightCommand) &&
+                        !Input.GetKey(KeyCode.LeftAlt) &&
+                        !Input.GetKey(KeyCode.RightAlt))
+                    {
+                        SetCollapsed(false, persist: true);
+                    }
+                }
+                else if (IsEscapeChatShortcutEnabled())
+                {
+                    if (Input.GetKeyDown(KeyCode.Escape))
+                    {
+                        if (IsRequestInProgress())
+                        {
+                            StopActiveGeneration();
+                        }
+                        else
+                        {
+                            SetCollapsed(true, persist: true);
+                        }
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Player Settings: только New Input System — Input.* недоступен.
+            }
         }
 
         private static bool IsEscape(KeyDownEvent evt)

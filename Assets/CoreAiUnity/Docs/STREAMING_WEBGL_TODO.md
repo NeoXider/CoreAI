@@ -1,6 +1,6 @@
 # TODO — WebGL SSE streaming в `OpenAiChatLlmClient`
 
-**Статус:** известная регрессия, не входит в 0.25.2. Workaround доступен на стороне приложения.
+**Статус:** известная регрессия, не входит в 0.25.3. Workaround доступен на стороне приложения.
 
 **Затронутый код:** `Runtime/Source/Features/Llm/OpenAiChatLlmClient.cs` → `MeaiOpenAiChatClient.CompleteStreamingAsync`.
 
@@ -122,7 +122,7 @@ race в `_thinkFilter.ProcessChunk` глотает префикс. Точная 
 
 ## 4. Предложенный порядок работ
 
-1. **Сейчас (0.25.2):** документировать (этот файл) + workaround на стороне приложения.
+1. **Сейчас (0.25.3):** документировать (этот файл) + workaround на стороне приложения.
 2. **0.26.0 (минор):** Решение C — `ShouldUseStreamingForRole` virtual hook + дефолтная
    реализация, возвращающая `false` под `#if UNITY_WEBGL && !UNITY_EDITOR`. Сразу убрать
    симптом «бесконечной анимации» для всех проектов на CoreAI.

@@ -48,6 +48,21 @@ namespace CoreAI.Chat
         [Tooltip("Максимальная длина сообщения (0 = без лимита).")]
         [SerializeField] private int _maxMessageLength = 2000;
 
+        [Header("Горячие клавиши")]
+        [Tooltip(
+            "Пока чат свёрнут (FAB), разрешить открытие с клавиатуры (UI Toolkit + опрос Legacy Input, когда фокус не на UITK). Выключите, если клавиша конфликтует с управлением в игре.")]
+        [SerializeField]
+        private bool _enableOpenChatKeyboardShortcut = true;
+
+        [Tooltip("Клавиша открытия свёрнутого чата (без Ctrl / Cmd / Alt). Игнорируется, если открытие с клавиатуры выключено.")]
+        [SerializeField]
+        private KeyCode _openChatHotkey = KeyCode.C;
+
+        [Tooltip(
+            "Пока чат развёрнут: Esc останавливает генерацию (если идёт) или сворачивает панель. Выключите, если Esc нужен только игроку.")]
+        [SerializeField]
+        private bool _enableEscapeChatShortcuts = true;
+
         [Header("Ошибки")]
         [SerializeField] private string _errorMessagePrefix = "Error: ";
         [SerializeField] private string _timeoutMessage = "Request timeout.";
@@ -66,6 +81,9 @@ namespace CoreAI.Chat
         public int ChatHeight => _chatHeight;
         public bool SendOnShiftEnter => _sendOnShiftEnter;
         public int MaxMessageLength => _maxMessageLength;
+        public bool EnableOpenChatKeyboardShortcut => _enableOpenChatKeyboardShortcut;
+        public KeyCode OpenChatHotkey => _openChatHotkey;
+        public bool EnableEscapeChatShortcuts => _enableEscapeChatShortcuts;
         public string ErrorMessagePrefix => _errorMessagePrefix;
         public string TimeoutMessage => _timeoutMessage;
         public string NoResponseMessage => _noResponseMessage;

@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.25.3] — 2026-04-26
+
+### Release sync с `com.nexoider.coreaiunity 0.25.3`
+
+- 🔧 Версия пакета поднята до `0.25.3`. Манифест зависимости `coreaiunity 0.25.3 → coreai 0.25.3`.
+- ✅ Изменений в публичном API **`CoreAI.Core`** нет — релиз только Unity-слоя. Подробности: `Assets/CoreAiUnity/CHANGELOG.md` (0.25.3: горячие клавиши чата C/Esc, `Update` + poll при отсутствии фокуса UITK, фикс `FocusController`, хук `OnCollapsedStateChanged`, UXML/tooltip).
+
 ## [v0.25.2] — 2026-04-26
 
 ### Release sync с `com.nexoider.coreaiunity 0.25.2`

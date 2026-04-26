@@ -26,6 +26,7 @@
 - **Welcome Message** — приветственное сообщение
 - **Enable Streaming** — потоковая генерация ответов
 - **Send On Shift+Enter** — горячая клавиша отправки
+- **Горячие клавиши** (с 0.25.3) — см. раздел [ниже](#chat-hotkeys)
 
 ### 2. Добавьте на сцену
 
@@ -48,6 +49,57 @@
 
 Кастомная вёрстка: если вы **копируете** UXML в свой проект, добавьте те же имена элементов или переопределите привязку в наследнике `CoreAiChatPanel` (переопределите `BindUI` и вызовите `base.BindUI()` либо продублируйте логику).
 
+<a id="chat-hotkeys"></a>
+
+## Горячие клавиши FAB / Esc (настраиваются в `CoreAiChatConfig`) — с 0.25.3
+
+Все переключатели — в asset **CoreAI → Chat Config** на панели (`CoreAiChatPanel.config`):
+
+| Поле | Назначение |
+|------|------------|
+| **Enable Open Chat Keyboard Shortcut** | Если выключено — чат из свёрнутого (FAB) открывается **только кликом** по FAB, без клавиши. |
+| **Open Chat Hotkey** | `KeyCode` открытия свёрнутого чата (по умолчанию **C**). Для **A–Z** учитываются и код клавиши, и вводимый символ (без Ctrl / Cmd / Alt). |
+| **Enable Escape Chat Shortcuts** | Если выключено — **Esc** не обрабатывается панелью (удобно, если Esc полностью отдан FPS / паузе). |
+
+### Из кода (поверх конфига)
+
+У `CoreAiChatPanel` есть **runtime-переопределения** (имеют приоритет над `CoreAiChatConfig`, пока не сброшены):
+
+| Метод / свойство | Назначение |
+|------------------|------------|
+| `SetRuntimeEscapeChatShortcutsEnabled(false)` | Полностью отключить Esc у чата (стоп генерации + сворачивание), не меняя asset. |
+| `SetRuntimeEscapeChatShortcutsEnabled(null)` | Снова следовать полю **Enable Escape Chat Shortcuts** в конфиге. |
+| `SetRuntimeOpenChatKeyboardShortcutEnabled(bool?)` | Включить/выключить клавишу открытия свёрнутого чата. |
+| `SetRuntimeOpenChatHotkey(KeyCode?)` | Сменить клавишу открытия в рантайме. |
+| `ClearRuntimeHotkeyOverrides()` | Сбросить все три переопределения. |
+| `EffectiveOpenChatKeyboardShortcutEnabled`, `EffectiveOpenChatHotkey`, `EffectiveEscapeChatShortcutsEnabled` | Текущее итоговое поведение (конфиг + оверрайды). |
+
+Пример: отдать Esc только игроку, пока открыт мир:
+
+```csharp
+void OnWorldMapOpened()
+{
+    chatPanel.SetRuntimeEscapeChatShortcutsEnabled(false);
+}
+
+void OnWorldMapClosed()
+{
+    chatPanel.SetRuntimeEscapeChatShortcutsEnabled(null); // или true
+}
+```
+
+**Поведение по умолчанию (оба флага включены):**
+
+- Пока чат **свёрнут** — нажатие настроенной клавиши открывает панель (обработка в `OnRootKeyDown` на фазе `TrickleDown` с корня `UIDocument`).
+- Пока чат **развёрнут** — **Esc** сначала останавливает активную генерацию (если идёт запрос/стрим), иначе **сворачивает** панель в FAB.
+- Дополнительно в **`Update()`** вызывается опрос **Legacy `Input.GetKeyDown`** только когда у корня UITK **нет** сфокусированного элемента (`Root.focusController.focusedElement == null`) — чтобы сочетаться с управлением персонажем, когда фокус не в UI. На **WebGL** в том же `Update()` по-прежнему сбрасывается `WebGLInput.captureAllKeyboardInput`.
+
+**Ограничение:** если в *Player Settings* включён только **New Input System** без Legacy, `Input.*` недоступен — ветка опроса в `Update` тихо пропускается; клавиши работают, пока фокус клавиатуры в дереве UITK (или подключите свой слой ввода / `Both` в Active Input Handling).
+
+**Интеграция с геймплеем:** после каждого `SetCollapsed` вызывается `protected virtual void OnCollapsedStateChanged(bool collapsed)` — в наследнике можно подписать паузу движения, курсор и т.д., не таща игровые контроллеры в CoreAI.
+
+Наследники **`Update()`** должны вызывать **`base.Update()` первым**, если переопределяют метод (иначе потеряете WebGL-фикс и poll горячих клавиш).
+
 ## Остановка генерации (Stop) — с 0.22.0
 
 Во время активной генерации `CoreAiChatPanel` автоматически переключает кнопку отправки в режим остановки:
@@ -59,13 +111,13 @@
 Остановить текущий ответ можно двумя способами:
 
 - нажать кнопку отправки повторно (в режиме `Stop`);
-- нажать `Esc` пока чат генерирует ответ.
+- нажать `Esc` пока чат генерирует ответ (если в `CoreAiChatConfig` включён **Enable Escape Chat Shortcuts**).
 
 Под капотом вызывается `CoreAi.StopAgent(roleId)` и отменяется активный `CancellationToken` запроса, поэтому останавливаются и текущая генерация, и задачи этой роли в очереди оркестратора.
 
 ## Очистка контекста из UI
 
-Кнопка `C` в хеддере (`coreai-chat-clear`) вызывает `ClearChat()`:
+Кнопка **`*`** в хеддере (`coreai-chat-clear`) вызывает `ClearChat()`:
 
 - очищает сообщения в UI;
 - по умолчанию очищает только историю чата (`clearChatHistory: true`, `clearLongTermMemory: false`).
