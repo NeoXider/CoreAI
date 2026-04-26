@@ -10,6 +10,7 @@
 - ✨ **`CoreAiChatPanel.SubmitMessageFromExternalAsync(messageText, options, cancellationToken)`** — сценарии из кода (кат-сцены, квесты, кнопки в мире): опция **`CoreAiChatExternalSubmitOptions.AppendUserMessageToChat`** (по умолчанию `true`, пузырь пользователя), **`SimulatedAssistantReply`** — показать ответ ассистента **без вызова LLM**; возврат текста ответа или `null` при занятости панели / отмене / пустом тексте после **`OnMessageSending`**.
 - ✨ Внутренний общий путь **`RunAgentTurnAsync`** для UI-отправки и внешней; стриминг / non-streaming возвращают финальную строку для вызывающего кода.
 - 📝 **`README_CHAT.md`** — раздел про программный вызов; раздел Stop без ссылки на кнопку в шапке.
+- 🧪 **EditMode:** `CoreAiChatExternalSubmitOptionsEditModeTests` (дефолты опций); в **`CoreAiChatConfigEditModeTests`** — проверки **`LoadPersistedChatOnStartup`** / **`MaxPersistedMessagesForUi`**.
 - 🔧 Версия пакета **`0.25.5`**.
 
 ## [0.25.4] - 2026-04-26

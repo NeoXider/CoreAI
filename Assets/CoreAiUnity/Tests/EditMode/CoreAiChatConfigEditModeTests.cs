@@ -29,6 +29,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(string.IsNullOrEmpty(config.ErrorMessagePrefix));
             Assert.IsFalse(string.IsNullOrEmpty(config.TimeoutMessage));
             Assert.IsFalse(string.IsNullOrEmpty(config.NoResponseMessage));
+            Assert.IsTrue(config.LoadPersistedChatOnStartup, "по умолчанию подгружаем сохранённую историю в UI");
+            Assert.AreEqual(0, config.MaxPersistedMessagesForUi, "0 = без лимита при подгрузке");
 
             Object.DestroyImmediate(config);
         }
