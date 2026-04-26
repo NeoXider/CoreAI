@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.25.1] — 2026-04-26
+
+### Release sync — version alignment с `com.nexoider.coreaiunity 0.25.1`
+
+- 🔧 Версия пакета поднята до `0.25.1`, чтобы синхронизироваться с релизом `com.nexoider.coreaiunity 0.25.1` (там вышли два WebGL/input-фикса — см. ниже).
+- 🔧 Манифест зависимости `com.nexoider.coreaiunity` теперь требует `com.nexoider.coreai 0.25.1` (раньше `0.25.0`).
+- ✅ **Никаких breaking-изменений в `CoreAI.Core` API** не вносилось — это чистый release-sync. Существующий код, использующий `LlmToolChoiceMode`, `AiTaskRequest.ForcedToolMode`, оркестратор и т.д., работает без правок.
+
+### Контекст релиза CoreAI Unity 0.25.1 (что фактически починено в Unity-слое)
+
+- 🐛 **WebGL TextField focus persistence** — `CoreAiChatPanel` теперь удерживает `WebGLInput.captureAllKeyboardInput = false` каждый кадр (Update-watchdog под `#if UNITY_WEBGL && !UNITY_EDITOR`). Симптом-«фокус 1 кадр и слетает» в собранном WebGL-билде устранён.
+- 🐛 **Совместимость с обеими input-системами Unity** — `OrchestrationDashboard` больше не падает при `Active Input Handling = Input System Package (New)`. `CoreAI.Source.asmdef` объявляет soft-зависимость `Unity.InputSystem` через `versionDefines` (`COREAI_HAS_INPUT_SYSTEM`).
+- Подробности — в `Assets/CoreAiUnity/CHANGELOG.md` (запись 0.25.1).
+
 ## [v0.25.0] — 2026-04-26
 
 ### Forced Tool Mode — deterministic tool selection per request

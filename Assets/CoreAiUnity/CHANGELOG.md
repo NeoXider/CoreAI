@@ -2,6 +2,25 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.1] - 2026-04-26
+
+### 💬 Chat UI — WebGL TextField focus persistence (фикс «фокус держится 1 кадр и слетает»)
+
+- 🐛 **`CoreAiChatPanel.Update()` (только WebGL)** удерживает `WebGLInput.captureAllKeyboardInput = false` каждый кадр.
+  - **Симптом:** на собранном WebGL-билде клик по `TextField` чата приводит к фокусу ровно на 1 кадр, после чего фокус слетает и набор текста становится невозможен. В Editor проблема не воспроизводится.
+  - **Причина:** Unity-плагин WebGL периодически возвращает `captureAllKeyboardInput` обратно в `true` — re-attach JS keyboard handler при возврате фокуса на canvas, переключение сцены, отдельные операции с DOM-инпутом, который UITK создаёт под фокус `TextField`. Существующий one-shot `ConfigureWebGlKeyboardInput()` в `Awake()` отрабатывал ровно один раз при старте панели и больше не пересинхронизировался.
+  - **Фикс:** в `CoreAiChatPanel` добавлен `protected virtual void Update()` под `#if UNITY_WEBGL && !UNITY_EDITOR`, который сравнивает `WebGLInput.captureAllKeyboardInput` с `false` и переустанавливает в `false` при изменении. Операция дешёвая (одно булево сравнение, запись только при расхождении), в Editor / Standalone полностью stripped через `#if`.
+  - **Не возвращён `FocusOutEvent`-loop из 0.21.4** (он флипал каретку — см. 0.21.6) — Update-watchdog воздействует на источник проблемы (capture flag), а не на сам фокус UITK.
+  - **Override-friendly:** метод `protected virtual`, наследники могут расширять (например, добавить свой watchdog для дополнительных WebGL-фиксов), вызывая `base.Update()` первым.
+
+### 🎮 Input compatibility — Legacy Input Manager + new Input System Package
+
+- 🐛 **`OrchestrationDashboard` падал** при `Active Input Handling = Input System Package (New)`. Прямой вызов `Input.GetKeyDown()` бросает `InvalidOperationException`, когда legacy Input Manager отключён, и панель метрик падала на каждом кадре.
+- ✅ **Новый хелпер `IsToggleKeyPressedThisFrame()`** инкапсулирует обращение к обеим input-системам через `#if ENABLE_LEGACY_INPUT_MANAGER` / `#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM`. При `Active Input Handling = Both` используются обе ветки (legacy первой как fast-path).
+- ✅ **`CoreAI.Source.asmdef`** объявляет soft-зависимость `Unity.InputSystem` в `references` + `versionDefines` (`com.unity.inputsystem >= 1.0.0` → `COREAI_HAS_INPUT_SYSTEM`). Если пакет Input System не установлен — `using UnityEngine.InputSystem;` и весь new-input код полностью stripped, проект собирается без warning'ов.
+- ✅ **Маппинг `KeyCode → Key`** через `ToInputSystemKey()` покрывает функциональные клавиши F1-F12, BackQuote, Tab, Escape, Enter, Space (актуально для дашборда; неподдерживаемые клавиши возвращают `Key.None` — ожидание расширения по запросу).
+- ⚠️ **Совместимость:** ничего не сломано для проектов на legacy Input Manager (поведение идентично 0.25.0). Для проектов на new Input System требуется установить `com.unity.inputsystem` (versionDefines активирует Input-System ветку автоматически).
+
 ## [0.25.0] - 2026-04-26
 
 ### Forced Tool Mode (provider tool_choice) — deterministic tool calls

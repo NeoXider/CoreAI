@@ -6,7 +6,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.nexoider.coreaiunity` — [`package.json`](package.json) | `com.nexoider.coreai` **v0.24.2** | ✅ Production |
+| `com.nexoider.coreaiunity` **v0.25.1** — [`package.json`](package.json) | `com.nexoider.coreai` **v0.25.1** | ✅ Production |
 
 *Languages:* [English](../../README.md) · [Русский](../../README_RU.md)
 
@@ -43,8 +43,10 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 ---
 
-## 🆕 What's new (0.22 → 0.24)
+## 🆕 What's new (0.22 → 0.25)
 
+- 🩹 **0.25.1** — **WebGL TextField focus persistence + dual-input-system support.** `CoreAiChatPanel` под `#if UNITY_WEBGL && !UNITY_EDITOR` каждый кадр держит `WebGLInput.captureAllKeyboardInput = false` — устранён симптом «фокус 1 кадр и слетает» в собранном WebGL-билде. `OrchestrationDashboard` совместим с `Active Input Handling = Input System Package (New)` (раньше падал `InvalidOperationException`); `CoreAI.Source.asmdef` объявляет soft-зависимость `Unity.InputSystem` через `versionDefines` (`COREAI_HAS_INPUT_SYSTEM`).
+- 🎯 **0.25.0** — **Forced tool mode.** `LlmToolChoiceMode` (`Auto`/`RequireAny`/`RequireSpecific`/`None`) на `AiTaskRequest`/`LlmCompletionRequest`. Streaming honours forced mode только на первой итерации (потом сброс в `Auto`). `CoreAiChatPanel.BuildAiTaskRequest` virtual hook для подмешивания полей в подклассах.
 - 🔧 **0.24.2** — HTTP errors now show the API response body (not just `400 Bad Request`); `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1; docs refresh.
 - 🧩 **0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE, `ToolExecutionPolicy` shared between streaming/non-streaming, hardened JSON extraction with code-block protection, UI stop deduplication.
 - 🎮 **0.22** — Agent Control API: `StopAgent`, `ClearContext`, `OnToolExecuted`, chat clear 🗑 button, Escape-to-stop.

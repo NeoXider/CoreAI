@@ -98,6 +98,24 @@ namespace CoreAI.Chat
 #endif
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        /// <summary>
+        /// На WebGL Unity-плагин периодически возвращает <c>WebGLInput.captureAllKeyboardInput</c>
+        /// в <c>true</c> (триггеры: re-attach JS keyboard handler при фокусе на canvas, переключение
+        /// сцены, отдельные операции с DOM-инпутом, который UITK создаёт под фокус TextField).
+        /// Симптом — фокус в TextField «держится 1 кадр и слетает», ввод недоступен.
+        /// Удерживаем флаг в <c>false</c> каждый кадр: операция дешёвая (один bool-сравнение),
+        /// в Editor/Standalone-сборках полностью stripped через <c>#if</c>.
+        /// </summary>
+        protected virtual void Update()
+        {
+            if (WebGLInput.captureAllKeyboardInput)
+            {
+                WebGLInput.captureAllKeyboardInput = false;
+            }
+        }
+#endif
+
         protected virtual void OnEnable()
         {
             var uiDoc = GetComponent<UIDocument>();

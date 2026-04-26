@@ -1,6 +1,9 @@
 using System.Text;
 using CoreAI.Ai;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace CoreAI.Diagnostics
 {
@@ -31,11 +34,70 @@ namespace CoreAI.Diagnostics
 
         private void Update()
         {
-            if (Input.GetKeyDown(_toggleKey))
+            if (IsToggleKeyPressedThisFrame())
             {
                 _showDashboard = !_showDashboard;
             }
         }
+
+        /// <summary>
+        /// Совместимо с обоими input-системами Unity: Legacy Input Manager и new Input System Package.
+        /// При <c>Active Input Handling = Both</c> сначала пробуем legacy (быстрый путь), затем new.
+        /// При установленном только Input System пакете обращение к <c>UnityEngine.Input</c>
+        /// бросает <c>InvalidOperationException</c>, поэтому защищены символом <c>ENABLE_LEGACY_INPUT_MANAGER</c>.
+        /// </summary>
+        private bool IsToggleKeyPressedThisFrame()
+        {
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(_toggleKey))
+            {
+                return true;
+            }
+#endif
+#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            if (kb != null)
+            {
+                Key key = ToInputSystemKey(_toggleKey);
+                if (key != Key.None && kb[key].wasPressedThisFrame)
+                {
+                    return true;
+                }
+            }
+#endif
+            return false;
+        }
+
+#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
+        /// <summary>
+        /// Маппинг наиболее популярных <see cref="KeyCode"/> → new-Input-System <see cref="Key"/>.
+        /// Возвращает <see cref="Key.None"/> для неподдерживаемых, чтобы клиент мог переопределить.
+        /// </summary>
+        private static Key ToInputSystemKey(KeyCode keyCode)
+        {
+            switch (keyCode)
+            {
+                case KeyCode.F1: return Key.F1;
+                case KeyCode.F2: return Key.F2;
+                case KeyCode.F3: return Key.F3;
+                case KeyCode.F4: return Key.F4;
+                case KeyCode.F5: return Key.F5;
+                case KeyCode.F6: return Key.F6;
+                case KeyCode.F7: return Key.F7;
+                case KeyCode.F8: return Key.F8;
+                case KeyCode.F9: return Key.F9;
+                case KeyCode.F10: return Key.F10;
+                case KeyCode.F11: return Key.F11;
+                case KeyCode.F12: return Key.F12;
+                case KeyCode.BackQuote: return Key.Backquote;
+                case KeyCode.Tab: return Key.Tab;
+                case KeyCode.Escape: return Key.Escape;
+                case KeyCode.Return: return Key.Enter;
+                case KeyCode.Space: return Key.Space;
+                default: return Key.None;
+            }
+        }
+#endif
 
         private void InitStyles()
         {

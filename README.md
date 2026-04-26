@@ -18,7 +18,7 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.25.0** · `ForcedToolMode` (deterministic tool_choice) · multi-round streaming tool loop · `CoreAiChatPanel.BuildAiTaskRequest` extension hook · HTTP error diagnostics · `ToolExecutionPolicy` hardening
+**Version:** **v0.25.1** · WebGL `TextField` focus persistence (Update-watchdog `WebGLInput.captureAllKeyboardInput=false`) · cross-input-system compatibility (`OrchestrationDashboard` works on both Legacy Input Manager и new Input System Package) · `ForcedToolMode` (deterministic tool_choice) · multi-round streaming tool loop · `CoreAiChatPanel.BuildAiTaskRequest` extension hook
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -42,6 +42,7 @@
 
 ## 🆕 What's new (0.22 → 0.25)
 
+- 🩹 **v0.25.1** — **WebGL chat input fix + dual-input-system support.** `CoreAiChatPanel` теперь удерживает `WebGLInput.captureAllKeyboardInput = false` каждый кадр на WebGL — фикс знакомого «фокус в `TextField` держится 1 кадр и слетает» в собранном WebGL-билде. `OrchestrationDashboard` совместим с обеими input-системами Unity (Legacy Input Manager и new Input System Package) через `#if ENABLE_LEGACY_INPUT_MANAGER` / `ENABLE_INPUT_SYSTEM` + `versionDefines` в `CoreAI.Source.asmdef` (`COREAI_HAS_INPUT_SYSTEM`). Никаких breaking-изменений API.
 - 🎯 **v0.25.0** — **Forced tool mode.** New enum `LlmToolChoiceMode` (`Auto` / `RequireAny` / `RequireSpecific` / `None`) on `AiTaskRequest` and `LlmCompletionRequest` — application code (intent classifiers, retry pipelines) can guarantee tool emission for a single call without changing the agent definition. Streaming honours the forced mode on the first iteration only, then resets to `Auto` so multi-round tool loops stay sane. New `CoreAiChatPanel.BuildAiTaskRequest` virtual hook lets subclasses inject extra fields without rewriting the chat pipeline. Streaming + tool calling is on by default for tool-equipped agents (Claude Code / Cursor-style live token UX with silent tool execution).
 - 🔧 **v0.24.2** — HTTP error responses now include the API body (not just `400 Bad Request`), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1, docs refresh.
 - 🧩 **v0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE (OpenAI, Anthropic), `ToolExecutionPolicy` shared across streaming/non-streaming paths, hardened `TryExtractToolCallsFromText` with code-block protection, UI stop deduplication.
