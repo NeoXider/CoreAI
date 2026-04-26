@@ -2,6 +2,15 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.2] - 2026-04-26
+
+### 💬 Chat UI — emoji glyphs в header-кнопках заменены на ASCII (фикс пустых кнопок в WebGL)
+
+- 🐛 **`Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`** — кнопка `coreai-chat-stop` теперь рендерится как `■` (Geometric Shapes U+25A0, входит в LiberationSans / стандартный TMP fallback) вместо `⏹` (Misc Technical U+23F9, в дефолтных WebGL-шрифтах отсутствует и рисовался пустым прямоугольником).
+- **Контекст:** в собранном WebGL-плеере Unity не подгружает emoji-fallback (Noto Color Emoji и т.п.), поэтому любые символы из эмодзи-плоскостей (U+1F300-U+1FAFF, частично U+2600-U+27BF, U+23F0-U+23FF) рендерятся как `□` или вообще не видно в круглой кнопке. ASCII / Latin-1 / Geometric Shapes (U+2580-U+25FF) гарантированно есть в дефолтном font-asset, поэтому — переезд на `■`.
+- **Совместимость:** изменение чисто косметическое, никаких API-изменений. Проекты, переопределяющие текст кнопок в своих UXML, не затронуты. Tooltip остался прежним («Остановить агента и генерацию»), так что UX не страдает.
+- **Известное TODO (не входит в 0.25.2):** в WebGL `UnityWebRequest` не отдаёт SSE по частям, из-за чего `OpenAiChatLlmClient.CompleteStreamingAsync` присылает один терминальный чанк вместо потока — стриминговый UI зависает («ответ не пишется + бесконечная анимация набора»). Подробности и план фикса — в [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). Workaround на стороне приложения — принудительно `CoreAiChatConfig.EnableStreaming = false` под `#if UNITY_WEBGL && !UNITY_EDITOR` (пример — `RedoSchool/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs`).
+
 ## [0.25.1] - 2026-04-26
 
 ### 💬 Chat UI — WebGL TextField focus persistence (фикс «фокус держится 1 кадр и слетает»)

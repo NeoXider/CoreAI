@@ -7,7 +7,7 @@
         <ui:VisualElement name="coreai-chat-header" class="coreai-chat-header">
             <ui:VisualElement name="coreai-chat-header-icon" class="coreai-chat-header-icon"/>
             <ui:Label name="coreai-chat-header-title" class="coreai-chat-header-title"/>
-            <ui:Button name="coreai-chat-stop" text="⏹" class="coreai-chat-header-btn" tooltip="Остановить агента и генерацию"/>
+            <ui:Button name="coreai-chat-stop" text="■" class="coreai-chat-header-btn" tooltip="Остановить агента и генерацию"/>
             <ui:Button name="coreai-chat-clear" text="C" class="coreai-chat-header-btn" tooltip="Clear chat history"/>
             <ui:Button name="coreai-chat-collapse" text="-" class="coreai-chat-header-btn" tooltip="Collapse chat"/>
         </ui:VisualElement>

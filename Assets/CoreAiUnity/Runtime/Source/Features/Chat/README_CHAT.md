@@ -114,8 +114,15 @@ new AgentBuilder("JsonParser")
 
 | Бэкенд | Механизм | Реальный стриминг? |
 |--------|----------|--------------------|
-| **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → парсинг `data:` чанков | ✅ Да |
+| **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → парсинг `data:` чанков | ✅ Да (Standalone / Editor); ⚠️ нет на WebGL — см. ниже |
 | **LLMUnity** (локальная GGUF) | `LLMAgent.Chat(callback)` → дельта через ConcurrentQueue | ✅ Да |
+
+> ⚠️ **WebGL caveat (актуально для 0.25.x).** В собранном WebGL-плеере `UnityWebRequest`-обёртка
+> (emscripten `XMLHttpRequest`) не отдаёт SSE incrementally — все чанки прилетают одним блоком в
+> конце запроса (`chunks=1` в логе `LLM ◀ (stream)`). Из-за этого typing-индикатор может зависнуть,
+> а bubble не появиться. **Workaround:** под `#if UNITY_WEBGL && !UNITY_EDITOR` принудительно
+> ставить `CoreAiChatConfig.EnableStreaming = false` (любая non-streaming-ветка работает корректно).
+> Полный план фикса (включая `.jslib`-fetch-bridge) — в [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md).
 
 ### Streaming + Tool Calling (single-cycle)
 

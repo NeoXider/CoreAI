@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.25.2] — 2026-04-26
+
+### Release sync с `com.nexoider.coreaiunity 0.25.2`
+
+- 🔧 Версия пакета поднята до `0.25.2`. Манифест зависимости `coreaiunity 0.25.2 → coreai 0.25.2`.
+- ✅ Никаких изменений в публичном API `CoreAI.Core` — это release-sync. См. CoreAI Unity CHANGELOG 0.25.2 (UXML emoji-cleanup + новый `Docs/STREAMING_WEBGL_TODO.md` с планом фикса WebGL SSE-стриминга в `OpenAiChatLlmClient.CompleteStreamingAsync`).
+
 ## [v0.25.1] — 2026-04-26
 
 ### Release sync — version alignment с `com.nexoider.coreaiunity 0.25.1`

@@ -31,6 +31,7 @@ Install → open scene → connect LLM → press Play.
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, configuration hierarchy |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
+| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` не отдаёт SSE incrementally → `chunks=1` + бесконечная typing-анимация. Workaround + план фикса |
 
 ---
 
