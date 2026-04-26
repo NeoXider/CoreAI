@@ -1,0 +1,1794 @@
+<?xml version="1.0" encoding="utf-8"?>
+<test-run id="2" testcasecount="66" result="Skipped:Ignored" total="66" passed="65" failed="0" inconclusive="0" skipped="1" asserts="0" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326,586919">
+  <test-suite type="TestSuite" id="1102" name="CoreAI" fullname="CoreAI" runstate="Runnable" testcasecount="66" result="Skipped" label="Ignored" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326.586919" total="66" passed="65" failed="0" inconclusive="0" skipped="1" asserts="0">
+    <properties>
+      <property name="platform" value="PlayMode" />
+    </properties>
+    <reason>
+      <message><![CDATA[One or more child tests were ignored]]></message>
+    </reason>
+    <test-suite type="Assembly" id="1091" name="PlayModeTest.dll" fullname="C:/Git/CoreAI/Library/ScriptAssemblies/PlayModeTest.dll" runstate="Runnable" testcasecount="66" result="Skipped" label="Ignored" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326.579235" total="66" passed="65" failed="0" inconclusive="0" skipped="1" asserts="0">
+      <properties>
+        <property name="_PID" value="25340" />
+        <property name="_APPDOMAIN" value="Unity Child Domain" />
+        <property name="platform" value="PlayMode" />
+        <property name="EditorOnly" value="False" />
+      </properties>
+      <reason>
+        <message><![CDATA[One or more child tests were ignored]]></message>
+      </reason>
+      <test-suite type="TestSuite" id="1092" name="CoreAI" fullname="CoreAI" runstate="Runnable" testcasecount="66" result="Skipped" label="Ignored" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326.577341" total="66" passed="65" failed="0" inconclusive="0" skipped="1" asserts="0">
+        <properties />
+        <reason>
+          <message><![CDATA[One or more child tests were ignored]]></message>
+        </reason>
+        <test-suite type="TestSuite" id="1093" name="Tests" fullname="CoreAI.Tests" runstate="Runnable" testcasecount="66" result="Skipped" label="Ignored" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326.575988" total="66" passed="65" failed="0" inconclusive="0" skipped="1" asserts="0">
+          <properties />
+          <reason>
+            <message><![CDATA[One or more child tests were ignored]]></message>
+          </reason>
+          <test-suite type="TestSuite" id="1095" name="PlayMode" fullname="CoreAI.Tests.PlayMode" runstate="Runnable" testcasecount="63" result="Skipped" label="Ignored" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:31:09Z" duration="326.544111" total="63" passed="62" failed="0" inconclusive="0" skipped="1" asserts="0">
+            <properties />
+            <reason>
+              <message><![CDATA[One or more child tests were ignored]]></message>
+            </reason>
+            <test-suite type="TestFixture" id="1005" name="AgentMemoryOpenAiApiPlayModeTests" fullname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests" classname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests" runstate="Runnable" testcasecount="3" result="Passed" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:25:51Z" duration="8.987934" total="3" passed="3" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1007" name="MemoryTool_AppendsMemory" fullname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests.MemoryTool_AppendsMemory" methodname="MemoryTool_AppendsMemory" classname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests" runstate="Runnable" seed="1100169270" result="Passed" start-time="2026-04-26 10:25:42Z" end-time="2026-04-26 10:25:48Z" duration="5.641616" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="360000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#1] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[MemoryTest] Testing append...
+[MemoryTest] Memory after append: initial value
+Session initialized - Creator agent ready for CoreAI game commands
+[MemoryTest] First append attempt did not update memory. Retrying with strict prompt...
+[MemoryTest] Memory after append retry: initial value
+Session initialized - Creator agent ready for CoreAI game commands
+appended value
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1008" name="MemoryTool_ClearsMemory" fullname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests.MemoryTool_ClearsMemory" methodname="MemoryTool_ClearsMemory" classname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests" runstate="Runnable" seed="1998554103" result="Passed" start-time="2026-04-26 10:25:48Z" end-time="2026-04-26 10:25:49Z" duration="1.481394" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="360000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#2] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[MemoryTest] Testing clear...
+[MemoryTest] SUCCESS! Memory cleared.
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1006" name="MemoryTool_WritesMemory" fullname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests.MemoryTool_WritesMemory" methodname="MemoryTool_WritesMemory" classname="CoreAI.Tests.PlayMode.AgentMemoryOpenAiApiPlayModeTests" runstate="Runnable" seed="1567377203" result="Passed" start-time="2026-04-26 10:25:49Z" end-time="2026-04-26 10:25:51Z" duration="1.852013" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#3] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[MemoryTest] Backend: HTTP, writing memory...
+[MemoryTest] SUCCESS! Memory: qwen4b works great
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1009" name="AgentMemoryWithRealModelPlayModeTests" fullname="CoreAI.Tests.PlayMode.AgentMemoryWithRealModelPlayModeTests" classname="CoreAI.Tests.PlayMode.AgentMemoryWithRealModelPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:25:51Z" end-time="2026-04-26 10:25:55Z" duration="3.587975" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1010" name="Creator_WritesMemory_ThenRecalls_ViaAuto" fullname="CoreAI.Tests.PlayMode.AgentMemoryWithRealModelPlayModeTests.Creator_WritesMemory_ThenRecalls_ViaAuto" methodname="Creator_WritesMemory_ThenRecalls_ViaAuto" classname="CoreAI.Tests.PlayMode.AgentMemoryWithRealModelPlayModeTests" runstate="Runnable" seed="2048457743" result="Passed" start-time="2026-04-26 10:25:51Z" end-time="2026-04-26 10:25:55Z" duration="3.583801" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="900000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#4] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[Test] Backend: HTTP
+[Test] Memory stored: remember: apples
+[Test] Test completed successfully!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1011" name="AiGameCommandRouterMainThreadPlayModeTests" fullname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests" classname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:25:55Z" end-time="2026-04-26 10:25:55Z" duration="0.029683" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1013" name="Pipeline_QueuedOrchestrator_Publish_CommandReceived_OnMainThread" fullname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests.Pipeline_QueuedOrchestrator_Publish_CommandReceived_OnMainThread" methodname="Pipeline_QueuedOrchestrator_Publish_CommandReceived_OnMainThread" classname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests" runstate="Runnable" seed="655341418" result="Passed" start-time="2026-04-26 10:25:55Z" end-time="2026-04-26 10:25:55Z" duration="0.014826" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1012" name="Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool" fullname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests.Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool" methodname="Router_CommandReceived_OnMainThread_WhenSubscribeInvokedFromThreadPool" classname="CoreAI.Tests.PlayMode.AiGameCommandRouterMainThreadPlayModeTests" runstate="Runnable" seed="269881739" result="Passed" start-time="2026-04-26 10:25:55Z" end-time="2026-04-26 10:25:55Z" duration="0.010559" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1014" name="AiOrchestratorAllRolesPlayModeTests" fullname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests" classname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:25:55Z" end-time="2026-04-26 10:26:02Z" duration="7.164312" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1016" name="Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto" fullname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests.Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto" methodname="Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto" classname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests" runstate="Runnable" seed="1220565003" result="Passed" start-time="2026-04-26 10:25:55Z" end-time="2026-04-26 10:26:02Z" duration="7.140163" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="900000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[Test] Starting Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto
+
+IgnoreFailingMessages:true
+[Test] LLM handle created, waiting for model...
+[Test] Model ready, running orchestrator...
+[Test] Testing role: Creator
+[Test] Role Creator passed, response: OK
+[Test] Testing role: Analyzer
+[Test] Role Analyzer passed, response: OK
+[Test] Testing role: Programmer
+[Test] Role Programmer passed, response: OK
+[Test] Testing role: AINpc
+[Test] Role AINpc passed, response: OK
+[Test] Testing role: CoreMechanicAI
+[Test] Role CoreMechanicAI passed, response: OK
+[Test] Testing role: PlayerChat
+[Test] Role PlayerChat passed, response: OK
+[Test] Testing role: Merchant
+[Test] Role Merchant passed, response: Welcome!
+[Test] Orchestrator completed successfully
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1015" name="Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub" fullname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests.Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub" methodname="Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub" classname="CoreAI.Tests.PlayMode.AiOrchestratorAllRolesPlayModeTests" runstate="Runnable" seed="870599434" result="Passed" start-time="2026-04-26 10:26:02Z" end-time="2026-04-26 10:26:02Z" duration="0.019807" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[Test] Testing role: Creator
+[Test] Role Creator passed, response: {"commandType":"ApplyWaveModifier","payload":{"agentRole":"Creator","modifierId":"stub","wave":148}}
+[Test] Testing role: Analyzer
+[Test] Role Analyzer passed, response: {"commandType":"ApplyWaveModifier","payload":{"agentRole":"Analyzer","modifierId":"stub","wave":148}}
+[Test] Testing role: Programmer
+[Test] Role Programmer passed, response: ```lua
+report('stub: lua executed (Programmer)');
+```
+[Test] Testing role: AINpc
+[Test] Role AINpc passed, response: {"commandType":"ApplyWaveModifier","payload":{"agentRole":"AINpc","modifierId":"stub","wave":148}}
+[Test] Testing role: CoreMechanicAI
+[Test] Role CoreMechanicAI passed, response: {"commandType":"ApplyWaveModifier","payload":{"agentRole":"CoreMechanicAI","modifierId":"stub","wave":148}}
+[Test] Testing role: PlayerChat
+[Test] Role PlayerChat passed, response: [stub] {"telemetry":{},"hint":"playmode test: reply with a single short line of plain text (for example the word OK). No empty reply.","ai_task_source":""}
+[Test] Testing role: Merchant
+[Test] Role Merchant passed, response: {"commandType":"ApplyWaveModifier","payload":{"agentRole":"Merchant","modifierId":"stub","wave":148}}
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1017" name="AllToolCallsPlayModeTests" fullname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests" classname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:26:02Z" end-time="2026-04-26 10:26:12Z" duration="10.207484" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1019" name="AllToolCalls_ExecuteLuaTool_Programmer" fullname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests.AllToolCalls_ExecuteLuaTool_Programmer" methodname="AllToolCalls_ExecuteLuaTool_Programmer" classname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests" runstate="Runnable" seed="1929242064" result="Passed" start-time="2026-04-26 10:26:02Z" end-time="2026-04-26 10:26:05Z" duration="2.888646" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="600000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[AllToolCalls]  EXECUTE LUA TOOL TEST START 
+[AllToolCalls.ExecuteLua] Backend: OpenAiCompatibleHttp
+[AllToolCalls.ExecuteLua] Client: OpenAiChatLlmClient
+[AllToolCalls] 
+[AllToolCalls] TEST: EXECUTE LUA TOOL
+[AllToolCalls] 
+[AllToolCalls]  PROMPT TO MODEL:
+[AllToolCalls] Create a simple item called 'TestDagger' with quality 50. You MUST use the execute_lua tool call.
+[AllToolCalls] 
+[AllToolCalls]  MODEL RESPONSE:
+[AllToolCalls] Content: The item 'TestDagger' has been successfully created with quality 50 using the execute_lua tool.
+[AllToolCalls] Commands produced: 1
+[AllToolCalls]  Lua executed, 1 command(s) produced
+[AllToolCalls]   - Command: AiEnvelope
+[AllToolCalls]  EXECUTE LUA TOOL TEST PASSED 
+]]></output>
+              </test-case>
+              <test-case id="1018" name="AllToolCalls_MemoryTool_WriteAppendClear" fullname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests.AllToolCalls_MemoryTool_WriteAppendClear" methodname="AllToolCalls_MemoryTool_WriteAppendClear" classname="CoreAI.Tests.PlayMode.AllToolCallsPlayModeTests" runstate="Runnable" seed="1291410534" result="Passed" start-time="2026-04-26 10:26:05Z" end-time="2026-04-26 10:26:12Z" duration="7.314855" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="600000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[AllToolCalls]  MEMORY TOOL TEST START 
+[AllToolCalls] Backend: OpenAiCompatibleHttp
+[AllToolCalls] Using client: OpenAiChatLlmClient
+[AllToolCalls] 
+[AllToolCalls] TEST 1: WRITE MEMORY
+[AllToolCalls] 
+[AllToolCalls]  PROMPT TO MODEL:
+[AllToolCalls] Save this to memory using the memory tool: 'Test craft #1: Iron Sword'. CALL the memory tool now.
+[AllToolCalls] 
+[AllToolCalls]  MODEL RESPONSE:
+[AllToolCalls] Content (FULL):
+Memory saved successfully.
+[AllToolCalls] 
+[AllToolCalls]  Memory written by tool call: Test craft #1: Iron Sword
+[AllToolCalls] 
+[AllToolCalls] TEST 2: APPEND MEMORY
+[AllToolCalls] 
+[AllToolCalls]  PROMPT TO MODEL:
+[AllToolCalls] Append this to memory using the memory tool: 'Test craft #2: Steel Shield'. CALL the memory tool now.
+[AllToolCalls] 
+[AllToolCalls]  MODEL RESPONSE:
+[AllToolCalls] Content: Memory updated successfully.
+[AllToolCalls]  Memory appended by tool call: Test craft #1: Iron Sword
+Test craft #2: Steel Shield
+[AllToolCalls] 
+[AllToolCalls] TEST 3: CLEAR MEMORY
+[AllToolCalls] 
+[AllToolCalls]  PROMPT TO MODEL:
+[AllToolCalls] Clear all memory using the memory tool. CALL the memory tool now.
+[AllToolCalls] 
+[AllToolCalls]  MODEL RESPONSE:
+[AllToolCalls] Content: Memory cleared successfully. Ready to proceed with your task.
+[AllToolCalls]  Memory cleared by tool call
+[AllToolCalls]  MEMORY TOOL TEST PASSED 
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1020" name="ChatHistoryPlayModeTests" fullname="CoreAI.Tests.PlayMode.ChatHistoryPlayModeTests" classname="CoreAI.Tests.PlayMode.ChatHistoryPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:26:12Z" end-time="2026-04-26 10:26:30Z" duration="18.353880" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1021" name="ChatHistory_PersistentBetweenSessions_Works" fullname="CoreAI.Tests.PlayMode.ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works" methodname="ChatHistory_PersistentBetweenSessions_Works" classname="CoreAI.Tests.PlayMode.ChatHistoryPlayModeTests" runstate="Runnable" seed="1280757402" result="Passed" start-time="2026-04-26 10:26:12Z" end-time="2026-04-26 10:26:30Z" duration="18.349296" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[ChatHistory]  TEST 1: Persistent Context Across Restarts 
+[ChatHistory]  STEP 1: Sending first message...
+[ChatHistory]  STEP 2: Restarting game (creating new orchestrator/store)...
+[ChatHistory] Final Response: Your secret word was 'Pineapple'.
+[ChatHistory]  TEST PASSED
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1024" name="CompatibilityToolPlayModeTests" fullname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests" classname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests" runstate="Runnable" testcasecount="3" result="Passed" start-time="2026-04-26 10:26:30Z" end-time="2026-04-26 10:26:38Z" duration="7.558888" total="3" passed="3" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1025" name="CompatibilityTool_CompatibleIngredients_LlmReportsCompatible" fullname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests.CompatibilityTool_CompatibleIngredients_LlmReportsCompatible" methodname="CompatibilityTool_CompatibleIngredients_LlmReportsCompatible" classname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests" runstate="Runnable" seed="88728190" result="Passed" start-time="2026-04-26 10:26:30Z" end-time="2026-04-26 10:26:32Z" duration="1.908988" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CompatibilityTest] === TEST 1: Compatible ingredients ===
+[CompatibilityTest] Tools: 1, Response: Yes, Fire and Earth are compatible! They have a synergy bonus with a compatibility score of 1.5. The ingredients create 
+[CompatibilityTest] TEST 1 PASSED
+]]></output>
+              </test-case>
+              <test-case id="1026" name="CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible" fullname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests.CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible" methodname="CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible" classname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests" runstate="Runnable" seed="248619864" result="Passed" start-time="2026-04-26 10:26:32Z" end-time="2026-04-26 10:26:35Z" duration="2.827091" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CompatibilityTest] === TEST 2: Incompatible ingredients ===
+[CompatibilityTest] Tools: 1, Response: **Compatibility Check Result:**
+
+❌ **Not Compatible** (Score: 0/2)
+
+**Reason:** Fire and Water cancel each other out.
+
+*
+[CompatibilityTest] TEST 2 PASSED
+]]></output>
+              </test-case>
+              <test-case id="1027" name="CompatibilityTool_ThreeIngredients_GroupRule" fullname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests.CompatibilityTool_ThreeIngredients_GroupRule" methodname="CompatibilityTool_ThreeIngredients_GroupRule" classname="CoreAI.Tests.PlayMode.CompatibilityToolPlayModeTests" runstate="Runnable" seed="1980223949" result="Passed" start-time="2026-04-26 10:26:35Z" end-time="2026-04-26 10:26:38Z" duration="2.817653" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CompatibilityTest] === TEST 3: Three ingredients group rule ===
+[CompatibilityTest] Tools: 1, Response: The ingredients **Fire, Earth, and Air** are compatible with a synergy score of approximately 1.8 (greater than 1 indica
+[CompatibilityTest] TEST 3 PASSED
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1028" name="CoreAiChatServiceIntegrationPlayModeTests" fullname="CoreAI.Tests.PlayMode.CoreAiChatServiceIntegrationPlayModeTests" classname="CoreAI.Tests.PlayMode.CoreAiChatServiceIntegrationPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:26:38Z" end-time="2026-04-26 10:26:54Z" duration="16.149239" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1029" name="ChatService_Integration_AllModesAndAgentSwapping" fullname="CoreAI.Tests.PlayMode.CoreAiChatServiceIntegrationPlayModeTests.ChatService_Integration_AllModesAndAgentSwapping" methodname="ChatService_Integration_AllModesAndAgentSwapping" classname="CoreAI.Tests.PlayMode.CoreAiChatServiceIntegrationPlayModeTests" runstate="Runnable" seed="101474139" result="Passed" start-time="2026-04-26 10:26:38Z" end-time="2026-04-26 10:26:54Z" duration="16.145086" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[ChatServiceIntegration] ===== TEST START =====
+[ChatServiceIntegration] Backend: OpenAiCompatibleHttp
+[ChatServiceIntegration] Mode: Chat Only
+[ChatServiceIntegration] Mode: Tools Only
+[ChatServiceIntegration] Mode: Hybrid
+[ChatServiceIntegration] Mode: Agent Swapping
+[ChatServiceIntegration] ===== TEST PASSED =====
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1030" name="CraftingMemoryViaLlmUnityPlayModeTests" fullname="CoreAI.Tests.PlayMode.CraftingMemoryViaLlmUnityPlayModeTests" classname="CoreAI.Tests.PlayMode.CraftingMemoryViaLlmUnityPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:26:54Z" end-time="2026-04-26 10:27:39Z" duration="45.081398" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1031" name="CraftingMemoryLlmUnity_ThreeCrafts_AllUnique" fullname="CoreAI.Tests.PlayMode.CraftingMemoryViaLlmUnityPlayModeTests.CraftingMemoryLlmUnity_ThreeCrafts_AllUnique" methodname="CraftingMemoryLlmUnity_ThreeCrafts_AllUnique" classname="CoreAI.Tests.PlayMode.CraftingMemoryViaLlmUnityPlayModeTests" runstate="Runnable" seed="449502796" result="Passed" start-time="2026-04-26 10:26:54Z" end-time="2026-04-26 10:27:39Z" duration="45.077324" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="2400000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CraftingMemory.LLMUnity] ========================================
+[CraftingMemory.LLMUnity] TEST START
+[CraftingMemory.LLMUnity] ========================================
+[CraftingMemory] Using backend: OpenAiCompatibleHttp, Model ready
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] SENDING TO MODEL: CRAFT 1: Iron + Oak
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MEMORY: (empty - first craft)
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] PROMPT (722 chars):
+You are crafting a weapon. This is craft #1.
+
+Ingredients:
+- Iron (metal, hardness:60, magic:5, rarity:1)
+- Oak Wood (wood, hardness:40, magic:10, rarity:1)
+
+This is your first craft. No previous crafts to check.
+
+You MUST perform these actions IN ORDER using tool calls:
+
+STEP 1: Call the 'memory' tool with:
+  - action: "write"
+  - content: "Previous crafts: Craft #1 - <your weapon name> made from Iron + Oak"
+
+STEP 2: Call the 'execute_lua' tool with Lua code:
+  create_item('YourWeaponName', 'weapon', quality)
+  report('crafted YourWeaponName')
+
+Choose a creative weapon name based on the ingredients. Quality should be 1-100 based on ingredient rarity.
+
+CRITICAL: You MUST call BOTH tools. Do NOT stop after memory.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak
+[Lua.create_item] name=IronOak Blade, type=weapon, quality=50
+[Lua.report] crafted IronOak Blade
+[RealLuaExecutor] SUCCESS: void
+[Lua.create_item] name=IronOak Blade, type=weapon, quality=50
+[Lua.report] crafted IronOak Blade
+[RealLuaExecutor] SUCCESS: void
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Both tools have been successfully executed:
+
+1. **Memory saved**: Craft #1 - IronOak Blade made from Iron + Oak
+2. **Weapon crafted**: IronOak Blade created as a weapon with quality level 50
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MODEL RESPONSE: craft 1
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] Command received: AiEnvelope
+[CraftingMemory.LLMUnity] RAW PAYLOAD (190 chars):
+Both tools have been successfully executed:
+
+1. **Memory saved**: Craft #1 - IronOak Blade made from Iron + Oak
+2. **Weapon crafted**: IronOak Blade created as a weapon with quality level 50
+[CraftingMemory.LLMUnity] MEMORY AFTER:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak
+[CraftingMemory.LLMUnity] ----------------------------------------
+[craft 1] Crafted: 'Blade'
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] SENDING TO MODEL: CRAFT 2: Steel + Hardwood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] PROMPT (943 chars):
+You are crafting a weapon. This is craft #2.
+
+Ingredients:
+- Steel (metal, hardness:75, magic:8, rarity:2)
+- Hardwood (wood, hardness:50, magic:12, rarity:2)
+
+YOUR MEMORY (previous crafts):
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak
+
+CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. Do NOT repeat any previous craft name or concept.
+
+You MUST perform these actions IN ORDER using tool calls:
+
+STEP 1: Call the 'memory' tool with:
+  - action: "write"
+  - content: "Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - <your weapon name> made from Steel + Hardwood"
+
+STEP 2: Call the 'execute_lua' tool with Lua code:
+  create_item('YourWeaponName', 'weapon', quality)
+  report('crafted YourWeaponName')
+
+Choose a creative weapon name based on the ingredients. Quality should be 1-100 based on ingredient rarity.
+
+CRITICAL: You MUST call BOTH tools. Do NOT stop after memory.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Axe made from Steel + Hardwood
+[Lua.create_item] name=SteelHardwood Axe, type=weapon, quality=50
+[Lua.report] crafted SteelHardwood Axe
+[RealLuaExecutor] SUCCESS: void
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood
+[Lua.create_item] name=SteelHardwood Blade, type=weapon, quality=55
+[Lua.report] crafted SteelHardwood Blade
+[RealLuaExecutor] SUCCESS: void
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Both tools have been called successfully. The memory has been updated and the weapon "SteelHardwood Blade" has been crafted with quality 55.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MODEL RESPONSE: craft 2
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] Command received: AiEnvelope
+[CraftingMemory.LLMUnity] RAW PAYLOAD (140 chars):
+Both tools have been called successfully. The memory has been updated and the weapon "SteelHardwood Blade" has been crafted with quality 55.
+[CraftingMemory.LLMUnity] MEMORY AFTER:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[craft 2] Crafted: 'SteelHardwood Blade'
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] SENDING TO MODEL: CRAFT 3: Mithril + Enchanted Wood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] PROMPT (1073 chars):
+You are crafting a weapon. This is craft #3.
+
+Ingredients:
+- Mithril (metal, hardness:70, magic:60, rarity:4)
+- Enchanted Wood (wood, hardness:45, magic:70, rarity:3)
+
+YOUR MEMORY (previous crafts):
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood
+
+CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. Do NOT repeat any previous craft name or concept.
+
+You MUST perform these actions IN ORDER using tool calls:
+
+STEP 1: Call the 'memory' tool with:
+  - action: "write"
+  - content: "Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - <your weapon name> made from Mithril + Enchanted"
+
+STEP 2: Call the 'execute_lua' tool with Lua code:
+  create_item('YourWeaponName', 'weapon', quality)
+  report('crafted YourWeaponName')
+
+Choose a creative weapon name based on the ingredients. Quality should be 1-100 based on ingredient rarity.
+
+CRITICAL: You MUST call BOTH tools. Do NOT stop after memory.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood
+[Lua.create_item] name=Arcane Mithril Blade, type=weapon, quality=75
+[Lua.report] crafted Arcane Mithril Blade
+[RealLuaExecutor] SUCCESS: void
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Both tools have been successfully executed:
+
+- **Memory updated**: Craft #3 recorded as "MithrilEnchanted Blade made from Mithril + Enchanted Wood"
+- **Weapon crafted**: "Arcane Mithril Blade" created with quality 75 (based on ingredient rarities)
+
+The new weapon uses completely different ingredients than the previous crafts, avoiding any repetition of IronOak or SteelHardwood concepts.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MODEL RESPONSE: craft 3
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] Command received: AiEnvelope
+[CraftingMemory.LLMUnity] RAW PAYLOAD (389 chars):
+Both tools have been successfully executed:
+
+- **Memory updated**: Craft #3 recorded as "MithrilEnchanted Blade made from Mithril + Enchanted Wood"
+- **Weapon crafted**: "Arcane Mithril Blade" created with quality 75 (based on ingredient rarities)
+
+The new weapon uses completely different ingredients than the previous crafts, avoiding any repetition of IronOak or SteelHardwood concepts.
+[CraftingMemory.LLMUnity] MEMORY AFTER:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[craft 3] Could not extract item name from payload - recovered from memory: 'MithrilEnchanted Blade'
+[craft 3] Crafted: 'MithrilEnchanted Blade'
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] SENDING TO MODEL: CRAFT 4: Steel + Hardwood (REPEAT of craft #2  DETERMINISM CHECK)
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] PROMPT (1008 chars):
+You are crafting a weapon. This is craft #4.
+
+Ingredients:
+- Steel (metal, hardness:75, magic:8, rarity:2)
+- Hardwood (wood, hardness:50, magic:12, rarity:2)
+
+YOUR MEMORY (ALL previous crafts):
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood
+
+You MUST perform these actions IN ORDER using tool calls:
+
+STEP 1: Call the 'memory' tool with:
+  - action: "write"
+  - content: "Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - <same weapon name as before>"
+
+STEP 2: Call the 'execute_lua' tool with Lua code.
+
+CRITICAL: You MUST craft the EXACT SAME item as before - same name, same quality.
+These are the EXACT same ingredients, so the result must be IDENTICAL.
+You MUST call BOTH tools. Do NOT stop after memory.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood
+[RealLuaExecutor] SUCCESS: void
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood
+[RealLuaExecutor] SUCCESS: (Table)
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Both tools have been called successfully:
+
+1. **Memory updated** with Craft #4 information (SteelHardwood Blade made from Steel + Hardwood)
+2. **Lua execution completed** - crafted the SteelHardwood Blade with identical properties to Craft #2:
+   - Total Hardness: 125 (75 + 50)
+   - Total Magic: 20 (8 + 12)
+   - Rarity: 2
+   - Quality: High
+
+Craft #4 is complete and matches the previous SteelHardwood Blade exactly.
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] MODEL RESPONSE: craft 4 (determinism)
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] Command received: AiEnvelope
+[CraftingMemory.LLMUnity] RAW PAYLOAD (418 chars):
+Both tools have been called successfully:
+
+1. **Memory updated** with Craft #4 information (SteelHardwood Blade made from Steel + Hardwood)
+2. **Lua execution completed** - crafted the SteelHardwood Blade with identical properties to Craft #2:
+   - Total Hardness: 125 (75 + 50)
+   - Total Magic: 20 (8 + 12)
+   - Rarity: 2
+   - Quality: High
+
+Craft #4 is complete and matches the previous SteelHardwood Blade exactly.
+[CraftingMemory.LLMUnity] MEMORY AFTER:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood
+[CraftingMemory.LLMUnity] ----------------------------------------
+[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was 'SteelHardwood Blade', Craft #4 is 'the SteelHardwood Blade with identical properties to Craft'
+[CraftingMemory.LLMUnity]  DETERMINISM FAILED: Craft #4 'the SteelHardwood Blade with identical properties to Craft' != Craft #2 'SteelHardwood Blade'
+[InMemoryStore] Saved for CoreMechanicAI: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood, Craft #4 - the SteelHardwood Blade with identical properties to Craft
+[craft 4] Memory updated: Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood, Craft #4 - the SteelHardwood Blade with identical properties to Craft
+[craft 4] Crafted: 'the SteelHardwood Blade with identical properties to Craft'
+[CraftingMemory.LLMUnity] 
+[CraftingMemory.LLMUnity]  FINAL VALIDATION 
+[CraftingMemory.LLMUnity] 
+[CraftingMemory.LLMUnity]  First 3 crafts are unique
+[CraftingMemory.LLMUnity] Crafted items: Blade | SteelHardwood Blade | MithrilEnchanted Blade | the SteelHardwood Blade with identical properties to Craft
+[CraftingMemory.LLMUnity] Determinism: Craft#2='SteelHardwood Blade' vs Craft#4='the SteelHardwood Blade with identical properties to Craft'   DIFFERENT
+[CraftingMemory.LLMUnity] Final memory state:
+Previous crafts: Craft #1 - IronOak Blade made from Iron + Oak, Craft #2 - SteelHardwood Blade made from Steel + Hardwood, Craft #3 - MithrilEnchanted Blade made from Mithril + Enchanted Wood, Craft #4 - SteelHardwood Blade made from Steel + Hardwood, Craft #4 - the SteelHardwood Blade with identical properties to Craft
+[CraftingMemory.LLMUnity] 
+[CraftingMemory.LLMUnity]  TEST PASSED 
+[CraftingMemory.LLMUnity] 
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1032" name="CraftingMemoryViaOpenAiPlayModeTests" fullname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests" classname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:27:39Z" end-time="2026-04-26 10:28:53Z" duration="74.171424" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1033" name="CraftingMemoryOpenAi_ThreeCrafts_AllUnique" fullname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests.CraftingMemoryOpenAi_ThreeCrafts_AllUnique" methodname="CraftingMemoryOpenAi_ThreeCrafts_AllUnique" classname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests" runstate="Runnable" seed="1516131022" result="Passed" start-time="2026-04-26 10:27:39Z" end-time="2026-04-26 10:28:26Z" duration="46.503796" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="2400000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  TEST START 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  HTTP client created
+[CraftingMemory.OpenAI] Base URL: 
+[CraftingMemory.OpenAI] Model: 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 1: Iron + Oak
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY: (empty  first craft)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (631 chars):
+You are crafting a weapon. This is craft #1.
+
+Ingredients:
+- Iron (metal, hardness:60, magic:5, rarity:1)
+- Oak Wood (wood, hardness:40, magic:10, rarity:1)
+
+This is your first craft. No previous crafts to check.
+
+OUTPUT FORMAT:
+1. First, call the memory tool to save this craft:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <list all crafts including this one>"}}
+   ```
+
+2. Then, call the execute_lua tool to create the item:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('YourWeaponName', 'weapon', quality)\nreport('crafted YourWeaponName')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Ironwood Blade', 'weapon', 3)
+report('crafted Ironwood Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Craft #1 completed successfully!
+
+**Item Created:** Ironwood Blade
+- **Type:** Weapon
+- **Quality:** 3
+- **Ingredients Used:**
+  - Iron (metal, hardness:60, magic:5, rarity:1)
+  - Oak Wood (wood, hardness:40, magic:10, rarity:1)
+
+The weapon has been crafted and saved to memory.
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 1
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (75 chars):
+create_item('Ironwood Blade', 'weapon', 3)
+report('crafted Ironwood Blade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Ironwood Blade (weapon, quality 3) - Ingredients: Iron (metal, hardness:60, magic:5, rarity:1), Oak Wood (wood, hardness:40, magic:10, rarity:1)
+[CraftingMemory.OpenAI] 
+[craft 1]  Crafted: 'Ironwood Blade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 2: Steel + Hardwood
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - Ironwood Blade (weapon, quality 3) - Ingredients: Iron (metal, hardness:60, magic:5, rarity:1), Oak Wood (wood, hardness:40, magic:10, rarity:1) | New: Ironwood Blade
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (800 chars):
+You are crafting a weapon. This is craft #2.
+
+Ingredients:
+- Steel (metal, hardness:75, magic:8, rarity:2)
+- Hardwood (wood, hardness:50, magic:12, rarity:2)
+
+YOUR MEMORY (previous crafts):
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak
+
+CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. Do NOT repeat any previous craft name or concept.
+
+OUTPUT FORMAT:
+1. First, call the memory tool to save this craft:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <list all crafts including this one>"}}
+   ```
+
+2. Then, call the execute_lua tool to create the item:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('YourWeaponName', 'weapon', quality)\nreport('crafted YourWeaponName')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Steelhard Blade', 'weapon', 4)
+report('crafted Steelhard Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Steelhard Blade', 'weapon', 4)
+report('crafted Steelhard Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Craft #2 completed: Steelhard Blade created successfully with quality 4, made from Steel and Hardwood. Memory updated with both crafts.
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 2
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (77 chars):
+create_item('Steelhard Blade', 'weapon', 4)
+report('crafted Steelhard Blade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak | Craft #2 - Steelhard Blade made from Steel + Hardwood
+[CraftingMemory.OpenAI] 
+[craft 2]  Crafted: 'Steelhard Blade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 3: Mithril + Enchanted Wood
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak | Craft #2 - Steelhard Blade made from Steel + Hardwood | New: Steelhard Blade
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (864 chars):
+You are crafting a weapon. This is craft #3.
+
+Ingredients:
+- Mithril (metal, hardness:70, magic:60, rarity:4)
+- Enchanted Wood (wood, hardness:45, magic:70, rarity:3)
+
+YOUR MEMORY (previous crafts):
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood
+
+CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. Do NOT repeat any previous craft name or concept.
+
+OUTPUT FORMAT:
+1. First, call the memory tool to save this craft:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <list all crafts including this one>"}}
+   ```
+
+2. Then, call the execute_lua tool to create the item:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('YourWeaponName', 'weapon', quality)\nreport('crafted YourWeaponName')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Mithrilwood Blade', 'weapon', 85)
+report('crafted Mithrilwood Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('MithrilEnchant Blade', 'weapon', 5)
+report('crafted MithrilEnchant Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Crafted successfully! Created **MithrilEnchant Blade** using Mithril and Enchanted Wood - distinct from your previous Ironwood and Steelhard blades.
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 3
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (82 chars):
+create_item('Mithrilwood Blade', 'weapon', 85)
+report('crafted Mithrilwood Blade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood, Craft #3 - MithrilWood Blade made from Mithril + Enchanted Wood
+[CraftingMemory.OpenAI] 
+[craft 3]  Crafted: 'Mithrilwood Blade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 4: Steel + Hardwood (REPEAT of craft #2  DETERMINISM CHECK)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood, Craft #3 - MithrilWood Blade made from Mithril + Enchanted Wood | New: Mithrilwood Blade
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (935 chars):
+You are crafting a weapon. This is craft #4.
+
+Ingredients:
+- Steel (metal, hardness:75, magic:8, rarity:2)
+- Hardwood (wood, hardness:50, magic:12, rarity:2)
+
+YOUR MEMORY (ALL previous crafts):
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood, Craft #3 - Mithrilwood Blade made from Mithril + Enchanted
+
+IMPORTANT: These EXACT ingredients were used before (see memory above).
+You MUST craft the EXACT SAME item as before  use the SAME name and properties.
+This tests deterministic behavior: same input = same output.
+
+OUTPUT FORMAT:
+1. Call the memory tool:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <update list>"}}
+   ```
+
+2. Call the execute_lua tool:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('SameNameAsBefore', 'weapon', quality)\nreport('crafted SameNameAsBefore')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Steelhard Blade', 'weapon', quality)
+report('crafted Steelhard Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Steelhard Blade', 'weapon', 2)
+report('crafted Steelhard Blade')
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 4 (determinism)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (83 chars):
+create_item('Steelhard Blade', 'weapon', quality)
+report('crafted Steelhard Blade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood, Craft #3 - MithrilWood Blade made from Mithril + Enchanted Wood, Craft #4 - SameNameAsBefore made from Steel + Hardwood
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was 'Steelhard Blade', Craft #4 is 'Steelhard Blade'
+[CraftingMemory.OpenAI]  DETERMINISM PASS: Craft #4 repeated Craft #2 name 'Steelhard Blade'
+[craft 4]  Crafted: 'Steelhard Blade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  FINAL VALIDATION 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  First 3 crafts are unique
+[CraftingMemory.OpenAI] Crafted items: Ironwood Blade | Steelhard Blade | Mithrilwood Blade | Steelhard Blade
+[CraftingMemory.OpenAI] Determinism: Craft#2='Steelhard Blade' vs Craft#4='Steelhard Blade'   SAME
+[CraftingMemory.OpenAI] Canonical memory for prompts:
+Previous crafts: Craft #1 - Ironwood Blade made from Iron + Oak, Craft #2 - Steelhard Blade made from Steel + Hardwood, Craft #3 - Mithrilwood Blade made from Mithril + Enchanted, Craft #4 - Steelhard Blade made from Steel + Hardwood
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  TEST PASSED 
+[CraftingMemory.OpenAI] 
+]]></output>
+              </test-case>
+              <test-case id="1034" name="CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent" fullname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests.CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent" methodname="CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent" classname="CoreAI.Tests.PlayMode.CraftingMemoryViaOpenAiPlayModeTests" runstate="Runnable" seed="550829288" result="Passed" start-time="2026-04-26 10:28:26Z" end-time="2026-04-26 10:28:53Z" duration="27.662594" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="900000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  2-CRAFT TEST START 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 1: Steel + Fire Crystal
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY: (empty  first craft)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (662 chars):
+You are crafting a weapon. This is craft #1.
+
+Ingredients:
+- Steel Ingot (metal, hardness:80, magic:10, rarity:2)
+- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+
+This is your first craft. No previous crafts to check.
+
+OUTPUT FORMAT:
+1. First, call the memory tool to save this craft:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <list all crafts including this one>"}}
+   ```
+
+2. Then, call the execute_lua tool to create the item:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('YourWeaponName', 'weapon', quality)\nreport('crafted YourWeaponName')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Flameforge Blade', 'weapon', 'rare')\nreport('crafted Flameforge Blade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+Craft #1 complete! The Flameforge Blade has been crafted with rare quality using Steel Ingot and Fire Crystal ingredients.
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 1
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (85 chars):
+create_item('Flameforge Blade', 'weapon', 'rare')\nreport('crafted Flameforge Blade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Flameforge Blade (weapon, quality: rare). Ingredients: Steel Ingot (metal, hardness:80, magic:10, rarity:2), Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI] Extracted Craft 1 name: 'Flameforge Blade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   SENDING TO MODEL: CRAFT 2: Same ingredients, check memory
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MEMORY VISIBLE TO MODEL:
+Previous crafts: Craft #1 - Flameforge Blade (weapon, quality: rare). Ingredients: Steel Ingot (metal, hardness:80, magic:10, rarity:2), Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   PROMPT (975 chars):
+You are crafting a weapon. This is craft #2.
+
+Ingredients:
+- Steel Ingot (metal, hardness:80, magic:10, rarity:2)
+- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+
+YOUR MEMORY (previous crafts):
+Previous crafts: Craft #1 - Flameforge Blade (weapon, quality: rare). Ingredients: Steel Ingot (metal, hardness:80, magic:10, rarity:2), Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+
+CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. Do NOT repeat any previous craft name or concept.
+
+OUTPUT FORMAT:
+1. First, call the memory tool to save this craft:
+   ```json
+   {"name": "memory", "arguments": {"action": "write", "content": "Previous crafts: <list all crafts including this one>"}}
+   ```
+
+2. Then, call the execute_lua tool to create the item:
+   ```json
+   {"name": "execute_lua", "arguments": {"code": "create_item('YourWeaponName', 'weapon', quality)\nreport('crafted YourWeaponName')"}}
+   ```
+[CraftingMemory.OpenAI] 
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Shadowblade', 'weapon', uncommon)
+report('crafted Shadowblade')
+[LoggingSink] Received command: AiEnvelope
+[LoggingSink] Payload:
+create_item('Aetherblade', 'weapon', uncommon)
+report('crafted Aetherblade')
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   MODEL RESPONSE: craft 2
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]   Command received: AiEnvelope
+[CraftingMemory.OpenAI]   RAW PAYLOAD (76 chars):
+create_item('Shadowblade', 'weapon', uncommon)
+report('crafted Shadowblade')
+[CraftingMemory.OpenAI]   MEMORY AFTER:
+Previous crafts: Craft #1 - Flameforge Blade (weapon, quality: rare). Ingredients: Steel Ingot (metal, hardness:80, magic:10, rarity:2), Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25); Craft #2 - Icebreaker Dagger (weapon, quality: uncommon). Ingredients: Steel Ingot (metal, hardness:80, magic:10, rarity:2), Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI] Extracted Craft 2 name: 'Shadowblade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  VALIDATION 
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  Craft names are different:
+[CraftingMemory.OpenAI]   Craft 1: 'Flameforge Blade'
+[CraftingMemory.OpenAI]   Craft 2: 'Shadowblade'
+[CraftingMemory.OpenAI] 
+[CraftingMemory.OpenAI]  TEST PASSED 
+[CraftingMemory.OpenAI] 
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1035" name="CustomAgentsPlayModeTests" fullname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" classname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" runstate="Runnable" testcasecount="4" result="Passed" start-time="2026-04-26 10:28:53Z" end-time="2026-04-26 10:29:04Z" duration="10.935130" total="4" passed="4" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1037" name="CustomAgent_Analyzer_ToolsOnly" fullname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests.CustomAgent_Analyzer_ToolsOnly" methodname="CustomAgent_Analyzer_ToolsOnly" classname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" runstate="Runnable" seed="1296976892" result="Passed" start-time="2026-04-26 10:28:53Z" end-time="2026-04-26 10:28:55Z" duration="1.773955" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CustomAgents] === TEST 2: ANALYZER (ToolsOnly) ===
+[CustomAgents] PROMPT TO MODEL (TestAnalyzer):
+[CustomAgents] System: You analyze sessions. Call get_session_stats tool.
+[CustomAgents] Hint: Analyze session
+[CustomAgents] ----------------------------------------
+[CustomAgents] MODEL RESPONSE:
+[CustomAgents] Available Tools: 1
+[CustomAgents] Content:
+Session Analysis Complete:
+- Waves Completed: 5
+- Kills: 42
+[CustomAgents] ----------------------------------------
+[CustomAgents] ANALYZER Tools: 1, Mode: ToolsOnly
+[CustomAgents] TEST 2 PASSED
+]]></output>
+              </test-case>
+              <test-case id="1039" name="CustomAgent_Helper_WithAction" fullname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests.CustomAgent_Helper_WithAction" methodname="CustomAgent_Helper_WithAction" classname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" runstate="Runnable" seed="87764861" result="Passed" start-time="2026-04-26 10:28:55Z" end-time="2026-04-26 10:28:57Z" duration="1.730913" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CustomAgents] === TEST 4: HELPER (WithAction) ===
+[CustomAgents] PROMPT TO MODEL (TestHelper):
+[CustomAgents] System: Call the send_ping tool with the message 'hello'.
+[CustomAgents] Hint: Send ping
+[CustomAgents] ----------------------------------------
+[CustomAgents] MODEL RESPONSE:
+[CustomAgents] Available Tools: 1
+[CustomAgents] Content:
+Ping sent successfully.
+[CustomAgents] ----------------------------------------
+[CustomAgents] HELPER Tools: 1, Fired: True, Msg: hello
+[CustomAgents] TEST 4 PASSED
+]]></output>
+              </test-case>
+              <test-case id="1036" name="CustomAgent_Merchant_ToolsAndChat" fullname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests.CustomAgent_Merchant_ToolsAndChat" methodname="CustomAgent_Merchant_ToolsAndChat" classname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" runstate="Runnable" seed="389444972" result="Passed" start-time="2026-04-26 10:28:57Z" end-time="2026-04-26 10:28:59Z" duration="1.723485" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CustomAgents] === TEST 1: MERCHANT (ToolsAndChat) ===
+[CustomAgents] PROMPT TO MODEL (TestMerchant):
+[CustomAgents] System: You are a shopkeeper. When asked about items, call get_inventory first.
+[CustomAgents] Hint: What items do you have?
+[CustomAgents] ----------------------------------------
+[CustomAgents] MODEL RESPONSE:
+[CustomAgents] Available Tools: 3
+[CustomAgents] Content:
+I have the following items in stock:
+
+*   **Iron Sword** (Weapon) - 3 available, Price: 50 gold each
+*   **Health Potion** (Consumable) - 10 available, Price: 25 gold each
+[CustomAgents] ----------------------------------------
+[CustomAgents] MERCHANT Tools: 3, Response: I have the following items in stock:
+
+*   **Iron Sword** (Weapon) - 3 available,
+[CustomAgents] TEST 1 PASSED
+]]></output>
+              </test-case>
+              <test-case id="1038" name="CustomAgent_Storyteller_ChatOnly" fullname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests.CustomAgent_Storyteller_ChatOnly" methodname="CustomAgent_Storyteller_ChatOnly" classname="CoreAI.Tests.PlayMode.CustomAgentsPlayModeTests" runstate="Runnable" seed="1489678049" result="Passed" start-time="2026-04-26 10:28:59Z" end-time="2026-04-26 10:29:04Z" duration="5.701835" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[CustomAgents] === TEST 3: STORYTELLER (ChatOnly) ===
+[CustomAgents] PROMPT TO MODEL (TestStoryteller):
+[CustomAgents] System: You are a campfire storyteller. Share tales.
+[CustomAgents] Hint: Tell me a story
+[CustomAgents] ----------------------------------------
+[CustomAgents] MODEL RESPONSE:
+[CustomAgents] Available Tools: 2
+[CustomAgents] Content:
+Once upon a time, in a village nestled between two towering mountains, there lived an old clockmaker named Elias who had one peculiar obsession: he believed the world was running out of time.
+
+Every night at midnight, Elias would climb to his attic workshop and wind up a massive brass mechanism that hummed with strange energy. The villagers whispered that it wasn't just a clock—it was a key to something far greater than mere hours and minutes.
+
+One stormy evening, the sky turned an unnatural shade of violet, and the mountain peaks began to glow with an eerie light. Elias knew what this meant: the world's time had reached its end. He rushed down from his attic, clutching the brass mechanism in his hands, and found himself standing before a massive stone door at the base of the highest peak.
+
+The villagers gathered around, their faces pale with fear. "What are you doing?" they cried out. Elias didn't answer. Instead, he placed the mechanism against the stone door and began to turn its intricate gears.
+
+As the clockmaker worked, the ground shook beneath them. The violet sky deepened into black, and lightning struck not in jagged patterns, but in perfect circles—like the hands of a clock. Suddenly, the stone door groaned open, revealing not a dungeon or a tomb, but a vast library stretching into infinity.
+
+Inside, books floated in mid-air, their pages whispering secrets to anyone who dared listen. Elias found himself surrounded by thousands of stories waiting to be told—tales of courage and love, of loss and hope, of the very thing that made time worth keeping: wonder.
+
+He realized then that his clock wasn't meant to measure time at all—it was a reminder that every moment is precious because it holds the potential for something new. The villagers watched in awe as Elias opened the first book, its pages fluttering like wings. And so began a new age of stories, where time would never truly run out again.
+
+And that's why we tell tales around the fire—not just to pass the hours, but because every story is a gift from the past, and each one makes us believe in something better yet to come.
+[CustomAgents] ----------------------------------------
+[CustomAgents] STORYTELLER Tools: 2, Response: Once upon a time, in a village nestled between two towering mountains, there liv
+[CustomAgents] TEST 3 PASSED
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1040" name="LuaBindingsIntegrationPlayModeTests" fullname="CoreAI.Tests.PlayMode.LuaBindingsIntegrationPlayModeTests" classname="CoreAI.Tests.PlayMode.LuaBindingsIntegrationPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:04Z" duration="0.014532" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1041" name="Envelope_WithAggregatingBindings_AppliesDataOverlay_AndPublishesEvent" fullname="CoreAI.Tests.PlayMode.LuaBindingsIntegrationPlayModeTests.Envelope_WithAggregatingBindings_AppliesDataOverlay_AndPublishesEvent" methodname="Envelope_WithAggregatingBindings_AppliesDataOverlay_AndPublishesEvent" classname="CoreAI.Tests.PlayMode.LuaBindingsIntegrationPlayModeTests" runstate="Runnable" seed="131234155" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:04Z" duration="0.010527" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1042" name="LuaCoroutineRunnerPlayModeTests" fullname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests" classname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:04Z" duration="0.175996" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1044" name="CoroutineRunner_RespectsTimeScale" fullname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests.CoroutineRunner_RespectsTimeScale" methodname="CoroutineRunner_RespectsTimeScale" classname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests" runstate="Runnable" seed="1718599906" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:04Z" duration="0.013585" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1043" name="CoroutineRunner_TicksCoroutine_WithTimeBindings" fullname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests.CoroutineRunner_TicksCoroutine_WithTimeBindings" methodname="CoroutineRunner_TicksCoroutine_WithTimeBindings" classname="CoreAI.Tests.PlayMode.LuaCoroutineRunnerPlayModeTests" runstate="Runnable" seed="2103244630" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:04Z" duration="0.157923" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1045" name="LuaDynamicGameMechanicsTests" fullname="CoreAI.Tests.PlayMode.LuaDynamicGameMechanicsTests" classname="CoreAI.Tests.PlayMode.LuaDynamicGameMechanicsTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:07Z" duration="2.437271" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1046" name="GameMaster_ModifiesDamageFormula_AtRuntime" fullname="CoreAI.Tests.PlayMode.LuaDynamicGameMechanicsTests.GameMaster_ModifiesDamageFormula_AtRuntime" methodname="GameMaster_ModifiesDamageFormula_AtRuntime" classname="CoreAI.Tests.PlayMode.LuaDynamicGameMechanicsTests" runstate="Runnable" seed="1174160339" result="Passed" start-time="2026-04-26 10:29:04Z" end-time="2026-04-26 10:29:07Z" duration="2.433464" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="600000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[LuaDynamic]  LUA MECHANICS MODIFICATION TEST START 
+[LuaDynamic] Initial calculate_damage() = 10
+[LuaDynamic]  PROMPT: Players are complaining that the game is too hard. Change the 'calculate_damage()' lua function to return 50 instead of 10.
+You MUST use the 'execute_lua' tool to redefine the function globally.
+Example code: 
+function calculate_damage() return 50 end
+[LuaDynamic] Modified calculate_damage() = 50
+[LuaDynamic]  AI successfully modified game logic at runtime!
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1047" name="LuaFormulaRuntimeIntegrationPlayModeTests" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" testcasecount="12" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.107468" total="12" passed="12" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1049" name="LuaRuntime_CanApplyDamageAndHeal" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanApplyDamageAndHeal" methodname="LuaRuntime_CanApplyDamageAndHeal" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="42117791" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.008900" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1055" name="LuaRuntime_CanCalculateLevelProgression" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanCalculateLevelProgression" methodname="LuaRuntime_CanCalculateLevelProgression" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="645670531" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.008360" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1050" name="LuaRuntime_CanChainMultipleFormulas" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanChainMultipleFormulas" methodname="LuaRuntime_CanChainMultipleFormulas" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1169043949" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.007613" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1051" name="LuaRuntime_CanDefineCustomFormula" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanDefineCustomFormula" methodname="LuaRuntime_CanDefineCustomFormula" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1022356559" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.007675" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1058" name="LuaRuntime_CanImplementConditionalDamage" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanImplementConditionalDamage" methodname="LuaRuntime_CanImplementConditionalDamage" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="718074043" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.009032" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1052" name="LuaRuntime_CanImplementDOT" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanImplementDOT" methodname="LuaRuntime_CanImplementDOT" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1178034060" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.010708" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1054" name="LuaRuntime_CanImplementLifesteal" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanImplementLifesteal" methodname="LuaRuntime_CanImplementLifesteal" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1419181685" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.008381" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1056" name="LuaRuntime_CanImplementScalingFormulas" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanImplementScalingFormulas" methodname="LuaRuntime_CanImplementScalingFormulas" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1641657727" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.007073" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1048" name="LuaRuntime_CanModifyDamageFormula_WithArmor" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanModifyDamageFormula_WithArmor" methodname="LuaRuntime_CanModifyDamageFormula_WithArmor" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1602770381" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.007309" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1053" name="LuaRuntime_CanModifyStatsDynamically" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanModifyStatsDynamically" methodname="LuaRuntime_CanModifyStatsDynamically" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="1465139371" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.009511" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1059" name="LuaRuntime_CanTrackCombatLog" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_CanTrackCombatLog" methodname="LuaRuntime_CanTrackCombatLog" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="336303024" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.007295" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1057" name="LuaRuntime_SecureEnvironment_BlocksDangerousAPIs" fullname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests.LuaRuntime_SecureEnvironment_BlocksDangerousAPIs" methodname="LuaRuntime_SecureEnvironment_BlocksDangerousAPIs" classname="CoreAI.Tests.PlayMode.LuaFormulaRuntimeIntegrationPlayModeTests" runstate="Runnable" seed="626029670" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:07Z" duration="0.009888" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1060" name="MeaiLlmClientPlayModeTests" fullname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests" classname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests" runstate="Runnable" testcasecount="3" result="Skipped" label="Ignored" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:09Z" duration="1.639461" total="3" passed="2" failed="0" inconclusive="0" skipped="1" asserts="0">
+              <properties />
+              <reason>
+                <message><![CDATA[One or more child tests were ignored]]></message>
+              </reason>
+              <test-case id="1061" name="MeaiLlmClient_CreateHttp_ShouldCreateAndConnect" fullname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests.MeaiLlmClient_CreateHttp_ShouldCreateAndConnect" methodname="MeaiLlmClient_CreateHttp_ShouldCreateAndConnect" classname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests" runstate="Runnable" seed="497089188" result="Passed" start-time="2026-04-26 10:29:07Z" end-time="2026-04-26 10:29:09Z" duration="1.623355" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[MeaiLlmClient.HTTP] Creating HTTP client...
+[MeaiLlmClient.HTTP] Client created, sending request...
+
+IgnoreFailingMessages:true
+[MeaiLlmClient.HTTP] Success: OK
+]]></output>
+              </test-case>
+              <test-case id="1062" name="MeaiLlmClient_CreateLlmUnity_ShouldCreateAndConnect" fullname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests.MeaiLlmClient_CreateLlmUnity_ShouldCreateAndConnect" methodname="MeaiLlmClient_CreateLlmUnity_ShouldCreateAndConnect" classname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests" runstate="Runnable" seed="1756414934" result="Skipped" label="Ignored" start-time="2026-04-26 10:29:09Z" end-time="2026-04-26 10:29:09Z" duration="0.009213" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="600000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <reason>
+                  <message><![CDATA[Backend in settings is not LLMUnity/Auto: OpenAiHttp]]></message>
+                </reason>
+              </test-case>
+              <test-case id="1063" name="MeaiLlmClient_NullArguments_ShouldThrow" fullname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests.MeaiLlmClient_NullArguments_ShouldThrow" methodname="MeaiLlmClient_NullArguments_ShouldThrow" classname="CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests" runstate="Runnable" seed="462979910" result="Passed" start-time="2026-04-26 10:29:09Z" end-time="2026-04-26 10:29:09Z" duration="0.002408" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1022" name="MerchantWithToolCallingPlayModeTests" fullname="CoreAI.Tests.PlayMode.MerchantWithToolCallingPlayModeTests" classname="CoreAI.Tests.PlayMode.MerchantWithToolCallingPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:09Z" end-time="2026-04-26 10:29:11Z" duration="2.219645" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1023" name="ChatAgent_CallsInventoryTool_ThenRespondsWithItems" fullname="CoreAI.Tests.PlayMode.MerchantWithToolCallingPlayModeTests.ChatAgent_CallsInventoryTool_ThenRespondsWithItems" methodname="ChatAgent_CallsInventoryTool_ThenRespondsWithItems" classname="CoreAI.Tests.PlayMode.MerchantWithToolCallingPlayModeTests" runstate="Runnable" seed="1010706479" result="Passed" start-time="2026-04-26 10:29:09Z" end-time="2026-04-26 10:29:11Z" duration="2.215193" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <reason>
+                  <message><![CDATA[Chat Agent called tool and responded with real items]]></message>
+                </reason>
+                <output><![CDATA[[ChatWithToolCalling]  TEST START 
+[ChatWithToolCalling] Backend: OpenAiCompatibleHttp
+[ChatWithToolCalling] 
+[ChatWithToolCalling]  PLAYER MESSAGE:
+[ChatWithToolCalling] I want to buy something. What do you have?
+[ChatWithToolCalling] 
+[ChatWithToolCalling]  AGENT RESPONSE:
+[ChatWithToolCalling] Content: Welcome! What can I get for you? I have some fine wares available:
+
+*   **Iron Sword** - 50 gold (3 available)
+*   **Health Potion** - 25 gold (10 available)
+*   **Leather Armor** - 100 gold (2 available)
+
+Is there anything specific you're looking for?
+[ChatWithToolCalling] Commands produced: 1
+[ChatWithToolCalling]  Agent responded with inventory items!
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1064" name="MultiAgentCraftingWorkflowPlayModeTests" fullname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests" classname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests" runstate="Runnable" testcasecount="2" result="Passed" start-time="2026-04-26 10:29:11Z" end-time="2026-04-26 10:29:33Z" duration="22.134740" total="2" passed="2" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1066" name="MultiAgent_CreatorThenMechanic_QuickWorkflow" fullname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests.MultiAgent_CreatorThenMechanic_QuickWorkflow" methodname="MultiAgent_CreatorThenMechanic_QuickWorkflow" classname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests" runstate="Runnable" seed="452586458" result="Passed" start-time="2026-04-26 10:29:11Z" end-time="2026-04-26 10:29:19Z" duration="8.425504" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="900000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[MultiAgent.Quick] 
+[MultiAgent.Quick]  TEST START: Creator  CoreMechanic 
+[MultiAgent.Quick] 
+[MultiAgent.Quick] === CREATOR: Design craft ===
+[MultiAgent]  Creator MEMORY: (empty)
+[MultiAgent]  creator RESPONSE (698 chars):
+```json
+{
+  "weapon": {
+    "name": "Flameforge Blade",
+    "materials": [
+      {"material": "Iron", "hardness": 60, "rarity": 1},
+      {"material": "Fire Crystal", "magic": 85, "rarity": 4}
+    ],
+    "type": "Sword",
+    "description": "A blade forged from high-hardness iron infused with volatile fire crystal. The iron provides structural integrity while the fire crystal grants intense magical burning properties.",
+    "stats": {
+      "base_damage": 120,
+      "magic_power": 85,
+      "durability": 60,
+      "rarity_rating": 4
+    },
+    "special_effects": [
+      "Fire Crystal imbues attacks with burning damage",
+      "Iron core prevents shattering under high impact"
+    ]
+  }
+}
+```
+[MultiAgent]  Creator MEMORY: Design: Iron+Fire Crystal -> weapon
+[MultiAgent.Quick] === COREMECHANIC: Calculate result ===
+[MultiAgent]  CoreMechanicAI MEMORY: (empty)
+[MultiAgent]  mechanic RESPONSE (92 chars):
+```json
+{
+  "item_name": "Fire-Cursed Iron Blade",
+  "damage": 20,
+  "fire_damage": 10
+}
+```
+[MultiAgent]  CoreMechanicAI MEMORY: Craft#1: weapon damage:20 fire:10
+[MultiAgent.Quick]  MEMORY ISOLATION CHECK 
+[MultiAgent.Quick] Creator memory:      Design: Iron+Fire Crystal -> weapon
+[MultiAgent.Quick] CoreMechanic memory: Craft#1: weapon damage:20 fire:10
+[MultiAgent.Quick]  Memory isolation verified
+[MultiAgent.Quick]  TEST PASSED 
+]]></output>
+              </test-case>
+              <test-case id="1065" name="MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow" fullname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests.MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow" methodname="MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow" classname="CoreAI.Tests.PlayMode.MultiAgentCraftingWorkflowPlayModeTests" runstate="Runnable" seed="1558365795" result="Passed" start-time="2026-04-26 10:29:19Z" end-time="2026-04-26 10:29:33Z" duration="13.704770" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="1800000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[MultiAgent] 
+[MultiAgent]  TEST START: Creator  CoreMechanic  Programmer 
+[MultiAgent] 
+[MultiAgent] 
+[MultiAgent]   1: Creator   
+[MultiAgent] 
+[MultiAgent]  Creator MEMORY: (empty)
+[MultiAgent]  creator RESPONSE (112 chars):
+```json
+{
+  "item_type": "weapon",
+  "estimated_damage": 45,
+  "estimated_fire_damage": 15,
+  "quality": 1
+}
+```
+[MultiAgent]  Creator MEMORY: Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15
+[MultiAgent]  Creator memory: Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15
+[MultiAgent] 
+[MultiAgent]   2: CoreMechanicAI   
+[MultiAgent] 
+[MultiAgent]  CoreMechanicAI MEMORY: (empty)
+[MultiAgent]  mechanic RESPONSE (59 chars):
+```json
+{
+  "item_name": "Frostblade",
+  "damage": 45
+}
+```
+[MultiAgent]  CoreMechanicAI MEMORY: Craft#1: weapon damage:45
+[MultiAgent]  CoreMechanicAI memory: Craft#1: weapon damage:45
+[MultiAgent]  Item name from CoreMechanicAI: 'weapon'
+[MultiAgent] 
+[MultiAgent]   3: Programmer   Lua
+[MultiAgent] 
+[MultiAgent]  Programmer MEMORY: (empty)
+[MultiAgent]  programmer RESPONSE (484 chars):
+The memory action was successfully completed. However, the `execute_lua` tool is not available in this environment, so I cannot run the Lua code at this time. 
+
+I've written a basic Weapon class structure for you:
+- A constructor that accepts name and damage parameters
+- Proper metatable setup for inheritance
+- Ready to be extended with additional properties like range, accuracy, etc.
+
+Would you like me to generate more complete weapon functionality or modify the code in any way?
+[MultiAgent]  Programmer MEMORY: Programmer wrote Lua script
+[MultiAgent] 
+[MultiAgent]   4: CoreMechanicAI    ()
+[MultiAgent] 
+[MultiAgent] Previous craft memory: Craft#1: weapon damage:45
+[MultiAgent]  mechanic repeat RESPONSE (85 chars):
+```json
+{"telemetry":{},"hint":"Calculate craft result for Iron + Fire Crystal."}
+```
+[MultiAgent]  CoreMechanicAI MEMORY: Craft#2: weapon
+[MultiAgent] Final CoreMechanicAI memory:
+Craft#2: weapon
+[MultiAgent] 
+[MultiAgent]  FINAL VALIDATION 
+[MultiAgent] 
+[MultiAgent] Creator memory:      Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15
+[MultiAgent] CoreMechanic memory: Craft#2: weapon
+[MultiAgent] Programmer memory:  Programmer wrote Lua script
+[MultiAgent]  Memory isolation verified
+[MultiAgent] 
+[MultiAgent]  TEST PASSED 
+[MultiAgent] 
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1067" name="PlayerChatPlayModeTests" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" testcasecount="5" result="Passed" start-time="2026-04-26 10:29:33Z" end-time="2026-04-26 10:29:58Z" duration="25.046534" total="5" passed="5" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1072" name="AINpc_ChatOnlyMode_PlainTextOnly" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests.AINpc_ChatOnlyMode_PlainTextOnly" methodname="AINpc_ChatOnlyMode_PlainTextOnly" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" seed="752727909" result="Passed" start-time="2026-04-26 10:29:33Z" end-time="2026-04-26 10:29:34Z" duration="1.280688" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[AINpc] === TEST START ===
+[AINpc] Testing ChatOnly mode...
+[AINpc] AINpc ChatOnly mode works
+[AINpc] TEST PASSED
+]]></output>
+              </test-case>
+              <test-case id="1071" name="AINpc_ToolsAndChatMode_CanUseTools" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests.AINpc_ToolsAndChatMode_CanUseTools" methodname="AINpc_ToolsAndChatMode_CanUseTools" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" seed="145232501" result="Passed" start-time="2026-04-26 10:29:34Z" end-time="2026-04-26 10:29:37Z" duration="3.086793" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[AINpc] === TEST START ===
+[AINpc] Backend: OpenAiCompatibleHttp
+[AINpc] Requesting NPC with memory tool...
+[AINpc] Response: Greetings, Hero! Welcome to this realm. What adventure awaits you today?
+[AINpc] Commands: 1
+[AINpc] AINpc with ToolsAndChat mode completed
+[AINpc] TEST PASSED
+]]></output>
+              </test-case>
+              <test-case id="1070" name="PlayerChat_ClearHistory_Works" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests.PlayerChat_ClearHistory_Works" methodname="PlayerChat_ClearHistory_Works" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" seed="1743018401" result="Passed" start-time="2026-04-26 10:29:37Z" end-time="2026-04-26 10:29:39Z" duration="1.441441" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[PlayerChat] === TEST START ===
+[AINpc] Backend: OpenAiCompatibleHttp
+[AINpc] Requesting NPC dialogue...
+[AINpc] ----------------------------------------
+[AINpc] Role: AINpc
+[AINpc] Response: Welcome, traveler! Come in, take a seat at the bar. What brings you to these parts?
+[AINpc] ----------------------------------------
+[AINpc] AINpc generated dialogue
+[AINpc] TEST PASSED
+]]></output>
+              </test-case>
+              <test-case id="1069" name="PlayerChat_MaintainsHistory" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests.PlayerChat_MaintainsHistory" methodname="PlayerChat_MaintainsHistory" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" seed="1624064407" result="Passed" start-time="2026-04-26 10:29:39Z" end-time="2026-04-26 10:29:47Z" duration="8.670343" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[PlayerChat] === TEST START ===
+[PlayerChat] Backend: OpenAiCompatibleHttp
+[PlayerChat] History maintained: 2 pairs
+[PlayerChat] TEST PASSED
+]]></output>
+              </test-case>
+              <test-case id="1068" name="PlayerChat_RespondsToGreeting" fullname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests.PlayerChat_RespondsToGreeting" methodname="PlayerChat_RespondsToGreeting" classname="CoreAI.Tests.PlayMode.PlayerChatPlayModeTests" runstate="Runnable" seed="732448206" result="Passed" start-time="2026-04-26 10:29:47Z" end-time="2026-04-26 10:29:58Z" duration="10.562144" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[PlayerChat] === TEST START ===
+[PlayerChat] Backend: OpenAiCompatibleHttp
+[PlayerChat] Sending: 'Hello, how are you?'
+[PlayerChat] ----------------------------------------
+[PlayerChat] Role: PlayerChat
+[PlayerChat] System Prompt: CRITICAL RULES FOR ALL AGENTS:
+1. TOOL CALLING: When tools/functions are available, you MUST use the...
+[PlayerChat] Response: Hello! I'm ready to assist you with your game tasks today. What would you like to do?
+[PlayerChat] ----------------------------------------
+[PlayerChat] PlayerChat responded with: Hello! I'm ready to assist you with your game task...
+[PlayerChat] TEST PASSED
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestSuite" id="1096" name="Scenarios" fullname="CoreAI.Tests.PlayMode.Scenarios" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:58Z" end-time="2026-04-26 10:30:12Z" duration="14.102014" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-suite type="TestSuite" id="1097" name="Complex" fullname="CoreAI.Tests.PlayMode.Scenarios.Complex" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:58Z" end-time="2026-04-26 10:30:12Z" duration="14.047652" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+                <properties />
+                <test-suite type="TestFixture" id="1089" name="MerchantBehaviorChatWithToolsPlayModeTests" fullname="CoreAI.Tests.PlayMode.Scenarios.Complex.MerchantBehaviorChatWithToolsPlayModeTests" classname="CoreAI.Tests.PlayMode.Scenarios.Complex.MerchantBehaviorChatWithToolsPlayModeTests" runstate="Runnable" testcasecount="1" result="Passed" start-time="2026-04-26 10:29:58Z" end-time="2026-04-26 10:30:12Z" duration="14.045913" total="1" passed="1" failed="0" inconclusive="0" skipped="0" asserts="0">
+                  <properties />
+                  <test-case id="1090" name="MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase" fullname="CoreAI.Tests.PlayMode.Scenarios.Complex.MerchantBehaviorChatWithToolsPlayModeTests.MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase" methodname="MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase" classname="CoreAI.Tests.PlayMode.Scenarios.Complex.MerchantBehaviorChatWithToolsPlayModeTests" runstate="Runnable" seed="1384938406" result="Passed" start-time="2026-04-26 10:29:58Z" end-time="2026-04-26 10:30:12Z" duration="14.044171" asserts="0">
+                    <properties>
+                      <property name="_JOINTYPE" value="UnityCombinatorial" />
+                      <property name="Timeout" value="600000" />
+                      <property name="retryIteration" value="0" />
+                      <property name="repeatIteration" value="0" />
+                    </properties>
+                    <output><![CDATA[[MerchantScenario] Backend: OpenAiCompatibleHttp
+[MerchantScenario] === Step1_GreetAndList ===
+[MerchantScenario] PLAYER: You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. You MUST call get_inventory first, then answer with item names and prices.
+[MerchantScenario] LLM CMD[0] type=AiEnvelope
+[MerchantScenario] LLM RESPONSE[0]: Welcome! What can I get for you? Fine wares I have include:
+
+- Iron Sword - 60 gold (2 available)
+- Health Potion - 30 gold (8 available)  
+- Leather Armor - 100 gold (1 available)
+
+Is there anything specific you'd like to purchase?
+[MerchantScenario] Inventory tool calls: get_inventory:3
+[MerchantScenario] Economy tool calls: 
+[MerchantScenario] Player gold: 40; Player items: 
+[MerchantScenario] === Step2_TooExpensive ===
+[MerchantScenario] PLAYER: Player says: 'I want Leather Armor x1'. Player has low gold. You MUST call get_player_gold and buy_item(itemName='Leather Armor', quantity=1). If purchase fails, explain briefly and suggest cheaper options.
+[MerchantScenario] LLM CMD[1] type=AiEnvelope
+[MerchantScenario] LLM RESPONSE[1]: Well well! I'd love to sell you that Leather Armor, but it's priced at 100 gold and you only have 40 with you. 
+
+However, I do have some cheaper options for you! How about a Health Potion? It's just 30 gold and will help you recover health when needed. Or if you're looking for something else, I've got Iron Swords available at 60 gold each.
+
+What can I get for you instead?
+[MerchantScenario] Inventory tool calls: get_inventory:3 | get_inventory:3
+[MerchantScenario] Economy tool calls: get_player_gold:40 | buy_item:Leather Armor:1:insufficient_gold
+[MerchantScenario] Player gold: 40; Player items: 
+[MerchantScenario] === Step3_NegotiateAndBuy ===
+[MerchantScenario] PLAYER: Player says: 'Can you discount Health Potion? I have little money.' You MUST call apply_discount(itemName='Health Potion', percent=20), then buy_item(itemName='Health Potion', quantity=1). Then confirm successful purchase.
+[MerchantScenario] LLM CMD[2] type=AiEnvelope
+[MerchantScenario] LLM RESPONSE[2]: Welcome! I'm glad you could afford that Health Potion at our special discount price of 24 gold. Here's your potion - may it help you on your journey!
+[MerchantScenario] Inventory tool calls: get_inventory:3 | get_inventory:3
+[MerchantScenario] Economy tool calls: get_player_gold:40 | buy_item:Leather Armor:1:insufficient_gold | apply_discount:Health Potion:20 | buy_item:Health Potion:1:success:24
+[MerchantScenario] Player gold: 16; Player items: Health Potion
+[MerchantScenario] Memory snapshot: Player bought 1 Health Potion for 24 gold, with 16 gold remaining after purchase.
+]]></output>
+                  </test-case>
+                </test-suite>
+              </test-suite>
+            </test-suite>
+            <test-suite type="TestFixture" id="1073" name="StreamingPlayModeTests" fullname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" classname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" runstate="Runnable" testcasecount="4" result="Passed" start-time="2026-04-26 10:30:12Z" end-time="2026-04-26 10:30:45Z" duration="33.112578" total="4" passed="4" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1075" name="Streaming_CancellationToken_StopsStream" fullname="CoreAI.Tests.PlayMode.StreamingPlayModeTests.Streaming_CancellationToken_StopsStream" methodname="Streaming_CancellationToken_StopsStream" classname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" runstate="Runnable" seed="298044877" result="Passed" start-time="2026-04-26 10:30:12Z" end-time="2026-04-26 10:30:20Z" duration="8.014579" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#5] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[StreamingTest] Cancellation: wasCancelled=True, chunks=0
+]]></output>
+              </test-case>
+              <test-case id="1074" name="Streaming_ReturnsChunks_WithDoneFlag" fullname="CoreAI.Tests.PlayMode.StreamingPlayModeTests.Streaming_ReturnsChunks_WithDoneFlag" methodname="Streaming_ReturnsChunks_WithDoneFlag" classname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" runstate="Runnable" seed="1563074781" result="Passed" start-time="2026-04-26 10:30:20Z" end-time="2026-04-26 10:30:24Z" duration="4.209979" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#6] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[StreamingTest] Full response (5 chunks): 
+
+Hello there friend
+]]></output>
+              </test-case>
+              <test-case id="1077" name="Streaming_ThinkBlocks_StrippedFromResponse" fullname="CoreAI.Tests.PlayMode.StreamingPlayModeTests.Streaming_ThinkBlocks_StrippedFromResponse" methodname="Streaming_ThinkBlocks_StrippedFromResponse" classname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" runstate="Runnable" seed="500388393" result="Passed" start-time="2026-04-26 10:30:24Z" end-time="2026-04-26 10:30:37Z" duration="12.939911" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#7] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[ThinkBlockTest] Response (295 chunks): ` in the system prompt example? Wait, looking at the actual system prompt provided: "Think step by step using ` tags? No, usually it's `<thinking>`. The prompt says "using ` in the system instruction example? No, it says "using  tags before responding. Keep your answer brief." -> Wait, the system prompt text provided in the `user` block says "Think step by step using  tags before responding." No, wait. The system instruction is hidden. The user message is just "What is 2+2?".
+    Wait, I am an AI model. I need to follow the system instructions provided in the context.
+    Context: "Think step by step using  tags before responding. Keep your answer brief." -> Wait, no. The text I see is:
+    User: "What is 2+2?"
+    System (implicit): "Think step by step using  tags before responding." -> Wait, in the prompt provided to me right now (the one I am processing), it says:
+    System: "Think step by step using  tags". Wait, no. The text says "using 
+
+<thinking>
+1. Identify the operation: Addition (+).
+2. Add the two numbers: 2 and 2.
+3. Calculate the sum: 2 + 2 = 4.
+</thinking>
+
+The answer is 4.
+]]></output>
+              </test-case>
+              <test-case id="1076" name="ThreeLayerPrompt_AllLayersApplied" fullname="CoreAI.Tests.PlayMode.StreamingPlayModeTests.ThreeLayerPrompt_AllLayersApplied" methodname="ThreeLayerPrompt_AllLayersApplied" classname="CoreAI.Tests.PlayMode.StreamingPlayModeTests" runstate="Runnable" seed="1668084117" result="Passed" start-time="2026-04-26 10:30:37Z" end-time="2026-04-26 10:30:45Z" duration="7.943301" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#8] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[ThreeLayerTest] Composed prompt:
+RULE: Always respond with 'LAYER1_OK' at the start.
+You are a test agent. Always include 'LAYER2_OK'.
+
+Also include 'LAYER3_OK' in your response.
+[ThreeLayerTest] LLM response: LAYER1_OK I am a test agent responding as instructed. LAYER2_OK LAYER3_OK
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1078" name="StreamingToolCallingPlayModeTests" fullname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests" classname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests" runstate="Runnable" testcasecount="3" result="Passed" start-time="2026-04-26 10:30:45Z" end-time="2026-04-26 10:30:54Z" duration="9.236036" total="3" passed="3" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1080" name="Streaming_EarlyCancellation_StopsCleanly" fullname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests.Streaming_EarlyCancellation_StopsCleanly" methodname="Streaming_EarlyCancellation_StopsCleanly" classname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests" runstate="Runnable" seed="1536511851" result="Passed" start-time="2026-04-26 10:30:45Z" end-time="2026-04-26 10:30:50Z" duration="5.011189" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#9] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[StreamingToolTest] EarlyCancel: wasCancelled=True, chunks=0
+]]></output>
+              </test-case>
+              <test-case id="1081" name="Streaming_ThenNonStreaming_NoStateContamination" fullname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests.Streaming_ThenNonStreaming_NoStateContamination" methodname="Streaming_ThenNonStreaming_NoStateContamination" classname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests" runstate="Runnable" seed="759324689" result="Passed" start-time="2026-04-26 10:30:50Z" end-time="2026-04-26 10:30:52Z" duration="2.111489" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#10] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[StreamingToolTest] Stream→NonStream test passed. Stream: 4 chunks, NonStream: 12 chars
+]]></output>
+              </test-case>
+              <test-case id="1079" name="Streaming_WithToolCapablePrompt_CompletesSuccessfully" fullname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests.Streaming_WithToolCapablePrompt_CompletesSuccessfully" methodname="Streaming_WithToolCapablePrompt_CompletesSuccessfully" classname="CoreAI.Tests.PlayMode.StreamingToolCallingPlayModeTests" runstate="Runnable" seed="848755497" result="Passed" start-time="2026-04-26 10:30:52Z" end-time="2026-04-26 10:30:54Z" duration="2.108359" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#11] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[StreamingToolTest] Full response (9 chunks): 
+
+2 + 2 = 4
+]]></output>
+              </test-case>
+            </test-suite>
+            <test-suite type="TestFixture" id="1082" name="WorldCommandPlayModeTests" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" testcasecount="6" result="Passed" start-time="2026-04-26 10:30:54Z" end-time="2026-04-26 10:31:09Z" duration="14.086362" total="6" passed="6" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1088" name="WorldLlmTool_CanBeCreated" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldLlmTool_CanBeCreated" methodname="WorldLlmTool_CanBeCreated" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="130463261" result="Passed" start-time="2026-04-26 10:30:54Z" end-time="2026-04-26 10:30:54Z" duration="0.000524" asserts="0">
+                <properties>
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+              </test-case>
+              <test-case id="1087" name="WorldTool_ListAnimations" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldTool_ListAnimations" methodname="WorldTool_ListAnimations" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="1920010039" result="Passed" start-time="2026-04-26 10:30:54Z" end-time="2026-04-26 10:30:57Z" duration="2.288294" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#12] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[WorldTest] Backend: HTTP, testing list_animations...
+[WorldTest] SUCCESS! List animations command executed!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1085" name="WorldTool_ListObjects" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldTool_ListObjects" methodname="WorldTool_ListObjects" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="1868907483" result="Passed" start-time="2026-04-26 10:30:57Z" end-time="2026-04-26 10:30:59Z" duration="2.413586" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#13] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[WorldTest] Backend: HTTP, testing list_objects...
+[WorldTest] SUCCESS! List objects command executed!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1084" name="WorldTool_MoveObject" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldTool_MoveObject" methodname="WorldTool_MoveObject" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="1199728772" result="Passed" start-time="2026-04-26 10:30:59Z" end-time="2026-04-26 10:31:02Z" duration="3.356526" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#14] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[WorldTest] Backend: HTTP, testing move...
+[WorldTest] SUCCESS! Move command executed!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1086" name="WorldTool_PlayAnimation" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldTool_PlayAnimation" methodname="WorldTool_PlayAnimation" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="1515382980" result="Passed" start-time="2026-04-26 10:31:02Z" end-time="2026-04-26 10:31:05Z" duration="2.330870" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#15] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[WorldTest] Backend: HTTP, testing play_animation...
+[WorldTest] SUCCESS! Play animation command executed!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+              <test-case id="1083" name="WorldTool_SpawnObject" fullname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests.WorldTool_SpawnObject" methodname="WorldTool_SpawnObject" classname="CoreAI.Tests.PlayMode.WorldCommandPlayModeTests" runstate="Runnable" seed="694117634" result="Passed" start-time="2026-04-26 10:31:05Z" end-time="2026-04-26 10:31:09Z" duration="3.691251" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="Timeout" value="300000" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[TestAgentSetup#16] Backend: OpenAiHttp
+[TestAgentSetup] Initializing HTTP: http://192.168.1.154:1234/v1
+
+IgnoreFailingMessages:true
+[TestAgentSetup] Ready: True, Backend: HTTP
+[WorldTest] Backend: HTTP, testing spawn...
+[WorldTest] SUCCESS! World command executed!
+
+IgnoreFailingMessages:false
+]]></output>
+              </test-case>
+            </test-suite>
+          </test-suite>
+          <test-suite type="TestSuite" id="1094" name="PlayModeTest" fullname="CoreAI.Tests.PlayModeTest" runstate="Runnable" testcasecount="3" result="Passed" start-time="2026-04-26 10:31:09Z" end-time="2026-04-26 10:31:09Z" duration="0.030418" total="3" passed="3" failed="0" inconclusive="0" skipped="0" asserts="0">
+            <properties />
+            <test-suite type="TestFixture" id="1001" name="GameConfigPlayModeTests" fullname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests" classname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests" runstate="Runnable" testcasecount="3" result="Passed" start-time="2026-04-26 10:31:09Z" end-time="2026-04-26 10:31:09Z" duration="0.026601" total="3" passed="3" failed="0" inconclusive="0" skipped="0" asserts="0">
+              <properties />
+              <test-case id="1002" name="GameConfig_AI_ReadModifyWrite_FullCycle" fullname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests.GameConfig_AI_ReadModifyWrite_FullCycle" methodname="GameConfig_AI_ReadModifyWrite_FullCycle" classname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests" runstate="Runnable" seed="1302049695" result="Passed" start-time="2026-04-26 10:31:09Z" end-time="2026-04-26 10:31:09Z" duration="0.010930" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[GameConfigTest] AI successfully updated config: {"difficulty":2,"enemy_hp_mult":1.5,"max_enemies":80}
+]]></output>
+              </test-case>
+              <test-case id="1004" name="GameConfig_MultipleKeys_ReadAll" fullname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests.GameConfig_MultipleKeys_ReadAll" methodname="GameConfig_MultipleKeys_ReadAll" classname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests" runstate="Runnable" seed="114284858" result="Passed" start-time="2026-04-26 10:31:09Z" end-time="2026-04-26 10:31:09Z" duration="0.007135" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[GameConfigTest] Multi-key read: {"session":{"difficulty":1,"enemy_hp_mult":1.0,"max_enemies":50},"crafting":{"max_ingredients":6,"quality_min":0,"quality_max":100}}
+]]></output>
+              </test-case>
+              <test-case id="1003" name="GameConfig_NoAccess_ReturnsError" fullname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests.GameConfig_NoAccess_ReturnsError" methodname="GameConfig_NoAccess_ReturnsError" classname="CoreAI.Tests.PlayModeTest.GameConfigPlayModeTests" runstate="Runnable" seed="1018568344" result="Passed" start-time="2026-04-26 10:31:09Z" end-time="2026-04-26 10:31:09Z" duration="0.006328" asserts="0">
+                <properties>
+                  <property name="_JOINTYPE" value="UnityCombinatorial" />
+                  <property name="retryIteration" value="0" />
+                  <property name="repeatIteration" value="0" />
+                </properties>
+                <output><![CDATA[[GameConfigTest] Restricted role correctly denied access
+<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: [TestRunnerNoThrottle] Restored Interaction Mode after test run.
+Saving results to: C:/Users/User/AppData/LocalLow/DefaultCompany/CoreAI\TestResults.xml
+]]></output>
+              </test-case>
+            </test-suite>
+          </test-suite>
+        </test-suite>
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>

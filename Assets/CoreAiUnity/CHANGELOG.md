@@ -2,6 +2,22 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.0] - 2026-04-26
+
+### Forced Tool Mode (provider tool_choice) — deterministic tool calls
+
+- **`MeaiLlmClient.ApplyForcedToolMode`** maps the new `LlmToolChoiceMode` (introduced in `com.nexoider.coreai 0.25.0`) onto Microsoft.Extensions.AI `ChatOptions.ToolMode`:
+  - `Auto` → provider default (model decides),
+  - `RequireAny` → `ChatToolMode.RequireAny`,
+  - `RequireSpecific` → `ChatToolMode.RequireSpecific(name)` (validated against the available `AIFunction` set; falls back to `RequireAny` with a warning if the named tool isn't present),
+  - `None` → `ChatToolMode.None`.
+- **Streaming + forced tools fixed for multi-round loops.** `MeaiLlmClient.CompleteStreamingAsync` applies the forced mode only on the **first** iteration; after each tool result is fed back to the model, options are cloned with `ChatToolMode.Auto` (`CloneOptionsWithAutoToolMode`), so the model can finalise with text instead of being pinned into an infinite tool-call loop.
+- **Both code paths supported.** Forced tool mode flows through both `CompleteAsync` (non-streaming, via `SmartToolCallingChatClient`) and `CompleteStreamingAsync` (streaming, native + text-based tool extraction).
+- **Tool-call JSON stays out of streaming text by default.** The existing native (SSE `delta.tool_calls`) and text-based extraction paths already strip tool-call JSON before yielding text chunks; `ForcedToolMode` does not change that.
+- 🧪 **Tests:** new `ForcedToolModeEditModeTests` verify forced-mode mapping, RequireSpecific validation, and the per-iteration reset in streaming.
+- **HTTP SSE `reasoning_content` (Qwen / LM Studio)** — `MeaiOpenAiChatClient.ExtractDeltaUpdate` извлекает дельты так, что цепь размышлений в отдельном поле не попадает в видимый `content`; `ParseResponse` документирован как «только `message.content` для текста ассистента». EditMode: `MeaiOpenAiChatClientSseEditModeTests`; PlayMode: ожидание `Streaming_ThinkBlocks_StrippedFromResponse` согласовано с `RequestTimeoutSeconds` + запас.
+- 🔧 Bumped package versions to `0.25.0`. Dependency: `com.nexoider.coreai 0.25.0+`.
+
 ## [0.24.2] - 2026-04-26
 
 ### HTTP error diagnostics & policy hardening

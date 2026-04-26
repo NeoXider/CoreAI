@@ -55,7 +55,7 @@ namespace CoreAI.Tests.PlayMode
                 string.IsNullOrWhiteSpace(state.Memory))
             {
                 Debug.LogWarning("[MemoryTest] Memory not written. Model may not support tool-call format.");
-                Assert.Ignore("Memory write skipped - model may not support tool-call format");
+                Assert.Fail("Memory write failed: model did not invoke memory tool or returned empty state.");
             }
 
             Debug.Log($"[MemoryTest] SUCCESS! Memory: {state.Memory}");
@@ -153,7 +153,7 @@ namespace CoreAI.Tests.PlayMode
                 !string.IsNullOrWhiteSpace(state.Memory))
             {
                 Debug.LogWarning($"[MemoryTest] Memory not cleared: {state.Memory}");
-                Assert.Ignore("Clear test skipped");
+                Assert.Fail("Memory clear failed: memory state is still present after clear request.");
             }
 
             Debug.Log("[MemoryTest] SUCCESS! Memory cleared.");

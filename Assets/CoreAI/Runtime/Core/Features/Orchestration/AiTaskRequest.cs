@@ -47,5 +47,21 @@ namespace CoreAI.Ai
         /// Ключи оверлеев данных (<see cref="IDataOverlayVersionStore"/>), через запятую или «;» — в промпт Programmer добавляются baseline и текущие JSON.
         /// </summary>
         public string DataOverlayVersionKeysCsv { get; set; } = "";
+
+        /// <summary>
+        /// Per-call override of how the model picks tools. <see cref="LlmToolChoiceMode.Auto"/>
+        /// is the default and matches the legacy behaviour (model decides).
+        /// Application-layer logic (intent classifiers, retry pipelines) sets this when it needs
+        /// guaranteed tool emission for the current request without changing the agent definition.
+        /// Propagated to <see cref="LlmCompletionRequest.ForcedToolMode"/> by the orchestrator.
+        /// </summary>
+        public LlmToolChoiceMode ForcedToolMode { get; set; } = LlmToolChoiceMode.Auto;
+
+        /// <summary>
+        /// Tool name to require when <see cref="ForcedToolMode"/> is
+        /// <see cref="LlmToolChoiceMode.RequireSpecific"/>. Ignored otherwise.
+        /// Must match an <see cref="ILlmTool.Name"/> registered for this role.
+        /// </summary>
+        public string RequiredToolName { get; set; } = "";
     }
 }

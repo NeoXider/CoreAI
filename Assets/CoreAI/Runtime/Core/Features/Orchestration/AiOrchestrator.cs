@@ -223,7 +223,9 @@ namespace CoreAI.Ai
                             ChatHistory = chatHistory,
                             TraceId = traceId,
                             Tools = tools,
-                            AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls
+                            AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
+                            ForcedToolMode = task.ForcedToolMode,
+                            RequiredToolName = task.RequiredToolName ?? ""
                         },
                         linkedCts.Token);
                     sw.Stop();
@@ -273,7 +275,9 @@ namespace CoreAI.Ai
                         SystemPrompt = system,
                         UserPayload = userRetry,
                         TraceId = traceId,
-                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls
+                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
+                        ForcedToolMode = task.ForcedToolMode,
+                        RequiredToolName = task.RequiredToolName ?? ""
                     },
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();
@@ -358,7 +362,9 @@ namespace CoreAI.Ai
                 ChatHistory = bundle.ChatHistory,
                 TraceId = bundle.TraceId,
                 Tools = bundle.Tools,
-                AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls
+                AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
+                ForcedToolMode = task.ForcedToolMode,
+                RequiredToolName = task.RequiredToolName ?? ""
             };
 
             Stopwatch sw = Stopwatch.StartNew();

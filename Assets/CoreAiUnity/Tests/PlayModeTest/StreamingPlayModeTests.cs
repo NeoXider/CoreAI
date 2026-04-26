@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -214,8 +215,8 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_ThinkBlocks_StrippedFromResponse()
         {
-            // Models like DeepSeek/Qwen produce <think>...</think> blocks
-            // MeaiLlmClient should strip them
+            // Модели могут писать think в <think> (content) либо отдельно как delta.reasoning_content;
+            // MeaiLlmClient/ThinkBlockStreamFilter убирают теги; HTTP-клиент не прокидывает reasoning в UI.
             var request = new LlmCompletionRequest
             {
                 AgentRoleId = "PlayerChat",
@@ -229,9 +230,16 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
                 _ => { });
 
-            //  120  reasoning- (DeepSeek/Qwen)  
-            //    <think>   .
-            yield return _setup.RunAndWait(streamTask, 120f, "Streaming_ThinkBlock");
+            // Ожидание не меньше UnityWebRequest (RequestTimeoutSeconds) + запас: длинный reasoning_content
+            // съедает тот же wall-time, что и генерация, и тест не должен обрываться раньше HTTP.
+            float waitSec = 180f;
+            CoreAISettingsAsset asset = CoreAISettingsAsset.Instance;
+            if (asset != null)
+            {
+                waitSec = Mathf.Max(180f, asset.RequestTimeoutSeconds + 30f);
+            }
+
+            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming_ThinkBlock");
 
             foreach (var c in chunks)
             {

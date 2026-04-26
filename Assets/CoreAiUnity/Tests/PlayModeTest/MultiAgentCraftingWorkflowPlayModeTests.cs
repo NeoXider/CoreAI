@@ -216,6 +216,15 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAgentResponse("programmer", sink);
                     LogAgentMemory(store, "Programmer");
+
+                    Assert.Greater(sink.Items.Count, 0, "Programmer should emit at least one response payload.");
+                    string programmerPayload = sink.Items[0].JsonPayload ?? string.Empty;
+                    Assert.IsFalse(string.IsNullOrWhiteSpace(programmerPayload),
+                        "Programmer response payload should not be empty.");
+                    Assert.That(programmerPayload.ToLowerInvariant(), Does.Contain("lua"),
+                        "Programmer response should contain Lua-related output.");
+                    Assert.That(programmerPayload, Does.Not.Contain("execute_lua tool is not available"),
+                        "Workflow claims execute_lua step, but tool was unavailable.");
                 }
 
                 // =====  4: CoreMechanicAI    () =====

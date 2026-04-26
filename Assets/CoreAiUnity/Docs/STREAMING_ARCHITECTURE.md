@@ -74,7 +74,11 @@ Key files:
 
 ## 3. Think-block filter
 
-Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. Those blocks must never reach the UI, but:
+Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. **OpenAI-compatible HTTP (LM Studio, vLLM, etc.)** may instead stream a separate `delta.reasoning_content` field; `MeaiOpenAiChatClient` does **not** forward that to MEAI/Chat (it never becomes `update.Text` for the think filter). The tag-based filter only sees **in-content** tags.
+
+`UnityWebRequest.timeout` (mapped to `RequestTimeoutSeconds` on the HTTP settings asset) is a **whole-request** time budget from request start, not a per-chunk or idle timeout — long reasoning phases count against the same limit as the final answer.
+
+Those blocks must never reach the UI, but:
 
 - Opening and closing tags can arrive in **separate chunks** (e.g. `"<thi"` + `"nk>…"`).
 - A stray `<` that is **not** part of a `<think>` tag must still be rendered.

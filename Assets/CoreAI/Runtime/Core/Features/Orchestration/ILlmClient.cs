@@ -40,6 +40,21 @@ namespace CoreAI.Ai
 
         /// <summary>Разрешить/запретить вызов одного и того же инструмента подряд (null = перекладывается на глобальные настройки).</summary>
         public bool? AllowDuplicateToolCalls { get; set; }
+
+        /// <summary>
+        /// How the LLM backend should treat tool selection for this request.
+        /// <see cref="LlmToolChoiceMode.Auto"/> = provider default (model decides).
+        /// Adapters in the Unity layer translate this to <c>ChatOptions.ToolMode</c>
+        /// (Microsoft.Extensions.AI) or to the equivalent provider-native field.
+        /// </summary>
+        public LlmToolChoiceMode ForcedToolMode { get; set; } = LlmToolChoiceMode.Auto;
+
+        /// <summary>
+        /// Tool name to require when <see cref="ForcedToolMode"/> is
+        /// <see cref="LlmToolChoiceMode.RequireSpecific"/>. Must match an <see cref="ILlmTool.Name"/>
+        /// in <see cref="Tools"/>. Ignored for other modes.
+        /// </summary>
+        public string RequiredToolName { get; set; } = "";
     }
 
     /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>

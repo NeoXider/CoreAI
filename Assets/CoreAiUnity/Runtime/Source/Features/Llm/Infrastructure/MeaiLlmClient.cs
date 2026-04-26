@@ -163,6 +163,7 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
+                ApplyForcedToolMode(chatOptions, request, aiTools);
             }
 
             MEAI.ChatResponse response;
@@ -276,6 +277,7 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
+                ApplyForcedToolMode(chatOptions, request, aiTools);
             }
 
             _logger.LogInfo(GameLogFeature.Llm,
@@ -299,6 +301,17 @@ namespace CoreAI.Infrastructure.Llm
                     yield break;
                 }
 
+                // ForcedToolMode applies ONLY to the first iteration.
+                // After we feed tool results back to the model, it must decide naturally
+                // whether to call more tools or finalise with text — otherwise the
+                // tool-choice constraint would loop forever (model is forced to re-call a tool,
+                // we feed its result, model is forced again, ...).
+                MEAI.ChatOptions iterationOptions = chatOptions;
+                if (toolIteration > 1 && chatOptions.ToolMode != null && chatOptions.ToolMode is not MEAI.AutoChatToolMode)
+                {
+                    iterationOptions = CloneOptionsWithAutoToolMode(chatOptions);
+                }
+
                 ThinkBlockStreamFilter thinkFilter = new();
                 List<string> visibleChunks = new();
                 System.Text.StringBuilder iterationVisible = new();
@@ -306,7 +319,7 @@ namespace CoreAI.Infrastructure.Llm
                 int chunkCount = 0;
 
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
-                                   .GetStreamingResponseAsync(chatMessages, chatOptions, cancellationToken))
+                                   .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
                 {
                     // Check for native tool calls in the update (from providers that support delta.tool_calls)
                     if (update.Contents != null)
@@ -594,6 +607,79 @@ namespace CoreAI.Infrastructure.Llm
         {
             public int Start;
             public int Length;
+        }
+
+        /// <summary>
+        /// Maps <see cref="LlmCompletionRequest.ForcedToolMode"/> onto
+        /// <see cref="MEAI.ChatOptions.ToolMode"/>. Called only when the request actually
+        /// has tools attached — forcing a tool with an empty tool list would error out.
+        /// <para>
+        /// Multi-round streaming: the caller is responsible for resetting the mode to
+        /// <see cref="MEAI.ChatToolMode.Auto"/> after the first iteration via
+        /// <see cref="CloneOptionsWithAutoToolMode"/>; otherwise the model would be forced
+        /// to keep emitting tool calls forever (it's pinned to "RequireAny" each turn).
+        /// </para>
+        /// </summary>
+        private void ApplyForcedToolMode(MEAI.ChatOptions options, LlmCompletionRequest request, IReadOnlyList<MEAI.AIFunction> aiTools)
+        {
+            switch (request.ForcedToolMode)
+            {
+                case LlmToolChoiceMode.Auto:
+                    return;
+                case LlmToolChoiceMode.None:
+                    options.ToolMode = MEAI.ChatToolMode.None;
+                    return;
+                case LlmToolChoiceMode.RequireAny:
+                    options.ToolMode = MEAI.ChatToolMode.RequireAny;
+                    return;
+                case LlmToolChoiceMode.RequireSpecific:
+                    string targetName = request.RequiredToolName?.Trim();
+                    if (string.IsNullOrEmpty(targetName))
+                    {
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmClient: ForcedToolMode=RequireSpecific but RequiredToolName is empty — falling back to RequireAny.");
+                        options.ToolMode = MEAI.ChatToolMode.RequireAny;
+                        return;
+                    }
+
+                    bool isAvailable = false;
+                    for (int i = 0; i < aiTools.Count; i++)
+                    {
+                        if (string.Equals(aiTools[i].Name, targetName, StringComparison.Ordinal))
+                        {
+                            isAvailable = true;
+                            break;
+                        }
+                    }
+
+                    if (!isAvailable)
+                    {
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"MeaiLlmClient: ForcedToolMode=RequireSpecific('{targetName}') but tool is not registered for this role — falling back to RequireAny.");
+                        options.ToolMode = MEAI.ChatToolMode.RequireAny;
+                        return;
+                    }
+
+                    options.ToolMode = MEAI.ChatToolMode.RequireSpecific(targetName);
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Returns a shallow copy of <paramref name="source"/> with <see cref="MEAI.ChatToolMode.Auto"/>.
+        /// Used in the streaming loop after the first iteration so the model isn't forced
+        /// to keep emitting tool calls after each tool result is fed back.
+        /// </summary>
+        private static MEAI.ChatOptions CloneOptionsWithAutoToolMode(MEAI.ChatOptions source)
+        {
+            MEAI.ChatOptions clone = new()
+            {
+                Temperature = source.Temperature,
+                MaxOutputTokens = source.MaxOutputTokens,
+                Tools = source.Tools,
+                ToolMode = MEAI.ChatToolMode.Auto
+            };
+            return clone;
         }
 
         private List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)

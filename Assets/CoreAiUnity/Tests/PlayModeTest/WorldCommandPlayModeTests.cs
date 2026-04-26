@@ -87,7 +87,7 @@ namespace CoreAI.Tests.PlayMode
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
                 Debug.LogWarning("[WorldTest] Move command not executed.");
-                Assert.Ignore("World move skipped - model may not support tool-call format");
+                Assert.Fail("World move failed: tool call was not executed.");
             }
 
             Debug.Log($"[WorldTest] SUCCESS! Move command executed!");
@@ -124,7 +124,7 @@ namespace CoreAI.Tests.PlayMode
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
                 Debug.LogWarning("[WorldTest] List objects command not executed.");
-                Assert.Ignore("World list_objects skipped - model may not support tool-call format");
+                Assert.Fail("World list_objects failed: tool call was not executed.");
             }
 
             Debug.Log($"[WorldTest] SUCCESS! List objects command executed!");

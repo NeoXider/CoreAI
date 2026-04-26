@@ -59,15 +59,10 @@ namespace CoreAI.Tests.PlayMode
             yield return PlayModeTestAwait.WaitTask(task, 300f, "MeaiLlmClient HTTP request");
 
             LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
-            if (!result.Ok)
-            {
-                Debug.LogWarning($"[MeaiLlmClient.HTTP] Request failed: {result.Error}");
-            }
-            else
-            {
-                Debug.Log(
-                    $"[MeaiLlmClient.HTTP] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
-            }
+            Assert.IsTrue(result.Ok, $"HTTP request failed: {result?.Error}");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "HTTP response content should not be empty");
+            Debug.Log(
+                $"[MeaiLlmClient.HTTP] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
         }
 
         /// <summary>
@@ -89,8 +84,7 @@ namespace CoreAI.Tests.PlayMode
             //   settings   LLMUnity/Auto   .
             if (settings.BackendType != LlmBackendType.LlmUnity && settings.BackendType != LlmBackendType.Auto)
             {
-                Debug.Log("[MeaiLlmClient.LLMUnity] Skip: backend in settings is " + settings.BackendType);
-                yield break;
+                Assert.Ignore("Backend in settings is not LLMUnity/Auto: " + settings.BackendType);
             }
 
             Debug.Log("[MeaiLlmUnity.LLMUnity] Creating LLMUnity client...");
@@ -109,9 +103,8 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[MeaiLlmUnity] Using backend: {handle.ResolvedBackend}");
             if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                Debug.Log("[MeaiLlmClient.LLMUnity] Skip: factory resolved non-LLMUnity backend.");
                 handle.Dispose();
-                yield break;
+                Assert.Ignore("Factory resolved non-LLMUnity backend: " + handle.ResolvedBackend);
             }
 
             //   LLMUnity    
@@ -149,15 +142,10 @@ namespace CoreAI.Tests.PlayMode
             yield return PlayModeTestAwait.WaitTask(task, 240f, "MeaiLlmClient LLMUnity request");
 
             LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
-            if (!result.Ok)
-            {
-                Debug.LogWarning($"[MeaiLlmClient.LLMUnity] Request failed: {result.Error}");
-            }
-            else
-            {
-                Debug.Log(
-                    $"[MeaiLlmClient.LLMUnity] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
-            }
+            Assert.IsTrue(result.Ok, $"LLMUnity request failed: {result?.Error}");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "LLMUnity response content should not be empty");
+            Debug.Log(
+                $"[MeaiLlmClient.LLMUnity] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
 
             handle.Dispose();
 #endif

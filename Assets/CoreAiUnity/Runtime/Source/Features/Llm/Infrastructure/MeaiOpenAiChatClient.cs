@@ -167,6 +167,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 JToken msg = choices[0]["message"];
+                // reasoning_content (Qwen/LM Studio, OpenAI-совм.) — цепь размышлений; в ответе Assistant используем только content
                 string content = msg?["content"]?.ToString() ?? "";
 
                 // Strip <think>...</think> blocks if any
@@ -352,6 +353,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Парсит SSE data: строки и извлекает delta.content и delta.tool_calls из JSON чанков.
+        /// delta.reasoning_content (Qwen и др.) обрабатывается в <see cref="ExtractDeltaUpdate"/> и в UI не попадает.
         /// Returns ChatResponseUpdate objects that may contain text. Tool calls are accumulated
         /// in the <paramref name="accumulator"/> and flushed when complete.
         /// </summary>
@@ -374,7 +376,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Извлекает choices[0].delta.content из SSE JSON чанка.
+        /// Извлекает choices[0].delta из SSE JSON: видимый текст — только <c>delta.content</c>.
+        /// <c>delta.reasoning_content</c> (Qwen/LM Studio и т.п.) намеренно не передается в UI.
         /// Tool call deltas are accumulated in the <paramref name="accumulator"/> rather than
         /// emitted immediately, because cloud providers split name/arguments across chunks.
         /// </summary>
@@ -385,6 +388,9 @@ namespace CoreAI.Infrastructure.Llm
                 JObject obj = JObject.Parse(json);
                 JToken delta = obj?["choices"]?[0]?["delta"];
                 if (delta == null) return null;
+
+                // Сообщаем, что дельта обработана; цепь размышлений в ответ пользователю не идет
+                _ = delta["reasoning_content"]?.ToString();
 
                 string content = delta["content"]?.ToString();
                 JArray toolCallsArray = delta["tool_calls"] as JArray;
@@ -417,6 +423,13 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
         }
+
+        /// <summary>
+        /// Тестовый hook: разбор одной JSON-строки тела <c>data: …</c> (без префикса <c>data: </c>).
+        /// Только для NUnit/EditMode. Не вызывать из продакшн-кода.
+        /// </summary>
+        internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson) =>
+            ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
 
         /// <summary>
         /// Accumulates partial SSE delta.tool_calls across multiple chunks.

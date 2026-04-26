@@ -495,6 +495,10 @@ namespace CoreAI.Chat
 
             try
             {
+                // Subclasses may override BuildAiTaskRequest to inject ForcedToolMode,
+                // SourceTag, Priority etc. Default builds a minimal Chat request.
+                AiTaskRequest request = BuildAiTaskRequest(userText, roleId);
+
                 // Эффективный флаг стриминга:
                 //   UI (CoreAiChatConfig.EnableStreaming) → per-agent (AgentMemoryPolicy)
                 //   → глобальный (CoreAISettings.EnableStreaming).
@@ -505,11 +509,11 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    await SendStreamingAsync(userText, roleId, _activeRequestCts.Token);
+                    await SendStreamingAsync(request, _activeRequestCts.Token);
                 }
                 else
                 {
-                    await SendNonStreamingAsync(userText, roleId, _activeRequestCts.Token);
+                    await SendNonStreamingAsync(request, _activeRequestCts.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -557,14 +561,35 @@ namespace CoreAI.Chat
             InputField?.Focus();
         }
 
-        private async System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId, CancellationToken ct)
+        /// <summary>
+        /// Build the <see cref="AiTaskRequest"/> for the next chat message. Default returns
+        /// a minimal request (RoleId + Hint + SourceTag="Chat"). Override in subclasses to
+        /// inject extra fields, e.g. <see cref="AiTaskRequest.ForcedToolMode"/> for
+        /// deterministic tool-calling driven by an intent classifier.
+        /// </summary>
+        protected virtual AiTaskRequest BuildAiTaskRequest(string userText, string roleId)
+        {
+            return new AiTaskRequest
+            {
+                RoleId = roleId,
+                Hint = userText,
+                SourceTag = "Chat"
+            };
+        }
+
+        private System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId, CancellationToken ct)
+        {
+            return SendStreamingAsync(new AiTaskRequest { RoleId = roleId, Hint = userText, SourceTag = "Chat" }, ct);
+        }
+
+        private async System.Threading.Tasks.Task SendStreamingAsync(AiTaskRequest request, CancellationToken ct)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
 
             string fullResponse = "";
-            await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(userText, roleId, ct))
+            await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Error))
                 {
@@ -614,11 +639,16 @@ namespace CoreAI.Chat
             }
         }
 
-        private async System.Threading.Tasks.Task SendNonStreamingAsync(string userText, string roleId, CancellationToken ct)
+        private System.Threading.Tasks.Task SendNonStreamingAsync(string userText, string roleId, CancellationToken ct)
+        {
+            return SendNonStreamingAsync(new AiTaskRequest { RoleId = roleId, Hint = userText, SourceTag = "Chat" }, ct);
+        }
+
+        private async System.Threading.Tasks.Task SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
         {
             ShowTypingIndicator();
 
-            string response = await _chatService.SendMessageAsync(userText, roleId, ct);
+            string response = await _chatService.SendMessageAsync(request, ct);
             HideTypingIndicator();
 
             if (string.IsNullOrEmpty(response))
@@ -803,7 +833,7 @@ namespace CoreAI.Chat
 
         internal static string GetSendButtonText(bool isBusy)
         {
-            return isBusy ? "X" : ">";
+            return isBusy ? "X" : "";
         }
 
         internal static string GetSendButtonTooltip(bool isBusy)

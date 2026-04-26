@@ -18,7 +18,7 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.24.2** · HTTP error diagnostics · `ToolExecutionPolicy` hardening · SSE tool-call accumulation · agent control API
+**Version:** **v0.25.0** · `ForcedToolMode` (deterministic tool_choice) · multi-round streaming tool loop · `CoreAiChatPanel.BuildAiTaskRequest` extension hook · HTTP error diagnostics · `ToolExecutionPolicy` hardening
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -40,8 +40,9 @@
 
 ---
 
-## 🆕 What's new (0.22 → 0.24)
+## 🆕 What's new (0.22 → 0.25)
 
+- 🎯 **v0.25.0** — **Forced tool mode.** New enum `LlmToolChoiceMode` (`Auto` / `RequireAny` / `RequireSpecific` / `None`) on `AiTaskRequest` and `LlmCompletionRequest` — application code (intent classifiers, retry pipelines) can guarantee tool emission for a single call without changing the agent definition. Streaming honours the forced mode on the first iteration only, then resets to `Auto` so multi-round tool loops stay sane. New `CoreAiChatPanel.BuildAiTaskRequest` virtual hook lets subclasses inject extra fields without rewriting the chat pipeline. Streaming + tool calling is on by default for tool-equipped agents (Claude Code / Cursor-style live token UX with silent tool execution).
 - 🔧 **v0.24.2** — HTTP error responses now include the API body (not just `400 Bad Request`), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1, docs refresh.
 - 🧩 **v0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE (OpenAI, Anthropic), `ToolExecutionPolicy` shared across streaming/non-streaming paths, hardened `TryExtractToolCallsFromText` with code-block protection, UI stop deduplication.
 - 🎮 **v0.22** — Agent Control API: `CoreAi.StopAgent()`, `CoreAi.ClearContext()`, `CoreAi.OnToolExecuted` event, chat clear button, Escape-to-stop.

@@ -168,8 +168,78 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 
 ---
 
+## 🎯 Forced Tool Mode (v0.25.0+)
+
+Иногда модель «забывает» вызвать инструмент даже там, где он явно нужен (например — пользователь явно попросил «сделай тест по спискам», а LLM отвечает текстом «я запустил тест…»). С v0.25.0 в `AiTaskRequest` и `LlmCompletionRequest` есть поле `ForcedToolMode` (enum `LlmToolChoiceMode`) для **детерминированного** выбора tool calling под конкретный запрос — по умолчанию `Auto` (совместимо с прежним поведением).
+
+### API
+
+```csharp
+public enum LlmToolChoiceMode
+{
+    Auto = 0,            // default — модель сама решает
+    RequireAny = 1,      // провайдер обязан вызвать ХОТЯ БЫ ОДИН инструмент
+    RequireSpecific = 2, // провайдер обязан вызвать инструмент с именем RequiredToolName
+    None = 3             // провайдер обязан ответить только текстом, tool calls запрещены
+}
+```
+
+Установка:
+
+```csharp
+// Принудить любой tool call для этого запроса:
+await orch.RunTaskAsync(new AiTaskRequest
+{
+    RoleId = "Teacher",
+    Hint = "сделай тест на списки",
+    ForcedToolMode = LlmToolChoiceMode.RequireAny
+});
+
+// Принудить конкретный tool:
+await orch.RunTaskAsync(new AiTaskRequest
+{
+    RoleId = "Teacher",
+    Hint = "spawn quiz",
+    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+    RequiredToolName = "spawn_quiz"
+});
+```
+
+### Маппинг на Microsoft.Extensions.AI
+
+`MeaiLlmClient.ApplyForcedToolMode` транслирует значения 1-в-1 в `ChatOptions.ToolMode`:
+
+| `LlmToolChoiceMode` | MEAI `ChatToolMode` | Семантика провайдера |
+|---|---|---|
+| `Auto` | `null` | OpenAI: `tool_choice: "auto"` (default) |
+| `RequireAny` | `ChatToolMode.RequireAny` | OpenAI: `tool_choice: "required"` |
+| `RequireSpecific` | `ChatToolMode.RequireSpecific(name)` | OpenAI: `tool_choice: {type: "function", function: {name: ...}}` |
+| `None` | `ChatToolMode.None` | OpenAI: `tool_choice: "none"` |
+
+Для `RequireSpecific` имя проверяется на наличие в зарегистрированных `AIFunction[]` для роли — если инструмент не найден, выводится warning и forced mode понижается до `RequireAny` (модель всё равно ОБЯЗАНА вызвать что-то — лучше шумно ошибиться, чем тихо прийти к не-tool ответу).
+
+### Streaming + ForcedToolMode (v0.25.0)
+
+В `MeaiLlmClient.CompleteStreamingAsync` forced mode применяется **только на первой итерации** tool-loop'а. После того как мы скармливаем модели результат tool, опции клонируются с `ChatToolMode.Auto` через `CloneOptionsWithAutoToolMode` — иначе модель оказалась бы заперта в бесконечном цикле tool calls (на каждом круге она была бы forced снова).
+
+Это совместимо с тем, как работают многозвенные tool-цепочки в Claude Code / Cursor: первый tool call принудителен (если application-слой так решил), последующие — на усмотрение модели.
+
+### Когда использовать
+
+- **`Auto` (default).** 95% случаев. Модель в `ToolsAndChat` сама хорошо решает, когда дёргать tool.
+- **`RequireAny`.** Когда детерминированно знаем, что нужен tool, но не важно какой именно. Например, intent classifier распознал «хочу проверить мои знания» — точно нужен какой-то interactive evaluation tool, не текст.
+- **`RequireSpecific`.** Узкие интеграции: rerun-фикс, ремонт Lua, форс конкретного workflow. Используйте осторожно — слишком частая принудительная подмена tool calls бьёт по живости диалога.
+- **`None`.** Когда tools зарегистрированы для роли, но именно для этого ответа их использовать нельзя (например, пост-tool reflection / суммаризация).
+
+### Тесты
+
+См. `Assets/CoreAiUnity/Tests/EditMode/ForcedToolModeEditModeTests.cs`.
+
+---
+
 ## 📚 Ссылки
 
 - [Microsoft.Extensions.AI Docs](https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai)
 - [FunctionInvokingChatClient](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.functioninvokingchatclient)
 - [AIFunctionFactory](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.aifunctionfactory)
+- [ChatToolMode](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.chattoolmode)

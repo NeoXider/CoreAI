@@ -44,7 +44,7 @@ namespace CoreAI.Tests.PlayMode
                 string.IsNullOrWhiteSpace(st.Memory))
             {
                 Debug.LogWarning("[Test] Model did not write memory");
-                Assert.Ignore("Model did not write memory - LLM may not support tool-call format");
+                Assert.Fail("Model did not write memory via memory tool.");
             }
 
             StringAssert.StartsWith("remember:", st.Memory.Trim(), "Memory should start with 'remember:'");
