@@ -114,8 +114,14 @@
     padding: 16px 14px;
 }
 
-/* Leave space so the last bubble isn't hidden behind typing + input row */
+/* Chat layout: chronological order in DOM (old → new), visually anchored to the bottom of the
+   viewport when the thread is short — avoids the «bubbles fall down» jump when the first reply arrives.
+   When content is taller than the viewport, extra space sits at the top; scroll stays at bottom. */
 .coreai-chat-scroll > .unity-scroll-view__content-container {
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: stretch;
+    min-height: 100%;
     padding-bottom: 110px;
 }
 

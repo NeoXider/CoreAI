@@ -89,6 +89,11 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains(BuiltInAgentRoleIds.Creator, joined);
             StringAssert.Contains("LLM ▶", joined);
             StringAssert.Contains("LLM ◀", joined);
+            StringAssert.Contains("promptBudget", joined);
+            StringAssert.Contains("estTok≈", joined);
+            StringAssert.Contains("words≈", joined);
+            StringAssert.Contains("systemSplit", joined);
+            StringAssert.Contains("outWords≈", joined);
         }
 
         [Test]
@@ -201,6 +206,64 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("LLM ▶", joined, "Лог старта");
             StringAssert.Contains("LLM ◀", joined, "Лог успешного завершения");
             StringAssert.Contains("chunks=2", joined, "Должно быть число текстовых чанков");
+            StringAssert.Contains("promptBudget", joined);
+        }
+
+        [Test]
+        public void PromptBudget_CountWordsAndEstimateTokensRough()
+        {
+            Assert.AreEqual(0, LoggingLlmClientDecorator.CountWords(null));
+            Assert.AreEqual(0, LoggingLlmClientDecorator.CountWords("   "));
+            Assert.AreEqual(1, LoggingLlmClientDecorator.CountWords("a"));
+            Assert.AreEqual(2, LoggingLlmClientDecorator.CountWords("hello world"));
+            Assert.AreEqual(1, LoggingLlmClientDecorator.EstimateTokensRough("abcd"));
+            Assert.AreEqual(2, LoggingLlmClientDecorator.EstimateTokensRough("abcde"));
+        }
+
+        [Test]
+        public void PromptBudget_FormatLine_SplitsSystemAndChat()
+        {
+            string line = LoggingLlmClientDecorator.FormatPromptBudgetLine("sys", "user one two");
+            StringAssert.Contains("promptBudget", line);
+            StringAssert.Contains("systemSplit", line);
+            StringAssert.Contains("total=3", line);
+            StringAssert.Contains("core=3", line);
+            StringAssert.Contains("memory=0", line);
+            StringAssert.Contains("toolsDef≈0(0 tools)", line);
+            StringAssert.Contains("chat chars=12", line);
+            StringAssert.Contains("estTok≈3", line);
+            StringAssert.Contains("words≈3", line);
+        }
+
+        [Test]
+        public void SplitSystemCoreAndMemory_UsesOrchestratorDelimiter()
+        {
+            string sys = "role prompt" + LoggingLlmClientDecorator.OrchestratorMemorySectionDelimiter + "mem line one";
+            LoggingLlmClientDecorator.SplitSystemCoreAndMemory(sys, out string core, out string mem);
+            Assert.AreEqual("role prompt", core);
+            Assert.AreEqual("mem line one", mem);
+        }
+
+        private sealed class StubTool : ILlmTool
+        {
+            public string Name { get; set; }
+            public string Description { get; set; }
+            public string ParametersSchema { get; set; }
+            public bool AllowDuplicates => false;
+        }
+
+        [Test]
+        public void PromptBudget_ToolsDefNonZeroWhenToolsPresent()
+        {
+            IReadOnlyList<ILlmTool> tools = new[]
+            {
+                new StubTool { Name = "ping", Description = "pong", ParametersSchema = "{}" }
+            };
+            int d = LoggingLlmClientDecorator.EstimateToolsCatalogChars(tools);
+            Assert.Greater(d, 50);
+            string line = LoggingLlmClientDecorator.FormatPromptBudgetLine("x", "y", tools);
+            StringAssert.Contains("toolsDef≈", line);
+            StringAssert.Contains("(1 tools)", line);
         }
     }
 }

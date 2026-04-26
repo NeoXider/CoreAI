@@ -24,6 +24,8 @@
 - **Role ID** — роль агента (`PlayerChat`, `Teacher`, ваша кастомная)
 - **Header Title** — заголовок чата
 - **Welcome Message** — приветственное сообщение
+- **Сессия / история** (с 0.25.4) — см. [восстановление сессии](#persisted-chat-session)
+- **Программный вызов** (с 0.25.5) — см. [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — потоковая генерация ответов
 - **Send On Shift+Enter** — горячая клавиша отправки
 - **Горячие клавиши** (с 0.25.3) — см. раздел [ниже](#chat-hotkeys)
@@ -35,6 +37,25 @@
 3. Добавьте компонент `CoreAiChatPanel`
 4. Назначьте ваш `CoreAiChatConfig`
 5. **Готово!** Чат работает с текущим CoreAI бэкендом
+
+<a id="persisted-chat-session"></a>
+
+## Восстановление сессии (история после перезапуска) — с 0.25.4
+
+По умолчанию **`CoreAiChatPanel`** при включении (`OnEnable`) подгружает в ленту сообщений сохранённую историю чата для **`Role ID`** из конфига.
+
+| Поле в **Chat Config** | Назначение |
+|------------------------|------------|
+| **Load Persisted Chat On Startup** | Если включено (по умолчанию **да**) — перед приветствием читается история из **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, поле `chatHistoryJson`). |
+| **Max Persisted Messages For Ui** | Сколько **последних** сообщений показать при подгрузке; **0** = все сохранённые. |
+
+**Условия:** для роли в `AgentMemoryPolicy` должны быть включены **`WithChatHistory`** и **`PersistChatHistory`** (например `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`), иначе на диск история не пишется — подгружать будет нечего (останется только **Welcome Message**).
+
+**Приветствие:** если после подгрузки в скролле **уже есть** сообщения, **Welcome Message** не добавляется (чтобы не дублировать «Привет!» поверх диалога). Если истории нет — приветствие показывается как раньше.
+
+**Повторный `OnEnable`:** перед гидратацией лента **очищается**, затем снова читается store — дубликаты при выключении/включении объекта с панелью не копятся.
+
+**Расширение:** переопределите **`HydrateStartupMessagesFromStore`** или **`TryAppendPersistedChatHistoryFromStore`**, если нужен свой источник сообщений.
 
 ## Сворачивание панели (FAB) — с 0.21.7
 
@@ -100,7 +121,47 @@ void OnWorldMapClosed()
 
 Наследники **`Update()`** должны вызывать **`base.Update()` первым**, если переопределяют метод (иначе потеряете WebGL-фикс и poll горячих клавиш).
 
+<a id="programmatic-chat-submit"></a>
+
+## Программный вызов из кода (кат-сцена, квест, кнопка в мире) — с 0.25.5
+
+Получите ссылку на панель (`GetComponent<CoreAiChatPanel>()`, singleton в сцене и т.д.) и вызывайте:
+
+```csharp
+using CoreAI.Chat;
+using System.Threading;
+using System.Threading.Tasks;
+
+// Обычный ход: пузырь пользователя в чате + запрос к LLM (как после ввода в поле)
+string? reply = await chatPanel.SubmitMessageFromExternalAsync(
+    "Расскажи про квест",
+    cancellationToken: CancellationToken.None);
+
+// Тихий вызов: не дублировать текст в UI, только оркестратор
+var opt = new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false };
+reply = await chatPanel.SubmitMessageFromExternalAsync("Секретный контекст для модели", opt);
+
+// Только нарратив в UI, без LLM (подставной ответ ассистента)
+var fake = new CoreAiChatExternalSubmitOptions
+{
+    AppendUserMessageToChat = true,
+    SimulatedAssistantReply = "Добро пожаловать в город!"
+};
+reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
+```
+
+| Поле `CoreAiChatExternalSubmitOptions` | По умолчанию | Назначение |
+|----------------------------------------|----------------|------------|
+| **`AppendUserMessageToChat`** | `true` | Добавить пузырь **пользователя** с текстом запроса перед ходом. |
+| **`SimulatedAssistantReply`** | `null` | Если задана непустая строка — **LLM не вызывается**; в ленту добавляется пузырь ассистента с этим текстом (после strip think и `FormatResponseText`). |
+
+**Возврат:** строка ответа ассистента (в т.ч. симулированная), либо `null`, если панель занята другим запросом, текст после `OnMessageSending` пустой, или операция отменена.
+
+**Хуки:** по-прежнему вызываются `OnMessageSending`, для реального ответа — `OnResponseReceived` / событие **`OnAiResponseCompleted`**.
+
 ## Остановка генерации (Stop) — с 0.22.0
+
+С **0.25.5** отдельной кнопки «стоп» в **шапке** нет — остановка только через кнопку отправки и Esc (ниже).
 
 Во время активной генерации `CoreAiChatPanel` автоматически переключает кнопку отправки в режим остановки:
 

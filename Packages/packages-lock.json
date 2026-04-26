@@ -326,18 +326,6 @@
       },
       "url": "https://packages.unity.com"
     },
-    "com.unity.services.vivox": {
-      "version": "16.10.0",
-      "depth": 0,
-      "source": "registry",
-      "dependencies": {
-        "com.unity.modules.audio": "1.0.0",
-        "com.unity.services.core": "1.15.1",
-        "com.unity.settings-manager": "1.0.3",
-        "com.unity.nuget.newtonsoft-json": "3.0.2"
-      },
-      "url": "https://packages.unity.com"
-    },
     "com.unity.services.wire": {
       "version": "1.4.2",
       "depth": 1,
@@ -347,13 +335,6 @@
         "com.unity.nuget.newtonsoft-json": "3.2.1",
         "com.unity.services.authentication": "2.7.4"
       },
-      "url": "https://packages.unity.com"
-    },
-    "com.unity.settings-manager": {
-      "version": "2.1.1",
-      "depth": 1,
-      "source": "registry",
-      "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.shadergraph": {

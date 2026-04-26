@@ -22,6 +22,18 @@ namespace CoreAI.Chat
         [TextArea(2, 4)]
         [SerializeField] private string _welcomeMessage = "Привет! Чем могу помочь?";
 
+        [Header("Сессия / история")]
+        [Tooltip(
+            "При включении панели подгружать в UI сохранённую историю чата из IAgentMemoryStore для RoleId " +
+            "(файл под persistentDataPath, если у роли включён persist chat в AgentMemoryPolicy). " +
+            "Если история непустая — приветствие не дублируется.")]
+        [SerializeField]
+        private bool _loadPersistedChatOnStartup = true;
+
+        [Tooltip("Максимум последних сообщений для отображения при подгрузке (0 = все сохранённые).")]
+        [SerializeField]
+        private int _maxPersistedMessagesForUi = 0;
+
         [Header("UI — Иконки")]
         [Tooltip("Иконка AI-аватара (опционально).")]
         [SerializeField] private Sprite _aiAvatarIcon;
@@ -73,6 +85,8 @@ namespace CoreAI.Chat
         public string RoleId => _roleId;
         public string HeaderTitle => _headerTitle;
         public string WelcomeMessage => _welcomeMessage;
+        public bool LoadPersistedChatOnStartup => _loadPersistedChatOnStartup;
+        public int MaxPersistedMessagesForUi => _maxPersistedMessagesForUi < 0 ? 0 : _maxPersistedMessagesForUi;
         public Sprite AiAvatarIcon => _aiAvatarIcon;
         public Sprite UserAvatarIcon => _userAvatarIcon;
         public bool EnableStreaming => _enableStreaming;

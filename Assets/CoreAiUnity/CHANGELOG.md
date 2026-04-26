@@ -2,6 +2,31 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.5] - 2026-04-26
+
+### 💬 Chat UI — хедер без дублирующего Stop, программный API
+
+- 🧹 **`CoreAiChat.uxml`** — удалена кнопка **`coreai-chat-stop`** из шапки: остановка генерации остаётся **кнопкой отправки** в режиме **X** и **Esc** (как в 0.22.0), без дублирования с header.
+- ✨ **`CoreAiChatPanel.SubmitMessageFromExternalAsync(messageText, options, cancellationToken)`** — сценарии из кода (кат-сцены, квесты, кнопки в мире): опция **`CoreAiChatExternalSubmitOptions.AppendUserMessageToChat`** (по умолчанию `true`, пузырь пользователя), **`SimulatedAssistantReply`** — показать ответ ассистента **без вызова LLM**; возврат текста ответа или `null` при занятости панели / отмене / пустом тексте после **`OnMessageSending`**.
+- ✨ Внутренний общий путь **`RunAgentTurnAsync`** для UI-отправки и внешней; стриминг / non-streaming возвращают финальную строку для вызывающего кода.
+- 📝 **`README_CHAT.md`** — раздел про программный вызов; раздел Stop без ссылки на кнопку в шапке.
+- 🔧 Версия пакета **`0.25.5`**.
+
+## [0.25.4] - 2026-04-26
+
+### 💬 Chat UI — восстановление сессии при старте
+
+- ✨ **`CoreAiChatPanel`** — при `OnEnable` после `InitService` вызывается **`HydrateStartupMessagesFromStore()`**: очищается лента сообщений, из **`IAgentMemoryStore`** подгружается сохранённая история для **`CoreAiChatConfig.RoleId`** (если в конфиге включено **`Load Persisted Chat On Startup`**, по умолчанию **включено**). Если история **непустая**, приветствие **не** показывается поверх неё; если истории нет — показывается **`Welcome Message`** как раньше.
+- ✨ **`CoreAiChatConfig`** — секция **«Сессия / история»**: **`Load Persisted Chat On Startup`**, **`Max Persisted Messages For Ui`** (0 = все сообщения из store).
+- ✨ **`CoreAiChatService.TryGetPersistedChatHistory`** — чтение `ChatMessage[]` для UI/интеграций без дублирования доступа к store.
+- 📝 **`README_CHAT.md`** — раздел про восстановление сессии и условия (persist chat в `AgentMemoryPolicy`, путь `FileAgentMemoryStore`).
+- 🔧 Версия пакета **`0.25.4`**.
+- 🐛 **`CoreAiChat.uss` + `ScrollToBottom`** — лента сообщений: **`justify-content: flex-end`** и **`min-height: 100%`** на контейнере скролла, чтобы при коротком диалоге пузыри **сразу прижимались к низу** (у поля ввода), без эффекта «приветствие было под хедером и внезапно упало вниз» при первом сообщении. Прокрутка к низу выполняется **дважды** на соседних тиках расписания, чтобы учесть пересчёт `highValue` после layout.
+
+### 📊 LLM — логи бюджета промпта (`LoggingLlmClientDecorator`)
+
+- ✨ В строках **`LLM ▶` / `LLM ◀`** расширен блок **`promptBudget`**: разбор **system** на total / **core** / **memory** (маркер `## Memory` как в `AiOrchestrator`) / оценка каталога **tools** из `request.Tools`; **chat** (user payload); грубые **estTok** и **words**; при наличии **usage** от API — те же метрики в суффиксе + **`outWords≈`** для completion.
+
 ## [0.25.3] - 2026-04-26
 
 ### 💬 Chat UI — горячие клавиши C / Esc, глобальный poll и фокус UITK

@@ -78,7 +78,8 @@ namespace CoreAI.Infrastructure.Llm
             _logger.LogInfo(GameLogFeature.Llm,
                 $"LLM ▶ traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({system.Length} симв.): {Preview(system, SystemPreviewChars)}\n" +
-                $"  user ({user.Length} симв.): {Preview(user, UserPreviewChars)}");
+                $"  user ({user.Length} симв.): {Preview(user, UserPreviewChars)}\n" +
+                $"  {FormatPromptBudgetLine(system, user, request.Tools)}");
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result;
@@ -130,7 +131,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             string content = result.Content ?? "";
-            string tokLine = FormatTokenLine(result, wallMs, content.Length);
+            string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
             _logger.LogInfo(GameLogFeature.Llm,
                 $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}\n" +
                 $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
@@ -172,11 +173,15 @@ namespace CoreAI.Infrastructure.Llm
             string backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
                 ? _backendLabel
                 : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
+            string streamSystem = request.SystemPrompt ?? "";
+            string streamUser = request.UserPayload ?? "";
+            IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
             _logger.LogInfo(GameLogFeature.Llm,
                 $"LLM ▶ (stream) traceId={trace} role={role} backend={backendLine}\n" +
-                $"  system ({(request.SystemPrompt ?? "").Length} симв.): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
-                $"  user ({(request.UserPayload ?? "").Length} симв.): {Preview(request.UserPayload, UserPreviewChars)}");
+                $"  system ({streamSystem.Length} симв.): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
+                $"  user ({streamUser.Length} симв.): {Preview(request.UserPayload, UserPreviewChars)}\n" +
+                $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}");
 
             Stopwatch sw = Stopwatch.StartNew();
             StringBuilder accumulated = new();
@@ -294,7 +299,7 @@ namespace CoreAI.Infrastructure.Llm
                     TotalTokens = totalTokens,
                     Error = terminalError ?? ""
                 };
-                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length);
+                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser, streamTools);
 
                 if (!string.IsNullOrEmpty(terminalError))
                 {
@@ -310,22 +315,202 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static string FormatTokenLine(LlmCompletionResult result, double wallMs, int outChars)
+        private static string FormatTokenLine(
+            LlmCompletionResult result,
+            double wallMs,
+            int outChars,
+            string systemPrompt,
+            string userPayload,
+            IReadOnlyList<ILlmTool> tools)
         {
+            string budgetSuffix = " | " + FormatPromptBudgetLine(systemPrompt ?? "", userPayload ?? "", tools);
+            string outWordsPart = outChars > 0
+                ? $" | outWords≈{CountWords(result.Content ?? "")}"
+                : "";
+
             if (result.CompletionTokens.HasValue && wallMs > 1)
             {
                 double tps = result.CompletionTokens.Value / (wallMs / 1000.0);
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (по completion)";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (по completion){outWordsPart}{budgetSuffix}";
             }
 
             if (result.TotalTokens.HasValue)
             {
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s н/д";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s н/д{outWordsPart}{budgetSuffix}";
             }
 
-            return $"tokens н/д (LLMUnity не отдаёт usage в Chat) | outChars={outChars} | оценка скорости н/д";
+            return
+                $"tokens н/д (LLMUnity не отдаёт usage в Chat) | outChars={outChars} | оценка скорости н/д{outWordsPart}{budgetSuffix}";
+        }
+
+        /// <summary>
+        /// Маркер блока памяти в system, как в <see cref="CoreAI.Ai.AiOrchestrator"/> (BuildRequest).
+        /// </summary>
+        internal const string OrchestratorMemorySectionDelimiter = "\n\n## Memory\n";
+
+        /// <summary>
+        /// Делит <paramref name="systemPrompt"/> на «чистый» системный текст и тело памяти после <see cref="OrchestratorMemorySectionDelimiter"/>.
+        /// </summary>
+        internal static void SplitSystemCoreAndMemory(string systemPrompt, out string corePrompt, out string memoryBody)
+        {
+            corePrompt = systemPrompt ?? "";
+            memoryBody = "";
+            if (string.IsNullOrEmpty(systemPrompt))
+            {
+                return;
+            }
+
+            int idx = systemPrompt.IndexOf(OrchestratorMemorySectionDelimiter, StringComparison.Ordinal);
+            if (idx < 0)
+            {
+                return;
+            }
+
+            corePrompt = systemPrompt.Substring(0, idx).TrimEnd();
+            memoryBody = systemPrompt.Substring(idx + OrchestratorMemorySectionDelimiter.Length).Trim();
+        }
+
+        /// <summary>
+        /// Грубая оценка размера промпта для логов и бюджетирования, когда API не возвращает usage.
+        /// estTok = ceil(chars/4) на каждую часть (эвристика для латиницы/смеси; для оптимизации сравнивайте относительные величины).
+        /// Слова — по пробелам (для русского без дефисов как разделителей слов).
+        /// Разбор system: всего / core (промпт без ## Memory) / memory / оценка каталога tools (имя+описание+schema;
+        /// для LLMUnity близко к тексту, добавляемому к system внутри адаптера; при native tool calling JSON может отличаться).
+        /// </summary>
+        internal static string FormatPromptBudgetLine(
+            string systemPrompt,
+            string userPayload,
+            IReadOnlyList<ILlmTool> tools = null)
+        {
+            SplitSystemCoreAndMemory(systemPrompt ?? "", out string core, out string mem);
+            int sysChars = systemPrompt?.Length ?? 0;
+            int coreChars = core.Length;
+            int memChars = mem.Length;
+            int toolsChars = EstimateToolsCatalogChars(tools);
+            int toolCount = tools?.Count ?? 0;
+
+            int chatChars = userPayload?.Length ?? 0;
+            int coreTok = EstimateTokensRough(core);
+            int memTok = EstimateTokensRough(mem);
+            int toolsTok = EstimateTokensRoughFromCharCount(toolsChars);
+            int chatTok = EstimateTokensRough(userPayload);
+            int coreWords = CountWords(core);
+            int memWords = CountWords(mem);
+            int toolsWords = CountWords(BuildToolsCatalogBlobForWordCount(tools));
+            int chatWords = CountWords(userPayload);
+
+            int sysTokFromParts = coreTok + memTok;
+            int sysTokWhole = EstimateTokensRough(systemPrompt);
+            return
+                $"promptBudget systemSplit chars total={sysChars} core={coreChars} memory={memChars} toolsDef≈{toolsChars}({toolCount} tools) " +
+                $"| system estTok≈{sysTokWhole} (core≈{coreTok} mem≈{memTok} toolsDef≈{toolsTok}; partsSum≈{sysTokFromParts + toolsTok}) " +
+                $"| system words≈{coreWords + memWords + toolsWords} (core≈{coreWords} mem≈{memWords} tools≈{toolsWords}) " +
+                $"| chat chars={chatChars} estTok≈{chatTok} words≈{chatWords} " +
+                $"[estTok=⌈chars/4⌉; toolsDef≈размер описаний инструментов]";
+        }
+
+        /// <summary>
+        /// Оценка символов, которые LLMUnity добавляет к system при наличии tools (см. LlmUnityMeaiChatClient).
+        /// </summary>
+        internal static int EstimateToolsCatalogChars(IReadOnlyList<ILlmTool> tools)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                return 0;
+            }
+
+            int n = LlmUnityToolsRulesPreambleCharCount;
+            foreach (ILlmTool t in tools)
+            {
+                if (t == null)
+                {
+                    continue;
+                }
+
+                string name = t.Name ?? "";
+                string desc = t.Description ?? "";
+                string schema = t.ParametersSchema ?? "";
+                n += "- name: ".Length + name.Length + "\n  description: ".Length + desc.Length + "\n".Length;
+                n += "  parameters schema: ".Length + schema.Length + "\n".Length;
+            }
+
+            return n;
+        }
+
+        private static int LlmUnityToolsRulesPreambleCharCount =>
+            "\n\nCRITICAL SYSTEM RULES FOR TOOLS:\n".Length +
+            "1. You have access to the following tools. You MUST use one if it matches the user request.\n".Length +
+            "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n".Length +
+            "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n".Length;
+
+        private static string BuildToolsCatalogBlobForWordCount(IReadOnlyList<ILlmTool> tools)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                return "";
+            }
+
+            StringBuilder sb = new();
+            foreach (ILlmTool t in tools)
+            {
+                if (t == null)
+                {
+                    continue;
+                }
+
+                sb.Append(t.Name);
+                sb.Append(' ');
+                sb.Append(t.Description);
+                sb.Append(' ');
+                sb.Append(t.ParametersSchema);
+                sb.Append(' ');
+            }
+
+            return sb.ToString();
+        }
+
+        private static int EstimateTokensRoughFromCharCount(int charCount)
+        {
+            if (charCount <= 0)
+            {
+                return 0;
+            }
+
+            return (charCount + 3) / 4;
+        }
+
+        internal static int EstimateTokensRough(string text)
+        {
+            return EstimateTokensRoughFromCharCount(string.IsNullOrEmpty(text) ? 0 : text.Length);
+        }
+
+        internal static int CountWords(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return 0;
+            }
+
+            int count = 0;
+            bool inWord = false;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                bool ws = char.IsWhiteSpace(c);
+                if (!ws && !inWord)
+                {
+                    inWord = true;
+                    count++;
+                }
+                else if (ws)
+                {
+                    inWord = false;
+                }
+            }
+
+            return count;
         }
 
         private static string Fmt(int? n)

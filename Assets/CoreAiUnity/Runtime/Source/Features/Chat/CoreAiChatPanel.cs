@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -14,6 +15,7 @@ namespace CoreAI.Chat
     /// Расширение: наследуйтесь и переопределяйте virtual-методы:
     /// <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
     /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>.
+    /// Программный ход без поля ввода: <see cref="SubmitMessageFromExternalAsync"/>.
     /// </summary>
     public class CoreAiChatPanel : MonoBehaviour
     {
@@ -37,7 +39,6 @@ namespace CoreAI.Chat
         protected TextField      InputField;
         protected Button         SendButton;
         protected Button         ClearButton;
-        protected Button         StopButton;
         protected Button         CollapseButton;
         protected Button         FabButton;
         protected VisualElement  TypingIndicator;
@@ -135,15 +136,15 @@ namespace CoreAI.Chat
             }
 
             BindUI();
-            ApplyConfig();
             InitService();
+            ApplyConfig();
+            HydrateStartupMessagesFromStore();
         }
 
         protected virtual void OnDisable()
         {
             if (SendButton != null) SendButton.UnregisterCallback<ClickEvent>(OnSendClicked);
             if (ClearButton != null) ClearButton.UnregisterCallback<ClickEvent>(OnClearClicked);
-            if (StopButton != null) StopButton.UnregisterCallback<ClickEvent>(OnStopClicked);
             if (InputField != null)
             {
                 InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
@@ -171,7 +172,6 @@ namespace CoreAI.Chat
             InputField       = Root.Q<TextField>("coreai-chat-input");
             SendButton       = Root.Q<Button>("coreai-chat-send");
             ClearButton      = Root.Q<Button>("coreai-chat-clear");
-            StopButton       = Root.Q<Button>("coreai-chat-stop");
             CollapseButton   = Root.Q<Button>("coreai-chat-collapse");
             FabButton        = Root.Q<Button>("coreai-chat-fab");
             TypingIndicator  = Root.Q<VisualElement>("coreai-typing-indicator");
@@ -192,11 +192,6 @@ namespace CoreAI.Chat
             {
                 ClearButton.RegisterCallback<ClickEvent>(OnClearClicked);
                 ClearButton.focusable = false;
-            }
-            if (StopButton != null)
-            {
-                StopButton.RegisterCallback<ClickEvent>(OnStopClicked);
-                StopButton.focusable = false;
             }
             if (CollapseButton != null)
             {
@@ -253,11 +248,8 @@ namespace CoreAI.Chat
                 ApplyResponsiveSize(ChatContainer);
             }
 
-            // Приветствие
-            if (!string.IsNullOrEmpty(config.WelcomeMessage))
-            {
-                AddMessage(config.WelcomeMessage, isUser: false);
-            }
+            // Приветствие и восстановление истории — в <see cref="HydrateStartupMessagesFromStore"/>
+            // после <see cref="InitService"/> (нужен <see cref="_chatService"/>).
 
             // По умолчанию на мобильных экранах чат стартует свёрнутым,
             // чтобы не перекрывать игровой мир. Пользовательский выбор
@@ -393,7 +385,7 @@ namespace CoreAI.Chat
             container.style.height = Mathf.Min(configuredHeight, maxHeight);
         }
 
-        // ===================== Collapse / FAB / Stop =====================
+        // ===================== Collapse / FAB =====================
 
         private static bool IsMobileScreen()
         {
@@ -403,8 +395,6 @@ namespace CoreAI.Chat
         }
 
         private void OnClearClicked(ClickEvent _) => ClearChat();
-
-        private void OnStopClicked(ClickEvent _) => StopAgent();
 
         private void OnCollapseClicked(ClickEvent _) => SetCollapsed(true, persist: true);
 
@@ -441,7 +431,13 @@ namespace CoreAI.Chat
                 PlayerPrefs.SetInt(CollapsedPrefsKey, collapsed ? 1 : 0);
             }
 
-            if (!collapsed)
+            if (collapsed)
+            {
+                // Иначе TextField остаётся с клавиатурным фокусом — WASD уходят в UI, а не в FPS-контроллер.
+                ReleaseChatKeyboardFocus();
+                Root?.schedule.Execute(ReleaseChatKeyboardFocus);
+            }
+            else
             {
                 // После разворачивания возвращаем фокус в поле ввода,
                 // чтобы пользователь сразу мог продолжить печатать.
@@ -514,6 +510,85 @@ namespace CoreAI.Chat
             {
                 Debug.LogWarning("[CoreAiChatPanel] CoreAiChatService not available (no CoreAILifetimeScope on scene?).");
             }
+        }
+
+        /// <summary>
+        /// После привязки UI и <see cref="InitService"/>: подгружает сохранённую историю (если включено в конфиге)
+        /// и показывает приветствие только когда в ленте сообщений ещё пусто.
+        /// </summary>
+        protected virtual void HydrateStartupMessagesFromStore()
+        {
+            // При повторном OnEnable (выключили/включили объект) лента могла сохраниться — не дублируем store.
+            if (MessageScroll != null)
+            {
+                MessageScroll.Clear();
+            }
+
+            TryAppendPersistedChatHistoryFromStore();
+            if (GetMessageScrollChildCount() > 0)
+            {
+                return;
+            }
+
+            if (config == null || string.IsNullOrEmpty(config.WelcomeMessage))
+            {
+                return;
+            }
+
+            AddMessage(config.WelcomeMessage, isUser: false);
+        }
+
+        /// <summary>
+        /// Добавляет в <see cref="MessageScroll"/> сообщения из <see cref="IAgentMemoryStore"/> для <see cref="CoreAiChatConfig.RoleId"/>.
+        /// Роли <c>user</c> / <c>assistant</c> (без учёта регистра); прочие — как сообщения ассистента.
+        /// </summary>
+        protected virtual void TryAppendPersistedChatHistoryFromStore()
+        {
+            if (MessageScroll == null)
+            {
+                return;
+            }
+
+            if (config == null || !config.LoadPersistedChatOnStartup)
+            {
+                return;
+            }
+
+            if (_chatService == null)
+            {
+                return;
+            }
+
+            string roleId = config.RoleId ?? "PlayerChat";
+            int max = config.MaxPersistedMessagesForUi;
+            if (!_chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max))
+            {
+                return;
+            }
+
+            foreach (ChatMessage msg in history)
+            {
+                string text = msg.Content ?? "";
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                bool isUser = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase);
+                AddMessage(text.TrimEnd(), isUser);
+            }
+        }
+
+        /// <summary>Число дочерних элементов в области прокрутки сообщений (для решения, показывать ли welcome).</summary>
+        protected int GetMessageScrollChildCount()
+        {
+            if (MessageScroll == null)
+            {
+                return 0;
+            }
+
+            VisualElement content = MessageScroll.contentContainer;
+            return content != null ? content.childCount : MessageScroll.childCount;
         }
 
         // ===================== Input Handling =====================
@@ -731,12 +806,94 @@ namespace CoreAI.Chat
 
         // ===================== AI Communication =====================
 
-        private async void SendToAI(string userText)
+        /// <summary>
+        /// Программная отправка «как из чата»: опционально пузырь пользователя (по умолчанию да),
+        /// затем LLM или только <see cref="CoreAiChatExternalSubmitOptions.SimulatedAssistantReply"/> без вызова модели.
+        /// </summary>
+        /// <returns>
+        /// Текст ответа ассистента (после форматирования), или <c>null</c>, если вызов пропущен
+        /// (панель занята, пустой текст, <see cref="OnMessageSending"/> отменил, отмена токена).
+        /// </returns>
+        public async Task<string?> SubmitMessageFromExternalAsync(
+            string messageText,
+            CoreAiChatExternalSubmitOptions options = null,
+            CancellationToken cancellationToken = default)
         {
+            options ??= new CoreAiChatExternalSubmitOptions();
+
+            if (IsActionInProgress())
+            {
+                Debug.LogWarning("[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (chat busy).");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(messageText))
+            {
+                return null;
+            }
+
+            string text = messageText.Trim();
+            if (config != null && config.MaxMessageLength > 0 && text.Length > config.MaxMessageLength)
+            {
+                text = text.Substring(0, config.MaxMessageLength);
+            }
+
+            text = OnMessageSending(text);
+            if (string.IsNullOrEmpty(text))
+            {
+                return null;
+            }
+
+            if (options.AppendUserMessageToChat)
+            {
+                AddMessage(text, isUser: true);
+                OnUserMessageSent?.Invoke(text);
+            }
+
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+            return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token);
+        }
+
+        /// <summary>Путь кнопки «Отправить»: пузырь пользователя уже добавлен в <see cref="TrySendInput"/>.</summary>
+        private void SendToAI(string userText)
+        {
+            _ = SendToAIFromUiAsync(userText);
+        }
+
+        private async Task SendToAIFromUiAsync(string userText)
+        {
+            try
+            {
+                await RunAgentTurnAsync(userText, simulatedAssistantReply: null, _cts.Token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Debug.LogError($"[CoreAiChatPanel] SendToAI: {ex.Message}");
+            }
+        }
+
+        /// <param name="userTextForModel">Текст в LLM (<see cref="AiTaskRequest.Hint"/>).</param>
+        /// <param name="simulatedAssistantReply">Если не пусто — оркестратор не вызывается, только пузырь ассистента.</param>
+        private async Task<string?> RunAgentTurnAsync(
+            string userTextForModel,
+            string simulatedAssistantReply,
+            CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(simulatedAssistantReply))
+            {
+                string raw = simulatedAssistantReply.Trim();
+                string stripped = StripThinkBlocks(raw);
+                string formatted = FormatResponseText(string.IsNullOrEmpty(stripped) ? raw : stripped);
+                AddMessage(formatted, isUser: false);
+                OnResponseReceived(formatted);
+                OnAiResponseCompleted?.Invoke(formatted);
+                return formatted;
+            }
+
             if (_chatService == null)
             {
                 AddMessage(config?.ErrorMessagePrefix + "AI сервис не подключён.", isUser: false);
-                return;
+                return null;
             }
 
             string roleId = config?.RoleId ?? "PlayerChat";
@@ -744,30 +901,20 @@ namespace CoreAI.Chat
             _stopRequestedByUser = false;
             UpdateSendButtonVisualState();
             _activeRequestCts?.Dispose();
-            _activeRequestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            _activeRequestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
             try
             {
-                // Subclasses may override BuildAiTaskRequest to inject ForcedToolMode,
-                // SourceTag, Priority etc. Default builds a minimal Chat request.
-                AiTaskRequest request = BuildAiTaskRequest(userText, roleId);
-
-                // Эффективный флаг стриминга:
-                //   UI (CoreAiChatConfig.EnableStreaming) → per-agent (AgentMemoryPolicy)
-                //   → глобальный (CoreAISettings.EnableStreaming).
+                AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
                 bool uiStreaming = config == null || config.EnableStreaming;
-                bool useStreaming = _chatService != null
-                    ? _chatService.IsStreamingEnabled(roleId, uiStreaming)
-                    : uiStreaming;
+                bool useStreaming = _chatService.IsStreamingEnabled(roleId, uiStreaming);
 
                 if (useStreaming)
                 {
-                    await SendStreamingAsync(request, _activeRequestCts.Token);
+                    return await SendStreamingAsync(request, _activeRequestCts.Token);
                 }
-                else
-                {
-                    await SendNonStreamingAsync(request, _activeRequestCts.Token);
-                }
+
+                return await SendNonStreamingAsync(request, _activeRequestCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -781,12 +928,15 @@ namespace CoreAI.Chat
                 {
                     AddMessage(config?.TimeoutMessage ?? "Timeout.", isUser: false);
                 }
+
+                return null;
             }
             catch (Exception ex)
             {
                 FinishStreaming();
                 Debug.LogError($"[CoreAiChatPanel] Error: {ex.Message}");
                 AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + ex.Message, isUser: false);
+                return null;
             }
             finally
             {
@@ -795,15 +945,13 @@ namespace CoreAI.Chat
                 _activeRequestCts?.Dispose();
                 _activeRequestCts = null;
                 UpdateSendButtonVisualState();
-                // Вернуть фокус во input после завершения AI-ответа,
-                // чтобы пользователь мог сразу печатать следующее сообщение.
                 InputField?.schedule.Execute(FocusInputField);
             }
         }
 
         /// <summary>
         /// Устанавливает фокус на TextField штатным способом.
-        /// Вызывается ТОЛЬКО после программной очистки поля (TrySendInput/SendToAI),
+        /// Вызывается ТОЛЬКО после программной очистки поля (TrySendInput / завершение хода LLM),
         /// чтобы пользователь мог сразу печатать следующее сообщение.
         /// В обычных взаимодействиях UI Toolkit сам ставит фокус по клику —
         /// любые наши форсированные Focus() на pointer/focus событиях
@@ -812,6 +960,11 @@ namespace CoreAI.Chat
         private void FocusInputField()
         {
             InputField?.Focus();
+        }
+
+        private void ReleaseChatKeyboardFocus()
+        {
+            Root?.panel?.focusController?.focusedElement?.Blur();
         }
 
         /// <summary>
@@ -830,12 +983,7 @@ namespace CoreAI.Chat
             };
         }
 
-        private System.Threading.Tasks.Task SendStreamingAsync(string userText, string roleId, CancellationToken ct)
-        {
-            return SendStreamingAsync(new AiTaskRequest { RoleId = roleId, Hint = userText, SourceTag = "Chat" }, ct);
-        }
-
-        private async System.Threading.Tasks.Task SendStreamingAsync(AiTaskRequest request, CancellationToken ct)
+        private async Task<string?> SendStreamingAsync(AiTaskRequest request, CancellationToken ct)
         {
             ShowTypingIndicator();
             ResetThinkFilter();
@@ -849,7 +997,7 @@ namespace CoreAI.Chat
                     FinishStreaming();
                     HideTypingIndicator();
                     AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + chunk.Error, isUser: false);
-                    return;
+                    return null;
                 }
 
                 if (!string.IsNullOrEmpty(chunk.Text))
@@ -884,20 +1032,15 @@ namespace CoreAI.Chat
                 FinishStreaming();
                 HideTypingIndicator();
                 AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
+                return null;
             }
-            else
-            {
-                OnResponseReceived(fullResponse);
-                OnAiResponseCompleted?.Invoke(fullResponse);
-            }
+
+            OnResponseReceived(fullResponse);
+            OnAiResponseCompleted?.Invoke(fullResponse);
+            return fullResponse;
         }
 
-        private System.Threading.Tasks.Task SendNonStreamingAsync(string userText, string roleId, CancellationToken ct)
-        {
-            return SendNonStreamingAsync(new AiTaskRequest { RoleId = roleId, Hint = userText, SourceTag = "Chat" }, ct);
-        }
-
-        private async System.Threading.Tasks.Task SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
+        private async Task<string?> SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
         {
             ShowTypingIndicator();
 
@@ -907,16 +1050,16 @@ namespace CoreAI.Chat
             if (string.IsNullOrEmpty(response))
             {
                 AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
+                return null;
             }
-            else
-            {
-                // Убираем <think> блоки из финального ответа
-                response = StripThinkBlocks(response);
-                string formatted = FormatResponseText(response);
-                AddMessage(formatted, isUser: false);
-                OnResponseReceived(formatted);
-                OnAiResponseCompleted?.Invoke(formatted);
-            }
+
+            // Убираем <think> блоки из финального ответа
+            response = StripThinkBlocks(response);
+            string formatted = FormatResponseText(response);
+            AddMessage(formatted, isUser: false);
+            OnResponseReceived(formatted);
+            OnAiResponseCompleted?.Invoke(formatted);
+            return formatted;
         }
 
         // ===================== Think-Block Filter =====================
@@ -1059,7 +1202,6 @@ namespace CoreAI.Chat
         {
             bool actionInProgress = IsActionInProgress();
             if (ClearButton != null) ClearButton.SetEnabled(!actionInProgress);
-            if (StopButton != null) StopButton.SetEnabled(!actionInProgress);
         }
 
         private void UpdateSendButtonVisualState()
@@ -1178,13 +1320,30 @@ namespace CoreAI.Chat
 
         protected void ScrollToBottom()
         {
-            MessageScroll?.schedule.Execute(() =>
+            if (MessageScroll == null)
             {
-                if (MessageScroll?.verticalScroller != null)
-                {
-                    MessageScroll.verticalScroller.value = MessageScroll.verticalScroller.highValue;
-                }
+                return;
+            }
+
+            // Два прохода: после изменения дерева / flex (justify flex-end + min-height)
+            // highValue пересчитывается на следующем layout — иначе скролл остаётся «вверху»
+            // и пузыри визуально «падают» при первом ответе.
+            MessageScroll.schedule.Execute(() =>
+            {
+                SnapScrollToBottom();
+                MessageScroll.schedule.Execute(SnapScrollToBottom);
             });
+        }
+
+        private void SnapScrollToBottom()
+        {
+            if (MessageScroll?.verticalScroller == null)
+            {
+                return;
+            }
+
+            Scroller vs = MessageScroll.verticalScroller;
+            vs.value = vs.highValue;
         }
 
         /// <summary>

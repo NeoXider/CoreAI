@@ -151,6 +151,28 @@ namespace CoreAI.Chat
             _memoryStore?.ClearChatHistory(roleId);
         }
 
+        /// <summary>
+        /// Прочитать сохранённую историю чата (тип 2: ChatHistory в <see cref="IAgentMemoryStore"/>).
+        /// Удобно для UI при старте сцену. <paramref name="maxMessages"/>: 0 = без лимита (как в store).
+        /// </summary>
+        public bool TryGetPersistedChatHistory(string roleId, out ChatMessage[] messages, int maxMessages = 0)
+        {
+            messages = Array.Empty<ChatMessage>();
+            if (_memoryStore == null || string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
+            ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
+            if (raw == null || raw.Length == 0)
+            {
+                return false;
+            }
+
+            messages = raw;
+            return true;
+        }
+
         /// <summary>Остановить все текущие и ожидающие задачи для роли.</summary>
         public void StopAgent(string roleId)
         {
