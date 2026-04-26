@@ -833,7 +833,7 @@ namespace CoreAI.Chat
 
         internal static string GetSendButtonText(bool isBusy)
         {
-            return isBusy ? "X" : "";
+            return isBusy ? "X" : ">";
         }
 
         internal static string GetSendButtonTooltip(bool isBusy)
