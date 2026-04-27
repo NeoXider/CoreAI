@@ -12,9 +12,19 @@ namespace CoreAI.Editor
     /// Temporarily excludes heavy LLMUnity-related StreamingAssets folders from WebGL builds,
     /// then restores them after build completion.
     /// </summary>
+    /// <remarks>
+    /// <see cref="callbackOrder"/> must run <b>after</b> LLMUnity's <c>LLMBuildProcessor</c> (default ~0),
+    /// which calls <c>Directory.GetDirectories</c> on <c>StreamingAssets/LlamaLib*</c>. If we move those
+    /// folders first, WebGL preprocess fails with <see cref="DirectoryNotFoundException"/>.
+    /// </remarks>
     internal sealed class CoreAIWebGlStreamingAssetsGuard : IPreprocessBuildWithReport, IPostprocessBuildWithReport
     {
         private const string SessionStateKey = "CoreAI.WebGlStreamingAssetsGuard.Manifest";
+
+        /// <summary>
+        /// Late preprocess: after undream/LLMUnity (and similar) have consumed StreamingAssets.
+        /// </summary>
+        private const int LateBuildCallbackOrder = 100_000;
 
         // Common folder prefixes produced by local LLM/LLMUnity setups.
         private static readonly string[] GuardedFolderPrefixes =
@@ -24,7 +34,7 @@ namespace CoreAI.Editor
             "LLMUnityBuild"
         };
 
-        public int callbackOrder => 0;
+        public int callbackOrder => LateBuildCallbackOrder;
 
         [InitializeOnLoadMethod]
         private static void TryRestoreAfterInterruptedBuild()
