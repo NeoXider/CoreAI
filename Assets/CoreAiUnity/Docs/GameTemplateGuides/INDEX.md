@@ -1,15 +1,15 @@
-# Game Template Guides — оглавление
+# Game Template Guides — index
 
-Короткие рецепты для игр на шаблоне CoreAI. Норматив — [DGF_SPEC.md](../DGF_SPEC.md). **Онбординг и карта кода** — [DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md).
+Short recipes for games built on the CoreAI template. Normative spec: [DGF_SPEC.md](../DGF_SPEC.md). **Onboarding and code map:** [DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md).
 
-| Документ | Статус | Описание |
-|----------|--------|----------|
-| [01_NetworkHostAuthority.md](01_NetworkHostAuthority.md) | черновик | DGF §5, DEVELOPER_GUIDE §3, AI_AGENT_ROLES |
-| [02_AiOrchestration.md](02_AiOrchestration.md) | черновик | DEVELOPER_GUIDE §3–4, TraceId, декоратор LLM, DGF §6 |
-| [03_AgentRolesAndProfiles.md](03_AgentRolesAndProfiles.md) | черновик | Ссылки на AI_AGENT_ROLES, промпты, BuiltInAgentRoleIds |
-| [04_SingleVsMultiplayer.md](04_SingleVsMultiplayer.md) | черновик | Единый пайплайн ядра, DGF §5 |
-| [05_ReferenceGame.md](05_ReferenceGame.md) | черновик | DEVELOPER_GUIDE §8, `_exampleGame`, playbook |
+| Document | Status | Description |
+|----------|--------|-------------|
+| [01_NetworkHostAuthority.md](01_NetworkHostAuthority.md) | draft | DGF §5, DEVELOPER_GUIDE §3, AI_AGENT_ROLES |
+| [02_AiOrchestration.md](02_AiOrchestration.md) | draft | DEVELOPER_GUIDE §3–4, TraceId, LLM decorator, DGF §6 |
+| [03_AgentRolesAndProfiles.md](03_AgentRolesAndProfiles.md) | draft | Links to AI_AGENT_ROLES, prompts, BuiltInAgentRoleIds |
+| [04_SingleVsMultiplayer.md](04_SingleVsMultiplayer.md) | draft | Single core pipeline, DGF §5 |
+| [05_ReferenceGame.md](05_ReferenceGame.md) | draft | DEVELOPER_GUIDE §8, `_exampleGame`, playbook |
 
-Дополнительно:
-- [MULTIPLAYER_AI.md](../MULTIPLAYER_AI.md) — политика Host / клиенты / все узлы, `CoreAiNetworkPeerBehaviour`.
-- [WORLD_COMMANDS.md](../WORLD_COMMANDS.md) — безопасное управление миром из Lua (whitelist → MessagePipe → main thread).
+Also:
+- [MULTIPLAYER_AI.md](../MULTIPLAYER_AI.md) — Host / clients / all peers policy, `CoreAiNetworkPeerBehaviour`.
+- [WORLD_COMMANDS.md](../WORLD_COMMANDS.md) — safe world control from Lua (whitelist → MessagePipe → main thread).

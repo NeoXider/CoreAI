@@ -1,7 +1,7 @@
-# Сингл и мультиплеер: один код-путь
+# Single-player and multiplayer: one code path
 
-**Идея:** solo = локальный авторитет; мульти — те же команды после репликации с хоста ([DGF_SPEC §5](../DGF_SPEC.md)).
+**Idea:** solo = local authority; multiplayer = the same commands after replication from the host ([DGF_SPEC §5](../DGF_SPEC.md)).
 
-**Ядро:** один пайплайн **`RunTaskAsync` → LLM → ApplyAiGameCommand → Lua`** ([DEVELOPER_GUIDE.md §3](../DEVELOPER_GUIDE.md)); различие только в том, **кто** публикует команды и как они доходят до клиентов.
+**Core:** one pipeline **`RunTaskAsync` → LLM → ApplyAiGameCommand → Lua** ([DEVELOPER_GUIDE.md §3](../DEVELOPER_GUIDE.md)); the only difference is **who** publishes commands and how they reach clients.
 
-**Feature flags / режимы** — в игре; в шаблоне не дублируем политику сетевого стека.
+**Feature flags / modes** — in the game; the template does not duplicate network stack policy.

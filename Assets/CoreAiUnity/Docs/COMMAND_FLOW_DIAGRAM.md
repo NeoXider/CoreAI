@@ -1,51 +1,51 @@
-# 🗺️ Как команда от игрока проходит через всю систему
+# 🗺️ How a player command flows through the system
 
-**Версия документа:** 1.0 | **Дата:** Апрель 2026
+**Document version:** 1.0 | **Date:** April 2026
 
-Этот документ детально описывает путь команды игрока от момента ввода до исполнения в игровом мире. Понимание этого потока — ключ к отладке и расширению CoreAI.
+This document describes in detail the path of a player command from input to execution in the game world. Understanding this flow is key to debugging and extending CoreAI.
 
 ---
 
-## 1. Общая диаграмма потока
+## 1. High-level flow diagram
 
 ```mermaid
 flowchart TB
-    subgraph PLAYER ["🎮 Слой игрока"]
-        Input["Ввод игрока<br/>(текст, действие, хоткей)"]
+    subgraph PLAYER ["🎮 Player layer"]
+        Input["Player input<br/>(text, action, hotkey)"]
     end
 
-    subgraph GAME ["🎯 Слой игры"]
-        GameCode["Игровой код<br/>(MonoBehaviour / UI)"]
+    subgraph GAME ["🎯 Game layer"]
+        GameCode["Game code<br/>(MonoBehaviour / UI)"]
         TaskRequest["AiTaskRequest<br/>{RoleId, Hint, Priority,<br/>CancellationScope, TraceId}"]
     end
 
-    subgraph ORCHESTRATION ["🧠 Слой оркестрации"]
-        QueuedOrch["QueuedAiOrchestrator<br/>• Приоритетная очередь<br/>• Лимит параллелизма<br/>• Отмена предыдущей задачи"]
-        AiOrch["AiOrchestrator<br/>• Назначает TraceId<br/>• Собирает промпты<br/>• Вставляет память<br/>• Валидация ответа"]
+    subgraph ORCHESTRATION ["🧠 Orchestration layer"]
+        QueuedOrch["QueuedAiOrchestrator<br/>• Priority queue<br/>• Concurrency limit<br/>• Cancel previous task"]
+        AiOrch["AiOrchestrator<br/>• Assigns TraceId<br/>• Builds prompts<br/>• Injects memory<br/>• Response validation"]
     end
 
-    subgraph PROMPT ["📝 Сборка промпта"]
+    subgraph PROMPT ["📝 Prompt assembly"]
         PromptComposer["AiPromptComposer<br/>Universal Prefix + System Prompt<br/>+ Memory + User Payload"]
         MemoryLoad["IAgentMemoryStore<br/>TryLoad(roleId)"]
-        PromptSource["Промпт:<br/>1. AgentPromptsManifest<br/>2. Resources/AgentPrompts/<br/>3. BuiltInAgentSystemPromptTexts"]
+        PromptSource["Prompt sources:<br/>1. AgentPromptsManifest<br/>2. Resources/AgentPrompts/<br/>3. BuiltInAgentSystemPromptTexts"]
     end
 
-    subgraph LLM ["🤖 Слой LLM"]
+    subgraph LLM ["🤖 LLM layer"]
         LoggingDeco["LoggingLlmClientDecorator<br/>LLM ▶ / LLM ◀ / LLM ⏱"]
-        Routing["RoutingLlmClient<br/>(маршрутизация по роли)"]
+        Routing["RoutingLlmClient<br/>(routing by role)"]
         MeaiClient["MeaiLlmClient<br/>+ FunctionInvokingChatClient<br/>(MEAI pipeline)"]
         
-        subgraph BACKENDS ["Бэкенды"]
-            LlmUnity["MeaiLlmUnityClient<br/>(локальная GGUF)"]
+        subgraph BACKENDS ["Backends"]
+            LlmUnity["MeaiLlmUnityClient<br/>(local GGUF)"]
             OpenAI["OpenAiChatLlmClient<br/>(HTTP API)"]
-            Stub["StubLlmClient<br/>(заглушка)"]
+            Stub["StubLlmClient<br/>(stub)"]
         end
     end
 
     subgraph TOOLCALL ["🔧 Tool Calling (MEAI)"]
-        FuncInvoke["FunctionInvokingChatClient<br/>Распознаёт tool_calls"]
+        FuncInvoke["FunctionInvokingChatClient<br/>Recognizes tool_calls"]
         
-        subgraph TOOLS ["Доступные инструменты"]
+        subgraph TOOLS ["Available tools"]
             MemoryTool["🧠 MemoryTool<br/>write / append / clear"]
             LuaTool["📜 LuaTool<br/>execute_lua"]
             WorldTool["🌍 WorldTool<br/>spawn / move / destroy..."]
@@ -57,39 +57,39 @@ flowchart TB
         end
     end
 
-    subgraph MESSAGING ["📬 Слой сообщений (MessagePipe)"]
+    subgraph MESSAGING ["📬 Messaging layer (MessagePipe)"]
         Publish["Publish<br/>ApplyAiGameCommand<br/>{AiEnvelope, TraceId}"]
-        Router["AiGameCommandRouter<br/>⚠️ Маршалинг на<br/>ГЛАВНЫЙ ПОТОК Unity"]
+        Router["AiGameCommandRouter<br/>⚠️ Marshal to<br/>Unity MAIN THREAD"]
     end
 
-    subgraph LUA ["🔧 Слой Lua (MoonSharp)"]
-        LuaProcessor["LuaAiEnvelopeProcessor<br/>Извлекает Lua из ответа"]
+    subgraph LUA ["🔧 Lua layer (MoonSharp)"]
+        LuaProcessor["LuaAiEnvelopeProcessor<br/>Extracts Lua from response"]
         SecureLua["SecureLuaEnvironment<br/>+ LuaExecutionGuard<br/>+ LuaApiRegistry"]
         
         subgraph LUAAPI ["Lua API (whitelist)"]
             Report["report(string)"]
             Add["add(a, b)"]
             WorldAPI["coreai_world_spawn/move/destroy..."]
-            GameBindings["IGameLuaRuntimeBindings<br/>(ваши функции)"]
+            GameBindings["IGameLuaRuntimeBindings<br/>(your functions)"]
         end
     end
 
-    subgraph WORLD ["🌍 Слой мира (Unity)"]
+    subgraph WORLD ["🌍 World layer (Unity)"]
         WorldExec["ICoreAiWorldCommandExecutor<br/>TryExecute()"]
-        PrefabReg["CoreAiPrefabRegistryAsset<br/>(whitelist префабов)"]
+        PrefabReg["CoreAiPrefabRegistryAsset<br/>(prefab whitelist)"]
         
-        subgraph ACTIONS ["Действия в мире"]
+        subgraph ACTIONS ["World actions"]
             Spawn["GameObject.Instantiate"]
             Move["transform.position ="]
             Destroy["GameObject.Destroy"]
             Anim["Animator.Play"]
             Scene["SceneManager.Load"]
-            UI["UI обновление"]
+            UI["UI update"]
         end
     end
 
-    subgraph REPAIR ["🔄 Авто-восстановление"]
-        RepairLoop["Programmer Self-Heal<br/>до 3 попыток<br/>(MaxLuaRepairRetries)"]
+    subgraph REPAIR ["🔄 Auto-recovery"]
+        RepairLoop["Programmer Self-Heal<br/>up to 3 attempts<br/>(MaxLuaRepairRetries)"]
     end
 
     %% Connections
@@ -137,8 +137,8 @@ flowchart TB
     WorldExec --> Scene
     WorldExec --> UI
     
-    SecureLua -.->|"Ошибка Lua"| RepairLoop
-    RepairLoop -.->|"Контекст ошибки"| AiOrch
+    SecureLua -.->|"Lua error"| RepairLoop
+    RepairLoop -.->|"Error context"| AiOrch
 
     classDef player fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
     classDef game fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
@@ -152,55 +152,55 @@ flowchart TB
 
 ---
 
-## 2. Пошаговый разбор (с номерами шагов)
+## 2. Step-by-step walkthrough (numbered steps)
 
-### Шаг 1: Ввод игрока → `AiTaskRequest`
+### Step 1: Player input → `AiTaskRequest`
 
 ```csharp
-// Игрок нажал кнопку крафта или ввёл текст в чат
+// Player clicked a craft button or typed in chat
 await orchestrator.RunTaskAsync(new AiTaskRequest
 {
-    RoleId = "CoreMechanicAI",           // Какой агент обработает
-    Hint = "Скрафти оружие: Iron + Fire Crystal",  // Что сделать
-    Priority = 5,                         // Приоритет (больше = важнее)
-    CancellationScope = "crafting"        // Группа отмены
+    RoleId = "CoreMechanicAI",           // Which agent handles it
+    Hint = "Craft weapon: Iron + Fire Crystal",  // What to do
+    Priority = 5,                         // Priority (higher = more important)
+    CancellationScope = "crafting"        // Cancellation group
 });
 ```
 
-### Шаг 2: Очередь → `QueuedAiOrchestrator`
+### Step 2: Queue → `QueuedAiOrchestrator`
 
 ```
-📋 Очередь задач:
+📋 Task queue:
 ┌──────────┬──────────┬────────────┬──────────────────┐
 │ Priority │ RoleId   │ CancelScope│ Status           │
 ├──────────┼──────────┼────────────┼──────────────────┤
-│    10    │ Creator  │ session    │ ⏳ В обработке    │
-│     5    │ Mechanic │ crafting   │ ⏳ Ожидание       │ ← наша задача
-│     1    │ Analyzer │ analytics  │ ⏳ Ожидание       │
+│    10    │ Creator  │ session    │ ⏳ In progress    │
+│     5    │ Mechanic │ crafting   │ ⏳ Waiting        │ ← our task
+│     1    │ Analyzer │ analytics  │ ⏳ Waiting        │
 └──────────┴──────────┴────────────┴──────────────────┘
 
-Лимит параллелизма: MaxConcurrent = 2
+Concurrency limit: MaxConcurrent = 2
 ```
 
-**Что происходит:**
-- Задача помещается в приоритетную очередь
-- Если уже есть задача с тем же `CancellationScope` — предыдущая отменяется
-- Когда слот освобождается — задача передаётся в `AiOrchestrator`
+**What happens:**
+- The task is placed in a priority queue
+- If a task with the same `CancellationScope` already exists, the previous one is cancelled
+- When a slot frees up, the task is handed to `AiOrchestrator`
 
-### Шаг 3: Сборка промпта → `AiPromptComposer`
+### Step 3: Prompt assembly → `AiPromptComposer`
 
 ```
 ═══════════════════════════════════════════════════
-  ФИНАЛЬНЫЙ СИСТЕМНЫЙ ПРОМПТ (собирается из 3 частей)
+  FINAL SYSTEM PROMPT (built from 3 parts)
 ═══════════════════════════════════════════════════
 
-📌 Часть 1 — Universal Prefix (общий для всех):
+📌 Part 1 — Universal Prefix (shared by all):
 "You are an AI agent in a game. Always stay in character."
 
-📌 Часть 2 — Промпт роли (CoreMechanicAI):
+📌 Part 2 — Role prompt (CoreMechanicAI):
 "You are the CoreMechanicAI. Evaluate crafting recipes..."
 
-📌 Часть 3 — Память агента (из прошлых вызовов):
+📌 Part 3 — Agent memory (from prior runs):
 "Previous memory: Craft#1: Iron Blade damage:45 fire:0"
 
 ═══════════════════════════════════════════════════
@@ -208,11 +208,11 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 ═══════════════════════════════════════════════════
 {
   "telemetry": { "wave": 3, "playerLevel": 5 },
-  "hint": "Скрафти оружие: Iron + Fire Crystal"
+  "hint": "Craft weapon: Iron + Fire Crystal"
 }
 ```
 
-### Шаг 4: Запрос к LLM → `ILlmClient`
+### Step 4: LLM request → `ILlmClient`
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -221,13 +221,13 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 │                                                       │
 │  ┌─────────────────────────────────────────────────┐ │
 │  │  RoutingLlmClient                                │ │
-│  │  Маршрут: CoreMechanicAI → OpenAiHttp             │ │
+│  │  Route: CoreMechanicAI → OpenAiHttp             │ │
 │  │                                                   │ │
 │  │  ┌─────────────────────────────────────────────┐ │ │
 │  │  │  MeaiLlmClient                              │ │ │
 │  │  │  + FunctionInvokingChatClient                │ │ │
 │  │  │  + SmartToolCallingChatClient                │ │ │
-│  │  │    (дедупликация, защита от циклов)          │ │ │
+│  │  │    (dedup, loop protection)                  │ │ │
 │  │  │                                              │ │ │
 │  │  │  Tools: [memory, execute_lua, game_config]   │ │ │
 │  │  └─────────────────────────────────────────────┘ │ │
@@ -237,10 +237,10 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 └─────────────────────────────────────────────────────┘
 ```
 
-### Шаг 5: Модель отвечает (с Tool Call)
+### Step 5: Model response (with tool call)
 
 ```json
-// Модель возвращает tool call:
+// Model returns a tool call:
 {
   "name": "memory",
   "arguments": {
@@ -250,16 +250,16 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 }
 ```
 
-**MEAI Pipeline автоматически:**
-1. Распознаёт tool call в ответе
-2. Находит `MemoryTool` по имени `"memory"`
-3. Вызывает `MemoryTool.ExecuteAsync(action, content)`
-4. Результат → обратно модели → финальный текстовый ответ
+**MEAI pipeline automatically:**
+1. Recognizes the tool call in the response
+2. Resolves `MemoryTool` by name `"memory"`
+3. Calls `MemoryTool.ExecuteAsync(action, content)`
+4. Result → back to the model → final text response
 
-### Шаг 6: Публикация → MessagePipe
+### Step 6: Publish → MessagePipe
 
 ```csharp
-// AiOrchestrator публикует результат в шину:
+// AiOrchestrator publishes the result to the bus:
 messageBroker.Publish(new ApplyAiGameCommand
 {
     CommandTypeId = "AiEnvelope",
@@ -268,10 +268,10 @@ messageBroker.Publish(new ApplyAiGameCommand
 });
 ```
 
-### Шаг 7: Маршрутизация → `AiGameCommandRouter`
+### Step 7: Routing → `AiGameCommandRouter`
 
 ```
-⚠️ КРИТИЧНО: Переключение на ГЛАВНЫЙ ПОТОК Unity!
+⚠️ CRITICAL: Switch to Unity MAIN THREAD!
 
 Background Thread ──→ UniTask.SwitchToMainThread() ──→ Main Thread
                                                           ↓
@@ -280,40 +280,40 @@ Background Thread ──→ UniTask.SwitchToMainThread() ──→ Main Thread
                                                  SecureLuaEnvironment
 ```
 
-### Шаг 8: Исполнение Lua → `SecureLuaEnvironment`
+### Step 8: Lua execution → `SecureLuaEnvironment`
 
 ```lua
--- Lua исполняется в песочнице MoonSharp:
+-- Lua runs in MoonSharp sandbox:
 create_item("Flame Sword", 75)        -- → Whitelist API
 add_effect("fire_damage", 15)         -- → Whitelist API
 report("crafted Flame Sword")         -- → IGameLuaRuntimeBindings
 
--- Если Lua вызывает World Command:
+-- If Lua invokes a world command:
 coreai_world_spawn("SwordVFX", "fx_sword", 0, 1, 0)
--- → Публикует ApplyAiGameCommand{CommandTypeId = "WorldCommand"}
+-- → Publishes ApplyAiGameCommand{CommandTypeId = "WorldCommand"}
 -- → AiGameCommandRouter → ICoreAiWorldCommandExecutor.TryExecute()
 ```
 
-### Шаг 9: Авто-восстановление при ошибке (Self-Heal)
+### Step 9: Auto-recovery on error (Self-Heal)
 
 ```
-Попытка 1: LLM → Lua → ❌ Runtime Error: "bad argument to 'create_item'"
+Attempt 1: LLM → Lua → ❌ Runtime Error: "bad argument to 'create_item'"
     ↓
-Попытка 2: LLM (с контекстом ошибки) → Lua → ❌ Syntax Error
+Attempt 2: LLM (with error context) → Lua → ❌ Syntax Error
     ↓
-Попытка 3: LLM (с историей ошибок) → Lua → ✅ Успех!
+Attempt 3: LLM (with error history) → Lua → ✅ Success!
     ↓
 LuaExecutionSucceeded { TraceId = "abc123" }
 ```
 
 ---
 
-## 3. Диаграмма последовательности (Sequence Diagram)
+## 3. Sequence diagram
 
 ```mermaid
 sequenceDiagram
-    actor Player as 🎮 Игрок
-    participant Game as 🎯 Игра
+    actor Player as 🎮 Player
+    participant Game as 🎯 Game
     participant Queue as 📋 QueuedOrchestrator
     participant Orch as 🧠 AiOrchestrator
     participant Prompt as 📝 PromptComposer
@@ -326,92 +326,92 @@ sequenceDiagram
     participant Lua as 📜 Lua Sandbox
     participant World as 🌍 Unity World
 
-    Player->>Game: Ввод (текст / действие)
+    Player->>Game: Input (text / action)
     Game->>Queue: RunTaskAsync(AiTaskRequest)
     
-    Note over Queue: Приоритетная очередь<br/>Проверка CancellationScope
-    Queue->>Orch: Передача задачи
+    Note over Queue: Priority queue<br/>CancellationScope check
+    Queue->>Orch: Hand off task
 
-    Orch->>Orch: Назначить TraceId
-    Orch->>Prompt: Собрать промпт
+    Orch->>Orch: Assign TraceId
+    Orch->>Prompt: Build prompt
     Prompt->>Memory: TryLoad(roleId)
     Memory-->>Prompt: AgentMemoryState
     Prompt-->>Orch: System + User prompt
 
     Orch->>LLM: CompleteAsync(request + tools)
     LLM->>MEAI: IChatClient.GetResponseAsync()
-    MEAI->>MEAI: Отправка в модель
+    MEAI->>MEAI: Send to model
 
-    alt Модель вызвала Tool
+    alt Model invoked a tool
         MEAI->>Tools: AIFunction.InvokeAsync()
-        Tools-->>MEAI: Tool Result
-        MEAI->>MEAI: Результат → модели
-        MEAI-->>LLM: Финальный ответ
-    else Только текст
-        MEAI-->>LLM: Текстовый ответ
+        Tools-->>MEAI: Tool result
+        MEAI->>MEAI: Result → model
+        MEAI-->>LLM: Final answer
+    else Text only
+        MEAI-->>LLM: Text response
     end
 
     LLM-->>Orch: LlmCompletionResult
 
-    alt Programmer / Creator (с Lua)
+    alt Programmer / Creator (with Lua)
         Orch->>Bus: Publish(ApplyAiGameCommand)
-        Bus->>Router: Подписчик получает
+        Bus->>Router: Subscriber receives
         
         Note over Router: ⚠️ SwitchToMainThread
         Router->>Lua: LuaAiEnvelopeProcessor.Process()
         
-        alt Lua вызывает World Command
+        alt Lua calls world command
             Lua->>World: coreai_world_spawn(...)
             World->>World: Instantiate / Move / Destroy
         end
 
-        alt Lua ошибка
+        alt Lua error
             Lua-->>Router: LuaExecutionFailed
-            Router->>Orch: Повторный вызов (repair context)
-            Note over Orch: До 3 попыток self-heal
-        else Lua успех
+            Router->>Orch: Retry (repair context)
+            Note over Orch: Up to 3 self-heal attempts
+        else Lua success
             Lua-->>Router: LuaExecutionSucceeded
         end
-    else Chat Agent (PlayerChat / AINpc)
-        Orch-->>Game: Текстовый ответ
-        Game-->>Player: Отображение в UI
+    else Chat agent (PlayerChat / AINpc)
+        Orch-->>Game: Text response
+        Game-->>Player: Show in UI
     end
 ```
 
 ---
 
-## 4. Поток для конкретных сценариев
+## 4. Flows for specific scenarios
 
-### 4.1 Сценарий: Игрок спрашивает NPC-торговца
+### 4.1 Scenario: Player asks an NPC merchant
 
 ```
-Игрок: "Что у тебя есть?"
+Player: "What do you have?"
   ↓
-AiTaskRequest { RoleId = "Merchant", Hint = "Что у тебя есть?" }
+AiTaskRequest { RoleId = "Merchant", Hint = "What do you have?" }
   ↓
 QueuedAiOrchestrator → AiOrchestrator
   ↓
-PromptComposer: System="You are a shopkeeper..." + ChatHistory (последние 20 сообщений)
+PromptComposer: System="You are a shopkeeper..." + ChatHistory (last 20 messages)
   ↓
 LLM → FunctionInvokingChatClient
   ↓
-Модель: {"name": "get_inventory", "arguments": {}}
+Model: {"name": "get_inventory", "arguments": {}}
   ↓
 InventoryTool → [{name: "Iron Sword", price: 50, qty: 3}, ...]
   ↓
-Результат → модели → "У меня отличные товары! Iron Sword за 50 монет..."
+Result → model → "I've got great goods! Iron Sword for 50 coins..."
   ↓
-Игрок видит ответ в чате 💬
+Player sees reply in chat 💬
 ```
 
-### 4.2 Сценарий: Creator меняет сложность
+### 4.2 Scenario: Creator adjusts difficulty
 
 ```
-Analyzer: "Игрок доминирует, скука растёт"
+Analyzer: "Player is dominating, boredom rising"
   ↓
-AiTaskRequest { RoleId = "Creator", Hint = "Игрок слишком силён..." }
+AiTaskRequest { RoleId = "Creator", Hint = "Player is too strong..." }
   ↓
-Модель: 
+Model: 
   1. {"name": "memory", "arguments": {"action": "write", "content": "Wave 7: increased difficulty"}}
   2. Lua: coreai_world_spawn("EliteBoss", "boss_7", 50, 0, 50)
   ↓
@@ -419,22 +419,22 @@ MessagePipe → Router → Lua → coreai_world_spawn
   ↓
 WorldCommandExecutor → PrefabRegistry → Instantiate(EliteBoss @ 50,0,50)
   ↓
-Элитный босс появляется в мире! 🎮
+Elite boss appears in the world! 🎮
 ```
 
-### 4.3 Сценарий: Programmer чинит Lua
+### 4.3 Scenario: Programmer fixes Lua
 
 ```
-Creator: "Напиши скрипт награды за босса"
+Creator: "Write a boss reward script"
   ↓
-AiTaskRequest { RoleId = "Programmer", Hint = "Скрипт награды..." }
+AiTaskRequest { RoleId = "Programmer", Hint = "Reward script..." }
   ↓
-Попытка 1:
-  Модель → {"name": "execute_lua", "arguments": {"code": "reward_player(500)\nreport('done')"}}
+Attempt 1:
+  Model → {"name": "execute_lua", "arguments": {"code": "reward_player(500)\nreport('done')"}}
   Lua → ❌ "attempt to call 'reward_player' (a nil value)"
   ↓
-Попытка 2 (с контекстом ошибки):
-  Модель → {"name": "execute_lua", "arguments": {"code": "report('reward: 500 gold')"}}
+Attempt 2 (with error context):
+  Model → {"name": "execute_lua", "arguments": {"code": "report('reward: 500 gold')"}}
   Lua → ✅ Success
   ↓
 LuaExecutionSucceeded { TraceId = "abc123" }
@@ -442,65 +442,65 @@ LuaExecutionSucceeded { TraceId = "abc123" }
 
 ---
 
-## 5. Ключевые точки безопасности
+## 5. Key security checkpoints
 
-| Точка | Защита | Описание |
-|-------|--------|----------|
-| **Очередь** | Приоритет + CancellationScope | Предотвращение спама задач |
-| **Промпт** | Universal Prefix | Единые правила для всех агентов |
-| **Tool Calling** | SmartToolCallingChatClient | Детекция дубликатов, защита от циклов |
-| **Tool Retry** | MaxToolCallRetries (3) | Маленькие модели получают повторные попытки |
-| **Lua** | SecureLuaEnvironment + Guard | Whitelist API, лимит шагов, wallclock |
-| **World Commands** | PrefabRegistryAsset | Whitelist префабов для спавна |
-| **Потоки** | MainThread маршалинг | Unity API только на главном потоке |
-| **Self-Heal** | MaxLuaRepairRetries (3) | Лимит попыток восстановления Lua |
+| Checkpoint | Protection | Description |
+|------------|------------|-------------|
+| **Queue** | Priority + CancellationScope | Reduces task spam |
+| **Prompt** | Universal Prefix | Shared rules for all agents |
+| **Tool calling** | SmartToolCallingChatClient | Duplicate detection, loop protection |
+| **Tool retry** | MaxToolCallRetries (3) | Small models get another try |
+| **Lua** | SecureLuaEnvironment + Guard | Whitelist API, step limit, wall clock |
+| **World commands** | PrefabRegistryAsset | Whitelist prefabs for spawn |
+| **Threads** | Main-thread marshaling | Unity APIs only on main thread |
+| **Self-heal** | MaxLuaRepairRetries (3) | Cap on Lua repair attempts |
 
 ---
 
-## 6. Визуальная карта файлов
+## 6. Visual file map
 
 ```
 CoreAI/Runtime/Core/
 ├── Orchestration/
-│   ├── AiOrchestrator.cs          ← Главный оркестратор
-│   ├── QueuedAiOrchestrator.cs    ← Очередь с приоритетами
-│   ├── AiTaskRequest.cs           ← DTO запроса
-│   └── AiPromptComposer.cs       ← Сборка промптов
+│   ├── AiOrchestrator.cs          ← Main orchestrator
+│   ├── QueuedAiOrchestrator.cs    ← Priority queue
+│   ├── AiTaskRequest.cs           ← Request DTO
+│   └── AiPromptComposer.cs       ← Prompt assembly
 ├── Features/
 │   ├── Llm/
-│   │   ├── ILlmClient.cs         ← Интерфейс LLM
-│   │   ├── ILlmTool.cs           ← Интерфейс инструмента
+│   │   ├── ILlmClient.cs         ← LLM interface
+│   │   ├── ILlmTool.cs           ← Tool interface
 │   │   └── MeaiLlmClient.cs      ← MEAI pipeline
 │   ├── AgentMemory/
-│   │   ├── MemoryTool.cs          ← Tool для памяти
-│   │   └── IAgentMemoryStore.cs   ← Хранилище памяти
+│   │   ├── MemoryTool.cs          ← Memory tool
+│   │   └── IAgentMemoryStore.cs   ← Memory store
 │   ├── LuaExecution/
-│   │   ├── SecureLuaEnvironment.cs ← Песочница Lua
-│   │   └── LuaExecutionGuard.cs   ← Лимиты Lua
+│   │   ├── SecureLuaEnvironment.cs ← Lua sandbox
+│   │   └── LuaExecutionGuard.cs   ← Lua limits
 │   └── World/
-│       └── CoreAiWorldCommandEnvelope.cs ← DTO команд мира
+│       └── CoreAiWorldCommandEnvelope.cs ← World command DTO
 
 CoreAiUnity/Runtime/Source/
 ├── Composition/
-│   └── CoreAILifetimeScope.cs     ← DI контейнер (VContainer)
+│   └── CoreAILifetimeScope.cs     ← DI container (VContainer)
 ├── Features/
 │   ├── Llm/
-│   │   ├── MeaiLlmUnityClient.cs  ← LLMUnity адаптер
-│   │   ├── OpenAiChatLlmClient.cs ← HTTP API адаптер
-│   │   └── RoutingLlmClient.cs    ← Маршрутизация по ролям
+│   │   ├── MeaiLlmUnityClient.cs  ← LLMUnity adapter
+│   │   ├── OpenAiChatLlmClient.cs ← HTTP API adapter
+│   │   └── RoutingLlmClient.cs    ← Role-based routing
 │   ├── Messaging/
-│   │   └── AiGameCommandRouter.cs ← Маршрутизатор + main thread
+│   │   └── AiGameCommandRouter.cs ← Router + main thread
 │   ├── Lua/
-│   │   └── LuaAiEnvelopeProcessor.cs ← Обработчик Lua конвертов
+│   │   └── LuaAiEnvelopeProcessor.cs ← Lua envelope handler
 │   └── World/
-│       └── CoreAiWorldCommandExecutor.cs ← Исполнитель команд мира
+│       └── CoreAiWorldCommandExecutor.cs ← World command executor
 ```
 
 ---
 
-> 📖 **Связанные документы:**
-> - [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) — формат JSON команд
-> - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — архитектура и карта кода
-> - [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) — роли агентов
-> - [WORLD_COMMANDS.md](WORLD_COMMANDS.md) — команды мира
-> - [MemorySystem.md](MemorySystem.md) — система памяти
+> 📖 **Related documents:**
+> - [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) — JSON command format
+> - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — architecture and code map
+> - [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) — agent roles
+> - [WORLD_COMMANDS.md](WORLD_COMMANDS.md) — world commands
+> - [MemorySystem.md](MemorySystem.md) — memory system

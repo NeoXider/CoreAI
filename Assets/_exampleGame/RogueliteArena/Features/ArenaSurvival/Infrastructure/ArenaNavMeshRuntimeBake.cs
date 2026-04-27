@@ -13,7 +13,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
     {
         public static IDisposable SuspendAgentsForNavMeshBake(bool disableCharacterControllers)
         {
-            var agents = UnityEngine.Object.FindObjectsByType<NavMeshAgent>(FindObjectsInactive.Include);
+            var agents = UnityEngine.Object.FindObjectsByType<NavMeshAgent>(FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
             var agentStates = new List<(NavMeshAgent agent, bool enabled)>();
             foreach (var a in agents)
             {
@@ -26,7 +27,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             var ccStates = new List<(CharacterController cc, bool enabled)>();
             if (disableCharacterControllers)
             {
-                var ccs = UnityEngine.Object.FindObjectsByType<CharacterController>(FindObjectsInactive.Include);
+                var ccs = UnityEngine.Object.FindObjectsByType<CharacterController>(FindObjectsInactive.Include,
+                    FindObjectsSortMode.None);
                 foreach (var cc in ccs)
                 {
                     if (cc == null)

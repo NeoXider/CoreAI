@@ -1,81 +1,82 @@
-# CoreAI: Руководство по ScriptableObject (SO)
+# CoreAI: ScriptableObject (SO) guide
 
-В архитектуре **CoreAI** активно используются паттерны на базе `ScriptableObject` для хранения конфигураций, настройки AI моделей, правил роутинга и префабов сцены. 
+In **CoreAI**, **ScriptableObject** patterns are used heavily for configuration, AI model settings, routing rules, and scene prefab catalogs.
 
-Это позволяет отделить данные от логики (Data-Driven Design), избежать god-объектов в Monobehaviour и удобно редактировать баланс прямо в инспекторе.
+This keeps data separate from logic (data-driven design), avoids god objects on `MonoBehaviour`, and lets you tune balance directly in the Inspector.
 
 ---
 
-## 🛠️ Основные (Системные) ScriptableObjects
+## 🛠️ Core (system) ScriptableObjects
 
-Эти SO необходимы для работы ядра фреймворка. При загрузке плагина в Unity они **автоматически создаются** с дефолтными значениями, если отсутствуют (смотри `CoreAI/Setup/Create Default Assets`).
+These assets are required for the framework. When the plugin loads in Unity they are **created automatically** with defaults if missing (see `CoreAI/Setup/Create Default Assets`).
 
 ### 1. `CoreAISettingsAsset`
-**Назначение:** Глобальный конфигуратор LLM, таймаутов, fallback-моделей и логов. Единственная точка входа (Singleton), подхватывается автоматически из `Resources/CoreAISettings.asset`.
-- **Путь:** `Assets/Resources/CoreAISettings.asset` (обязательно в Resources / или назначен в Scope).
-- **За что отвечает:**
-  - Какой бэкенд использовать (`LlmUnity` vs `OpenAiHttp` vs `Auto`).
-  - API Ключ, URL, Название модели.
-  - Управление режимом размышлений (`Enable Reasoning / Thinking mode`).
-  - Управление fallback логикой (оффлайн режим).
-- **Меню Unity:** Можно быстро открыть через `CoreAI -> Settings`.
+**Purpose:** Global LLM configuration, timeouts, fallback models, and logging. Single entry point (singleton), loaded from `Resources/CoreAISettings.asset`.
+- **Path:** `Assets/Resources/CoreAISettings.asset` (must live under Resources / or be assigned on the scope).
+- **Responsibilities:**
+  - Which backend to use (`LlmUnity` vs `OpenAiHttp` vs `Auto`).
+  - API key, URL, model name.
+  - Reasoning / thinking mode (`Enable Reasoning / Thinking mode`).
+  - Fallback behavior (offline mode).
+- **Unity menu:** Quick access via `CoreAI -> Settings`.
 
 ### 2. `AgentPromptsManifest`
-**Назначение:** Хранилище всех стартовых и системных промптов (System Prompts) для каждого агента по его `RoleId`.
-- **Где найти:** `Assets/CoreAiUnity/Settings/AgentPromptsManifest.asset`
-- **За что отвечает:**
-  - Настройка личностей (Assistant, Programmer, Storyteller, UI Designer).
-  - На какие инструменты и правила должен опираться агент.
-- **Интеграция:** Привязывается к `CoreAILifetimeScope` (Dependency Injection).
+**Purpose:** Store of initial and system prompts for each agent by `RoleId`.
+- **Where:** `Assets/CoreAiUnity/Settings/AgentPromptsManifest.asset`
+- **Responsibilities:**
+  - Personas (Assistant, Programmer, Storyteller, UI Designer).
+  - Which tools and rules each agent should rely on.
+- **Integration:** Wired to `CoreAILifetimeScope` (dependency injection).
 
 ### 3. `LlmRoutingManifest`
-**Назначение:** Роутер бэкендов в зависимости от роли агента (Backend-per-Task).
-- **Где найти:** `Assets/CoreAiUnity/Settings/LlmRoutingManifest.asset`
-- **За что отвечает:**
-  - Если агент `Writer` → используем локальную Llama-3-8b (`LlmUnity`).
-  - Если агент `Coder` → направляем запрос к GPT-4o или Claude (`OpenAiHttp`).
-  - Если агент не указан → используется дефолтный `Routing Profile`.
+**Purpose:** Route backends per agent role (backend-per-task).
+- **Where:** `Assets/CoreAiUnity/Settings/LlmRoutingManifest.asset`
+- **Responsibilities:**
+  - Example: `Writer` → local Llama-3-8b (`LlmUnity`).
+  - Example: `Coder` → GPT-4o or Claude (`OpenAiHttp`).
+  - If a role is unspecified → default **Routing Profile**.
 
 ### 4. `CoreAiPrefabRegistryAsset`
-**Назначение:** Каталог всех префабов (GameObjects/Units), которые LLM агент может спавнить через `WorldCommand` инструмент (например `spawn_entity`).
-- **Где найти:** `Assets/CoreAiUnity/Settings/CoreAiPrefabRegistry.asset`
-- **За что отвечает:**
-  - Безопасный спавн (String Name -> Unity Prefab ресолвер). LLM никогда напрямую не загружает ресурсы, она использует ключи из этого реестра.
-- **Интеграция:** Инжектируется в `PrefabRuleValidator` и `WorldLlmTool`.
+**Purpose:** Catalog of prefabs (GameObjects/units) the LLM may spawn via the `WorldCommand` tool (e.g. `spawn_entity`).
+- **Where:** `Assets/CoreAiUnity/Settings/CoreAiPrefabRegistry.asset`
+- **Responsibilities:**
+  - Safe spawning (string name → Unity prefab resolver). The LLM never loads assets directly; it uses keys from this registry.
+- **Integration:** Injected into `PrefabRuleValidator` and `WorldLlmTool`.
 
 ### 5. `GameLogSettingsAsset`
-**Назначение:** Тонкая настройка системы логирования внутри фреймворка.
-- **Где найти:** `Assets/CoreAiUnity/Settings/GameLogSettings.asset`
-- **За что отвечает:**
-  - Включение/отключение конкретных фич (например отключить спам логов от `NavMesh` или детальный лог `LlmToolCalls`).
+**Purpose:** Fine-grained logging for framework subsystems.
+- **Where:** `Assets/CoreAiUnity/Settings/GameLogSettings.asset`
+- **Responsibilities:**
+  - Enable/disable specific features (e.g. reduce spam from `NavMesh` or verbose `LlmToolCalls` logs).
 
 ### 6. `AiPermissionsAsset`
-**Назначение:** Контроль доступа к функциям API или внутриигровых компонентов (Permissions and Scopes).
-- **Где найти:** `Assets/CoreAiUnity/Settings/AiPermissions.asset`
-- **За что отвечает:** 
-  - Какие модули доступны для AI в текущем контексте. Ограничивает область действия (например, запретить агенту управлять погодой в данже).
+**Purpose:** Access control for API features or in-game components (permissions and scopes).
+- **Where:** `Assets/CoreAiUnity/Settings/AiPermissions.asset`
+- **Responsibilities:**
+  - Which modules the AI may use in the current context. Restricts scope (e.g. forbid weather control inside a dungeon).
 
 ---
 
-## 🗑️ Устаревшие (Deprecated) ScriptableObjects
+## 🗑️ Deprecated ScriptableObjects
 
-Эти SO были заменены и оставлены только для обратной совместимости, **будут удалены в v1.0**.
+These assets were superseded and remain **only for backward compatibility**; **they will be removed in v1.0**.
 
 ### `OpenAiHttpLlmSettings`
-- 🚫 **Статус:** Устарел.
-- **Заменён на:** `CoreAISettingsAsset`.
-- **Причина:** Создавал путаницу между конфигурацией локальной модели (`LLMUnity`) и удаленной API-модели. Теперь всё объединено в `CoreAISettingsAsset`.
+- 🚫 **Status:** Deprecated.
+- **Replaced by:** `CoreAISettingsAsset`.
+- **Reason:** It blurred local model config (`LLMUnity`) vs remote API config. Everything now lives in `CoreAISettingsAsset`.
 
 ---
 
-## 💡 Пользовательские (Игровые) ScriptableObjects
+## 💡 Custom (game) ScriptableObjects
 
-Помимо встроенных, вы можете создавать собственные SO для передачи в агента через систему `IGameConfigStore`:
-- Например `ItemConfig : ScriptableObject`, в котором хранятся статы оружия, цены.
-- Вы можете передать этот SO в инструмент `GameConfigLlmTool`, и агент сможет прочитать эти статы и использовать в ответе.
+Beyond built-ins, you can author your own SOs and expose them to agents via `IGameConfigStore`:
+- Example: `ItemConfig : ScriptableObject` holding weapon stats and prices.
+- Pass that SO into `GameConfigLlmTool` so the agent can read stats and use them in replies.
 
 ---
 
-## Как это загружается?
-Плагин CoreAI использует атрибут `[InitializeOnLoadMethod]`. Это значит, что при первом импорте плагина (или перекомпиляции), скрипт `CoreAIBuildMenu` проверяет наличие `CoreAISettingsAsset` в папке `Resources`. 
-Если его (или других системных SO) нет — они **автосоздаются** с безопасными дефолтными настройками, что исключает краши из-за `NullReferenceException`.
+## How loading works
+
+CoreAI uses `[InitializeOnLoadMethod]`. On first import (or recompile), `CoreAIBuildMenu` checks for `CoreAISettingsAsset` under `Resources`.
+If it (or other system SOs) is missing, assets are **auto-created** with safe defaults to avoid `NullReferenceException` crashes.

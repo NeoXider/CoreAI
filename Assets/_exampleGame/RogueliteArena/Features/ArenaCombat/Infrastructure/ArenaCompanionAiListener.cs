@@ -64,7 +64,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 
         private static ArenaCompanionBot FindCompanion()
         {
-            var bots = FindObjectsByType<ArenaCompanionBot>(FindObjectsInactive.Exclude);
+            var bots = FindObjectsByType<ArenaCompanionBot>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             return bots != null && bots.Length > 0 ? bots[0] : null;
         }
 

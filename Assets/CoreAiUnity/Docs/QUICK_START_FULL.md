@@ -1,101 +1,101 @@
-# 🚀 Quick Start: Запуск LM Studio → Запуск сцены → Отправка команды
+# 🚀 Quick Start: Run LM Studio → Run the scene → Send a command
 
-**Версия документа:** 1.0 | **Дата:** Апрель 2026
+**Document version:** 1.0 | **Date:** April 2026
 
-Пошаговое руководство от нуля до работающего AI-агента за **10 минут**.
-
----
-
-## Содержание
-
-1. [Установка LM Studio](#1-установка-lm-studio-2-минуты)
-2. [Загрузка модели](#2-загрузка-модели-3-минуты)
-3. [Запуск локального сервера](#3-запуск-локального-сервера-1-минута)
-4. [Настройка Unity проекта](#4-настройка-unity-проекта-2-минуты)
-5. [Запуск сцены и отправка команды](#5-запуск-сцены-и-отправка-команды-2-минуты)
-6. [Проверка результата](#6-проверка-результата)
-7. [Что дальше?](#7-что-дальше)
+A step-by-step guide from zero to a working AI agent in **10 minutes**.
 
 ---
 
-## 1. Установка LM Studio (2 минуты)
+## Contents
 
-### Скачайте LM Studio
+1. [Installing LM Studio](#1-installing-lm-studio-2-minutes)
+2. [Downloading a model](#2-downloading-a-model-3-minutes)
+3. [Starting the local server](#3-starting-the-local-server-1-minute)
+4. [Configuring the Unity project](#4-configuring-the-unity-project-2-minutes)
+5. [Running the scene and sending a command](#5-running-the-scene-and-sending-a-command-2-minutes)
+6. [Verifying the result](#6-verifying-the-result)
+7. [What’s next?](#7-whats-next)
 
-1. Перейдите на [https://lmstudio.ai](https://lmstudio.ai)
-2. Скачайте установщик для вашей OS (Windows / macOS / Linux)
-3. Установите и запустите
+---
+
+## 1. Installing LM Studio (2 minutes)
+
+### Download LM Studio
+
+1. Go to [https://lmstudio.ai](https://lmstudio.ai)
+2. Download the installer for your OS (Windows / macOS / Linux)
+3. Install and launch
 
 ```
-💡 LM Studio — бесплатный инструмент для запуска LLM моделей локально.
-   Он предоставляет OpenAI-совместимый HTTP API.
+💡 LM Studio is a free tool for running LLM models locally.
+   It provides an OpenAI-compatible HTTP API.
 ```
 
-### Системные требования
+### System requirements
 
-| | Минимум | Рекомендуется |
-|--|---------|--------------|
+| | Minimum | Recommended |
+|--|---------|-------------|
 | **RAM** | 8 GB | 16 GB+ |
 | **GPU (VRAM)** | 4 GB | 8 GB+ |
-| **Диск** | 5 GB (для модели 4B) | 20 GB+ |
+| **Disk** | 5 GB (for a 4B model) | 20 GB+ |
 
 ---
 
-## 2. Загрузка модели (3 минуты)
+## 2. Downloading a model (3 minutes)
 
-### Рекомендуемые модели
+### Recommended models
 
-| Модель | Размер | Tool Calling | Для кого |
+| Model | Size | Tool calling | Best for |
 |--------|--------|:------------:|----------|
-| ⭐ **Qwen3.5-4B** (Q4_K_M) | ~2.5 GB | ✅ Отлично | **Лучший старт** |
-| **Qwen3.5-2B** (Q4_K_M) | ~1.5 GB | ⚠️ Базовый | Слабое железо |
-| **Gemma 4 26B** | ~15 GB | ✅ Превосходно | Мощное железо |
-| **Qwen3.5-35B MoE** | ~20 GB | ✅ Превосходно | Продакшен |
+| ⭐ **Qwen3.5-4B** (Q4_K_M) | ~2.5 GB | ✅ Excellent | **Best starting point** |
+| **Qwen3.5-2B** (Q4_K_M) | ~1.5 GB | ⚠️ Basic | Weaker hardware |
+| **Gemma 4 26B** | ~15 GB | ✅ Excellent | Powerful hardware |
+| **Qwen3.5-35B MoE** | ~20 GB | ✅ Excellent | Production |
 
-### Пошагово
+### Step by step
 
-1. В LM Studio нажмите **🔍 Search** (или иконку поиска)
-2. Введите `Qwen3.5-4B`
-3. Выберите **GGUF** версию с квантизацией **Q4_K_M**
-4. Нажмите **Download** и дождитесь загрузки
+1. In LM Studio, click **🔍 Search** (or the search icon)
+2. Enter `Qwen3.5-4B`
+3. Pick the **GGUF** build with **Q4_K_M** quantization
+4. Click **Download** and wait for it to finish
 
 ```
-📦 Размер загрузки: ~2.5 GB для Qwen3.5-4B Q4_K_M
-   Время загрузки: 2-5 минут (зависит от интернета)
+📦 Download size: ~2.5 GB for Qwen3.5-4B Q4_K_M
+   Download time: 2–5 minutes (depends on your connection)
 ```
 
 ---
 
-## 3. Запуск локального сервера (1 минута)
+## 3. Starting the local server (1 minute)
 
-### Загрузите модель
+### Load the model
 
-1. Перейдите на вкладку **💬 Chat** (или **Local Server**)
-2. В верхнем выпадающем списке выберите скачанную модель (Qwen3.5-4B)
-3. Дождитесь загрузки (строка статуса покажет "Model loaded")
+1. Open the **💬 Chat** tab (or **Local Server**)
+2. In the top dropdown, select the downloaded model (Qwen3.5-4B)
+3. Wait until it loads (the status line shows “Model loaded”)
 
-### Запустите сервер
+### Start the server
 
-1. Перейдите на вкладку **🖥️ Local Server** (иконка `<->`)
-2. Нажмите **Start Server**
-3. Убедитесь что статус: **Server running on port 1234**
+1. Open the **🖥️ Local Server** tab (`<->` icon)
+2. Click **Start Server**
+3. Confirm status: **Server running on port 1234**
 
 ```
-✅ Сервер запущен!
+✅ Server is running!
    URL: http://localhost:1234/v1
-   Модель: Qwen3.5-4B-Q4_K_M
-   Статус: Ready
+   Model: Qwen3.5-4B-Q4_K_M
+   Status: Ready
 ```
 
-### Проверка (опционально)
+### Optional check
 
-Откройте PowerShell и выполните:
+Open PowerShell and run:
 
 ```powershell
-# Проверка работы сервера
+# Check the server
 Invoke-RestMethod -Uri "http://localhost:1234/v1/models"
 
-# Тестовый запрос
+# Sample request
 $body = @{
     model = "qwen3.5-4b"
     messages = @(@{ role = "user"; content = "Say hello" })
@@ -107,29 +107,30 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 
 ---
 
-## 4. Настройка Unity проекта (2 минуты)
+## 4. Configuring the Unity project (2 minutes)
 
-### 4.1 Откройте проект
+### 4.1 Open the project
 
-1. **Unity Hub** → **Add** → выберите папку `CoreAI`
-2. Откройте проект (Unity **6000.0+**)
+1. **Unity Hub** → **Add** → select the `CoreAI` folder
+2. Open the project (Unity **6000.0+**)
 
-### 4.2 Откройте сцену
+### 4.2 Open the scene
 
 ```
-Меню: CoreAI → Development → Open _mainCoreAI scene
+Menu: CoreAI → Development → Open _mainCoreAI scene
 ```
 
-Или в Project Window:
+Or in the Project window:
+
 ```
 Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 ```
 
-### 4.3 Настройте CoreAISettings
+### 4.3 Configure CoreAISettings
 
-1. В Project Window найдите: `Assets/CoreAiUnity/Resources/CoreAISettings.asset`
-2. Или создайте: **Create → CoreAI → CoreAI Settings**
-3. В Inspector настройте:
+1. In the Project window find: `Assets/CoreAiUnity/Resources/CoreAISettings.asset`
+2. Or create: **Create → CoreAI → CoreAI Settings**
+3. In the Inspector configure:
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -139,13 +140,13 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 │                                              │
 │  🌐 HTTP API:                                │
 │     Base URL:    http://localhost:1234/v1     │
-│     API Key:     (пусто)                     │
+│     API Key:     (empty)                     │
 │     Model:       qwen3.5-4b                  │
 │     Temperature: 0.2                         │
 │     Max Tokens:  4096                        │
 │     Timeout:     120                         │
 │                                              │
-│  ⚙️ Общие:                                   │
+│  ⚙️ General:                                 │
 │     LLM Timeout: 30                          │
 │     Max Concurrent: 2                        │
 │                                              │
@@ -154,11 +155,12 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 └─────────────────────────────────────────────┘
 ```
 
-### 4.4 Проверьте подключение
+### 4.4 Test the connection
 
-Нажмите кнопку **🔗 Test Connection** в Inspector.
+Click **🔗 Test Connection** in the Inspector.
 
-Ожидаемый результат:
+Expected result:
+
 ```
 ✅ HTTP API: Connected
    Model: qwen3.5-4b
@@ -168,22 +170,23 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 
 ---
 
-## 5. Запуск сцены и отправка команды (2 минуты)
+## 5. Running the scene and sending a command (2 minutes)
 
-### 5.1 Нажмите ▶ Play
+### 5.1 Press ▶ Play
 
-В Unity нажмите кнопку **Play** (▶).
+In Unity, click **Play** (▶).
 
-В консоли Unity вы увидите:
+In the Unity Console you should see:
+
 ```
-[CoreAI] VContainer + MessagePipe... готовы.
+[CoreAI] VContainer + MessagePipe... ready.
 [CoreAI] Backend: OpenAiHttp → http://localhost:1234/v1
 [CoreAI] Registered tools: memory, execute_lua, world_command, get_inventory, ...
 ```
 
-### 5.2 Отправьте команду из кода
+### 5.2 Send a command from code
 
-**Вариант A: Из своего скрипта**
+**Option A: From your own script**
 
 ```csharp
 using CoreAI;
@@ -195,23 +198,23 @@ public class MyGameController : MonoBehaviour
 
     async void Start()
     {
-        // Вызвать агента Programmer для генерации Lua
+        // Ask the Programmer agent to generate Lua
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Programmer",
             Hint = "Write a Lua script that reports 'Hello from AI!'"
         });
         
-        Debug.Log("✅ AI задача выполнена!");
+        Debug.Log("✅ AI task completed!");
     }
 }
 ```
 
-**Вариант B: Через хоткей (уже на сцене)**
+**Option B: Via hotkey (already on the scene)**
 
-1. Находясь в Play Mode, нажмите **F9**
-2. Это вызовет агента **Programmer** через компонент `CoreAiLuaHotkey`
-3. Результат появится в логах:
+1. In Play Mode, press **F9**
+2. That invokes the **Programmer** agent via `CoreAiLuaHotkey`
+3. Check the logs:
 
 ```
 [LLM ▶] traceId=abc123 role=Programmer
@@ -219,10 +222,10 @@ public class MyGameController : MonoBehaviour
 [Lua] Execution succeeded: "Hello from AI!"
 ```
 
-**Вариант C: Создайте кастомного агента**
+**Option C: Create a custom agent**
 
 ```csharp
-// Создайте торговца — 3 строки!
+// Create a merchant — three lines!
 var merchant = new AgentBuilder("Merchant")
     .WithSystemPrompt("You are a friendly weapon merchant. Greet customers warmly.")
     .WithTool(new InventoryLlmTool(myInventory))
@@ -231,17 +234,17 @@ var merchant = new AgentBuilder("Merchant")
 
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
-// Отправьте сообщение:
-merchant.Ask("Покажи мечи", (response) => {
-    Debug.Log($"Торговец: {response}");
+// Send a message:
+merchant.Ask("Show me swords", (response) => {
+    Debug.Log($"Merchant: {response}");
 });
 ```
 
 ---
 
-## 6. Проверка результата
+## 6. Verifying the result
 
-### Что вы должны увидеть
+### What you should see
 
 ```
 ┌─ Unity Console ──────────────────────────────────────────────┐
@@ -252,79 +255,79 @@ merchant.Ask("Покажи мечи", (response) => {
 │ [MEAI] Tool call detected: name=execute_lua                   │
 │ [Lua] Executing: report("Hello from AI!")                     │
 │ [Lua] Execution succeeded                                     │
-│ ✅ AI задача выполнена!                                        │
+│ ✅ AI task completed!                                         │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### Что делать если не работает?
+### If something does not work
 
-| Проблема | Быстрое решение |
+| Issue | Quick fix |
 |----------|----------------|
-| `Backend: Stub` | Проверьте что LM Studio запущен |
-| `Connection refused` | Проверьте порт 1234 в LM Studio |
-| `Empty response` | Увеличьте Timeout до 120 сек |
-| `Tool call not recognized` | Модель слишком маленькая, используйте 4B+ |
+| `Backend: Stub` | Confirm LM Studio is running |
+| `Connection refused` | Check port 1234 in LM Studio |
+| `Empty response` | Raise Timeout to 120 s |
+| `Tool call not recognized` | Model too small; use 4B+ |
 
-> 📖 Подробнее: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+> 📖 Details: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ---
 
-## 7. Что дальше?
+## 7. What’s next?
 
-### 📚 Пошаговые руководства
+### 📚 Step-by-step guides
 
-| Задача | Документ |
+| Task | Document |
 |--------|----------|
-| Создать своего агента | [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) |
-| Управлять миром из Lua | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) |
-| Настроить память | [MemorySystem.md](MemorySystem.md) |
-| Добавить свой инструмент | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) |
-| Понять архитектуру | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) |
-| Роли и промпты | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) |
-| Посмотреть примеры | [EXAMPLES.md](EXAMPLES.md) |
+| Build your own agent | [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) |
+| Control the world from Lua | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) |
+| Configure memory | [MemorySystem.md](MemorySystem.md) |
+| Add a custom tool | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) |
+| Understand architecture | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) |
+| Roles and prompts | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) |
+| Browse examples | [EXAMPLES.md](EXAMPLES.md) |
 
-### 🎯 Попробуйте
+### 🎯 Try this
 
-1. **Создайте NPC-торговца** с инвентарём → [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md)
-2. **Скрафтите оружие** через CoreMechanicAI → [EXAMPLES.md](EXAMPLES.md)
-3. **Спавните врагов** через World Commands → [WORLD_COMMANDS.md](WORLD_COMMANDS.md)
-4. **Запустите тесты** → Window → Test Runner → EditMode → Run All
+1. **Build an NPC merchant** with inventory → [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md)
+2. **Craft weapons** via CoreMechanicAI → [EXAMPLES.md](EXAMPLES.md)
+3. **Spawn enemies** via World Commands → [WORLD_COMMANDS.md](WORLD_COMMANDS.md)
+4. **Run tests** → Window → Test Runner → EditMode → Run All
 
 ---
 
-## 📋 Чеклист быстрого старта
+## 📋 Quick start checklist
 
 ```
-✅ LM Studio установлен
-✅ Модель скачана (Qwen3.5-4B Q4_K_M)
-✅ Сервер запущен на порту 1234
-✅ Unity проект открыт
-✅ Сцена _mainCoreAI загружена
+✅ LM Studio installed
+✅ Model downloaded (Qwen3.5-4B Q4_K_M)
+✅ Server running on port 1234
+✅ Unity project open
+✅ _mainCoreAI scene loaded
 ✅ CoreAISettings → Backend = OpenAiHttp
 ✅ CoreAISettings → Base URL = http://localhost:1234/v1
 ✅ Test Connection = ✅ Connected
-✅ Play → F9 → "Hello from AI!" в логах
+✅ Play → F9 → "Hello from AI!" in the logs
 
-🎉 Готово! Переходите к созданию своих агентов!
+🎉 Done! Move on to building your own agents.
 ```
 
 ---
 
-## 🔀 Альтернативные варианты
+## 🔀 Alternatives
 
-### Вариант B: Без LM Studio (LLMUnity — встроенная модель)
+### Option B: Without LM Studio (LLMUnity — embedded model)
 
-Если вы хотите запустить модель **прямо внутри Unity** (без внешних серверов):
+To run a model **inside Unity** (no external server):
 
-1. CoreAISettings → Backend = **LlmUnity** (или **Auto**)
-2. На сцене найдите объект **LlmManager** с компонентами `LLM` + `LLMAgent`
-3. В Inspector `LLM` → скачайте модель (кнопка Download в LLMUnity)
-4. Нажмите Play
+1. CoreAISettings → Backend = **LlmUnity** (or **Auto**)
+2. On the scene, find **LlmManager** with `LLM` + `LLMAgent`
+3. In the **LLM** Inspector, download a model (LLMUnity Download button)
+4. Press Play
 
-> ⚠️ LLMUnity запускает модель в процессе Unity — это медленнее, но не требует внешних инструментов.
+> ⚠️ LLMUnity runs the model inside the Unity process — slower, but no external tools.
 
-### Вариант C: Облачный API (OpenAI, Qwen API)
+### Option C: Cloud API (OpenAI, Qwen API)
 
 ```
 CoreAISettings → Backend = OpenAiHttp
@@ -333,7 +336,7 @@ CoreAISettings → Backend = OpenAiHttp
    Model: gpt-4o-mini
 ```
 
-или
+or
 
 ```
 CoreAISettings → Backend = OpenAiHttp
@@ -344,4 +347,4 @@ CoreAISettings → Backend = OpenAiHttp
 
 ---
 
-> 🚀 **CoreAI** — сделай свою игру умнее. Один агент за раз.
+> 🚀 **CoreAI** — make your game smarter. One agent at a time.

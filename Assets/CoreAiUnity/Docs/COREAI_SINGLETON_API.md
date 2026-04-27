@@ -1,19 +1,19 @@
-# `CoreAi` — статический API для всех
+# `CoreAi` — static API for everyone
 
-Один класс **`CoreAI.CoreAi`** — единая точка входа к LLM и оркестратору. Не нужно знать VContainer, писать свой singleton или искать сервисы на сцене вручную.
+A single class **`CoreAI.CoreAi`** — one entry point to the LLM and orchestrator. You do not need to know VContainer, write your own singleton, or resolve services on the scene by hand.
 
-| Кому | Что получить |
+| Audience | What you get |
 |------|----------------|
-| **Новичок** | Скопировать 3 шага ниже → `await CoreAi.AskAsync(...)` в скрипте на объекте. |
-| **Опытный разработчик** | Та же статика для прототипов и UI; для крупной архитектуры — `TryGet*` + DI, см. раздел [Профессиональный стек](#5-профессиональный-стек). |
+| **Beginner** | Copy the 3 steps below → `await CoreAi.AskAsync(...)` in a script on an object. |
+| **Experienced developer** | The same static API for prototypes and UI; for larger architecture — `TryGet*` + DI, see [Professional stack](#5-professional-stack). |
 
 ---
 
-## Минимум для новичка (3 шага)
+## Minimum for beginners (3 steps)
 
-1. **Сцена с CoreAI** — меню **CoreAI → Setup → Create Chat Demo Scene** или **CoreAI → Create Scene Setup** (есть `CoreAILifetimeScope`).
-2. **Бэкенд** — в `CoreAISettings` укажите HTTP (LM Studio) или LLMUnity; см. [QUICK_START](QUICK_START.md).
-3. **Код** — на любом `MonoBehaviour`:
+1. **Scene with CoreAI** — menu **CoreAI → Setup → Create Chat Demo Scene** or **CoreAI → Create Scene Setup** (includes `CoreAILifetimeScope`).
+2. **Backend** — in `CoreAISettings` set HTTP (LM Studio) or LLMUnity; see [QUICK_START](QUICK_START.md).
+3. **Code** — on any `MonoBehaviour`:
 
 ```csharp
 using CoreAI;
@@ -22,152 +22,152 @@ public class MyNpc : MonoBehaviour
 {
     async void OnPlayerTalk()
     {
-        if (!CoreAi.IsReady) { Debug.LogWarning("Нет CoreAILifetimeScope на сцене"); return; }
+        if (!CoreAi.IsReady) { Debug.LogWarning("No CoreAILifetimeScope on scene"); return; }
 
-        string reply = await CoreAi.AskAsync("Как дела?");
+        string reply = await CoreAi.AskAsync("How are you?");
         Debug.Log(reply);
     }
 }
 ```
 
-Стриминг «как в чате» — одна строка цикла:
+Streaming “like chat” — one loop line:
 
 ```csharp
-await foreach (string part in CoreAi.StreamAsync("Расскажи про квест", "PlayerChat"))
+await foreach (string part in CoreAi.StreamAsync("Tell me about the quest", "PlayerChat"))
     uiLabel.text += part;
 ```
 
-Готово. Роль `"PlayerChat"` должна совпадать с `AgentBuilder` / конфигом чата, если вы настраивали агентов.
+Done. The `"PlayerChat"` role must match `AgentBuilder` / chat config if you configured agents.
 
-### Отправка сообщений: удобно и в UI, и из кода
+### Sending messages: convenient in UI and from code
 
-| Как вы общаетесь | Что нажимаете / пишете | Куда идёт запрос |
+| How you interact | What you press / write | Where the request goes |
 |------------------|------------------------|------------------|
-| **Окно чата** (`CoreAiChatPanel`) | Кнопка отправки, **Shift+Enter** (по умолчанию) или **Enter** — в зависимости от `CoreAiChatConfig.SendOnShiftEnter` | `CoreAiChatService` → тот же `ILlmClient`, что и у `CoreAi` |
-| **Скрипт** (NPC, квест, кнопка «Спросить») | Вызов `CoreAi.AskAsync("текст")` или `CoreAi.StreamAsync` — это и есть «отправка» пользовательского запроса в LLM | Тот же `CoreAiChatService` внутри `CoreAi` |
+| **Chat window** (`CoreAiChatPanel`) | Send button, **Shift+Enter** (default) or **Enter** — depending on `CoreAiChatConfig.SendOnShiftEnter` | `CoreAiChatService` → same `ILlmClient` as `CoreAi` |
+| **Script** (NPC, quest, “Ask” button) | `CoreAi.AskAsync("text")` or `CoreAi.StreamAsync` — that is how a user request is sent to the LLM | Same `CoreAiChatService` inside `CoreAi` |
 
-Оба пути используют **один** зарегистрированный в сцене `CoreAILifetimeScope` и **одни** настройки бэкенда. Разница только в UX: в панели вы набирате текст в поле; в коде передаёте строку в метод. Подключение кистей/стриминга/ролей — в [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) и [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md).
+Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one** backend configuration. The only difference is UX: in the panel you type in a field; in code you pass a string to a method. Brushes/streaming/roles — see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) and [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md).
 
-**Итог:** для игрока в чате — встроенная панель; для логики игры без виджета — `CoreAi`. Вместе **CoreAI + CoreAiUnity** закрывают сценарий «удобно везде»: демо-сцена за 1 клик, горячие клавиши в инспекторе, и одна строка `CoreAi` в любом `MonoBehaviour`.
+**Summary:** for the player in chat — built-in panel; for game logic without a widget — `CoreAi`. Together **CoreAI + CoreAiUnity** cover “convenient everywhere”: demo scene in one click, hotkeys in the Inspector, and one line of `CoreAi` on any `MonoBehaviour`.
 
 ---
 
-## Быстрая шпаргалка (все методы)
+## Quick cheat sheet (all methods)
 
-| Метод | Возвращает | Когда использовать |
+| Method | Returns | When to use |
 |-------|------------|-------------------|
-| `AskAsync` | `Task<string?>` | Нужен **целый ответ одной строкой** (логика, сохранение, простой NPC). |
-| `StreamAsync` | `IAsyncEnumerable<string>` | **Живой текст** в UI (подпись, TMP, UI Toolkit). |
-| `StreamChunksAsync` | `IAsyncEnumerable<LlmStreamChunk>` | Нужны **IsDone, Error, usage** по чанкам. |
-| `SmartAskAsync` | `Task<string?>` | И **стрим в UI**, и **полная строка** в конце (аналитика, квесты). Режим стрима решает иерархия настроек. |
-| `OrchestrateAsync` | `Task<string?>` | Полный **игровой пайплайн**: снимок сессии, authority, очередь, валидация, **публикация команды** в шину. |
-| `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | То же, но **токены по мере генерации** + финальная публикация после стрима. |
-| `OrchestrateStreamCollectAsync` | `Task<string>` | Стрим + **сборка полного текста** + `onChunk` для UI. |
-| `StopAgent` | `void` | **Отмена генерации** и выполняемых задач агента. |
-| `ClearContext` | `void` | **Очистка памяти** (чат + долговременная). |
-| `IsReady` | `bool` | Можно ли вызывать API (scope + сервисы). |
-| `Invalidate()` | `void` | После **смены сцены** или в тестах — сброс кэша. |
-| `TryGetChatService` / `TryGetOrchestrator` | `bool` | **Без исключений**: проверка перед кнопкой в UI или опциональным AI. |
-| `GetChatService` / `GetOrchestrator` / `GetSettings` | сервисы | Прямой доступ, когда нужен полный контроль. |
+| `AskAsync` | `Task<string?>` | You need the **full answer as one string** (logic, save, simple NPC). |
+| `StreamAsync` | `IAsyncEnumerable<string>` | **Live text** in UI (label, TMP, UI Toolkit). |
+| `StreamChunksAsync` | `IAsyncEnumerable<LlmStreamChunk>` | You need **IsDone, Error, usage** per chunk. |
+| `SmartAskAsync` | `Task<string?>` | Both **stream to UI** and **full string** at the end (analytics, quests). Stream mode follows the settings hierarchy. |
+| `OrchestrateAsync` | `Task<string?>` | Full **game pipeline**: session snapshot, authority, queue, validation, **publishing a command** to the bus. |
+| `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | Same, but **tokens as they generate** + final publish after the stream. |
+| `OrchestrateStreamCollectAsync` | `Task<string>` | Stream + **assemble full text** + `onChunk` for UI. |
+| `StopAgent` | `void` | **Cancel generation** and running agent tasks. |
+| `ClearContext` | `void` | **Clear memory** (chat + long-term). |
+| `IsReady` | `bool` | Whether the API can be called (scope + services). |
+| `Invalidate()` | `void` | After **scene change** or in tests — clear cache. |
+| `TryGetChatService` / `TryGetOrchestrator` | `bool` | **No exceptions**: check before a UI button or optional AI. |
+| `GetChatService` / `GetOrchestrator` / `GetSettings` | services | Direct access when you need full control. |
 
-Подробные сценарии — в разделе [Когда что использовать](#2-когда-что-использовать-подробно) ниже.
-
----
-
-## 1. Для новичков: частые вопросы
-
-**Почему падает или ничего не происходит?**  
-Убедитесь, что на **активной** сцене есть GameObject с **`CoreAILifetimeScope`**. После `LoadScene` вызовите `CoreAi.Invalidate()` или проверяйте `CoreAi.IsReady` / `CoreAi.TryGetChatService(out _)`.
-
-**Чем `AskAsync` отличается от `OrchestrateAsync`?**  
-- `AskAsync` — **чат**: промпт + история роли, ответ в виде текста.  
-- `OrchestrateAsync` — **задача для игры**: снимок сессии, роли вроде Creator, публикация **JSON-команды** в игровую шину. Для «поговорить с NPC» обычно хватает `Ask` / `Stream`.
-
-**Можно ли вызывать не из `async void`?**  
-Можно из `Start` с `StartCoroutine` + обёрткой, но проще — **`async void` на Unity main thread** или **UniTask**. С `Task.Run` не вызывайте — LLM-запросы должны оставаться на **главном потоке** (см. [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)).
-
-**Где взять `roleId`?**  
-Тот же id, что в `AgentBuilder("...")` и в `CoreAiChatConfig`. Часто `"PlayerChat"`.
+Detailed scenarios — section [When to use what](#2-when-to-use-what-in-detail) below.
 
 ---
 
-## 2. Когда что использовать (подробно)
+## 1. For beginners: common questions
 
-| Слой | Метод | Что делает | Когда брать |
+**Why does it fail or nothing happens?**  
+Ensure the **active** scene has a GameObject with **`CoreAILifetimeScope`**. After `LoadScene` call `CoreAi.Invalidate()` or check `CoreAi.IsReady` / `CoreAi.TryGetChatService(out _)`.
+
+**How is `AskAsync` different from `OrchestrateAsync`?**  
+- `AskAsync` — **chat**: prompt + role history, text answer.  
+- `OrchestrateAsync` — **game task**: session snapshot, roles like Creator, publishing a **JSON command** to the game bus. For “talk to NPC” you usually use `Ask` / `Stream`.
+
+**Can I call outside `async void`?**  
+You can from `Start` with `StartCoroutine` + wrapper, but simpler — **`async void` on the Unity main thread** or **UniTask**. Do not use `Task.Run` — LLM calls must stay on the **main thread** (see [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)).
+
+**Where do I get `roleId`?**  
+The same id as in `AgentBuilder("...")` and `CoreAiChatConfig`. Often `"PlayerChat"`.
+
+---
+
+## 2. When to use what (in detail)
+
+| Layer | Method | What it does | When to pick it |
 |------|-------|------------|-------------|
-| **Chat** | `CoreAi.AskAsync` | Ждёт полный ответ, история чата по роли. | Простой диалог, лог, «одна строка». |
-| **Chat** | `CoreAi.StreamAsync` | Чанки строк. | Подпись / чат, эффект «печатает». |
-| **Chat** | `CoreAi.StreamChunksAsync` | `LlmStreamChunk` с метаданными. | Ошибки, `IsDone`, токены. |
-| **Chat** | `CoreAi.SmartAskAsync` | Сам решает стрим или нет; `onChunk` + полный текст. | UI + сохранение полного ответа. |
-| **Orchestrator** | `CoreAi.OrchestrateAsync` | Snapshot → prompt → authority → очередь → валидация → **ApplyAiGameCommand**. | Поведение агентов Creator / Programmer / сценарии с командами. |
-| **Orchestrator** | `CoreAi.OrchestrateStreamAsync` | То же, но токены по ходу. | Квесты с длинным ответом + команда в конце. |
-| **Orchestrator** | `CoreAi.OrchestrateStreamCollectAsync` | Стрим + накопление `string` + `onChunk`. | Удобно совместить лайв-UI и постобработку строки. |
+| **Chat** | `CoreAi.AskAsync` | Waits for full answer, chat history by role. | Simple dialogue, log, “one line”. |
+| **Chat** | `CoreAi.StreamAsync` | String chunks. | Caption / chat, “typing” effect. |
+| **Chat** | `CoreAi.StreamChunksAsync` | `LlmStreamChunk` with metadata. | Errors, `IsDone`, tokens. |
+| **Chat** | `CoreAi.SmartAskAsync` | Chooses stream or not; `onChunk` + full text. | UI + saving full answer. |
+| **Orchestrator** | `CoreAi.OrchestrateAsync` | Snapshot → prompt → authority → queue → validation → **ApplyAiGameCommand**. | Creator / Programmer agents, scenarios with commands. |
+| **Orchestrator** | `CoreAi.OrchestrateStreamAsync` | Same, but tokens along the way. | Long quest text + command at the end. |
+| **Orchestrator** | `CoreAi.OrchestrateStreamCollectAsync` | Stream + accumulate `string` + `onChunk`. | Combine live UI and post-processed string. |
 
 ---
 
-## 3. Рецепты с кодом
+## 3. Code recipes
 
-### 3.1. Простой вопрос — одна строка
+### 3.1. Simple question — one line
 
 ```csharp
-string answer = await CoreAi.AskAsync("Привет! Сколько тебе лет?");
+string answer = await CoreAi.AskAsync("Hi! How old are you?");
 Debug.Log(answer);
 ```
 
-### 3.2. Стриминг в UI Toolkit / TextMeshPro
+### 3.2. Streaming in UI Toolkit / TextMeshPro
 
 ```csharp
 label.text = "";
-await foreach (string chunk in CoreAi.StreamAsync("Расскажи анекдот", "PlayerChat"))
+await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "PlayerChat"))
     label.text += chunk;
 ```
 
-### 3.3. Smart: и чанки в UI, и полный текст в переменной
+### 3.3. Smart: chunks in UI and full text in a variable
 
 ```csharp
 string full = await CoreAi.SmartAskAsync(
-    "Расскажи историю",
+    "Tell a story",
     roleId: "PlayerChat",
     onChunk: c => label.text += c);
 
 SaveToPlayerJournal(full);
 ```
 
-Переопределение стрима: `uiStreamingOverride: false` — принудительно полный ответ одним куском.
+Override streaming: `uiStreamingOverride: false` — force full response in one piece.
 
-### 3.4. Безопасный вызов (без try при отсутствии AI)
+### 3.4. Safe call (no try when AI is absent)
 
 ```csharp
 if (CoreAi.TryGetChatService(out var chat))
 {
-    string reply = await chat.SendMessageAsync("Привет", "PlayerChat", ct);
+    string reply = await chat.SendMessageAsync("Hi", "PlayerChat", ct);
 }
 else
 {
-    // AI отключён или сцена без scope — показать дефолтный текст NPC
+    // AI disabled or scene without scope — show default NPC text
 }
 ```
 
-### 3.4b. Управление агентом (Agent Control API)
+### 3.4b. Agent control API
 
 ```csharp
-// Остановить генерацию (например, кнопка Stop в UI)
+// Stop generation (e.g. Stop button in UI)
 CoreAi.StopAgent("PlayerChat");
 
-// Очистить историю чата, но оставить долговременные воспоминания (факты, квесты)
+// Clear chat history but keep long-term memory (facts, quests)
 CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: false);
 
-// Полный хард-ресет (амнезия)
+// Full hard reset (amnesia)
 CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: true);
 ```
 
-### 3.5. Оркестратор: команда в игру
+### 3.5. Orchestrator: command into the game
 
 ```csharp
 var task = new AiTaskRequest
 {
     RoleId = "Creator",
-    Hint = "Сгенерируй JSON команду spawn",
+    Hint = "Generate JSON spawn command",
     Priority = 5,
     CancellationScope = "creator"
 };
@@ -175,10 +175,10 @@ var task = new AiTaskRequest
 string json = await CoreAi.OrchestrateAsync(task);
 ```
 
-### 3.6. Оркестратор со стримом в подпись
+### 3.6. Orchestrator with stream to a status line
 
 ```csharp
-var task = new AiTaskRequest { RoleId = "Creator", Hint = "Объясни шаг" };
+var task = new AiTaskRequest { RoleId = "Creator", Hint = "Explain the step" };
 
 string full = await CoreAi.OrchestrateStreamCollectAsync(task,
     onChunk: c => statusLine.text += c);
@@ -186,65 +186,65 @@ string full = await CoreAi.OrchestrateStreamCollectAsync(task,
 
 ---
 
-## 4. Жизненный цикл и сцены
+## 4. Lifecycle and scenes
 
-- **`CoreAi`** кэширует ссылку на `CoreAILifetimeScope` и сервисы.
-- **`SceneManager.sceneLoaded` / `OnDestroy` при выгрузке** — вызывайте **`CoreAi.Invalidate()`**, иначе возможен устаревший контейнер.
-- **EditMode / PlayMode тесты** — в `[SetUp]`: `CoreAi.Invalidate()`.
-- **`GetSettings()`** — может вернуть `null`, если scope ещё не готов; для глобальных дефолтов используйте также статический `CoreAISettings` из портативного ядра, если он у вас настроен.
+- **`CoreAi`** caches a reference to `CoreAILifetimeScope` and services.
+- **`SceneManager.sceneLoaded` / `OnDestroy` on unload** — call **`CoreAi.Invalidate()`**, otherwise you may keep a stale container.
+- **EditMode / PlayMode tests** — in `[SetUp]`: `CoreAi.Invalidate()`.
+- **`GetSettings()`** — may return `null` if the scope is not ready yet; for global defaults also use static `CoreAISettings` from the portable core if configured.
 
 ---
 
-## 5. Профессиональный стек
+## 5. Professional stack
 
-**Статика — не «антипаттерн» для CoreAI:** это **официальный фасад** поверх VContainer. Он:
+**Static API is not an “anti-pattern” for CoreAI:** it is the **official facade** over VContainer. It:
 
-- прокидывает вызовы в `CoreAiChatService` и `IAiOrchestrationService` без дублирования логики;
-- уважает тот же `ILlmClient`, очередь, логи и метрики, что и ручной резолв.
+- forwards calls to `CoreAiChatService` and `IAiOrchestrationService` without duplicating logic;
+- respects the same `ILlmClient`, queue, logs, and metrics as manual resolution.
 
-**Когда оставить `CoreAi` везде:** прототипы, инструменты, `MonoBehaviour` в сцене, кнопки в меню, обучающие сцены.
+**When to keep `CoreAi` everywhere:** prototypes, tools, scene `MonoBehaviour`, menu buttons, tutorial scenes.
 
-**Когда внедрять интерфейсы (DI):** большая кодовая база, **юнит-тесты** без сцены, несколько scope’ов, строгая изоляция модулей. Паттерн:
+**When to inject interfaces (DI):** large codebase, **unit tests** without a scene, multiple scopes, strict module isolation. Pattern:
 
 ```csharp
-// Регистрация (у вас в LifetimeScope)
+// Registration (in your LifetimeScope)
 builder.Register<QuestAiController>(Lifetime.Transient)
     .WithParameter<Func<CoreAiChatService?>>(() => {
         if (CoreAi.TryGetChatService(out var s)) return s;
         return null;
     });
-// или
+// or
 builder.Register<QuestAiController>(Lifetime.Transient)
     .WithParameter<ILlmClient>(c => c.Resolve<ILlmClient>());
 ```
 
-`CoreAi.GetChatService()` остаётся удобным **адаптером** на границе «скрипт на объекте ↔ ядро».
+`CoreAi.GetChatService()` remains a convenient **adapter** at the “object script ↔ core” boundary.
 
-**Расширение поведения:** зарегистрируйте обёртку в контейнере; если она тот же тип, что ожидает `CoreAiChatService.TryCreateFromScene`, сценарий может потребовать явной регистрации — для тонкой настройки используйте **прямой** `IObjectResolver` в своём `LifetimeScope` и вызывайте сервисы оттуда; фасад `CoreAi` при этом остаётся валиден для **дефолтного** пути.
+**Extending behavior:** register a wrapper in the container; if it is the same type `CoreAiChatService.TryCreateFromScene` expects, you may need explicit registration — for fine control use **direct** `IObjectResolver` in your `LifetimeScope` and call services from there; the `CoreAi` facade stays valid for the **default** path.
 
 ---
 
-## 6. Main thread (обязательно)
+## 6. Main thread (required)
 
 ```csharp
-// OK — из MonoBehaviour, main thread
+// OK — from MonoBehaviour, main thread
 async void OnEnable() {
   await foreach (var c in CoreAi.StreamAsync("Hi")) t.text += c;
 }
 
-// НЕ ВЫПОЛНЯТЬ — worker thread + UnityWebRequest
+// DO NOT — worker thread + UnityWebRequest
 _ = Task.Run(() => _ = CoreAi.AskAsync("x"));
 ```
 
 ---
 
-## 7. Связанные документы
+## 7. Related docs
 
-| Документ | Содержание |
+| Document | Contents |
 |----------|------------|
-| [QUICK_START](QUICK_START.md) | Установка, сцена, бэкенд |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Панель чата, стили, события |
-| [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity, оркестратор-стрим, лимиты |
-| [DOCS_INDEX](DOCS_INDEX.md) | Полная карта документации |
+| [QUICK_START](QUICK_START.md) | Install, scene, backend |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Chat panel, styles, events |
+| [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity, orchestrator stream, limits |
+| [DOCS_INDEX](DOCS_INDEX.md) | Full documentation map |
 
-**Версия:** см. `Assets/CoreAiUnity/package.json` — в changelog релизов с `CoreAi` смотрите раздел *Singleton API* / *Orchestrator streaming*.
+**Version:** see `Assets/CoreAiUnity/package.json` — in release changelogs for `CoreAi`, see *Singleton API* / *Orchestrator streaming*.

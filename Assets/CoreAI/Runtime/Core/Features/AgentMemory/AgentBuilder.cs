@@ -47,6 +47,7 @@ namespace CoreAI.Ai
         private bool _persistChatHistory;
         private int _maxChatHistoryMessages = 30;
         private float? _temperature;
+        private int? _maxOutputTokens;
         private bool? _allowDuplicateToolCalls;
         private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
@@ -183,6 +184,20 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Set a response token cap for this agent. Null or non-positive values clear the per-agent override.
+        /// Per-call <see cref="AiTaskRequest.MaxOutputTokens"/> still has higher priority.
+        /// </summary>
+        /// <example>
+        /// .WithMaxOutputTokens(256)   // Short NPC replies
+        /// .WithMaxOutputTokens(2048)  // Longer planning agent
+        /// </example>
+        public AgentBuilder WithMaxOutputTokens(int? tokens)
+        {
+            _maxOutputTokens = tokens.HasValue && tokens.Value > 0 ? tokens.Value : null;
+            return this;
+        }
+
+        /// <summary>
         /// Разрешить/запретить этому агенту вызывать одни и те же инструменты с одинаковыми аргументами подряд.
         /// Переопределяет глобальную настройку CoreAISettings.AllowDuplicateToolCalls.
         /// </summary>
@@ -252,6 +267,7 @@ namespace CoreAI.Ai
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = temp,
+                MaxOutputTokens = _maxOutputTokens,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 EnableStreaming = _enableStreaming,
                 MemoryDefaultAction = _memoryDefaultAction,
@@ -274,6 +290,7 @@ namespace CoreAI.Ai
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
         public int MaxChatHistoryMessages { get; internal set; }
         public float Temperature { get; internal set; }
+        public int? MaxOutputTokens { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
 
         /// <summary>Per-role override для стриминга; null = использовать глобальный <see cref="ICoreAISettings.EnableStreaming"/>.</summary>
@@ -300,6 +317,7 @@ namespace CoreAI.Ai
 
             policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
                 PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
+            policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
 
             // Регистрируем дополнительный системный промпт (слой 3)
             if (!string.IsNullOrWhiteSpace(SystemPrompt))

@@ -125,6 +125,36 @@ namespace CoreAI.Tests.EditMode
             await Task.WhenAll(blocker, low, high, mid);
         }
 
+        [Test]
+        public async Task Priority_EqualPriority_ExecutesFifo()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker", Priority = 0 });
+            Task first = queue.RunTaskAsync(new AiTaskRequest { Hint = "first", Priority = 5 });
+            Task second = queue.RunTaskAsync(new AiTaskRequest { Hint = "second", Priority = 5 });
+            Task third = queue.RunTaskAsync(new AiTaskRequest { Hint = "third", Priority = 5 });
+
+            await Task.Delay(50);
+            Assert.AreEqual("blocker", inner.ExecutionLog[0]);
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(50);
+            Assert.AreEqual("first", inner.ExecutionLog[1]);
+
+            inner.Gates[1].TrySetResult(null);
+            await Task.Delay(50);
+            Assert.AreEqual("second", inner.ExecutionLog[2]);
+
+            inner.Gates[2].TrySetResult(null);
+            await Task.Delay(50);
+            Assert.AreEqual("third", inner.ExecutionLog[3]);
+
+            inner.Gates[3].TrySetResult(null);
+            await Task.WhenAll(blocker, first, second, third);
+        }
+
         // ──────────────────────────────────────────────────────────
         // Тест 2: CancellationScope — новая задача с тем же scope отменяет предыдущую
         // ──────────────────────────────────────────────────────────
@@ -156,19 +186,62 @@ namespace CoreAI.Tests.EditMode
             await Task.Delay(50);
             Assert.AreEqual(2, inner.Gates.Count, "Вторая задача тоже должна запуститься (MaxConcurrent=2)");
 
-            // Первая задача должна получить CancellationToken cancel
-            // Мы проверяем это через то, что first бросит OperationCanceledException
-            // Ждём немного, чтобы cancel пропагировался
             await Task.Delay(50);
 
-            // Первая задача должна быть отменена (её CancellationToken сработал через gate.TrySetCanceled)
-            // Assert: first должен быть Canceled
-            Assert.IsTrue(first.IsCanceled || first.IsCompleted,
-                "Первая задача с тем же CancellationScope должна быть отменена или завершена");
+            Assert.IsTrue(first.IsCanceled,
+                "Previous active task with the same CancellationScope must be cancelled, not merely completed.");
 
             // Cleanup: завершаем вторую
             inner.Gates[1].TrySetResult(null);
+            await second;
+        }
+
+        [Test]
+        public async Task CancellationScope_PendingSameScope_LatestTaskWinsBeforeStart()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            Task oldPending = queue.RunTaskAsync(new AiTaskRequest { Hint = "old", CancellationScope = "npc" });
+            Task latest = queue.RunTaskAsync(new AiTaskRequest { Hint = "latest", CancellationScope = "npc" });
+
             await Task.Delay(50);
+
+            Assert.AreEqual(1, inner.Gates.Count, "Only blocker should be active.");
+            Assert.IsTrue(oldPending.IsCanceled, "Older pending task with the same CancellationScope should be cancelled immediately.");
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(50);
+
+            Assert.AreEqual(2, inner.Gates.Count, "Latest task should start after blocker finishes.");
+            Assert.AreEqual("latest", inner.ExecutionLog[1]);
+
+            inner.Gates[1].TrySetResult(null);
+            await Task.WhenAll(blocker, latest);
+        }
+
+        [Test]
+        public async Task ExternalCancellation_PendingTask_CancelsBeforeStart()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            using CancellationTokenSource cts = new();
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            Task pending = queue.RunTaskAsync(new AiTaskRequest { Hint = "pending" }, cts.Token);
+
+            await Task.Delay(50);
+            cts.Cancel();
+            await Task.Delay(50);
+
+            Assert.IsTrue(pending.IsCanceled, "Pending task should observe external cancellation without waiting for a free slot.");
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(50);
+
+            Assert.AreEqual(1, inner.ExecutionLog.Count, "Cancelled pending task must not start later.");
+            await blocker;
         }
 
         // ──────────────────────────────────────────────────────────
@@ -248,10 +321,10 @@ namespace CoreAI.Tests.EditMode
             await Task.Delay(100);
             
             // t1 должна быть отменена (IsCanceled)
-            Assert.IsTrue(t1.IsCanceled || t1.IsFaulted || (t1.IsCompleted && inner.Gates[0].Task.IsCanceled), "t1 (active) должна быть отменена");
+            Assert.IsTrue(t1.IsCanceled, "t1 (active) должна быть отменена");
             
             // t2 должна быть отменена без запуска
-            Assert.IsTrue(t2.IsCanceled || t2.IsFaulted, "t2 (pending) должна быть отменена");
+            Assert.IsTrue(t2.IsCanceled, "t2 (pending) должна быть отменена");
             
             // t3 (NPC2) должна была начать выполняться, так как слот освободился!
             Assert.AreEqual(2, inner.Gates.Count, "t3 (NPC2) должна стартовать после отмены NPC1");

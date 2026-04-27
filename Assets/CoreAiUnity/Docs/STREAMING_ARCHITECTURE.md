@@ -1,4 +1,4 @@
-# 🌊 Streaming Architecture
+# Streaming Architecture
 
 How CoreAI streams tokens from LLMs into your UI — end-to-end, with every layer you can override.
 
@@ -46,7 +46,7 @@ Key files:
 | Wrapper | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs` |
 | HTTP SSE | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` |
 | LLMUnity | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityMeaiChatClient.cs` |
-| Tool Execution Policy | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/ToolExecutionPolicy.cs` |
+| Tool execution policy | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/ToolExecutionPolicy.cs` |
 | Non-streaming tool loop | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/SmartToolCallingChatClient.cs` |
 | UI | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs` |
 | Service | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs` |
@@ -156,7 +156,7 @@ await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerCh
 }
 ```
 
-Или через статический синглтон `CoreAi` (см. [`COREAI_SINGLETON_API.md`](COREAI_SINGLETON_API.md)) — без ручного резолва сервисов:
+Or use the static `CoreAi` singleton (see [`COREAI_SINGLETON_API.md`](COREAI_SINGLETON_API.md)) — no manual service resolution:
 
 ```csharp
 await foreach (string chunk in CoreAi.StreamAsync("Hello", "PlayerChat"))
@@ -167,29 +167,29 @@ await foreach (string chunk in CoreAi.StreamAsync("Hello", "PlayerChat"))
 
 ## 6. Orchestrator streaming
 
-Stream идёт не только через `CoreAiChatService`, но и через полный AI-пайплайн (`IAiOrchestrationService`). Разница:
+Streaming is not limited to `CoreAiChatService`; it also flows through the full AI pipeline (`IAiOrchestrationService`). Differences:
 
-| Слой | `CoreAiChatService.SendMessageStreamingAsync` | `IAiOrchestrationService.RunStreamingAsync` |
-|------|-----------------------------------------------|---------------------------------------------|
-| Prompt composer | ❌ (использует явные system+user) | ✅ 3-layer prompt composer |
-| Authority check | ❌ | ✅ `IAuthorityHost.CanRunAiTasks` |
-| Очередь + MaxConcurrent | ❌ | ✅ `QueuedAiOrchestrator` (порционно, по приоритету) |
-| `CancellationScope` (отмена предыдущей задачи с тем же ключом) | ❌ | ✅ |
-| Structured validation | ❌ | ✅ (после стрима) |
-| Publish `ApplyAiGameCommand` | ❌ | ✅ (после полного ответа) |
-| Метрики | ❌ | ✅ `IAiOrchestrationMetrics` |
+| Layer | `CoreAiChatService.SendMessageStreamingAsync` | `IAiOrchestrationService.RunStreamingAsync` |
+|-------|-----------------------------------------------|---------------------------------------------|
+| Prompt composer | No (explicit system + user) | Yes — 3-layer prompt composer |
+| Authority check | No | Yes — `IAuthorityHost.CanRunAiTasks` |
+| Queue + `MaxConcurrent` | No | Yes — `QueuedAiOrchestrator` (fair, by priority) |
+| `CancellationScope` (cancel prior task with same key) | No | Yes |
+| Structured validation | No | Yes (after stream completes) |
+| Publish `ApplyAiGameCommand` | No | Yes (after full response) |
+| Metrics | No | Yes — `IAiOrchestrationMetrics` |
 
-Используйте `CoreAi.OrchestrateStreamAsync(task)` для агентских сценариев (Creator / Programmer / Mechanic) и `CoreAi.StreamAsync("text")` — для простого чата.
+Use `CoreAi.OrchestrateStreamAsync(task)` for agent workflows (Creator / Programmer / Mechanic) and `CoreAi.StreamAsync("text")` for simple chat.
 
-Внутри `AiOrchestrator.RunStreamingAsync`:
+Inside `AiOrchestrator.RunStreamingAsync`:
 
-1. Собирает snapshot + prompt composer (common с `RunTaskAsync`, выделено в `BuildRequest`).
-2. Создаёт `LlmCompletionRequest` с tools/history/temperature.
-3. Await-foreach по `ILlmClient.CompleteStreamingAsync` (уже включает `ThinkBlockStreamFilter` в `MeaiLlmClient`).
-4. Аккумулирует полный текст в `StringBuilder` (нужен для шага 5).
-5. Когда стрим кончился — structured validation, публикация `ApplyAiGameCommand`, запись в chat history, метрики.
+1. Build snapshot + prompt composer (shared with `RunTaskAsync`, factored into `BuildRequest`).
+2. Create `LlmCompletionRequest` with tools, history, temperature.
+3. `await foreach` on `ILlmClient.CompleteStreamingAsync` (already includes `ThinkBlockStreamFilter` in `MeaiLlmClient`).
+4. Accumulate full text in a `StringBuilder` (required for step 5).
+5. When the stream ends — structured validation, publish `ApplyAiGameCommand`, append chat history, record metrics.
 
-`QueuedAiOrchestrator.RunStreamingAsync` прокидывает через собственную producer/consumer-очередь (`AsyncChunkQueue` на `SemaphoreSlim + ConcurrentQueue` — без `System.Threading.Channels`, который недоступен в Unity-сборке), соблюдая `MaxConcurrent` и `CancellationScope`.
+`QueuedAiOrchestrator.RunStreamingAsync` forwards through its own producer/consumer queue (`AsyncChunkQueue` on `SemaphoreSlim` + `ConcurrentQueue` — no `System.Threading.Channels`, which is unavailable in this Unity build), respecting `MaxConcurrent` and `CancellationScope`.
 
 ---
 
@@ -202,10 +202,10 @@ Since v0.24.0, streaming tool-calling uses a **dual-path architecture**:
 The primary mechanism, designed for local models (Ollama, llama.cpp, LM Studio) that output tool calls as text.
 `MeaiLlmClient.TryExtractToolCallsFromText` scans the accumulated visible text for JSON objects containing both `"name"` and `"arguments"` keys.
 
-- ✅ Multi-tool: extracts multiple tool calls from a single response
-- ✅ False-positive protection: ignores JSON inside fenced code blocks (` ```...``` `)
-- ✅ Pattern-aware: only matches JSON with required `name` + `arguments` structure
-- ✅ Graceful: partial/malformed JSON is silently skipped
+- Multi-tool: extracts multiple tool calls from a single response
+- False-positive protection: ignores JSON inside fenced code blocks (` ```...``` `)
+- Pattern-aware: only matches JSON with required `name` + `arguments` structure
+- Graceful: partial/malformed JSON is silently skipped
 
 ### Path 2: Native SSE `delta.tool_calls` (enhancement)
 
@@ -224,19 +224,19 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 | Consecutive error tracking | Counter resets on success, increments on failure. Agent aborts at `MaxToolCallRetries` threshold. |
 | Notification | Every tool execution fires `CoreAi.NotifyToolExecuted(roleId, toolName, args, result)`. |
 
-### Stop / Clear guarantees
+### Stop / clear guarantees
 
-- **StopActiveGeneration()** has a `_isStopping` reentrance guard — concurrent Escape + button click cannot double-fire.
+- **`StopActiveGeneration()`** has a `_isStopping` re-entrancy guard — concurrent Escape + button click cannot double-fire.
 - **Send button stop mode (0.25.6+)** stays enabled while a request is running; the button is the stop control in that state, so click events must reach `StopActiveGeneration()`.
-- **StopAgent()** delegates to `StopActiveGeneration()` and additionally resets the root CTS and cleans up UI.
+- **`StopAgent()`** delegates to `StopActiveGeneration()` and additionally resets the root CTS and cleans up UI.
 - **Cancellation cleanup (0.25.6+)** cancels the active request CTS and resets streaming/sending UI state even when the static `CoreAi.StopAgent(roleId)` path is unavailable.
-- **ClearChat()** calls `StopActiveGeneration()` before clearing history.
+- **`ClearChat()`** calls `StopActiveGeneration()` before clearing history.
 
 ## 8. Known limitations
 
 - **No output-length timeout** — there is a per-request cancellation token but no *total response length* guard. Add one externally if you need it.
 - **Mobile** — `UnityWebRequest` SSE streaming has been tested on Desktop and Editor. On mobile, behaviour depends on the OS HTTP stack; measure before shipping.
-- **Partial SSE tool_calls** — Cloud providers may split tool call arguments across multiple SSE chunks. The current implementation only handles complete `delta.tool_calls` with both `name` and fully-formed `arguments` in a single chunk. Progressive accumulation across chunks is not yet implemented.
-- **WebGL — `UnityWebRequest` не отдаёт SSE incrementally** *(0.25.x, regression report)*. В собранном WebGL-плеере `XMLHttpRequest`-обёртка emscripten доставляет тело ответа только в `onload`, поэтому SSE-чанки от OpenAI/HTTP-провайдера копятся в браузере и приходят к `MeaiOpenAiChatClient.ParseSseStream` всем буфером. Симптомы: лог `LLM ◀ (stream) chunks=1` при ответе в десятки–сотни символов; в `CoreAiChatPanel` typing-индикатор не гасится, bubble не появляется. **Workaround:** `CoreAiChatConfig.EnableStreaming = false` под `#if UNITY_WEBGL && !UNITY_EDITOR` (пример — `Assets/_source/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs` в проекте RedoSchool). **Полный план фикса** — [`STREAMING_WEBGL_TODO.md`](STREAMING_WEBGL_TODO.md): в 0.26.0 — `protected virtual ShouldUseStreamingForRole()` hook с дефолтным `false` под WebGL; в 0.27.0 — настоящий fetch-SSE-bridge через `.jslib`.
+- **Partial SSE `tool_calls`** — Cloud providers may split tool call arguments across multiple SSE chunks. The current implementation only handles complete `delta.tool_calls` with both `name` and fully-formed `arguments` in a single chunk. Progressive accumulation across chunks is not yet implemented.
+- **WebGL — `UnityWebRequest` does not deliver SSE incrementally** *(0.25.x, regression report)*. In a built WebGL player, the emscripten `XMLHttpRequest` wrapper typically delivers the response body only in `onload`, so SSE chunks from an OpenAI / HTTP provider accumulate in the browser and reach `MeaiOpenAiChatClient.ParseSseStream` as one buffer. Symptoms: log `LLM ◀ (stream) chunks=1` for responses tens–hundreds of characters long; in `CoreAiChatPanel` the typing indicator never clears and the bubble never appears. **Workaround:** `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR` (example: `Assets/_source/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs` in the RedoSchool project). **Full fix plan:** [`STREAMING_WEBGL_TODO.md`](STREAMING_WEBGL_TODO.md): in 0.26.0 — `protected virtual ShouldUseStreamingForRole()` hook defaulting to `false` on WebGL; in 0.27.0 — a real fetch-SSE bridge via `.jslib`.
 
 Related deep dives: [LUA_SANDBOX_SECURITY (TODO)](LUA_SANDBOX_SECURITY.md) · [TOOL_CALLING_BEST_PRACTICES (TODO)](TOOL_CALLING_BEST_PRACTICES.md).

@@ -4,7 +4,7 @@
 
 # <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — AI Agents for Dynamic Games
 
-*Read this in other languages: [English](README.md), [Русский](README_RU.md).*
+*Read this in other languages: [English](README.md) · [Russian](README_RU.md).*
 
 > ### 🎬 Imagine this
 > A player walks up to a blacksmith NPC. They type _"Got any fire swords?"_. The NPC **calls your inventory code**, finds nothing, then **replies in-character**: _"Fresh out of fire blades, but I can forge one if you bring me a Fire Crystal."_ The player crafts it — the **Programmer agent writes Lua**, the **CoreMechanic agent rolls stats**, and a unique _Flame Sword_ lands in their inventory. All of this happens at runtime, with streaming token-by-token into a chat bubble, powered by a **local 4 GB model** on their machine. No cloud keys. No scripted dialogue trees. **That's CoreAI.**
@@ -18,7 +18,7 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.25.7** · **Editor:** безопасное автосоздание `CoreAISettings` после domain reload · **PlayMode:** real-model memory recall — короткие повторы и **Ignore** при HTTP 5xx (LM Studio) · **чат:** надёжный Stop при streaming/fast stub · `SubmitMessageFromExternalAsync` · hotkeys (C / Esc) · WebGL `TextField` · **TODO** [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md)
+**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -30,7 +30,7 @@
 
 | | Section |
 |---|---------|
-| [What's new](#-whats-new-022--024) | 0.22 → 0.24 highlights |
+| [Changelog](#changelog) | Unity + core release notes (single source of truth) |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory |
 | [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
@@ -40,24 +40,14 @@
 
 ---
 
-## 🆕 What's new (0.22 → 0.25)
+## Changelog
 
-- 🔧 **v0.25.7** — **Editor:** `CoreAIBuildMenu` delays default-asset creation until the editor is ready so `CoreAISettings.asset` from the repo is not overwritten on domain reload. **PlayMode:** `AgentMemoryWithRealModelPlayModeTests` retries recall briefly, then **Ignore** with a Russian hint if the local HTTP API returns 5xx/empty (infra, not CoreAI memory logic). **Docs:** `TROUBLESHOOTING.md` — HTTP 500 + LM Studio.
-- 💬 **v0.25.6** — **Reliable Chat Stop.** Send button stays clickable while it is the **X** stop control; UI marks requests busy before the first `await`, cancels active request CTS, resets streaming/sending state, and covers the path with EditMode + PlayMode regression tests.
-- 💬 **v0.25.5** — **`CoreAiChatPanel.SubmitMessageFromExternalAsync`**: optional user bubble, **simulated assistant** text without LLM, return assistant string or `null` if busy. Header **Stop** removed (use send **X** + **Esc**). Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#programmatic-chat-submit).
-- 💬 **v0.25.4** — **Persisted chat session in UI.** On panel enable, messages reload from `IAgentMemoryStore` when **`Load Persisted Chat On Startup`** is on (default); welcome only if the thread is empty. Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#persisted-chat-session).
-- ⌨️ **v0.25.3** — **Chat hotkeys + `CoreAiChatConfig` toggles.** FAB open key (default **C**, optional off), **Esc** stop/collapse (optional off), Legacy `Input` poll when UITK has no keyboard focus, `OnCollapsedStateChanged` hook. Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#chat-hotkeys).
-- 🧹 **v0.25.2** — **WebGL header buttons cleanup.** В `Runtime/Source/Features/Chat/UI/CoreAiChat.uxml` кнопка stop теперь рендерится как `■` (Geometric Shapes U+25A0, гарантированно есть в дефолтных WebGL-шрифтах) вместо `⏹` (Misc Technical U+23F9, в WebGL-плеере без emoji-fallback'а отрисовывалась пустым прямоугольником). Никаких API-изменений. Параллельно опубликован [`Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md) — известная WebGL-регрессия SSE-стриминга в `OpenAiChatLlmClient.CompleteStreamingAsync` (UnityWebRequest на WebGL не отдаёт `progress` инкрементально; симптом — `chunks=1` + бесконечный typing-индикатор). Workaround — `CoreAiChatConfig.EnableStreaming = false` под `#if UNITY_WEBGL && !UNITY_EDITOR`. Полноценный фикс через `.jslib`-fetch-bridge запланирован в 0.27.0.
-- 🩹 **v0.25.1** — **WebGL chat input fix + dual-input-system support.** `CoreAiChatPanel` теперь удерживает `WebGLInput.captureAllKeyboardInput = false` каждый кадр на WebGL — фикс знакомого «фокус в `TextField` держится 1 кадр и слетает» в собранном WebGL-билде. `OrchestrationDashboard` совместим с обеими input-системами Unity (Legacy Input Manager и new Input System Package) через `#if ENABLE_LEGACY_INPUT_MANAGER` / `ENABLE_INPUT_SYSTEM` + `versionDefines` в `CoreAI.Source.asmdef` (`COREAI_HAS_INPUT_SYSTEM`). Никаких breaking-изменений API.
-- 🎯 **v0.25.0** — **Forced tool mode.** New enum `LlmToolChoiceMode` (`Auto` / `RequireAny` / `RequireSpecific` / `None`) on `AiTaskRequest` and `LlmCompletionRequest` — application code (intent classifiers, retry pipelines) can guarantee tool emission for a single call without changing the agent definition. Streaming honours the forced mode on the first iteration only, then resets to `Auto` so multi-round tool loops stay sane. New `CoreAiChatPanel.BuildAiTaskRequest` virtual hook lets subclasses inject extra fields without rewriting the chat pipeline. Streaming + tool calling is on by default for tool-equipped agents (Claude Code / Cursor-style live token UX with silent tool execution).
-- 🔧 **v0.24.2** — HTTP error responses now include the API body (not just `400 Bad Request`), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to ≥ 1, docs refresh.
-- 🧩 **v0.24.0–0.24.1** — `SseToolCallAccumulator` for cloud SSE (OpenAI, Anthropic), `ToolExecutionPolicy` shared across streaming/non-streaming paths, hardened `TryExtractToolCallsFromText` with code-block protection, UI stop deduplication.
-- 🎮 **v0.22** — Agent Control API: `CoreAi.StopAgent()`, `CoreAi.ClearContext()`, `CoreAi.OnToolExecuted` event, chat clear button, Escape-to-stop.
-- 🎯 **v0.21** — `CoreAi` static facade (`AskAsync` / `StreamAsync`), orchestrator streaming, chat collapse-to-FAB.
+Per-release notes, migration hints, and **version numbers** are maintained only in the changelogs (so this README does not need duplicate edits on every ship):
 
-**Foundation (0.20.x):** universal chat panel, HTTP + LLMUnity streaming, `ThinkBlockStreamFilter`, 3-layer streaming flags, one-click demo scene.
+- **[`com.nexoider.coreaiunity` CHANGELOG](Assets/CoreAiUnity/CHANGELOG.md)** — Unity layer: Editor, chat UI, PlayMode tests, docs.
+- **[`com.nexoider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
 
-Full notes: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
+The **`version`** field in each package’s `package.json` is the authoritative semver for that package.
 
 ---
 
@@ -82,6 +72,7 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new InventoryLlmTool(myInventory))  // Knows their stock
     .WithMemory()                                  // Remembers buyers
+    .WithMaxOutputTokens(512)                      // Per-agent reply budget
     .Build();
 
 merchant.ApplyToPolicy(CoreAIAgent.Policy);

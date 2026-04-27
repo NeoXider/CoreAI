@@ -1,72 +1,72 @@
 # 🔧 Troubleshooting Guide — CoreAI
 
-**Версия документа:** 1.0 | **Дата:** Апрель 2026
+**Document version:** 1.0 | **Date:** April 2026
 
-Руководство по решению типичных проблем при работе с CoreAI.
-
----
-
-## Содержание
-
-- [🤖 Проблема: Модель не отвечает](#-проблема-модель-не-отвечает)
-- [📜 Проблема: Lua упала](#-проблема-lua-упала)
-- [🧠 Проблема: Память не пишется](#-проблема-память-не-пишется)
-- [🔧 Проблема: Tool Call не работает](#-проблема-tool-call-не-работает)
-- [🌍 Проблема: World Command не исполняется](#-проблема-world-command-не-исполняется)
-- [⏳ Проблема: Тесты зависают](#-проблема-тесты-зависают)
-- [⏳ PlayMode: HTTP 500 от LM Studio / локального API](#-playmode-http-500-от-lm-studio--локального-api)
-- [🔌 Проблема: DI / VContainer ошибки](#-проблема-di--vcontainer-ошибки)
-- [📊 Диагностика: Как включить подробные логи](#-диагностика-как-включить-подробные-логи)
+A guide to resolving typical issues when working with CoreAI.
 
 ---
 
-## 🤖 Проблема: Модель не отвечает
+## Table of contents
 
-### Симптомы
-- Пустой ответ от LLM (`"Empty response from LLM"`)
-- Таймаут запроса
-- `StubLlmClient` вместо реальной модели
-- Нет логов `LLM ▶` / `LLM ◀` в консоли
+- [🤖 Problem: Model does not respond](#-problem-model-does-not-respond)
+- [📜 Problem: Lua failed](#-problem-lua-failed)
+- [🧠 Problem: Memory is not written](#-problem-memory-is-not-written)
+- [🔧 Problem: Tool call does not work](#-problem-tool-call-does-not-work)
+- [🌍 Problem: World command is not executed](#-problem-world-command-is-not-executed)
+- [⏳ Problem: Tests hang](#-problem-tests-hang)
+- [⏳ PlayMode: HTTP 500 from LM Studio / local API](#playmode-http-500-from-lm-studio--local-api)
+- [🔌 Problem: DI / VContainer errors](#-problem-di--vcontainer-errors)
+- [📊 Diagnostics: How to enable verbose logs](#-diagnostics-how-to-enable-verbose-logs)
 
-### Диагностика
+---
 
-**Шаг 1: Проверьте какой бэкенд выбран**
+## 🤖 Problem: Model does not respond
 
-В консоли Unity при старте должно быть сообщение о бэкенде:
+### Symptoms
+- Empty response from the LLM (`"Empty response from LLM"`)
+- Request timeout
+- `StubLlmClient` instead of a real model
+- No `LLM ▶` / `LLM ◀` logs in the console
+
+### Diagnostics
+
+**Step 1: Check which backend is selected**
+
+On Unity startup the console should show a backend message:
 ```
 [CoreAI] Backend: OpenAiHttp → http://localhost:1234/v1
 ```
-или
+or
 ```
 [CoreAI] Backend: LlmUnity → Qwen3.5-4B
 ```
-или
+or
 ```
-[CoreAI] Backend: Stub (offline mode)  ← ❌ Проблема!
+[CoreAI] Backend: Stub (offline mode)  ← ❌ Problem!
 ```
 
-**Шаг 2: Определите причину по бэкенду**
+**Step 2: Narrow down by backend**
 
 ---
 
-### 🔌 LLMUnity не отвечает
+### 🔌 LLMUnity does not respond
 
-| Проверка | Как проверить | Решение |
+| Check | How to verify | Fix |
 |----------|--------------|---------|
-| LLMAgent на сцене? | Hierarchy → ищите объект с `LLMAgent` | Создайте `LLMAgent` на сцене |
-| LLM компонент есть? | Inspector LLMAgent → есть ли `LLM`? | Добавьте `LLM` компонент |
-| GGUF файл существует? | Inspector LLM → Model Path | Скачайте модель через LLMUnity или LM Studio |
-| Сервис запущен? | Логи `LLMUnity: started` | Увеличьте `Startup Timeout` в CoreAISettings |
-| VRAM достаточно? | Task Manager → GPU Memory | Уменьшите модель (4B вместо 9B) или `numGPULayers` |
+| LLMAgent on scene? | Hierarchy → look for an object with `LLMAgent` | Create an `LLMAgent` on the scene |
+| LLM component present? | Inspector LLMAgent → is there an `LLM`? | Add the `LLM` component |
+| GGUF file exists? | Inspector LLM → Model Path | Download the model via LLMUnity or LM Studio |
+| Service running? | Logs for `LLMUnity: started` | Increase `Startup Timeout` in CoreAISettings |
+| Enough VRAM? | Task Manager → GPU Memory | Use a smaller model (4B instead of 9B) or lower `numGPULayers` |
 
 ```csharp
-// Проверка программно:
+// Programmatic check:
 var agent = FindObjectOfType<LLMAgent>();
 Debug.Log($"LLMAgent found: {agent != null}");
 Debug.Log($"LLM started: {agent?.llm?.started}");
 ```
 
-**Типичное решение:**
+**Typical fix:**
 ```
 CoreAISettings → LLMUnity → ✅ Keep Alive = true
 CoreAISettings → LLMUnity → Startup Timeout = 120
@@ -74,22 +74,22 @@ CoreAISettings → LLMUnity → Startup Timeout = 120
 
 ---
 
-### 🌐 HTTP API не отвечает
+### 🌐 HTTP API does not respond
 
-| Проверка | Как проверить | Решение |
+| Check | How to verify | Fix |
 |----------|--------------|---------|
-| Сервер запущен? | Браузер → `http://localhost:1234/v1/models` | Запустите LM Studio / Ollama |
-| URL правильный? | CoreAISettings → HTTP API → Base URL | Без `/` в конце: `http://localhost:1234/v1` |
-| Модель загружена? | LM Studio → Status = "Loaded" | Загрузите модель в LM Studio |
-| API Key нужен? | OpenAI → да, LM Studio → нет | Для LM Studio оставьте API Key **пустым** |
-| Порт открыт? | `Test-NetConnection localhost -Port 1234` | Проверьте firewall |
+| Server running? | Browser → `http://localhost:1234/v1/models` | Start LM Studio / Ollama |
+| URL correct? | CoreAISettings → HTTP API → Base URL | No trailing `/`: `http://localhost:1234/v1` |
+| Model loaded? | LM Studio → Status = "Loaded" | Load the model in LM Studio |
+| API key required? | OpenAI → yes, LM Studio → no | For LM Studio leave API Key **empty** |
+| Port open? | `Test-NetConnection localhost -Port 1234` | Check the firewall |
 
-**Быстрая проверка через PowerShell:**
+**Quick check via PowerShell:**
 ```powershell
-# Проверка доступности API
+# API reachability
 Invoke-RestMethod -Uri "http://localhost:1234/v1/models" -Method GET
 
-# Тестовый запрос
+# Sample request
 $body = @{
     model = "qwen3.5-4b"
     messages = @(@{ role = "user"; content = "Say OK" })
@@ -99,86 +99,86 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
     -Method POST -Body $body -ContentType "application/json"
 ```
 
-**Типичное решение:**
+**Typical fix:**
 ```
-1. Запустить LM Studio
-2. Загрузить модель (Qwen3.5-4B)
-3. Включить Local Server (порт 1234)
+1. Start LM Studio
+2. Load the model (Qwen3.5-4B)
+3. Enable Local Server (port 1234)
 4. CoreAISettings → Backend = OpenAiHttp
 5. CoreAISettings → Base URL = http://localhost:1234/v1
-6. Нажать "🔗 Test Connection"
+6. Click "🔗 Test Connection"
 ```
 
 ---
 
-### 🔇 Stub вместо модели (Silent Fallback)
+### 🔇 Stub instead of model (silent fallback)
 
-**Почему выбрался Stub:**
-1. Backend = Auto, но ни LLMUnity, ни HTTP не доступны
-2. LLMAgent не найден на сцене и HTTP URL не настроен
-3. Определитель `COREAI_NO_LLM` включён (ручной opt-out)
-4. Пакет `undream.llmunity` не установлен (`COREAI_HAS_LLMUNITY` не определён) — LLMUnity-бэкенд недоступен
+**Why Stub was chosen:**
+1. Backend = Auto, but neither LLMUnity nor HTTP is available
+2. LLMAgent not found on scene and HTTP URL not configured
+3. `COREAI_NO_LLM` define is enabled (manual opt-out)
+4. Package `ai.undream.llm` is not installed (`COREAI_HAS_LLMUNITY` not defined) — LLMUnity backend unavailable
 
-**Решение:**
+**Fix:**
 ```
-CoreAISettings → Backend Type = OpenAiHttp (или LlmUnity)
+CoreAISettings → Backend Type = OpenAiHttp (or LlmUnity)
 ```
 
-Или проверьте, что Auto-режим имеет хотя бы один доступный бэкенд:
+Or ensure Auto mode has at least one available backend:
 ```
 CoreAISettings → Backend Type = Auto
-CoreAISettings → Auto Priority = HTTP First  ← если HTTP основной
+CoreAISettings → Auto Priority = HTTP First  ← if HTTP is primary
 ```
 
 ---
 
-### ⏱️ Таймаут запроса
+### ⏱️ Request timeout
 
 ```
 [Error] LLM request timed out after 15 seconds
 ```
 
-**Решение:** Увеличьте таймаут:
+**Fix:** Increase the timeout:
 ```
-CoreAISettings → ⚙️ Общие → LLM Timeout = 120
+CoreAISettings → ⚙️ General → LLM Timeout = 120
 ```
 
-Для больших моделей (9B+) или слабого железа таймаут может потребоваться 120-300 секунд.
+For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
 ---
 
-## 📜 Проблема: Lua упала
+## 📜 Problem: Lua failed
 
-### Симптомы
-- `LuaExecutionFailed` в логах
-- `[Error] MoonSharp runtime: ...` в ответе модели
-- Бесконечные циклы self-heal (до 3 попыток)
+### Symptoms
+- `LuaExecutionFailed` in logs
+- `[Error] MoonSharp runtime: ...` in the model output
+- Endless self-heal loops (up to 3 attempts)
 - `LuaExecutionGuard: step limit exceeded`
 
-### Диагностика
+### Diagnostics
 
-**Тип 1: Синтаксическая ошибка Lua**
+**Type 1: Lua syntax error**
 ```
 [Error] MoonSharp: chunk_1:(3,0-4): unexpected symbol near 'end'
 ```
 
-**Причина:** Модель сгенерировала невалидный Lua код.
+**Cause:** The model generated invalid Lua.
 
-**Решение:**
-- Система автоматически делает до 3 попыток self-heal
-- Если не помогает → улучшите промпт Programmer с примерами валидного Lua
-- Или используйте более мощную модель (4B+ вместо 2B)
+**Fix:**
+- The system automatically retries self-heal up to 3 times
+- If that fails → improve the Programmer prompt with examples of valid Lua
+- Or use a stronger model (4B+ instead of 2B)
 
 ---
 
-**Тип 2: Вызов несуществующей функции**
+**Type 2: Calling a non-existent function**
 ```
 [Error] MoonSharp runtime: attempt to call 'custom_function' (a nil value)
 ```
 
-**Причина:** Lua код пытается вызвать функцию, которой нет в whitelist API.
+**Cause:** Lua tries to call a function that is not in the whitelist API.
 
-**Решение:** Добавьте функцию в `IGameLuaRuntimeBindings`:
+**Fix:** Add the function to `IGameLuaRuntimeBindings`:
 ```csharp
 public class MyGameBindings : IGameLuaRuntimeBindings
 {
@@ -191,7 +191,7 @@ public class MyGameBindings : IGameLuaRuntimeBindings
 }
 ```
 
-Или укажите в промпте Programmer'а какие функции доступны:
+Or state in the Programmer prompt which functions are available:
 ```
 Available Lua API: report(string), add(a,b), coreai_world_spawn(...), ...
 Do NOT use any other functions.
@@ -199,76 +199,76 @@ Do NOT use any other functions.
 
 ---
 
-**Тип 3: Бесконечный цикл (Step Limit)**
+**Type 3: Infinite loop (step limit)**
 ```
 [Warning] LuaExecutionGuard: step limit exceeded (10000 steps)
 ```
 
-**Причина:** Lua код содержит бесконечный цикл или очень ресурсоёмкую операцию.
+**Cause:** Lua contains an infinite loop or a very heavy operation.
 
-**Решение:**
-- `LuaExecutionGuard` автоматически прерывает через wall-clock и шаги
-- Убедитесь что Guard включён (по умолчанию — вкл)
-- Настройте лимиты при необходимости
+**Fix:**
+- `LuaExecutionGuard` aborts via wall-clock and step limits
+- Ensure the guard is enabled (default: on)
+- Tune limits if needed
 
 ---
 
-**Тип 4: Lua repair исчерпал попытки**
+**Type 4: Lua repair exhausted retries**
 ```
 [Warning] Programmer repair: max retries (3) exceeded for traceId=abc123
 ```
 
-**Причина:** 3 попытки self-heal не помогли.
+**Cause:** 3 self-heal attempts were not enough.
 
-**Решение:**
-1. Увеличьте `CoreAISettings.MaxLuaRepairRetries` (по умолчанию 3)
-2. Улучшите системный промпт Programmer (добавьте примеры)
-3. Используйте более мощную модель
-4. Проверьте что whitelist API корректен
+**Fix:**
+1. Increase `CoreAISettings.MaxLuaRepairRetries` (default 3)
+2. Improve the Programmer system prompt (add examples)
+3. Use a stronger model
+4. Verify the whitelist API is correct
 
 ---
 
-## 🧠 Проблема: Память не пишется
+## 🧠 Problem: Memory is not written
 
-### Симптомы
-- Агент «забывает» информацию между вызовами
-- Файл `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json` пустой или не создаётся
-- Память не появляется в системном промпте
+### Symptoms
+- The agent “forgets” information between calls
+- File `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json` is empty or not created
+- Memory does not appear in the system prompt
 
-### Диагностика
+### Diagnostics
 
-**Шаг 1: Проверьте что память включена для роли**
+**Step 1: Check that memory is enabled for the role**
 
 ```csharp
-// По умолчанию память ВКЛЮЧЕНА для:
+// By default memory is ON for:
 // Creator, Analyzer, Programmer, CoreMechanicAI
-// ВЫКЛЮЧЕНА для:
-// PlayerChat, AINpc (они используют ChatHistory)
+// OFF for:
+// PlayerChat, AINpc (they use ChatHistory)
 
 var policy = container.Resolve<AgentMemoryPolicy>();
 Debug.Log($"Memory enabled for Creator: {policy.IsMemoryToolEnabled("Creator")}");
 ```
 
-**Шаг 2: Проверьте что модель вызывает tool**
+**Step 2: Check that the model calls the tool**
 
-Включите MEAI Debug Logging:
+Enable MEAI Debug Logging:
 ```
-CoreAISettings → 🔧 Отладка → MEAI Debug Logging = ✅
+CoreAISettings → 🔧 Debug → MEAI Debug Logging = ✅
 ```
 
-В логах должно появиться:
+You should see in logs:
 ```
 [MEAI] Tool call detected: name=memory, arguments={action: write, content: ...}
 [MEAI] Tool result: Memory saved
 ```
 
-Если tool call НЕ вызывается — проблема в промпте. Добавьте явную инструкцию:
+If the tool is never called — the issue is the prompt. Add an explicit instruction:
 ```
 You MUST save important information using the memory tool:
 {"name": "memory", "arguments": {"action": "write", "content": "..."}}
 ```
 
-**Шаг 3: Проверьте хранилище**
+**Step 3: Check storage**
 
 ```csharp
 var store = container.Resolve<IAgentMemoryStore>();
@@ -282,222 +282,222 @@ else
 }
 ```
 
-**Шаг 4: Проверьте путь к файлу**
+**Step 4: Check the file path**
 
 ```csharp
 Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 ```
 
-| Платформа | Путь |
+| Platform | Path |
 |-----------|------|
 | Windows | `%APPDATA%/../LocalLow/<Company>/<Product>/CoreAI/AgentMemory/` |
 | macOS | `~/Library/Application Support/<Company>/<Product>/CoreAI/AgentMemory/` |
 | Android | `/data/data/<package>/files/CoreAI/AgentMemory/` |
-| WebGL | IndexedDB (через Unity's persistentDataPath) |
+| WebGL | IndexedDB (via Unity's persistentDataPath) |
 
-### Типичные решения
+### Typical fixes
 
-| Проблема | Решение |
+| Issue | Fix |
 |----------|---------|
-| Память выключена для роли | `policy.ConfigureRole("MyRole", useMemoryTool: true)` |
-| Модель не вызывает tool | Добавить инструкцию в промпт |
-| NullAgentMemoryStore | Проверить DI регистрацию `IAgentMemoryStore` |
-| Файл не создаётся | Проверить права доступа к `persistentDataPath` |
-| ChatHistory не работает | Убедитесь что `useChatHistory: true` и бэкенд = LLMUnity |
+| Memory disabled for role | `policy.ConfigureRole("MyRole", useMemoryTool: true)` |
+| Model does not call tool | Add instruction to the prompt |
+| NullAgentMemoryStore | Check DI registration for `IAgentMemoryStore` |
+| File not created | Check permissions on `persistentDataPath` |
+| ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
 
 ---
 
-## 🔧 Проблема: Tool Call не работает
+## 🔧 Problem: Tool call does not work
 
-### Симптомы
-- Модель возвращает текст вместо tool call
-- `Tool call not recognized` в логах
-- Tool call retry исчерпан
+### Symptoms
+- Model returns text instead of a tool call
+- `Tool call not recognized` in logs
+- Tool call retries exhausted
 
-### Диагностика
+### Diagnostics
 
-**Тип 1: Неправильный формат от модели**
+**Type 1: Wrong format from the model**
 ```
 [Warning] Tool call not recognized, retry 1/3
 ```
 
-**Причина:** Модель вернула tool call в неправильном формате.
+**Cause:** The model returned a tool call in an invalid format.
 
-**Решение:** CoreAI автоматически делает до 3 retry. Если не помогает:
-1. Используйте модель побольше (4B+ рекомендуется)
-2. Добавьте формат в промпт:
+**Fix:** CoreAI retries automatically up to 3 times. If that fails:
+1. Use a larger model (4B+ recommended)
+2. Add format to the prompt:
 ```
 ALWAYS use this exact format for tool calls:
 {"name": "tool_name", "arguments": {"param": "value"}}
 ```
 
-**Тип 2: Tool не зарегистрирован**
+**Type 2: Tool not registered**
 ```
 [Error] No AIFunction found for tool name: my_custom_tool
 ```
 
-**Решение:** Убедитесь что tool добавлен агенту:
+**Fix:** Ensure the tool is added to the agent:
 ```csharp
 var agent = new AgentBuilder("MyAgent")
-    .WithTool(new MyCustomTool())  // ← Добавить tool
+    .WithTool(new MyCustomTool())  // ← add tool
     .Build();
 ```
 
-**Тип 3: Бесконечный цикл tool calls**
+**Type 3: Infinite tool-call loop**
 ```
 [Warning] SmartToolCallingChatClient: duplicate tool_call detected, breaking loop
 ```
 
-**Причина:** Модель зациклилась, вызывая один и тот же tool.
+**Cause:** The model looped calling the same tool.
 
-**Решение:** `SmartToolCallingChatClient` автоматически обнаруживает и прерывает цикл. Если проблема повторяется — улучшите промпт.
+**Fix:** `SmartToolCallingChatClient` detects and breaks the loop automatically. If it keeps happening — improve the prompt.
 
 ---
 
-## 🌍 Проблема: World Command не исполняется
+## 🌍 Problem: World command is not executed
 
-### Симптомы
-- Объекты не спавнятся
-- `[Warning] Spawn rejected: prefab key 'X' not found` в логах
+### Symptoms
+- Objects do not spawn
+- `[Warning] Spawn rejected: prefab key 'X' not found` in logs
 - `coreai_world_spawn returned false`
 
-### Диагностика
+### Diagnostics
 
-**Проблема 1: Реестр префабов не назначен**
+**Issue 1: Prefab registry not assigned**
 ```
 [Warning] World prefab registry not assigned
 ```
 
-**Решение:**
+**Fix:**
 1. Create → CoreAI → World → Prefab Registry
-2. Добавьте префабы с ключами
-3. CoreAILifetimeScope → World Prefab Registry → назначьте asset
+2. Add prefabs with keys
+3. CoreAILifetimeScope → World Prefab Registry → assign the asset
 
-**Проблема 2: Ключ префаба не найден**
+**Issue 2: Prefab key not found**
 ```
 [Warning] Spawn rejected: prefab key 'Boss' not found in registry
 ```
 
-**Решение:** Добавьте ключ в `CoreAiPrefabRegistryAsset`:
-- Откройте asset
-- Добавьте запись: Key = "Boss", Name = "Boss", Prefab = ваш префаб
+**Fix:** Add the key in `CoreAiPrefabRegistryAsset`:
+- Open the asset
+- Add entry: Key = "Boss", Name = "Boss", Prefab = your prefab
 
-**Проблема 3: Вызов не на главном потоке**
+**Issue 3: Call not on the main thread**
 ```
 [Error] UnityException: ... can only be called from the main thread
 ```
 
-**Решение:** Это внутренняя ошибка. Убедитесь что `AiGameCommandRouter` правильно маршалит на main thread. Команды мира **всегда должны** проходить через MessagePipe → Router.
+**Fix:** This is an internal error. Ensure `AiGameCommandRouter` marshals to the main thread correctly. World commands **must always** go through MessagePipe → Router.
 
 ---
 
-## ⏳ Проблема: Тесты зависают
+## ⏳ Problem: Tests hang
 
-### EditMode тесты
+### EditMode tests
 ```
 Test hangs on "Waiting for LLM..."
 ```
 
-**Причина:** EditMode тесты не должны вызывать реальный LLM.
+**Cause:** EditMode tests must not call a real LLM.
 
-**Решение:**
-- Используйте `StubLlmClient` для EditMode
-- PlayMode тесты = реальный LLM
+**Fix:**
+- Use `StubLlmClient` for EditMode
+- PlayMode tests = real LLM
 
-### PlayMode тесты
+### PlayMode tests
 
-**Зависание на "stopping server":**
+**Hang on "stopping server":**
 ```
 CoreAISettings → LLMUnity → Keep Alive = ✅ true
 ```
 
-**Зависание на "waiting for model":**
-1. Увеличьте `Startup Timeout` до 120-300 сек
-2. Проверьте что модель скачана и путь GGUF верный
-3. Уменьшите модель (2B вместо 9B для тестов)
+**Hang on "waiting for model":**
+1. Increase `Startup Timeout` to 120–300 sec
+2. Verify the model is downloaded and the GGUF path is correct
+3. Use a smaller model for tests (2B instead of 9B)
 
-**HTTP тесты не подключаются:**
-1. Запустите LM Studio **перед** тестами
-2. Установите env vars:
+**HTTP tests do not connect:**
+1. Start LM Studio **before** tests
+2. Set env vars:
 ```powershell
 $env:COREAI_OPENAI_TEST_BASE = "http://localhost:1234/v1"
 $env:COREAI_OPENAI_TEST_MODEL = "qwen3.5-4b"
 ```
 
-### ⏳ PlayMode: HTTP 500 от LM Studio / локального API
+### ⏳ PlayMode: HTTP 500 from LM Studio / local API
 
-**Симптомы:** в консоли Unity при PlayMode-тестах с реальной моделью видно **HTTP/1.1 500** и HTML-тело вроде `<pre>Internal Server Error</pre>` в логах `MeaiOpenAiChatClient` / `MeaiLlmClient`; тест памяти падает на пустом sink или помечается **Ignored** после шага recall.
+**Symptoms:** In the Unity console during PlayMode tests with a real model you see **HTTP/1.1 500** and an HTML body like `<pre>Internal Server Error</pre>` in `MeaiOpenAiChatClient` / `MeaiLlmClient` logs; the memory test fails on an empty sink or is marked **Ignored** after the recall step.
 
-**Причина:** ответ приходит от **вашего** локального OpenAI-совместимого сервера (LM Studio, прокси на `http://…:1234/v1`), а не от логики памяти CoreAI. При ошибке LLM оркестратор **не** публикует `ApplyAiGameCommand`, поэтому счётчик команд в тесте остаётся нулевым.
+**Cause:** The response comes from **your** local OpenAI-compatible server (LM Studio, proxy at `http://…:1234/v1`), not from CoreAI memory logic. On LLM error the orchestrator does **not** publish `ApplyAiGameCommand`, so the command counter in the test stays zero.
 
-**Что проверить:**
-1. LM Studio (или аналог) запущен, модель **загружена** до старта теста.
-2. В `CoreAISettings.asset` корректный **Api Base URL** с суффиксом **`/v1`**.
-3. Нет перегрузки по контексту / VRAM — часто даёт 500 на втором длинном запросе.
+**What to check:**
+1. LM Studio (or equivalent) is running and the model is **loaded** before the test starts.
+2. In `CoreAISettings.asset`, **Api Base URL** is correct with the **`/v1`** suffix.
+3. No context / VRAM overload — often causes 500 on the second long request.
 
-Тесты с реальной моделью при устойчивом сбое recall завершаются **`Assert.Ignore`** с пояснением, чтобы CI не падал из‑за инфраструктуры.
+When the real-model tests hit a persistent recall failure they end with **`Assert.Ignore`** and an explanation so CI does not fail due to infrastructure.
 
 ---
 
-## 🔌 Проблема: DI / VContainer ошибки
+## 🔌 Problem: DI / VContainer errors
 
-### Симптомы
+### Symptoms
 ```
 VContainerException: Type 'ILlmClient' is not registered
 ```
 
-### Решение
+### Fix
 
-1. Убедитесь что `CoreAILifetimeScope` есть на сцене
-2. Убедитесь что он является **Root** или **Parent** для других LifetimeScope
-3. Проверьте что все зависимости назначены в Inspector:
+1. Ensure `CoreAILifetimeScope` is on the scene
+2. Ensure it is the **Root** or **Parent** for other LifetimeScopes
+3. Verify all dependencies are assigned in the Inspector:
    - Core AI Settings
-   - Agent Prompts Manifest (опционально)
-   - Game Log Settings (опционально)
-   - World Prefab Registry (опционально)
+   - Agent Prompts Manifest (optional)
+   - Game Log Settings (optional)
+   - World Prefab Registry (optional)
 
 ```
 Hierarchy:
 └── CoreAILifetimeScope  ← Root LifetimeScope
     ├── LlmManager (LLM + LLMAgent)
     ├── GameManager
-    └── ... ваши объекты
+    └── ... your objects
 ```
 
 ---
 
-## 📊 Диагностика: Как включить подробные логи
+## 📊 Diagnostics: How to enable verbose logs
 
-### Быстрое включение всей диагностики
+### Turn on full diagnostics quickly
 
 ```
-CoreAISettings → 🔧 Отладка:
-  ✅ MEAI Debug Logging      — логи MEAI pipeline
-  ✅ HTTP Debug Logging       — сырые HTTP запросы
-  ✅ Log Orchestration Metrics — метрики оркестратора
+CoreAISettings → 🔧 Debug:
+  ✅ MEAI Debug Logging      — MEAI pipeline logs
+  ✅ HTTP Debug Logging       — raw HTTP requests
+  ✅ Log Orchestration Metrics — orchestrator metrics
 ```
 
-### Что искать в логах
+### What to look for in logs
 
-| Паттерн | Значение |
+| Pattern | Meaning |
 |---------|----------|
-| `LLM ▶ [traceId=...]` | Запрос отправлен |
-| `LLM ◀ [traceId=...] 247 tokens, 1.2s` | Ответ получен |
-| `LLM ⏱ timeout` | Таймаут |
-| `[MessagePipe] traceId=...` | Маршрутизация команды |
-| `[MEAI] Tool call detected` | Tool call распознан |
-| `[MEAI] Tool result` | Результат tool call |
-| `[Lua] Execution succeeded` | Lua выполнен |
-| `[Lua] Execution failed` | Lua ошибка |
-| `[World] Spawn: Enemy at (10,0,5)` | Команда мира |
-| `SmartToolCallingChatClient: duplicate` | Обнаружен цикл |
+| `LLM ▶ [traceId=...]` | Request sent |
+| `LLM ◀ [traceId=...] 247 tokens, 1.2s` | Response received |
+| `LLM ⏱ timeout` | Timeout |
+| `[MessagePipe] traceId=...` | Command routing |
+| `[MEAI] Tool call detected` | Tool call recognized |
+| `[MEAI] Tool result` | Tool call result |
+| `[Lua] Execution succeeded` | Lua succeeded |
+| `[Lua] Execution failed` | Lua error |
+| `[World] Spawn: Enemy at (10,0,5)` | World command |
+| `SmartToolCallingChatClient: duplicate` | Loop detected |
 
-### Фильтрация по TraceId
+### Filter by TraceId
 
-Каждый запрос получает уникальный `TraceId`. Используйте его для отслеживания пути команды:
+Each request gets a unique `TraceId`. Use it to trace the command path:
 
 ```
-Фильтр в консоли Unity: "abc123"
+Unity console filter: "abc123"
 
 [abc123] LLM ▶ role=Programmer hint="Create ambush script"
 [abc123] LLM ◀ 312 tokens, 2.1s
@@ -507,48 +507,48 @@ CoreAISettings → 🔧 Отладка:
 
 ---
 
-## 🚑 Быстрый чеклист проблем
+## 🚑 Quick problem checklist
 
 ```
-❓ Модель молчит?
-  → Проверь Backend Type в CoreAISettings
-  → Проверь что LM Studio / LLMAgent запущен
-  → Нажми "🔗 Test Connection"
+❓ Model silent?
+  → Check Backend Type in CoreAISettings
+  → Check that LM Studio / LLMAgent is running
+  → Click "🔗 Test Connection"
 
-❓ Пустой ответ?
-  → Увеличь LLM Timeout (120+)
-  → Включи Keep Alive для LLMUnity
-  → Проверь логи LLM ▶ / LLM ◀
+❓ Empty response?
+  → Increase LLM Timeout (120+)
+  → Enable Keep Alive for LLMUnity
+  → Check LLM ▶ / LLM ◀ logs
 
-❓ Tool call не срабатывает?
-  → Включи MEAI Debug Logging
-  → Проверь что tool добавлен агенту
-  → Используй модель 4B+ для надёжного tool calling
+❓ Tool call not firing?
+  → Enable MEAI Debug Logging
+  → Check that the tool is added to the agent
+  → Use a 4B+ model for reliable tool calling
 
-❓ Lua падает?
-  → Проверь whitelist API в промпте
-  → Self-heal работает до 3 попыток
-  → Увеличь MaxLuaRepairRetries если нужно
+❓ Lua failing?
+  → Check whitelist API in the prompt
+  → Self-heal runs up to 3 attempts
+  → Increase MaxLuaRepairRetries if needed
 
-❓ Память не сохраняется?
-  → Проверь AgentMemoryPolicy для роли
-  → Проверь что модель вызывает memory tool
-  → Проверь persistentDataPath
+❓ Memory not saving?
+  → Check AgentMemoryPolicy for the role
+  → Check that the model calls the memory tool
+  → Check persistentDataPath
 
-❓ Объект не спавнится?
-  → Назначь CoreAiPrefabRegistryAsset
-  → Добавь ключ префаба в реестр
-  → Проверь логи [World]
+❓ Object not spawning?
+  → Assign CoreAiPrefabRegistryAsset
+  → Add prefab key to the registry
+  → Check [World] logs
 
-❓ Тесты зависают?
+❓ Tests hanging?
   → Keep Alive = true
   → Startup Timeout = 120
-  → Для CI: используй Stub backend
+  → For CI: use Stub backend
 ```
 
 ---
 
-> 📖 **Связанные документы:**
-> - [COREAI_SETTINGS.md](COREAI_SETTINGS.md) — все настройки
-> - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — архитектура
-> - [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) — настройка LLM
+> 📖 **Related documents:**
+> - [COREAI_SETTINGS.md](COREAI_SETTINGS.md) — all settings
+> - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — architecture
+> - [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) — LLM setup

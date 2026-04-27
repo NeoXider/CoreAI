@@ -1,7 +1,10 @@
 #if UNITY_EDITOR
 using System;
+using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEditor.PackageManager;
 using UnityEngine;
 using UnityEngine.Networking;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -68,8 +71,6 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("API Key", "Bearer токен. Для LM Studio оставить пустым"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("modelName"),
                     new GUIContent("Model", "gpt-4o-mini, qwen3.5-4b, llama-3-8b"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxTokens"),
-                    new GUIContent("Max Tokens", "Лимит токенов в ответе"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("requestTimeoutSeconds"),
                     new GUIContent("Timeout (sec)", "Таймаут HTTP-запроса"));
 
@@ -95,71 +96,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-                SerializedProperty ggufPathProp = serializedObject.FindProperty("ggufModelPath");
-
-                System.Collections.Generic.List<string> options = new() { "[ Auto / Fallback ]" };
-                System.Collections.Generic.List<string> fileNames = new() { "" };
-
-                try
-                {
-                    if (LLMManager.modelEntries != null)
-                    {
-                        foreach (ModelEntry entry in LLMManager.modelEntries)
-                        {
-                            if (!entry.lora)
-                            {
-                                options.Add(entry.filename);
-                                fileNames.Add(entry.filename);
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                }
-
-                int currentIndex = fileNames.IndexOf(ggufPathProp.stringValue);
-
-                // Если введено вручную, добавим в конец
-                if (currentIndex == -1 && !string.IsNullOrEmpty(ggufPathProp.stringValue))
-                {
-                    options.Add(ggufPathProp.stringValue + " (Ручной ввод)");
-                    fileNames.Add(ggufPathProp.stringValue);
-                    currentIndex = fileNames.Count - 1;
-                }
-                else if (currentIndex == -1)
-                {
-                    currentIndex = 0;
-                }
-
-                EditorGUILayout.BeginHorizontal();
-                int newIndex =
-                    EditorGUILayout.Popup(new GUIContent("GGUF Path", "Выбор модели из LLMUnity. Пусто = авто"),
-                        currentIndex, options.ToArray());
-                if (newIndex != currentIndex)
-                {
-                    ggufPathProp.stringValue = fileNames[newIndex];
-                }
-
-                if (GUILayout.Button("Manual", GUILayout.Width(60)))
-                {
-                    string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        ggufPathProp.stringValue = System.IO.Path.GetFileName(path);
-                    }
-                }
-
-                EditorGUILayout.EndHorizontal();
-
-                // Даем возможность отредактировать ручками прямо тут
-                ggufPathProp.stringValue = EditorGUILayout.TextField(new GUIContent(" ", "Ручной вод имени файла"),
-                    ggufPathProp.stringValue);
-#else
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("ggufModelPath"),
-                    new GUIContent("GGUF Path", "Путь к .gguf файлу. Пусто = авто"));
-#endif
+                DrawGgufModelDropdown(serializedObject.FindProperty("ggufModelPath"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityDontDestroyOnLoad"),
                     new GUIContent("Dont Destroy On Load", "Не уничтожать при смене сцены"));
                 SerializedProperty gpuLayersProp = serializedObject.FindProperty("llmUnityNumGPULayers");
@@ -177,6 +114,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Max Concurrent Chats", "1 = последовательно, >1 = параллельно"));
 
                 EditorGUI.EndDisabledGroup();
+
+                DrawLlmUnityWiringStatus();
 
                 if (isAuto)
                 {
@@ -216,17 +155,25 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.Space(2);
 
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxLuaRepairRetries"),
-                    new GUIContent("Lua Repair Retries",
-                        "Максимум подряд неудачных Lua repair до прерывания Programmer"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxToolCallRetries"),
-                    new GUIContent("Tool Call Retries", "Максимум подряд неудачных tool call до прерывания агента"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxTokens"),
+                    new GUIContent("Max Output Tokens",
+                        "Глобальный лимит токенов в ответе LLM. Применяется единообразно к HTTP API и LLMUnity. " +
+                        "Можно переопределить per-call через AiTaskRequest.MaxOutputTokens или per-request через LlmCompletionRequest. " +
+                        "0 = без лимита (используется дефолт провайдера)."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("contextWindowTokens"),
                     new GUIContent("Context Window", "Контекстное окно (токены)"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxConcurrentOrchestrations"),
                     new GUIContent("Max Concurrent", "Параллельных задач оркестратора"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmRequestTimeoutSeconds"),
                     new GUIContent("LLM Timeout (sec)", "Таймаут запроса к LLM"));
+
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Retry лимиты", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxLuaRepairRetries"),
+                    new GUIContent("Lua Repair Retries",
+                        "Максимум подряд неудачных Lua repair до прерывания Programmer"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxToolCallRetries"),
+                    new GUIContent("Tool Call Retries", "Максимум подряд неудачных tool call до прерывания агента"));
             }
 
             EditorGUILayout.EndFoldoutHeaderGroup();
@@ -324,6 +271,213 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void DrawLlmUnityWiringStatus()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginVertical("HelpBox");
+            EditorGUILayout.LabelField("LLMUnity status", EditorStyles.boldLabel);
+
+            bool packageInstalled = IsLlmUnityPackageInstalled();
+            bool defineActive = IsLlmUnityDefineActive();
+
+            if (!packageInstalled)
+            {
+                EditorGUILayout.HelpBox(
+                    "LLMUnity package is not installed. Add package `ai.undream.llm` from Package Manager to enable local GGUF models.",
+                    MessageType.Warning);
+                if (GUILayout.Button("Open Package Manager", GUILayout.Height(24)))
+                {
+                    EditorApplication.ExecuteMenuItem("Window/Package Manager");
+                }
+            }
+            else if (!defineActive)
+            {
+                EditorGUILayout.HelpBox(
+                    "LLMUnity package is installed, but COREAI_HAS_LLMUNITY is not active for CoreAI assemblies. " +
+                    "This usually means asmdef versionDefines point to the old package name.",
+                    MessageType.Warning);
+                if (GUILayout.Button("Auto-fix asmdef wiring", GUILayout.Height(24)))
+                {
+                    FixLlmUnityAsmdefWiring();
+                }
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "LLMUnity package is installed and CoreAI assemblies see COREAI_HAS_LLMUNITY.",
+                    MessageType.Info);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private static bool IsLlmUnityPackageInstalled()
+        {
+            return UnityEditor.PackageManager.PackageInfo.FindForPackageName("ai.undream.llm") != null;
+        }
+
+        private static bool IsLlmUnityDefineActive()
+        {
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            return true;
+#else
+            return false;
+#endif
+        }
+
+        private static void FixLlmUnityAsmdefWiring()
+        {
+            string[] asmdefPaths =
+            {
+                "Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef",
+                "Assets/CoreAiUnity/Editor/CoreAI.Editor.asmdef",
+                "Assets/CoreAiUnity/Tests/CoreAI.Tests.asmdef",
+                "Assets/CoreAiUnity/Tests/PlayModeTest/PlayModeTest.asmdef"
+            };
+
+            int changed = 0;
+            foreach (string assetPath in asmdefPaths)
+            {
+                string fullPath = Path.GetFullPath(assetPath);
+                if (!File.Exists(fullPath))
+                {
+                    Debug.LogWarning($"[CoreAI] LLMUnity wiring: asmdef not found: {assetPath}");
+                    continue;
+                }
+
+                string text = File.ReadAllText(fullPath);
+                string updated = Regex.Replace(
+                    text,
+                    "\"name\"\\s*:\\s*\"undream\\.llmunity\"\\s*,\\s*\"expression\"\\s*:\\s*\"\"",
+                    "\"name\": \"ai.undream.llm\",\n      \"expression\": \"1.0.0\"");
+
+                if (updated == text)
+                {
+                    continue;
+                }
+
+                File.WriteAllText(fullPath, updated);
+                AssetDatabase.ImportAsset(assetPath);
+                changed++;
+            }
+
+            AssetDatabase.Refresh();
+            string message = changed > 0
+                ? $"[CoreAI] LLMUnity asmdef wiring updated in {changed} file(s). Unity will recompile; reopen this inspector after compilation."
+                : "[CoreAI] LLMUnity asmdef wiring already looks correct.";
+            Debug.Log(message);
+            EditorUtility.DisplayDialog("CoreAI LLMUnity Wiring", message, "OK");
+        }
+
+        /// <summary>
+        /// GGUF model picker. With LLMUnity present — popup из <c>LLMManager.modelEntries</c> (имена файлов
+        /// уже скачанных моделей) + кнопка <b>Browse…</b> для выбора файла на диске + явное текстовое поле
+        /// для ручного override. Без LLMUnity — только текстовое поле. Popup и текстовое поле работают
+        /// независимо: выбор в popup не затирается вводом и наоборот.
+        /// </summary>
+        private static void DrawGgufModelDropdown(SerializedProperty ggufPathProp)
+        {
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            System.Collections.Generic.List<string> options = new() { "[ Auto / Fallback ]" };
+            System.Collections.Generic.List<string> fileNames = new() { "" };
+
+            int discoveredEntryCount = 0;
+            try
+            {
+                // ModelEntries ленивые — без LoadFromDisk() они часто пусты при первом открытии инспектора.
+                // Загружаем синхронно, это копеечная операция.
+                if (LLMManager.modelEntries == null || LLMManager.modelEntries.Count == 0)
+                {
+                    LLMManager.LoadFromDisk();
+                }
+
+                if (LLMManager.modelEntries != null)
+                {
+                    foreach (ModelEntry entry in LLMManager.modelEntries)
+                    {
+                        if (entry == null || entry.lora)
+                        {
+                            continue;
+                        }
+
+                        options.Add(entry.filename);
+                        fileNames.Add(entry.filename);
+                        discoveredEntryCount++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // LLMManager не инициализирован — показываем только Auto + ручной ввод, без падения инспектора.
+                Debug.LogWarning($"[CoreAI] GGUF dropdown: LLMManager.LoadFromDisk failed: {ex.Message}");
+            }
+
+            string currentValue = ggufPathProp.stringValue ?? "";
+            int currentIndex = fileNames.IndexOf(currentValue);
+            if (currentIndex == -1 && !string.IsNullOrEmpty(currentValue))
+            {
+                options.Add(currentValue + "  (manual)");
+                fileNames.Add(currentValue);
+                currentIndex = fileNames.Count - 1;
+            }
+            else if (currentIndex == -1)
+            {
+                currentIndex = 0;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            int newIndex = EditorGUILayout.Popup(
+                new GUIContent("GGUF Model",
+                    "Выбор модели из LLMUnity Model Manager. Пусто = автоопределение.\nНажмите Browse… чтобы выбрать .gguf файл с диска."),
+                currentIndex, options.ToArray());
+            if (newIndex != currentIndex)
+            {
+                ggufPathProp.stringValue = fileNames[newIndex];
+            }
+
+            if (GUILayout.Button("Browse…", GUILayout.Width(78)))
+            {
+                string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
+                if (!string.IsNullOrEmpty(path))
+                {
+                    ggufPathProp.stringValue = System.IO.Path.GetFileName(path);
+                }
+            }
+
+            if (GUILayout.Button("↻", GUILayout.Width(28)))
+            {
+                LLMManager.LoadFromDisk();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUI.indentLevel++;
+            string typed = EditorGUILayout.DelayedTextField(
+                new GUIContent("Manual override", "Имя .gguf файла вручную. Перекрывает popup."),
+                ggufPathProp.stringValue ?? "");
+            if (typed != (ggufPathProp.stringValue ?? ""))
+            {
+                ggufPathProp.stringValue = typed;
+            }
+            EditorGUI.indentLevel--;
+
+            if (discoveredEntryCount == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "LLMUnity Model Manager пуст — нет загруженных GGUF моделей.\n" +
+                    "Загрузите модель через окно LLMUnity → Model Manager, либо укажите имя файла вручную (Browse… / Manual override). Кнопка ↻ перечитывает список моделей.",
+                    MessageType.None);
+            }
+#else
+            EditorGUILayout.PropertyField(ggufPathProp,
+                new GUIContent("GGUF Path", "Путь к .gguf файлу. Пусто = автоопределение."));
+            EditorGUILayout.HelpBox(
+                "LLMUnity package не подключён к этому asmdef — popup моделей недоступен. " +
+                "If package ai.undream.llm is installed, use the LLMUnity status helper above to fix CoreAI asmdef versionDefines.",
+                MessageType.None);
+#endif
         }
 
         /// <summary>

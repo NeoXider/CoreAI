@@ -1,28 +1,31 @@
-# World Commands — управление миром из Lua (рантайм)
+# World Commands — controlling the world from Lua (runtime)
 
-Цель: позволить роли **Programmer** (и в перспективе Creator) **безопасно** менять мир во время игры: спавнить/перемещать/включать объекты, переключать сцены, и т.д.
+**Goal:** Let the **Programmer** role (and eventually **Creator**) **safely** change the world at runtime: spawn/move/enable objects, switch scenes, and more.
 
-Ключевая идея: Lua **не** трогает Unity напрямую. Lua вызывает **whitelist API**, который публикует типизированную команду в шину. Unity‑слой на **главном потоке** выполняет действие.
+**Core idea:** Lua does **not** touch Unity directly. Lua calls a **whitelist API** that publishes a typed command on the bus. The Unity layer executes the action on the **main thread**.
 
 ---
 
-## 1. Поток данных (канон)
+## 1. Data flow (canonical)
 
-1. LLM → `ApplyAiGameCommand` с `CommandTypeId = AiEnvelope`
-2. `LuaAiEnvelopeProcessor` извлекает Lua и исполняет в `SecureLuaEnvironment`
-3. Lua вызывает `coreai_world_*` → публикуется `ApplyAiGameCommand` с `CommandTypeId = WorldCommand`
-4. `AiGameCommandRouter` на main thread вызывает `ICoreAiWorldCommandExecutor.TryExecute(...)`
+1. LLM → `ApplyAiGameCommand` with `CommandTypeId = AiEnvelope`
+2. `LuaAiEnvelopeProcessor` extracts Lua and runs it in `SecureLuaEnvironment`
+3. Lua calls `coreai_world_*` → publishes `ApplyAiGameCommand` with `CommandTypeId = WorldCommand`
+4. `AiGameCommandRouter` on the main thread calls `ICoreAiWorldCommandExecutor.TryExecute(...)`
 
-Это сохраняет:
-- **main thread safety** для Unity
-- **контроль/логирование** через MessagePipe и `traceId` (когда он есть)
-- расширяемость через интерфейсы и реестры
+This preserves:
+- **Main-thread safety** for Unity
+- **Control / logging** via MessagePipe and `traceId` (when present)
+- Extensibility via interfaces and registries
+
+Direct MEAI tool calls through `WorldLlmTool` use the same safety rule: before invoking
+`ICoreAiWorldCommandExecutor.TryExecute(...)`, the tool switches to the Unity main thread.
 
 ---
 
 ## 2. Lua API (whitelist)
 
-Доступные функции (встроенный набор):
+Built-in functions:
 
 - `coreai_world_spawn(prefabKeyOrName, targetName, x, y, z) -> bool`
 - `coreai_world_move(targetName, x, y, z)`
@@ -37,58 +40,58 @@
 - `coreai_world_spawn_particles(targetName, prefabKeyOrName)`
 - `coreai_world_list_objects(searchPattern)`
 
-### Рекомендация по ключам
+### Key recommendations
 
-- **prefabKeyOrName**: лучше использовать **GUID‑строку** (или другое стабильное id) либо имя префаба из справочника.
-- **targetName**: строка с именем объекта в сцене (Unity GameObject name). Все команды резолвят объект динамически по `GameObject.Find()`.
-
----
-
-## 3. Whitelist ресурсов: спавн префабов
-
-Спавн делается только через `CoreAiPrefabRegistryAsset` (ScriptableObject‑реестр).
-
-### Как подключить
-
-1. Создайте asset: **Create → CoreAI → World → Prefab Registry**
-2. Заполните `Key` (GUID строкой) и/или `Name`, назначьте `Prefab`
-3. На `CoreAILifetimeScope` назначьте поле **World Prefab Registry**
-
-Если реестр не назначен — спавн будет **отклонён**.
+- **prefabKeyOrName:** Prefer a **GUID string** (or another stable id) or a prefab name from the registry.
+- **targetName:** Scene object name (`GameObject` name). Commands resolve objects dynamically via `GameObject.Find()`.
+- **Animation commands:** `coreai_world_play_animation`, `coreai_world_list_animations`, and direct `world_command` actions `play_animation` / `list_animations` require `targetName`; pass it as a structured argument, not only in prose.
 
 ---
 
-## 4. Расширение возможностей (проектный слой)
+## 3. Resource whitelist: spawning prefabs
 
-### 4.1 Добавить свои команды мира
+Spawning goes only through `CoreAiPrefabRegistryAsset` (ScriptableObject registry).
 
-Варианты:
-- **A (рекомендуется)**: расширить `ICoreAiWorldCommandExecutor` своей реализацией (или обёрткой‑композицией), добавить новые `action` в JSON envelope и обработку на main thread.
-- **B**: отдельный `WorldCommandRouter` на MessagePipe, который подписывается на `ApplyAiGameCommand` и обрабатывает только `WorldCommand` (если хотите полностью изолировать от `AiGameCommandRouter`).
+### How to wire it
 
-### 4.2 «Рефлексия» и изменение компонентов
+1. Create asset: **Create → CoreAI → World → Prefab Registry**
+2. Fill **Key** (GUID string) and/or **Name**, assign **Prefab**
+3. On `CoreAILifetimeScope`, assign **World Prefab Registry**
 
-Рефлексия напрямую из Lua — опасна. Если требуется «менять данные объекта», делайте это через:
-- allowlist типов/полей/методов
-- отдельную политику `IWorldReflectionPolicy` (проектный слой)
-- набор строго типизированных команд (например `set_transform`, `add_force`, `set_anim_trigger`)
+If the registry is not assigned, spawn requests are **rejected**.
 
 ---
 
-## 5. Дефолты vs настройка
+## 4. Extending behavior (project layer)
 
-**По умолчанию** в шаблоне:
-- World Commands включены (Lua API зарегистрирован).
-- Спавн требует явно назначенный `CoreAiPrefabRegistryAsset`.
+### 4.1 Add your own world commands
 
-**Настраиваемо** через инспектор `CoreAILifetimeScope`:
-- назначение/отключение реестра префабов
-- замена/обёртка исполнителя команд
+Options:
+- **A (recommended):** Extend `ICoreAiWorldCommandExecutor` with your implementation (or a composition wrapper), add new `action` values in the JSON envelope, and handle them on the main thread.
+- **B:** A separate `WorldCommandRouter` on MessagePipe that subscribes to `ApplyAiGameCommand` and handles only `WorldCommand` (if you want full isolation from `AiGameCommandRouter`).
+
+### 4.2 “Reflection” and changing components
+
+Direct reflection from Lua is risky. To “mutate object data,” do it through:
+- An allowlist of types/fields/methods
+- A dedicated `IWorldReflectionPolicy` (project layer)
+- A set of strictly typed commands (e.g. `set_transform`, `add_force`, `set_anim_trigger`)
 
 ---
 
-## 6. Тесты
+## 5. Defaults vs configuration
 
-- EditMode: `WorldCommandLuaBindingsEditModeTests` — проверяет, что Lua публикует `WorldCommand` с корректным JSON.
-- PlayMode (рекомендуется добавить в тайтле): smoke‑тест сцены, где `coreai_world_spawn` создаёт объект из реестра.
+**By default** in the template:
+- World Commands are enabled (Lua API registered).
+- Spawning requires an assigned `CoreAiPrefabRegistryAsset`.
 
+**Configurable** via `CoreAILifetimeScope` Inspector:
+- Assign or disable the prefab registry
+- Replace or wrap the command executor
+
+---
+
+## 6. Tests
+
+- EditMode: `WorldCommandLuaBindingsEditModeTests` — verifies Lua publishes `WorldCommand` with valid JSON.
+- PlayMode (recommended for your title): smoke test on a scene where `coreai_world_spawn` creates an object from the registry.

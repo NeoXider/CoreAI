@@ -55,7 +55,16 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
                 chunks, done => gotDone = done);
 
-            yield return _setup.RunAndWait(streamTask, 30f, "Streaming");
+            // LLMUnity cold start / first token can exceed 30s; align with RequestTimeoutSeconds + margin
+            // (same idea as Streaming_ThinkBlocks_StrippedFromResponse).
+            float waitSec = 120f;
+            CoreAISettingsAsset settingsAsset = CoreAISettingsAsset.Instance;
+            if (settingsAsset != null)
+            {
+                waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
+            }
+
+            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming");
 
             Assert.IsTrue(gotDone, "Should receive a chunk with IsDone=true");
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");

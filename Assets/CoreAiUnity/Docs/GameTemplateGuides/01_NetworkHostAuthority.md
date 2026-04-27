@@ -1,7 +1,7 @@
-# Сеть: хост и авторитет ИИ
+# Networking: host and AI authority
 
-**Норматив:** [DGF_SPEC.md §5](../DGF_SPEC.md) — клиент не авторитет для глобальных исходов ИИ; хост (или solo) — эталон для оркестрации и публикации **`ApplyAiGameCommand`**.
+**Normative:** [DGF_SPEC.md §5](../DGF_SPEC.md) — the client is not authoritative for global AI outcomes; the host (or solo) is the source of truth for orchestration and publishing **`ApplyAiGameCommand`**.
 
-**Где в коде сейчас:** оркестрация идёт из игры через **`IAiOrchestrationService`**; репликация и «кто вызывает LLM» — ответственность тайтла. Карта потока: [DEVELOPER_GUIDE.md §3](../DEVELOPER_GUIDE.md).
+**Where this lives in code today:** orchestration is driven from the game via **`IAiOrchestrationService`**; replication and “who calls the LLM” are the title’s responsibility. Flow map: [DEVELOPER_GUIDE.md §3](../DEVELOPER_GUIDE.md).
 
-**Placement ролей и мультиплеер:** [AI_AGENT_ROLES.md](../AI_AGENT_ROLES.md).
+**Role placement and multiplayer:** [AI_AGENT_ROLES.md](../AI_AGENT_ROLES.md).

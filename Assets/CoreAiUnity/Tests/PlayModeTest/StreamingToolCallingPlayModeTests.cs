@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -57,7 +58,7 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
                 chunks, done => gotDone = done);
 
-            yield return _setup.RunAndWait(streamTask, 30f, "Streaming_ToolCapable");
+            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_ToolCapable");
 
             Assert.IsTrue(gotDone, "Should receive a chunk with IsDone=true");
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
@@ -93,7 +94,7 @@ namespace CoreAI.Tests.PlayMode
 
             Task streamTask = CollectCancelStreamAsync(_setup.Client, request, cts, counter, cancelAfterChunks: 2);
 
-            yield return _setup.RunAndWait(streamTask, 30f, "Streaming_EarlyCancel");
+            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_EarlyCancel");
 
             Debug.Log($"[StreamingToolTest] EarlyCancel: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
             Assert.IsTrue(counter.WasCancelled,
@@ -121,7 +122,7 @@ namespace CoreAI.Tests.PlayMode
             Task streamTask = CollectStreamAsync(_setup.Client, streamRequest, CancellationToken.None,
                 chunks, done => gotDone = done);
 
-            yield return _setup.RunAndWait(streamTask, 30f, "Streaming_First");
+            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_First");
 
             Assert.IsTrue(gotDone, "Streaming should complete");
 
@@ -136,7 +137,7 @@ namespace CoreAI.Tests.PlayMode
             var resultBox = new LlmResultBox();
             Task nonStreamTask = CompleteOnMainThreadAsync(_setup.Client, nonStreamRequest, resultBox);
 
-            yield return _setup.RunAndWait(nonStreamTask, 30f, "NonStreaming_Second");
+            yield return _setup.RunAndWait(nonStreamTask, ResolveLlmWaitSeconds(), "NonStreaming_Second");
 
             Assert.IsNotNull(resultBox.Value, "Non-streaming result should not be null");
             Assert.IsTrue(resultBox.Value.Ok, $"Non-streaming request failed: {resultBox.Value?.Error}");
@@ -147,6 +148,21 @@ namespace CoreAI.Tests.PlayMode
         }
 
         // ===================== Helpers =====================
+
+        /// <summary>
+        /// LLMUnity cold start / first token often exceeds 30s; match <see cref="StreamingPlayModeTests"/> margins.
+        /// </summary>
+        private static float ResolveLlmWaitSeconds()
+        {
+            float waitSec = 120f;
+            CoreAISettingsAsset settingsAsset = CoreAISettingsAsset.Instance;
+            if (settingsAsset != null)
+            {
+                waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
+            }
+
+            return waitSec;
+        }
 
         private static async Task CollectStreamAsync(
             ILlmClient client,

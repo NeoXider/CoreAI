@@ -85,10 +85,24 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                     "You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. " +
                     "You MUST call get_inventory first, then answer with item names and prices.");
 
-                yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive",
-                    "Player says: 'I want Leather Armor x1'. Player has low gold. " +
-                    "You MUST call get_player_gold and buy_item(itemName='Leather Armor', quantity=1). " +
-                    "If purchase fails, explain briefly and suggest cheaper options.");
+                const string step2Base =
+                    "Player says: 'I want Leather Armor x1'. Player has low gold (40 gold). " +
+                    "Do NOT call get_inventory again. " +
+                    "You MUST call get_player_gold, then buy_item(itemName='Leather Armor', quantity=1). " +
+                    "If purchase fails, explain briefly and suggest cheaper options.";
+                yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base);
+                for (int retry = 0;
+                     retry < 2 &&
+                     !economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal));
+                     retry++)
+                {
+                    Debug.LogWarning(
+                        $"[MerchantScenario] Step2 missing buy_item(Leather Armor); corrective retry {retry + 1}.");
+                    yield return RunStep(orch, sink, inventory, economy, store, $"Step2_TooExpensive_Retry{retry + 1}",
+                        step2Base +
+                        " Your last answer did not invoke get_player_gold and buy_item. " +
+                        "Call those two tools now (no meta commentary about prior steps).");
+                }
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
                     "Player says: 'Can you discount Health Potion? I have little money.' " +

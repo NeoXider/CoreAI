@@ -87,6 +87,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void AgentMemoryPolicy_Default_PlayerChat_PersistsChatHistory()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.PlayerChat);
+
+            Assert.IsFalse(config.UseMemoryTool, "PlayerChat should not expose MemoryTool by default");
+            Assert.IsTrue(config.WithChatHistory, "Drop-in chat should keep conversation context by default");
+            Assert.IsTrue(config.PersistChatHistory, "Drop-in chat should restore session after app restart by default");
+        }
+
+        [Test]
+        public void AgentMemoryPolicy_Default_Creator_StillUsesMemoryToolOnly()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.Creator);
+
+            Assert.IsTrue(config.UseMemoryTool);
+            Assert.IsFalse(config.WithChatHistory);
+            Assert.IsFalse(config.PersistChatHistory);
+        }
+
+        [Test]
         public void WithChatHistory_OnlyPersist_ShouldUseDefaultTokens()
         {
             AgentConfig config = new AgentBuilder("TestAgent")

@@ -63,5 +63,14 @@ namespace CoreAI.Ai
         /// Must match an <see cref="ILlmTool.Name"/> registered for this role.
         /// </summary>
         public string RequiredToolName { get; set; } = "";
+
+        /// <summary>
+        /// Per-call override of the LLM response token budget. <c>null</c> or <c>0</c> = use the
+        /// per-agent/default fallback chain. Positive value wins over per-agent and global defaults.
+        /// Propagated to
+        /// <see cref="LlmCompletionRequest.MaxOutputTokens"/> by the orchestrator. Honored uniformly
+        /// by HTTP and LLMUnity backends.
+        /// </summary>
+        public int? MaxOutputTokens { get; set; }
     }
 }

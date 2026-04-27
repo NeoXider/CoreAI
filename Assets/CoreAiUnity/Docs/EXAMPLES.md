@@ -1,44 +1,44 @@
-# 📖 Примеры использования CoreAI
+# 📖 CoreAI usage examples
 
-**Версия документа:** 1.0 | **Дата:** Апрель 2026
+**Document version:** 1.0 | **Date:** April 2026
 
-Практические примеры использования CoreAI: от простых до продвинутых сценариев.
-
----
-
-## Содержание
-
-- [Пример 1: Создание врага через AI](#пример-1-создание-врага-через-ai)
-- [Пример 2: Крафт оружия (CoreMechanicAI + Programmer)](#пример-2-крафт-оружия-coremechanicai--programmer)
-- [Пример 3: Auto-repair Lua кода](#пример-3-auto-repair-lua-кода)
-- [Пример 4: NPC-торговец с инвентарём](#пример-4-npc-торговец-с-инвентарём)
-- [Пример 5: Адаптивная сложность](#пример-5-адаптивная-сложность)
-- [Пример 6: Кастомный агент-рассказчик](#пример-6-кастомный-агент-рассказчик)
-- [Пример 7: NPC с памятью и событиями](#пример-7-npc-с-памятью-и-событиями)
+Practical CoreAI examples from simple to advanced scenarios.
 
 ---
 
-## Пример 1: Создание врага через AI
+## Contents
 
-### Сценарий
-Creator AI анализирует состояние игры и решает, что нужно спавнить нового врага для баланса.
+- [Example 1: Spawning an enemy via AI](#example-1-spawning-an-enemy-via-ai)
+- [Example 2: Weapon crafting (CoreMechanicAI + Programmer)](#example-2-weapon-crafting-coremechanicai--programmer)
+- [Example 3: Auto-repair Lua code](#example-3-auto-repair-lua-code)
+- [Example 4: NPC merchant with inventory](#example-4-npc-merchant-with-inventory)
+- [Example 5: Adaptive difficulty](#example-5-adaptive-difficulty)
+- [Example 6: Custom storyteller agent](#example-6-custom-storyteller-agent)
+- [Example 7: NPC with memory and events](#example-7-npc-with-memory-and-events)
 
-### Поток
+---
+
+## Example 1: Spawning an enemy via AI
+
+### Scenario
+Creator AI reads game state and decides a new enemy should spawn for balance.
+
+### Flow
 ```
 Creator AI → World Command Tool → PrefabRegistry → GameObject.Instantiate
 ```
 
-### Код запуска
+### Launch code
 
 ```csharp
-// Где-то в вашем GameManager:
+// Somewhere in your GameManager:
 public class WaveManager : MonoBehaviour
 {
     [Inject] private IAiOrchestrationService _orchestrator;
 
     public async void OnWaveComplete(int waveNumber)
     {
-        // Попросить Creator создать следующую волну
+        // Ask Creator to build the next wave
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Creator",
@@ -51,12 +51,12 @@ public class WaveManager : MonoBehaviour
 }
 ```
 
-### Что делает AI
+### What the AI does
 
-**Системный промпт Creator'а** содержит инструкции по балансу. Модель анализирует подсказку и вызывает tool:
+**Creator’s system prompt** includes balance instructions. The model reads the hint and calls tools:
 
 ```json
-// Шаг 1: Creator вызывает world_command для спавна
+// Step 1: Creator calls world_command to spawn
 {"name": "world_command", "arguments": {
     "action": "spawn",
     "prefabKey": "Archer",
@@ -64,7 +64,7 @@ public class WaveManager : MonoBehaviour
     "x": -15, "y": 0, "z": 20
 }}
 
-// Шаг 2: Ещё один враг
+// Step 2: Another enemy
 {"name": "world_command", "arguments": {
     "action": "spawn",
     "prefabKey": "EliteBoss",
@@ -72,23 +72,23 @@ public class WaveManager : MonoBehaviour
     "x": 0, "y": 0, "z": 30
 }}
 
-// Шаг 3: Сохраняет в память что сделал
+// Step 3: Saves to memory what it did
 {"name": "memory", "arguments": {
     "action": "append",
     "content": "Wave 4: spawned 1 Archer + 1 EliteBoss (player was strong, DPS=150)"
 }}
 ```
 
-### Результат в Unity
+### Result in Unity
 ```
 [World] Spawned "archer_w4_1" (Archer) at (-15, 0, 20)
 [World] Spawned "boss_w4" (EliteBoss) at (0, 0, 30)
 [Memory] Creator: appended "Wave 4: spawned 1 Archer + 1 EliteBoss..."
 ```
 
-2 новых врага появляются на сцене! 🎮
+Two new enemies appear on the scene.
 
-### Необходимая настройка
+### Required setup
 
 ```
 CoreAiPrefabRegistryAsset:
@@ -97,28 +97,28 @@ CoreAiPrefabRegistryAsset:
   ├─ Key: "Archer"     → Prefab: ArcherPrefab
   └─ Key: "Healer"     → Prefab: HealerPrefab
 
-CoreAILifetimeScope → World Prefab Registry → ваш asset
+CoreAILifetimeScope → World Prefab Registry → your asset
 ```
 
 ---
 
-## Пример 2: Крафт оружия (CoreMechanicAI + Programmer)
+## Example 2: Weapon crafting (CoreMechanicAI + Programmer)
 
-### Сценарий
-Игрок крафтит оружие из двух ингредиентов. CoreMechanicAI определяет результат, Programmer создаёт предмет через Lua.
+### Scenario
+The player crafts a weapon from two ingredients. CoreMechanicAI decides the outcome; Programmer creates the item via Lua.
 
-### Поток
+### Flow
 ```
-Игрок: "Craft Iron + Fire Crystal"
+Player: "Craft Iron + Fire Crystal"
   ↓
-CoreMechanicAI → анализ рецепта → JSON результат
+CoreMechanicAI → recipe analysis → JSON result
   ↓
 Programmer → execute_lua → create_item() + add_effect()
   ↓
-Игрок получает "Flame Sword" (урон 45, огонь 15)
+Player gets "Flame Sword" (damage 45, fire 15)
 ```
 
-### Код запуска
+### Launch code
 
 ```csharp
 public class CraftingSystem : MonoBehaviour
@@ -127,7 +127,7 @@ public class CraftingSystem : MonoBehaviour
 
     public async void OnCraftRequest(string ingredient1, string ingredient2)
     {
-        // Шаг 1: CoreMechanicAI определяет результат крафта
+        // Step 1: CoreMechanicAI decides craft outcome
         var mechanicResult = await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "CoreMechanicAI",
@@ -137,7 +137,7 @@ public class CraftingSystem : MonoBehaviour
             Priority = 8
         });
 
-        // Шаг 2: Programmer создаёт предмет через Lua
+        // Step 2: Programmer creates the item via Lua
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Programmer",
@@ -151,23 +151,23 @@ public class CraftingSystem : MonoBehaviour
 }
 ```
 
-### Что делает CoreMechanicAI
+### What CoreMechanicAI does
 
 ```json
-// CoreMechanicAI анализирует и сохраняет в память:
+// CoreMechanicAI analyzes and saves to memory:
 {"name": "memory", "arguments": {
     "action": "append",
     "content": "Craft#1: Iron + Fire Crystal → Flame Sword | damage:45, fire_damage:15, weight:medium"
 }}
 ```
 
-Затем отвечает текстом:
+Then answers in text:
 ```
 "Combining Iron with Fire Crystal creates a Flame Sword. 
 Base damage: 45. Special effect: fire_damage +15."
 ```
 
-### Что делает Programmer
+### What Programmer does
 
 ```json
 {"name": "execute_lua", "arguments": {
@@ -175,7 +175,7 @@ Base damage: 45. Special effect: fire_damage +15."
 }}
 ```
 
-### Результат
+### Result
 ```
 [CoreMechanicAI] Memory: "Craft#1: Iron + Fire Crystal → Flame Sword..."
 [Programmer] Lua: create_item("Flame Sword", 45) ✅
@@ -185,22 +185,22 @@ Base damage: 45. Special effect: fire_damage +15."
 
 ---
 
-## Пример 3: Auto-repair Lua кода
+## Example 3: Auto-repair Lua code
 
-### Сценарий
-Programmer генерирует Lua код, но он содержит ошибку. Система автоматически пытается починить код до 3 раз.
+### Scenario
+Programmer generates Lua that contains an error. The system automatically tries to fix the code up to 3 times.
 
-### Поток
+### Flow
 ```
-Попытка 1: LLM → Lua → ❌ Error
-Попытка 2: LLM (+ контекст ошибки) → Lua → ❌ Error 
-Попытка 3: LLM (+ история ошибок) → Lua → ✅ Success!
+Attempt 1: LLM → Lua → ❌ Error
+Attempt 2: LLM (+ error context) → Lua → ❌ Error 
+Attempt 3: LLM (+ error history) → Lua → ✅ Success!
 ```
 
-### Как это работает (внутри системы)
+### How it works (inside the system)
 
 ```
-═══════════ ПОПЫТКА 1 ═══════════
+═══════════ ATTEMPT 1 ═══════════
 
 LLM → execute_lua:
   local reward = calculate_reward(player_level)  -- ❌ nil function!
@@ -209,34 +209,34 @@ LLM → execute_lua:
 MoonSharp Error:
   "attempt to call 'calculate_reward' (a nil value)"
 
-═══════════ ПОПЫТКА 2 (auto-repair) ═══════════
+═══════════ ATTEMPT 2 (auto-repair) ═══════════
 
-System prompt включает:
+System prompt includes:
   "Previous error: attempt to call 'calculate_reward' (a nil value)"
   "Available API: report(string), add(a,b), coreai_world_*"
   "Fix the Lua code. Do NOT use functions not in the API."
 
 LLM → execute_lua:
-  local reward = 50 * 3  -- используем только math
+  local reward = 50 * 3  -- use only allowed math
   report("Reward: " .. reward
 
 MoonSharp Error:
-  "')' expected near '<eof>'"  -- забыл закрыть скобку
+  "')' expected near '<eof>'"  -- missing closing paren
 
-═══════════ ПОПЫТКА 3 (auto-repair) ═══════════
+═══════════ ATTEMPT 3 (auto-repair) ═══════════
 
-System prompt включает:
+System prompt includes:
   "Previous errors: [attempt to call..., ')' expected near...]"
   "Fix the syntax error."
 
 LLM → execute_lua:
   local reward = 50 * 3
-  report("Reward: " .. reward)  -- ✅ Исправлено!
+  report("Reward: " .. reward)  -- ✅ Fixed!
 
 Result: "Reward: 150" ✅ Success!
 ```
 
-### Логи в консоли Unity
+### Unity console logs
 ```
 [traceId=xyz789] LLM ▶ role=Programmer (attempt 1/4)
 [traceId=xyz789] LLM ◀ 156 tokens, 0.8s
@@ -251,23 +251,23 @@ Result: "Reward: 150" ✅ Success!
 [traceId=xyz789] Lua execution succeeded: "Reward: 150"
 ```
 
-### Настройка
+### Configuration
 ```csharp
-// Максимум попыток авто-ремонта (по умолчанию 3):
+// Max auto-repair attempts (default 3):
 CoreAISettings.MaxLuaRepairRetries = 3;
 
-// Максимум попыток tool call (по умолчанию 3):
+// Max tool call attempts (default 3):
 CoreAISettings.MaxToolCallRetries = 3;
 ```
 
 ---
 
-## Пример 4: NPC-торговец с инвентарём
+## Example 4: NPC merchant with inventory
 
-### Сценарий
-Игрок общается с NPC-торговцем. NPC запрашивает свой инвентарь и отвечает с учётом товаров.
+### Scenario
+The player talks to an NPC merchant. The NPC queries inventory and answers with stock in mind.
 
-### Код
+### Code
 
 ```csharp
 public class MerchantSetup : MonoBehaviour
@@ -276,7 +276,7 @@ public class MerchantSetup : MonoBehaviour
 
     void Start()
     {
-        // Создаём инвентарь (или получаем через DI)
+        // Create inventory (or resolve via DI)
         var inventory = new SimpleInventoryProvider(new[]
         {
             new InventoryItem("Iron Sword", "weapon", 3, 50),
@@ -285,7 +285,7 @@ public class MerchantSetup : MonoBehaviour
             new InventoryItem("Flame Blade", "weapon", 1, 250)
         });
 
-        // Создаём агента-торговца
+        // Merchant agent
         var merchant = new AgentBuilder("Merchant")
             .WithSystemPrompt(
                 "You are Grok, a grumpy but lovable blacksmith. " +
@@ -303,47 +303,47 @@ public class MerchantSetup : MonoBehaviour
 }
 ```
 
-### Диалог
+### Dialogue
 
 ```
-🎮 Игрок: "Что у тебя есть?"
+🎮 Player: "What do you have?"
 
-🤖 Merchant внутренне:
+🤖 Merchant internally:
    1. {"name": "get_inventory", "arguments": {}}
-   2. Получает: [{name: "Iron Sword", price: 50, qty: 3}, ...]
-   3. Формирует ответ
+   2. Receives: [{name: "Iron Sword", price: 50, qty: 3}, ...]
+   3. Builds reply
 
-💬 Merchant: "Ха! Покупатель! Значит так, слушай:
-   • Iron Sword — 50 монет (3 штуки, крепкое железо!)
-   • Steel Axe — 100 монет (последний! Для серьёзных рубак)
-   • Health Potion — 25 монет (10 штук, не болей)
-   • Flame Blade — 250 монет (ОГОНЬ! В буквальном смысле!)
-   Ну что, берёшь?"
+💬 Merchant: "Ha! A customer! Listen up:
+   • Iron Sword — 50 coins (3 in stock, solid iron!)
+   • Steel Axe — 100 coins (last one! For serious chopper types)
+   • Health Potion — 25 coins (10 in stock, stay healthy)
+   • Flame Blade — 250 coins (FIRE! Literally!)
+   So, buying anything?"
 
-🎮 Игрок: "Flame Blade слишком дорогой, скинь цену!"
+🎮 Player: "Flame Blade is too expensive, lower the price!"
 
-💬 Merchant: "250?! Дорого?! Да этот клинок выкован в самом жерле
-   вулкана! Ладно, ты мне нравишься... 220 монет. Последнее слово!"
+💬 Merchant: "250?! Too pricey?! This blade was forged in the volcano’s heart!
+   Fine, I like you… 220 coins. Final offer!"
 ```
 
 ---
 
-## Пример 5: Адаптивная сложность
+## Example 5: Adaptive difficulty
 
-### Сценарий
-Analyzer анализирует поведение игрока и рекомендует Creator'у изменить сложность.
+### Scenario
+Analyzer studies player behavior and recommends Creator adjust difficulty.
 
-### Код
+### Code
 
 ```csharp
 public class AdaptiveDifficultySystem : MonoBehaviour
 {
     [Inject] private IAiOrchestrationService _orchestrator;
 
-    // Вызывается каждые 60 секунд
+    // Called every 60 seconds
     public async void AnalyzeAndAdapt()
     {
-        // Собираем метрики
+        // Collect metrics
         var metrics = new
         {
             playerDPS = 250,
@@ -354,15 +354,15 @@ public class AdaptiveDifficultySystem : MonoBehaviour
             itemsIgnored = new[] { "Shield", "Armor", "Healing" }
         };
 
-        // Шаг 1: Analyzer анализирует
+        // Step 1: Analyzer runs
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Analyzer",
             Hint = $"Analyze player: {JsonConvert.SerializeObject(metrics)}",
-            Priority = 3  // Низкий приоритет, фоновый
+            Priority = 3  // Low priority, background
         });
 
-        // Шаг 2: Creator реагирует на анализ
+        // Step 2: Creator reacts to analysis
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Creator",
@@ -375,7 +375,7 @@ public class AdaptiveDifficultySystem : MonoBehaviour
 }
 ```
 
-### Что делает Analyzer
+### What Analyzer does
 
 ```json
 {"name": "memory", "arguments": {
@@ -384,16 +384,16 @@ public class AdaptiveDifficultySystem : MonoBehaviour
 }}
 ```
 
-### Что делает Creator
+### What Creator does
 
 ```json
-// 1. Обновляет конфиг игры
+// 1. Updates game config
 {"name": "game_config", "arguments": {
     "action": "update",
     "content": "{\"difficulty_multiplier\": 1.8, \"heal_drop_rate\": 0.3, \"enemy_ranged_ratio\": 0.6}"
 }}
 
-// 2. Спавнит сюрприз
+// 2. Spawns a surprise
 {"name": "world_command", "arguments": {
     "action": "spawn",
     "prefabKey": "Archer",
@@ -401,7 +401,7 @@ public class AdaptiveDifficultySystem : MonoBehaviour
     "x": 30, "y": 5, "z": 30
 }}
 
-// 3. Сохраняет решение
+// 3. Saves the decision
 {"name": "memory", "arguments": {
     "action": "append",
     "content": "Decision: increased difficulty x1.8, reduced heals, added sniper at elevation"
@@ -410,12 +410,12 @@ public class AdaptiveDifficultySystem : MonoBehaviour
 
 ---
 
-## Пример 6: Кастомный агент-рассказчик
+## Example 6: Custom storyteller agent
 
-### Сценарий
-Создаём агента-рассказчика, который описывает события в игре в стиле фэнтези-хроники.
+### Scenario
+Build a storyteller agent that describes in-game events in fantasy chronicle style.
 
-### Код
+### Code
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")
@@ -424,20 +424,20 @@ var storyteller = new AgentBuilder("Storyteller")
         "Describe events in epic fantasy prose. Use metaphors and vivid imagery. " +
         "Keep responses under 3 sentences. " +
         "Reference previous events from your memory.")
-    .WithMemory()                    // Помнит ключевые события
-    .WithChatHistory()               // Помнит контекст разговора
-    .WithMode(AgentMode.ChatOnly)    // Только текст, без инструментов
-    .WithTemperature(0.7f)           // Более креативный
+    .WithMemory()                    // Remembers key events
+    .WithChatHistory()               // Conversation context
+    .WithMode(AgentMode.ChatOnly)    // Text only, no tools
+    .WithTemperature(0.7f)           // More creative
     .Build();
 
 storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
-// Использование:
+// Usage:
 storyteller.Ask("The player defeated the dragon boss",
     (narration) => ShowCinematicText(narration));
 ```
 
-### Результат
+### Result
 
 ```
 📜 "And so the blade sang its crimson song — the ancient wyrm, 
@@ -448,12 +448,12 @@ storyteller.Ask("The player defeated the dragon boss",
 
 ---
 
-## Пример 7: NPC с памятью и событиями
+## Example 7: NPC with memory and events
 
-### Сценарий
-Создаём стражника, который помнит игрока, может поднять тревогу и открывать ворота.
+### Scenario
+Build a guard who remembers the player, can raise the alarm, and open the gates.
 
-### Код
+### Code
 
 ```csharp
 public class GuardSetup : MonoBehaviour
@@ -473,7 +473,7 @@ public class GuardSetup : MonoBehaviour
                 "If someone shows the king's seal, call 'open_gate'. " +
                 "Remember everyone you meet using memory tool.")
             
-            // Кастомные действия через WithAction
+            // Custom actions via WithAction
             .WithAction("raise_alarm", "Raise the city alarm for intruders",
                 () => {
                     _alarmAudio.Play();
@@ -486,7 +486,7 @@ public class GuardSetup : MonoBehaviour
                     Debug.Log("🚪 Gate opened!");
                 })
             
-            // Событие через EventTool (decoupled через CoreAiEvents)
+            // Event via EventTool (decoupled via CoreAiEvents)
             .WithEventTool("report_crime", "Report a crime to the patrol system")
             
             .WithMemory()
@@ -499,60 +499,60 @@ public class GuardSetup : MonoBehaviour
 }
 ```
 
-### Диалоги
+### Dialogues
 
 ```
-🎮 Игрок: "Открой ворота, я посланник короля."
+🎮 Player: "Open the gates, I am the king's envoy."
 
-🤖 Guard (внутренне):
-  1. Проверяет память → нет записей об этом игроке
-  2. Решает: без доказательств не открывать
+🤖 Guard (internal):
+  1. Checks memory → no record of this player
+  2. Decision: no proof, do not open
   
-💬 Guard: "Посланник, говоришь? Каждый второй бродяга 
-   так себя называет. Покажи королевскую печать!"
+💬 Guard: "An envoy, you say? Every second vagabond claims that.
+   Show the royal seal!"
 
-🎮 Игрок: "Вот печать." (показывает предмет)
+🎮 Player: "Here is the seal." (shows item)
 
-🤖 Guard (внутренне):
+🤖 Guard (internal):
   1. {"name": "memory", "arguments": {"action": "write", "content": "Player showed king's seal. Authorized."}}
   2. {"name": "open_gate", "arguments": {}}
   
-💬 Guard: "Хм, настоящая... Простите за подозрения, милорд.
-   Ворота открыты. Добро пожаловать в город!"
+💬 Guard: "Hmm, genuine… Pardon the suspicion, my lord.
+   The gates are open. Welcome to the city!"
    
-🚪 *ворота открываются* ✅
+🚪 *gates open* ✅
 ```
 
 ```
-🎮 (Другой игрок): "Я... эм... тоже посланник!"
+🎮 (Another player): "I… uh… I'm an envoy too!"
 
-🤖 Guard (внутренне):
+🤖 Guard (internal):
   1. {"name": "raise_alarm", "arguments": {}}
   2. {"name": "report_crime", "arguments": {}}
   
-💬 Guard: "СТРАЖА! Самозванец у ворот! Взять его!"
+💬 Guard: "GUARDS! An impostor at the gates! Seize him!"
    
-🚨 *тревога звучит* ✅
+🚨 *alarm sounds* ✅
 ```
 
 ---
 
-## 📋 Матрица примеров
+## 📋 Example matrix
 
-| Пример | Роли | Tools | Сложность |
+| Example | Roles | Tools | Difficulty |
 |--------|------|-------|:---------:|
-| [Создание врага](#пример-1) | Creator | world_command, memory | ⭐ |
-| [Крафт оружия](#пример-2) | CoreMechanicAI + Programmer | memory, execute_lua | ⭐⭐ |
-| [Auto-repair](#пример-3) | Programmer | execute_lua (self-heal) | ⭐⭐ |
-| [Торговец](#пример-4) | Merchant (custom) | get_inventory, memory | ⭐ |
-| [Адаптивная сложность](#пример-5) | Analyzer + Creator | memory, game_config, world_command | ⭐⭐⭐ |
-| [Рассказчик](#пример-6) | Storyteller (custom) | (нет — ChatOnly) | ⭐ |
-| [Стражник](#пример-7) | Guard (custom) | WithAction, WithEventTool, memory | ⭐⭐ |
+| [Enemy spawn](#example-1-spawning-an-enemy-via-ai) | Creator | world_command, memory | ⭐ |
+| [Weapon craft](#example-2-weapon-crafting-coremechanicai--programmer) | CoreMechanicAI + Programmer | memory, execute_lua | ⭐⭐ |
+| [Auto-repair](#example-3-auto-repair-lua-code) | Programmer | execute_lua (self-heal) | ⭐⭐ |
+| [Merchant](#example-4-npc-merchant-with-inventory) | Merchant (custom) | get_inventory, memory | ⭐ |
+| [Adaptive difficulty](#example-5-adaptive-difficulty) | Analyzer + Creator | memory, game_config, world_command | ⭐⭐⭐ |
+| [Storyteller](#example-6-custom-storyteller-agent) | Storyteller (custom) | (none — ChatOnly) | ⭐ |
+| [Guard](#example-7-npc-with-memory-and-events) | Guard (custom) | WithAction, WithEventTool, memory | ⭐⭐ |
 
 ---
 
-> 📖 **Связанные документы:**
-> - [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) — полный гайд по созданию агентов
-> - [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) — спецификация инструментов
-> - [JSON_COMMAND_FORMAT.md](JSON_COMMAND_FORMAT.md) — формат JSON команд
-> - [QUICK_START_FULL.md](QUICK_START_FULL.md) — быстрый старт
+> 📖 **Related docs:**
+> - [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) — full guide to building agents
+> - [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) — tool specification
+> - [JSON_COMMAND_FORMAT.md](JSON_COMMAND_FORMAT.md) — JSON command format
+> - [QUICK_START_FULL.md](QUICK_START_FULL.md) — quick start

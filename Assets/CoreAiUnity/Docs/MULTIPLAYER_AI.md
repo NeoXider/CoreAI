@@ -1,31 +1,31 @@
-# CoreAI и мультиплеер
+# CoreAI and multiplayer
 
-## Политика выполнения ИИ
+## AI execution policy
 
-В `CoreAILifetimeScope` (секция **Network / AI authority**):
+In `CoreAILifetimeScope` (**Network / AI authority** section):
 
-| Поле | Смысл |
+| Field | Meaning |
 |------|--------|
-| **AllPeers** (по умолчанию) | LLM/оркестратор могут выполняться на каждом узле. Удобно для прототипов; возможны дублирующие вызовы и расход токенов. |
-| **HostOnly** | ИИ только на узле с `IsHostAuthority` (хост, dedicated server, solo). |
-| **ClientPeersOnly** | ИИ только на «чистых» клиентах (`IsPureClient`), без роли хоста. |
+| **AllPeers** (default) | LLM/orchestrator may run on every node. Handy for prototypes; duplicate calls and token spend are possible. |
+| **HostOnly** | AI only on the node with `IsHostAuthority` (host, dedicated server, solo). |
+| **ClientPeersOnly** | AI only on “pure” clients (`IsPureClient`), without host role. |
 
-Без сетевого слоя используется `DefaultSoloNetworkPeer`: хост = да, чистый клиент = нет.
+Without a network layer, `DefaultSoloNetworkPeer` is used: host = yes, pure client = no.
 
-## Свой peer (Unity Netcode и др.)
+## Your peer (Unity Netcode, etc.)
 
-Добавьте компонент, унаследованный от `CoreAiNetworkPeerBehaviour`, и назначьте его в поле **network peer behaviour** на `CoreAILifetimeScope`.
+Add a component derived from `CoreAiNetworkPeerBehaviour` and assign it to the **network peer behaviour** field on `CoreAILifetimeScope`.
 
-Пример логики (псевдокод NGO):
+Example logic (NGO pseudocode):
 
-- `IsHostAuthority` → `IsServer` или `IsHost` (listen server).
-- `IsPureClient` → `IsClient && !IsHost` (удалённый клиент без host authority).
+- `IsHostAuthority` → `IsServer` or `IsHost` (listen server).
+- `IsPureClient` → `IsClient && !IsHost` (remote client without host authority).
 
-## Команды и состояние
+## Commands and state
 
-`ApplyAiGameCommand` и Lua/версии данных по умолчанию локальны. Для мультиплеера обычно нужно:
+`ApplyAiGameCommand` and Lua/data versions are local by default. For multiplayer you usually need to:
 
-- Реплицировать **решения**, которые меняют игру (спавн, прогрессия), с сервера.
-- Держать **один** источник правды для LLM-трассировки или явно помечать «локальный чат» vs «серверный сценарий».
+- Replicate **decisions** that change the game (spawn, progression) from the server.
+- Keep **one** source of truth for LLM traces, or clearly label “local chat” vs “server scenario”.
 
-Подробнее см. комментарии в `ArenaSurvivalProceduralSetup` (роль симуляции).
+See comments in `ArenaSurvivalProceduralSetup` (simulation role) for more detail.

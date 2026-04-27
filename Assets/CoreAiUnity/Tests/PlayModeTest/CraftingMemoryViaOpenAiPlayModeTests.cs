@@ -99,6 +99,9 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                // Local models often re-emit identical tool payloads across iterations; duplicate guard
+                // otherwise hits max consecutive errors. Harness sink is idempotent for these crafts.
+                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -137,6 +140,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 1", sink, store);
                     if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
@@ -167,6 +171,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 2", sink, store);
                     if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
@@ -197,6 +202,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 3", sink, store);
                     if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
@@ -228,6 +234,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 4");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 4 (determinism)", sink, store);
 
@@ -320,6 +327,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -346,6 +354,7 @@ namespace CoreAI.Tests.PlayMode
                 });
 
                 yield return PlayModeTestAwait.WaitTask(t1, 300f, "craft 1");
+                yield return FlushMemoryStorePersistenceFrames();
 
                 LogAfterModelCall("craft 1", sink1, store);
 
@@ -360,11 +369,21 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
 
                 // =====  2 (   + ) =====
+                // This harness only registers execute_lua (no memory ILlmTool), so the model's "memory" JSON
+                // never hits IAgentMemoryStore. Feed craft #2 the canonical previous-crafts line from craft #1
+                // so the prompt can require a different weapon name (same as ThreeCrafts memoryAccum pattern).
                 string memoryHint = "";
                 if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState st1) &&
                     !string.IsNullOrWhiteSpace(st1.Memory))
                 {
-                    memoryHint = st1.Memory;
+                    memoryHint = st1.Memory.Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(memoryHint) && !string.IsNullOrWhiteSpace(firstName))
+                {
+                    memoryHint = $"Previous crafts: Craft #1 - {firstName} made from Steel + Fire";
+                    store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryHint });
+                    Debug.Log($"[CraftingMemory.OpenAI] Injected harness memory for craft 2 prompt:\n{memoryHint}");
                 }
 
                 string prompt2 = BuildCraftPrompt(2,
@@ -384,6 +403,7 @@ namespace CoreAI.Tests.PlayMode
                 });
 
                 yield return PlayModeTestAwait.WaitTask(t2, 300f, "craft 2");
+                yield return FlushMemoryStorePersistenceFrames();
 
                 LogAfterModelCall("craft 2", sink2, store);
 
@@ -507,6 +527,14 @@ namespace CoreAI.Tests.PlayMode
 
         #region Logging Helpers
 
+        private IEnumerator FlushMemoryStorePersistenceFrames()
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                yield return null;
+            }
+        }
+
         private static void LogBeforeModelCall(string label, string prompt, InMemoryStore store)
         {
             Debug.Log($"[CraftingMemory.OpenAI] ");
@@ -522,7 +550,7 @@ namespace CoreAI.Tests.PlayMode
             }
             else
             {
-                Debug.Log($"[CraftingMemory.OpenAI]   MEMORY: (empty  first craft)");
+                Debug.Log("[CraftingMemory.OpenAI]   MEMORY: (empty — first craft)");
                 Debug.Log($"[CraftingMemory.OpenAI] ");
             }
 
@@ -555,7 +583,8 @@ namespace CoreAI.Tests.PlayMode
             }
             else
             {
-                Debug.Log($"[CraftingMemory.OpenAI]   MEMORY: (not written by model)");
+                Debug.Log(
+                    "[CraftingMemory.OpenAI]   MEMORY: (empty in store after turn — harness may sync after ExtractCraftInfo)");
             }
 
             Debug.Log($"[CraftingMemory.OpenAI] ");
@@ -590,14 +619,9 @@ namespace CoreAI.Tests.PlayMode
             craftedNames.Add(itemName);
             memoryAccum = BuildCanonicalMemory(memoryAccum, craftNumber, itemName, ingredient1Short, ingredient2Short);
 
-            //  
-            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState existing))
-            {
-                store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState
-                {
-                    Memory = existing.Memory + $" | New: {itemName}"
-                });
-            }
+            // Keep store aligned with memoryAccum (what the next BuildCraftPrompt uses). Do not append
+            // "| New: ..." to model-written memory — that made "MEMORY VISIBLE TO MODEL" logs misleading.
+            store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryAccum });
 
             Debug.Log($"[{label}]  Crafted: '{itemName}'");
             return true;
@@ -637,7 +661,8 @@ namespace CoreAI.Tests.PlayMode
         private static readonly HashSet<string> JunkSingleWordNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "with", "the", "a", "an", "and", "or", "for", "from", "to", "of", "in", "on", "at", "is", "it", "as", "be",
-            "quality", "weapon", "memory", "item" // line "- Weapon created" () vs    
+            "quality", "weapon", "memory", "item", // line "- Weapon created" () vs
+            "execute_lua" // tool JSON envelope: "name": "execute_lua" must not become the item name
         };
 
         private static readonly Regex[] Patterns =
@@ -655,7 +680,10 @@ namespace CoreAI.Tests.PlayMode
             new("(?:[Tt]he )?weapon\\s+\"([^\"]+)\""),
             // " with Craft #4 - SteelHardwood Blade (identical to "
             new("Craft #\\d+\\s*-\\s*([A-Za-z0-9][A-Za-z0-9_ ]*?)\\s*\\("),
-            // JSON: "name": "..."
+            // Lua table field inside generated code (before generic JSON "name": tool keys)
+            new(@"\bname\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
+            new(@"\bname\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
+            // JSON: "name": "..." (may match tool envelope; junk-filter execute_lua / memory above)
             new("\"name\"\\s*:\\s*\"([^\"]+)\""),
             new("Name\\s*=\\s*\"([^\"]+)\""),
             // " crafted with quality" must NOT match "with" as the name  (?!with\b)

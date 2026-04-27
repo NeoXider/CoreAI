@@ -87,12 +87,20 @@ namespace CoreAI.Tests.EditMode
             public bool TryGetUserTemplate(string roleId, out string template) { template = null; return false; }
         }
 
-        private static AiOrchestrator BuildOrchestrator(CapturingLlmClient llm)
+        private sealed class StubTool : ILlmTool
+        {
+            public string Name { get; set; }
+            public string Description { get; set; }
+            public string ParametersSchema { get; set; } = "{}";
+            public bool AllowDuplicates { get; set; }
+        }
+
+        private static AiOrchestrator BuildOrchestrator(CapturingLlmClient llm, AgentMemoryPolicy policy = null)
         {
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memoryStore: null, memoryPolicy: new AgentMemoryPolicy(),
+                memoryStore: null, memoryPolicy: policy ?? new AgentMemoryPolicy(),
                 structuredPolicy: null, metrics: null, settings: new TestSettings());
         }
 
@@ -157,6 +165,96 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(LlmToolChoiceMode.Auto, llm.LastRequest.ForcedToolMode,
                 "Existing call sites that don't set ForcedToolMode must continue to behave as v0.24.x (Auto).");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AppendsToolContract_WhenRoleHasTools()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Merchant");
+            policy.SetToolsForRole("Merchant", new ILlmTool[]
+            {
+                new StubTool
+                {
+                    Name = "buy_item",
+                    Description = "Buy an item for the player.",
+                    ParametersSchema = "{\"type\":\"object\",\"properties\":{\"itemName\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}},\"required\":[\"itemName\",\"quantity\"]}"
+                }
+            });
+
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Merchant",
+                Hint = "buy potion",
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = "buy_item"
+            });
+
+            Assert.IsNotNull(llm.LastRequest);
+            StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("buy_item", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("do not claim that the tool is unavailable", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("This request requires calling tool 'buy_item'", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("itemName", llm.LastRequest.SystemPrompt);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_UsesPerAgentMaxOutputTokens_WhenPerCallMissing()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig agent = new AgentBuilder("ShortNpc")
+                .WithMaxOutputTokens(256)
+                .Build();
+            agent.ApplyToPolicy(policy);
+
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "ShortNpc", Hint = "hi" });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.AreEqual(256, llm.LastRequest.MaxOutputTokens,
+                "Per-agent MaxOutputTokens must be forwarded when the call does not override it.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_PerCallMaxOutputTokens_WinsOverPerAgent()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentConfig agent = new AgentBuilder("ShortNpc")
+                .WithMaxOutputTokens(256)
+                .Build();
+            agent.ApplyToPolicy(policy);
+
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "ShortNpc",
+                Hint = "hi",
+                MaxOutputTokens = 99
+            });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.AreEqual(99, llm.LastRequest.MaxOutputTokens,
+                "Per-call MaxOutputTokens has higher priority than the agent default.");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_NoPerAgentMaxOutputTokens_LeavesRequestUnset()
+        {
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "DefaultNpc", Hint = "hi" });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.IsNull(llm.LastRequest.MaxOutputTokens,
+                "Without per-call or per-agent override, the LLM client applies settings/provider fallback.");
         }
     }
 }

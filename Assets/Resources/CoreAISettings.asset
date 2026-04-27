@@ -12,16 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
-  backendType: 2
+  backendType: 1
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
   apiKey: 
   modelName: qwen3.5-4b
   temperature: 0.1
-  maxTokens: 4096
+  maxTokens: 2048
   requestTimeoutSeconds: 120
   llmUnityAgentName: 
-  ggufModelPath: Qwen3.5-2B-Q4_K_M.gguf
+  ggufModelPath: Qwen3.5-4B-Q4_K_M.gguf
   llmUnityDontDestroyOnLoad: 1
   llmUnityStartupTimeoutSeconds: 120
   llmUnityStartupDelaySeconds: 1

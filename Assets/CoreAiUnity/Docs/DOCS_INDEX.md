@@ -31,7 +31,7 @@ Install → open scene → connect LLM → press Play.
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
-| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` не отдаёт SSE incrementally → `chunks=1` + бесконечная typing-анимация. Workaround + план фикса |
+| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` does not deliver SSE incrementally → `chunks=1` + endless typing animation. Workaround + fix plan |
 
 ---
 
@@ -42,6 +42,7 @@ Install → open scene → connect LLM → press Play.
 | 5 | [TOOL_CALL_SPEC](TOOL_CALL_SPEC.md) | 🔧 All built-in tools: memory, Lua, world, inventory, scene, camera |
 | 5b | [JSON_COMMAND_FORMAT](JSON_COMMAND_FORMAT.md) | 📋 JSON command format per role (reference) |
 | 6 | [MemorySystem](MemorySystem.md) | 🧠 `MemoryTool` vs `ChatHistory`, per-role config |
+| 6a | [MEMORY_STORE_CUSTOM_BACKENDS](MEMORY_STORE_CUSTOM_BACKENDS.md) | 💾 `IAgentMemoryStore`: PlayerPrefs, cloud save, composite (offline-first) |
 | 7 | [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | 🤖 5 built-in roles, model selection strategy |
 | 8 | [WORLD_COMMANDS](WORLD_COMMANDS.md) | 🌍 Spawn/move/scene control from sandboxed Lua |
 | 9 | [LLMUNITY_SETUP_AND_MODELS](LLMUNITY_SETUP_AND_MODELS.md) | 📦 LLMUnity, GGUF, OpenAI HTTP, Lua pipeline |

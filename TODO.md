@@ -1,7 +1,18 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-04-26 | **Текущая версия:** v0.25.3
+**Обновлено:** 2026-04-27 | **Текущая версия:** v0.25.4 (core) / v0.25.8 (unity)
 
 ## 🚧 Open — приоритет на 0.26.x
+
+### Dual-backend at runtime (primary + secondary)
+
+- [ ] **0.26.0** — `CoreAISettings` получает поле `secondaryBackend` (`LlmBackendType?`, по умолчанию `null` = текущее single-backend поведение). При не-`null`:
+  - `CoreAILifetimeScope` регистрирует **оба** клиента (primary + secondary) и заворачивает их в существующий `RoutingLlmClient` через `LlmRoutingManifest`.
+  - В Editor — отдельная секция «Secondary backend» с симметричным набором полей (Base URL / Model / Auth для HTTP-секунды, отдельный `LLMAgent` slot для LLMUnity).
+  - В `LlmRoutingManifest` — UX выбора per-role: «primary», «secondary», «auto-fallback (primary→secondary on error)».
+  - Дефолт остаётся single-backend, чтобы не плодить настройки для тех, кому это не нужно.
+- [ ] EditMode-тест: `RoutingLlmClient` корректно переключается на secondary при ошибке primary; per-role override уважается; metrics пишутся для каждого backend'а отдельно.
+- [ ] Doc-долг: обновить `DEVELOPER_GUIDE.md` §4 «LLM: два бэкенда» → «LLM: один или два бэкенда»; добавить пример `LlmRoutingManifest` с per-role routing.
+- **Контекст:** инфраструктура (`RoutingLlmClient`, `LlmRoutingManifest`, `ILlmClientRegistry`) уже есть, но не подключена в основной DI flow и не доступна через инспектор `CoreAISettings`. Этот TODO связывает существующие классы с UX.
 
 ### WebGL streaming SSE (регрессия 0.25.x)
 

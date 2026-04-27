@@ -30,8 +30,8 @@
   ],
   "versionDefines": [
     {
-      "name": "undream.llmunity",
-      "expression": "",
+      "name": "ai.undream.llm",
+      "expression": "1.0.0",
       "define": "COREAI_HAS_LLMUNITY"
     }
   ],

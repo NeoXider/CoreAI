@@ -1,82 +1,82 @@
-# Руководство разработчика CoreAI (шаблон)
+# CoreAI Developer Guide (template)
 
-Документ для тех, кто **подключает ядро к своей игре** или **расширяет репозиторий**. Нормативные контракты и дорожная карта — в **[DGF_SPEC.md](DGF_SPEC.md)**; здесь — практическая карта кода и типичные задачи.
+For teams who **wire the core into their own game** or **extend this repository**. Normative contracts and the roadmap live in **[DGF_SPEC.md](DGF_SPEC.md)**; this document is a practical map of the codebase and common tasks.
 
 ---
 
-## 1. С чего начать (порядок чтения)
+## 1. Where to start (reading order)
 
-**С нуля за 10 минут:** [QUICK_START.md](QUICK_START.md) → сцена RogueliteArena, LLM, F9. **Оглавление всех Docs:** [DOCS_INDEX.md](DOCS_INDEX.md).
+**From zero in ~10 minutes:** [QUICK_START.md](QUICK_START.md) → RogueliteArena scene, LLM, F9. **Index of all Docs:** [DOCS_INDEX.md](DOCS_INDEX.md).
 
-| Шаг | Документ / место | Зачем |
+| Step | Document / location | Why |
 |-----|------------------|--------|
-| 0 | [QUICK_START.md](QUICK_START.md), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) | Быстрый старт и пошаговая настройка Example Game в Unity |
-| 1 | [DGF_SPEC.md](DGF_SPEC.md) §1–5, §8–9 (**§9.4** — главный поток Unity после LLM) | Цели ядра, LLM/stub, Lua, потоки |
-| 2 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Роли агентов, placement, выбор модели |
-| 3 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, LM Studio / OpenAI HTTP, PlayMode-тесты, Lua-пайплайн |
-| 4 | [../README.md](../README.md) (хост **`CoreAiUnity`**) | Сборки, папки, DI, промпты, MessagePipe |
-| 5 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Короткие рецепты под тайтл |
-| 6 | [../../_exampleGame/README.md](../../_exampleGame/README.md) | Пример игры и точки входа |
+| 0 | [QUICK_START.md](QUICK_START.md), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) | Quick start and step-by-step Example Game setup in Unity |
+| 1 | [DGF_SPEC.md](DGF_SPEC.md) §1–5, §8–9 (**§9.4** — main Unity flow after LLM) | Core goals, LLM/stub, Lua, threading |
+| 2 | [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Agent roles, placement, model selection |
+| 3 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | LLMUnity, LM Studio / OpenAI HTTP, Play Mode tests, Lua pipeline |
+| 4 | [../README.md](../README.md) (host **`CoreAiUnity`**) | Builds, folders, DI, prompts, MessagePipe |
+| 5 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Short recipes for your title |
+| 6 | [../../_exampleGame/README.md](../../_exampleGame/README.md) | Example game and entry points |
 
 ---
 
-## 2. Сборки и границы ответственности
+## 2. Assemblies and responsibility boundaries
 
-**Принцип:** **`CoreAI.Core`** — переносимый **C#** без реализации под конкретный движок; **`CoreAI.Source`** — слой **Unity** (DI, сцена, LLM-адаптеры). Нормативно зафиксировано в **[DGF_SPEC §3.0](DGF_SPEC.md)**.
+**Principle:** **`CoreAI.Core`** is portable **C#** with no engine-specific implementation; **`CoreAI.Source`** is the **Unity** layer (DI, scene, LLM adapters). Normatively fixed in **[DGF_SPEC §3.0](DGF_SPEC.md)**.
 
-| Сборка | Папка | Ограничение |
+| Assembly | Folder | Constraint |
 |--------|-------|-------------|
-| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **Без Unity** (`noEngineReferences`). Контракты ИИ, оркестратор, очередь **`QueuedAiOrchestrator`**, снимок сессии, песочница MoonSharp, парсинг Lua, процессор конверта. |
-| **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, маршрутизация LLM (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, логирование, роутер команд, биндинги Lua (`report` / `add`). Пакет **`com.nexoider.coreaiunity`**. |
-| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | EditMode NUnit, без Play Mode. |
-| **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (оркестратор, опционально LM Studio через env). |
-| **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Демо-арена; зависит от Source. |
+| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. |
+| **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, Lua bindings (`report` / `add`). Package **`com.nexoider.coreaiunity`**. |
+| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit, no Play Mode. |
+| **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (orchestrator, optionally LM Studio via env). |
+| **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Demo arena; depends on Source. |
 
-**Проверка:** компиляция — `dotnet build` по сгенерированным `*.csproj` (Unity/Rider) или сборка из IDE; **NUnit EditMode / Play Mode** — в **Unity Test Runner** (`Window → General → Test Runner`). Источник истины для сценариев с `UnityEngine` и тестовыми ассетами — Test Runner, а не «голый» `dotnet test` без Unity.
+**Verification:** compile with `dotnet build` on generated `*.csproj` (Unity/Rider) or build from the IDE; **NUnit Edit Mode / Play Mode** — in **Unity Test Runner** (`Window → General → Test Runner`). The source of truth for scenarios involving `UnityEngine` and test assets is Test Runner, not bare `dotnet test` without Unity.
 
-**Правило:** игровая логика тайтла не должна «протекать» в Core без необходимости. Новые **игровые** API для Lua — через реализацию **`IGameLuaRuntimeBindings`** в Source (или в сборке игры), а не правки песочницы в обход whitelist.
-
----
-
-## 2.1 Дефолтное поведение (из коробки) и точки настройки
-
-Шаблон задуман так, чтобы **по умолчанию работал “разумно”**, но при необходимости позволял точечную настройку без переписывания ядра.
-
-### Что работает “из коробки”
-
-- **DI + MessagePipe + лог**: `CoreAILifetimeScope` регистрирует `IGameLogger`, брокер `ApplyAiGameCommand`, `IAiGameCommandSink`.
-- **Оркестрация**: `IAiOrchestrationService` по умолчанию — `QueuedAiOrchestrator` вокруг `AiOrchestrator`.
-- **Lua‑конвейер**: `AiGameCommandRouter` переносит обработку на main thread и запускает `LuaAiEnvelopeProcessor`.
-- **Лимиты Lua**: `LuaExecutionGuard` ограничивает wall‑clock и “шаги” (best‑effort).
-- **Prompts**: цепочка system/user по манифесту → Resources → встроенный fallback.
-- **Версии Programmer (Lua + data overlays)**: в Unity‑слое по умолчанию сохраняются на диск (File* store).
-- **World Commands**: Lua API `coreai_world_*` публикует команды мира в шину, выполнение — на main thread (см. [WORLD_COMMANDS.md](WORLD_COMMANDS.md)).
-
-### Что настраивается в инспекторе `CoreAILifetimeScope`
-
-- **LLM backend**: `OpenAiHttpLlmSettings` (OpenAI‑compatible HTTP) и `LlmRoutingManifest` (маршрутизация по ролям).
-- **Промпты**: `AgentPromptsManifest` (переопределения system/user и кастомные роли).
-- **Логи**: `GameLogSettingsAsset` (фильтр по фичам и уровню).
-- **World Commands**: `World Prefab Registry` (whitelist префабов для спавна).
-
-Рекомендация для тайтла: держать настройки в 1‑2 ScriptableObject‑ассетах и версионировать их в git (без секретов).
-
-### 2.2 Логирование: `IGameLogger`, теги/фичи и внешние библиотеки (Serilog и т.п.)
-
-- **В ядре CoreAI** используйте **`IGameLogger`** и **`GameLogFeature`** — это встроенные «теги» подсистем и фильтр по уровню через **`GameLogSettingsAsset`** (аналог структурированных категорий без отдельного NuGet). Вывод в консоль Unity идёт через **`FilteringGameLogger` → `UnityGameLogSink`**; не разбрасывайте **`Debug.Log`** по бизнес-коду.
-- **Serilog / NLog / Microsoft.Extensions.Logging** в Unity подключают отдельно, если нужен вывод в файлы, Seq, Elasticsearch и т.д. Для кода **ядра** они не требуются: достаточно реализовать свой **`IGameLogger`** или заменить sink, чтобы дублировать записи в Serilog, не смешивая два стиля логирования в одном слое.
-- **Фильтрация в консоли Unity:** по префиксу сообщения (категория из **`GameLogFeature`**), по **`TraceId`** в цепочке оркестратора/команд (см. README хоста), плюс настройки минимального уровня в ассете логов.
-- **Editor** (меню, setup без DI): **`CoreAIEditorLog`** — единая точка сообщений редактора.
+**Rule:** title gameplay logic should not “leak” into Core unless necessary. New **game** APIs for Lua go through **`IGameLuaRuntimeBindings`** in Source (or in the game assembly), not by editing the sandbox outside the whitelist.
 
 ---
 
-## 3. Поток данных (как всё связано)
+## 2.1 Default behavior (out of the box) and tuning points
 
-Упрощённая схема рантайма:
+The template is meant to **work sensibly by default**, while still allowing targeted tuning without rewriting the core.
+
+### What works out of the box
+
+- **DI + MessagePipe + log:** `CoreAILifetimeScope` registers `IGameLogger`, `ApplyAiGameCommand` broker, `IAiGameCommandSink`.
+- **Orchestration:** default `IAiOrchestrationService` is `QueuedAiOrchestrator` around `AiOrchestrator`.
+- **Lua pipeline:** `AiGameCommandRouter` marshals handling to the main thread and runs `LuaAiEnvelopeProcessor`.
+- **Lua limits:** `LuaExecutionGuard` caps wall-clock and “steps” (best-effort).
+- **Prompts:** system/user chain from manifest → Resources → built-in fallback.
+- **Programmer versions (Lua + data overlays):** in the Unity layer they are persisted to disk by default (File* store).
+- **World Commands:** Lua API `coreai_world_*` publishes world commands to the bus; execution runs on the main thread (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md)).
+
+### What you configure on `CoreAILifetimeScope`
+
+- **LLM backend:** `OpenAiHttpLlmSettings` (OpenAI-compatible HTTP) and `LlmRoutingManifest` (per-role routing).
+- **Prompts:** `AgentPromptsManifest` (system/user overrides and custom roles).
+- **Logs:** `GameLogSettingsAsset` (feature and level filter).
+- **World Commands:** `World Prefab Registry` (spawn prefab whitelist).
+
+Recommendation for a title: keep settings in one or two ScriptableObject assets and version them in git (no secrets).
+
+### 2.2 Logging: `IGameLogger`, tags/features, and external libraries (Serilog, etc.)
+
+- **In the CoreAI core** use **`IGameLogger`** and **`GameLogFeature`** — built-in subsystem “tags” and level filtering via **`GameLogSettingsAsset`** (structured categories without a separate NuGet). Unity console output goes through **`FilteringGameLogger` → `UnityGameLogSink`**; avoid scattering **`Debug.Log`** across business code.
+- **Serilog / NLog / Microsoft.Extensions.Logging** in Unity are wired separately if you need files, Seq, Elasticsearch, etc. They are **not** required for **core** code: implement your own **`IGameLogger`** or replace the sink to mirror into Serilog without mixing two logging styles in one layer.
+- **Filtering in the Unity console:** by message prefix (category from **`GameLogFeature`**), by **`TraceId`** in the orchestrator/command chain (see host README), plus minimum level in the log asset.
+- **Editor** (menus, setup without DI): **`CoreAIEditorLog`** — single entry point for editor messages.
+
+---
+
+## 3. Data flow (how everything connects)
+
+Simplified runtime diagram:
 
 ```mermaid
 flowchart LR
-  Game["Игра: IAiOrchestrationService.RunTaskAsync"]
+  Game["Game: IAiOrchestrationService.RunTaskAsync"]
   Orch["AiOrchestrator"]
   LLM["ILlmClient"]
   Sink["IAiGameCommandSink → MessagePipe"]
@@ -89,169 +89,246 @@ flowchart LR
   Sink --> Router
   Router --> LuaP
   LuaP --> Lua
-  LuaP -->|"ошибка + Programmer"| Orch
+  LuaP -->|"error + Programmer"| Orch
 ```
 
-1. **Игра** вызывает **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (роль, hint, **`Priority`**, **`CancellationScope`**, опционально поля ремонта Lua и **`TraceId`**).
-2. Реализация по умолчанию — **`QueuedAiOrchestrator`** (лимит параллелизма, приоритет, отмена предыдущей задачи с тем же **`CancellationScope`**) вокруг **`AiOrchestrator`**. **`AiOrchestrator`** назначает **`TraceId`**, собирает промпты, вызывает **`ILlmClient.CompleteAsync`**; при **`IRoleStructuredResponsePolicy`** для роли возможен **один** повтор с подсказкой **`structured_retry:`** в user/hint. Затем публикуется **`ApplyAiGameCommand`** (**`AiEnvelope`**, **`TraceId`**, …). Метрики — **`IAiOrchestrationMetrics`** (лог при **`GameLogFeature.Metrics`**).
-3. В DI **`ILlmClient`** — **`LoggingLlmClientDecorator`** вокруг **`RoutingLlmClient`** (или legacy один клиент): внутри — **`OpenAiChatLlmClient`** / **`MeaiLlmUnityClient`** / **`StubLlmClient`** по **`LlmRoutingManifest`** и роли. Лог **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), строка бэкенда **`RoutingLlmClient→OpenAiHttp`** и т.п. Для «это stub?» — **`LoggingLlmClientDecorator.Unwrap(client)`**.
-4. Подписчик **`AiGameCommandRouter`** получает **`ApplyAiGameCommand`** из MessagePipe и **переносит обработку на главный поток Unity** (`UniTask.SwitchToMainThread`), затем вызывает **`LuaAiEnvelopeProcessor.Process`**: из текста извлекается Lua код, выполняется в песочнице с API из **`IGameLuaRuntimeBindings`**; в лог **`[MessagePipe]`** попадает **`traceId`** той же задачи.
-5. При успехе / ошибке публикуются **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** ( **`TraceId`** сохраняется). Для роли **Programmer** при ошибке оркестратор вызывается повторно с контекстом ремонта и тем же **`TraceId`** (до **3 попыток** по умолчанию, настраивается через **`CoreAISettings.MaxLuaRepairRetries`**).
+1. The **game** calls **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (role, hint, **`Priority`**, **`CancellationScope`**, optional Lua repair fields, **`TraceId`**).
+2. The default implementation is **`QueuedAiOrchestrator`** (concurrency limit, priority, canceling the previous task with the same **`CancellationScope`**) around **`AiOrchestrator`**. **`AiOrchestrator`** assigns **`TraceId`**, assembles prompts, calls **`ILlmClient.CompleteAsync`**; with **`IRoleStructuredResponsePolicy`** for a role, **one** retry is allowed with a **`structured_retry:`** hint in user/hint. Then **`ApplyAiGameCommand`** is published (**`AiEnvelope`**, **`TraceId`**, …). Metrics — **`IAiOrchestrationMetrics`** (log under **`GameLogFeature.Metrics`**).
+3. In DI, **`ILlmClient`** is **`LoggingLlmClientDecorator`** around **`RoutingLlmClient`** (or a legacy single client): inside — **`OpenAiChatLlmClient`** / **`MeaiLlmUnityClient`** / **`StubLlmClient`** per **`LlmRoutingManifest`** and role. Log **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), backend line **`RoutingLlmClient→OpenAiHttp`**, etc. For “is this stub?” — **`LoggingLlmClientDecorator.Unwrap(client)`**.
+4. Subscriber **`AiGameCommandRouter`** receives **`ApplyAiGameCommand`** from MessagePipe and **marshals handling to the Unity main thread** (`UniTask.SwitchToMainThread`), then calls **`LuaAiEnvelopeProcessor.Process`**: Lua is extracted from text, executed in the sandbox with API from **`IGameLuaRuntimeBindings`**; **`[MessagePipe]`** logs include the same task **`traceId`**.
+5. On success / failure, **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** are published (**`TraceId`** preserved). For the **Programmer** role on error, the orchestrator is invoked again with repair context and the same **`TraceId`** (up to **3 attempts** by default, configurable via **`CoreAISettings.MaxLuaRepairRetries`**).
 
-**Важно:** геймплейные системы могут подписываться на **`ApplyAiGameCommand`** и реагировать на типы команд; не парсить сырой текст LLM вне общего конвейера, если хотите единообразия. Подробнее логи и таймаут: **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1 (блок про CoreAI) и таймаут.
+**Important:** gameplay systems may subscribe to **`ApplyAiGameCommand`** and react to command types; do not parse raw LLM text outside the shared pipeline if you want consistency. For logs and timeout details, see **[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)** §1 (CoreAI block) and timeout.
 
-**Unity — главный поток (кратко):** после **`QueuedAiOrchestrator`** продолжение async часто выполняется **не** на main thread; **`Publish`** из оркестратора может прийти с пула. Любой код с **`UnityEngine`**, **`FindObjectsByType`**, сценой и UI — только на главном потоке **или** после явного маршалинга. Шаблон делает маршалинг в **`AiGameCommandRouter`**; свои подписчики на MessagePipe должны повторять тот же принцип. Нормативно и с чеклистом: **[DGF_SPEC.md](DGF_SPEC.md) §9.4**.
+**Unity main thread (short):** after **`QueuedAiOrchestrator`**, async continuations often run **not** on the main thread; **`Publish`** from the orchestrator may arrive from the thread pool. Any code using **`UnityEngine`**, **`FindObjectsByType`**, scene, or UI — only on the main thread **or** after explicit marshaling. The template marshals in **`AiGameCommandRouter`**; your own MessagePipe subscribers should follow the same rule. Normative text and checklist: **[DGF_SPEC.md](DGF_SPEC.md) §9.4**.
 
 ---
 
-## 4. LLM: два бэкенда
+### 3.1 Queue semantics
 
-| Режим | Где настраивается | Когда выбирается |
+`QueuedAiOrchestrator` is the default `IAiOrchestrationService` wrapper. It provides:
+
+- **Concurrency cap:** `AiOrchestrationQueueOptions.MaxConcurrent` limits total in-flight work across non-streaming and streaming tasks.
+- **Priority:** higher `AiTaskRequest.Priority` runs first. Equal priority is FIFO.
+- **Shared sync/stream priority:** `RunTaskAsync` and `RunStreamingAsync` use one effective priority order; a high-priority stream is not blocked behind a lower-priority non-stream task.
+- **Latest-wins scopes:** when a new task has the same non-empty `CancellationScope`, older active and pending work for that scope is cancelled immediately.
+- **Explicit stop:** `CancelTasks(scope)` cancels active work and removes pending non-streaming / streaming work for that scope.
+- **External cancellation:** a caller `CancellationToken` cancels pending work before it starts, so callers do not wait for a free LLM slot just to observe cancellation.
+
+Beginner rule: set `CancellationScope = roleId` for UI/chat-style “only latest request matters” flows.
+Advanced rule: use stable domain scopes (`arena_wave_plan`, `npc:merchant:dialogue`) and priority bands
+for predictable gameplay scheduling.
+
+---
+
+## 4. LLM: two backends
+
+| Mode | Where it is configured | When it is selected |
 |--------|-------------------|------------------|
-| **LLMUnity** (`LLMAgent` на сцене) | Инспектор **LLM** / **LLMAgent** | По умолчанию, если HTTP выключен: фактический клиент — **`MeaiLlmUnityClient`**, в контейнере обёрнут в **`LoggingLlmClientDecorator`**. См. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
-| **OpenAI-compatible HTTP** | Asset **CoreAI → LLM → OpenAI-compatible HTTP**, поле на **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — тогда внутри декоратора реализация — **`OpenAiChatLlmClient`**. |
+| **LLMUnity** (`LLMAgent` in scene) | **LLM** / **LLMAgent** inspector | By default when HTTP is off: actual client is **`MeaiLlmUnityClient`**, wrapped in **`LoggingLlmClientDecorator`** in the container. See [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
+| **OpenAI-compatible HTTP** | **CoreAI → LLM → OpenAI-compatible HTTP** asset, field on **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — then inside the decorator the implementation is **`OpenAiChatLlmClient`**. |
 
-Символ **`COREAI_NO_LLM`** (ручной opt-out): в контейнере остаётся цепочка с **`StubLlmClient`** / HTTP при необходимости — детали в DGF_SPEC §5.2.
+Symbol **`COREAI_NO_LLM`** (manual opt-out): the container keeps a chain with **`StubLlmClient`** / HTTP as needed — details in DGF_SPEC §5.2.
 
-Символ **`COREAI_HAS_LLMUNITY`** (автоматический): определяется через `versionDefines` в asmdef, когда пакет `undream.llmunity` установлен. Код, зависящий от типов LLMUnity (`MeaiLlmUnityClient`, `LLMAgent`, `LLMManager`), компилируется **только** при наличии этого символа. Пользователю не нужно задавать его вручную.
+Symbol **`COREAI_HAS_LLMUNITY`** (automatic): defined via `versionDefines` in the asmdef when the `ai.undream.llm` package is installed. Code that depends on LLMUnity types (`MeaiLlmUnityClient`, `LLMAgent`, `LLMManager`) compiles **only** with this symbol. Users do not set it manually.
 
-**Наблюдаемость:** **`GameLogFeature.Llm`** (запросы LLM); **`GameLogFeature.Metrics`** (метрики оркестратора, не входит в **`AllBuiltIn`** — включите вручную в ассете). Старые **Game Log Settings** без бита **Llm** дополняются при **`OnValidate`**. Фильтр по **`traceId`** связывает **`LLM ▶/◀`** и **`ApplyAiGameCommand`**.
+**Observability:** **`GameLogFeature.Llm`** (LLM requests); **`GameLogFeature.Metrics`** (orchestrator metrics, not in **`AllBuiltIn`** — enable manually in the asset). Older **Game Log Settings** without the **Llm** bit are patched on **`OnValidate`**. Filtering by **`traceId`** links **`LLM ▶/◀`** and **`ApplyAiGameCommand`**.
 
-Для стриминга с tool-calling используется single-cycle в `MeaiLlmClient.CompleteStreamingAsync`: если модель выдала tool JSON, он исполняется внутри цикла и не рендерится в UI, после чего генерация продолжается следующим стриминговым шагом.
-По умолчанию per-role streaming override включается для ролей с инструментами (`AgentMode.ToolsAndChat` и `AgentMode.ToolsOnly`); для `AgentMode.ChatOnly` остаётся стандартный fallback по настройкам.
-`CoreAIGameEntryPoint` в Unity-слое работает идемпотентно: повторный `Start()` не переинициализирует глобальный `CoreAIAgent` и логирует предупреждение по `LogTag.Composition`, что защищает от случайной двойной композиции контейнера в сцене.
-
----
-
-## 5. Промпты и роли
-
-- **Цепочка системного промпта:** манифест (опционально) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → встроенный fallback (**`BuiltInAgentSystemPromptTexts`**).
-- **Встроенные роли:** см. **`BuiltInAgentRoleIds`** и тесты **`AgentRolesAndPromptsTests`**.
-- **Кастомные агенты:** используйте **`AgentBuilder`** для создания новых агентов с уникальными инструментами. См. [AGENT_BUILDER.md](AGENT_BUILDER.md).
-- **User payload:** по умолчанию — JSON вида `{"telemetry":{...},"hint":"..."}` из **`GameSessionSnapshot.Telemetry`**; при ремонте Lua добавляются поля **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
-- **Память агента (опционально):** агент сохраняет память через **MEAI tool calling**:
-  - `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` — перезаписать
-  - `{"name": "memory", "arguments": {"action": "append", "content": "..."}}` — дописать
-  - `{"name": "memory", "arguments": {"action": "clear"}}` — очистить
-
-  По умолчанию память **выключена у всех ролей**, кроме **Creator** (см. `AgentMemoryPolicy`). В рантайме Unity память хранится в `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`.
+For streaming with tool-calling, a single cycle is used in `MeaiLlmClient.CompleteStreamingAsync`: if the model emits tool JSON, it runs inside the loop and is not rendered in the UI, then generation continues with the next streaming step.
+By default, per-role streaming override is enabled for roles with tools (`AgentMode.ToolsAndChat` and `AgentMode.ToolsOnly`); for `AgentMode.ChatOnly` the standard fallback from settings remains.
+`CoreAIGameEntryPoint` in the Unity layer is idempotent: repeated `Start()` does not reinitialize global `CoreAIAgent` and logs a warning on `LogTag.Composition`, guarding against accidental double composition of the scene container.
 
 ---
 
-## 6. Lua для агента Programmer
+## 5. Prompts and roles
 
-- Парсинг: **`AiLuaPayloadParser`** (markdown → JSON **`ExecuteLua`**).
-- Исполнение: **`SecureLuaEnvironment`**, **`LuaExecutionGuard`**, **`LuaApiRegistry`**.
-- Лимиты: `LuaExecutionGuard` включает best-effort ограничение **wall-clock** и **шагов** (см. `InstructionLimitDebugger`), чтобы бесконечные циклы Lua не могли зависнуть навсегда.
-- Дефолтные игровые вызовы в шаблоне: **`LoggingLuaRuntimeBindings`** — **`report(string)`**, **`add(a,b)`**.
-- Расширение: зарегистрируйте свою реализацию **`IGameLuaRuntimeBindings`** в **`CoreAILifetimeScope`** (вместо или поверх дефолтной — по политике проекта; избегайте дублирования интерфейса в контейнере без явной замены).
-- Управление миром (рантайм): встроенная фича **World Commands** добавляет Lua‑API `coreai_world_*` и выполняет команды на главном потоке Unity через MessagePipe. См. **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
+- **System prompt chain:** manifest (optional) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → built-in fallback (**`BuiltInAgentSystemPromptTexts`**).
+- **Built-in roles:** see **`BuiltInAgentRoleIds`** and **`AgentRolesAndPromptsTests`**.
+- **Custom agents:** use **`AgentBuilder`** to create agents with unique tools. See [AGENT_BUILDER.md](AGENT_BUILDER.md).
+- **User payload:** default JSON like `{"telemetry":{...},"hint":"..."}` from **`GameSessionSnapshot.Telemetry`**; Lua repair adds **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
+- **Agent memory (optional):** the agent persists memory via **MEAI tool calling**:
+  - `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` — overwrite
+  - `{"name": "memory", "arguments": {"action": "append", "content": "..."}}` — append
+  - `{"name": "memory", "arguments": {"action": "clear"}}` — clear
 
-### 6.1 Персистенция версий Lua и data overlay (платформы, перезапуск)
+  By default memory is **off for all roles** except **Creator** (see `AgentMemoryPolicy`). At Unity runtime, memory is stored under `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`.
 
-Это **отдельное** файловое хранение CoreAI под `Application.persistentDataPath` (через `File.WriteAllText` / чтение при создании store), **не** Neo SaveProvider и не общий игровой сейв тайтла.
+---
 
-| Что | Путь по умолчанию |
+## 5.1 MessagePipe extension points (beginner → pro)
+
+CoreAI uses **MessagePipe** as the Unity-side integration bus. The default orchestrator flow is:
+
+`AiOrchestrator` → `IAiGameCommandSink` → `MessagePipeAiCommandSink` → `IPublisher<ApplyAiGameCommand>` → `AiGameCommandRouter`
+
+The important rule: **gameplay handling must run on the Unity main thread**. `AiGameCommandRouter`
+already does `UniTask.SwitchToMainThread()` before processing Lua, world commands, logs, and
+`CommandReceived`.
+
+### Beginner path: subscribe after the safe router
+
+For UI, tutorials, simple game reactions, or debugging, use:
+
+```csharp
+AiGameCommandRouter.CommandReceived += OnAiCommand;
+
+private void OnAiCommand(ApplyAiGameCommand cmd)
+{
+    // Already on Unity main thread.
+    Debug.Log(cmd.JsonPayload);
+}
+```
+
+This is the easiest extension point: no direct DI or MessagePipe subscription is required, and it is safe
+to touch Unity objects.
+
+### Pro path: subscribe to MessagePipe directly
+
+For larger systems, register your own `ISubscriber<ApplyAiGameCommand>` subscriber in the container.
+This is useful for analytics, multiplayer replication, custom command routing, save integration, or
+domain-specific systems.
+
+If you subscribe directly to MessagePipe, **marshal your handler to the main thread** before touching
+Unity APIs:
+
+```csharp
+_subscription = subscriber.Subscribe(cmd =>
+{
+    UniTask.Void(async () =>
+    {
+        await UniTask.SwitchToMainThread();
+        // Safe Unity/GameObject work here.
+    });
+});
+```
+
+Direct MessagePipe subscribers may also run lightweight, thread-safe work without switching (for example
+enqueueing telemetry), but Unity scene mutation, UI, `GameObject`, `Transform`, `Animator`, and most save/UI
+integrations should use the main-thread path.
+
+### Publishing commands
+
+Prefer publishing through `IAiGameCommandSink` when you are inside CoreAI/agent code. Use
+`IPublisher<ApplyAiGameCommand>` directly only in Unity integration code that is already part of the
+MessagePipe composition. Keep payloads explicit (`CommandTypeId`, `TraceId`, `SourceRoleId`) so logs and
+external subscribers can follow the agent work.
+
+---
+
+## 6. Lua for the Programmer agent
+
+- Parsing: **`AiLuaPayloadParser`** (markdown → JSON **`ExecuteLua`**).
+- Execution: **`SecureLuaEnvironment`**, **`LuaExecutionGuard`**, **`LuaApiRegistry`**.
+- Limits: `LuaExecutionGuard` applies best-effort **wall-clock** and **step** caps (see `InstructionLimitDebugger`) so infinite Lua loops cannot hang forever.
+- Default game calls in the template: **`LoggingLuaRuntimeBindings`** — **`report(string)`**, **`add(a,b)`**.
+- Extension: register your **`IGameLuaRuntimeBindings`** in **`CoreAILifetimeScope`** (instead of or on top of the default — per project policy; avoid duplicating the interface in the container without an explicit replacement).
+- World control (runtime): the built-in **World Commands** feature adds Lua API `coreai_world_*` and executes commands on the Unity main thread via MessagePipe. See **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
+
+### 6.1 Lua version persistence and data overlay (platforms, restart)
+
+This is **separate** CoreAI file storage under `Application.persistentDataPath` (via `File.WriteAllText` / read when creating the store), **not** Neo SaveProvider and not the title’s shared game save.
+
+| What | Default path |
 |-----|-------------------|
-| Версии Lua Programmer | `persistentDataPath/CoreAI/LuaScriptVersions/lua_script_versions.json` |
+| Programmer Lua versions | `persistentDataPath/CoreAI/LuaScriptVersions/lua_script_versions.json` |
 | Data overlays | `persistentDataPath/CoreAI/DataOverlayVersions/data_overlays.json` |
 
-- **После перезапуска игры** при старте контейнера store снова читает JSON: восстанавливаются **текущий** текст (`current`) и **история** ревизий; оркестратор/Lua используют уже загруженное состояние.
-- **Android / iOS / Desktop** — обычная запись в каталог приложения; данные сохраняются между сеансами, пока пользователь не удалит приложение или не очистит «данные приложения».
-- **WebGL** — `persistentDataPath` в Unity мапится на хранилище браузера (IndexedDB и т.п.): между сессиями обычно работает, но пользователь может очистить данные сайта; возможны ограничения квоты — уточняйте по [документации Unity](https://docs.unity3d.com/) для вашей версии под WebGL.
-- Для **синхронизации с облаком / одним сейвом игры** нужна отдельная интеграция (копирование файлов, свой провайдер или зеркалирование после `RecordSuccessfulExecution`).
+- **After restarting the game**, when the container starts the store reads JSON again: **current** text (`current`) and **revision history** are restored; orchestrator/Lua use the loaded state.
+- **Android / iOS / Desktop** — normal writes to the app directory; data persists across sessions until the user uninstalls the app or clears “app data”.
+- **WebGL** — `persistentDataPath` in Unity maps to browser storage (IndexedDB, etc.): usually works across sessions, but the user can clear site data; quota limits may apply — check [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
+- **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
 ---
 
-## 7. Тесты
+## 7. Tests
 
-| Сборка | Запуск | Что проверяет |
+| Assembly | How to run | What it covers |
 |--------|--------|----------------|
-| **CoreAI.Tests** | Test Runner → EditMode | Промпты, stub LLM, песочница Lua, парсер конверта, **`LuaAiEnvelopeProcessor`**, композер repair, **`LuaProgrammerPipelineEndToEndEditModeTests`** (оркестратор → конверт → Lua → ошибка → повтор Programmer → успех). |
-| **CoreAI.PlayModeTests** | Test Runner → PlayMode | Оркестратор по всем ролям; опционально реальный HTTP (переменные **`COREAI_OPENAI_TEST_*`** — см. LLMUNITY doc). |
+| **CoreAI.Tests** | Test Runner → Edit Mode | Prompts, stub LLM, Lua sandbox, envelope parser, **`LuaAiEnvelopeProcessor`**, repair composer, **`LuaProgrammerPipelineEndToEndEditModeTests`** (orchestrator → envelope → Lua → error → Programmer retry → success). |
+| **CoreAI.PlayModeTests** | Test Runner → Play Mode | Orchestrator across roles; optional real HTTP (env vars **`COREAI_OPENAI_TEST_*`** — see LLMUNITY doc). |
 
-Рекомендация: перед PR прогонять **EditMode**; PlayMode — при изменениях DI/сцены или HTTP-клиента.
+Recommendation: run **Edit Mode** before a PR; Play Mode when DI/scene or the HTTP client changes.
 
-Актуальные EditMode проверки по последним фиксам стабильности:
-- `CoreAIGameEntryPointEditModeTests` — гарантия single-init поведения CoreAI фасада при дублированном стартe entrypoint.
-- `MeaiLlmClientEditModeTests.CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` — JSON tool-call не попадает в UI, видимый текст сохраняется.
-- `MeaiLlmClientEditModeTests.CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` — стриминговый tool-loop завершается контролируемой ошибкой при превышении лимита итераций.
-
----
-
-## 8. Пример игры (`_exampleGame`)
-
-- Сцена **`RogueliteArena`** (см. Build Settings): **`CompositionRoot`** с **`CoreAILifetimeScope`**, **`ExampleRogueliteEntry`** (арена + хоткеи).
-- **F9** — задача **Programmer** (демо Lua + `report`), компонент **`CoreAiLuaHotkey`**.
-- Дочерний **`LifetimeScope`** примера: **`RogueliteArenaLifetimeScope`** — заготовка под фичи игры с **Parent** = ядро.
-
-Подробности: [../../_exampleGame/README.md](../../_exampleGame/README.md).
+Current Edit Mode checks for recent stability fixes:
+- `CoreAIGameEntryPointEditModeTests` — single-init behavior for the CoreAI facade when the entry point starts twice.
+- `MeaiLlmClientEditModeTests.CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` — tool-call JSON does not reach the UI; visible text is preserved.
+- `MeaiLlmClientEditModeTests.CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` — streaming tool loop ends with a controlled error when the iteration limit is exceeded.
 
 ---
 
-## 9. Типичные задачи разработчика
+## 8. Example game (`_exampleGame`)
 
-| Задача | Куда смотреть / что делать |
+- Scene **`RogueliteArena`** (see Build Settings): **`CompositionRoot`** with **`CoreAILifetimeScope`**, **`ExampleRogueliteEntry`** (arena + hotkeys).
+- **F9** — **Programmer** task (demo Lua + `report`), **`CoreAiLuaHotkey`** component.
+- Child **`LifetimeScope`** in the sample: **`RogueliteArenaLifetimeScope`** — stub for game features with **Parent** = core.
+
+Details: [../../_exampleGame/README.md](../../_exampleGame/README.md).
+
+---
+
+## 9. Typical developer tasks
+
+| Task | Where to look / what to do |
 |--------|----------------------------|
-| Новая роль агента | Константа или строковый id; промпт в Resources или манифесте; при необходимости тест в **`AgentRolesAndPromptsTests`**. |
-| Новый тип команды ИИ | Расширить обработку **`ApplyAiGameCommand.CommandTypeId`** (новый подписчик или ветка в игре); не смешивать с сырым текстом LLM без парсера. |
-| Новые функции для Lua от LLM | Реализовать **`IGameLuaRuntimeBindings`**; регистрация делегатов в **`LuaApiRegistry`** (whitelist). |
-| Управление миром из Lua | Использовать **World Commands** (`coreai_world_*`), настроить `CoreAiPrefabRegistryAsset` и назначить в `CoreAILifetimeScope`. См. **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**. |
-| Смена модели / облако | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md); для продакшена не коммить API-ключи. |
-| Мультиплеер | DGF_SPEC, **AI_AGENT_ROLES** (placement); авторитет LLM на хосте — ответственность игры. |
+| New agent role | Constant or string id; prompt in Resources or manifest; add a test in **`AgentRolesAndPromptsTests`** if needed. |
+| New AI command type | Extend handling of **`ApplyAiGameCommand.CommandTypeId`** (new subscriber or branch in the game); do not mix with raw LLM text without a parser. |
+| New Lua functions for the LLM | Implement **`IGameLuaRuntimeBindings`**; register delegates in **`LuaApiRegistry`** (whitelist). |
+| World control from Lua | Use **World Commands** (`coreai_world_*`), configure `CoreAiPrefabRegistryAsset` and assign it on `CoreAILifetimeScope`. See **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**. |
+| Change model / cloud | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md); do not commit API keys for production. |
+| Multiplayer | DGF_SPEC, **AI_AGENT_ROLES** (placement); LLM authority on the host is the game’s responsibility. |
 
 ---
 
-## 9.1 Управление Агентом (Control API)
+## 9.1 Agent control (Control API)
 
-Для управления текущим состоянием агентов (отмена задач, сброс памяти, подписка на инструменты) используется статический фасад `CoreAI.Api.CoreAi`.
+Use the static facade `CoreAI.Api.CoreAi` to manage current agent state (cancel tasks, clear memory, subscribe to tools).
 
-### Остановка агента (Cancel Tasks)
+### Stopping an agent (cancel tasks)
 
-Если агент долго генерирует ответ или его задача больше не актуальна, вы можете программно прервать все его текущие и ожидающие задачи в очереди `QueuedAiOrchestrator`:
+If an agent is generating for a long time or its task is no longer valid, you can programmatically cancel all its current and queued tasks in `QueuedAiOrchestrator`:
 
 ```csharp
-// Остановить генерацию для конкретной роли (использует CancellationScope = roleId)
+// Stop generation for a specific role (uses CancellationScope = roleId)
 CoreAi.StopAgent("Teacher");
 ```
-*Также доступно через оркестратор напрямую для профессионалов:* `_orchestrator.CancelTasks("Teacher")`.
+*Also available directly on the orchestrator for advanced users:* `_orchestrator.CancelTasks("Teacher")`.
 
-### Остановка из встроенного Chat UI (`CoreAiChatPanel`)
+### Stopping from built-in Chat UI (`CoreAiChatPanel`)
 
-Во время генерации ответа в `CoreAiChatPanel` кнопка отправки `coreai-chat-send` автоматически переключается в режим `Stop`:
+While a reply is generating, the send button `coreai-chat-send` in `CoreAiChatPanel` automatically switches to **Stop** mode:
 
-- визуально меняется на красную (`.coreai-chat-send-button-stop`);
-- текст кнопки меняется с `>` на `X`;
-- tooltip подсказывает `Остановить генерацию (Esc)`.
+- visually turns red (`.coreai-chat-send-button-stop`);
+- button label changes from `>` to `X`;
+- tooltip: `Stop generation (Esc)`.
 
-Пользователь может прервать генерацию:
+The user can interrupt generation:
 
-- нажатием на эту кнопку (повторный клик);
-- клавишей `Esc` в активном чате.
+- by clicking that button again;
+- with the `Esc` key while the chat is focused.
 
-В обоих сценариях UI вызывает `CoreAi.StopAgent(roleId)` и отменяет активный токен запроса, что безопасно останавливает текущий ответ и связанные задачи роли в `QueuedAiOrchestrator`.
-Начиная с `com.nexoider.coreaiunity` **0.25.6**, кнопка остаётся включённой во время генерации (это stop-контрол), busy-state выставляется до первого `await`, а UI гарантированно сбрасывает streaming/sending state после отмены.
+In both cases the UI calls `CoreAi.StopAgent(roleId)` and cancels the active request token, which safely stops the current reply and related role tasks in `QueuedAiOrchestrator`.
+Starting with `com.nexoider.coreaiunity` **0.25.6**, the button stays enabled during generation (stop control), busy state is set until the first `await`, and the UI reliably clears streaming/sending state after cancel.
 
-С **0.25.7** автосоздание `CoreAISettings.asset` в Editor (`CoreAIBuildMenu`) выполняется через **`EditorApplication.delayCall`**: не в том же кадре, что domain reload, и с проверкой файла на диске — клонированный `Assets/Resources/CoreAISettings.asset` не заменяется пустым ассетом с дефолтами.
+From **0.25.7**, auto-creation of `CoreAISettings.asset` in the Editor (`CoreAIBuildMenu`) runs via **`EditorApplication.delayCall`**: not in the same frame as domain reload, and with an on-disk file check — a cloned `Assets/Resources/CoreAISettings.asset` is not replaced by an empty asset with defaults.
 
-### Очистка контекста (Clear Context)
+### Clearing context
 
-Сброс истории чата (краткосрочного контекста) и/или долговременной памяти агента (MemoryTool):
+Reset chat history (short-term context) and/or long-term agent memory (MemoryTool):
 
 ```csharp
-// Полностью очистить контекст агента (историю сообщений и память)
+// Fully clear agent context (message history and memory)
 CoreAi.ClearContext("Teacher");
 
-// Очистить только историю чата (контекст сессии), оставив память агента нетронутой
+// Clear only chat history (session context), leave agent memory intact
 CoreAi.ClearContext("Teacher", clearChatHistory: true, clearLongTermMemory: false);
 
-// Очистить только долговременную память (факты, стэйт), оставив текущий диалог
+// Clear only long-term memory (facts, state), keep the current dialogue
 CoreAi.ClearContext("Teacher", clearChatHistory: false, clearLongTermMemory: true);
 ```
 
-### Подписка на использование инструментов (Tool Execution Event)
+### Subscribing to tool execution (`OnToolExecuted`)
 
-Для удобного встраивания (например, проигрывания звуков, запуска эффектов или логирования) вы можете подписаться на глобальное событие успешного вызова любого инструмента моделью (через MEAI):
+For hooks (sounds, VFX, logging) you can subscribe to the global event for a successful tool call from the model (via MEAI):
 
 ```csharp
 private void OnEnable()
@@ -268,7 +345,7 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
 {
     Debug.Log($"Agent {roleId} used tool {toolName}!");
     
-    // Пример: реакция на конкретный инструмент
+    // Example: react to a specific tool
     if (toolName == "spawn_item" && args != null && args.TryGetValue("item_id", out var itemId))
     {
         AudioSystem.PlaySound($"spawn_{itemId}");
@@ -276,97 +353,97 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
 }
 ```
 
-### Очистка чата из UI (`CoreAiChatPanel`)
+### Clearing chat from UI (`CoreAiChatPanel`)
 
-В хеддере встроенного чат-панели (`CoreAiChatPanel`) есть кнопка 🗑 — по нажатию очищает все сообщения из UI и сбрасывает **краткосрочный контекст** (историю чата) агента. Это поведение по умолчанию.
+The built-in chat panel header (`CoreAiChatPanel`) has a 🗑 button — on click it clears all messages from the UI and resets **short-term context** (chat history) for the agent. That is the default behavior.
 
-Программно можно управлять детальнее:
+You can control this in code:
 
 ```csharp
-// Очистить сообщения в UI + историю чата (по умолчанию при нажатии 🗑)
+// Clear UI messages + chat history (default for 🗑)
 chatPanel.ClearChat();
 
-// Полная очистка: и чат, и долговременная память
+// Full clear: chat and long-term memory
 chatPanel.ClearChat(clearChatHistory: true, clearLongTermMemory: true);
 
-// Только долговременная память, сохраняя текущий диалог в UI
+// Long-term memory only, keep the current dialogue in the UI
 chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
 ```
 
 ---
 
-## 9.2 Где CoreAI обычно “сложный” и как упростить пайплайн (рекомендации)
+## 9.2 Where CoreAI is often “heavy” and how to simplify the pipeline (recommendations)
 
-Ниже — практические “узкие места” при интеграции и способы сделать CoreAI более автоматичным, но настраиваемым.
+Practical integration pain points and ways to keep CoreAI automatic but configurable.
 
-### 1) Сборка сцены и ассетов “по умолчанию”
+### 1) Scene and default assets setup
 
-**Проблема:** легко забыть настроить `CoreAILifetimeScope` (LLM backend, промпты, лог‑настройки, реестр префабов мира).
+**Problem:** easy to forget `CoreAILifetimeScope` (LLM backend, prompts, log settings, world prefab registry).
 
-**Упростить:**
-- Добавить Editor‑меню “CoreAI → Setup → Create Default Assets”:
-  - `GameLogSettingsAsset` (с включенным `Llm` и нужными фичами)
-  - `OpenAiHttpLlmSettings` (пустой шаблон)
-  - `AgentPromptsManifest` (опционально)
-  - `CoreAiPrefabRegistryAsset` (пустой whitelist)
-- Добавить “CoreAI → Setup → Validate Scene” (проверка: есть `CoreAILifetimeScope`, корректные ссылки, предупреждения).
+**Simplify:**
+- Add an Editor menu “CoreAI → Setup → Create Default Assets”:
+  - `GameLogSettingsAsset` (with `Llm` and needed features enabled)
+  - `OpenAiHttpLlmSettings` (empty template)
+  - `AgentPromptsManifest` (optional)
+  - `CoreAiPrefabRegistryAsset` (empty whitelist)
+- Add “CoreAI → Setup → Validate Scene” (checks: `CoreAILifetimeScope` present, references valid, warnings).
 
-### 2) Дефолтный выбор LLM backend и деградация в stub
+### 2) Default LLM backend choice and stub fallback
 
-**Проблема:** «почему молчит модель?» — потому что `LLMAgent` не найден или HTTP не включен, а ядро ушло в stub.
+**Problem:** “Why is the model silent?” — `LLMAgent` missing or HTTP off, and the core fell back to stub.
 
-**Упростить:**
-- В логах старта писать явное резюме: backend=stub/llmunity/http, почему выбран.
-- В UI/дашборде показывать текущий backend и `traceId` последних запросов.
+**Simplify:**
+- Log an explicit summary at startup: backend=stub/llmunity/http and why.
+- Show current backend and last request `traceId` in UI/dashboard.
 
 ### 3) Main thread vs background thread (Unity)
 
-**Проблема:** команды могут приходить с пула потоков.
+**Problem:** commands may arrive from the thread pool.
 
-**Упростить:**
-- Канонизировать одну точку “apply to Unity” (как сейчас `AiGameCommandRouter`) и запрещать прямую обработку из `ISubscriber<T>` без маршалинга.
-- Добавить небольшой util/шаблон `MainThreadCommandQueue` для проектов без UniTask.
+**Simplify:**
+- Canonize one “apply to Unity” entry point (as with `AiGameCommandRouter`) and forbid handling directly from `ISubscriber<T>` without marshaling.
+- Add a small util/template `MainThreadCommandQueue` for projects without UniTask.
 
-### 4) Lua безопасность и предсказуемость
+### 4) Lua safety and predictability
 
-**Проблема:** бесконечные циклы, расширение API, ошибки в Lua.
+**Problem:** infinite loops, API growth, Lua errors.
 
-**Упростить:**
-- Держать Lua API в виде **малых фич** (Versioning, World Commands, game‑bindings) и документировать каждую.
-- По умолчанию включать лимиты (`LuaExecutionGuard`) и логировать превышение лимитов как отдельный сигнал.
+**Simplify:**
+- Keep Lua API as **small features** (Versioning, World Commands, game bindings) and document each.
+- Enable limits (`LuaExecutionGuard`) by default and log limit breaches as a distinct signal.
 
-### 5) Версионирование “скрипты + конфиги”
+### 5) Versioning “scripts + configs”
 
-**Проблема:** Programmer меняет и код, и данные; нужен быстрый rollback.
+**Problem:** Programmer changes both code and data; fast rollback matters.
 
-**Упростить:**
-- Стабильные ключи (usecase id / overlay key) и единый UI “Versions” в дашборде (показ original/current/history + reset).
-- “Reset All” для аварийного восстановления.
+**Simplify:**
+- Stable keys (use case id / overlay key) and a single “Versions” UI in a dashboard (original/current/history + reset).
+- “Reset All” for emergency recovery.
 
-### 6) Повторяемый CI/QA
+### 6) Repeatable CI/QA
 
-**Проблема:** PlayMode тесты могут зависеть от модели/сети.
+**Problem:** Play Mode tests may depend on model/network.
 
-**Упростить:**
-- Для CI: дефолт `COREAI_NO_LLM` или stub‑профиль, обязательный EditMode прогон.
-- Для “integration” ветки: отдельный ручной job с env для HTTP и ограничением времени.
-
----
-
-## 10. Чеклист PR
-
-- **EditMode:** `CoreAI.Tests` без ошибок (промпты, Lua, парсеры, процессор конверта).
-- **PlayMode:** при изменениях `CoreAILifetimeScope`, сцен, `OpenAiChatLlmClient` или PlayMode-тестов — прогнать `CoreAI.PlayModeTests`.
-- **Секреты:** не коммитить API-ключи, `.env` с ключами, локальные пути к моделям с персональными данными; для CI использовать переменные окружения (см. [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
-- **Документация:** если меняется контракт или поток (§3 DGF / DI), обновить **DGF_SPEC** и при необходимости этот гайд в том же PR.
-- **Релиз UPM (любое изменение в `Assets/CoreAI` или `Assets/CoreAiUnity`):** поднять **`version`** в [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) и [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; зависимость = версии ядра); добавить запись в **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** и **[../CHANGELOG.md](../CHANGELOG.md)**; обновить документацию по затронутой фиче (корневые **README.md** / **README_RU.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md) и т.д.); при смене публичного API — при необходимости тесты.
+**Simplify:**
+- For CI: default `COREAI_NO_LLM` or stub profile, mandatory Edit Mode run.
+- For an “integration” branch: separate manual job with HTTP env and a time cap.
 
 ---
 
-## 11. Версионирование документов
+## 10. PR checklist
 
-Крупные изменения контрактов фиксируйте в **DGF_SPEC** (версия в шапке). **DEVELOPER_GUIDE** описывает текущую карту кода; при расхождении с кодом приоритет у репозитория — обновите гайд в том же PR.
+- **Edit Mode:** `CoreAI.Tests` green (prompts, Lua, parsers, envelope processor).
+- **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run `CoreAI.PlayModeTests`.
+- **Secrets:** do not commit API keys, `.env` with keys, or local model paths with personal data; for CI use environment variables (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
+- **Documentation:** if contracts or flow change (DGF §3 / DI), update **DGF_SPEC** and this guide in the same PR if needed.
+- **UPM release (any change under `Assets/CoreAI` or `Assets/CoreAiUnity`):** bump **`version`** in [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) and [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; dependency = core version); add entries in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** and **[../CHANGELOG.md](../CHANGELOG.md)**; update docs for the affected feature (root **README.md** / **README_RU.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.); if public API changes, add tests as needed.
 
-**Синхронизация с UPM:** номер в шапке README и в **QUICK_START** должен отражать актуальный **`package.json`**, иначе потребители пакета видят устаревшую версию.
+---
 
-**Версия этого гайда:** 1.4 (апрель 2026) — чеклист UPM-релиза (version + CHANGELOG + доки), синхронизация README с `package.json`.
+## 11. Document versioning
+
+Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOPER_GUIDE** describes the current code map; if it diverges from code, the repository wins — update the guide in the same PR.
+
+**UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
+
+**Version of this guide:** 1.4 (April 2026) — UPM release checklist (version + CHANGELOG + docs), README sync with `package.json`.

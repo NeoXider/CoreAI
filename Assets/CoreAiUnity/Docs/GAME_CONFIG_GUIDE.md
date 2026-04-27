@@ -1,52 +1,52 @@
-# GameConfig Guide: Как разрешить AI менять параметры игры
+# GameConfig guide: letting AI change game parameters
 
-## 📌 Концепция
+## 📌 Concept
 
-**CoreAI НЕ содержит игровых конфигов.** Вместо этого ядро даёт **универсальную инфраструктуру** для чтения/записи JSON конфигов через AI function calling.
+**CoreAI does not ship game-specific configs.** Instead, the core provides **generic infrastructure** to read/write JSON configs through AI function calling.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    CoreAI (универсальный)                │
+│                    CoreAI (generic)                      │
 │  ┌─────────────────┐    ┌──────────────┐               │
 │  │ IGameConfigStore│    │ GameConfig   │               │
-│  │ (интерфейс)     │◄───│ Tool (ILlm)  │               │
+│  │ (interface)     │◄───│ Tool (ILlm)  │               │
 │  └────────┬────────┘    └──────────────┘               │
 │           │                    ▲                        │
 │           │            AI function calling              │
 └───────────┼────────────────────┼────────────────────────┘
             │                    │
      ┌──────┴──────┐    ┌───────┴───────┐
-     │  Ваша игра  │    │  LLM (Creator)│
-     │  реализует  │    │  read/update  │
-     │  интерфейс  │    │  JSON конфиги │
+     │  Your game  │    │  LLM (Creator)│
+     │  implements │    │  read/update  │
+     │  interface  │    │  JSON configs   │
      └─────────────┘    └───────────────┘
 ```
 
 ---
 
-## 🔧 Как это работает
+## 🔧 How it works
 
-### 1. CoreAI предоставляет:
+### 1. CoreAI provides:
 
-| Компонент | Назначение | Где |
+| Component | Purpose | Where |
 |-----------|------------|-----|
-| `IGameConfigStore` | Интерфейс: `TryLoad(key)`, `TrySave(key, json)` | CoreAI |
-| `GameConfigTool` | ILlmTool для AI function calling (read/update) | CoreAI |
-| `GameConfigPolicy` | Какие роли могут читать/менять какие ключи | CoreAI |
-| `UnityGameConfigStore` | Реализация на ScriptableObject | CoreAIUnity |
+| `IGameConfigStore` | Interface: `TryLoad(key)`, `TrySave(key, json)` | CoreAI |
+| `GameConfigTool` | `ILlmTool` for AI function calling (read/update) | CoreAI |
+| `GameConfigPolicy` | Which roles may read/write which keys | CoreAI |
+| `UnityGameConfigStore` | ScriptableObject implementation | CoreAIUnity |
 
-### 2. Игра делает:
+### 2. Your game:
 
-1. Создаёт ScriptableObject с параметрами
-2. Регистрирует его в `UnityGameConfigStore`
-3. Настраивает `GameConfigPolicy` для ролей
-4. AI получает доступ к конфигам через function calling
+1. Creates a ScriptableObject with parameters
+2. Registers it in `UnityGameConfigStore`
+3. Configures `GameConfigPolicy` for roles
+4. AI accesses configs through function calling
 
 ---
 
-## 📝 Пошаговая инструкция
+## 📝 Step-by-step
 
-### Шаг 1: Создайте ScriptableObject конфиг
+### Step 1: Create a ScriptableObject config
 
 ```csharp
 // Assets/_exampleGame/Config/GameSessionConfig.cs
@@ -62,32 +62,32 @@ public class GameSessionConfig : ScriptableObject
 }
 ```
 
-### Шаг 2: Зарегистрируйте конфиг в DI
+### Step 2: Register the config in DI
 
 ```csharp
-// В вашем LifetimeScope:
+// In your LifetimeScope:
 var configStore = container.Resolve<UnityGameConfigStore>();
 configStore.Register("session", mySessionConfigAsset);
 
-// Настройте политику
+// Configure policy
 var configPolicy = container.Resolve<GameConfigPolicy>();
 configPolicy.SetKnownKeys(new[] { "session", "crafting" });
-configPolicy.GrantFullAccess("Creator"); // Creator может всё
+configPolicy.GrantFullAccess("Creator"); // Creator can do everything
 configPolicy.ConfigureRole("CoreMechanicAI", 
     readKeys: new[] { "session" }, 
     writeKeys: new[] { "session" });
 ```
 
-### Шаг 3: AI автоматически получает tool
+### Step 3: AI receives the tool automatically
 
-`AiOrchestrator` **автоматически** передаёт `GameConfigTool` в LLM если:
-- Роль имеет доступ к конфигам (через `GameConfigPolicy`)
-- `AgentMemoryPolicy.GetToolsForRole()` включает GameConfigTool
+`AiOrchestrator` **automatically** passes `GameConfigTool` to the LLM when:
+- The role has config access (via `GameConfigPolicy`)
+- `AgentMemoryPolicy.GetToolsForRole()` includes GameConfigTool
 
 ```csharp
-// В AiOrchestrator — инструменты собираются автоматически:
+// In AiOrchestrator — tools are assembled automatically:
 var tools = _memoryPolicy?.GetToolsForRole(roleId);
-// GameConfigTool добавляется отдельно если роль имеет доступ
+// GameConfigTool is added separately if the role has access
 if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
 {
     var configTool = _configPolicy.CreateLlmTool(_configStore, roleId);
@@ -97,12 +97,12 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
 
 ---
 
-## 🤖 Как AI использует конфиги
+## 🤖 How AI uses configs
 
-### AI читает конфиг
+### AI reads config
 
 ```json
-// AI вызывает function call:
+// AI function call:
 {
   "name": "game_config",
   "arguments": {
@@ -110,7 +110,7 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
   }
 }
 
-// Получает ответ:
+// Response:
 {
   "success": true,
   "message": "Config read successfully",
@@ -118,10 +118,10 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
 }
 ```
 
-### AI меняет конфиг
+### AI updates config
 
 ```json
-// AI вызывает function call с изменённым JSON:
+// AI function call with modified JSON:
 {
   "name": "game_config",
   "arguments": {
@@ -130,7 +130,7 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
   }
 }
 
-// Получает подтверждение:
+// Confirmation:
 {
   "success": true,
   "message": "Config updated for key: session"
@@ -139,23 +139,23 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
 
 ---
 
-## 🔒 Безопасность
+## 🔒 Security
 
 ```csharp
-// Ограничьте доступ ролей:
+// Restrict role access:
 configPolicy.ConfigureRole("AINpc",
-    readKeys: new[] { "dialogue" },   // Только чтение
-    writeKeys: Array.Empty<string>()); // Без записи
+    readKeys: new[] { "dialogue" },   // Read only
+    writeKeys: Array.Empty<string>()); // No write
 
-configPolicy.RevokeAccess("PlayerChat"); // Без доступа
+configPolicy.RevokeAccess("PlayerChat"); // No access
 ```
 
 ---
 
-## 🧪 Тестирование
+## 🧪 Testing
 
 ```csharp
-// EditMode тест
+// EditMode test
 [Test]
 public void ConfigTool_ReadModifyWrite_Works()
 {
@@ -183,45 +183,45 @@ public void ConfigTool_ReadModifyWrite_Works()
 
 ---
 
-## 📁 Структура файлов
+## 📁 File layout
 
 ```
-CoreAI (универсальный):
+CoreAI (portable):
 ├── Features/Config/
-│   ├── IGameConfigStore.cs          # Интерфейс
+│   ├── IGameConfigStore.cs          # Interface
 │   ├── GameConfigTool.cs            # ILlmTool
-│   ├── GameConfigPolicy.cs          # Политика доступа
-│   ├── GameConfigLlmTool.cs         # Обёртка ILlmTool
-│   └── NullGameConfigStore.cs       # Заглушка
+│   ├── GameConfigPolicy.cs          # Access policy
+│   ├── GameConfigLlmTool.cs         # ILlmTool wrapper
+│   └── NullGameConfigStore.cs       # Stub
 
 CoreAIUnity (Unity):
 ├── Features/Config/Infrastructure/
-│   └── UnityGameConfigStore.cs      # ScriptableObject реализация
+│   └── UnityGameConfigStore.cs      # ScriptableObject implementation
 
-Ваша игра:
+Your game:
 ├── Config/
-│   ├── GameSessionConfig.cs         # Ваш ScriptableObject
-│   ├── GameSessionConfig.asset      # Ассет
-│   └── ConfigInstaller.cs           # Регистрация в DI
+│   ├── GameSessionConfig.cs         # Your ScriptableObject
+│   ├── GameSessionConfig.asset      # Asset
+│   └── ConfigInstaller.cs           # DI registration
 ```
 
 ---
 
 ## ✅ Checklist
 
-- [ ] Создан ScriptableObject с параметрами
-- [ ] Создан ассет конфига (`CreateAssetMenu`)
-- [ ] `UnityGameConfigStore.Register("key", configAsset)` вызван
-- [ ] `GameConfigPolicy` настроен для ролей
-- [ ] Системный промпт AI знает о доступных ключах
-- [ ] Тесты написаны (EditMode + PlayMode)
+- [ ] ScriptableObject with parameters created
+- [ ] Config asset created (`CreateAssetMenu`)
+- [ ] `UnityGameConfigStore.Register("key", configAsset)` called
+- [ ] `GameConfigPolicy` configured for roles
+- [ ] AI system prompt mentions available keys
+- [ ] Tests written (EditMode + PlayMode)
 
 ---
 
-## 💡 Советы
+## 💡 Tips
 
-1. **Один ключ = один ScriptableObject** — не смешивайте разные типы конфигов
-2. **Валидация в SO** — используйте `[Range]` для защиты от безумных значений
-3. **Логирование** — `UnityGameConfigStore` логирует все изменения
-4. **Editor** — изменения сохраняются в ассет через `EditorUtility.SetDirty`
-5. **Runtime** — в билде изменения живут до перезагрузки сцены
+1. **One key = one ScriptableObject** — do not mix unrelated config types
+2. **Validate on the SO** — use `[Range]` to block absurd values
+3. **Logging** — `UnityGameConfigStore` logs all changes
+4. **Editor** — changes persist to the asset via `EditorUtility.SetDirty`
+5. **Runtime** — in builds, changes last until scene reload

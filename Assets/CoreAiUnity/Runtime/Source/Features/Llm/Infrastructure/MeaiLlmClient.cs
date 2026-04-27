@@ -158,7 +158,7 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions = new()
             {
                 Temperature = request.Temperature,
-                MaxOutputTokens = request.MaxOutputTokens
+                MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
             };
             if (aiTools.Count > 0)
             {
@@ -272,7 +272,7 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions = new()
             {
                 Temperature = request.Temperature,
-                MaxOutputTokens = request.MaxOutputTokens
+                MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
             };
             if (aiTools.Count > 0)
             {
@@ -663,6 +663,23 @@ namespace CoreAI.Infrastructure.Llm
                     options.ToolMode = MEAI.ChatToolMode.RequireSpecific(targetName);
                     return;
             }
+        }
+
+        /// <summary>
+        /// Resolves the effective <c>MaxOutputTokens</c> for a single MEAI <c>ChatOptions</c>:
+        /// per-request value wins; otherwise fall back to <see cref="ICoreAISettings.MaxTokens"/>
+        /// when it is positive; otherwise leave <c>null</c> so the provider uses its own default.
+        /// Both HTTP and LLMUnity backends honour the resulting value uniformly.
+        /// </summary>
+        private int? ResolveMaxOutputTokens(int? perRequest)
+        {
+            if (perRequest.HasValue && perRequest.Value > 0)
+            {
+                return perRequest.Value;
+            }
+
+            int settingsValue = _settings?.MaxTokens ?? 0;
+            return settingsValue > 0 ? settingsValue : (int?)null;
         }
 
         /// <summary>

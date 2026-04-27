@@ -1,92 +1,152 @@
 # Changelog — `com.nexoider.coreaiunity`
 
-Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
+Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
+
+## [0.25.12] - 2026-04-27
+
+### Queue scheduling stability
+
+- 🐛 **`QueuedAiOrchestrator` latest-wins scopes** — `CancellationScope` now cancels older active and pending work as soon as a newer task with the same scope is enqueued, including streaming tasks.
+- 🐛 **Queue fairness and cancellation** — equal priorities are FIFO, streaming and non-streaming tasks share one effective priority order, and pending tasks observe external cancellation before they start.
+- 🧪 **EditMode coverage:** added queue regressions for FIFO priority ties, pending scope supersession, pending external cancellation, pending stream supersession, `CancelTasks(scope)` for pending streams, and shared sync/stream priority.
+- 📝 **`DEVELOPER_GUIDE.md`** — documents the queue contract: `MaxConcurrent`, `Priority`, `CancellationScope`, `CancelTasks(scope)`, and sync/stream scheduling.
+- 🔧 Package **`0.25.12`**. Dependency **`com.nexoider.coreai 0.25.12`**.
+
+## [0.25.11] - 2026-04-27
+
+### Tool calling stability + world tool hardening
+
+- ✨ **CoreAI tool contract prompt** — `AiOrchestrator` now injects a concise tool contract whenever a role has registered tools, so local models are nudged by the framework to call real tools with structured arguments instead of simulating them in prose.
+- 🐛 **Structured retry keeps tool context** — structured-response retries preserve registered tools, chat history, forced tool mode, required tool name, and response-token budget.
+- 🐛 **`WorldLlmTool` main-thread execution** — direct `world_command` tool calls now marshal `ICoreAiWorldCommandExecutor.TryExecute(...)` through `UniTask.SwitchToMainThread` instead of forcing `Task.Run`. This avoids ThreadPool execution for Unity-facing world executors and aligns direct tool calls with the MessagePipe router contract.
+- 🔧 **`WorldLlmTool` tool contract hardening** — descriptions now explicitly require `targetName` for animation commands such as `list_animations`, and invalid/missing argument responses use one centralized valid-action list plus action-specific missing-parameter messages.
+- 🧪 **EditMode coverage:** added regressions for orchestrator tool-contract injection, `WorldLlmTool` missing `targetName` feedback, and world executor thread handling.
+- 📝 **`MEAI_TOOL_CALLING.md` / `WORLD_COMMANDS.md` / `DEVELOPER_GUIDE.md`** — documented the orchestrator-level tool contract, direct world-command main-thread execution, and beginner/pro MessagePipe extension points.
+- 🔧 Package **`0.25.11`**. Dependency **`com.nexoider.coreai 0.25.11`**.
+
+## [0.25.10] - 2026-04-27
+
+### File-backed memory store + docs
+
+- 🐛 **`FileAgentMemoryStore.ClearChatHistory`** — after dropping in-memory chat for a role, the internal “history loaded” flag is reset so the **same store instance** can call `GetChatHistory` / `AppendChatMessage` again without `KeyNotFoundException` (regression covered by **`FileAgentMemoryStoreEditModeTests.ClearChatHistory_SameStoreInstance_GetChatHistory_IsSafe`**).
+- 📝 **`MemorySystem.md`** — notes that `RoleMemoryConfig` defaults treat persisted chat as off unless chat history is enabled or set explicitly (see **`com.nexoider.coreai` 0.25.10**).
+- 📝 **`MEMORY_STORE_CUSTOM_BACKENDS.md`** — custom `IAgentMemoryStore` implementations should invalidate any per-role RAM cache when implementing `ClearChatHistory`, same contract as the reference file store.
+- 🔧 Package **`0.25.10`**. Dependency **`com.nexoider.coreai 0.25.10`**.
+
+## [0.25.9] - 2026-04-27
+
+### Per-agent MaxOutputTokens + LLMUnity asmdef wiring helper
+
+- ✨ **Per-agent output budget:** `AgentBuilder.WithMaxOutputTokens(int? tokens)` stores a role-level response token cap in `AgentMemoryPolicy.RoleMemoryConfig.MaxOutputTokens`. Orchestrator priority is now `AiTaskRequest.MaxOutputTokens` (per-call) → per-agent (`WithMaxOutputTokens`) → global `CoreAISettings.MaxTokens` → provider default.
+- 🐛 **LLMUnity package detection:** all CoreAI asmdefs use the real UPM package name **`ai.undream.llm`** in `versionDefines` (`COREAI_HAS_LLMUNITY`). The assembly references remain `undream.llmunity.Runtime` / `.Editor`, which are the assembly names exposed by the package.
+- ✨ **`CoreAISettingsAssetEditor` — LLMUnity status helper.** The LLMUnity foldout now reports whether package `ai.undream.llm` is installed and whether `COREAI_HAS_LLMUNITY` is active. If the package is installed but the define is missing, **Auto-fix asmdef wiring** updates the four CoreAI asmdefs and refreshes the AssetDatabase.
+- 🧪 **EditMode:** added per-agent MaxOutputTokens priority tests in the orchestrator plumbing suite.
+- 🔧 Package version **`0.25.9`**. Dependency `com.nexoider.coreai 0.25.9+`; package versions are aligned.
+
+## [0.25.8] - 2026-04-27
+
+### 🎛️ CoreAISettings inspector + unified MaxTokens fallback for both backends
+
+- 🐛 **`CoreAISettingsAssetEditor` — GGUF model picker fixed.** Previously a stray `EditorGUILayout.TextField` rendered **below** the popup re-read `ggufPathProp.stringValue` and overwrote the popup's just-applied selection on the same frame (symptom: pick a model in the dropdown → it reverts to `[ Auto / Fallback ]` on next repaint). Refactored into `DrawGgufModelDropdown(SerializedProperty)`:
+  - Popup lists `LLMManager.modelEntries` (already-downloaded GGUF files in LLMUnity Model Manager) plus a leading `[ Auto / Fallback ]` entry.
+  - **`LLMManager.LoadFromDisk()`** is invoked on first paint (and via the new **↻** refresh button) so the popup is populated even when entries were not lazy-loaded yet.
+  - **Browse…** opens `EditorUtility.OpenFilePanel` and writes the selected `.gguf` filename to the property.
+  - Separate **Manual override** `DelayedTextField` for typing a filename by hand (applies on Enter / focus-loss, no longer races with the popup).
+  - Empty Model Manager — informative `HelpBox` instead of an empty silent popup.
+  - Without the LLMUnity package — graceful fallback to a plain `PropertyField` + `HelpBox`.
+- ✨ **`Max Output Tokens` moved from HTTP-only section into General settings** with an explicit tooltip stating it now applies uniformly to both HTTP API and LLMUnity. Previously it was hidden under the HTTP API foldout, suggesting it was provider-specific — that was misleading once the field actually became consumed by both backends.
+- ✨ **Unified `MaxTokens` for HTTP API and LLMUnity.** Previously `CoreAISettings.MaxTokens = 4096` was a read-only getter with **no consumer**: visible in the inspector, never applied to either backend (request stayed `null` → provider default). Now `MeaiLlmClient.ResolveMaxOutputTokens(perRequest)` back-fills `ChatOptions.MaxOutputTokens` from `ICoreAISettings.MaxTokens` (when positive) on **both** non-streaming (`CompleteAsync`) and streaming (`CompleteStreamingAsync`) paths. Both `MeaiOpenAiChatClient` (HTTP `req["max_tokens"]`) and `LlmUnityMeaiChatClient` (`_unityAgent.numPredict`) consume the same `ChatOptions` value, so behaviour is symmetric.
+- ✨ **Per-call override via `AiTaskRequest.MaxOutputTokens` (`int?`)** — symmetric with `ForcedToolMode`/`RequiredToolName`. Forwarded by `AiOrchestrator` (`RunTaskAsync`, `RunStreamingAsync`, structured-retry) into `LlmCompletionRequest.MaxOutputTokens`. Application code can still call the LLM client directly with `LlmCompletionRequest.MaxOutputTokens` for finer control.
+- 🔧 **Effective priority:** `LlmCompletionRequest.MaxOutputTokens` (per-request direct call) → `AiTaskRequest.MaxOutputTokens` (per-call via orchestrator) → `ICoreAISettings.MaxTokens` (global default in `CoreAISettings.asset`) → provider default. Set `MaxTokens = 0` in the asset to opt out of the global fallback.
+- 🧪 **`MaxTokensFallbackEditModeTests`** — 4 new tests through `MeaiLlmClient` covering: settings-default fallback (non-streaming + streaming), per-request override wins, `MaxTokens=0` leaves provider default. Existing 552 EditMode tests continue to pass.
+- 🔧 **TODO (next):** dual-backend at runtime (primary + secondary, per-role routing via existing `RoutingLlmClient` + `LlmRoutingManifest`). Captured in [`TODO.md`](../../TODO.md).
+- 🔧 Package version **`0.25.8`**. Dependency `com.nexoider.coreai 0.25.4+` (new `MaxTokens` interface member with default-impl, new `AiTaskRequest.MaxOutputTokens`).
 
 ## [0.25.7] - 2026-04-27
 
-### 🔧 Editor bootstrap + устойчивость PlayMode к HTTP 5xx
+### 🔧 Editor bootstrap + PlayMode resilience to HTTP 5xx
 
-- 🔧 **`CoreAIBuildMenu`** — автосоздание `CoreAISettings.asset` отложено на **`EditorApplication.delayCall`**: не дублировать и не перезаписывать ассет в том же кадре, что и domain reload; если файл уже есть на диске, но импорт ещё не подхватил — **`ImportAsset(ForceSynchronousImport)`** вместо создания нового с дефолтами.
-- 🧪 **PlayMode (реальная модель):** `AgentMemoryWithRealModelPlayModeTests` — recall до **3** попыток с **`WaitForSecondsRealtime(1s)`** между ними; при пустом ответе после повторов (HTTP 5xx LM Studio и т.п.) — **`Assert.Ignore`** с текстом на русском вместо падения на пустом command sink; оркестратор не менялся.
-- 📝 **`TROUBLESHOOTING.md`** — раздел **PlayMode: HTTP 500 от LM Studio / локального API** (симптомы, причина, чеклист).
-- 🔧 Версия пакета **`0.25.7`**.
+- 🔧 **`CoreAIBuildMenu`** — auto-creation of `CoreAISettings.asset` is deferred to **`EditorApplication.delayCall`**: avoid duplicating or overwriting the asset in the same frame as domain reload; if the file already exists on disk but import has not picked it up yet — **`ImportAsset(ForceSynchronousImport)`** instead of creating a new asset with defaults.
+- 🧪 **PlayMode (real model):** `AgentMemoryWithRealModelPlayModeTests` — up to **3** recall attempts with **`WaitForSecondsRealtime(1s)`** between them; after retries, an empty response (HTTP 5xx from LM Studio, etc.) yields **`Assert.Ignore`** with a short hint instead of failing on an empty command sink; orchestrator unchanged.
+- 📝 **`TROUBLESHOOTING.md`** — section **PlayMode: HTTP 500 from LM Studio / local API** (symptoms, cause, checklist).
+- 🔧 Package version **`0.25.7`**.
 
 ## [0.25.6] - 2026-04-27
 
-### 💬 Chat UI — стоп при стриминге и «быстрых» бэкендах
+### 💬 Chat UI — stop during streaming and “fast” backends
 
-- 🐛 **`CoreAiChatPanel`** — флаг занятости для UI-отправки выставляется **до** первого `await`, стриминг помечает `_isStreaming` сразу после `Task.Yield()` (плюс сброс в `finally` / при `Stop`), чтобы кнопка **X** и `StopActiveGeneration` не терялись на stub / нулевой задержке; после отмены вызываются **`FinishStreaming` + `HideTypingIndicator`**.
-- 🐛 **Stop button** — `TrySendInput()` теперь сначала обрабатывает активный запрос, а потом общий lock; кнопка отправки остаётся включённой во время генерации, потому что в этом состоянии она является stop-контролом.
-- 📝 **Docs** — обновлены `README.md`, `CoreAiUnity/README.md`, `README_CHAT.md`, `DEVELOPER_GUIDE.md`, `STREAMING_ARCHITECTURE.md`, `DOCS_INDEX.md`.
-- 🧪 **PlayMode:** `CoreAiChatPanelStopPlayModeTests` проверяет, что активный streaming/request отменяет CTS и сбрасывает busy state через публичный `StopAgent()`.
-- 🔧 Версия пакета **`0.25.6`**.
+- 🐛 **`CoreAiChatPanel`** — busy flag for UI send is set **before** the first `await`; streaming sets `_isStreaming` right after `Task.Yield()` (also reset in `finally` / on `Stop`) so the **X** button and `StopActiveGeneration` are not lost on stub / zero-delay backends; after cancel, **`FinishStreaming` + `HideTypingIndicator`** run.
+- 🐛 **Stop button** — `TrySendInput()` handles the active request first, then the global lock; send stays enabled while generating because in that state it is the stop control.
+- 📝 **Docs** — updated `README.md`, `CoreAiUnity/README.md`, `README_CHAT.md`, `DEVELOPER_GUIDE.md`, `STREAMING_ARCHITECTURE.md`, `DOCS_INDEX.md`.
+- 🧪 **PlayMode:** `CoreAiChatPanelStopPlayModeTests` asserts active streaming/request cancels CTS and clears busy state via public `StopAgent()`.
+- 🔧 Package version **`0.25.6`**.
 
 ## [0.25.5] - 2026-04-26
 
-### 💬 Chat UI — хедер без дублирующего Stop, программный API
+### 💬 Chat UI — header without duplicate Stop, programmatic API
 
-- 🧹 **`CoreAiChat.uxml`** — удалена кнопка **`coreai-chat-stop`** из шапки: остановка генерации остаётся **кнопкой отправки** в режиме **X** и **Esc** (как в 0.22.0), без дублирования с header.
-- ✨ **`CoreAiChatPanel.SubmitMessageFromExternalAsync(messageText, options, cancellationToken)`** — сценарии из кода (кат-сцены, квесты, кнопки в мире): опция **`CoreAiChatExternalSubmitOptions.AppendUserMessageToChat`** (по умолчанию `true`, пузырь пользователя), **`SimulatedAssistantReply`** — показать ответ ассистента **без вызова LLM**; возврат текста ответа или `null` при занятости панели / отмене / пустом тексте после **`OnMessageSending`**.
-- ✨ Внутренний общий путь **`RunAgentTurnAsync`** для UI-отправки и внешней; стриминг / non-streaming возвращают финальную строку для вызывающего кода.
-- 📝 **`README_CHAT.md`** — раздел про программный вызов; раздел Stop без ссылки на кнопку в шапке.
-- 🧪 **EditMode:** `CoreAiChatExternalSubmitOptionsEditModeTests` (дефолты опций); в **`CoreAiChatConfigEditModeTests`** — проверки **`LoadPersistedChatOnStartup`** / **`MaxPersistedMessagesForUi`**.
-- 🔧 Версия пакета **`0.25.5`**.
+- 🧹 **`CoreAiChat.uxml`** — removed **`coreai-chat-stop`** from the header: stopping generation remains the **send button** in **X** mode plus **Esc** (as in 0.22.0), no duplicate header control.
+- ✨ **`CoreAiChatPanel.SubmitMessageFromExternalAsync(messageText, options, cancellationToken)`** — for code-driven flows (cutscenes, quests, world buttons): **`CoreAiChatExternalSubmitOptions.AppendUserMessageToChat`** (default `true`, user bubble), **`SimulatedAssistantReply`** — show assistant text **without calling the LLM**; returns final assistant text or `null` when the panel is busy / cancelled / empty text after **`OnMessageSending`**.
+- ✨ Shared internal path **`RunAgentTurnAsync`** for UI and external submits; streaming / non-streaming return the final string to callers.
+- 📝 **`README_CHAT.md`** — programmatic submit section; Stop section no longer references a header button.
+- 🧪 **EditMode:** `CoreAiChatExternalSubmitOptionsEditModeTests` (option defaults); **`CoreAiChatConfigEditModeTests`** — **`LoadPersistedChatOnStartup`** / **`MaxPersistedMessagesForUi`**.
+- 🔧 Package version **`0.25.5`**.
 
 ## [0.25.4] - 2026-04-26
 
-### 💬 Chat UI — восстановление сессии при старте
+### 💬 Chat UI — session restore on startup
 
-- ✨ **`CoreAiChatPanel`** — при `OnEnable` после `InitService` вызывается **`HydrateStartupMessagesFromStore()`**: очищается лента сообщений, из **`IAgentMemoryStore`** подгружается сохранённая история для **`CoreAiChatConfig.RoleId`** (если в конфиге включено **`Load Persisted Chat On Startup`**, по умолчанию **включено**). Если история **непустая**, приветствие **не** показывается поверх неё; если истории нет — показывается **`Welcome Message`** как раньше.
-- ✨ **`CoreAiChatConfig`** — секция **«Сессия / история»**: **`Load Persisted Chat On Startup`**, **`Max Persisted Messages For Ui`** (0 = все сообщения из store).
-- ✨ **`CoreAiChatService.TryGetPersistedChatHistory`** — чтение `ChatMessage[]` для UI/интеграций без дублирования доступа к store.
-- 📝 **`README_CHAT.md`** — раздел про восстановление сессии и условия (persist chat в `AgentMemoryPolicy`, путь `FileAgentMemoryStore`).
-- 🔧 Версия пакета **`0.25.4`**.
-- 🐛 **`CoreAiChat.uss` + `ScrollToBottom`** — лента сообщений: **`justify-content: flex-end`** и **`min-height: 100%`** на контейнере скролла, чтобы при коротком диалоге пузыри **сразу прижимались к низу** (у поля ввода), без эффекта «приветствие было под хедером и внезапно упало вниз» при первом сообщении. Прокрутка к низу выполняется **дважды** на соседних тиках расписания, чтобы учесть пересчёт `highValue` после layout.
+- ✨ **`CoreAiChatPanel`** — after `OnEnable` and `InitService`, **`HydrateStartupMessagesFromStore()`** clears the message list and loads persisted history from **`IAgentMemoryStore`** for **`CoreAiChatConfig.RoleId`** when **`Load Persisted Chat On Startup`** is enabled (default **on**). If history is **non-empty**, the welcome line is **not** shown on top; if empty, **`Welcome Message`** shows as before.
+- ✨ **`CoreAiChatConfig`** — **“Session / history”** section: **`Load Persisted Chat On Startup`**, **`Max Persisted Messages For Ui`** (0 = all messages from the store).
+- ✨ **`CoreAiChatService.TryGetPersistedChatHistory`** — reads `ChatMessage[]` for UI/integrations without duplicating store access.
+- 📝 **`README_CHAT.md`** — session restore section and conditions (persist chat in `AgentMemoryPolicy`, `FileAgentMemoryStore` path).
+- 🔧 Package version **`0.25.4`**.
+- 🐛 **`CoreAiChat.uss` + `ScrollToBottom`** — message list: **`justify-content: flex-end`** and **`min-height: 100%`** on the scroll content so short threads **stick to the bottom** (near the input) without the “welcome sat under the header then jumped down” effect on first message. Scroll-to-bottom runs **twice** on adjacent schedule ticks to account for `highValue` relayout.
 
-### 📊 LLM — логи бюджета промпта (`LoggingLlmClientDecorator`)
+### 📊 LLM — prompt budget logs (`LoggingLlmClientDecorator`)
 
-- ✨ В строках **`LLM ▶` / `LLM ◀`** расширен блок **`promptBudget`**: разбор **system** на total / **core** / **memory** (маркер `## Memory` как в `AiOrchestrator`) / оценка каталога **tools** из `request.Tools`; **chat** (user payload); грубые **estTok** и **words**; при наличии **usage** от API — те же метрики в суффиксе + **`outWords≈`** для completion.
+- ✨ **`LLM ▶` / `LLM ◀`** lines include an expanded **`promptBudget`**: **system** split into total / **core** / **memory** (`## Memory` marker as in `AiOrchestrator`) / **tools** catalog estimate from `request.Tools`; **chat** (user payload); rough **estTok** and **words**; when the API returns **usage**, the same metrics appear in the suffix plus **`outWords≈`** for completions.
 
 ## [0.25.3] - 2026-04-26
 
-### 💬 Chat UI — горячие клавиши C / Esc, глобальный poll и фокус UITK
+### 💬 Chat UI — C / Esc hotkeys, global poll, UITK focus
 
-- ✨ **`CoreAiChatPanel`** — пока чат **свёрнут** (FAB), **C** (латинская, без Ctrl/Cmd/Alt) открывает панель; пока **развёрнут**, **Esc** останавливает активную генерацию (если идёт запрос/стрим) иначе **сворачивает** чат. Обработка **Esc** на фазе `TrickleDown` с корня (`OnRootKeyDown`), чтобы не дублировать логику в `TextField`.
-- ✨ **`Update()`** вызывается на **всех** платформах: внутри — `PollChatToggleShortcuts()` (Legacy `Input.*`), когда у корня UITK **нет** сфокусированного элемента (`Root.focusController.focusedElement`) — чтобы сочетаться с управлением персонажем вне фокуса UI. На WebGL по-прежнему сбрасывается `WebGLInput.captureAllKeyboardInput`. Наследники **`Update()`** должны вызывать `base.Update()` первым, если переопределяют.
-- 🐛 **Совместимость API UITK:** вместо несуществующего на части версий `IPanel.focusedElement` используется **`Root.focusController.focusedElement`**.
-- ✨ **Хук для приложений:** `protected virtual void OnCollapsedStateChanged(bool collapsed)` — вызывается после каждого `SetCollapsed` (связка с геймплеем/курсором — вне пакета, через наследника или DI).
-- 📝 **`CoreAiChat.uxml`** — подсказки: «Открыть чат (C)», «Свернуть чат (Esc)», «Очистить историю»; кнопка очистки истории — символ **`*`**, чтобы не путать с горячей **C** чата.
-- 🧪 **Тесты:** `CoreAiChatPanelEditModeTests` — `IsOpenChatHotkeyFromKeys` (C / модификаторы / прочие клавиши).
-- ⚙️ **`CoreAiChatConfig`** — опции **«Горячие клавиши»**: включить/выключить открытие свёрнутого чата с клавиатуры, выбор **`OpenChatHotkey`** (`KeyCode`, по умолчанию `C`), включить/выключить **Esc** (стоп генерации / сворачивание). Подсказки FAB и буква на FAB обновляются из конфига.
-- ⚙️ **`CoreAiChatPanel` runtime API** — `SetRuntimeOpenChatKeyboardShortcutEnabled` / `SetRuntimeOpenChatHotkey` / `SetRuntimeEscapeChatShortcutsEnabled` (`null` = снова из конфига), `ClearRuntimeHotkeyOverrides()`, свойства **`Effective*`** для итогового поведения.
+- ✨ **`CoreAiChatPanel`** — while **collapsed** (FAB), **C** (Latin, no Ctrl/Cmd/Alt) opens the panel; while **expanded**, **Esc** stops active generation if a request/stream is running, otherwise **collapses** chat. **Esc** is handled at `TrickleDown` on the root (`OnRootKeyDown`) so `TextField` does not duplicate logic.
+- ✨ **`Update()`** runs on **all** platforms: calls `PollChatToggleShortcuts()` (Legacy `Input.*`) when the UITK root has **no** focused element (`Root.focusController.focusedElement`) — works with character controls when UI is unfocused. On WebGL, `WebGLInput.captureAllKeyboardInput` is still cleared. Subclasses overriding **`Update()`** should call `base.Update()` first.
+- 🐛 **UITK API compatibility:** use **`Root.focusController.focusedElement`** instead of `IPanel.focusedElement` (missing on some Unity versions).
+- ✨ **App hook:** `protected virtual void OnCollapsedStateChanged(bool collapsed)` — invoked after each `SetCollapsed` (gameplay/cursor wiring stays in your subclass or DI).
+- 📝 **`CoreAiChat.uxml`** — tooltips: “Open chat (C)”, “Collapse chat (Esc)”, “Clear history”; clear-history button uses **`*`** so it is not confused with chat hotkey **C**.
+- 🧪 **Tests:** `CoreAiChatPanelEditModeTests` — `IsOpenChatHotkeyFromKeys` (C / modifiers / other keys).
+- ⚙️ **`CoreAiChatConfig`** — **“Hotkeys”** options: enable/disable keyboard open while collapsed, **`OpenChatHotkey`** (`KeyCode`, default `C`), enable/disable **Esc** (stop generation / collapse). FAB tooltip and FAB letter refresh from config.
+- ⚙️ **`CoreAiChatPanel` runtime API** — `SetRuntimeOpenChatKeyboardShortcutEnabled` / `SetRuntimeOpenChatHotkey` / `SetRuntimeEscapeChatShortcutsEnabled` (`null` = use config again), `ClearRuntimeHotkeyOverrides()`, **`Effective*`** properties for resolved behavior.
 
 ## [0.25.2] - 2026-04-26
 
-### 💬 Chat UI — emoji glyphs в header-кнопках заменены на ASCII (фикс пустых кнопок в WebGL)
+### 💬 Chat UI — header emoji glyphs replaced with ASCII (empty WebGL buttons fix)
 
-- 🐛 **`Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`** — кнопка `coreai-chat-stop` теперь рендерится как `■` (Geometric Shapes U+25A0, входит в LiberationSans / стандартный TMP fallback) вместо `⏹` (Misc Technical U+23F9, в дефолтных WebGL-шрифтах отсутствует и рисовался пустым прямоугольником).
-- **Контекст:** в собранном WebGL-плеере Unity не подгружает emoji-fallback (Noto Color Emoji и т.п.), поэтому любые символы из эмодзи-плоскостей (U+1F300-U+1FAFF, частично U+2600-U+27BF, U+23F0-U+23FF) рендерятся как `□` или вообще не видно в круглой кнопке. ASCII / Latin-1 / Geometric Shapes (U+2580-U+25FF) гарантированно есть в дефолтном font-asset, поэтому — переезд на `■`.
-- **Совместимость:** изменение чисто косметическое, никаких API-изменений. Проекты, переопределяющие текст кнопок в своих UXML, не затронуты. Tooltip остался прежним («Остановить агента и генерацию»), так что UX не страдает.
-- **Известное TODO (не входит в 0.25.2):** в WebGL `UnityWebRequest` не отдаёт SSE по частям, из-за чего `OpenAiChatLlmClient.CompleteStreamingAsync` присылает один терминальный чанк вместо потока — стриминговый UI зависает («ответ не пишется + бесконечная анимация набора»). Подробности и план фикса — в [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). Workaround на стороне приложения — принудительно `CoreAiChatConfig.EnableStreaming = false` под `#if UNITY_WEBGL && !UNITY_EDITOR` (пример — `RedoSchool/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs`).
+- 🐛 **`Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`** — `coreai-chat-stop` now renders as `■` (Geometric Shapes U+25A0, present in LiberationSans / default TMP fallback) instead of `⏹` (Misc Technical U+23F9, missing from default WebGL fonts and drew as an empty rectangle).
+- **Context:** shipped WebGL players do not load emoji fallbacks (Noto Color Emoji, etc.), so emoji-plane symbols (U+1F300–U+1FAFF, parts of U+2600–U+27BF, U+23F0–U+23FF) render as `□` or disappear inside round buttons. ASCII / Latin-1 / Geometric Shapes (U+2580–U+25FF) are present in the default font asset — hence the move to `■`.
+- **Compatibility:** cosmetic only, no API changes. Projects overriding button text in custom UXML are unaffected. Tooltip unchanged (“Stop agent and generation”), so UX stays clear.
+- **Known TODO (out of scope for 0.25.2):** on WebGL, `UnityWebRequest` does not deliver SSE incrementally, so `OpenAiChatLlmClient.CompleteStreamingAsync` can deliver one terminal chunk instead of a stream — streaming UI appears stuck (“no typed reply + endless typing animation”). Details and fix plan: [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). App workaround: force `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR` (example: `RedoSchool/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs`).
 
 ## [0.25.1] - 2026-04-26
 
-### 💬 Chat UI — WebGL TextField focus persistence (фикс «фокус держится 1 кадр и слетает»)
+### 💬 Chat UI — WebGL TextField focus persistence (“focus lasts one frame” fix)
 
-- 🐛 **`CoreAiChatPanel.Update()` (только WebGL)** удерживает `WebGLInput.captureAllKeyboardInput = false` каждый кадр.
-  - **Симптом:** на собранном WebGL-билде клик по `TextField` чата приводит к фокусу ровно на 1 кадр, после чего фокус слетает и набор текста становится невозможен. В Editor проблема не воспроизводится.
-  - **Причина:** Unity-плагин WebGL периодически возвращает `captureAllKeyboardInput` обратно в `true` — re-attach JS keyboard handler при возврате фокуса на canvas, переключение сцены, отдельные операции с DOM-инпутом, который UITK создаёт под фокус `TextField`. Существующий one-shot `ConfigureWebGlKeyboardInput()` в `Awake()` отрабатывал ровно один раз при старте панели и больше не пересинхронизировался.
-  - **Фикс:** в `CoreAiChatPanel` добавлен `protected virtual void Update()` под `#if UNITY_WEBGL && !UNITY_EDITOR`, который сравнивает `WebGLInput.captureAllKeyboardInput` с `false` и переустанавливает в `false` при изменении. Операция дешёвая (одно булево сравнение, запись только при расхождении), в Editor / Standalone полностью stripped через `#if`.
-  - **Не возвращён `FocusOutEvent`-loop из 0.21.4** (он флипал каретку — см. 0.21.6) — Update-watchdog воздействует на источник проблемы (capture flag), а не на сам фокус UITK.
-  - **Override-friendly:** метод `protected virtual`, наследники могут расширять (например, добавить свой watchdog для дополнительных WebGL-фиксов), вызывая `base.Update()` первым.
+- 🐛 **`CoreAiChatPanel.Update()` (WebGL only)** keeps `WebGLInput.captureAllKeyboardInput = false` every frame.
+  - **Symptom:** in a WebGL build, clicking the chat `TextField` focuses for exactly one frame, then focus drops and typing fails. Not reproduced in the Editor.
+  - **Cause:** the WebGL player periodically flips `captureAllKeyboardInput` back to `true` (JS keyboard handler re-attach on canvas focus return, scene switches, DOM input churn under UITK `TextField` focus). The previous one-shot `ConfigureWebGlKeyboardInput()` in `Awake()` ran only once at panel startup.
+  - **Fix:** `CoreAiChatPanel` adds `protected virtual void Update()` under `#if UNITY_WEBGL && !UNITY_EDITOR` that compares `WebGLInput.captureAllKeyboardInput` to `false` and resets when it diverges. Cheap (one bool compare; write only on change); stripped in Editor / Standalone.
+  - **Not restored:** the `FocusOutEvent` loop from 0.21.4 (it fought the caret — see 0.21.6). The Update watchdog targets the capture flag, not UITK focus itself.
+  - **Override-friendly:** `protected virtual`; subclasses can extend (extra WebGL watchdogs) calling `base.Update()` first.
 
 ### 🎮 Input compatibility — Legacy Input Manager + new Input System Package
 
-- 🐛 **`OrchestrationDashboard` падал** при `Active Input Handling = Input System Package (New)`. Прямой вызов `Input.GetKeyDown()` бросает `InvalidOperationException`, когда legacy Input Manager отключён, и панель метрик падала на каждом кадре.
-- ✅ **Новый хелпер `IsToggleKeyPressedThisFrame()`** инкапсулирует обращение к обеим input-системам через `#if ENABLE_LEGACY_INPUT_MANAGER` / `#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM`. При `Active Input Handling = Both` используются обе ветки (legacy первой как fast-path).
-- ✅ **`CoreAI.Source.asmdef`** объявляет soft-зависимость `Unity.InputSystem` в `references` + `versionDefines` (`com.unity.inputsystem >= 1.0.0` → `COREAI_HAS_INPUT_SYSTEM`). Если пакет Input System не установлен — `using UnityEngine.InputSystem;` и весь new-input код полностью stripped, проект собирается без warning'ов.
-- ✅ **Маппинг `KeyCode → Key`** через `ToInputSystemKey()` покрывает функциональные клавиши F1-F12, BackQuote, Tab, Escape, Enter, Space (актуально для дашборда; неподдерживаемые клавиши возвращают `Key.None` — ожидание расширения по запросу).
-- ⚠️ **Совместимость:** ничего не сломано для проектов на legacy Input Manager (поведение идентично 0.25.0). Для проектов на new Input System требуется установить `com.unity.inputsystem` (versionDefines активирует Input-System ветку автоматически).
+- 🐛 **`OrchestrationDashboard` crashed** with `Active Input Handling = Input System Package (New)`. Direct `Input.GetKeyDown()` throws `InvalidOperationException` when the legacy Input Manager is disabled, breaking the metrics panel every frame.
+- ✅ **New helper `IsToggleKeyPressedThisFrame()`** wraps both stacks via `#if ENABLE_LEGACY_INPUT_MANAGER` / `#if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM`. With `Both`, both paths run (legacy first as fast path).
+- ✅ **`CoreAI.Source.asmdef`** declares a soft dependency on `Unity.InputSystem` in `references` + `versionDefines` (`com.unity.inputsystem >= 1.0.0` → `COREAI_HAS_INPUT_SYSTEM`). If Input System is not installed, `using UnityEngine.InputSystem;` and all new-input code strip out cleanly.
+- ✅ **`KeyCode → Key` mapping** via `ToInputSystemKey()` covers F1–F12, BackQuote, Tab, Escape, Enter, Space (dashboard use; unsupported keys return `Key.None` — extend on demand).
+- ⚠️ **Compatibility:** legacy-only projects behave as in 0.25.0. New Input System projects should install `com.unity.inputsystem` (versionDefines enable the branch automatically).
 
 ## [0.25.0] - 2026-04-26
 
@@ -101,7 +161,7 @@
 - **Both code paths supported.** Forced tool mode flows through both `CompleteAsync` (non-streaming, via `SmartToolCallingChatClient`) and `CompleteStreamingAsync` (streaming, native + text-based tool extraction).
 - **Tool-call JSON stays out of streaming text by default.** The existing native (SSE `delta.tool_calls`) and text-based extraction paths already strip tool-call JSON before yielding text chunks; `ForcedToolMode` does not change that.
 - 🧪 **Tests:** new `ForcedToolModeEditModeTests` verify forced-mode mapping, RequireSpecific validation, and the per-iteration reset in streaming.
-- **HTTP SSE `reasoning_content` (Qwen / LM Studio)** — `MeaiOpenAiChatClient.ExtractDeltaUpdate` извлекает дельты так, что цепь размышлений в отдельном поле не попадает в видимый `content`; `ParseResponse` документирован как «только `message.content` для текста ассистента». EditMode: `MeaiOpenAiChatClientSseEditModeTests`; PlayMode: ожидание `Streaming_ThinkBlocks_StrippedFromResponse` согласовано с `RequestTimeoutSeconds` + запас.
+- **HTTP SSE `reasoning_content` (Qwen / LM Studio)** — `MeaiOpenAiChatClient.ExtractDeltaUpdate` applies deltas so reasoning chains in a separate field do not leak into visible `content`; `ParseResponse` is documented as “`message.content` only for assistant text”. EditMode: `MeaiOpenAiChatClientSseEditModeTests`; PlayMode: `Streaming_ThinkBlocks_StrippedFromResponse` timing aligned with `RequestTimeoutSeconds` plus margin.
 - 🔧 Bumped package versions to `0.25.0`. Dependency: `com.nexoider.coreai 0.25.0+`.
 
 ## [0.24.2] - 2026-04-26
@@ -118,7 +178,7 @@
 ### SSE tool-call accumulation & UI stop fix
 
 - **`SseToolCallAccumulator`** — new stateful accumulator in `MeaiOpenAiChatClient` that properly collects `delta.tool_calls` spread across multiple SSE chunks (cloud providers like OpenAI split `id`+`name` in chunk 1 and `arguments` fragments across chunks 2..N). Flushed at stream end into `FunctionCallContent`. Removes the "Partial SSE tool_calls" known limitation.
-- **UI stop deduplication** — removed redundant `AddMessage("Остановлено пользователем")` from `StopAgent()`. The `OperationCanceledException` handler in `SendToAI` already displays the stop message via `_stopRequestedByUser` flag, eliminating double feedback.
+- **UI stop deduplication** — removed redundant `AddMessage("Stopped by user")` from `StopAgent()`. The `OperationCanceledException` handler in `SendToAI` already displays the stop message via `_stopRequestedByUser` flag, eliminating double feedback.
 - **New PlayMode tests** — `StreamingToolCallingPlayModeTests`:
   - `Streaming_WithToolCapablePrompt_CompletesSuccessfully` — smoke test for full tool-capable pipeline.
   - `Streaming_EarlyCancellation_StopsCleanly` — validates clean cancellation mid-stream.
@@ -184,386 +244,386 @@
 
 ## [0.22.0] - 2026-04-25
 
-### ✨ Agent Control API — Полноценное управление жизненным циклом агента
+### ✨ Agent Control API — Full agent lifecycle control
 
-Новый уровень контроля над агентами: остановка, очистка памяти, подписка на вызовы инструментов.
+A new level of control over agents: stop, clear memory, subscribe to tool invocations.
 
-### 💬 Chat UI — остановка генерации из интерфейса
+### 💬 Chat UI — stop generation from the UI
 
-- 🛑 **Stop по кнопке отправки.** Пока модель генерирует ответ, `coreai-chat-send` переключается в режим остановки (`■`) и вызывает `CoreAi.StopAgent(roleId)` + отмену активного токена.
-- ⌨️ **Stop по `Esc`.** Во время активной генерации нажатие `Esc` в чате останавливает текущий запрос так же, как и кнопка.
-- 🎨 **Визуальный сигнал busy-state.** Кнопка отправки получает отдельный красный стиль (`.coreai-chat-send-button-stop`), чтобы явно показать, что это теперь кнопка остановки.
-- 🧪 **EditMode тесты.** Добавлен `CoreAiChatPanelEditModeTests` (Escape-детект и отображение send/stop состояния кнопки).
-- 📝 **Документация.** Обновлены `README_CHAT.md` и `DEVELOPER_GUIDE.md` (разделы по остановке генерации из UI).
+- 🛑 **Stop via the send button.** While the model is generating a reply, `coreai-chat-send` switches to stop mode (`■`) and calls `CoreAi.StopAgent(roleId)` plus cancellation of the active token.
+- ⌨️ **Stop via `Esc`.** During active generation, pressing `Esc` in the chat stops the current request the same way as the button.
+- 🎨 **Busy-state visual cue.** The send button gets a dedicated red style (`.coreai-chat-send-button-stop`) to make it clear it now acts as the stop control.
+- 🧪 **EditMode tests.** Added `CoreAiChatPanelEditModeTests` (Escape detection and send/stop button state rendering).
+- 📝 **Docs.** Updated `README_CHAT.md` and `DEVELOPER_GUIDE.md` (sections on stopping generation from the UI).
 
-#### Остановка агента (`CoreAi.StopAgent`)
-- **`CoreAi.StopAgent(string cancellationScope)`** — атомарная отмена всех текущих и ожидающих задач оркестратора (`QueuedAiOrchestrator`).
-- Отменяет `CancellationToken` активных генераций и очищает внутреннюю очередь для указанного scope (обычно `roleId`).
-- Безопасен для вызова из любого потока.
+#### Stopping the agent (`CoreAi.StopAgent`)
+- **`CoreAi.StopAgent(string cancellationScope)`** — atomically cancels all current and pending orchestrator tasks (`QueuedAiOrchestrator`).
+- Cancels the `CancellationToken` for active generations and clears the internal queue for the given scope (usually `roleId`).
+- Safe to call from any thread.
 
-#### Очистка контекста (`CoreAi.ClearContext`)
-- **`CoreAi.ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)`** — гранулярный сброс памяти агента.
-- `clearChatHistory = true` — очищает краткосрочную историю чата (контекст сессии).
-- `clearLongTermMemory = true` — очищает долговременную память (стэйт/факты агента через `MemoryTool`).
-- Можно комбинировать: только чат, только память, или всё сразу.
+#### Clearing context (`CoreAi.ClearContext`)
+- **`CoreAi.ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)`** — granular reset of agent memory.
+- `clearChatHistory = true` — clears short-term chat history (session context).
+- `clearLongTermMemory = true` — clears long-term memory (agent state/facts via `MemoryTool`).
+- You can combine flags: chat only, long-term memory only, or both.
 
-#### Подписка на инструменты (`CoreAi.OnToolExecuted`)
-- **`CoreAi.OnToolExecuted`** — глобальное событие, срабатывает когда модель вызывает инструмент через MEAI pipeline.
-- Делегат `ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?> arguments, object? result)`.
-- Идеально для: проигрывания звуков, запуска VFX, аналитики, логирования.
-- Обёрнуто в `try/catch` — ошибки подписчиков не роняют LLM pipeline.
+#### Subscribing to tools (`CoreAi.OnToolExecuted`)
+- **`CoreAi.OnToolExecuted`** — global event fired when the model invokes a tool through the MEAI pipeline.
+- Delegate: `ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?> arguments, object? result)`.
+- Ideal for: playing sounds, triggering VFX, analytics, logging.
+- Wrapped in `try/catch` — subscriber errors do not tear down the LLM pipeline.
 
-#### Кнопка очистки чата в UI
-- 🆕 Добавлена кнопка **🗑** в хеддер `CoreAiChatPanel` (справа, перед кнопкой сворачивания).
-- По умолчанию очищает UI-сообщения и краткосрочную историю чата (`ClearChat()` → `CoreAi.ClearContext(roleId, true, false)`).
-- Для полного сброса (чат + долговременная память) используйте `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
-- **`ClearChat(bool clearChatHistory, bool clearLongTermMemory)`** — новая перегрузка с гранулярным управлением.
+#### Chat clear button in the UI
+- 🆕 Added a **🗑** button to the `CoreAiChatPanel` header (on the right, before the collapse control).
+- By default it clears UI messages and short-term chat history (`ClearChat()` → `CoreAi.ClearContext(roleId, true, false)`).
+- For a full reset (chat + long-term memory), use `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
+- **`ClearChat(bool clearChatHistory, bool clearLongTermMemory)`** — new overload with granular control.
 
-#### Конструктор `SmartToolCallingChatClient`
-- Добавлен обязательный параметр `roleId` — передаётся в `CoreAi.NotifyToolExecuted` при каждом вызове инструмента.
-- ⚠️ **Breaking:** все прямые создания `SmartToolCallingChatClient` теперь требуют `roleId` перед `maxConsecutiveErrors`.
+#### `SmartToolCallingChatClient` constructor
+- Added a required `roleId` parameter — passed to `CoreAi.NotifyToolExecuted` on every tool invocation.
+- ⚠️ **Breaking:** all direct `SmartToolCallingChatClient` constructions now require `roleId` before `maxConsecutiveErrors`.
 
-### 📝 Документация
-- Обновлён `DEVELOPER_GUIDE.md`: новая секция "Control API" с примерами кода для `StopAgent`, `ClearContext`, `OnToolExecuted`.
+### 📝 Documentation
+- Updated `DEVELOPER_GUIDE.md`: new "Control API" section with code examples for `StopAgent`, `ClearContext`, and `OnToolExecuted`.
 
-### 🧪 Тесты
-- Новые EditMode-тесты: `ClearContext_ClearsOnlyChatHistory`, `ClearContext_ClearsOnlyLongTermMemory`, `OnToolExecuted_FiresOnToolCall`.
-- Обновлены все тесты `SmartToolCallingChatClient*` — добавлен параметр `roleId`.
-- Тест `CancelTasks_SpecificScope_CancelsActiveAndPendingTasks` для оркестратора.
+### 🧪 Tests
+- New EditMode tests: `ClearContext_ClearsOnlyChatHistory`, `ClearContext_ClearsOnlyLongTermMemory`, `OnToolExecuted_FiresOnToolCall`.
+- All `SmartToolCallingChatClient*` tests updated — `roleId` parameter added.
+- Test `CancelTasks_SpecificScope_CancelsActiveAndPendingTasks` for the orchestrator.
 
 ## [0.21.9] - 2026-04-25
 
-### ✨ Agent Control API (Отмена задач и Очистка контекста)
+### ✨ Agent Control API (task cancellation and context clearing)
 
-- В ядро (через фасад `CoreAi`) добавлены публичные методы для остановки работы агента и сброса его памяти.
-- **`CoreAi.StopAgent(string cancellationScope)`**: Отменяет `CancellationToken` всех текущих генераций и очищает внутреннюю очередь `QueuedAiOrchestrator` для задач с переданным скоупом.
-- **`CoreAi.ClearContext(string roleId)`**: Программно очищает историю чата (`IAgentMemoryStore.ClearChatHistory`) и внутреннюю память (`MemoryTool`) для указанной роли агента.
-- Обновлена документация (`DEVELOPER_GUIDE.md`).
+- Public methods were added to the core (via the `CoreAi` facade) to stop agent work and reset its memory.
+- **`CoreAi.StopAgent(string cancellationScope)`**: Cancels the `CancellationToken` for all current generations and clears the `QueuedAiOrchestrator` internal queue for tasks with the given scope.
+- **`CoreAi.ClearContext(string roleId)`**: Programmatically clears chat history (`IAgentMemoryStore.ClearChatHistory`) and internal memory (`MemoryTool`) for the specified agent role.
+- Documentation updated (`DEVELOPER_GUIDE.md`).
 
 ## [0.21.8] - 2026-04-25
 
-### 🔧 LLMUnity — автоматическое определение пакета (COREAI_HAS_LLMUNITY)
+### 🔧 LLMUnity — automatic package detection (`COREAI_HAS_LLMUNITY`)
 
-- 🐛 **Исправлена ошибка компиляции `CS0246: MeaiLlmUnityClient` в проектах без LLMUnity.** Ранее код, зависящий от `undream.llmunity`, был скрыт за отрицательным символом `#if !COREAI_NO_LLM`, который нигде не определялся автоматически. В результате, если пакет LLMUnity не был установлен (но `COREAI_NO_LLM` не был задан вручную), ссылки на типы `LLMUnity` проходили компиляцию и падали.
-- ✨ **`versionDefines` в asmdef.** Во все 4 assembly definition файла (`CoreAI.Source`, `CoreAI.Editor`, `CoreAI.Tests`, `PlayModeTest`) добавлен блок `versionDefines`, который автоматически определяет символ `COREAI_HAS_LLMUNITY`, когда пакет `undream.llmunity` установлен в проекте.
-- ♻️ **Рефакторинг preprocessor guards.** Все LLMUnity-зависимые `#if` заменены с `!COREAI_NO_LLM && !UNITY_WEBGL` на `COREAI_HAS_LLMUNITY && !UNITY_WEBGL`:
-  - `MeaiLlmUnityClient.cs`, `LlmUnityModelBootstrap.cs`, `LlmUnityMeaiChatClient.cs`, `LlmUnityAutoDisableIfNoModel.cs` — полная обёртка файла.
-  - `MeaiLlmClient.cs` — `using LLMUnity` и метод `CreateLlmUnity()`.
+- 🐛 **Fixed compile error `CS0246: MeaiLlmUnityClient` in projects without LLMUnity.** Code depending on `undream.llmunity` was previously gated behind `#if !COREAI_NO_LLM`, which was never defined automatically. As a result, if LLMUnity was not installed (and `COREAI_NO_LLM` was not set manually), `LLMUnity` type references still compiled and then failed.
+- ✨ **`versionDefines` in asmdefs.** All four assembly definition files (`CoreAI.Source`, `CoreAI.Editor`, `CoreAI.Tests`, `PlayModeTest`) now include a `versionDefines` block that defines `COREAI_HAS_LLMUNITY` automatically when the `ai.undream.llm` package is present in the project.
+- ♻️ **Preprocessor guard refactor.** All LLMUnity-dependent `#if` conditions were changed from `!COREAI_NO_LLM && !UNITY_WEBGL` to `COREAI_HAS_LLMUNITY && !UNITY_WEBGL`:
+  - `MeaiLlmUnityClient.cs`, `LlmUnityModelBootstrap.cs`, `LlmUnityMeaiChatClient.cs`, `LlmUnityAutoDisableIfNoModel.cs` — entire file wrapped.
+  - `MeaiLlmClient.cs` — `using LLMUnity` and `CreateLlmUnity()` method.
   - `ILlmAgentProvider.cs` — `SceneLlmAgentProvider`.
-  - `LlmPipelineInstaller.cs` — fallback при отсутствии LLMUnity → `StubLlmClient`.
-  - `RoutingLlmClient.cs` — определение типа inner client.
-  - `LlmClientRegistry.cs` — case `LlmBackendKind.LlmUnity`.
-  - `CoreAISettingsAssetEditor.cs` — Editor-специфичные `LLMManager` / `LLMAgent` проверки.
+  - `LlmPipelineInstaller.cs` — fallback when LLMUnity is absent → `StubLlmClient`.
+  - `RoutingLlmClient.cs` — inner client type resolution.
+  - `LlmClientRegistry.cs` — `LlmBackendKind.LlmUnity` case.
+  - `CoreAISettingsAssetEditor.cs` — Editor-only `LLMManager` / `LLMAgent` checks.
   - `CoreAIBuildMenu.cs` — `TryCreateLlmUnityObjects`.
-  - **PlayMode-тесты:** `AllToolCallsPlayModeTests`, `PlayModeLlmUnityTestHarness`, `PlayModeProductionLikeLlmFactory.LlmUnityWarmup`, `MeaiLlmClientPlayModeTests`, `SharedLlmUnity`, `PlayModeProductionLikeLlmTestSupport`, `LlmUnityGlobalSetup`, `TestAgentSetup`.
-  - **EditMode-тесты:** `MeaiToolCallsEditModeTests` — `#if` guard для `LlmUnityMeaiChatClient.TryParseToolCallFromText`.
-- 📝 **`COREAI_NO_LLM` сохранён** как ручной opt-out для полного отключения LLM-функциональности (HTTP + LLMUnity). Новый `COREAI_HAS_LLMUNITY` — автоматическое определение окружения.
+  - **PlayMode tests:** `AllToolCallsPlayModeTests`, `PlayModeLlmUnityTestHarness`, `PlayModeProductionLikeLlmFactory.LlmUnityWarmup`, `MeaiLlmClientPlayModeTests`, `SharedLlmUnity`, `PlayModeProductionLikeLlmTestSupport`, `LlmUnityGlobalSetup`, `TestAgentSetup`.
+  - **EditMode tests:** `MeaiToolCallsEditModeTests` — `#if` guard for `LlmUnityMeaiChatClient.TryParseToolCallFromText`.
+- 📝 **`COREAI_NO_LLM` remains** as a manual opt-out to disable all LLM functionality (HTTP + LLMUnity). `COREAI_HAS_LLMUNITY` is the new automatic environment detection.
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.21.8**
+- Bumped dependency on `com.nexoider.coreai` to **0.21.8**
 
 ## [0.21.7] - 2026-04-23
 
-### 💬 Chat UI — сворачивание в плавающую кнопку (FAB)
+### 💬 Chat UI — collapse to a floating action button (FAB)
 
-- ✨ **Сворачивание чата.** В шапку `CoreAiChatPanel` добавлена кнопка `coreai-chat-collapse` (`—`). В свёрнутом состоянии контейнер скрыт через класс `.coreai-collapsed`, а вместо него отображается круглая плавающая кнопка `coreai-chat-fab` в правом нижнем углу — клик по ней разворачивает чат обратно и возвращает фокус во `InputField`.
-- 📱 **Автосворачивание на мобильных.** При старте на экранах `≤ 720×560` чат по умолчанию стартует свёрнутым, чтобы не перекрывать игровой мир — пользователь открывает его тапом по FAB. Пользовательский выбор (свернул/развернул) персистится в `PlayerPrefs` и перекрывает дефолт при следующих запусках.
-- 🧩 **API.** Публичный метод `SetCollapsed(bool collapsed, bool persist = true)` + свойство `IsCollapsed` — для программного управления из игрового кода или из геймплея (например, свернуть чат во время катсцены).
-- 🎨 **USS.** Новые классы: `.coreai-chat-header-btn` (круглая кнопка в шапке), `.coreai-chat-container.coreai-collapsed` (скрытое состояние), `.coreai-chat-fab` / `.coreai-chat-fab-icon` (плавающая кнопка + иконка).
-- 📦 **UXML.** Добавлены элементы `coreai-chat-collapse` (в шапке) и `coreai-chat-fab` (на корневой панели, по умолчанию `display: none`).
-- ✅ Linter clean, существующие WebGL input-focus исправления из `0.21.6` сохранены.
+- ✨ **Chat collapse.** The `CoreAiChatPanel` header now includes a `coreai-chat-collapse` (`—`) button. When collapsed, the container is hidden via the `.coreai-collapsed` class and a round floating `coreai-chat-fab` appears in the bottom-right corner — clicking it expands the chat again and returns focus to the `InputField`.
+- 📱 **Auto-collapse on small screens.** On startup, when the screen is `≤ 720×560`, the chat starts collapsed by default so it does not cover the game world; the user opens it by tapping the FAB. User choice (collapsed vs expanded) is persisted in `PlayerPrefs` and overrides the default on later launches.
+- 🧩 **API.** Public method `SetCollapsed(bool collapsed, bool persist = true)` plus `IsCollapsed` — for programmatic control from game code or gameplay (for example, collapse the chat during a cutscene).
+- 🎨 **USS.** New classes: `.coreai-chat-header-btn` (round header button), `.coreai-chat-container.coreai-collapsed` (hidden state), `.coreai-chat-fab` / `.coreai-chat-fab-icon` (floating button + icon).
+- 📦 **UXML.** Added `coreai-chat-collapse` (in the header) and `coreai-chat-fab` (on the root panel, default `display: none`).
+- ✅ Linter clean; existing WebGL input-focus fixes from `0.21.6` preserved.
 
 ## [0.21.6] - 2026-04-23
 
-### 💬 Chat UI — отмена форсированного фокуса (фикс мигания каретки на WebGL)
+### 💬 Chat UI — removed forced focus (WebGL caret flicker fix)
 
-- 🐛 **Убран `PointerDown`/`PointerUp` force-focus на `InputField`.** Предыдущая попытка «гарантировать» фокус на внутренний `unity-text-input` при каждом клике/тапе в WebGL создавала конфликт с собственным фокус-менеджментом UI Toolkit. Фокус переключался между внешним `TextField` и его внутренним редактором каждый кадр, из-за чего:
-  - обводка поля «моргала» (focused/unfocused каждый кадр),
-  - пропадала каретка (`|` не видно, т.к. re-focus сбрасывал позицию курсора),
-  - не работали стандартные сочетания вроде `Ctrl+A` (выделение сбрасывалось),
-  - при быстром наборе терялись символы.
-- 🐛 **Убран `FocusOutEvent`-loop.** Автовосстановление фокуса при любом `FocusOut` замыкало петлю: «фокус ушёл → форс-фокус назад → снова ушёл». Теперь UI Toolkit сам управляет фокусом по кликам.
-- ✅ **Оставлено только необходимое для WebGL-стабильности:**
-  - `WebGLInput.captureAllKeyboardInput = false` — Unity не забирает клавиатуру у браузера;
-  - `SendButton.focusable = false` — кнопка отправки не крадёт фокус после клика;
-  - однократный `InputField.Focus()` в `TrySendInput`/`SendToAI.finally` — чтобы после отправки можно было сразу печатать следующее сообщение.
-- ♻️ **`FocusInputField()` упрощён** до штатного `InputField.Focus()` — ручной lookup внутреннего `unity-text-input` больше не нужен и только вредил.
+- 🐛 **Removed `PointerDown`/`PointerUp` force-focus on `InputField`.** Forcing focus to the inner `unity-text-input` on every click/tap in WebGL fought UI Toolkit’s own focus management. Focus bounced between the outer `TextField` and its inner editor every frame, which caused:
+  - border flicker (focused/unfocused every frame),
+  - missing caret (`|` invisible because re-focus reset cursor position),
+  - broken combos like `Ctrl+A` (selection cleared),
+  - dropped characters when typing fast.
+- 🐛 **Removed the `FocusOutEvent` loop.** Auto-restore on any `FocusOut` created a loop: “focus left → force back → left again”. UITK now handles focus on clicks.
+- ✅ **Kept only what WebGL needs:**
+  - `WebGLInput.captureAllKeyboardInput = false` — Unity does not steal keyboard from the browser;
+  - `SendButton.focusable = false` — send does not steal focus after click;
+  - one-shot `InputField.Focus()` in `TrySendInput` / `SendToAI.finally` so you can type the next message immediately.
+- ♻️ **`FocusInputField()` simplified** to plain `InputField.Focus()` — manual inner `unity-text-input` lookup was unnecessary and harmful.
 
 ## [0.21.4] - 2026-04-23
 
 ### 💬 Chat UI — WebGL input focus hardening
 
-- 🐛 **`WebGLInput.captureAllKeyboardInput = false`** при Awake чата. В WebGL-сборке Unity по умолчанию забирает все клавиатурные события у браузера, из-за чего UI Toolkit TextField внутри runtime-панели терял фокус и «глотал» символы.
-- 🐛 **PointerDown/PointerUp на InputField**: гарантированный фокус на внутренний `unity-text-input` при любом клике/тапе по полю. Фокус больше не «прилипает» к внешнему композиту TextField.
-- 🐛 **`FocusOutEvent` авто-восстановление фокуса**: если фокус слетел не из-за отправки (характерно для multiline TextField в WebGL), он возвращается на следующий тик.
-- 🐛 **Не забирают фокус у инпута**: `ScrollView` с историей сообщений, заголовок и иконка header помечены `focusable = false`, чтобы клик по ним не уводил фокус с TextField.
+- 🐛 **`WebGLInput.captureAllKeyboardInput = false`** on chat `Awake`. In WebGL builds Unity defaults to capturing all keyboard events from the browser, so UITK `TextField` inside the runtime panel lost focus and “ate” characters.
+- 🐛 **PointerDown/PointerUp on `InputField`:** force focus to the inner `unity-text-input` on any click/tap. Focus no longer sticks to the outer `TextField` composite.
+- 🐛 **`FocusOutEvent` auto-restore:** if focus drops for a reason other than send (common for multiline `TextField` on WebGL), it returns on the next tick.
+- 🐛 **No focus stealers:** message-history `ScrollView`, header title, and header icon are `focusable = false` so clicks do not pull focus off the `TextField`.
 
 ## [0.21.3] - 2026-04-23
 
 ### 💬 Chat UI — WebGL typing stability
 
-- 🐛 **Устранена потеря фокуса после отправки через кнопку.** `CoreAiChatPanel.BindUI()` теперь выставляет `SendButton.focusable = false`, чтобы после клика клавиатурный фокус не «залипал» на кнопке отправки и следующий ввод сразу попадал в `TextField`.
-- 🐛 **Стабилизирован ввод следующего сообщения.** Сочетание явного рефокуса `FocusInputField()` + нефокусируемой send-кнопки устраняет кейс, где после первой отправки часть символов не печаталась в WebGL.
+- 🐛 **Fixed focus loss after send-button submit.** `CoreAiChatPanel.BindUI()` sets `SendButton.focusable = false` so keyboard focus does not stick on send and the next keystrokes go to the `TextField`.
+- 🐛 **Stabilized typing the next message.** Explicit `FocusInputField()` plus non-focusable send removes the WebGL case where some characters failed after the first send.
 
 ## [0.21.2] - 2026-04-23
 
 ### 💬 Chat UI — input focus
 
-- 🐛 **Фокус возвращается в текстовое поле после отправки.** `CoreAiChatPanel.TrySendInput` / `SendToAI.finally` теперь фокусят именно внутренний `unity-text-input` (а не внешний композит `TextField`). Ранее после 1-го отправленного сообщения в multi-line поле фокус «висел» на внешнем `TextField` и клавиатурный ввод не уходил в редактор — печатать можно было только повторным кликом в поле.
-- ✨ **`CoreAiChatPanel.FocusInputField()`** — приватный хелпер, инкапсулирует `TextField.textInputUssName` lookup. Используется и при очистке поля после отправки, и в `finally` SendToAI (чтобы после завершения AI-ответа можно было сразу продолжать печатать).
+- 🐛 **Focus returns to the text field after send.** `CoreAiChatPanel.TrySendInput` / `SendToAI.finally` now focus the inner `unity-text-input` (not the outer `TextField` shell). Previously, after the first send in multi-line mode focus stayed on the outer shell and keystrokes did not reach the editor until you clicked again.
+- ✨ **`CoreAiChatPanel.FocusInputField()`** — private helper wrapping `TextField.textInputUssName` lookup. Used when clearing the field after send and in `SendToAI` `finally` so you can keep typing after the assistant finishes.
 
 ## [0.21.1] - 2026-04-23
 
 ### 💬 Chat UI polish & layout stability
 
-- 💅 **ScrollView layout**: фикс overlap/сжатия — `ScrollView` корректно shrink'ится в колонке (min-height: 0), header/input/typing больше не уменьшаются при огромном контенте (`flex-shrink: 0`).
-- 💅 **Scrollbar theming (UI Toolkit / Unity 6)**: явные стили для `Scroller`-частей (`.unity-scroll-view__vertical-scroller`, `.unity-scroller__tracker`, `.unity-scroller__dragger`), скрыты arrow buttons (`.unity-scroller__low-button/.unity-scroller__high-button`) — дефолтный «белый» бар больше не пробивается.
-- 💅 **InputField readability**: усилены селекторы для внутренних классов `TextField` в разных версиях Unity, выставлены caret/selection colors — ввод игрока стабильно виден на тёмной теме.
-- 🔧 **Scroll bottom padding**: последний bubble не прячется под typing/input.
+- 💅 **ScrollView layout:** overlap/shrink fix — `ScrollView` shrinks correctly in the column (`min-height: 0`); header/input/typing no longer squash when content is huge (`flex-shrink: 0`).
+- 💅 **Scrollbar theming (UI Toolkit / Unity 6):** explicit `Scroller` styles (`.unity-scroll-view__vertical-scroller`, `.unity-scroller__tracker`, `.unity-scroller__dragger`); arrow buttons hidden (`.unity-scroller__low-button` / `.unity-scroller__high-button`) so the default bright bar no longer bleeds through.
+- 💅 **InputField readability:** stronger selectors for inner `TextField` classes across Unity versions; caret/selection colors tuned so player input stays readable on dark theme.
+- 🔧 **Scroll bottom padding:** last bubble no longer hides under typing/input.
 
 ### ⏱️ Timeouts
 
-- ⏱️ **CoreAISettingsAsset.LlmRequestTimeoutSeconds**: дефолт увеличен с **15s → 120s** (стриминг/tool-calling на локальных/медленных моделях часто требует больше времени).
+- ⏱️ **`CoreAISettingsAsset.LlmRequestTimeoutSeconds`:** default raised from **15s → 120s** (streaming/tool-calling on local/slow models often needs more time).
 
 ### 🧪 Tests (PlayMode)
 
-- 🧪 **CraftingMemoryViaLlmUnityPlayModeTests**: тест больше не падает, если бэкенд выполнил tool calls, но не прислал финальный `AiEnvelope` — имя предмета восстанавливается из memory (контракт промпта).
-- 🧪 **CraftingMemoryViaOpenAiPlayModeTests**: determinism-check теперь не просто логируется — добавлен `Assert` (craft #4 обязан повторить craft #2). Память для промпта приведена к каноническому формату `Craft #N - Name made from X + Y`, чтобы модель могла повторить результат по ингредиентам.
-- 🧪 **CraftingMemoryItemNameExtractor**: устойчивее к вольному тексту модели (кавычки, “crafted with quality”, жирный markdown и т.п.).
+- 🧪 **`CraftingMemoryViaLlmUnityPlayModeTests`:** test no longer fails when the backend ran tool calls but never returned a final `AiEnvelope` — item name is recovered from memory (prompt contract).
+- 🧪 **`CraftingMemoryViaOpenAiPlayModeTests`:** determinism check is now asserted (craft #4 must match craft #2), not only logged. Prompt memory uses canonical `Craft #N - Name made from X + Y` so the model can repeat by ingredients.
+- 🧪 **`CraftingMemoryItemNameExtractor`:** more tolerant of free-form model text (quotes, “crafted with quality”, bold markdown, etc.).
 
 ## [0.21.0] - 2026-04-23
 
 ### 🎯 `CoreAi` singleton — unified one-line entry point
 
-Раньше чтобы вызвать LLM из игрового кода надо было либо знать VContainer (`container.Resolve<CoreAiChatService>()`), либо городить свой singleton, либо использовать `CoreAiChatService.TryCreateFromScene()` каждый раз. Теперь — один статический класс, который умеет всё.
+Previously, calling the LLM from game code meant knowing VContainer (`container.Resolve<CoreAiChatService>()`), rolling your own singleton, or calling `CoreAiChatService.TryCreateFromScene()` every time. Now there is one static class that covers the common paths.
 
-- ✨ **`CoreAI.CoreAi`** (static facade, `Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs`) — ленивый потоко-безопасный синглтон, авторезолв из первой `CoreAILifetimeScope` на сцене.
-  - `CoreAi.TryGetChatService(out CoreAiChatService?)` / `CoreAi.TryGetOrchestrator(out IAiOrchestrationService?)` — **без исключений**, удобно для кнопок в UI и опционального AI (в отличие от `Get*` которые бросают `InvalidOperationException`).
-  - `CoreAi.AskAsync(message, roleId, ct)` → `Task<string>` — простой синхронный чат.
-  - `CoreAi.StreamAsync(message, roleId, ct)` → `IAsyncEnumerable<string>` — стриминг строковых чанков.
-  - `CoreAi.StreamChunksAsync(message, roleId, ct)` → `IAsyncEnumerable<LlmStreamChunk>` — стриминг с метаданными (`IsDone`, `Error`, usage).
-  - `CoreAi.SmartAskAsync(message, roleId, onChunk, uiStreamingOverride, ct)` → сам решает стрим/sync по иерархии флагов, возвращает полный текст, попутно вызывает `onChunk` на каждый фрагмент.
-  - `CoreAi.OrchestrateAsync(AiTaskRequest, ct)` → полный пайплайн оркестратора (snapshot → prompt composer → authority → очередь → structured policy → publish `ApplyAiGameCommand` → метрики).
-  - `CoreAi.OrchestrateStreamAsync(AiTaskRequest, ct)` → стриминговый вариант с тем же пайплайном.
-  - `CoreAi.OrchestrateStreamCollectAsync(task, onChunk, ct)` → стриминг + накопление полного текста + `onChunk`, возвращает `string`.
-  - `CoreAi.IsReady` / `CoreAi.Invalidate()` / `CoreAi.GetChatService()` / `CoreAi.GetOrchestrator()` / `CoreAi.GetSettings()` — управление кэшем и прямой доступ к сервисам.
-- ✨ **`QueuedAiOrchestrator.RunStreamingAsync`** — стриминг через собственную очередь с соблюдением `MaxConcurrent` и `CancellationScope`. Реализован через портативную producer/consumer-очередь на `SemaphoreSlim + ConcurrentQueue` (без `System.Threading.Channels`, который недоступен в Unity-сборке).
+- ✨ **`CoreAI.CoreAi`** (static facade, `Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs`) — lazy thread-safe singleton auto-resolved from the first `CoreAILifetimeScope` in the scene.
+  - `CoreAi.TryGetChatService(out CoreAiChatService?)` / `CoreAi.TryGetOrchestrator(out IAiOrchestrationService?)` — **non-throwing**, handy for UI buttons and optional AI (unlike `Get*` which throws `InvalidOperationException`).
+  - `CoreAi.AskAsync(message, roleId, ct)` → `Task<string>` — simple chat.
+  - `CoreAi.StreamAsync(message, roleId, ct)` → `IAsyncEnumerable<string>` — streamed text chunks.
+  - `CoreAi.StreamChunksAsync(message, roleId, ct)` → `IAsyncEnumerable<LlmStreamChunk>` — stream with metadata (`IsDone`, `Error`, usage).
+  - `CoreAi.SmartAskAsync(message, roleId, onChunk, uiStreamingOverride, ct)` — chooses stream vs sync from the flag hierarchy, returns full text, invokes `onChunk` per fragment.
+  - `CoreAi.OrchestrateAsync(AiTaskRequest, ct)` — full orchestrator pipeline (snapshot → prompt composer → authority → queue → structured policy → publish `ApplyAiGameCommand` → metrics).
+  - `CoreAi.OrchestrateStreamAsync(AiTaskRequest, ct)` — streaming variant of the same pipeline.
+  - `CoreAi.OrchestrateStreamCollectAsync(task, onChunk, ct)` — stream + accumulate full text + `onChunk`, returns `string`.
+  - `CoreAi.IsReady` / `CoreAi.Invalidate()` / `CoreAi.GetChatService()` / `CoreAi.GetOrchestrator()` / `CoreAi.GetSettings()` — cache control and direct service access.
+- ✨ **`QueuedAiOrchestrator.RunStreamingAsync`** — streaming through the orchestrator queue honoring `MaxConcurrent` and `CancellationScope`. Portable producer/consumer queue on `SemaphoreSlim + ConcurrentQueue` (no `System.Threading.Channels`, which is not available in this Unity build).
 
 ### 🧪 Tests
 
-- ✅ **`AiOrchestratorStreamingEditModeTests`** (новый файл, 5 тестов):
-  - `DefaultFallback_EmitsSingleTextChunkThenDone` — default-реализация интерфейса выдаёт ровно 2 чанка (текст + terminal).
-  - `DefaultFallback_EmptyResult_EmitsErrorChunk` — пустой результат → terminal с `Error="empty result"`.
-  - `QueuedAiOrchestrator_Streaming_DelegatesRealChunks` — 4 delta → 5 чанков (4 + terminal), а не 1 (fallback).
-  - `QueuedAiOrchestrator_Streaming_RespectsMaxConcurrent` — 2 параллельных стрима с `MaxConcurrent=1` оба успешно выполняются.
-  - `QueuedAiOrchestrator_Streaming_ExternalCancellation_EmitsCancelledTerminal` — отмена во время стрима → terminal с `Error="cancelled"`.
-- ✅ **`CoreAiFacadeEditModeTests`** (новый файл, 7 тестов):
+- ✅ **`AiOrchestratorStreamingEditModeTests`** (new file, 5 tests):
+  - `DefaultFallback_EmitsSingleTextChunkThenDone` — default interface implementation yields exactly 2 chunks (text + terminal).
+  - `DefaultFallback_EmptyResult_EmitsErrorChunk` — empty result → terminal with `Error="empty result"`.
+  - `QueuedAiOrchestrator_Streaming_DelegatesRealChunks` — 4 deltas → 5 chunks (4 + terminal), not 1 (fallback).
+  - `QueuedAiOrchestrator_Streaming_RespectsMaxConcurrent` — two parallel streams with `MaxConcurrent=1` both complete.
+  - `QueuedAiOrchestrator_Streaming_ExternalCancellation_EmitsCancelledTerminal` — cancel mid-stream → terminal with `Error="cancelled"`.
+- ✅ **`CoreAiFacadeEditModeTests`** (new file, 7 tests):
   - `IsReady_WithoutLifetimeScope_ReturnsFalse`.
   - `Invalidate_DoesNotThrow_WhenCalledMultipleTimes`.
   - `GetSettings_WithoutLifetimeScope_ReturnsNull`.
-  - `GetChatService_WithoutLifetimeScope_ThrowsInvalidOperation` — с понятным сообщением.
+  - `GetChatService_WithoutLifetimeScope_ThrowsInvalidOperation` — clear message.
   - `GetOrchestrator_WithoutLifetimeScope_ThrowsInvalidOperation`.
   - `TryGetChatService_WithoutLifetimeScope_ReturnsFalse` / `TryGetOrchestrator_WithoutLifetimeScope_ReturnsFalse`.
 
 ### 📚 Docs
 
-- ✨ **`Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md`** — полный справочник по фасаду: **блок для новичков** (3 шага + FAQ), **шпаргалка по всем методам**, **профессиональный стек** (когда оставить статику, когда DI), `TryGet*`, threading, расширения.
-- 🔧 **`STREAMING_ARCHITECTURE.md`** — новая секция `6. Orchestrator streaming` с таблицей сравнения `CoreAiChatService.SendMessageStreamingAsync` vs `IAiOrchestrationService.RunStreamingAsync` (авторити, структурная валидация, очередь, publish command, метрики).
-- 🔧 **`QUICK_START.md`** — раздел «One-line alternative — `CoreAi` singleton».
-- 🔧 **`DOCS_INDEX.md`** — ссылка на `COREAI_SINGLETON_API` в секции «Chat & Streaming».
-- 🔧 **`README_CHAT.md`** — программное использование переписано на два варианта: через `CoreAi` фасад (рекомендуется) и через прямой `CoreAiChatService`.
+- ✨ **`Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md`** — full facade reference: **beginner block** (3 steps + FAQ), **method cheat sheet**, **pro stack** (when to keep static vs DI), `TryGet*`, threading, extensions.
+- 🔧 **`STREAMING_ARCHITECTURE.md`** — new §`6. Orchestrator streaming` comparing `CoreAiChatService.SendMessageStreamingAsync` vs `IAiOrchestrationService.RunStreamingAsync` (authority, structured validation, queue, publish command, metrics).
+- 🔧 **`QUICK_START.md`** — “One-line alternative — `CoreAi` singleton” section.
+- 🔧 **`DOCS_INDEX.md`** — link to `COREAI_SINGLETON_API` under Chat & Streaming.
+- 🔧 **`README_CHAT.md`** — programmatic usage documented both via `CoreAi` (recommended) and direct `CoreAiChatService`.
 
 ## [0.20.3] - 2026-04-23
 
 ### 🐛 Chat panel & streaming hotfix
 
-- 🐛 **Streaming был невидим в UI (regression).** В chain `LoggingLlmClientDecorator` → `RoutingLlmClient` → `OpenAiChatLlmClient` / `MeaiLlmUnityClient` ни одно звено не переопределяло `CompleteStreamingAsync`. В результате всегда срабатывал default-fallback из интерфейса `ILlmClient`, который просто вызывал `CompleteAsync` и выдавал **один** терминальный чанк после завершения генерации — пользователь видел "Typing…" и затем сразу полный ответ без эффекта стриминга.
-  - **`OpenAiChatLlmClient.CompleteStreamingAsync`** → делегирует в `MeaiLlmClient.CompleteStreamingAsync` (SSE через `UnityWebRequest`, `ThinkBlockStreamFilter`).
-  - **`MeaiLlmUnityClient.CompleteStreamingAsync`** → делегирует в `MeaiLlmClient.CompleteStreamingAsync` (LLMUnity callback → `ConcurrentQueue`).
-  - **`RoutingLlmClient.CompleteStreamingAsync`** → выбирает inner-клиент по `AgentRoleId` и прокидывает чанки через `await foreach`.
-  - **`LoggingLlmClientDecorator.CompleteStreamingAsync`** → прокидывает чанки наружу без буферизации, параллельно накапливает в `StringBuilder` для финального лога (`LLM ◀ (stream) … chunks=N | tokens … | content …`). Таймаут из `LlmRequestTimeoutSeconds` применяется ко всему стриму и превращается в финальный чанк с `Error = "LLM stream timeout (Ns)"`.
-- 🐛 **Shift+Enter в multi-line TextField не отправлял сообщение.** `KeyDownEvent` был зарегистрирован в фазе Bubble (по умолчанию), поэтому UI Toolkit-овский multiline TextField успевал обработать Enter как newline до нашего обработчика. Теперь callback зарегистрирован в `TrickleDown.TrickleDown`, а проверка клавиши также учитывает `KeyCode.KeypadEnter` и `character == '\n' | '\r'` (на случай маппинга IME/клавиатуры).
+- 🐛 **Streaming was invisible in the UI (regression).** In the chain `LoggingLlmClientDecorator` → `RoutingLlmClient` → `OpenAiChatLlmClient` / `MeaiLlmUnityClient`, no link overrode `CompleteStreamingAsync`. The `ILlmClient` default fallback always ran: it called `CompleteAsync` and emitted **one** terminal chunk after generation finished — users saw “Typing…” then the full answer with no streaming effect.
+  - **`OpenAiChatLlmClient.CompleteStreamingAsync`** → delegates to `MeaiLlmClient.CompleteStreamingAsync` (SSE via `UnityWebRequest`, `ThinkBlockStreamFilter`).
+  - **`MeaiLlmUnityClient.CompleteStreamingAsync`** → delegates to `MeaiLlmClient.CompleteStreamingAsync` (LLMUnity callback → `ConcurrentQueue`).
+  - **`RoutingLlmClient.CompleteStreamingAsync`** → picks inner client by `AgentRoleId` and forwards chunks with `await foreach`.
+  - **`LoggingLlmClientDecorator.CompleteStreamingAsync`** → forwards chunks without buffering while appending to `StringBuilder` for the final log (`LLM ◀ (stream) … chunks=N | tokens … | content …`). `LlmRequestTimeoutSeconds` applies to the whole stream and becomes a terminal chunk `Error = "LLM stream timeout (Ns)"`.
+- 🐛 **Shift+Enter in multi-line `TextField` did not send.** `KeyDownEvent` used the Bubble phase (default), so UITK’s multiline `TextField` consumed Enter as newline before our handler. Callback is now `TrickleDown.TrickleDown`, and key handling includes `KeyCode.KeypadEnter` and `character == '\n' | '\r'` for IME/keyboard mappings.
 
 ### 💅 Typing indicator
 
-- 💅 **Анимация индикатора — чистые точки `...`** вместо `Печатает...`. `CoreAiChatConfig.TypingIndicatorText` теперь по умолчанию пуст; точки анимируются циклом `. → .. → ... → .` каждые 400 мс с выравниванием ширины (padding пробелами), чтобы бабл не «скакал». Пользователь может вернуть классический режим, задав префикс в Inspector (например, `Печатает` → `Печатает.` / `Печатает..` / `Печатает...`).
+- 💅 **Typing animation is plain dots `...`** instead of a long “typing…” prefix. `CoreAiChatConfig.TypingIndicatorText` defaults empty; dots animate `. → .. → ... → .` every 400 ms with padded width so the bubble does not jump. Classic prefix text can be set in the Inspector if desired.
 
 ### 🧪 Tests
 
-- ✅ **`LoggingLlmClientDecoratorEditModeTests`** расширены:
-  - `Streaming_DelegatesRealChunks_NotSingleShotFallback` — гарантирует, что при 4 реальных delta-чанках от mock-клиента пользователь получает 5 чанков (4 + терминальный), а не 1 (как было при fallback).
-  - `Streaming_LogsStartAndFinish` — проверяет, что в логе есть `LLM ▶ (stream)`, `LLM ◀ (stream)`, `chunks=2` и `traceId`.
-- ✅ **`RoutingLlmClientEditModeTests`** (новый файл, 3 теста):
-  - `Streaming_RoutesToInnerClient_ForRole` — роутер выбирает правильный клиент и вызывает именно стриминговый путь (не `CompleteAsync`).
-  - `Streaming_UsesFallbackClient_ForUnknownRole` — неизвестная роль → legacy fallback.
-  - `Streaming_NullRequest_YieldsErrorChunk` — null-запрос не ломает `IAsyncEnumerable`, а возвращает один терминальный чанк с ошибкой.
+- ✅ **`LoggingLlmClientDecoratorEditModeTests`** extended:
+  - `Streaming_DelegatesRealChunks_NotSingleShotFallback` — four real delta chunks from a mock yield five user-visible chunks (4 + terminal), not one fallback shot.
+  - `Streaming_LogsStartAndFinish` — asserts log contains `LLM ▶ (stream)`, `LLM ◀ (stream)`, `chunks=2`, and `traceId`.
+- ✅ **`RoutingLlmClientEditModeTests`** (new file, 3 tests):
+  - `Streaming_RoutesToInnerClient_ForRole` — router picks the right client and hits the streaming path (not `CompleteAsync`).
+  - `Streaming_UsesFallbackClient_ForUnknownRole` — unknown role → legacy fallback.
+  - `Streaming_NullRequest_YieldsErrorChunk` — null request yields one terminal error chunk without breaking `IAsyncEnumerable`.
 
 ## [0.20.2] - 2026-04-23
 
 ### 🗨️ Chat & Streaming
 
-- ✨ **Стриминг теперь работает для обоих бэкендов** — HTTP API (через SSE) и LLMUnity (через `LLMAgent.Chat(callback)` + `ConcurrentQueue` с delta-дифом под локом). Дублирующая `regex <think>` фильтрация убрана из `LlmUnityMeaiChatClient` — теперь единый `ThinkBlockStreamFilter` применяется на уровне `MeaiLlmClient`.
-- ✨ **`CoreAISettingsAsset.enableStreaming`** — глобальный тумблер в Inspector (секция «⚙️ Общие настройки»). Выключите его для принудительного non-streaming режима (полезно при отладке или работе с бэкендами без стриминга).
-- ✨ **`CoreAiChatService.IsStreamingEnabled(roleId, uiFallback)`** — вычисление эффективного флага с учётом иерархии: UI (`CoreAiChatConfig.EnableStreaming`) → per-agent (`AgentBuilder.WithStreaming`) → global (`CoreAISettings.EnableStreaming`).
-- ✨ **`CoreAiChatPanel`** теперь соблюдает все три слоя: при отключении любого из них панель автоматически переключается на non-streaming режим.
+- ✨ **Streaming works for both backends** — HTTP API (SSE) and LLMUnity (`LLMAgent.Chat(callback)` + `ConcurrentQueue` with delta diff under lock). Duplicate regex `<think>` filtering removed from `LlmUnityMeaiChatClient`; single `ThinkBlockStreamFilter` at `MeaiLlmClient`.
+- ✨ **`CoreAISettingsAsset.enableStreaming`** — global Inspector toggle (“General settings”). Turn off to force non-streaming (debugging or backends without streaming).
+- ✨ **`CoreAiChatService.IsStreamingEnabled(roleId, uiFallback)`** — effective flag from hierarchy: UI (`CoreAiChatConfig.EnableStreaming`) → per-agent (`AgentBuilder.WithStreaming`) → global (`CoreAISettings.EnableStreaming`).
+- ✨ **`CoreAiChatPanel`** honors all three layers; disabling any layer forces non-streaming for the panel.
 
 ### 🎬 Demo Scene
 
-- ✨ **`CoreAI → Setup → Create Chat Demo Scene`** — новое меню, создаёт готовую сцену `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` с:
+- ✨ **`CoreAI → Setup → Create Chat Demo Scene`** — new menu item; creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with:
   - `Main Camera`, `Directional Light`, `EventSystem`;
-  - `CoreAILifetimeScope` с автоматически назначенными `CoreAISettings`, `AgentPromptsManifest`, `LlmRoutingManifest`, `PrefabRegistry`, `GameLogSettings`;
-  - `UIDocument` с `CoreAiChat.uxml` + `CoreAiChat.uss` и `PanelSettings` (1920×1080, ScaleWithScreenSize);
-  - `CoreAiChatPanel` + демо-конфиг `CoreAiChatConfig_Demo.asset`.
-- ✨ **`CoreAI → Setup → Open Chat Demo Scene`** — открыть созданную сцену одним кликом.
+  - `CoreAILifetimeScope` wired to `CoreAISettings`, `AgentPromptsManifest`, `LlmRoutingManifest`, `PrefabRegistry`, `GameLogSettings`;
+  - `UIDocument` with `CoreAiChat.uxml` + `CoreAiChat.uss` and `PanelSettings` (1920×1080, ScaleWithScreenSize);
+  - `CoreAiChatPanel` + demo asset `CoreAiChatConfig_Demo.asset`.
+- ✨ **`CoreAI → Setup → Open Chat Demo Scene`** — opens the created scene in one click.
 
 ### 🧪 Tests
 
-- ✅ **`ThinkBlockStreamFilterEditModeTests`** — полное покрытие production-класса `CoreAI.Ai.ThinkBlockStreamFilter`: split-теги (по 1 символу за раз), несколько блоков, `Flush()` / `Reset()`, регистронезависимость, псевдо-теги (`<b>`, `2 < 3`), незакрытый `<think>` и long-reasoning через 50+ чанков.
-- ✅ **`CoreAiChatServiceEditModeTests`** — иерархия `IsStreamingEnabled` (UI → per-agent → global) для обеих перегрузок (`uiFallback` / `uiOverride`), `SendMessageAsync` / `SendMessageStreamingAsync` / `SendMessageSmartAsync` с поддельным `ILlmClient`.
-- ✅ **`CoreAiChatConfigEditModeTests`** — дефолты ScriptableObject (в т.ч. `EnableStreaming == true`).
-- ✅ `CoreAISettingsAssetEditModeTests` — добавлена проверка дефолта `EnableStreaming`.
-- ✅ **`SecureLuaSandboxEditModeTests`** — явное покрытие `SecureLuaEnvironment.StripRiskyGlobals` для каждого вырезанного глобала (`io`, `os`, `debug`, `load`, `loadfile`, `dofile`, `require`), а также `LuaExecutionGuard` (taimaut / max steps / fast code / non-function argument) и `LuaCoroutineHandle` (Resume/Kill/budgetPerResume).
-- ✅ **`LuaToolEditModeTests`** — `LuaTool.ExecuteAsync` (success, empty code, null code, executor throws, cancellation), `CreateAIFunction`, валидация `null`-аргументов конструктора, а также `LuaLlmTool` metadata (`Name`, `AllowDuplicates`, `Description`, `ParametersSchema`).
-- ✅ `SmartToolCallingChatClientEditModeTests` — добавлены тесты на duplicate detection (`allowDuplicateToolCalls=false`), per-tool `AllowDuplicates=true` override, `tool not found`, `tool throws exception`.
-- ✅ `InGameLlmChatServiceEditModeTests` — добавлены тесты rate limiter'а: превышение окна, `maxRequestsPerWindow=0` (отключение), отклонённый запрос не попадает в историю, скольжение окна.
+- ✅ **`ThinkBlockStreamFilterEditModeTests`** — full coverage of `CoreAI.Ai.ThinkBlockStreamFilter`: split tags (one char at a time), multiple blocks, `Flush()` / `Reset()`, case insensitivity, pseudo-tags (`<b>`, `2 < 3`), unclosed `<think>`, long reasoning (50+ chunks).
+- ✅ **`CoreAiChatServiceEditModeTests`** — `IsStreamingEnabled` hierarchy (UI → per-agent → global) for both overloads (`uiFallback` / `uiOverride`), `SendMessageAsync` / `SendMessageStreamingAsync` / `SendMessageSmartAsync` with fake `ILlmClient`.
+- ✅ **`CoreAiChatConfigEditModeTests`** — ScriptableObject defaults (including `EnableStreaming == true`).
+- ✅ `CoreAISettingsAssetEditModeTests` — default `EnableStreaming` assertion added.
+- ✅ **`SecureLuaSandboxEditModeTests`** — `SecureLuaEnvironment.StripRiskyGlobals` per removed global (`io`, `os`, `debug`, `load`, `loadfile`, `dofile`, `require`), plus `LuaExecutionGuard` (timeout / max steps / fast code / non-function argument) and `LuaCoroutineHandle` (Resume/Kill/budgetPerResume).
+- ✅ **`LuaToolEditModeTests`** — `LuaTool.ExecuteAsync` (success, empty code, null code, executor throws, cancellation), `CreateAIFunction`, constructor null-arg validation, `LuaLlmTool` metadata (`Name`, `AllowDuplicates`, `Description`, `ParametersSchema`).
+- ✅ `SmartToolCallingChatClientEditModeTests` — duplicate detection (`allowDuplicateToolCalls=false`), per-tool `AllowDuplicates=true`, `tool not found`, `tool throws exception`.
+- ✅ `InGameLlmChatServiceEditModeTests` — rate limiter: window overflow, `maxRequestsPerWindow=0` (disabled), rejected request not stored, sliding window.
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.20.2**
+- Bumped dependency on `com.nexoider.coreai` to **0.20.2**
 
 ## [0.20.1] - 2026-04-23
 
 ### 🐛 Streaming Fixes
 
-- 🐛 **Fixed `Create can only be called from the main thread`** в `StreamingPlayModeTests`. Тесты `Streaming_ReturnsChunks_WithDoneFlag`, `Streaming_CancellationToken_StopsStream`, `Streaming_ThinkBlocks_StrippedFromResponse` и `ThreeLayerPrompt_AllLayersApplied` раньше оборачивали `await foreach` в `Task.Run`, из-за чего `UnityWebRequest` и `DownloadHandlerBuffer` пытались создаться из ThreadPool и падали. Теперь streaming и `CompleteAsync()` вызываются напрямую как async-метод, continuations возвращаются через `UnitySynchronizationContext` на main thread.
-- 🐛 **Правильная отмена стрима:** `MeaiOpenAiChatClient.GetStreamingResponseAsync()` теперь вызывает `webReq.Abort()` при `CancellationToken.IsCancellationRequested`, а не только бросает `OperationCanceledException` (это важно на OpenRouter/удалённых HTTP-бэкендах, где иначе сессия продолжает тарифицироваться).
-- 🔧 **`MeaiLlmClient.CompleteStreamingAsync()`** переписан на новый stateful `ThinkBlockStreamFilter`. Раньше использовалась регулярка по одному чанку, из-за чего теги `<think>`/`</think>`, разбитые между SSE-чанками, не удалялись. Также гарантируется финальный `IsDone=true` чанк.
-- 🔧 **`CoreAiChatPanel`** — локальная реализация state-machine заменена на общий `ThinkBlockStreamFilter` (DRY, нет расхождения логики между UI и LLM-слоем).
+- 🐛 **Fixed `Create can only be called from the main thread`** in `StreamingPlayModeTests`. `Streaming_ReturnsChunks_WithDoneFlag`, `Streaming_CancellationToken_StopsStream`, `Streaming_ThinkBlocks_StrippedFromResponse`, and `ThreeLayerPrompt_AllLayersApplied` used to wrap `await foreach` in `Task.Run`, so `UnityWebRequest` / `DownloadHandlerBuffer` were created on the thread pool and failed. Streaming and `CompleteAsync()` now run as async methods on the Unity main thread via `UnitySynchronizationContext`.
+- 🐛 **Stream cancellation:** `MeaiOpenAiChatClient.GetStreamingResponseAsync()` now calls `webReq.Abort()` when `CancellationToken.IsCancellationRequested`, not only throwing `OperationCanceledException` (important for OpenRouter/remote HTTP where sessions may keep billing).
+- 🔧 **`MeaiLlmClient.CompleteStreamingAsync()`** rewritten around stateful `ThinkBlockStreamFilter` (old per-chunk regex missed split `<think>` / `</think>` across SSE chunks). Guarantees a final `IsDone=true` chunk.
+- 🔧 **`CoreAiChatPanel`** — local state machine replaced with shared `ThinkBlockStreamFilter` (DRY between UI and LLM layers).
 
 ### Tests
 
-- ✅ Все 4 `StreamingPlayModeTests` проходят (раньше все 4 падали).
-- ✅ 27 EditMode тестов (`ThinkBlockFilterEditModeTests` + `StreamingAndPromptsEditModeTests`) проходят.
+- ✅ All four `StreamingPlayModeTests` pass (previously all four failed).
+- ✅ 27 EditMode tests (`ThinkBlockFilterEditModeTests` + `StreamingAndPromptsEditModeTests`) pass.
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.20.1**
+- Bumped dependency on `com.nexoider.coreai` to **0.20.1**
 
 ## [0.20.0] - 2026-04-23
 
 ### 🗨️ Universal Chat Module (NEW)
-- ✨ **`CoreAiChatConfig`** — ScriptableObject для настройки чата в Inspector (`Assets → Create → CoreAI → Chat Config`): roleId, заголовок, приветствие, иконки, streaming on/off, размеры, лимиты ввода.
-- ✨ **`CoreAiChatPanel`** — MonoBehaviour + UI Toolkit контроллер: работает из коробки, поддержка streaming и non-streaming, think-block фильтрация, virtual методы для расширения (`OnMessageSending`, `OnResponseReceived`, `FormatResponseText`, `CreateMessageBubble`).
-- ✨ **`CoreAiChatService`** — сервис чата без UI: streaming, chat history, 3-layer prompt composition. `TryCreateFromScene()` для авто-резолва из DI.
-- ✨ **UXML/USS шаблон** — `CoreAiChat.uxml` + `CoreAiChat.uss` с тёмной темой, все CSS-классы с `coreai-` префиксом.
-- ✨ **Think-block фильтрация** — state machine для streaming: `<think>...</think>` блоки скрываются, typing indicator показывается пока модель «думает».
-- 📚 **`README_CHAT.md`** — документация: быстрый старт, расширение, программное API, кастомные стили.
+- ✨ **`CoreAiChatConfig`** — ScriptableObject chat settings in Inspector (`Assets → Create → CoreAI → Chat Config`): roleId, title, welcome, icons, streaming on/off, sizes, input limits.
+- ✨ **`CoreAiChatPanel`** — MonoBehaviour + UI Toolkit controller: works out of the box, streaming + non-streaming, think-block filtering, virtual hooks (`OnMessageSending`, `OnResponseReceived`, `FormatResponseText`, `CreateMessageBubble`).
+- ✨ **`CoreAiChatService`** — chat without UI: streaming, history, 3-layer prompts. `TryCreateFromScene()` for DI resolve.
+- ✨ **UXML/USS template** — `CoreAiChat.uxml` + `CoreAiChat.uss` dark theme, `coreai-` class prefix.
+- ✨ **Think-block filtering** — streaming state machine hides `<think>...</think>`; typing indicator while the model “thinks”.
+- 📚 **`README_CHAT.md`** — quick start, extension, programmatic API, custom styles.
 
 ### Streaming API
-- ✨ **Real SSE Streaming в `MeaiOpenAiChatClient`** — реализован настоящий потоковый приём ответов через Server-Sent Events (`stream: true`). Парсинг `data:` строк и извлечение `delta.content` чанков.
-- ✨ **`MeaiLlmClient.CompleteStreamingAsync()`** — стриминг через `IChatClient.GetStreamingResponseAsync()` с автоматической фильтрацией `<think>` блоков.
-- 🔧 **DRY рефакторинг `MeaiOpenAiChatClient`** — вынесены `BuildMessagesPayload()` и `BuildToolsPayload()`, переиспользуются в `GetResponseAsync` и `GetStreamingResponseAsync`.
+- ✨ **Real SSE streaming in `MeaiOpenAiChatClient`** — `stream: true`, parsing `data:` lines and `delta.content` chunks.
+- ✨ **`MeaiLlmClient.CompleteStreamingAsync()`** — streams via `IChatClient.GetStreamingResponseAsync()` with automatic `<think>` filtering.
+- 🔧 **DRY `MeaiOpenAiChatClient`** — `BuildMessagesPayload()` and `BuildToolsPayload()` shared by `GetResponseAsync` and `GetStreamingResponseAsync`.
 
 ### 3-Layer Prompt Architecture
-- 🔧 **`AiPromptComposer`** — расширен конструктор: принимает `AgentMemoryPolicy` и `ICoreAISettings` для 3-слойной сборки промптов.
+- 🔧 **`AiPromptComposer`** — constructor extended with `AgentMemoryPolicy` and `ICoreAISettings` for 3-layer prompt build.
 
 ### Tests
-- 🧪 **EditMode**: `StreamingAndPromptsEditModeTests` (13 тестов: 3-layer composition, AgentMemoryPolicy, LlmStreamChunk, default streaming fallback).
-- 🧪 **EditMode**: `ThinkBlockFilterEditModeTests` (10 тестов: regex и state machine фильтрации `<think>` блоков).
-- 🧪 **PlayMode**: `StreamingPlayModeTests` (4 теста: streaming chunks, cancellation, think-block stripping, 3-layer prompt с реальным LLM).
+- 🧪 **EditMode**: `StreamingAndPromptsEditModeTests` (13 tests: 3-layer composition, AgentMemoryPolicy, LlmStreamChunk, default streaming fallback).
+- 🧪 **EditMode**: `ThinkBlockFilterEditModeTests` (10 tests: regex + state machine for `<think>` blocks).
+- 🧪 **PlayMode**: `StreamingPlayModeTests` (4 tests: streaming chunks, cancellation, think-block stripping, 3-layer prompt with a real LLM).
 
 ### Dependencies
-- Обновлена зависимость от `com.nexoider.coreai` до **0.20.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.20.0**
 
 ## [0.19.1] - 2026-04-14
 
 ### Fixes & Stability
 
-- 🐛 **Защита от дублирования Tool Calls:** Разъяснены механизмы сброса счётчиков неудачных вызовов `MeaiLlmClient` внутри сессии. Локальность `executedSignatures` позволяет полностью изолировать каждый запрос.
-- 🔧 **Тестовое окружение `Agent.cs`:** 
-  - Тестовые фразы выведены в Inspector `[TextArea]` для изменения сценария "на лету" и предотвращения искусственного зацикливания LLM на идентичных промптах.
-  - Добавлен метод `ClearMemory()` для преднамеренной очистки истории (позволяет сбросить контекст бота между нажатиями кнопок, чтобы модель не опиралась на предыдущие ошибки).
-- 📝 **Документация:** Уточнена работа `SceneLlmAgentProvider` в связке с `DontDestroyOnLoad` — требуется явное наличие компонента `LLMAgent` или регистрация имени агента `LlmUnityAgentName`.
+- 🐛 **Duplicate tool-call protection:** clarified how `MeaiLlmClient` resets failed-call counters within a session. Per-request `executedSignatures` fully isolates each call.
+- 🔧 **Test harness `Agent.cs`:**
+  - Test phrases exposed in the Inspector `[TextArea]` for live scenario tweaks and to avoid the LLM looping on identical prompts.
+  - Added `ClearMemory()` to deliberately clear history (reset bot context between button presses so the model does not anchor on prior mistakes).
+- 📝 **Docs:** clarified `SceneLlmAgentProvider` with `DontDestroyOnLoad` — you need an `LLMAgent` component in the scene or a registered `LlmUnityAgentName`.
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.19.1**
+- Bumped dependency on `com.nexoider.coreai` to **0.19.1**
 
 ## [0.19.0] - 2026-04-10
 
 ### Crafting & Validation
 
-- ✨ **`CompatibilityChecker`** — проверка совместимости ингредиентов (правила на 2/3/4+ элементов, группы, кастомные валидаторы)
-- ✨ **`CompatibilityLlmTool`** — ILlmTool обёртка для function calling
-- ✨ **`JsonSchemaValidator`** — валидация JSON-ответов от LLM (типы, диапазоны, enum)
-- 🧪 **45+ EditMode тестов** (`CompatibilityAndSchemaEditModeTests.cs`)
-- 🧪 **3 PlayMode теста** (`CompatibilityToolPlayModeTests.cs`) с реальной LLM-моделью
+- ✨ **`CompatibilityChecker`** — ingredient compatibility checks (2/3/4+ item rules, groups, custom validators)
+- ✨ **`CompatibilityLlmTool`** — `ILlmTool` wrapper for function calling
+- ✨ **`JsonSchemaValidator`** — validates JSON from the LLM (types, ranges, enums)
+- 🧪 **45+ EditMode tests** (`CompatibilityAndSchemaEditModeTests.cs`)
+- 🧪 **3 PlayMode tests** (`CompatibilityToolPlayModeTests.cs`) with a real LLM
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.19.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.19.0**
 
 ## [0.18.0] - 2026-04-10
 
 ### Architecture — LifetimeScope Decomposition & DI Cleanup
 
-- 🔧 **`CoreAILifetimeScope.Configure()`** — декомпозиция из 200+ строк в модульные инсталлеры:
-  - `LlmPipelineInstaller` — LLM клиенты, маршрутизация, декоратор логирования, метрики оркестратора.
+- 🔧 **`CoreAILifetimeScope.Configure()`** — split from 200+ lines into modular installers:
+  - `LlmPipelineInstaller` — LLM clients, routing, logging decorator, orchestrator metrics.
   - `WorldCommandsInstaller` — Lua bindings, prefab registry, world executor, game config store.
-  - `Configure()` теперь ~40 строк с чёткими секциями.
-- ✨ **`ILlmAgentProvider` / `SceneLlmAgentProvider`** — абстракция поиска `LLMAgent` с lazy caching. Убран `FindFirstObjectByType<LLMAgent>` из DI composition root.
-- 🔧 **`CoreAISettings.Instance = settings`** — заменяет 17-строчный блок `SyncToStaticSettings()`. Статический прокси CoreAISettings теперь делегирует в DI-экземпляр автоматически.
-- ❌ **`SyncToStaticSettings()`** — удалён полностью (заменён одной строкой `CoreAISettings.Instance = settings`).
-- 🧪 **Тесты**:
-  - `CoreAISettingsSyncEditModeTests` — переписан на проверку Instance delegation (4 теста вместо 1).
-  - `LuaAiEnvelopeProcessorEditModeTests` — обновлён cleanup через `ResetOverrides()`.
+  - `Configure()` is now ~40 lines with clear sections.
+- ✨ **`ILlmAgentProvider` / `SceneLlmAgentProvider`** — abstraction for resolving `LLMAgent` with lazy caching. Removed `FindFirstObjectByType<LLMAgent>` from the DI composition root.
+- 🔧 **`CoreAISettings.Instance = settings`** — replaces the 17-line `SyncToStaticSettings()` block. The static `CoreAISettings` proxy now delegates to the DI instance automatically.
+- ❌ **`SyncToStaticSettings()`** — removed (replaced by `CoreAISettings.Instance = settings`).
+- 🧪 **Tests**:
+  - `CoreAISettingsSyncEditModeTests` — rewritten for `Instance` delegation (4 tests instead of 1).
+  - `LuaAiEnvelopeProcessorEditModeTests` — cleanup updated via `ResetOverrides()`.
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.18.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.18.0**
 
 ## [0.16.0] - 2026-04-09
 
 ### PlayMode Tools & Editor
-- ✨ **`SceneLlmTool`** — новый инструмент для Runtime инспекции сцены. Позволяет LLM искать, анализировать иерархию и менять `Transform` у GameObject, работая безопасно в главном потоке через UniTask.
-- ✨ **`CameraLlmTool`** — инструмент зрения, позволяющий модели делать скриншоты в PlayMode (`capture_camera`) с возвратом `dataUri` (Base64 JPEG).
-- 🛠 **Автоматизация `CoreAiPrefabRegistryAsset`** — добавлен `OnValidate`, который автоматически проставляет `Key` (на основе AssetDatabase GUID) и стягивает `Name` при добавлении префаба в инспекторе.
+- ✨ **`SceneLlmTool`** — runtime scene inspection tool. Lets the LLM search/analyze hierarchy and adjust `Transform` on `GameObject`s safely on the main thread via UniTask.
+- ✨ **`CameraLlmTool`** — vision tool for PlayMode screenshots (`capture_camera`) returning a Base64 JPEG `dataUri`.
+- 🛠 **`CoreAiPrefabRegistryAsset` automation** — `OnValidate` fills `Key` from AssetDatabase GUID and syncs `Name` when prefabs are assigned in the Inspector.
 
 ## [0.15.0] - 2026-04-09
 
 ### Tool Calling Engine
-- ✨ **Robust JSON Extraction** — полностью переписан механизм парсинга tool calls в `LlmUnityMeaiChatClient.TryParseToolCallFromText`. Старое хрупкое Regex вырезано; заменено на гибкий алгоритм поиска фигурных скобок (`IndexOf('{')`).
-- ⚙️ **Reasoning Mode Stripping** — добавлен препроцессинг ответов: парсинг tool calls теперь предварительно вырезает всю цепочку рассуждений `<think>...</think>`, предотвращая сбой JSON-парсера при "думанье" вслух (DeepSeek/Qwen).
+- ✨ **Robust JSON extraction** — rewrote tool-call parsing in `LlmUnityMeaiChatClient.TryParseToolCallFromText`. Fragile regex removed; flexible brace scanning (`IndexOf('{')`).
+- ⚙️ **Reasoning-mode stripping** — preprocess responses before tool parsing: strips `<think>...</think>` chains so JSON parsing does not break on “thinking aloud” (DeepSeek/Qwen).
 
 ### Editor UX
-- ✨ **Auto-Plugin Loading** — встроен механизм `[InitializeOnLoadMethod]` в `CoreAIBuildMenu`. При старте проекта он автоматически генерирует полный набор необходимых `ScriptableObject`.
-- ✨ **Quick Settings Menu** — добавлено удобное меню **CoreAI → Settings** для быстрого доступа к глобальному синглтону `CoreAISettings.asset`.
+- ✨ **Auto asset bootstrap** — `[InitializeOnLoadMethod]` in `CoreAIBuildMenu` ensures required `ScriptableObject` assets exist when the project loads.
+- ✨ **Quick Settings menu** — **CoreAI → Settings** jumps to the global `CoreAISettings.asset`.
 
 ## [0.13.0] - 2026-04-09
 
 ### Action / Event System
-- ✨ Поддержка `DelegateLlmTool`, `CoreAiEvents` и расширений `AgentBuilder` (добавлено в `Dependencies: com.nexoider.coreai 0.13.0`).
-- 📝 Обновлены `TOOL_CALL_SPEC.md` и `AGENT_BUILDER.md` с примерами и механизмом промптинга триггеров.
-- 🧪 **EditMode Tests** для `CoreAiEvents` и `AgentBuilder.WithAction` внедрены и пройдены.
-- 🧪 **PlayMode Tests** для `DelegateLlmTool` вызова (тест `CustomAgentsPlayModeTests.CustomAgent_Helper_WithAction`).
+- ✨ `DelegateLlmTool`, `CoreAiEvents`, and `AgentBuilder` extensions (via `com.nexoider.coreai 0.13.0`).
+- 📝 Updated `TOOL_CALL_SPEC.md` and `AGENT_BUILDER.md` with examples and trigger prompting.
+- 🧪 **EditMode tests** for `CoreAiEvents` and `AgentBuilder.WithAction`.
+- 🧪 **PlayMode test** `CustomAgentsPlayModeTests.CustomAgent_Helper_WithAction` for `DelegateLlmTool`.
 
 ## [0.12.0] - 2026-04-08
 
 ### Unified Logger (`ILog`)
 
-- 🔧 **UnityLog** — реализация `ILog` из CoreAI.Core, маппит `LogTag` → `GameLogFeature`
-- 🔧 **CoreServicesInstaller** — регистрирует `ILog` (через `UnityLog`) как DI singleton + устанавливает `Log.Instance`
-- 🔧 **GameLoggerUnscopedFallback** — автоматический fallback `Log.Instance` до инициализации DI
-- 🔧 **CoreAIGameEntryPoint** — мигрирован с `IGameLogger` на `ILog`
-- 🔧 **WorldTool** — logging мигрирован на `ILog` с `LogTag.World`
-- ❌ Удалена ручная установка `Log.Instance` из `CoreAILifetimeScope`
-- 🔧 **Унификация `MemoryToolAction`** (через Core 0.12.0) — устранено дублирование enum, настройка в `AgentBuilder.WithMemory()` теперь корректно применяется в политике через `policy.ConfigureRole()`.
-- ℹ️ `IGameLogger` сохранён как внутренний интерфейс Unity-слоя (FilteringGameLogger, GameLogSettingsAsset — без изменений)
+- 🔧 **UnityLog** — `ILog` implementation from CoreAI.Core; maps `LogTag` → `GameLogFeature`
+- 🔧 **CoreServicesInstaller** — registers `ILog` (`UnityLog`) as DI singleton and sets `Log.Instance`
+- 🔧 **GameLoggerUnscopedFallback** — automatic `Log.Instance` fallback before DI init
+- 🔧 **CoreAIGameEntryPoint** — migrated from `IGameLogger` to `ILog`
+- 🔧 **WorldTool** — logging migrated to `ILog` with `LogTag.World`
+- ❌ Removed manual `Log.Instance` wiring from `CoreAILifetimeScope`
+- 🔧 **`MemoryToolAction` unification** (Core 0.12.0) — single enum; `AgentBuilder.WithMemory()` applies correctly via `policy.ConfigureRole()`.
+- ℹ️ `IGameLogger` kept as an internal Unity-layer interface (`FilteringGameLogger`, `GameLogSettingsAsset` unchanged)
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.12.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.12.0**
 
 ---
 
@@ -571,218 +631,218 @@
 
 ### Universal System Prompt Prefix
 
-- ✨ **CoreAISettingsAsset.universalSystemPromptPrefix** — поле в Inspector (секция "⚙️ Общие настройки")
-- ✨ **CoreAISettings.UniversalSystemPromptPrefix** — статическое свойство для программного задания
-- ✨ **SyncToStaticSettings()** — синхронизация при старте из CoreAILifetimeScope
-- ✨ Префикс автоматически применяется ко всем агентам (встроенным и кастомным)
+- ✨ **`CoreAISettingsAsset.universalSystemPromptPrefix`** — Inspector field (“General settings”)
+- ✨ **`CoreAISettings.UniversalSystemPromptPrefix`** — static property for programmatic override
+- ✨ **`SyncToStaticSettings()`** — synced on startup from `CoreAILifetimeScope`
+- ✨ Prefix applies automatically to all agents (built-in and custom)
 
-### Temperature (общая для всех бэкендов)
+### Temperature (shared across backends)
 
-- ✨ **CoreAISettingsAsset.temperature** — изменён default с `0.2` на `0.1`
-- ✨ **CoreAISettings.Temperature** — статическое свойство (по умолчанию `0.1`)
-- ✨ Температура применяется и для LLMUnity, и для HTTP API
-- ✨ **AgentBuilder.WithTemperature(float)** — переопределить температуру для конкретного агента
-- ✨ **AgentConfig.Temperature** — свойство конфигурации
-- ✨ Поле в Inspector: "Temperature" в секции "⚙️ Общие настройки"
+- ✨ **`CoreAISettingsAsset.temperature`** — default changed from `0.2` to `0.1`
+- ✨ **`CoreAISettings.Temperature`** — static property (default `0.1`)
+- ✨ Temperature applies to LLMUnity and HTTP API
+- ✨ **`AgentBuilder.WithTemperature(float)`** — per-agent override
+- ✨ **`AgentConfig.Temperature`** — config property
+- ✨ Inspector field “Temperature” under “General settings”
 
-### MaxToolCallIterations (вынесен из хардкода)
+### MaxToolCallIterations (no longer hard-coded)
 
-- ✨ **CoreAISettingsAsset.maxToolCallIterations** — поле в Inspector (default 2)
-- ✨ **CoreAISettings.MaxToolCallIterations** — статическое свойство
-- ✨ **MeaiLlmClient** теперь читает из настроек вместо хардкода `MaximumIterationsPerRequest = 2`
+- ✨ **`CoreAISettingsAsset.maxToolCallIterations`** — Inspector field (default 2)
+- ✨ **`CoreAISettings.MaxToolCallIterations`** — static property
+- ✨ **`MeaiLlmClient`** reads from settings instead of hard-coded `MaximumIterationsPerRequest = 2`
 
 ## [0.7.0] - 2026-04-06
 
-### Единый MEAI Tool Calling Format (MAJOR)
+### Unified MEAI tool-calling format (MAJOR)
 
-**Все tool calls теперь используют единый формат через MEAI function calling**
+**All tool calls now use one MEAI function-calling shape**
 
-#### Новое
-- ✨ **LuaTool**: MEAI AIFunction для выполнения Lua скриптов от Programmer
-- ✨ **LuaLlmTool**: ILlmTool обёртка для Lua tool
-- ✨ **InventoryTool**: MEAI AIFunction для Merchant NPC (получение инвентаря)
-- ✨ **InventoryLlmTool**: ILlmTool обёртка для Inventory tool
-- ✨ **Merchant Agent**: Новый NPC-торговец с инструментами (get_inventory + memory)
-- ✨ **AgentBuilder**: Конструктор кастомных агентов — легко создавать новых агентов с уникальными инструментами
-- ✨ **AgentMode**: 3 режима — ToolsOnly, ToolsAndChat, ChatOnly
-- ✨ **WithChatHistory()**: Сохранение истории диалога (контекст текущей сессии, в RAM)
-- ✨ **WithMemory()**: Персистентная память (между сессиями, в JSON файл)
-- ✨ **Tool Call Retry**: До 3 попыток автоматически при неудачном tool call. Модель получает сообщение об ошибке и может исправить формат. (CoreAISettings.MaxToolCallRetries)
+#### Added
+- ✨ **`LuaTool`**: MEAI `AIFunction` for Programmer Lua execution
+- ✨ **`LuaLlmTool`**: `ILlmTool` wrapper for Lua
+- ✨ **`InventoryTool`**: MEAI `AIFunction` for Merchant inventory reads
+- ✨ **`InventoryLlmTool`**: `ILlmTool` wrapper for inventory
+- ✨ **Merchant agent**: NPC merchant with tools (`get_inventory` + memory)
+- ✨ **`AgentBuilder`**: fluent builder for custom agents/tools
+- ✨ **`AgentMode`**: `ToolsOnly`, `ToolsAndChat`, `ChatOnly`
+- ✨ **`WithChatHistory()`**: session dialog context in RAM
+- ✨ **`WithMemory()`**: persistent memory across sessions (JSON file)
+- ✨ **Tool-call retry**: up to 3 automatic attempts on failed tool calls with error feedback (`CoreAISettings.MaxToolCallRetries`)
 
-#### Изменения
-- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Упрощён до единого формата `{"name": "...", "arguments": {...}}`
-- 🔧 **Все tool calls через MEAI**: Memory и Lua tools работают через FunctionInvokingChatClient
-- 🔧 **ProgrammerResponsePolicy упрощена**: Больше не проверяет fenced блоки
-- 🔧 **AgentMemoryPolicy.SetToolsForRole()**: Добавление кастомных инструментов к роли
-- 🔧 **Обновлены все промпты**: Programmer, Merchant используют единый формат
+#### Changed
+- 🔧 **`LlmUnityMeaiChatClient.TryParseToolCallFromText`**: normalized to `{"name": "...", "arguments": {...}}`
+- 🔧 **All tools via MEAI**: Memory + Lua flow through `FunctionInvokingChatClient`
+- 🔧 **`ProgrammerResponsePolicy` simplified**: no fenced-block checks
+- 🔧 **`AgentMemoryPolicy.SetToolsForRole()`**: attach custom tools to a role
+- 🔧 **Prompts updated**: Programmer + Merchant use the unified format
 
-#### Удалено
-- ❌ **AgentMemoryDirectiveParser**: Удалён - всё через MEAI pipeline
-- ❌ **Fallback парсинг в AiOrchestrator**: Memory tool работает через FunctionInvokingChatClient
-- ❌ **Fenced блоки** (```memory, ```lua): Не используются для tool calls
+#### Removed
+- ❌ **`AgentMemoryDirectiveParser`**: removed — MEAI pipeline only
+- ❌ **Fallback parsing in `AiOrchestrator`**: memory via `FunctionInvokingChatClient`
+- ❌ **Fenced blocks** (```memory, ```lua): not used for tool calls
 
-#### Breaking Changes
-- **Programmer агент** теперь вызывает `execute_lua` tool вместо fenced ```lua блоков
-- **Memory tool** формат: `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
-- **MaxLuaRepairRetries** (ранее MaxLuaRepairGenerations) изменён с 4 на 3
+#### Breaking changes
+- **Programmer** now calls the `execute_lua` tool instead of fenced ```lua blocks
+- **Memory tool** shape: `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
+- **`MaxLuaRepairRetries`** (formerly `MaxLuaRepairGenerations`) changed from 4 → 3
 
-#### Тесты
-- ✨ **AgentBuilderEditModeTests** - 8 тестов на конструктор агентов
-- ✨ **CustomAgentsPlayModeTests** - 3 теста на кастомных агентов (Merchant, Analyzer, Storyteller)
-- 🔧 **MeaiToolCallsEditModeTests** - MemoryTool, LuaTool, парсинг JSON
-- 🔧 **LuaExecutionPipelineEditModeTests** - обновлено ожидаемое количество повторов (4→3)
-- 🔧 **RoleStructuredResponsePolicyEditModeTests** - Programmer теперь пропускает любой текст
-- 🔧 Все PlayMode тесты обновлены под единый формат tool calls v0.7.0
+#### Tests
+- ✨ **`AgentBuilderEditModeTests`** — 8 builder tests
+- ✨ **`CustomAgentsPlayModeTests`** — 3 custom-agent tests (Merchant, Analyzer, Storyteller)
+- 🔧 **`MeaiToolCallsEditModeTests`** — MemoryTool, LuaTool, JSON parsing
+- 🔧 **`LuaExecutionPipelineEditModeTests`** — expected retries updated (4→3)
+- 🔧 **`RoleStructuredResponsePolicyEditModeTests`** — Programmer allows any text
+- 🔧 All PlayMode tests updated for unified tool format v0.7.0
 
-#### Документация
-- 📝 **AGENT_BUILDER.md** - полное руководство по конструктору агентов
-- 📝 **TOOL_CALL_SPEC.md** - обновлённая спецификация tool calling
-- 📝 **CHAT_TOOL_CALLING.md** - Merchant NPC с tool calling
-- 📝 **DEVELOPER_GUIDE.md** - обновлены секции
+#### Documentation
+- 📝 **`AGENT_BUILDER.md`** — full builder guide
+- 📝 **`TOOL_CALL_SPEC.md`** — updated tool spec
+- 📝 **`CHAT_TOOL_CALLING.md`** — Merchant NPC tool calling
+- 📝 **`DEVELOPER_GUIDE.md`** — refreshed sections
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.7.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.7.0**
 
 ---
 
 ## [0.6.1] - 2026-04-06
 
-### Tool Calling Fallback для LLM без структурных tool_calls
+### Tool-calling fallback for LLMs without structured `tool_calls`
 
-- 🔧 **LlmUnityMeaiChatClient.TryParseToolCallFromText**: Добавлен fallback парсинг JSON tool calls из текста ответа модели
-- 🔧 **Поддержка Qwen3.5-2B**: Модель возвращает tool call как JSON текст, а не как структурный tool_call — теперь это распознаётся и преобразуется в `FunctionCallContent` для MEAI
-- 🔧 **Форматы распознавания**: 
+- 🔧 **`LlmUnityMeaiChatClient.TryParseToolCallFromText`**: fallback parses JSON tool calls from plain model text
+- 🔧 **Qwen3.5-2B support**: model returns tool JSON as text, not structured `tool_call` — now detected and converted to `FunctionCallContent` for MEAI
+- 🔧 **Recognized shapes:**
   - `{"tool": "memory", "action": "write", "content": "..."}`
   - `{"name": "memory", "arguments": {...}}`
   - ```json\n{...}\n``` fenced blocks
 
 ### Fixes
 
-- ✅ **Memory Tool теперь работает**: `FunctionInvokingChatClient` распознаёт tool call и вызывает `MemoryTool.ExecuteAsync()`
-- ✅ **Память сохраняется между вызовами**: Craft 2 видит память из Craft 1
+- ✅ **Memory tool works**: `FunctionInvokingChatClient` recognizes the call and runs `MemoryTool.ExecuteAsync()`
+- ✅ **Memory persists across calls**: Craft 2 sees Craft 1 memory
 
 ### Documentation
 
-- Обновлены секции troubleshooting в LLMUNITY_SETUP_AND_MODELS.md
+- Troubleshooting sections updated in `LLMUNITY_SETUP_AND_MODELS.md`
 
 ---
 
 ## [0.6.0] - 2026-04-05
 
-### Microsoft.Extensions.AI Full Integration
+### Microsoft.Extensions.AI full integration
 
-- ✨ **MeaiLlmUnityClient**: Полная интеграция с Microsoft.Extensions.AI для LLMUnity
-- ✨ **FunctionInvokingChatClient**: Использует MEAI FunctionInvokingChatClient для автоматического tool calling
-- ✨ **IChatClient реализация**: Внутренний IChatClient обёртка над LLMAgent
-- ✨ **MemoryTool.CreateAIFunction()**: Создаёт AIFunction для MEAI
+- ✨ **`MeaiLlmUnityClient`**: full Microsoft.Extensions.AI integration for LLMUnity
+- ✨ **`FunctionInvokingChatClient`**: MEAI automatic tool calling
+- ✨ **`IChatClient` implementation**: internal wrapper over `LLMAgent`
+- ✨ **`MemoryTool.CreateAIFunction()`**: builds MEAI `AIFunction`
 
 ### Removed
 
-- ❌ **LlmUnityLlmClient**: Заменён на MeaiLlmUnityClient
-- ❌ **MeaiChatClientAdapter**: Удалён — интеграция теперь через MeaiLlmUnityClient
+- ❌ **`LlmUnityLlmClient`**: replaced by `MeaiLlmUnityClient`
+- ❌ **`MeaiChatClientAdapter`**: removed — integration is `MeaiLlmUnityClient`
 
 ### Documentation
 
-- Обновлена документация: MemorySystem.md, DEVELOPER_GUIDE.md, DGF_SPEC.md, LLMUNITY_SETUP_AND_MODELS.md
+- Updated: `MemorySystem.md`, `DEVELOPER_GUIDE.md`, `DGF_SPEC.md`, `LLMUNITY_SETUP_AND_MODELS.md`
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.6.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.6.0**
 
 ---
 
 ## [0.5.0] - 2026-04-05
 
-### LLM Response Validation
+### LLM response validation
 
-- ✨ **Role-specific validation policies**: 6 классов для валидации ответов каждой роли
-- ✨ **CompositeRoleStructuredResponsePolicy**: Маршрутизация валидации по roleId
-- ✨ **20 новых EditMode тестов**: Comprehensive coverage всех политик
-- ✅ **Автоматический retry**: При неудачной валидации — повторный запрос с подсказкой
+- ✨ **Role-specific validation policies**: six classes validating each role’s output
+- ✨ **`CompositeRoleStructuredResponsePolicy`**: routes validation by `roleId`
+- ✨ **20 new EditMode tests**: broad policy coverage
+- ✅ **Automatic retry**: failed validation triggers a follow-up request with hints
 
-### GameConfig System
+### GameConfig system
 
-- ✨ **UnityGameConfigStore**: Реализация `IGameConfigStore` на ScriptableObject
-- ✨ **DI интеграция**: Регистрация в CoreAILifetimeScope
-- ✨ **EditMode тесты**: 9 тестов (policy, read, update, round-trip)
-- ✨ **PlayMode тесты**: 3 теста (AI read/modify/write, no access, multi-key)
-- ✨ **GAME_CONFIG_GUIDE.md**: Полная инструкция для разработчиков
+- ✨ **`UnityGameConfigStore`**: `IGameConfigStore` backed by ScriptableObjects
+- ✨ **DI wiring**: registered in `CoreAILifetimeScope`
+- ✨ **EditMode tests**: nine tests (policy, read, update, round-trip)
+- ✨ **PlayMode tests**: three tests (AI read/modify/write, no access, multi-key)
+- ✨ **`GAME_CONFIG_GUIDE.md`**: developer guide
 
-### Analyzer Tests
+### Analyzer tests
 
-- ✨ **AnalyzerEditModeTests**: 10 тестов (prompts, telemetry, validation, orchestrator)
+- ✨ **`AnalyzerEditModeTests`**: ten tests (prompts, telemetry, validation, orchestrator)
 
 ### Tests
 
-- ✨ **RoleStructuredResponsePolicyEditModeTests.cs**: 20 тестов на все политики
-- ✨ **GameConfigEditModeTests.cs**: 9 тестов на GameConfigTool и GameConfigPolicy
-- ✨ **GameConfigPlayModeTests.cs**: 3 теста с реальным AI
-- ✨ **AnalyzerEditModeTests.cs**: 10 тестов на Analyzer роль
+- ✨ **`RoleStructuredResponsePolicyEditModeTests.cs`**: 20 policy tests
+- ✨ **`GameConfigEditModeTests.cs`**: nine tests for `GameConfigTool` / `GameConfigPolicy`
+- ✨ **`GameConfigPlayModeTests.cs`**: three tests with a real AI
+- ✨ **`AnalyzerEditModeTests.cs`**: ten Analyzer-role tests
 
 ### Dependencies
 
-- Обновлена зависимость от `com.nexoider.coreai` до **0.5.0**
+- Bumped dependency on `com.nexoider.coreai` to **0.5.0**
 
 ---
 
 ## [0.4.0] - 2026-04-05
 
-### Tool Calling Support
+### Tool calling support
 
-- ✨ **LlmUnityLlmClient.SetTools()**: Реализация tool calling для LLMUnity
-- ✨ **Tools Injection into System Prompt**: Tools добавляются в system prompt модели
-- ✨ **OpenAiChatLlmClient Tools Support**: Поддержка tools в OpenAI API (tools array)
+- ✨ **`LlmUnityLlmClient.SetTools()`**: LLMUnity tool calling
+- ✨ **Tools in system prompt**: tools appended to the model system prompt
+- ✨ **`OpenAiChatLlmClient` tools**: OpenAI-compatible `tools` array support
 
 ### Architecture
 
-- Единый интерфейс **ILlmClient** работает с:
-  - **OpenAI API** (CoreAI) - tools в JSON body
-  - **LLMUnity** (CoreAIUnity) - tools в system prompt
-- **CoreAILifetimeScope** регистрирует клиенты с tool support
+- Shared **`ILlmClient`** surface for:
+  - **OpenAI HTTP** (CoreAI) — tools in JSON body
+  - **LLMUnity** (CoreAI Unity) — tools in system prompt
+- **`CoreAILifetimeScope`** registers tool-capable clients
 
 ### Tests
 
-- ✨ Обновлены тесты для проверки tool calling
-- PlayMode тесты для LLMUnity с memory tool
+- ✨ Tests updated for tool calling
+- PlayMode coverage for LLMUnity + memory tool
 
 ---
 
 ## [0.3.0] - 2026-04-04
 
-### MEAI Integration
+### MEAI integration
 
-- Обновлён для работы с **Microsoft.Extensions.AI** function calling
-- Все системные промпты агентов используют MEAI format
-- Тесты обновлены для проверки MEAI pipeline
+- Updated for **Microsoft.Extensions.AI** function calling
+- Agent system prompts use the MEAI format
+- Tests updated for the MEAI pipeline
 
 ### Tests
 
-- ✨ **MemoryToolMeaiEditModeTests.cs**: 8 MEAI integration тестов
-- ✅ Все PlayMode тесты обновлены для JSON/MEAI формата
-- ✅ Удалены устаревшие тесты AgentToolCallParser
-- **+50 тестов** общей сложности для MEAI coverage
+- ✨ **`MemoryToolMeaiEditModeTests.cs`**: eight MEAI integration tests
+- ✅ PlayMode tests updated for JSON/MEAI format
+- ✅ Removed legacy `AgentToolCallParser` tests
+- **+50 tests** overall for MEAI coverage
 
 ### Documentation
 
-- **AI_AGENT_ROLES.md**: Обновлены роли с MEAI integration
-- Новые гайды по MEAI function calling
+- **`AI_AGENT_ROLES.md`**: roles updated for MEAI
+- New MEAI function-calling guides
 
 ## [0.2.0] - 2026-04-04
 
-### Структура
+### Layout
 
-- Исходники **CoreAI.Source** находятся в **`Assets/CoreAiUnity/Runtime/Source/`** (раньше — под `Packages/com.nexoider.coreai/Runtime/Source/`). Зависимости UPM этого пакета: **MessagePipe**, **MessagePipe.VContainer**, **UniTask**, **LLMUnity** (плюс транзитивно **`com.nexoider.coreai`**).
+- **CoreAI.Source** sources live under **`Assets/CoreAiUnity/Runtime/Source/`** (previously under `Packages/com.nexoider.coreai/Runtime/Source/`). UPM dependencies for this package: **MessagePipe**, **MessagePipe.VContainer**, **UniTask**, **LLMUnity** (plus **`com.nexoider.coreai`** transitively).
 
-### Логирование (обязательный блок релиза)
+### Logging (release requirement)
 
-- **Editor:** сообщения меню и setup сосредоточены в **`CoreAIEditorLog`** (единая точка `Debug.*` в Editor-слое пакета).
-- **Тесты:** хранилища версий и LLM-хелперы используют **`NullGameLogger`** или **`GameLoggerUnscopedFallback`**, без прямого **`Debug.Log`** в тестовой логике ядра.
+- **Editor:** menu/setup messages go through **`CoreAIEditorLog`** (single `Debug.*` choke point for the Editor layer).
+- **Tests:** version stores and LLM helpers use **`NullGameLogger`** or **`GameLoggerUnscopedFallback`** — no raw **`Debug.Log`** in core test logic.
 
-### Прочее
+### Other
 
-- Версия синхронизирована с **`com.nexoider.coreai` 0.1.3** (зависимость в `package.json`).
+- Version aligned with **`com.nexoider.coreai` 0.1.3** (`package.json` dependency).
 
-## [0.1.2] - ранее
+## [0.1.2] - earlier
 
-Базовая линия хоста. См. историю git.
+Baseline Unity host package. See git history.

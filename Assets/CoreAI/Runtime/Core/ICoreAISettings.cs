@@ -65,5 +65,22 @@ namespace CoreAI
         /// По умолчанию: true.
         /// </summary>
         bool EnableStreaming { get; }
+
+        /// <summary>
+        /// Дефолтный лимит токенов в ответе LLM. Применяется ко **всем** бэкендам (HTTP API и LLMUnity)
+        /// единообразно: подкладывается в <c>ChatOptions.MaxOutputTokens</c>, если запрос не задал его явно.
+        /// <para>
+        /// <b>Приоритет:</b> <c>LlmCompletionRequest.MaxOutputTokens</c> (per-request) →
+        /// <c>AiTaskRequest.MaxOutputTokens</c> (per-call) → per-agent policy →
+        /// <c>ICoreAISettings.MaxTokens</c> (этот фолбэк)
+        /// → провайдер-default.
+        /// </para>
+        /// <para>
+        /// <c>0</c> или отрицательное значение трактуется как «не задан» — фолбэк не применяется,
+        /// решает провайдер. Default interface member возвращает <c>0</c>, чтобы новое поле не ломало
+        /// существующих реализаторов (тестовые stub'ы и т.п.).
+        /// </para>
+        /// </summary>
+        int MaxTokens => 0;
     }
 }

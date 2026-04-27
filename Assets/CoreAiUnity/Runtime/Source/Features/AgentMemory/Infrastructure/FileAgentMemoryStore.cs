@@ -10,6 +10,8 @@ namespace CoreAI.Infrastructure.AiMemory
 {
     /// <summary>
     /// Персистентная память агентов в <see cref="Application.persistentDataPath"/> (JSON на роль).
+    /// WebGL: тот же API — Unity мапит <c>persistentDataPath</c> на IndexedDB; синхронные <c>File.*</c> допустимы,
+    /// но учитывайте квоту хранилища браузера и режим инкогнито (данные могут не пережить сессию).
     /// Поддерживает 2 типа памяти:
     /// 1) MemoryTool — явная память через function call (memory поле)
     /// 2) ChatHistory — полная история диалога (chatHistory поле)
@@ -127,6 +129,8 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 _ephemeralHistory.Remove(roleId);
             }
+
+            _loadedRoles.Remove(roleId); // re-sync _ephemeralHistory on next access after removing the list above
 
             // Очищаем с диска
             try

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Logging;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Authority;
@@ -77,6 +78,7 @@ namespace CoreAI.Ai
 
             string user = _promptComposer.BuildUserPayload(snap, task);
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
+            system = AppendToolContract(system, tools, task);
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
@@ -156,8 +158,8 @@ namespace CoreAI.Ai
             string user = _promptComposer.BuildUserPayload(snap, task);
 
             // Get tools for this role (includes MemoryTool if enabled)
-            // MeaiToolsLlmClientDecorator will inject them into system prompt automatically
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
+            system = AppendToolContract(system, tools, task);
 
             // ===== ТИП 2: ChatHistory — автоматическая история чата =====
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
@@ -198,6 +200,7 @@ namespace CoreAI.Ai
             }
 
             int maxAttempts = _settings.MaxLlmRequestRetries > 0 ? _settings.MaxLlmRequestRetries : 2;
+            int? maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
             LlmCompletionResult result = null;
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -225,7 +228,8 @@ namespace CoreAI.Ai
                             Tools = tools,
                             AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
                             ForcedToolMode = task.ForcedToolMode,
-                            RequiredToolName = task.RequiredToolName ?? ""
+                            RequiredToolName = task.RequiredToolName ?? "",
+                            MaxOutputTokens = maxOutputTokens
                         },
                         linkedCts.Token);
                     sw.Stop();
@@ -274,10 +278,13 @@ namespace CoreAI.Ai
                         AgentRoleId = roleId,
                         SystemPrompt = system,
                         UserPayload = userRetry,
+                        ChatHistory = chatHistory,
                         TraceId = traceId,
+                        Tools = tools,
                         AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
                         ForcedToolMode = task.ForcedToolMode,
-                        RequiredToolName = task.RequiredToolName ?? ""
+                        RequiredToolName = task.RequiredToolName ?? "",
+                        MaxOutputTokens = maxOutputTokens
                     },
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();
@@ -364,7 +371,8 @@ namespace CoreAI.Ai
                 Tools = bundle.Tools,
                 AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
                 ForcedToolMode = task.ForcedToolMode,
-                RequiredToolName = task.RequiredToolName ?? ""
+                RequiredToolName = task.RequiredToolName ?? "",
+                MaxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens)
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -534,8 +542,103 @@ namespace CoreAI.Ai
                 SourceTag = task.SourceTag,
                 CancellationScope = task.CancellationScope,
                 LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
-                DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
+                DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? "",
+                ForcedToolMode = task.ForcedToolMode,
+                RequiredToolName = task.RequiredToolName ?? "",
+                MaxOutputTokens = task.MaxOutputTokens
             };
+        }
+
+        private static string AppendToolContract(
+            string system,
+            IReadOnlyList<ILlmTool> tools,
+            AiTaskRequest task)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                return system;
+            }
+
+            StringBuilder sb = new();
+            sb.Append(string.IsNullOrWhiteSpace(system) ? "" : system.Trim());
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("## Tool Contract");
+            sb.AppendLine("You have native tool-calling available for this role. When the user/task asks to use or call a tool, call the matching tool through the tool interface; do not claim that the tool is unavailable, and do not simulate successful execution in prose.");
+            sb.AppendLine("Pass arguments as structured tool arguments matching the schema. Required values mentioned in the task (for example targetName, itemName, quantity, action) must be passed as tool arguments, not only described in text.");
+            sb.AppendLine("After a tool succeeds, summarize the real tool result briefly for the user.");
+
+            if (task != null && task.ForcedToolMode == LlmToolChoiceMode.RequireSpecific &&
+                !string.IsNullOrWhiteSpace(task.RequiredToolName))
+            {
+                sb.AppendLine($"This request requires calling tool '{task.RequiredToolName.Trim()}'.");
+            }
+            else if (task != null && task.ForcedToolMode == LlmToolChoiceMode.RequireAny)
+            {
+                sb.AppendLine("This request requires calling at least one available tool.");
+            }
+
+            sb.AppendLine("Available tools:");
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool == null || string.IsNullOrWhiteSpace(tool.Name))
+                {
+                    continue;
+                }
+
+                sb.Append("- ");
+                sb.Append(tool.Name.Trim());
+                if (!string.IsNullOrWhiteSpace(tool.Description))
+                {
+                    sb.Append(": ");
+                    sb.Append(SingleLine(tool.Description, 500));
+                }
+                sb.AppendLine();
+
+                if (!string.IsNullOrWhiteSpace(tool.ParametersSchema) && tool.ParametersSchema.Trim() != "{}")
+                {
+                    sb.Append("  schema: ");
+                    sb.AppendLine(SingleLine(tool.ParametersSchema, 800));
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static string SingleLine(string value, int maxChars)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "";
+            }
+
+            string normalized = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            while (normalized.Contains("  ", StringComparison.Ordinal))
+            {
+                normalized = normalized.Replace("  ", " ");
+            }
+
+            if (maxChars > 0 && normalized.Length > maxChars)
+            {
+                return normalized.Substring(0, maxChars) + "...";
+            }
+
+            return normalized;
+        }
+
+        private static int? ResolveMaxOutputTokens(int? perCall, int? perAgent)
+        {
+            if (perCall.HasValue && perCall.Value > 0)
+            {
+                return perCall.Value;
+            }
+
+            if (perAgent.HasValue && perAgent.Value > 0)
+            {
+                return perAgent.Value;
+            }
+
+            return null;
         }
 
         /// <inheritdoc />

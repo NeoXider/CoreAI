@@ -7,6 +7,7 @@ using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
+using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using UnityEngine;
 
@@ -46,13 +47,14 @@ namespace CoreAI.Infrastructure.Llm
             "'play_sound'/'set_volume' for audio, 'show_text'/'hide_panel'/'update_score' for UI, " +
             "'load_scene' to change levels, 'list_objects' to get hierarchy (search by name), " +
             "'apply_force'/'set_velocity' for physics. " +
-            "Objects are targeted by 'targetName'.";
+            "Objects are targeted by 'targetName'. For play_animation, stop_animation, and list_animations " +
+            "always pass targetName (for example targetName='Enemy'); do not put the target object name only in prose.";
 
         public override string ParametersSchema => JsonParams(
             ("action", "string", true,
                 "Command: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, set_velocity, spawn_particles, list_objects"),
             ("targetName", "string", false,
-                "Object name to target (required for move, destroy, set_active, play_animation, etc). Used to set a name for spawned objects."),
+                "Object name to target (required for move, destroy, set_active, play_animation, stop_animation, list_animations, etc). Used to set a name for spawned objects."),
             ("x", "number", false, "X coordinate (for spawn, move)"),
             ("y", "number", false, "Y coordinate (for spawn, move)"),
             ("z", "number", false, "Z coordinate (for spawn, move)"),
@@ -98,7 +100,7 @@ namespace CoreAI.Infrastructure.Llm
             if (string.IsNullOrEmpty(action))
             {
                 return SerializeResult(false,
-                    "Action is required. Valid actions: spawn, move, destroy, load_scene, reload_scene, set_active, show_text, apply_force, spawn_particles, list_objects");
+                    $"Action is required. Valid actions: {ValidActionsText}");
             }
 
             if (_settings.LogToolCalls)
@@ -179,25 +181,24 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (envelope == null)
                 {
-                    if (action != "spawn" && action != "move" && action != "destroy" && action != "load_scene" &&
-                        action != "reload_scene" && action != "set_active" && action != "play_animation" &&
-                        action != "list_animations" && action != "show_text" && action != "apply_force" &&
-                        action != "spawn_particles" && action != "list_objects")
+                    if (!IsKnownWorldAction(action))
                     {
                         throw new ArgumentException(
-                            $"Unknown action: '{action}'. Valid actions: spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, list_animations, show_text, apply_force, spawn_particles, list_objects");
+                            $"Unknown action: '{action}'. Valid actions: {ValidActionsText}");
                     }
 
-                    return SerializeResult(false, $"Missing required parameters for action '{action}'");
+                    return SerializeResult(false, MissingRequiredParametersMessage(action), action);
                 }
 
-                // Выполняем команду через executor
+                // World executors commonly touch Unity APIs; always marshal to the Unity main thread.
                 string json = Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
-                bool success = await Task.Run(() => _executor.TryExecute(new CoreAI.Messaging.ApplyAiGameCommand
+                cancellationToken.ThrowIfCancellationRequested();
+                await UniTask.SwitchToMainThread(cancellationToken);
+                bool success = _executor.TryExecute(new CoreAI.Messaging.ApplyAiGameCommand
                 {
                     CommandTypeId = CoreAI.Messaging.AiGameCommandTypeIds.WorldCommand,
                     JsonPayload = json
-                }), cancellationToken);
+                });
 
                 if (_settings.LogToolCallResults)
                 {
@@ -390,6 +391,48 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return CoreAiWorldCommandEnvelope.ListAnimations(targetName);
+        }
+
+        private const string ValidActionsText =
+            "spawn, move, destroy, load_scene, reload_scene, set_active, play_animation, stop_animation, " +
+            "list_animations, play_sound, set_volume, show_text, hide_panel, update_score, apply_force, " +
+            "set_velocity, spawn_particles, list_objects";
+
+        private static bool IsKnownWorldAction(string action)
+        {
+            return action switch
+            {
+                "spawn" or "move" or "destroy" or "load_scene" or "reload_scene" or "set_active" or
+                    "play_animation" or "stop_animation" or "list_animations" or "play_sound" or
+                    "set_volume" or "show_text" or "hide_panel" or "update_score" or "apply_force" or
+                    "set_velocity" or "spawn_particles" or "list_objects" => true,
+                _ => false
+            };
+        }
+
+        private static string MissingRequiredParametersMessage(string action)
+        {
+            return action switch
+            {
+                "spawn" => "Missing required parameters for action 'spawn': prefabKey is required; targetName is recommended.",
+                "move" => "Missing required parameters for action 'move': targetName is required.",
+                "destroy" => "Missing required parameters for action 'destroy': targetName is required.",
+                "load_scene" => "Missing required parameters for action 'load_scene': stringValue must be the scene name.",
+                "set_active" => "Missing required parameters for action 'set_active': targetName is required.",
+                "play_animation" => "Missing required parameters for action 'play_animation': targetName and animationName (or stringValue) are required.",
+                "stop_animation" => "Missing required parameters for action 'stop_animation': targetName is required.",
+                "list_animations" => "Missing required parameters for action 'list_animations': targetName is required (for example targetName='Enemy').",
+                "play_sound" => "Missing required parameters for action 'play_sound': targetName and stringValue are required.",
+                "set_volume" => "Missing required parameters for action 'set_volume': targetName is required.",
+                "show_text" => "Missing required parameters for action 'show_text': targetName and textToDisplay (or stringValue) are required.",
+                "hide_panel" => "Missing required parameters for action 'hide_panel': targetName is required.",
+                "update_score" => "Missing required parameters for action 'update_score': targetName and textToDisplay (or stringValue) are required.",
+                "apply_force" => "Missing required parameters for action 'apply_force': targetName and force components are required.",
+                "set_velocity" => "Missing required parameters for action 'set_velocity': targetName and velocity components are required.",
+                "spawn_particles" => "Missing required parameters for action 'spawn_particles': targetName and stringValue are required.",
+                "list_objects" => "Missing required parameters for action 'list_objects'.",
+                _ => $"Missing required parameters for action '{action}'."
+            };
         }
 
         private static string SerializeResult(bool success, string message, string? action = null)

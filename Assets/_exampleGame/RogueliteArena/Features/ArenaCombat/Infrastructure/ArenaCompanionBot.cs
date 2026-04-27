@@ -163,7 +163,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         {
             var best = (ArenaEnemyBrain)null;
             var bestD2 = enemyAcquireRadius * enemyAcquireRadius;
-            var all = Object.FindObjectsByType<ArenaEnemyBrain>(FindObjectsInactive.Exclude);
+            var all = Object.FindObjectsByType<ArenaEnemyBrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (var e in all)
             {
                 var d2 = (e.transform.position - from).sqrMagnitude;

@@ -109,22 +109,22 @@ Full reference with ready-made recipes: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_
 
 ### One-line alternative — `CoreAi` singleton
 
-Если у вас на сцене уже есть `CoreAILifetimeScope` (шаг 3), можно обойтись без `AgentBuilder` и DI — все виды вызова доступны через статический фасад `CoreAi`:
+If your scene already has `CoreAILifetimeScope` (step 3), you can skip `AgentBuilder` and DI — every call style is available through the static facade `CoreAi`:
 
 ```csharp
-// Синхронный:
-string reply = await CoreAi.AskAsync("Привет!", roleId: "PlayerChat");
+// Async ask:
+string reply = await CoreAi.AskAsync("Hello!", roleId: "PlayerChat");
 
-// Стриминг (живой UI):
-await foreach (string chunk in CoreAi.StreamAsync("Расскажи анекдот", "PlayerChat"))
+// Streaming (live UI):
+await foreach (string chunk in CoreAi.StreamAsync("Tell me a joke", "PlayerChat"))
     label.text += chunk;
 
-// Полный оркестратор-пайплайн (history + authority + publish command):
+// Full orchestrator pipeline (history + authority + publish command):
 string json = await CoreAi.OrchestrateAsync(
     new AiTaskRequest { RoleId = "Creator", Hint = "spawn JSON" });
 ```
 
-Полный справочник — [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
+Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
 
 ### Sanity check in Play mode
 

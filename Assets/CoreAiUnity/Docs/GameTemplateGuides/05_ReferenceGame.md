@@ -1,11 +1,11 @@
-# Референс-игра и пример в репозитории
+# Reference game and sample in the repo
 
-**Онбординг по ядру:** [QUICK_START.md](../QUICK_START.md), [DEVELOPER_GUIDE.md §8](../DEVELOPER_GUIDE.md). **Unity по шагам:** [../../../_exampleGame/Docs/UNITY_SETUP.md](../../../_exampleGame/Docs/UNITY_SETUP.md).
+**Core onboarding:** [QUICK_START.md](../QUICK_START.md), [DEVELOPER_GUIDE.md §8](../DEVELOPER_GUIDE.md). **Unity step-by-step:** [../../../_exampleGame/Docs/UNITY_SETUP.md](../../../_exampleGame/Docs/UNITY_SETUP.md).
 
-**Полигон:** [Assets/_exampleGame](../../../_exampleGame) (roguelite-арена). Playbook: `Assets/_exampleGame/Docs/ROGUELITE_PLAYBOOK.md` (если есть).
+**Playground:** [Assets/_exampleGame](../../../_exampleGame) (roguelite arena). Playbook: `Assets/_exampleGame/Docs/ROGUELITE_PLAYBOOK.md` (if present).
 
-**Цель:** быстрый цикл «поиграть → проверить оркестратор / команды / сеть» без отдельного тайтла.
+**Goal:** a fast loop “play → verify orchestrator / commands / network” without a separate title.
 
-**Зависимость от ядра:** только публичный API **CoreAI** (UPM **`com.nexoider.coreai`**), отдельный asmdef при росте кода примера.
+**Dependency on the core:** public **CoreAI** API only (UPM **`com.nexoider.coreai`**), separate asmdef as sample code grows.
 
-**Минимальный критерий (фаза D SPEC):** забег (арена, волна, UI) + одна процедурная ручка через команды ядра после авторитета.
+**Minimum criterion (phase D SPEC):** one run (arena, wave, UI) + one procedural lever via core commands after authority is wired.

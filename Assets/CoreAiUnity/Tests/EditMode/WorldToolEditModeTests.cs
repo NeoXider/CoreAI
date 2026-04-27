@@ -1,11 +1,12 @@
 using System.Collections.Generic;
-using Newtonsoft.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -173,6 +174,36 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task WorldLlmTool_ExecuteAsync_ListAnimationsWithoutTarget_ReturnsHelpfulError()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+            string resultJson = await tool.ExecuteAsync("list_animations");
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("list_animations", result.Action);
+            StringAssert.Contains("targetName", result.Message);
+            Assert.IsNull(executor.LastCommandJson, "Executor should not run when required world-command args are missing.");
+        }
+
+        [Test]
+        public async Task WorldLlmTool_ExecuteAsync_DoesNotForceThreadPoolExecution()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            int callerThreadId = Thread.CurrentThread.ManagedThreadId;
+
+            string resultJson = await tool.ExecuteAsync("list_objects");
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual(callerThreadId, executor.LastThreadId,
+                "WorldLlmTool should not force ICoreAiWorldCommandExecutor.TryExecute onto ThreadPool; Unity world executors require the caller/main thread.");
+        }
+
+        [Test]
         public async Task WorldLlmTool_ExecuteAsync_MoveWithTargetName_IncludesTargetName()
         {
             TestWorldExecutor executor = new();
@@ -239,12 +270,14 @@ namespace CoreAI.Tests.EditMode
         private sealed class TestWorldExecutor : ICoreAiWorldCommandExecutor
         {
             public string LastCommandJson;
+            public int LastThreadId;
 
             public string[] LastListedAnimations { get; private set; } = System.Array.Empty<string>();
             public List<Dictionary<string, object>> LastListedObjects { get; private set; } = new();
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
+                LastThreadId = Thread.CurrentThread.ManagedThreadId;
                 LastCommandJson = cmd.JsonPayload;
                 return true; // Всегда возвращаем успех для тестов
             }

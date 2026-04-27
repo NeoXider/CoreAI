@@ -1,28 +1,29 @@
-# 🛒 Merchant NPC с Tool Calling
+# 🛒 Merchant NPC with tool calling
 
-## Концепция
+## Concept
 
-**Merchant** — это NPC-торговец с инструментами:
-- `get_inventory` — получить список товаров для продажи
-- `memory` — запомнить что покупал игрок
+**Merchant** is an NPC shopkeeper with tools:
+- `get_inventory` — fetch the list of goods for sale
+- `memory` — remember what the player bought
 
-### Воркфлоу
+### Workflow
 
 ```
-Игрок: "Что у тебя есть?"
+Player: "What do you have?"
   ↓
-Merchant AI вызывает get_inventory tool
+Merchant AI calls get_inventory tool
   ↓
 Tool: [Iron Sword(50), Health Potion(25), Leather Armor(100)]
   ↓
-Merchant: "Добро пожаловать! У меня есть Iron Sword за 50 монет, Health Potion за 25..."
+Merchant: "Welcome! I have an Iron Sword for 50 coins, Health Potion for 25..."
 ```
 
-## Как это работает
+## How it works
 
-### 1. Merchant Agent
+### 1. Merchant agent
 
-Системный промпт Merchant:
+Merchant system prompt:
+
 ```
 You are a shopkeeper/merchant NPC. You have an inventory of items to sell.
 When the player asks to buy, browse, or see what you have, 
@@ -47,7 +48,7 @@ public class MyInventoryProvider : InventoryTool.IInventoryProvider
 }
 ```
 
-### 3. Настройка Merchant
+### 3. Configuring Merchant
 
 ```csharp
 var policy = new AgentMemoryPolicy();
@@ -59,10 +60,10 @@ policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
 policy.EnableMemoryTool(BuiltInAgentRoleIds.Merchant);
 ```
 
-## Архитектура
+## Architecture
 
 ```
-Player: "Хочу купить оружие"
+Player: "I want to buy a weapon"
   ↓
 Merchant AI (System: "You are a shopkeeper...")
   ↓
@@ -76,10 +77,10 @@ InventoryTool.GetInventoryAsync()
   ↓
 Returns: [{name: "Iron Sword", price: 50, qty: 3}]
   ↓
-Model: "У меня есть Iron Sword за 50 монет..."
+Model: "I have an Iron Sword for 50 coins..."
 ```
 
-## Тестирование
+## Testing
 
 ```bash
 COREAI_PLAYMODE_LLM_BACKEND=llmunity
@@ -88,10 +89,10 @@ Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
 
 ## PlayerChat vs Merchant
 
-| Агент | Инструменты | Назначение |
+| Agent | Tools | Purpose |
 |-------|-------------|------------|
-| **PlayerChat** | Нет | Чат-помощник, отвечает на вопросы |
-| **Merchant** | get_inventory, memory | Торговец с инвентарём и памятью |
+| **PlayerChat** | None | Chat helper; answers questions |
+| **Merchant** | get_inventory, memory | Shopkeeper with inventory and memory |
 
-PlayerChat — без инструментов, просто диалог.  
-Merchant — NPC с инструментами для осмысленных ответов.
+**PlayerChat** has no tools — dialogue only.  
+**Merchant** is an NPC with tools for grounded replies.

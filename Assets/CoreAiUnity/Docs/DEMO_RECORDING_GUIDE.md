@@ -1,185 +1,185 @@
-# 🎬 Подготовка видео/GIF демо CoreAI
+# 🎬 Preparing CoreAI demo video / GIF
 
-**Версия документа:** 1.0 | **Дата:** Апрель 2026
+**Document version:** 1.0 | **Date:** April 2026
 
-Руководство по записи демо-видео и GIF-анимаций для презентации CoreAI.
-
----
-
-## 📋 Чеклист перед записью
-
-### Подготовка окружения
-- [ ] LM Studio запущен, модель загружена (Qwen3.5-4B рекомендуется)
-- [ ] CoreAISettings → Backend = OpenAiHttp, URL проверен
-- [ ] Сцена `_mainCoreAI` открыта
-- [ ] Console Window видна (для демо логов)
-- [ ] Game Window настроено на разрешение 1920×1080
-
-### Инструменты записи
-- [ ] **OBS Studio** (бесплатный) — для видео → [obsproject.com](https://obsproject.com)
-- [ ] **ScreenToGif** (бесплатный) — для GIF → [screentogif.com](https://www.screentogif.com)
-- [ ] **ShareX** — для скриншотов и коротких GIF → [getsharex.com](https://getsharex.com)
+Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ---
 
-## 🎥 Сценарии для записи
+## 📋 Pre-recording checklist
 
-### Демо 1: Quick Start (30-60 сек)
+### Environment setup
+- [ ] LM Studio running, model loaded (Qwen3.5-4B recommended)
+- [ ] CoreAISettings → Backend = OpenAiHttp, URL verified
+- [ ] Scene `_mainCoreAI` open
+- [ ] Console Window visible (for demo logs)
+- [ ] Game Window set to 1920×1080
 
-**Цель:** Показать как быстро начать работу с CoreAI.
+### Recording tools
+- [ ] **OBS Studio** (free) — video → [obsproject.com](https://obsproject.com)
+- [ ] **ScreenToGif** (free) — GIF → [screentogif.com](https://www.screentogif.com)
+- [ ] **ShareX** — screenshots and short GIFs → [getsharex.com](https://getsharex.com)
 
-**Сценарий записи:**
+---
+
+## 🎥 Recording scenarios
+
+### Demo 1: Quick Start (30–60 sec)
+
+**Goal:** Show how quickly you can get started with CoreAI.
+
+**Recording script:**
 ```
-0:00 — Открытие Unity с проектом CoreAI
-0:05 — Открыть CoreAISettings → Показать настройки HTTP API
-0:10 — Нажать "Test Connection" → ✅ Connected
-0:15 — Нажать Play
-0:18 — Показать логи: "Backend: OpenAiHttp..."
-0:22 — Нажать F9 (хоткей Programmer)
+0:00 — Open Unity with CoreAI project
+0:05 — Open CoreAISettings → Show HTTP API settings
+0:10 — Click "Test Connection" → ✅ Connected
+0:15 — Press Play
+0:18 — Show logs: "Backend: OpenAiHttp..."
+0:22 — Press F9 (Programmer hotkey)
 0:25 — Console: LLM ▶, LLM ◀, Lua executed ✅
-0:30 — Стоп
+0:30 — Stop
 ```
 
-**Настройки записи:**
-- Формат: GIF или MP4
-- FPS: 15 (для GIF) / 30 (для видео)
-- Размер: 1280×720 (GIF) / 1920×1080 (видео)
+**Recording settings:**
+- Format: GIF or MP4
+- FPS: 15 (GIF) / 30 (video)
+- Size: 1280×720 (GIF) / 1920×1080 (video)
 
 ---
 
-### Демо 2: Торговец NPC (30-45 сек)
+### Demo 2: NPC merchant (30–45 sec)
 
-**Цель:** Показать AI-торговца в действии.
+**Goal:** Show the AI merchant in action.
 
-**Сценарий записи:**
+**Recording script:**
 ```
-0:00 — Play Mode, открыт In-Game Console / Chat UI
-0:05 — Написать: "Что продаёшь?"
-0:08 — Показать логи: get_inventory tool call
-0:12 — Ответ NPC: "У меня есть Iron Sword за 50..."
-0:18 — Написать: "Скидку дашь?"
-0:22 — NPC торгуется: "Ладно, 45 монет..."
-0:25 — Показать запись в память
-0:30 — Стоп
+0:00 — Play Mode, In-Game Console / Chat UI open
+0:05 — Type: "What are you selling?"
+0:08 — Show logs: get_inventory tool call
+0:12 — NPC reply: "I have Iron Sword for 50..."
+0:18 — Type: "Can you give a discount?"
+0:22 — NPC haggles: "Alright, 45 coins..."
+0:25 — Show memory write
+0:30 — Stop
 ```
 
 ---
 
-### Демо 3: Создание врага через AI (20-30 сек)
+### Demo 3: Spawning an enemy via AI (20–30 sec)
 
-**Цель:** Показать спавн объекта через World Command.
+**Goal:** Show object spawn via World Command.
 
-**Сценарий записи:**
+**Recording script:**
 ```
-0:00 — Play Mode, пустая арена
-0:05 — Запустить Creator через код
+0:00 — Play Mode, empty arena
+0:05 — Trigger Creator via code
 0:08 — Console: world_command → spawn "Enemy"
-0:12 — **В Game View:** враг появляется!
+0:12 — **In Game View:** enemy appears!
 0:15 — Console: spawn "EliteBoss"
-0:18 — Второй враг появляется!
-0:22 — Показать Memory: "Wave X: spawned..."
-0:25 — Стоп
+0:18 — Second enemy appears!
+0:22 — Show Memory: "Wave X: spawned..."
+0:25 — Stop
 ```
 
 ---
 
-### Демо 4: Auto-repair Lua (30-45 сек)
+### Demo 4: Auto-repair Lua (30–45 sec)
 
-**Цель:** Показать как AI чинит свой же Lua код.
+**Goal:** Show the AI fixing its own Lua.
 
-**Сценарий записи:**
+**Recording script:**
 ```
-0:00 — Запустить Programmer с задачей
+0:00 — Run Programmer with a task
 0:05 — Console: LLM ▶ (attempt 1)
 0:08 — Console: ❌ Lua FAILED: "attempt to call..."
 0:10 — Console: "Programmer repair: retry 1/3"
 0:13 — Console: LLM ▶ (attempt 2, repair context)
 0:16 — Console: ✅ Lua succeeded!
-0:20 — Подсветить: 2 попытки, автоматический ремонт
-0:25 — Стоп
+0:20 — Highlight: 2 attempts, automatic repair
+0:25 — Stop
 ```
 
 ---
 
-### Демо 5: Полный пайплайн крафта (45-60 сек)
+### Demo 5: Full crafting pipeline (45–60 sec)
 
-**Цель:** Показать multi-agent workflow: CoreMechanicAI → Programmer → Memory.
+**Goal:** Show multi-agent workflow: CoreMechanicAI → Programmer → Memory.
 
-**Сценарий записи:**
+**Recording script:**
 ```
-0:00 — Запустить крафт: "Iron + Fire Crystal"
-0:05 — Console: CoreMechanicAI → анализ рецепта
+0:00 — Start craft: "Iron + Fire Crystal"
+0:05 — Console: CoreMechanicAI → recipe analysis
 0:10 — Console: Memory: "Craft#1: Flame Sword..."
 0:15 — Console: Programmer → execute_lua
 0:20 — Console: Lua: create_item("Flame Sword", 45)
 0:25 — Console: Lua: add_effect("fire_damage", 15)
 0:30 — Console: ✅ "crafted Flame Sword"
-0:35 — Game View: показать результат (если есть UI)
-0:40 — Стоп
+0:35 — Game View: show result (if UI exists)
+0:40 — Stop
 ```
 
 ---
 
-## 🎨 Рекомендации по оформлению
+## 🎨 Presentation tips
 
-### Для README / GitHub
+### For README / GitHub
 
-| Формат | Размер файла | Рекомендуемая длина | Где использовать |
-|--------|:------------:|:-------------------:|-----------------|
-| **GIF** | < 5 MB | 5-15 сек | README, Issues |
-| **WebP** | < 3 MB | 5-15 сек | GitHub Docs |
-| **MP4** | < 25 MB | 30-60 сек | YouTube + ссылка |
+| Format | File size | Recommended length | Where to use |
+|--------|:-----------:|:-------------------:|--------------|
+| **GIF** | < 5 MB | 5–15 sec | README, Issues |
+| **WebP** | < 3 MB | 5–15 sec | GitHub Docs |
+| **MP4** | < 25 MB | 30–60 sec | YouTube + link |
 
-### Советы для качественных GIF
+### Tips for good GIFs
 
-1. **Уменьшите разрешение:** 800×450 для GIF (иначе файл огромный)
-2. **Увеличьте шрифт консоли:** чтобы логи были читаемы в маленьком GIF
-3. **Используйте тёмную тему Unity:** лучше выглядит в документации
-4. **Добавьте аннотации:** стрелки / подсветки ключевых моментов
+1. **Lower resolution:** 800×450 for GIF (otherwise files get huge)
+2. **Larger console font:** so logs stay readable in a small GIF
+3. **Use Unity dark theme:** looks better in docs
+4. **Add annotations:** arrows / highlights on key moments
 
-### Пост-обработка GIF
+### GIF post-processing
 
-В **ScreenToGif:**
-1. Запишите экран (15 FPS)
-2. Обрежьте начало/конец
-3. Добавьте подписи (Title Frames)
-4. Оптимизируйте: Save As → GIF → Quantizer: Octree → Quality: 15
+In **ScreenToGif:**
+1. Record screen (15 FPS)
+2. Trim start/end
+3. Add captions (Title Frames)
+4. Optimize: Save As → GIF → Quantizer: Octree → Quality: 15
 
 ---
 
-## 📁 Где хранить демо-файлы
+## 📁 Where to store demo files
 
 ```
 Assets/CoreAiUnity/Docs/
 ├── Media/
-│   ├── demo_quickstart.gif         — Quick Start демо
-│   ├── demo_merchant.gif           — Торговец NPC
-│   ├── demo_enemy_spawn.gif        — Спавн врага
+│   ├── demo_quickstart.gif         — Quick Start demo
+│   ├── demo_merchant.gif           — NPC merchant
+│   ├── demo_enemy_spawn.gif        — Enemy spawn
 │   ├── demo_auto_repair.gif        — Auto-repair Lua
-│   ├── demo_crafting_pipeline.gif  — Крафт (full pipeline)
-│   └── demo_full_overview.mp4      — Полное видео (YouTube)
+│   ├── demo_crafting_pipeline.gif  — Crafting (full pipeline)
+│   └── demo_full_overview.mp4      — Full video (YouTube)
 ```
 
-### Вставка в README
+### Embedding in README
 
 ```markdown
-## 🎬 CoreAI в действии
+## 🎬 CoreAI in action
 
 ### Quick Start
 ![CoreAI Quick Start Demo](Assets/CoreAiUnity/Docs/Media/demo_quickstart.gif)
 
-### AI-торговец
+### AI merchant
 ![Merchant NPC Demo](Assets/CoreAiUnity/Docs/Media/demo_merchant.gif)
 
-### Спавн врагов через AI
+### Enemy spawn via AI
 ![Enemy Spawn Demo](Assets/CoreAiUnity/Docs/Media/demo_enemy_spawn.gif)
 ```
 
 ---
 
-## 📝 Шаблон скрипта для демо-кода
+## 📝 Demo code script template
 
-Создайте `DemoRunner.cs` на сцене для удобной записи:
+Add `DemoRunner.cs` to the scene for easier recording:
 
 ```csharp
 using UnityEngine;
@@ -187,8 +187,8 @@ using CoreAI;
 using VContainer;
 
 /// <summary>
-/// Скрипт для записи демо-видео.
-/// Нажимайте хоткеи для запуска различных сценариев.
+/// Script for recording demo video.
+/// Use hotkeys to trigger different scenarios.
 /// </summary>
 public class DemoRunner : MonoBehaviour
 {
@@ -196,26 +196,26 @@ public class DemoRunner : MonoBehaviour
 
     void Update()
     {
-        // F1 — Демо торговца
+        // F1 — Merchant demo
         if (Input.GetKeyDown(KeyCode.F1))
             RunMerchantDemo();
         
-        // F2 — Демо спавна врага
+        // F2 — Enemy spawn demo
         if (Input.GetKeyDown(KeyCode.F2))
             RunEnemySpawnDemo();
         
-        // F3 — Демо крафта
+        // F3 — Crafting demo
         if (Input.GetKeyDown(KeyCode.F3))
             RunCraftingDemo();
         
-        // F4 — Демо auto-repair
+        // F4 — Auto-repair demo
         if (Input.GetKeyDown(KeyCode.F4))
             RunAutoRepairDemo();
     }
 
     async void RunMerchantDemo()
     {
-        Debug.Log("=== 🛒 ДЕМО: Торговец NPC ===");
+        Debug.Log("=== 🛒 DEMO: NPC Merchant ===");
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Merchant",
@@ -225,7 +225,7 @@ public class DemoRunner : MonoBehaviour
 
     async void RunEnemySpawnDemo()
     {
-        Debug.Log("=== 👾 ДЕМО: Спавн врага ===");
+        Debug.Log("=== 👾 DEMO: Enemy spawn ===");
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Creator",
@@ -237,7 +237,7 @@ public class DemoRunner : MonoBehaviour
 
     async void RunCraftingDemo()
     {
-        Debug.Log("=== ⚔️ ДЕМО: Крафт оружия ===");
+        Debug.Log("=== ⚔️ DEMO: Weapon crafting ===");
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "CoreMechanicAI",
@@ -248,7 +248,7 @@ public class DemoRunner : MonoBehaviour
 
     async void RunAutoRepairDemo()
     {
-        Debug.Log("=== 🔧 ДЕМО: Auto-repair Lua ===");
+        Debug.Log("=== 🔧 DEMO: Auto-repair Lua ===");
         await _orchestrator.RunTaskAsync(new AiTaskRequest
         {
             RoleId = "Programmer",
@@ -262,19 +262,19 @@ public class DemoRunner : MonoBehaviour
 
 ---
 
-## ✅ Финальный чеклист
+## ✅ Final checklist
 
 ```
-Для каждого демо:
-  □ Записан GIF (< 5 MB, 800×450, 15 FPS)
-  □ Записан MP4 (1920×1080, 30 FPS) — опционально
-  □ Файлы в Assets/CoreAiUnity/Docs/Media/
-  □ Вставлены в README.md и README_RU.md
-  □ Проверены на GitHub — GIF отображается корректно
+For each demo:
+  □ GIF recorded (< 5 MB, 800×450, 15 FPS)
+  □ MP4 recorded (1920×1080, 30 FPS) — optional
+  □ Files placed in Assets/CoreAiUnity/Docs/Media/
+  □ Embedded in README.md (and localized README if you maintain one)
+  □ Verified on GitHub — GIF displays correctly
 ```
 
 ---
 
-> 📖 **Связанные документы:**
-> - [EXAMPLES.md](EXAMPLES.md) — примеры кода
-> - [QUICK_START_FULL.md](QUICK_START_FULL.md) — быстрый старт
+> 📖 **Related documents:**
+> - [EXAMPLES.md](EXAMPLES.md) — code examples
+> - [QUICK_START_FULL.md](QUICK_START_FULL.md) — full quick start

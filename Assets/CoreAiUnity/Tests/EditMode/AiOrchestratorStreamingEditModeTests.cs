@@ -69,6 +69,45 @@ namespace CoreAI.Tests.EditMode
             public void CancelTasks(string cancellationScope) { }
         }
 
+        private sealed class MixedQueueOrchestrator : IAiOrchestrationService
+        {
+            private readonly object _lock = new();
+            public List<string> ExecutionLog { get; } = new();
+            public List<TaskCompletionSource<string>> Gates { get; } = new();
+
+            public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                TaskCompletionSource<string> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_lock)
+                {
+                    ExecutionLog.Add("task:" + (task?.Hint ?? ""));
+                    Gates.Add(gate);
+                }
+
+                using CancellationTokenRegistration reg = cancellationToken.Register(() => gate.TrySetCanceled());
+                return await gate.Task;
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest task,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                TaskCompletionSource<string> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_lock)
+                {
+                    ExecutionLog.Add("stream:" + (task?.Hint ?? ""));
+                    Gates.Add(gate);
+                }
+
+                yield return new LlmStreamChunk { Text = "stream-start" };
+                using CancellationTokenRegistration reg = cancellationToken.Register(() => gate.TrySetCanceled());
+                await gate.Task;
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+
+            public void CancelTasks(string cancellationScope) { }
+        }
+
         [Test]
         public async Task DefaultFallback_EmitsSingleTextChunkThenDone()
         {
@@ -149,6 +188,90 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task QueuedAiOrchestrator_StreamingAndTask_UseSharedPriorityQueue()
+        {
+            MixedQueueOrchestrator inner = new();
+            QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queued.RunTaskAsync(new AiTaskRequest { Hint = "blocker", Priority = 0 });
+            Task lowTask = queued.RunTaskAsync(new AiTaskRequest { Hint = "low-task", Priority = 1 });
+            Task<List<LlmStreamChunk>> highStream = CollectAsync(queued.RunStreamingAsync(
+                new AiTaskRequest { Hint = "high-stream", Priority = 10 }));
+
+            await Task.Delay(50);
+            Assert.AreEqual(1, inner.ExecutionLog.Count);
+            Assert.AreEqual("task:blocker", inner.ExecutionLog[0]);
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(50);
+
+            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 2);
+            Assert.AreEqual("stream:high-stream", inner.ExecutionLog[1],
+                "A higher-priority stream should run before a lower-priority non-stream task.");
+
+            inner.Gates[1].TrySetResult(null);
+            await highStream;
+            await Task.Delay(50);
+
+            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 3);
+            Assert.AreEqual("task:low-task", inner.ExecutionLog[2]);
+
+            inner.Gates[2].TrySetResult(null);
+            await Task.WhenAll(blocker, lowTask);
+        }
+
+        [Test]
+        public async Task QueuedAiOrchestrator_StreamingCancellationScope_PendingLatestWins()
+        {
+            MixedQueueOrchestrator inner = new();
+            QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queued.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            Task<List<LlmStreamChunk>> oldStream = CollectAsync(queued.RunStreamingAsync(
+                new AiTaskRequest { Hint = "old-stream", CancellationScope = "npc" }));
+            Task<List<LlmStreamChunk>> latestStream = CollectAsync(queued.RunStreamingAsync(
+                new AiTaskRequest { Hint = "latest-stream", CancellationScope = "npc" }));
+
+            await Task.Delay(50);
+
+            Assert.AreEqual(1, inner.ExecutionLog.Count, "Only blocker should be active.");
+            Assert.IsTrue(oldStream.IsCompleted, "Older pending stream should complete immediately when superseded.");
+            AssertHasCancelledTerminal(oldStream.Result);
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(50);
+
+            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 2);
+            Assert.AreEqual("stream:latest-stream", inner.ExecutionLog[1]);
+
+            inner.Gates[1].TrySetResult(null);
+            await latestStream;
+            await blocker;
+        }
+
+        [Test]
+        public async Task QueuedAiOrchestrator_StreamingCancelTasks_CancelsPendingStream()
+        {
+            MixedQueueOrchestrator inner = new();
+            QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queued.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            Task<List<LlmStreamChunk>> pendingStream = CollectAsync(queued.RunStreamingAsync(
+                new AiTaskRequest { Hint = "pending-stream", CancellationScope = "npc" }));
+
+            await Task.Delay(50);
+            queued.CancelTasks("npc");
+            await Task.Delay(50);
+
+            Assert.IsTrue(pendingStream.IsCompleted, "Pending stream should complete when its scope is cancelled.");
+            AssertHasCancelledTerminal(pendingStream.Result);
+            Assert.AreEqual(1, inner.ExecutionLog.Count, "Cancelled pending stream must not start later.");
+
+            inner.Gates[0].TrySetResult(null);
+            await blocker;
+        }
+
+        [Test]
         public async Task QueuedAiOrchestrator_Streaming_ExternalCancellation_EmitsCancelledTerminal()
         {
             // Пользовательская отмена (cancellationToken параметр) во время стрима
@@ -191,6 +314,21 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(gotCancelled,
                 $"QueuedAiOrchestrator должен эмитить терминальный chunk с Error=\"cancelled\" при отмене. " +
                 $"Получено чанков: {collected.Count}");
+        }
+
+        private static void AssertHasCancelledTerminal(IReadOnlyList<LlmStreamChunk> chunks)
+        {
+            bool gotCancelled = false;
+            foreach (LlmStreamChunk chunk in chunks)
+            {
+                if (chunk.IsDone && chunk.Error == "cancelled")
+                {
+                    gotCancelled = true;
+                    break;
+                }
+            }
+
+            Assert.IsTrue(gotCancelled, "Expected a terminal stream chunk with Error=\"cancelled\".");
         }
 
         private static async Task<List<T>> CollectAsync<T>(IAsyncEnumerable<T> source)

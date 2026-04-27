@@ -1,101 +1,103 @@
 # 🗨️ CoreAI Universal Chat Module
 
-Встроенный чат с AI для любой Unity-игры. Работает из коробки с UI Toolkit.
+Built-in AI chat for any Unity game. Works out of the box with UI Toolkit.
 
-Независимо от UI, из любого скрипта можно вызвать LLM через статический фасад **`CoreAi`** — см. [COREAI_SINGLETON_API.md](../../../Docs/COREAI_SINGLETON_API.md) (шпаргалка, FAQ для новичков, рекомендации для опытных разработчиков).
+Regardless of UI, you can call the LLM from any script via the static **`CoreAi`** facade — see [COREAI_SINGLETON_API.md](../../../Docs/COREAI_SINGLETON_API.md) (cheat sheet, beginner FAQ, tips for experienced developers).
 
-**Удобство «отправки» в двух режимах**
+**Sending in two modes**
 
-- **Панель чата** — игрок печатает в поле и жмёт кнопку или **Shift+Enter** (логика клавиш настраивается в `CoreAiChatConfig`, см. раздел *Ручной запуск*). Ответ приходит в те же пузыри, стриминг — по флагам.
-- **Код без панели** — «отправка» = вызов `CoreAi.AskAsync("...")` / `CoreAi.StreamAsync` с тем же текстом. Под капотом тот же `CoreAiChatService`, что и у панели, пока на сцене один `CoreAILifetimeScope`.
+- **Chat panel** — the player types in the field and presses the button or **Shift+Enter** (key behavior is configured in `CoreAiChatConfig`, see *Manual setup*). Replies appear in the same bubbles; streaming follows the flags.
+- **Code without the panel** — “send” = `CoreAi.AskAsync("...")` / `CoreAi.StreamAsync` with the same text. Under the hood it uses the same `CoreAiChatService` as the panel while there is a single `CoreAILifetimeScope` in the scene.
 
-Таблица «UI vs код» — в [COREAI_SINGLETON_API](../../../Docs/COREAI_SINGLETON_API.md) (подзаголовок *«Отправка сообщений: удобно и в UI, и из кода»*).
+The “UI vs code” table is in [COREAI_SINGLETON_API](../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
 
-## Быстрый старт (1 клик)
+## Quick start (1 click)
 
-Меню `CoreAI → Setup → Create Chat Demo Scene` создаст готовую сцену `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` со всеми необходимыми объектами (камера, свет, EventSystem, `CoreAILifetimeScope`, `UIDocument` + `CoreAiChatPanel` с дефолтным `CoreAiChatConfig_Demo`). Нажмите Play и пообщайтесь с моделью.
+The menu `CoreAI → Setup → Create Chat Demo Scene` creates a ready scene `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with all required objects (camera, light, EventSystem, `CoreAILifetimeScope`, `UIDocument` + `CoreAiChatPanel` with default `CoreAiChatConfig_Demo`). Press Play and chat with the model.
 
-## Ручной запуск (2 шага)
+## Manual setup (2 steps)
 
-### 1. Создайте конфиг
+### 1. Create a config
 `Assets → Create → CoreAI → Chat Config`
 
-Настройте в Inspector:
-- **Role ID** — роль агента (`PlayerChat`, `Teacher`, ваша кастомная)
-- **Header Title** — заголовок чата
-- **Welcome Message** — приветственное сообщение
-- **Сессия / история** (с 0.25.4) — см. [восстановление сессии](#persisted-chat-session)
-- **Программный вызов** (с 0.25.5) — см. [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
-- **Enable Streaming** — потоковая генерация ответов
-- **Send On Shift+Enter** — горячая клавиша отправки
-- **Горячие клавиши** (с 0.25.3) — см. раздел [ниже](#chat-hotkeys)
+Configure in the Inspector:
+- **Role ID** — agent role (`PlayerChat`, `Teacher`, your custom one)
+- **Header Title** — chat header
+- **Welcome Message** — welcome message
+- **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
+- **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
+- **Enable Streaming** — streamed generation of replies
+- **Send On Shift+Enter** — send hotkey
+- **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
 
-### 2. Добавьте на сцену
+### 2. Add to the scene
 
-1. Создайте `GameObject` с компонентом `UIDocument`
-2. Назначьте UXML: `Packages/com.nexoider.coreaiunity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`
-3. Добавьте компонент `CoreAiChatPanel`
-4. Назначьте ваш `CoreAiChatConfig`
-5. **Готово!** Чат работает с текущим CoreAI бэкендом
+1. Create a `GameObject` with `UIDocument`
+2. Assign UXML: `Packages/com.nexoider.coreaiunity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`
+3. Add the `CoreAiChatPanel` component
+4. Assign your `CoreAiChatConfig`
+5. **Done!** The chat uses the current CoreAI backend
 
 <a id="persisted-chat-session"></a>
 
-## Восстановление сессии (история после перезапуска) — с 0.25.4
+## Session restore (history after restart) — since 0.25.4
 
-По умолчанию **`CoreAiChatPanel`** при включении (`OnEnable`) подгружает в ленту сообщений сохранённую историю чата для **`Role ID`** из конфига.
+By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history for the **`Role ID`** from the config into the message list.
 
-| Поле в **Chat Config** | Назначение |
-|------------------------|------------|
-| **Load Persisted Chat On Startup** | Если включено (по умолчанию **да**) — перед приветствием читается история из **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, поле `chatHistoryJson`). |
-| **Max Persisted Messages For Ui** | Сколько **последних** сообщений показать при подгрузке; **0** = все сохранённые. |
+| Field in **Chat Config** | Purpose |
+|--------------------------|---------|
+| **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, field `chatHistoryJson`). |
+| **Max Persisted Messages For Ui** | How many **last** messages to show on load; **0** = all saved. |
 
-**Условия:** для роли в `AgentMemoryPolicy` должны быть включены **`WithChatHistory`** и **`PersistChatHistory`** (например `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`), иначе на диск история не пишется — подгружать будет нечего (останется только **Welcome Message**).
+**Requirements:** for the role, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. The built-in **`PlayerChat`** role has this enabled by default, so the drop-in chat restores its session after app restart. For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk — there is nothing to load (only **Welcome Message** remains).
 
-**Приветствие:** если после подгрузки в скролле **уже есть** сообщения, **Welcome Message** не добавляется (чтобы не дублировать «Привет!» поверх диалога). Если истории нет — приветствие показывается как раньше.
+**Welcome message:** if after load the scroll area **already has** messages, **Welcome Message** is not added (to avoid duplicating “Hello!” on top of the dialog). If there is no history, the welcome message is shown as before.
 
-**Повторный `OnEnable`:** перед гидратацией лента **очищается**, затем снова читается store — дубликаты при выключении/включении объекта с панелью не копятся.
+**Repeated `OnEnable`:** before hydration the list is **cleared**, then the store is read again — duplicates do not accumulate when toggling the panel object.
 
-**Расширение:** переопределите **`HydrateStartupMessagesFromStore`** или **`TryAppendPersistedChatHistoryFromStore`**, если нужен свой источник сообщений.
+**Extension:** override **`HydrateStartupMessagesFromStore`** or **`TryAppendPersistedChatHistoryFromStore`** if you need a custom message source.
 
-## Сворачивание панели (FAB) — с 0.21.7
+**Custom persistence:** chat hydration reads whatever `IAgentMemoryStore.GetChatHistory` returns (default: `FileAgentMemoryStore`). To use **PlayerPrefs** or **cloud** for the same contract (session + MemoryTool), see [`Docs/MEMORY_STORE_CUSTOM_BACKENDS.md`](../../../../Docs/MEMORY_STORE_CUSTOM_BACKENDS.md).
 
-На узких экранах (ширина ≤ 720 или высота ≤ 560) чат по умолчанию **стартует свёрнутым**: видна только круглая кнопка **`coreai-chat-fab`** в правом нижнем углу. Кнопка **`coreai-chat-collapse`** (`—`) в шапке сворачивает панель обратно в FAB.
+## Panel collapse (FAB) — since 0.21.7
 
-- **Персист:** выбор «свернут / развёрнут» сохраняется в `PlayerPrefs` под ключом `CoreAI.Chat.Collapsed` (целое: `1` = свёрнут). Если ключ ещё не задан, на мобильном layout применяется дефолт «свёрнут».
-- **API из кода:**
+On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed** by default: only the circular **`coreai-chat-fab`** button is visible in the bottom-right. The **`coreai-chat-collapse`** button (`—`) in the header collapses the panel back to the FAB.
+
+- **Persistence:** collapsed/expanded choice is stored in `PlayerPrefs` under `CoreAI.Chat.Collapsed` (integer: `1` = collapsed). If the key is unset, the mobile layout defaults to collapsed.
+- **API from code:**
   - `bool IsCollapsed { get; }`
-  - `void SetCollapsed(bool collapsed, bool persist = true)` — развернуть перед катсценой или свернуть после неё; при `persist: false` состояние не пишется в `PlayerPrefs`.
-- **UXML:** элементы `coreai-chat-collapse` (в `coreai-chat-header`) и `coreai-chat-fab` (корень, до `coreai-chat-root`).
-- **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` на контейнере, `.coreai-chat-fab` / `.coreai-chat-fab-icon`.
+  - `void SetCollapsed(bool collapsed, bool persist = true)` — expand before a cutscene or collapse after; with `persist: false` the state is not written to `PlayerPrefs`.
+- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`).
+- **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`.
 
-Кастомная вёрстка: если вы **копируете** UXML в свой проект, добавьте те же имена элементов или переопределите привязку в наследнике `CoreAiChatPanel` (переопределите `BindUI` и вызовите `base.BindUI()` либо продублируйте логику).
+Custom layout: if you **copy** UXML into your project, add the same element names or override bindings in a subclass of `CoreAiChatPanel` (override `BindUI` and call `base.BindUI()` or duplicate the logic).
 
 <a id="chat-hotkeys"></a>
 
-## Горячие клавиши FAB / Esc (настраиваются в `CoreAiChatConfig`) — с 0.25.3
+## FAB / Esc hotkeys (configured in `CoreAiChatConfig`) — since 0.25.3
 
-Все переключатели — в asset **CoreAI → Chat Config** на панели (`CoreAiChatPanel.config`):
+All toggles are in the **CoreAI → Chat Config** asset on the panel (`CoreAiChatPanel.config`):
 
-| Поле | Назначение |
-|------|------------|
-| **Enable Open Chat Keyboard Shortcut** | Если выключено — чат из свёрнутого (FAB) открывается **только кликом** по FAB, без клавиши. |
-| **Open Chat Hotkey** | `KeyCode` открытия свёрнутого чата (по умолчанию **C**). Для **A–Z** учитываются и код клавиши, и вводимый символ (без Ctrl / Cmd / Alt). |
-| **Enable Escape Chat Shortcuts** | Если выключено — **Esc** не обрабатывается панелью (удобно, если Esc полностью отдан FPS / паузе). |
+| Field | Purpose |
+|-------|---------|
+| **Enable Open Chat Keyboard Shortcut** | When off — collapsed (FAB) chat opens **only by clicking** the FAB, no key. |
+| **Open Chat Hotkey** | `KeyCode` to open collapsed chat (default **C**). For **A–Z**, both key code and typed character are considered (without Ctrl / Cmd / Alt). |
+| **Enable Escape Chat Shortcuts** | When off — **Esc** is not handled by the panel (useful if Esc is fully reserved for FPS / pause). |
 
-### Из кода (поверх конфига)
+### From code (on top of config)
 
-У `CoreAiChatPanel` есть **runtime-переопределения** (имеют приоритет над `CoreAiChatConfig`, пока не сброшены):
+`CoreAiChatPanel` has **runtime overrides** (they take precedence over `CoreAiChatConfig` until cleared):
 
-| Метод / свойство | Назначение |
-|------------------|------------|
-| `SetRuntimeEscapeChatShortcutsEnabled(false)` | Полностью отключить Esc у чата (стоп генерации + сворачивание), не меняя asset. |
-| `SetRuntimeEscapeChatShortcutsEnabled(null)` | Снова следовать полю **Enable Escape Chat Shortcuts** в конфиге. |
-| `SetRuntimeOpenChatKeyboardShortcutEnabled(bool?)` | Включить/выключить клавишу открытия свёрнутого чата. |
-| `SetRuntimeOpenChatHotkey(KeyCode?)` | Сменить клавишу открытия в рантайме. |
-| `ClearRuntimeHotkeyOverrides()` | Сбросить все три переопределения. |
-| `EffectiveOpenChatKeyboardShortcutEnabled`, `EffectiveOpenChatHotkey`, `EffectiveEscapeChatShortcutsEnabled` | Текущее итоговое поведение (конфиг + оверрайды). |
+| Method / property | Purpose |
+|-------------------|---------|
+| `SetRuntimeEscapeChatShortcutsEnabled(false)` | Fully disable Esc for chat (stop generation + collapse) without changing the asset. |
+| `SetRuntimeEscapeChatShortcutsEnabled(null)` | Follow **Enable Escape Chat Shortcuts** in config again. |
+| `SetRuntimeOpenChatKeyboardShortcutEnabled(bool?)` | Enable/disable the key to open collapsed chat. |
+| `SetRuntimeOpenChatHotkey(KeyCode?)` | Change the open key at runtime. |
+| `ClearRuntimeHotkeyOverrides()` | Clear all three overrides. |
+| `EffectiveOpenChatKeyboardShortcutEnabled`, `EffectiveOpenChatHotkey`, `EffectiveEscapeChatShortcutsEnabled` | Effective behavior (config + overrides). |
 
-Пример: отдать Esc только игроку, пока открыт мир:
+Example: give Esc only to the player while the world map is open:
 
 ```csharp
 void OnWorldMapOpened()
@@ -105,174 +107,174 @@ void OnWorldMapOpened()
 
 void OnWorldMapClosed()
 {
-    chatPanel.SetRuntimeEscapeChatShortcutsEnabled(null); // или true
+    chatPanel.SetRuntimeEscapeChatShortcutsEnabled(null); // or true
 }
 ```
 
-**Поведение по умолчанию (оба флага включены):**
+**Default behavior (both flags on):**
 
-- Пока чат **свёрнут** — нажатие настроенной клавиши открывает панель (обработка в `OnRootKeyDown` на фазе `TrickleDown` с корня `UIDocument`).
-- Пока чат **развёрнут** — **Esc** сначала останавливает активную генерацию (если идёт запрос/стрим), иначе **сворачивает** панель в FAB.
-- Дополнительно в **`Update()`** вызывается опрос **Legacy `Input.GetKeyDown`** только когда у корня UITK **нет** сфокусированного элемента (`Root.focusController.focusedElement == null`) — чтобы сочетаться с управлением персонажем, когда фокус не в UI. На **WebGL** в том же `Update()` по-прежнему сбрасывается `WebGLInput.captureAllKeyboardInput`.
+- While chat is **collapsed** — the configured key opens the panel (handled in `OnRootKeyDown` at `TrickleDown` from `UIDocument` root).
+- While chat is **expanded** — **Esc** first stops active generation (if a request/stream is in progress), otherwise **collapses** the panel to the FAB.
+- Additionally **`Update()`** polls **Legacy `Input.GetKeyDown`** only when the UITK root has **no** focused element (`Root.focusController.focusedElement == null`) — so it coexists with character control when focus is not in UI. On **WebGL**, the same `Update()` still resets `WebGLInput.captureAllKeyboardInput`.
 
-**Ограничение:** если в *Player Settings* включён только **New Input System** без Legacy, `Input.*` недоступен — ветка опроса в `Update` тихо пропускается; клавиши работают, пока фокус клавиатуры в дереве UITK (или подключите свой слой ввода / `Both` в Active Input Handling).
+**Limitation:** if *Player Settings* use only the **New Input System** without Legacy, `Input.*` is unavailable — the `Update` branch is skipped silently; keys still work while keyboard focus is in the UITK tree (or add your own input layer / `Both` in Active Input Handling).
 
-**Интеграция с геймплеем:** после каждого `SetCollapsed` вызывается `protected virtual void OnCollapsedStateChanged(bool collapsed)` — в наследнике можно подписать паузу движения, курсор и т.д., не таща игровые контроллеры в CoreAI.
+**Gameplay integration:** after each `SetCollapsed`, `protected virtual void OnCollapsedStateChanged(bool collapsed)` is called — in a subclass you can hook pause, cursor, etc., without pulling game controllers into CoreAI.
 
-Наследники **`Update()`** должны вызывать **`base.Update()` первым**, если переопределяют метод (иначе потеряете WebGL-фикс и poll горячих клавиш).
+Subclasses that override **`Update()`** must call **`base.Update()` first** (otherwise you lose the WebGL fix and hotkey polling).
 
 <a id="programmatic-chat-submit"></a>
 
-## Программный вызов из кода (кат-сцена, квест, кнопка в мире) — с 0.25.5
+## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
 
-Получите ссылку на панель (`GetComponent<CoreAiChatPanel>()`, singleton в сцене и т.д.) и вызывайте:
+Get a reference to the panel (`GetComponent<CoreAiChatPanel>()`, scene singleton, etc.) and call:
 
 ```csharp
 using CoreAI.Chat;
 using System.Threading;
 using System.Threading.Tasks;
 
-// Обычный ход: пузырь пользователя в чате + запрос к LLM (как после ввода в поле)
+// Normal path: user bubble in chat + LLM request (same as after typing in the field)
 string? reply = await chatPanel.SubmitMessageFromExternalAsync(
-    "Расскажи про квест",
+    "Tell me about the quest",
     cancellationToken: CancellationToken.None);
 
-// Тихий вызов: не дублировать текст в UI, только оркестратор
+// Silent call: do not duplicate text in UI, orchestrator only
 var opt = new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false };
-reply = await chatPanel.SubmitMessageFromExternalAsync("Секретный контекст для модели", opt);
+reply = await chatPanel.SubmitMessageFromExternalAsync("Secret context for the model", opt);
 
-// Только нарратив в UI, без LLM (подставной ответ ассистента)
+// Narrative in UI only, no LLM (simulated assistant reply)
 var fake = new CoreAiChatExternalSubmitOptions
 {
     AppendUserMessageToChat = true,
-    SimulatedAssistantReply = "Добро пожаловать в город!"
+    SimulatedAssistantReply = "Welcome to the city!"
 };
 reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 ```
 
-| Поле `CoreAiChatExternalSubmitOptions` | По умолчанию | Назначение |
-|----------------------------------------|----------------|------------|
-| **`AppendUserMessageToChat`** | `true` | Добавить пузырь **пользователя** с текстом запроса перед ходом. |
-| **`SimulatedAssistantReply`** | `null` | Если задана непустая строка — **LLM не вызывается**; в ленту добавляется пузырь ассистента с этим текстом (после strip think и `FormatResponseText`). |
+| Field `CoreAiChatExternalSubmitOptions` | Default | Purpose |
+|---------------------------------------|---------|---------|
+| **`AppendUserMessageToChat`** | `true` | Add a **user** bubble with the request text before the turn. |
+| **`SimulatedAssistantReply`** | `null` | If set to a non-empty string — **LLM is not called**; an assistant bubble with this text is appended (after think strip and `FormatResponseText`). |
 
-**Возврат:** строка ответа ассистента (в т.ч. симулированная), либо `null`, если панель занята другим запросом, текст после `OnMessageSending` пустой, или операция отменена.
+**Return value:** assistant reply string (including simulated), or `null` if the panel is busy with another request, text after `OnMessageSending` is empty, or the operation was cancelled.
 
-**Хуки:** по-прежнему вызываются `OnMessageSending`, для реального ответа — `OnResponseReceived` / событие **`OnAiResponseCompleted`**.
+**Hooks:** `OnMessageSending` is still invoked; for a real reply — `OnResponseReceived` / **`OnAiResponseCompleted`**.
 
-## Остановка генерации (Stop) — с 0.22.0
+## Stopping generation (Stop) — since 0.22.0
 
-С **0.25.5** отдельной кнопки «стоп» в **шапке** нет — остановка только через кнопку отправки и Esc (ниже).
-С **0.25.6** stop-path усилен для streaming и быстрых backend'ов/stub: кнопка остаётся enabled, пока она показывает `X`, busy-state выставляется до первого `await`, а активный request CTS отменяется даже если `CoreAi.StopAgent(roleId)` недоступен.
+Since **0.25.5** there is no separate “stop” button in the **header** — stop only via the send button and Esc (below).
+Since **0.25.6** the stop path is hardened for streaming and fast backends/stub: the button stays enabled while it shows `X`, busy state is set until the first `await`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
 
-Во время активной генерации `CoreAiChatPanel` автоматически переключает кнопку отправки в режим остановки:
+During active generation `CoreAiChatPanel` switches the send button to stop mode:
 
-- текст кнопки: `X` вместо `>`;
-- tooltip: `Остановить генерацию (Esc)`;
-- стиль: красный (`.coreai-chat-send-button-stop`).
+- button label: `X` instead of `>`;
+- tooltip: `Stop generation (Esc)`;
+- style: red (`.coreai-chat-send-button-stop`).
 
-Остановить текущий ответ можно двумя способами:
+Stop the current reply in two ways:
 
-- нажать кнопку отправки повторно (в режиме `Stop`);
-- нажать `Esc` пока чат генерирует ответ (если в `CoreAiChatConfig` включён **Enable Escape Chat Shortcuts**).
+- press the send button again (in `Stop` mode);
+- press `Esc` while the chat is generating (if **Enable Escape Chat Shortcuts** is on in `CoreAiChatConfig`).
 
-Под капотом вызывается `CoreAi.StopAgent(roleId)` и отменяется активный `CancellationToken` запроса, поэтому останавливаются и текущая генерация, и задачи этой роли в очереди оркестратора.
-После stop `CoreAiChatPanel` немедленно очищает streaming UI (`FinishStreaming` / `HideTypingIndicator`) и сбрасывает `_isSending` / `_isStreaming`; это покрыто `CoreAiChatPanelEditModeTests` и `CoreAiChatPanelStopPlayModeTests`.
+Under the hood this calls `CoreAi.StopAgent(roleId)` and cancels the active request `CancellationToken`, so both current generation and queued orchestrator tasks for that role stop.
+After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming` / `HideTypingIndicator`) and resets `_isSending` / `_isStreaming`; covered by `CoreAiChatPanelEditModeTests` and `CoreAiChatPanelStopPlayModeTests`.
 
-## Очистка контекста из UI
+## Clearing context from UI
 
-Кнопка **`*`** в хеддере (`coreai-chat-clear`) вызывает `ClearChat()`:
+The **`*`** button in the header (`coreai-chat-clear`) calls `ClearChat()`:
 
-- очищает сообщения в UI;
-- по умолчанию очищает только историю чата (`clearChatHistory: true`, `clearLongTermMemory: false`).
+- clears messages in the UI;
+- by default clears only chat history (`clearChatHistory: true`, `clearLongTermMemory: false`).
 
-Для ручного гранулярного управления доступна перегрузка:
+For manual granular control, use the overload:
 
 ```csharp
-// Только краткосрочный контекст (поведение кнопки clear по умолчанию)
+// Short-term context only (same as default clear button)
 chatPanel.ClearChat(clearChatHistory: true, clearLongTermMemory: false);
 
-// Полный сброс: краткосрочный контекст + долговременная память
+// Full reset: short-term context + long-term memory
 chatPanel.ClearChat(clearChatHistory: true, clearLongTermMemory: true);
 
-// Только долговременная память
+// Long-term memory only
 chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
 ```
 
-## Архитектура промптов (3 слоя)
+## Prompt architecture (3 layers)
 
-| Слой | Источник | Пример |
-|------|----------|--------|
-| 1 | `CoreAISettings.universalSystemPromptPrefix` | "Отвечай кратко. Не обсуждай запрещённые темы." |
-| 2 | `.txt` файл через `AgentPromptsManifest` | `TeacherSystemPrompt.txt` |
-| 3 | `AgentBuilder.WithSystemPrompt()` | "Ты обучаешь ученика теме: циклы for" |
+| Layer | Source | Example |
+|-------|--------|---------|
+| 1 | `CoreAISettings.universalSystemPromptPrefix` | "Keep answers short. Do not discuss forbidden topics." |
+| 2 | `.txt` file via `AgentPromptsManifest` | `TeacherSystemPrompt.txt` |
+| 3 | `AgentBuilder.WithSystemPrompt()` | "You are teaching a student about: for loops" |
 
-Итоговый промпт = `Слой 1` + `\n` + `Слой 2` + `\n\n` + `Слой 3`
+Final prompt = `Layer 1` + `\n` + `Layer 2` + `\n\n` + `Layer 3`
 
-### Переопределение universalPrefix
+### Overriding universalPrefix
 
-По умолчанию **universalPrefix применяется ко всем ролям**. Если нужен полностью кастомный промпт без общих правил — используйте `.WithOverrideUniversalPrefix()`:
+By default **universalPrefix applies to all roles**. For a fully custom prompt without shared rules, use `.WithOverrideUniversalPrefix()`:
 
 ```csharp
-// Обычный агент — prefix + base + additional (все 3 слоя)
+// Regular agent — prefix + base + additional (all 3 layers)
 new AgentBuilder("Teacher")
-    .WithSystemPrompt("Ты учитель Python.")
+    .WithSystemPrompt("You are a Python teacher.")
     .Build();
 
-// Кастомный агент — БЕЗ universalPrefix (только base + additional)
+// Custom agent — WITHOUT universalPrefix (base + additional only)
 new AgentBuilder("JsonParser")
     .WithSystemPrompt("You are a strict JSON parser.")
-    .WithOverrideUniversalPrefix()  // ← prefix пропускается
+    .WithOverrideUniversalPrefix()  // ← prefix skipped
     .Build();
 ```
 
-## Streaming (оба бэкенда)
+## Streaming (both backends)
 
-| Бэкенд | Механизм | Реальный стриминг? |
-|--------|----------|--------------------|
-| **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → парсинг `data:` чанков | ✅ Да (Standalone / Editor); ⚠️ нет на WebGL — см. ниже |
-| **LLMUnity** (локальная GGUF) | `LLMAgent.Chat(callback)` → дельта через ConcurrentQueue | ✅ Да |
+| Backend | Mechanism | Real streaming? |
+|---------|-----------|-----------------|
+| **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → parsing `data:` chunks | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
+| **LLMUnity** (local GGUF) | `LLMAgent.Chat(callback)` → deltas via ConcurrentQueue | ✅ Yes |
 
-> ⚠️ **WebGL caveat (актуально для 0.25.x).** В собранном WebGL-плеере `UnityWebRequest`-обёртка
-> (emscripten `XMLHttpRequest`) не отдаёт SSE incrementally — все чанки прилетают одним блоком в
-> конце запроса (`chunks=1` в логе `LLM ◀ (stream)`). Из-за этого typing-индикатор может зависнуть,
-> а bubble не появиться. **Workaround:** под `#if UNITY_WEBGL && !UNITY_EDITOR` принудительно
-> ставить `CoreAiChatConfig.EnableStreaming = false` (любая non-streaming-ветка работает корректно).
-> Полный план фикса (включая `.jslib`-fetch-bridge) — в [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md).
+> ⚠️ **WebGL caveat (0.25.x).** In a built WebGL player the `UnityWebRequest` wrapper
+> (emscripten `XMLHttpRequest`) does not deliver SSE incrementally — all chunks arrive in one block at
+> the end of the request (`chunks=1` in `LLM ◀ (stream)` logs). Because of that the typing indicator may hang
+> and the bubble may not appear. **Workaround:** under `#if UNITY_WEBGL && !UNITY_EDITOR` force
+> `CoreAiChatConfig.EnableStreaming = false` (any non-streaming path works correctly).
+> Full fix plan (including `.jslib` fetch bridge) — [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md).
 
 ### Streaming + Tool Calling (single-cycle)
 
-Если в стриминговом ответе модель сначала отдает tool-call JSON, CoreAI выполняет единый цикл:
+If in a streaming response the model first emits tool-call JSON, CoreAI runs a single cycle:
 
-1. получает стрим-ответ и детектит tool-call payload;
-2. выполняет соответствующий tool;
-3. добавляет результат tool в историю диалога;
-4. продолжает генерацию следующим стриминговым шагом.
+1. receives the stream and detects tool-call payload;
+2. runs the matching tool;
+3. appends the tool result to dialog history;
+4. continues generation with the next streaming step.
 
-Tool JSON в UI не рендерится: игрок видит только итоговый читаемый ответ ассистента.
+Tool JSON is not rendered in UI: the player only sees the final readable assistant reply.
 
-По умолчанию это поведение сразу активно для ролей с инструментами:
+This behavior is on by default for roles with tools:
 
 - `AgentMode.ToolsAndChat`
 - `AgentMode.ToolsOnly`
 
-Для `AgentMode.ChatOnly` используется обычная иерархия флагов стриминга (UI/per-agent/global).
+For `AgentMode.ChatOnly` the usual streaming flag hierarchy applies (UI / per-agent / global).
 
-### Иерархия настроек стриминга
+### Streaming settings hierarchy
 
-Порядок приоритета (от высшего к низшему):
+Priority order (highest to lowest):
 
-1. **UI-флаг** — `CoreAiChatConfig.EnableStreaming` (Inspector панели чата). Если выключен → всегда non-streaming, остальные слои игнорируются.
-2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (зарегистрирован в `AgentMemoryPolicy`).
-3. **Глобально** — `ICoreAISettings.EnableStreaming` (чекбокс в `CoreAISettings.asset`).
+1. **UI flag** — `CoreAiChatConfig.EnableStreaming` (chat panel Inspector). If off → always non-streaming; other layers ignored.
+2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`).
+3. **Global** — `ICoreAISettings.EnableStreaming` (checkbox in `CoreAISettings.asset`).
 
 ```csharp
-// Пример: агент-чат всегда стримит независимо от глобальной настройки
+// Example: chat agent always streams regardless of global setting
 new AgentBuilder("PlayerChat")
-    .WithSystemPrompt("Ты дружелюбный помощник.")
+    .WithSystemPrompt("You are a friendly assistant.")
     .WithStreaming(true)
     .Build();
 
-// Пример: агент-парсер никогда не стримит (нужен полный JSON сразу)
+// Example: parser agent never streams (needs full JSON at once)
 new AgentBuilder("JsonParser")
     .WithSystemPrompt("You are a strict JSON parser.")
     .WithOverrideUniversalPrefix()
@@ -280,71 +282,71 @@ new AgentBuilder("JsonParser")
     .Build();
 ```
 
-Программная проверка эффективного значения:
+Programmatic check of effective value:
 
 ```csharp
 var chatService = CoreAiChatService.TryCreateFromScene();
 bool useStream = chatService.IsStreamingEnabled("PlayerChat", uiFallback: true);
 ```
 
-### Think-block фильтрация
+### Think-block filtering
 
-Модели с reasoning (DeepSeek, Qwen3) генерируют `<think>...</think>` блоки. CoreAI автоматически:
-- **При стриминге**: общий stateful-фильтр `CoreAI.Ai.ThinkBlockStreamFilter` корректно удаляет блоки, **даже если открывающий/закрывающий тег разбит между SSE-чанками**. Пока модель «думает», показывается typing indicator.
-- **Без стриминга**: regex убирает `<think>` блоки из финального ответа.
-- **Tool calls**: не отображаются в чате (обрабатываются внутри MEAI pipeline, включая streaming single-cycle).
+Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI automatically:
+- **When streaming**: shared stateful filter `CoreAI.Ai.ThinkBlockStreamFilter` removes blocks **even if open/close tags are split across SSE chunks**. While the model “thinks”, the typing indicator is shown.
+- **Non-streaming**: regex strips `<think>` blocks from the final reply.
+- **Tool calls**: not shown in chat (handled inside the MEAI pipeline, including streaming single-cycle).
 
-> Стриминг должен вызываться с **main thread Unity** (из coroutine, `async void`, `UniTask` или обычного async-метода в UI). Оборачивание `CompleteStreamingAsync` в `Task.Run` приведёт к исключению `"Create can only be called from the main thread"` из-за создания `UnityWebRequest`.
+> Streaming must be invoked from the **Unity main thread** (from a coroutine, `async void`, `UniTask`, or a normal async method in UI). Wrapping `CompleteStreamingAsync` in `Task.Run` will throw `"Create can only be called from the main thread"` because `UnityWebRequest` is created off the main thread.
 
-## Расширение через наследование
+## Extension via inheritance
 
 ```csharp
 public class MyGameChatPanel : CoreAiChatPanel
 {
-    // Перехватить отправку (валидация, модификация)
+    // Intercept send (validation, modification)
     protected override string OnMessageSending(string text)
     {
-        if (text.Contains("bad word")) return null; // отменить
+        if (text.Contains("bad word")) return null; // cancel
         return text;
     }
 
-    // Пост-обработка ответа (markdown, аналитика)
+    // Post-process reply (markdown, analytics)
     protected override string FormatResponseText(string rawText)
     {
         return MarkdownRenderer.Render(rawText);
     }
 
-    // Полностью кастомная вёрстка сообщений
+    // Fully custom message layout
     protected override VisualElement CreateMessageBubble(string text, bool isUser)
     {
         var bubble = base.CreateMessageBubble(text, isUser);
-        // Добавьте свои классы, анимации, иконки...
+        // Add your classes, animations, icons...
         return bubble;
     }
 }
 ```
 
-## Программное использование (без UI)
+## Programmatic use (no UI)
 
-### Вариант 1 — статический фасад `CoreAi` (рекомендуется)
+### Option 1 — static `CoreAi` facade (recommended)
 
 ```csharp
-// Синхронно
-string answer = await CoreAi.AskAsync("Привет!", roleId: "Teacher");
+// Synchronous-style await
+string answer = await CoreAi.AskAsync("Hello!", roleId: "Teacher");
 
-// Стриминг (чанки по мере генерации)
-await foreach (string chunk in CoreAi.StreamAsync("Расскажи о Python", "Teacher"))
+// Streaming (chunks as generated)
+await foreach (string chunk in CoreAi.StreamAsync("Tell me about Python", "Teacher"))
     myTextLabel.text += chunk;
 
-// Smart — сам решает режим, попутно вызывает onChunk
+// Smart — picks mode, calls onChunk
 string full = await CoreAi.SmartAskAsync(
-    "Вопрос", "Teacher", onChunk: c => myTextLabel.text += c);
+    "Question", "Teacher", onChunk: c => myTextLabel.text += c);
 
-// Полный оркестратор-пайплайн (history + authority + publish command):
+// Full orchestrator pipeline (history + authority + publish command):
 string json = await CoreAi.OrchestrateAsync(
     new AiTaskRequest { RoleId = "Creator", Hint = "spawn JSON" });
 
-// Стриминговый оркестратор:
+// Streaming orchestrator:
 await foreach (var chunk in CoreAi.OrchestrateStreamAsync(
     new AiTaskRequest { RoleId = "Creator", Hint = "explain" }))
 {
@@ -353,67 +355,67 @@ await foreach (var chunk in CoreAi.OrchestrateStreamAsync(
 }
 ```
 
-Подробнее: [`COREAI_SINGLETON_API.md`](../../../Docs/COREAI_SINGLETON_API.md).
+Details: [`COREAI_SINGLETON_API.md`](../../../Docs/COREAI_SINGLETON_API.md).
 
-### Вариант 2 — прямой доступ к сервису
+### Option 2 — direct service access
 
 ```csharp
 var chatService = CoreAiChatService.TryCreateFromScene();
 
 // Non-streaming
-string response = await chatService.SendMessageAsync("Привет!", "Teacher");
+string response = await chatService.SendMessageAsync("Hello!", "Teacher");
 
 // Streaming
-await foreach (var chunk in chatService.SendMessageStreamingAsync("Расскажи о Python", "Teacher"))
+await foreach (var chunk in chatService.SendMessageStreamingAsync("Tell me about Python", "Teacher"))
 {
     myTextLabel.text += chunk.Text;
 }
 ```
 
-## Настройка агента
+## Agent setup
 
 ```csharp
-// В вашем LifetimeScope:
+// In your LifetimeScope:
 var config = new AgentBuilder("Teacher")
-    .WithSystemPrompt("Ты учитель Python для школьников.")  // Слой 3
+    .WithSystemPrompt("You are a Python teacher for school students.")  // Layer 3
     .WithChatHistory(4096, persistBetweenSessions: true)
     .WithMemory()
     .Build();
 config.ApplyToPolicy(policy);
 ```
 
-## Интеграция с VContainer / MessagePipe
+## VContainer / MessagePipe integration
 
-В проектах с VContainer рекомендуемая архитектура:
+In VContainer projects the recommended architecture:
 
 ```
-CoreAiChatPanel (UI) → события → ChatPresenter (VContainer)
+CoreAiChatPanel (UI) → events → ChatPresenter (VContainer)
     → MessagePipe → SendMessageUseCase (Application)
 ```
 
-`CoreAiChatPanel` публикует события `OnUserMessageSent` и `OnAiResponseCompleted`.
-`ChatPresenter` (VContainer `IStartable`) подписывается и маршрутизирует через `MessagePipe`.
+`CoreAiChatPanel` raises `OnUserMessageSent` and `OnAiResponseCompleted`.
+`ChatPresenter` (VContainer `IStartable`) subscribes and routes via `MessagePipe`.
 
-## Кастомные стили
+## Custom styles
 
-Создайте свой `.uss` файл и назначьте в `CoreAiChatPanel.customStyleSheet`.
-Все CSS-классы имеют префикс `coreai-` для избежания конфликтов:
+Create your own `.uss` file and assign it to `CoreAiChatPanel.customStyleSheet`.
+All CSS classes use the `coreai-` prefix to avoid clashes:
 
-| Класс | Описание |
-|-------|----------|
-| `.coreai-chat-container` | Контейнер чата |
-| `.coreai-chat-container.coreai-collapsed` | Контейнер скрыт (режим FAB) |
-| `.coreai-chat-header` | Заголовок |
-| `.coreai-chat-header-btn` | Кнопка сворачивания в шапке |
-| `.coreai-chat-fab` | Плавающая кнопка «открыть чат» |
-| `.coreai-chat-fab-icon` | Иконка внутри FAB |
-| `.coreai-ai-message` | Пузырь AI |
-| `.coreai-user-message` | Пузырь пользователя |
-| `.coreai-streaming-active` | Активный стриминг |
-| `.coreai-chat-send-button` | Кнопка отправки |
-| `.coreai-typing-message` | Индикатор «печатает...» |
+| Class | Description |
+|-------|-------------|
+| `.coreai-chat-container` | Chat container |
+| `.coreai-chat-container.coreai-collapsed` | Container hidden (FAB mode) |
+| `.coreai-chat-header` | Header |
+| `.coreai-chat-header-btn` | Collapse button in header |
+| `.coreai-chat-fab` | Floating “open chat” button |
+| `.coreai-chat-fab-icon` | Icon inside FAB |
+| `.coreai-ai-message` | AI bubble |
+| `.coreai-user-message` | User bubble |
+| `.coreai-streaming-active` | Active streaming |
+| `.coreai-chat-send-button` | Send button |
+| `.coreai-typing-message` | “Typing…” indicator |
 
-## События
+## Events
 
 ```csharp
 var chatPanel = GetComponent<CoreAiChatPanel>();

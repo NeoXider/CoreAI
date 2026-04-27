@@ -114,6 +114,9 @@ namespace CoreAI.Tests.PlayMode
                 LuaLlmTool luaTool = new(luaExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
                 AgentMemoryPolicy policy = new();
+                // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
+                // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
+                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
                 //  execute_lua   CoreMechanic
                 policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
 
@@ -147,15 +150,9 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 1", sink, store);
-
-                    //      
-                    if (!store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) ||
-                        string.IsNullOrWhiteSpace(mem.Memory))
-                    {
-                        Debug.LogWarning("[CraftingMemory.LLMUnity]  Model did NOT write to memory after craft 1!");
-                    }
 
                     if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1", 1))
                     {
@@ -183,6 +180,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 2", sink, store);
 
@@ -212,6 +210,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 3", sink, store);
 
@@ -242,6 +241,7 @@ namespace CoreAI.Tests.PlayMode
                     });
 
                     yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 4");
+                    yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 4 (determinism)", sink, store);
 
@@ -440,7 +440,10 @@ namespace CoreAI.Tests.PlayMode
                                   "STEP 1: Call the 'memory' tool with:\n" +
                                   "  - action: \"write\"\n" +
                                   $"  - content: \"{memoryWriteHint}\"\n\n" +
-                                  "STEP 2: Call the 'execute_lua' tool with Lua code.\n\n" +
+                                  "STEP 2: Call the 'execute_lua' tool with Lua code that ONLY calls the game API, same as crafts 1-3:\n" +
+                                  "  create_item('ExactWeaponName', 'weapon', qualityNumber)\n" +
+                                  "  report('crafted ExactWeaponName')\n" +
+                                  "Do NOT return Lua tables, do NOT simulate crafting in variables only — the host must see create_item and report.\n\n" +
                                   "CRITICAL: You MUST craft the EXACT SAME item as before - same name, same quality.\n" +
                                   "These are the EXACT same ingredients, so the result must be IDENTICAL.\n" +
                                   "You MUST call BOTH tools. Do NOT stop after memory.";
@@ -449,6 +452,18 @@ namespace CoreAI.Tests.PlayMode
         }
 
         #region Logging Helpers
+
+        /// <summary>
+        /// Lets the orchestrator / MEAI pipeline finish writing <see cref="IAgentMemoryStore"/> after the task completes
+        /// so logs and checks see the same memory the next prompt build will use.
+        /// </summary>
+        private IEnumerator FlushMemoryStorePersistenceFrames()
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                yield return null;
+            }
+        }
 
         private static void LogBeforeModelCall(string label, string prompt, InMemoryStore store)
         {
@@ -496,7 +511,8 @@ namespace CoreAI.Tests.PlayMode
             }
             else
             {
-                Debug.Log("[CraftingMemory.LLMUnity] MEMORY: (not written by model)");
+                Debug.Log(
+                    "[CraftingMemory.LLMUnity] MEMORY: (empty in store after turn — may still be applied next frame, or filled by ExtractCraftInfo from payload)");
             }
 
             Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");

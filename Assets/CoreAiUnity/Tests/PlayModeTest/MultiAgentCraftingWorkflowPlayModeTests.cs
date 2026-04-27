@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -91,6 +92,12 @@ namespace CoreAI.Tests.PlayMode
             {
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                // Local GGUF models often re-emit the same memory tool payload across tool-loop iterations;
+                // duplicate rejection would abort Programmer (and sometimes other roles) before execute_lua.
+                policy.ConfigureRole(BuiltInAgentRoleIds.Creator, allowDuplicateToolCalls: true);
+                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
+                policy.ConfigureRole(BuiltInAgentRoleIds.Programmer, allowDuplicateToolCalls: true);
+
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -170,14 +177,21 @@ namespace CoreAI.Tests.PlayMode
                     string mechanicMemory = mechanicMem.Memory;
                     Debug.Log($"[MultiAgent]  CoreMechanicAI memory: {mechanicMemory}");
 
-                    //   
-                    string itemName =
-                        CraftingMemoryItemNameExtractor.ExtractName(sink.Items.Count > 0
-                            ? sink.Items[0].JsonPayload
-                            : "");
+                    string payload = sink.Items.Count > 0 ? sink.Items[0].JsonPayload : "";
+                    string itemName = null;
+                    if (!string.IsNullOrEmpty(payload) &&
+                        TryExtractJsonStringProperty(payload, "item_name", out string fromJson))
+                    {
+                        itemName = fromJson;
+                    }
+
                     if (string.IsNullOrEmpty(itemName))
                     {
-                        //    
+                        itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+                    }
+
+                    if (string.IsNullOrEmpty(itemName))
+                    {
                         Match match = Regex.Match(mechanicMemory, @"Craft#1:\s*(\w+)");
                         if (match.Success)
                         {
@@ -407,6 +421,25 @@ namespace CoreAI.Tests.PlayMode
             {
                 handle.Dispose();
             }
+        }
+
+        private static bool TryExtractJsonStringProperty(string text, string propertyName, out string value)
+        {
+            value = null;
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(propertyName))
+            {
+                return false;
+            }
+
+            Match m = Regex.Match(text, $"\"{Regex.Escape(propertyName)}\"\\s*:\\s*\"([^\"]*)\"",
+                RegexOptions.IgnoreCase);
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            value = m.Groups[1].Value.Trim();
+            return !string.IsNullOrEmpty(value);
         }
 
         private static AiOrchestrator CreateOrchestrator(

@@ -46,7 +46,7 @@ namespace CoreAI.Tests.PlayMode
             yield return setup.RunAndWait(task, 240f, "world spawn");
 
             //      (      Orchestrator   )
-            //    5 ,   tool execution   Task.Run.
+            //      tool execution.
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
                 yield return PlayModeTestAwait.WaitUntil(() => setup.WorldExecutor.LastCommandWasCalled, 5f,
@@ -202,7 +202,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! List animations command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("list_animations")), 
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("list_animations")),
                 $"Command list_animations not found in any of the executed commands. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 

@@ -11,12 +11,18 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    ///  Creator   ILlmClient   TestAgentSetup.
-    ///    CoreAISettingsAsset.
+    /// PlayMode integration test for the Creator agent with the real <see cref="ILlmClient"/>
+    /// resolved by <see cref="TestAgentSetup"/>. Backend (LlmUnity / OpenAI HTTP / Auto) is
+    /// driven by <see cref="CoreAI.Infrastructure.Llm.CoreAISettingsAsset"/>.
     /// </summary>
     public sealed class AgentMemoryWithRealModelPlayModeTests
     {
-        /// <summary>Auto   CoreAISettingsAsset.BackendType.</summary>
+        /// <summary>
+        /// Writes a single fact into agent memory via the memory tool, then performs a recall turn
+        /// and asserts that the published <c>ApplyAiGameCommand</c> sink contains the recalled fact.
+        /// Backend choice follows <see cref="CoreAI.Infrastructure.Llm.CoreAISettingsAsset.BackendType"/>
+        /// (Auto picks the first reachable backend).
+        /// </summary>
         [UnityTest]
         [Timeout(900000)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()
@@ -95,8 +101,8 @@ namespace CoreAI.Tests.PlayMode
             if (string.IsNullOrEmpty(recallResult))
             {
                 Assert.Ignore(
-                    "Шаг recall вернул пустой ответ после повторов: вероятен HTTP 5xx или пустой ответ у локального OpenAI-совместимого API (LM Studio и т.п.). " +
-                    "Проверьте, что сервер доступен, модель загружена, лимиты контекста, `ApiBaseUrl` в CoreAISettings указывает на `/v1`.");
+                    "Recall step returned an empty response after retries: the local OpenAI-compatible API (LM Studio, etc.) likely returned HTTP 5xx or an empty body. " +
+                    "Check that the server is up, a model is loaded, context limits, and that `ApiBaseUrl` in CoreAISettings ends with `/v1`.");
             }
 
             Assert.AreEqual(1, sink2.Items.Count);

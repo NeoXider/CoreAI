@@ -55,8 +55,11 @@ namespace CoreAI.Ai
             /// <summary>Максимальное количество сообщений для сохранения и отправки в модель.</summary>
             public int MaxChatHistoryMessages;
 
+            /// <summary>Per-role LLM response token cap; null = use per-call/global/provider fallback.</summary>
+            public int? MaxOutputTokens;
+
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
-                bool withChatHistory = false, bool persistChatHistory = true, int contextTokens = 8192, bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30)
+                bool withChatHistory = false, bool persistChatHistory = false, int contextTokens = 8192, bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -65,6 +68,7 @@ namespace CoreAI.Ai
                 ContextTokens = contextTokens;
                 AllowDuplicateToolCalls = allowDuplicateToolCalls;
                 MaxChatHistoryMessages = maxChatHistoryMessages;
+                MaxOutputTokens = maxOutputTokens;
             }
         }
 
@@ -87,13 +91,20 @@ namespace CoreAI.Ai
         {
             _roleConfigs = new Dictionary<string, RoleMemoryConfig>();
 
-            // По умолчанию: все роли используют MemoryTool с append
+            // По умолчанию: агентные роли используют MemoryTool с append.
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 _roleConfigs[roleId] = new RoleMemoryConfig(
                     true,
                     MemoryToolAction.Append);
             }
+
+            // PlayerChat is the drop-in chat panel role. It should restore the visible conversation
+            // after restart by default, while long-term facts still belong to explicit MemoryTool roles.
+            _roleConfigs[BuiltInAgentRoleIds.PlayerChat] = new RoleMemoryConfig(
+                useMemoryTool: false,
+                withChatHistory: true,
+                persistChatHistory: true);
         }
 
         /// <summary>
@@ -163,8 +174,28 @@ namespace CoreAI.Ai
                 AllowDuplicateToolCalls = allowDuplicateToolCalls ?? existing.AllowDuplicateToolCalls,
                 WithChatHistory = existing.WithChatHistory,
                 PersistChatHistory = existing.PersistChatHistory,
-                ContextTokens = existing.ContextTokens
+                ContextTokens = existing.ContextTokens,
+                MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
+                MaxOutputTokens = existing.MaxOutputTokens
             };
+        }
+
+        /// <summary>
+        /// Set a per-role LLM response token cap. Null or non-positive values clear the override.
+        /// </summary>
+        public void SetMaxOutputTokens(string roleId, int? maxOutputTokens)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            RoleMemoryConfig existing = GetRoleConfig(roleId);
+            existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
+                ? maxOutputTokens.Value
+                : null;
+            _roleConfigs[roleId] = existing;
         }
 
         /// <summary>
