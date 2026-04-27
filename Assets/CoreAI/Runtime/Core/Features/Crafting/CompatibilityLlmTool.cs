@@ -52,28 +52,28 @@ namespace CoreAI.Crafting
         /// <summary>
         /// Выполняет проверку совместимости.
         /// </summary>
-        public Task<string> ExecuteAsync(object ingredientsObj, CancellationToken cancellationToken = default)
+        public Task<string> ExecuteAsync(object ingredients, CancellationToken cancellationToken = default)
         {
-            string[] ingredients = null;
+            string[] ingredientNames = null;
 
-            if (ingredientsObj != null)
+            if (ingredients != null)
             {
-                if (ingredientsObj is string[] arr)
-                    ingredients = arr;
-                else if (ingredientsObj is Newtonsoft.Json.Linq.JArray jArr)
-                    ingredients = jArr.ToObject<string[]>();
-                else if (ingredientsObj is string str)
+                if (ingredients is string[] arr)
+                    ingredientNames = arr;
+                else if (ingredients is Newtonsoft.Json.Linq.JArray jArr)
+                    ingredientNames = jArr.ToObject<string[]>();
+                else if (ingredients is string str)
                 {
-                    ingredients = str.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    ingredientNames = str.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                 }
             }
 
             if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
-                Log.Instance.Info($"[Tool Call] check_compatibility: ingredients=[{string.Join(", ", ingredients ?? Array.Empty<string>())}]", LogTag.Llm);
+                Log.Instance.Info($"[Tool Call] check_compatibility: ingredients=[{string.Join(", ", ingredientNames ?? Array.Empty<string>())}]", LogTag.Llm);
             }
 
-            if (ingredients == null || ingredients.Length == 0)
+            if (ingredientNames == null || ingredientNames.Length == 0)
             {
                 return Task.FromResult(JsonConvert.SerializeObject(new CompatibilityToolResult
                 {
@@ -85,7 +85,7 @@ namespace CoreAI.Crafting
             try
             {
                 List<string> trimmed = new();
-                foreach (string item in ingredients)
+                foreach (string item in ingredientNames)
                 {
                     string t = item?.Trim();
                     if (!string.IsNullOrEmpty(t))

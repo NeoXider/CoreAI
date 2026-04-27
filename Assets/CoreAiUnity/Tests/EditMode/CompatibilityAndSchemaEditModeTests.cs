@@ -1,5 +1,8 @@
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Crafting;
+using Microsoft.Extensions.AI;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -587,6 +590,24 @@ namespace CoreAI.Tests.EditMode
             string result = tool.ExecuteAsync(new[] { "Fire", "Earth" }).Result;
             Assert.IsTrue(result.Contains("\"Success\":true") || result.Contains("\"Success\": true"));
             Assert.IsTrue(result.Contains("\"IsCompatible\":true") || result.Contains("\"IsCompatible\": true"));
+        }
+
+        [Test]
+        public async Task CompatibilityTool_AIFunction_UsesIngredientsArgumentName()
+        {
+            CompatibilityChecker checker = new();
+            checker.AddRule("Fire", "Earth", 1.5f, "Lava synergy");
+            CompatibilityLlmTool tool = new(checker);
+            AIFunction function = tool.CreateAIFunction();
+
+            object result = await function.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object>
+            {
+                { "ingredients", new[] { "Fire", "Earth" } }
+            }), CancellationToken.None);
+
+            string json = result?.ToString() ?? "";
+            Assert.IsTrue(json.Contains("\"Success\":true") || json.Contains("\"Success\": true"));
+            Assert.IsTrue(json.Contains("\"IsCompatible\":true") || json.Contains("\"IsCompatible\": true"));
         }
 
         [Test]

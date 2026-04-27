@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.25.14] — 2026-04-27
+
+### Release
+
+- 🔧 Version **0.25.14**; release train aligned with `com.nexoider.coreaiunity` **0.25.14** (see Unity package changelog for `CoreAiChatPanel` UX fixes).
+
+## [v0.25.13] — 2026-04-27
+
+### MEAI tool argument binding
+
+- 🐛 **`CompatibilityLlmTool` native argument binding** — the MEAI executor parameter is now named `ingredients`, matching the JSON schema. Valid model calls such as `{"ingredients":["Fire","Earth"]}` no longer fail before reaching the tool with a missing `ingredientsObj` argument.
+- 🧪 **EditMode coverage:** added an `AIFunction.InvokeAsync` regression for `check_compatibility` using the public `ingredients` argument name.
+- 📝 **`MEAI_TOOL_CALLING.md`** — documents that .NET `AIFunction` parameter names must match `ILlmTool.ParametersSchema` property names.
+- 🔧 Version **`0.25.13`**; `com.nexoider.coreaiunity` aligned to **`0.25.13`**.
+
 ## [v0.25.12] — 2026-04-27
 
 ### Queue scheduling hardening

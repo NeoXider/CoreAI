@@ -296,7 +296,7 @@ namespace CoreAI.Tests.EditMode
         // ──────────────────────────────────────────────────────────
 
         [Test]
-        public async Task CancelTasks_SpecificScope_CancelsActiveAndPendingTasks()
+        public async Task CancelTasks_SpecificScope_CancelsActiveTask()
         {
             // Arrange: MaxConcurrent = 1
             RecordingOrchestrator inner = new();
@@ -305,11 +305,8 @@ namespace CoreAI.Tests.EditMode
             // Задача 1 (active)
             Task t1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t1", CancellationScope = "NPC1" });
             
-            // Задача 2 (pending)
-            Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2", CancellationScope = "NPC1" });
-            
-            // Задача 3 (pending, другой scope)
-            Task t3 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t3", CancellationScope = "NPC2" });
+            // Задача 2 (pending, другой scope)
+            Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2", CancellationScope = "NPC2" });
 
             await Task.Delay(100);
             
@@ -323,16 +320,42 @@ namespace CoreAI.Tests.EditMode
             // t1 должна быть отменена (IsCanceled)
             Assert.IsTrue(t1.IsCanceled, "t1 (active) должна быть отменена");
             
-            // t2 должна быть отменена без запуска
-            Assert.IsTrue(t2.IsCanceled, "t2 (pending) должна быть отменена");
-            
-            // t3 (NPC2) должна была начать выполняться, так как слот освободился!
-            Assert.AreEqual(2, inner.Gates.Count, "t3 (NPC2) должна стартовать после отмены NPC1");
-            Assert.AreEqual("t3", inner.ExecutionLog[1]);
+            // t2 (NPC2) должна была начать выполняться, так как слот освободился.
+            Assert.AreEqual(2, inner.Gates.Count, "t2 (NPC2) должна стартовать после отмены NPC1");
+            Assert.AreEqual("t2", inner.ExecutionLog[1]);
             
             // Cleanup
             inner.Gates[1].TrySetResult(null);
-            await Task.WhenAll(t3);
+            await Task.WhenAll(t2);
+        }
+
+        [Test]
+        public async Task CancelTasks_SpecificScope_CancelsPendingTask()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            Task blocker = queue.RunTaskAsync(new AiTaskRequest { Hint = "blocker" });
+            Task cancelled = queue.RunTaskAsync(new AiTaskRequest { Hint = "cancelled", CancellationScope = "NPC1" });
+            Task survivor = queue.RunTaskAsync(new AiTaskRequest { Hint = "survivor", CancellationScope = "NPC2" });
+
+            await Task.Delay(100);
+            Assert.AreEqual(1, inner.Gates.Count, "Only blocker should be active.");
+
+            queue.CancelTasks("NPC1");
+            await Task.Delay(100);
+
+            Assert.IsTrue(cancelled.IsCanceled, "Pending NPC1 task should be cancelled without starting.");
+            Assert.AreEqual(1, inner.Gates.Count, "Cancelled pending task must not start.");
+
+            inner.Gates[0].TrySetResult(null);
+            await Task.Delay(100);
+
+            Assert.AreEqual(2, inner.Gates.Count, "Different scope task should start after blocker finishes.");
+            Assert.AreEqual("survivor", inner.ExecutionLog[1]);
+
+            inner.Gates[1].TrySetResult(null);
+            await Task.WhenAll(blocker, survivor);
         }
     }
 }

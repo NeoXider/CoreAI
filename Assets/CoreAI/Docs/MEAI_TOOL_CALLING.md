@@ -62,6 +62,12 @@ public class MemoryTool
 
 `AIFunction` wraps a .NET method for MEAI.
 
+The public .NET parameter names are part of the native tool contract. Keep them
+identical to the JSON schema property names exposed through `ILlmTool.ParametersSchema`
+(`ingredients` in the schema must be `ExecuteAsync(object ingredients, ...)`, not
+`ingredientsObj`). If they diverge, MEAI can reject a valid model tool call before
+the tool implementation sees it.
+
 ### 3. Mapping ILlmTool → AIFunction
 
 In `MeaiLlmClient.BuildAIFunctions()`:

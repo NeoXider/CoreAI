@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -67,6 +68,7 @@ namespace CoreAI.Chat
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // true после первого видимого текста
+        private bool _streamTerminalChunkReceived;
 
         // === Typing animation ===
         private IVisualElementScheduledItem _typingAnimation;
@@ -589,14 +591,38 @@ namespace CoreAI.Chat
 
             foreach (ChatMessage msg in history)
             {
-                string text = msg.Content ?? "";
+                bool isUser = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase);
+                string text = FormatPersistedMessageForUi(msg.Content ?? "", isUser);
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     continue;
                 }
 
-                bool isUser = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase);
                 AddMessage(text.TrimEnd(), isUser);
+            }
+        }
+
+        internal static string FormatPersistedMessageForUi(string content, bool isUser)
+        {
+            if (!isUser || string.IsNullOrWhiteSpace(content))
+            {
+                return content ?? "";
+            }
+
+            string trimmed = content.TrimStart();
+            if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+            {
+                return content;
+            }
+
+            try
+            {
+                string hint = JObject.Parse(trimmed)["hint"]?.ToString();
+                return string.IsNullOrWhiteSpace(hint) ? content : hint;
+            }
+            catch
+            {
+                return content;
             }
         }
 
@@ -614,7 +640,7 @@ namespace CoreAI.Chat
 
         // ===================== Input Handling =====================
 
-        private void OnSendClicked(ClickEvent evt) => TrySendInput();
+        private void OnSendClicked(ClickEvent evt) => TrySendInput(stopIfBusy: true);
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
@@ -641,7 +667,7 @@ namespace CoreAI.Chat
             evt.StopImmediatePropagation();
             evt.PreventDefault();
 
-            TrySendInput();
+            TrySendInput(stopIfBusy: false);
         }
 
         private void OnRootKeyDown(KeyDownEvent evt)
@@ -769,6 +795,9 @@ namespace CoreAI.Chat
 
         private bool IsRequestInProgress()
         {
+            // `_isSending` covers the whole agent turn (RunAgentTurnAsync `finally`).
+            // `_isStreaming` stays true until the streaming enumerator fully completes
+            // (LLM chunks + orchestrator post-work); do not clear it on `chunk.IsDone` alone.
             return _isSending || _isStreaming;
         }
 
@@ -777,16 +806,25 @@ namespace CoreAI.Chat
             return IsChatInputLocked(_isSending, _isStreaming, _isStopping, _isClearing);
         }
 
+        private bool CanStopActiveGeneration()
+        {
+            return _isStreaming && !_streamTerminalChunkReceived;
+        }
+
         internal static bool IsChatInputLocked(bool isSending, bool isStreaming, bool isStopping, bool isClearing)
         {
             return isSending || isStreaming || isStopping || isClearing;
         }
 
-        private void TrySendInput()
+        private void TrySendInput(bool stopIfBusy)
         {
             if (IsRequestInProgress())
             {
-                StopActiveGeneration();
+                if (stopIfBusy && CanStopActiveGeneration())
+                {
+                    StopActiveGeneration();
+                }
+
                 return;
             }
 
@@ -932,8 +970,9 @@ namespace CoreAI.Chat
             }
 
             _stopRequestedByUser = false;
-            _activeRequestCts?.Dispose();
-            _activeRequestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+            CancellationTokenSource requestCts =
+                CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+            _activeRequestCts = requestCts;
 
             try
             {
@@ -943,10 +982,10 @@ namespace CoreAI.Chat
 
                 if (useStreaming)
                 {
-                    return await SendStreamingAsync(request, _activeRequestCts.Token);
+                    return await SendStreamingAsync(request, requestCts.Token);
                 }
 
-                return await SendNonStreamingAsync(request, _activeRequestCts.Token);
+                return await SendNonStreamingAsync(request, requestCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -976,8 +1015,12 @@ namespace CoreAI.Chat
                 HideTypingIndicator();
                 _isSending = false;
                 _stopRequestedByUser = false;
-                _activeRequestCts?.Dispose();
-                _activeRequestCts = null;
+                if (ReferenceEquals(_activeRequestCts, requestCts))
+                {
+                    _activeRequestCts = null;
+                }
+
+                requestCts.Dispose();
                 UpdateSendButtonVisualState();
                 InputField?.schedule.Execute(FocusInputField);
             }
@@ -1022,6 +1065,7 @@ namespace CoreAI.Chat
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
+            _streamTerminalChunkReceived = false;
 
             // Yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish the enumerator.
             await Task.Yield();
@@ -1029,54 +1073,71 @@ namespace CoreAI.Chat
             UpdateSendButtonVisualState();
 
             string fullResponse = "";
-            await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
+            try
             {
-                if (!string.IsNullOrEmpty(chunk.Error))
+                await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
-                    FinishStreaming();
-                    HideTypingIndicator();
-                    AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + chunk.Error, isUser: false);
-                    return null;
-                }
-
-                if (!string.IsNullOrEmpty(chunk.Text))
-                {
-                    // Чанки из MeaiLlmClient уже отфильтрованы от <think>-блоков,
-                    // но на случай, если service-layer отдал сырой поток
-                    // (например, мок, прямой MEAI клиент), прогоняем ещё раз.
-                    string visible = FilterStreamChunk(chunk.Text);
-                    if (!string.IsNullOrEmpty(visible))
+                    if (chunk.IsDone)
                     {
-                        if (!_streamingStartedVisible)
+                        _streamTerminalChunkReceived = true;
+                    }
+
+                    if (!string.IsNullOrEmpty(chunk.Error))
+                    {
+                        if (_stopRequestedByUser &&
+                            string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
                         {
-                            _streamingStartedVisible = true;
-                            StartStreaming();
+                            AddMessage(config?.ErrorMessagePrefix + "Генерация остановлена.", isUser: false);
+                            return null;
                         }
 
-                        string formatted = FormatResponseText(visible);
-                        fullResponse += formatted;
-                        AppendToStreaming(formatted);
+                        AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + chunk.Error, isUser: false);
+                        return null;
+                    }
+
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        // Чанки из MeaiLlmClient уже отфильтрованы от <think>-блоков,
+                        // но на случай, если service-layer отдал сырой поток
+                        // (например, мок, прямой MEAI клиент), прогоняем ещё раз.
+                        string visible = FilterStreamChunk(chunk.Text);
+                        if (fullResponse.Length == 0)
+                        {
+                            visible = NormalizeAssistantDisplayText(visible);
+                        }
+
+                        if (!string.IsNullOrEmpty(visible))
+                        {
+                            if (!_streamingStartedVisible)
+                            {
+                                _streamingStartedVisible = true;
+                                StartStreaming();
+                            }
+
+                            string formatted = FormatResponseText(visible);
+                            fullResponse += formatted;
+                            AppendToStreaming(formatted);
+                        }
                     }
                 }
 
-                if (chunk.IsDone)
+                if (string.IsNullOrEmpty(fullResponse))
                 {
-                    FinishStreaming();
-                    HideTypingIndicator();
+                    AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
+                    return null;
                 }
-            }
 
-            if (string.IsNullOrEmpty(fullResponse))
+                OnResponseReceived(fullResponse);
+                OnAiResponseCompleted?.Invoke(fullResponse);
+                return fullResponse;
+            }
+            finally
             {
                 FinishStreaming();
                 HideTypingIndicator();
-                AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
-                return null;
+                _streamTerminalChunkReceived = false;
+                UpdateSendButtonVisualState();
             }
-
-            OnResponseReceived(fullResponse);
-            OnAiResponseCompleted?.Invoke(fullResponse);
-            return fullResponse;
         }
 
         private async Task<string?> SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
@@ -1141,6 +1202,11 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual string FormatResponseText(string rawText) => rawText;
 
+        internal static string NormalizeAssistantDisplayText(string text)
+        {
+            return string.IsNullOrEmpty(text) ? text : text.TrimStart();
+        }
+
         /// <summary>
         /// Создание визуального элемента для сообщения.
         /// Переопределите для полностью кастомной вёрстки.
@@ -1162,7 +1228,7 @@ namespace CoreAI.Chat
                     avatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
                 }
 
-                var bubble = new Label(text);
+                var bubble = new Label(NormalizeAssistantDisplayText(text));
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
                 bubble.AddToClassList("coreai-ai-message");

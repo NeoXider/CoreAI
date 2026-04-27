@@ -2,6 +2,28 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [0.25.14] - 2026-04-27
+
+### CoreAiChatPanel (streaming, stop, history, display)
+
+- 🐛 **Second message no longer cancels the first** — streaming stays “busy” until the full `RunStreamingAsync` enumerator completes (including orchestrator post-work after the last token). Enter no longer triggers the stop path while a turn is still finishing; stop remains on the send button (`X`) and Esc (when enabled).
+- 🐛 **Per-turn request CTS** — avoids a race where the previous turn’s `finally` could dispose the active linked token for a new message.
+- 🐛 **Persisted chat UI** — user rows saved as composer JSON (`hint`, `telemetry`, …) hydrate as the **`hint`** text instead of raw JSON.
+- 🐛 **Assistant bubble layout** — leading whitespace/newlines from the model are trimmed for display so empty gaps do not appear above the first line.
+- 🧪 **EditMode:** `FormatPersistedMessageForUi`, `NormalizeAssistantDisplayText` regressions.
+- 📝 **`README_CHAT.md`** — documents send vs stop semantics, streaming completion, persisted `hint`, and display trimming.
+- 🔧 Package **`0.25.14`**. Dependency **`com.nexoider.coreai 0.25.14`**.
+
+## [0.25.13] - 2026-04-27
+
+### MEAI compatibility tool binding
+
+- 🐛 **`CompatibilityLlmTool` native argument binding** — the MEAI executor parameter is now named `ingredients`, matching the JSON schema. Valid model calls such as `{"ingredients":["Fire","Earth"]}` no longer fail before reaching the tool with a missing `ingredientsObj` argument.
+- 🧪 **EditMode coverage:** added an `AIFunction.InvokeAsync` regression for `check_compatibility` using the public `ingredients` argument name.
+- 🧪 **PlayMode stability:** `CoreAiChatServiceIntegrationPlayModeTests` now falls back to the returned task result when a streaming callback receives no text chunks, avoiding false failures on providers that emit only terminal chunks for short answers.
+- 📝 **`MEAI_TOOL_CALLING.md`** — documents that .NET `AIFunction` parameter names must match `ILlmTool.ParametersSchema` property names.
+- 🔧 Package **`0.25.13`**. Dependency **`com.nexoider.coreai 0.25.13`**.
+
 ## [0.25.12] - 2026-04-27
 
 ### Queue scheduling stability

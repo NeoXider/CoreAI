@@ -148,6 +148,44 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void FormatPersistedMessageForUi_UserComposerJson_ReturnsHint()
+        {
+            string content = "{\"telemetry\":{},\"hint\":\"привет\",\"ai_task_source\":\"Chat\"}";
+
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: true);
+
+            Assert.AreEqual("привет", formatted);
+        }
+
+        [Test]
+        public void FormatPersistedMessageForUi_AssistantJson_RemainsUnchanged()
+        {
+            string content = "{\"hint\":\"не показывать\"}";
+
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: false);
+
+            Assert.AreEqual(content, formatted);
+        }
+
+        [Test]
+        public void FormatPersistedMessageForUi_UserMalformedJson_ReturnsOriginal()
+        {
+            string content = "{\"telemetry\":{},\"hint\":}";
+
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: true);
+
+            Assert.AreEqual(content, formatted);
+        }
+
+        [Test]
+        public void NormalizeAssistantDisplayText_LeadingWhitespace_TrimsStartOnly()
+        {
+            string formatted = CoreAiChatPanel.NormalizeAssistantDisplayText("\n\n  Привет\n  мир");
+
+            Assert.AreEqual("Привет\n  мир", formatted);
+        }
+
+        [Test]
         public void StopAgent_WhenStreamingRequestActive_CancelsCtsAndUnlocksUiState()
         {
             GameObject go = new("CoreAiChatPanel_StopAgent_Test");

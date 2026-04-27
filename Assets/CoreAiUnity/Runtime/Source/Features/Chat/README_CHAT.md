@@ -166,6 +166,11 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 Since **0.25.5** there is no separate “stop” button in the **header** — stop only via the send button and Esc (below).
 Since **0.25.6** the stop path is hardened for streaming and fast backends/stub: the button stays enabled while it shows `X`, busy state is set until the first `await`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
 
+Since **0.25.14**:
+
+- **Send (Enter) vs stop:** While a turn is in progress, pressing **Enter** (or your configured send shortcut in the text field) does **not** stop generation — it is ignored until the turn completes. **Stop** is only the send button while it shows **`X`**, plus **Esc** when **Enable Escape Chat Shortcuts** is on. This prevents accidental cancellation during the orchestrator tail (e.g. chat history append + `ApplyAiGameCommand`) after the last streamed token.
+- **Busy until enumerator ends:** The panel treats the request as active until the streaming **enumerator** fully finishes (not merely when the model emits a terminal chunk). That keeps the UI and orchestrator in sync with `QueuedAiOrchestrator` / `AiOrchestrator` post-stream work.
+
 During active generation `CoreAiChatPanel` switches the send button to stop mode:
 
 - button label: `X` instead of `>`;
@@ -179,6 +184,11 @@ Stop the current reply in two ways:
 
 Under the hood this calls `CoreAi.StopAgent(roleId)` and cancels the active request `CancellationToken`, so both current generation and queued orchestrator tasks for that role stop.
 After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming` / `HideTypingIndicator`) and resets `_isSending` / `_isStreaming`; covered by `CoreAiChatPanelEditModeTests` and `CoreAiChatPanelStopPlayModeTests`.
+
+### Persisted history + assistant display (since 0.25.14)
+
+- **Hydrated user messages:** If the store contains the composer JSON shape (`{"telemetry":...,"hint":"...","ai_task_source":"..."}`), the UI shows only the **`hint`** string in the user bubble (same text the player typed conceptually).
+- **Assistant bubbles:** Leading spaces and newlines at the start of a reply are trimmed for display so the first line does not sit under a blank “gap”.
 
 ## Clearing context from UI
 

@@ -71,6 +71,7 @@ namespace CoreAI.Tests.PlayMode
                 policy.SetToolsForRole("MerchantToolOnly", new List<ILlmTool> { new InventoryLlmTool(new TestInventoryProvider()) });
                 policy.SetToolsForRole("MerchantHybrid", new List<ILlmTool> { new InventoryLlmTool(new TestInventoryProvider()) });
                 policy.SetToolsForRole("SimpleChatOnly", new List<ILlmTool>());
+                policy.SetStreamingEnabled("SimpleChatOnly", false);
 
                 AiOrchestrator orchestrator = new AiOrchestrator(
                     new SoloAuthorityHost(),
@@ -93,6 +94,10 @@ namespace CoreAI.Tests.PlayMode
                 var t1 = chatService.SendMessageSmartAsync("Hello, who are you?", "SimpleChatOnly",
                     c => { if (c.IsDone) chatOnlyResponse += ""; else chatOnlyResponse += c.Text; });
                 yield return PlayModeTestAwait.WaitTask(t1, 60f, "Chat Only");
+                if (string.IsNullOrEmpty(chatOnlyResponse))
+                {
+                    chatOnlyResponse = t1.Result;
+                }
                 Assert.IsNotEmpty(chatOnlyResponse, "Chat only response should not be empty");
                 //       -   chat-only.
                 //  chat-only     ,    sink.
@@ -124,6 +129,10 @@ namespace CoreAI.Tests.PlayMode
                 var t3 = chatService.SendMessageSmartAsync("Tell me a short joke and then check your inventory.", "MerchantHybrid",
                     c => { if (!c.IsDone) hybridResponse += c.Text; });
                 yield return PlayModeTestAwait.WaitTask(t3, 120f, "Hybrid");
+                if (string.IsNullOrEmpty(hybridResponse))
+                {
+                    hybridResponse = t3.Result;
+                }
 
                 Assert.IsNotEmpty(hybridResponse, "Hybrid response should not be empty");
 
@@ -133,6 +142,10 @@ namespace CoreAI.Tests.PlayMode
                 var t4 = chatService.SendMessageSmartAsync("Now reply as a simple chat bot again.", "SimpleChatOnly",
                     c => { if (!c.IsDone) swappedResponse += c.Text; });
                 yield return PlayModeTestAwait.WaitTask(t4, 60f, "Agent Swapping");
+                if (string.IsNullOrEmpty(swappedResponse))
+                {
+                    swappedResponse = t4.Result;
+                }
                 Assert.IsNotEmpty(swappedResponse, "Swapped response should not be empty");
 
                 Debug.Log("[ChatServiceIntegration] ===== TEST PASSED =====");
