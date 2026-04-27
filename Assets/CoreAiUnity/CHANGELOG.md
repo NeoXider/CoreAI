@@ -11,7 +11,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - 🐛 **Persisted chat UI** — user rows saved as composer JSON (`hint`, `telemetry`, …) hydrate as the **`hint`** text instead of raw JSON.
 - 🐛 **Assistant bubble layout** — leading whitespace/newlines from the model are trimmed for display so empty gaps do not appear above the first line.
 - 🧪 **EditMode:** `FormatPersistedMessageForUi`, `NormalizeAssistantDisplayText` regressions.
-- 📝 **`README_CHAT.md`** — documents send vs stop semantics, streaming completion, persisted `hint`, and display trimming.
+- 📝 **`README_CHAT.md`** — documents send vs stop semantics, streaming completion, persisted `hint`, display trimming, and an in-editor screenshot (`chat-readme-example.png`) with the chat panel next to Unity Console (`[CoreAI] [Llm]`, MessagePipe).
 - 🔧 Package **`0.25.14`**. Dependency **`com.nexoider.coreai 0.25.14`**.
 
 ## [0.25.13] - 2026-04-27

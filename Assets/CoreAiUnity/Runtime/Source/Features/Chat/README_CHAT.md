@@ -11,6 +11,14 @@ Regardless of UI, you can call the LLM from any script via the static **`CoreAi`
 
 The “UI vs code” table is in [COREAI_SINGLETON_API](../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
 
+## Example (Play Mode + Console)
+
+![AI Chat next to Unity Console — streaming logs and the panel in Play Mode](./chat-readme-example.png)
+
+*English:* `CoreAiChatPanel` (right) during Play Mode, with Unity Console (left) showing `[CoreAI] [Llm]` stream traces and `[CoreAI] [MessagePipe]` `ApplyAiGameCommand` after the reply completes.
+
+*Русский:* панель чата в Play Mode и консоль с логами стрима LLM и публикацией команды через MessagePipe.
+
 ## Quick start (1 click)
 
 The menu `CoreAI → Setup → Create Chat Demo Scene` creates a ready scene `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with all required objects (camera, light, EventSystem, `CoreAILifetimeScope`, `UIDocument` + `CoreAiChatPanel` with default `CoreAiChatConfig_Demo`). Press Play and chat with the model.
