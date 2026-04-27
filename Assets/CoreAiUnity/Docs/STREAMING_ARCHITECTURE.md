@@ -227,7 +227,9 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 ### Stop / Clear guarantees
 
 - **StopActiveGeneration()** has a `_isStopping` reentrance guard — concurrent Escape + button click cannot double-fire.
+- **Send button stop mode (0.25.6+)** stays enabled while a request is running; the button is the stop control in that state, so click events must reach `StopActiveGeneration()`.
 - **StopAgent()** delegates to `StopActiveGeneration()` and additionally resets the root CTS and cleans up UI.
+- **Cancellation cleanup (0.25.6+)** cancels the active request CTS and resets streaming/sending UI state even when the static `CoreAi.StopAgent(roleId)` path is unavailable.
 - **ClearChat()** calls `StopActiveGeneration()` before clearing history.
 
 ## 8. Known limitations

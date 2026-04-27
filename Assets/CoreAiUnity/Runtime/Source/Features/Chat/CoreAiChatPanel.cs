@@ -73,7 +73,19 @@ namespace CoreAI.Chat
         private int _typingDotCount;
 
         // === Service ===
-        private CoreAiChatService _chatService;
+        protected CoreAiChatService _chatService;
+        public virtual CoreAiChatService ChatService
+        {
+            get => _chatService;
+            set
+            {
+                _chatService = value;
+                if (isActiveAndEnabled && Root != null)
+                {
+                    HydrateStartupMessagesFromStore();
+                }
+            }
+        }
         private CancellationTokenSource _cts;
         private CancellationTokenSource _activeRequestCts;
 
@@ -139,6 +151,19 @@ namespace CoreAI.Chat
             InitService();
             ApplyConfig();
             HydrateStartupMessagesFromStore();
+        }
+
+        protected virtual void Start()
+        {
+            // По умолчанию на мобильных экранах чат стартует свёрнутым,
+            // чтобы не перекрывать игровой мир. Пользовательский выбор
+            // перекрывает это значение через PlayerPrefs.
+            // Мы делаем это в Start(), чтобы дать контроллерам персонажей (и другим скриптам)
+            // отработать свой Start() и заблокировать курсор ДО того, как UI Toolkit попытается
+            // захватить фокус. Это предотвращает "состояние гонки" при инициализации сцены.
+            bool defaultCollapsed = IsMobileScreen();
+            bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
+            SetCollapsed(collapsed, persist: false);
         }
 
         protected virtual void OnDisable()
@@ -251,12 +276,8 @@ namespace CoreAI.Chat
             // Приветствие и восстановление истории — в <see cref="HydrateStartupMessagesFromStore"/>
             // после <see cref="InitService"/> (нужен <see cref="_chatService"/>).
 
-            // По умолчанию на мобильных экранах чат стартует свёрнутым,
-            // чтобы не перекрывать игровой мир. Пользовательский выбор
-            // перекрывает это значение через PlayerPrefs.
-            bool defaultCollapsed = IsMobileScreen();
-            bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
-            SetCollapsed(collapsed, persist: false);
+            // Инициализация фокуса (SetCollapsed) перенесена в Start(), чтобы
+            // избежать состояния гонки с 3D-контроллерами на старте сцены.
 
             ApplyShortcutTooltips();
         }
@@ -763,20 +784,20 @@ namespace CoreAI.Chat
 
         private void TrySendInput()
         {
-            if (IsActionInProgress())
-            {
-                return;
-            }
-
             if (IsRequestInProgress())
             {
                 StopActiveGeneration();
                 return;
             }
 
+            if (IsActionInProgress())
+            {
+                return;
+            }
+
             // Even if the button is disabled, TextField key events can still fire.
             // Prevent sending while an AI request/stream is in progress.
-            if (_isSending || _isStreaming || IsActionInProgress() || (SendButton != null && !SendButton.enabledSelf))
+            if (IsActionInProgress() || (SendButton != null && !SendButton.enabledSelf))
             {
                 return;
             }
@@ -862,6 +883,11 @@ namespace CoreAI.Chat
 
         private async Task SendToAIFromUiAsync(string userText)
         {
+            // Mark busy before the first await so TrySendInput/Stop sees IsRequestInProgress even if the
+            // backend completes the first streaming iteration synchronously (e.g. stub / zero-delay mock).
+            _isSending = true;
+            _stopRequestedByUser = false;
+            UpdateSendButtonVisualState();
             try
             {
                 await RunAgentTurnAsync(userText, simulatedAssistantReply: null, _cts.Token);
@@ -892,14 +918,20 @@ namespace CoreAI.Chat
 
             if (_chatService == null)
             {
+                _isSending = false;
+                UpdateSendButtonVisualState();
                 AddMessage(config?.ErrorMessagePrefix + "AI сервис не подключён.", isUser: false);
                 return null;
             }
 
             string roleId = config?.RoleId ?? "PlayerChat";
-            _isSending = true;
+            if (!_isSending)
+            {
+                _isSending = true;
+                UpdateSendButtonVisualState();
+            }
+
             _stopRequestedByUser = false;
-            UpdateSendButtonVisualState();
             _activeRequestCts?.Dispose();
             _activeRequestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
@@ -940,6 +972,8 @@ namespace CoreAI.Chat
             }
             finally
             {
+                FinishStreaming();
+                HideTypingIndicator();
                 _isSending = false;
                 _stopRequestedByUser = false;
                 _activeRequestCts?.Dispose();
@@ -988,6 +1022,11 @@ namespace CoreAI.Chat
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
+
+            // Yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish the enumerator.
+            await Task.Yield();
+            _isStreaming = true;
+            UpdateSendButtonVisualState();
 
             string fullResponse = "";
             await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
@@ -1182,13 +1221,24 @@ namespace CoreAI.Chat
                 {
                     CoreAi.StopAgent(roleId);
                 }
-                catch
+                catch (Exception coreAiEx)
                 {
-                    _chatService?.StopAgent(roleId);
+                    try
+                    {
+                        _chatService?.StopAgent(roleId);
+                    }
+                    catch (Exception chatServiceEx)
+                    {
+                        Debug.LogWarning(
+                            $"[CoreAiChatPanel] StopAgent fallback failed. CoreAi: {coreAiEx.Message}; ChatService: {chatServiceEx.Message}");
+                    }
                 }
 
                 // Cancel the active HTTP/streaming request
                 _activeRequestCts?.Cancel();
+                FinishStreaming();
+                HideTypingIndicator();
+                _isSending = false;
             }
             finally
             {
@@ -1214,7 +1264,7 @@ namespace CoreAI.Chat
             bool isBusy = IsRequestInProgress();
             SendButton.text = GetSendButtonText(isBusy);
             SendButton.tooltip = GetSendButtonTooltip(isBusy);
-            SendButton.SetEnabled(!IsActionInProgress());
+            SendButton.SetEnabled(ShouldSendButtonBeEnabled(_isSending, _isStreaming, _isStopping, _isClearing));
 
             if (isBusy)
             {
@@ -1234,6 +1284,12 @@ namespace CoreAI.Chat
         internal static string GetSendButtonTooltip(bool isBusy)
         {
             return isBusy ? "Остановить генерацию (Esc)" : "Отправить сообщение";
+        }
+
+        internal static bool ShouldSendButtonBeEnabled(bool isSending, bool isStreaming, bool isStopping, bool isClearing)
+        {
+            // While a request is running the button is the stop control, so it must stay clickable.
+            return !isStopping && !isClearing;
         }
 
         public void ShowTypingIndicator()

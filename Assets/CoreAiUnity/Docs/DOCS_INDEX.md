@@ -29,7 +29,7 @@ Install → open scene → connect LLM → press Play.
 | Document | Topic |
 |----------|-------|
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, streaming hierarchy |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
 | [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` не отдаёт SSE incrementally → `chunks=1` + бесконечная typing-анимация. Workaround + план фикса |
 
@@ -45,7 +45,7 @@ Install → open scene → connect LLM → press Play.
 | 7 | [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | 🤖 5 built-in roles, model selection strategy |
 | 8 | [WORLD_COMMANDS](WORLD_COMMANDS.md) | 🌍 Spawn/move/scene control from sandboxed Lua |
 | 9 | [LLMUNITY_SETUP_AND_MODELS](LLMUNITY_SETUP_AND_MODELS.md) | 📦 LLMUnity, GGUF, OpenAI HTTP, Lua pipeline |
-| 9b | [TROUBLESHOOTING](TROUBLESHOOTING.md) | 🔧 Model silent, Lua crashed, memory not written |
+| 9b | [TROUBLESHOOTING](TROUBLESHOOTING.md) | 🔧 Model silent, Lua crashed, memory not written, **PlayMode HTTP 500 / LM Studio (0.25.7+)** |
 
 ---
 
@@ -78,6 +78,8 @@ DI, threading, spec, pipelines.
 | `MultiAgentCraftingWorkflowPlayModeTests` | 2 | Full workflow over a live LLM |
 | `CraftingMemoryViaLlmUnityPlayModeTests` | 1 | Local GGUF: 4 crafts + determinism |
 | `CraftingMemoryViaOpenAiPlayModeTests` | 2 | HTTP: 4 crafts + 2 quick crafts |
+| `CoreAiChatPanelStopPlayModeTests` | 1 | `StopAgent()` cancels active request CTS, clears sending/streaming |
+| `AgentMemoryWithRealModelPlayModeTests` | 1 | Real LLM memory write + recall (**Ignore** on recall 5xx after retries, 0.25.7+) |
 
 ---
 

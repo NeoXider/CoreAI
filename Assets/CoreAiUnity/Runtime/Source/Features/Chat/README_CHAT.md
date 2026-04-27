@@ -162,6 +162,7 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 ## Остановка генерации (Stop) — с 0.22.0
 
 С **0.25.5** отдельной кнопки «стоп» в **шапке** нет — остановка только через кнопку отправки и Esc (ниже).
+С **0.25.6** stop-path усилен для streaming и быстрых backend'ов/stub: кнопка остаётся enabled, пока она показывает `X`, busy-state выставляется до первого `await`, а активный request CTS отменяется даже если `CoreAi.StopAgent(roleId)` недоступен.
 
 Во время активной генерации `CoreAiChatPanel` автоматически переключает кнопку отправки в режим остановки:
 
@@ -175,6 +176,7 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 - нажать `Esc` пока чат генерирует ответ (если в `CoreAiChatConfig` включён **Enable Escape Chat Shortcuts**).
 
 Под капотом вызывается `CoreAi.StopAgent(roleId)` и отменяется активный `CancellationToken` запроса, поэтому останавливаются и текущая генерация, и задачи этой роли в очереди оркестратора.
+После stop `CoreAiChatPanel` немедленно очищает streaming UI (`FinishStreaming` / `HideTypingIndicator`) и сбрасывает `_isSending` / `_isStreaming`; это покрыто `CoreAiChatPanelEditModeTests` и `CoreAiChatPanelStopPlayModeTests`.
 
 ## Очистка контекста из UI
 

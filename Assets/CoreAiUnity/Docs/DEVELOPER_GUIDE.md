@@ -221,7 +221,7 @@ CoreAi.StopAgent("Teacher");
 Во время генерации ответа в `CoreAiChatPanel` кнопка отправки `coreai-chat-send` автоматически переключается в режим `Stop`:
 
 - визуально меняется на красную (`.coreai-chat-send-button-stop`);
-- текст кнопки меняется с `➤` на `■`;
+- текст кнопки меняется с `>` на `X`;
 - tooltip подсказывает `Остановить генерацию (Esc)`.
 
 Пользователь может прервать генерацию:
@@ -230,6 +230,9 @@ CoreAi.StopAgent("Teacher");
 - клавишей `Esc` в активном чате.
 
 В обоих сценариях UI вызывает `CoreAi.StopAgent(roleId)` и отменяет активный токен запроса, что безопасно останавливает текущий ответ и связанные задачи роли в `QueuedAiOrchestrator`.
+Начиная с `com.nexoider.coreaiunity` **0.25.6**, кнопка остаётся включённой во время генерации (это stop-контрол), busy-state выставляется до первого `await`, а UI гарантированно сбрасывает streaming/sending state после отмены.
+
+С **0.25.7** автосоздание `CoreAISettings.asset` в Editor (`CoreAIBuildMenu`) выполняется через **`EditorApplication.delayCall`**: не в том же кадре, что domain reload, и с проверкой файла на диске — клонированный `Assets/Resources/CoreAISettings.asset` не заменяется пустым ассетом с дефолтами.
 
 ### Очистка контекста (Clear Context)
 

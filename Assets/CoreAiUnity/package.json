@@ -1,6 +1,6 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "0.25.5",
+  "version": "0.25.7",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity layer for CoreAI: единый MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode (deterministic tool selection). Depends on com.nexoider.coreai 0.25.0+.",

@@ -1,3 +1,4 @@
+using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -55,20 +56,47 @@ namespace CoreAI.Editor
             EditorGUIUtility.PingObject(settings);
         }
 
+        /// <summary>
+        /// Не создаём ассеты в том же кадре, что и domain reload: AssetDatabase/Resources ещё могут не
+        /// отдать существующий CoreAISettings.asset — тогда создавался бы новый с дефолтами и перезаписывал файл на диске.
+        /// </summary>
         [InitializeOnLoadMethod]
         private static void AutoCreateDefaultAssetsOnLoad()
         {
-            // Проверяем наличие ассета двумя способами:
-            // 1. По точному пути (Assets/Resources/CoreAISettings.asset)
-            // 2. Через Resources.Load — находит ассет даже если он в подпапке Resources/
-            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
-                return;
+            EditorApplication.delayCall += TryAutoCreateDefaultCoreAiAssetsWhenEditorReady;
+        }
 
-            // Resources.Load ищет по всем папкам Resources/ в проекте
+        private static void TryAutoCreateDefaultCoreAiAssetsWhenEditorReady()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                EditorApplication.delayCall += TryAutoCreateDefaultCoreAiAssetsWhenEditorReady;
+                return;
+            }
+
+            // 1. Уже в БД ассетов
+            if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
+            {
+                return;
+            }
+
+            // 2. Файл уже есть на диске (клон репозитория / первая загрузка), но импорт ещё не подхватил — не создаём дубликат
+            string onDisk = Path.Combine(Application.dataPath, "Resources", "CoreAISettings.asset");
+            if (File.Exists(onDisk))
+            {
+                AssetDatabase.ImportAsset(CoreAiSettingsPath, ImportAssetOptions.ForceSynchronousImport);
+                if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
+                {
+                    return;
+                }
+            }
+
+            // 3. Другая папка Resources/ с тем же логическим именем «CoreAISettings»
             CoreAISettingsAsset existing = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
             if (existing != null)
             {
-                CoreAIEditorLog.Log($"CoreAISettings already exists at: {AssetDatabase.GetAssetPath(existing)}. Skipping auto-create.");
+                CoreAIEditorLog.Log(
+                    $"CoreAISettings already exists at: {AssetDatabase.GetAssetPath(existing)}. Skipping auto-create.");
                 return;
             }
 

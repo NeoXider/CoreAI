@@ -50,7 +50,7 @@ Preset:
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: maxTokens
-    value: 2048
+    value: 512
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: requestTimeoutSeconds
@@ -117,6 +117,10 @@ Preset:
   - target: {fileID: 0}
     propertyPath: contextWindowTokens
     value: 8192
+    objectReference: {fileID: 0}
+  - target: {fileID: 0}
+    propertyPath: enableStreaming
+    value: 1
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: offlineUseCustomResponse

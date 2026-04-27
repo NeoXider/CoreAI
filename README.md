@@ -18,7 +18,7 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Version:** **v0.25.5** · **чат:** `SubmitMessageFromExternalAsync` + симуляция ответа · хедер без дублирующего Stop (стоп = кнопка отправки + Esc) · восстановление сессии при старте · hotkeys (C / Esc) · WebGL `TextField` · cross-input-system · `ForcedToolMode` · **promptBudget** в LLM-логах · **TODO** [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md)
+**Version:** **v0.25.7** · **Editor:** безопасное автосоздание `CoreAISettings` после domain reload · **PlayMode:** real-model memory recall — короткие повторы и **Ignore** при HTTP 5xx (LM Studio) · **чат:** надёжный Stop при streaming/fast stub · `SubmitMessageFromExternalAsync` · hotkeys (C / Esc) · WebGL `TextField` · **TODO** [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md)
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -42,6 +42,8 @@
 
 ## 🆕 What's new (0.22 → 0.25)
 
+- 🔧 **v0.25.7** — **Editor:** `CoreAIBuildMenu` delays default-asset creation until the editor is ready so `CoreAISettings.asset` from the repo is not overwritten on domain reload. **PlayMode:** `AgentMemoryWithRealModelPlayModeTests` retries recall briefly, then **Ignore** with a Russian hint if the local HTTP API returns 5xx/empty (infra, not CoreAI memory logic). **Docs:** `TROUBLESHOOTING.md` — HTTP 500 + LM Studio.
+- 💬 **v0.25.6** — **Reliable Chat Stop.** Send button stays clickable while it is the **X** stop control; UI marks requests busy before the first `await`, cancels active request CTS, resets streaming/sending state, and covers the path with EditMode + PlayMode regression tests.
 - 💬 **v0.25.5** — **`CoreAiChatPanel.SubmitMessageFromExternalAsync`**: optional user bubble, **simulated assistant** text without LLM, return assistant string or `null` if busy. Header **Stop** removed (use send **X** + **Esc**). Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#programmatic-chat-submit).
 - 💬 **v0.25.4** — **Persisted chat session in UI.** On panel enable, messages reload from `IAgentMemoryStore` when **`Load Persisted Chat On Startup`** is on (default); welcome only if the thread is empty. Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#persisted-chat-session).
 - ⌨️ **v0.25.3** — **Chat hotkeys + `CoreAiChatConfig` toggles.** FAB open key (default **C**, optional off), **Esc** stop/collapse (optional off), Legacy `Input` poll when UITK has no keyboard focus, `OnCollapsedStateChanged` hook. Docs: [`README_CHAT.md`](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md#chat-hotkeys).
@@ -413,7 +415,7 @@ Unity → Window → General → Test Runner
   └── PlayMode — integration tests with a configured HTTP or local GGUF backend
 ```
 
-Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for HTTP — see [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
+Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for HTTP — see [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)). Real-model memory recall may **Ignore** (not fail) if the local OpenAI-compatible server returns **HTTP 5xx** — see [TROUBLESHOOTING](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).
 
 ---
 

@@ -1,5 +1,7 @@
 using CoreAI.Chat;
 using NUnit.Framework;
+using System.Reflection;
+using System.Threading;
 using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
@@ -99,6 +101,89 @@ namespace CoreAI.Tests.EditMode
                 isStreaming: false,
                 isStopping: false,
                 isClearing: false));
+        }
+
+        /// <summary>
+        /// Regression (RedoSchool COREAI_FIXES_REQUEST): stop must be reachable while a streaming turn is active
+        /// even before the first visible token — UI treats streaming as a busy state alongside sending.
+        /// </summary>
+        [Test]
+        public void IsChatInputLocked_WhenSendingOrStreaming_ReturnsTrue()
+        {
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(true, false, false, false), "sending");
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(false, true, false, false), "streaming");
+            Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(true, true, false, false), "sending+streaming");
+        }
+
+        [Test]
+        public void ShouldSendButtonBeEnabled_WhenRequestIsRunning_ReturnsTrue()
+        {
+            Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                isSending: true,
+                isStreaming: false,
+                isStopping: false,
+                isClearing: false));
+
+            Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                isSending: false,
+                isStreaming: true,
+                isStopping: false,
+                isClearing: false));
+        }
+
+        [Test]
+        public void ShouldSendButtonBeEnabled_WhenStoppingOrClearing_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                isSending: true,
+                isStreaming: true,
+                isStopping: true,
+                isClearing: false));
+
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                isSending: false,
+                isStreaming: false,
+                isStopping: false,
+                isClearing: true));
+        }
+
+        [Test]
+        public void StopAgent_WhenStreamingRequestActive_CancelsCtsAndUnlocksUiState()
+        {
+            GameObject go = new("CoreAiChatPanel_StopAgent_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                CancellationTokenSource activeRequestCts = new();
+
+                SetPrivateField(panel, "_isSending", true);
+                SetPrivateField(panel, "_isStreaming", true);
+                SetPrivateField(panel, "_activeRequestCts", activeRequestCts);
+
+                panel.StopAgent();
+
+                Assert.IsTrue(activeRequestCts.IsCancellationRequested);
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isSending"));
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isStreaming"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        private static void SetPrivateField<T>(CoreAiChatPanel panel, string fieldName, T value)
+        {
+            typeof(CoreAiChatPanel)
+                .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.SetValue(panel, value);
+        }
+
+        private static T GetPrivateField<T>(CoreAiChatPanel panel, string fieldName)
+        {
+            return (T)typeof(CoreAiChatPanel)
+                .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(panel);
         }
     }
 }

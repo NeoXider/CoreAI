@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.25.7] — 2026-04-27
+
+### Release sync с `com.nexoider.coreaiunity 0.25.7`
+
+- 🔧 Версия пакета **`com.nexoider.coreai`** остаётся **`0.25.3`** — изменений в публичном API **`CoreAI.Core`** нет. Релиз только Unity-слоя: Editor bootstrap `CoreAISettings`, PlayMode recall при 5xx, `TROUBLESHOOTING`. Подробности: `Assets/CoreAiUnity/CHANGELOG.md` (0.25.7).
+
 ## [v0.25.3] — 2026-04-26
 
 ### Release sync с `com.nexoider.coreaiunity 0.25.3`

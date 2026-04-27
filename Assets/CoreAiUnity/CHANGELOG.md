@@ -2,6 +2,25 @@
 
 Хост Unity: сборка **CoreAI.Source**, тесты (EditMode / PlayMode), Editor-меню, документация. Зависит от **`com.nexoider.coreai`**.
 
+## [0.25.7] - 2026-04-27
+
+### 🔧 Editor bootstrap + устойчивость PlayMode к HTTP 5xx
+
+- 🔧 **`CoreAIBuildMenu`** — автосоздание `CoreAISettings.asset` отложено на **`EditorApplication.delayCall`**: не дублировать и не перезаписывать ассет в том же кадре, что и domain reload; если файл уже есть на диске, но импорт ещё не подхватил — **`ImportAsset(ForceSynchronousImport)`** вместо создания нового с дефолтами.
+- 🧪 **PlayMode (реальная модель):** `AgentMemoryWithRealModelPlayModeTests` — recall до **3** попыток с **`WaitForSecondsRealtime(1s)`** между ними; при пустом ответе после повторов (HTTP 5xx LM Studio и т.п.) — **`Assert.Ignore`** с текстом на русском вместо падения на пустом command sink; оркестратор не менялся.
+- 📝 **`TROUBLESHOOTING.md`** — раздел **PlayMode: HTTP 500 от LM Studio / локального API** (симптомы, причина, чеклист).
+- 🔧 Версия пакета **`0.25.7`**.
+
+## [0.25.6] - 2026-04-27
+
+### 💬 Chat UI — стоп при стриминге и «быстрых» бэкендах
+
+- 🐛 **`CoreAiChatPanel`** — флаг занятости для UI-отправки выставляется **до** первого `await`, стриминг помечает `_isStreaming` сразу после `Task.Yield()` (плюс сброс в `finally` / при `Stop`), чтобы кнопка **X** и `StopActiveGeneration` не терялись на stub / нулевой задержке; после отмены вызываются **`FinishStreaming` + `HideTypingIndicator`**.
+- 🐛 **Stop button** — `TrySendInput()` теперь сначала обрабатывает активный запрос, а потом общий lock; кнопка отправки остаётся включённой во время генерации, потому что в этом состоянии она является stop-контролом.
+- 📝 **Docs** — обновлены `README.md`, `CoreAiUnity/README.md`, `README_CHAT.md`, `DEVELOPER_GUIDE.md`, `STREAMING_ARCHITECTURE.md`, `DOCS_INDEX.md`.
+- 🧪 **PlayMode:** `CoreAiChatPanelStopPlayModeTests` проверяет, что активный streaming/request отменяет CTS и сбрасывает busy state через публичный `StopAgent()`.
+- 🔧 Версия пакета **`0.25.6`**.
+
 ## [0.25.5] - 2026-04-26
 
 ### 💬 Chat UI — хедер без дублирующего Stop, программный API

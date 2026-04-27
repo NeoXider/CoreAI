@@ -6,7 +6,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.nexoider.coreaiunity` **v0.25.5** — [`package.json`](package.json) | `com.nexoider.coreai` **v0.25.3** | ✅ Production |
+| `com.nexoider.coreaiunity` **v0.25.7** — [`package.json`](package.json) | `com.nexoider.coreai` **v0.25.3** | ✅ Production |
 
 *Languages:* [English](../../README.md) · [Русский](../../README_RU.md)
 
@@ -45,6 +45,8 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 ## 🆕 What's new (0.22 → 0.25)
 
+- 🔧 **0.25.7** — **Editor:** отложенное автосоздание `CoreAISettings` после domain reload (без перезаписи клонированного ассета). **PlayMode:** `AgentMemoryWithRealModelPlayModeTests` — повторы recall и **Ignore** при 5xx/пустом ответе LM Studio. **Docs:** `TROUBLESHOOTING.md` — HTTP 500.
+- 💬 **0.25.6** — **Reliable Chat Stop.** Кнопка отправки остаётся кликабельной во время генерации, потому что в этом состоянии это **X/Stop**; UI выставляет busy до первого `await`, отменяет активный request CTS, сбрасывает streaming/sending state и покрыт EditMode + PlayMode regression tests.
 - ⌨️ **0.25.3** — **Chat hotkeys + config.** Свёрнутый чат открывается с клавиатуры (по умолчанию **C**, можно сменить `KeyCode` или отключить), развёрнутый — **Esc** (стоп генерации / сворачивание, опционально отключается). Опрос Legacy `Input` в `Update`, когда нет фокуса UITK; хук `OnCollapsedStateChanged`. Подробности: [`README_CHAT.md`](Runtime/Source/Features/Chat/README_CHAT.md#chat-hotkeys).
 - 🧹 **0.25.2** — **WebGL header buttons cleanup + STREAMING_WEBGL_TODO.** В `CoreAiChat.uxml` иконка stop-кнопки переведена с `⏹` (emoji, не рендерится в дефолтных WebGL-шрифтах — отсюда пустые круглые кнопки в браузере) на `■` (Geometric Shapes U+25A0, входит в LiberationSans / стандартный TMP fallback). Опубликован новый [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md) с диагностикой и планом фикса WebGL SSE-стриминга в `MeaiOpenAiChatClient.CompleteStreamingAsync` (`UnityWebRequest` на WebGL отдаёт SSE одним терминальным чанком — `chunks=1` + симптом «бесконечная typing-анимация и нет ответа»). Workaround на стороне приложения — принудительно `EnableStreaming = false` под `#if UNITY_WEBGL && !UNITY_EDITOR`.
 - 🩹 **0.25.1** — **WebGL TextField focus persistence + dual-input-system support.** `CoreAiChatPanel` под `#if UNITY_WEBGL && !UNITY_EDITOR` каждый кадр держит `WebGLInput.captureAllKeyboardInput = false` — устранён симптом «фокус 1 кадр и слетает» в собранном WebGL-билде. `OrchestrationDashboard` совместим с `Active Input Handling = Input System Package (New)` (раньше падал `InvalidOperationException`); `CoreAI.Source.asmdef` объявляет soft-зависимость `Unity.InputSystem` через `versionDefines` (`COREAI_HAS_INPUT_SYSTEM`).
