@@ -85,6 +85,9 @@ FirebaseCppApp-*.so
 
 # Scene Backups
 /SceneBackups/
+
+# Local-only business / monetization plans (not tracked; create `Docs/LocalBusinessPlans/` yourself)
+/Docs/LocalBusinessPlans/
 # LLMUnity — нативные бинарники LlamaLib в StreamingAssets (часто >100 MB, без Git LFS не пушится на GitHub)
 /[Aa]ssets/[Ss]treamingAssets/LlamaLib-*/
 /[Aa]ssets/[Ss]treamingAssets/LlamaLib-*.meta
