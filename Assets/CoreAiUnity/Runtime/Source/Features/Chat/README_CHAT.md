@@ -6,7 +6,7 @@ Regardless of UI, you can call the LLM from any script via the static **`CoreAi`
 
 **Sending in two modes**
 
-- **Chat panel** — the player types in the field and presses the button or **Shift+Enter** (key behavior is configured in `CoreAiChatConfig`, see *Manual setup*). Replies appear in the same bubbles; streaming follows the flags.
+- **Chat panel** — the player types in the field and presses the button or **Enter**. **Shift+Enter** inserts a newline by default; legacy Shift+Enter-to-send is still available through `CoreAiChatConfig`.
 - **Code without the panel** — “send” = `CoreAi.AskAsync("...")` / `CoreAi.StreamAsync` with the same text. Under the hood it uses the same `CoreAiChatService` as the panel while there is a single `CoreAILifetimeScope` in the scene.
 
 The “UI vs code” table is in [COREAI_SINGLETON_API](../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
@@ -35,7 +35,7 @@ Configure in the Inspector:
 - **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
 - **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
-- **Send On Shift+Enter** — send hotkey
+- **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
 - **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
 
 ### 2. Add to the scene

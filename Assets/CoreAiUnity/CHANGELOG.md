@@ -2,6 +2,17 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.0.3] - 2026-04-29
+
+### Chat UX and HTTP model selection
+
+- 🐛 **Stop button availability** — chat Stop is now available for any active request, including non-streaming requests and the tail after the final streaming chunk.
+- 🔧 **Enter/Shift+Enter default** — new chat configs use `Enter` to send and `Shift+Enter` for a newline. Legacy Shift+Enter-to-send remains available through `CoreAiChatConfig.SendOnShiftEnter`.
+- ✨ **HTTP model presets** — `CoreAISettingsAssetEditor` keeps the free-form model field and adds a preset dropdown for common OpenAI-compatible model ids.
+- 🧪 **EditMode coverage:** updated chat config defaults and added hotkey contract regressions.
+- 📝 **Docs:** chat README updated for the new send/newline behavior.
+- 🔧 Package **`1.0.3`**. Dependency **`com.nexoider.coreai 1.0.3`**.
+
 ## [1.0.2] - 2026-04-28
 
 ### Long context and tool-call identity
