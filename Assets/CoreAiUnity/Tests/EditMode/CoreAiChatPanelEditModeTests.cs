@@ -103,6 +103,20 @@ namespace CoreAI.Tests.EditMode
                 isClearing: false));
         }
 
+        [Test]
+        public void ShouldSubmitOnEnter_DefaultEnterSendsShiftEnterNewline()
+        {
+            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: false, shiftHeld: false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: false, shiftHeld: true));
+        }
+
+        [Test]
+        public void ShouldSubmitOnEnter_LegacyShiftEnterModeStillSupported()
+        {
+            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: true, shiftHeld: false));
+            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: true, shiftHeld: true));
+        }
+
         /// <summary>
         /// Regression (RedoSchool COREAI_FIXES_REQUEST): stop must be reachable while a streaming turn is active
         /// even before the first visible token — UI treats streaming as a busy state alongside sending.
