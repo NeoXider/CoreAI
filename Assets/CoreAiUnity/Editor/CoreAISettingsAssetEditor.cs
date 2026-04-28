@@ -31,6 +31,20 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private string _testResultMessage;
         private MessageType _testResultType;
 
+        private static readonly string[] HttpModelPresets =
+        {
+            "gpt-4o-mini",
+            "gpt-4o",
+            "gpt-4.1-mini",
+            "gpt-4.1",
+            "o4-mini",
+            "qwen3.5-4b",
+            "qwen3.5-8b",
+            "llama-3.1-8b-instruct",
+            "llama-3.2-3b-instruct",
+            "deepseek-chat"
+        };
+
         public override void OnInspectorGUI()
         {
             CoreAISettingsAsset settings = (CoreAISettingsAsset)target;
@@ -79,8 +93,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Base URL", "https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("apiKey"),
                     new GUIContent("API Key", "Bearer токен. Для LM Studio оставить пустым"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("modelName"),
-                    new GUIContent("Model", "gpt-4o-mini, qwen3.5-4b, llama-3-8b"));
+                DrawHttpModelField(serializedObject.FindProperty("modelName"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("requestTimeoutSeconds"),
                     new GUIContent("Timeout (sec)", "Таймаут HTTP-запроса"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxClientLimitedRequestsPerSession"),
@@ -342,6 +355,38 @@ namespace CoreAI.Infrastructure.Llm.Editor
             if (!string.IsNullOrEmpty(warning))
             {
                 EditorGUILayout.HelpBox(warning, MessageType.Warning);
+            }
+        }
+
+        private static void DrawHttpModelField(SerializedProperty modelProp)
+        {
+            if (modelProp == null)
+            {
+                return;
+            }
+
+            EditorGUILayout.PropertyField(modelProp,
+                new GUIContent("Model", "Provider model id. Type a custom value or choose a common preset below."));
+
+            string current = string.IsNullOrWhiteSpace(modelProp.stringValue)
+                ? "gpt-4o-mini"
+                : modelProp.stringValue.Trim();
+            int presetIndex = Array.IndexOf(HttpModelPresets, current);
+            int selectedIndex = Mathf.Max(0, presetIndex + 1);
+            string[] options = new string[HttpModelPresets.Length + 1];
+            options[0] = presetIndex >= 0 ? $"Preset: {current}" : "Preset: custom";
+            for (int i = 0; i < HttpModelPresets.Length; i++)
+            {
+                options[i + 1] = HttpModelPresets[i];
+            }
+
+            int nextIndex = EditorGUILayout.Popup(
+                new GUIContent("Model Preset", "Quickly fill the Model field with a common OpenAI-compatible model id."),
+                selectedIndex,
+                options);
+            if (nextIndex > 0)
+            {
+                modelProp.stringValue = HttpModelPresets[nextIndex - 1];
             }
         }
 

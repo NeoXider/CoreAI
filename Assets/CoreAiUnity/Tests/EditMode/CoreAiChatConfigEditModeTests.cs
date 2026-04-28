@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode
                 "префикс пуст → анимация индикатора показывает только точки \"...\"");
             Assert.AreEqual(500, config.ChatWidth);
             Assert.AreEqual(700, config.ChatHeight);
-            Assert.IsTrue(config.SendOnShiftEnter);
+            Assert.IsFalse(config.SendOnShiftEnter, "по умолчанию Enter отправляет, Shift+Enter вставляет перенос строки");
             Assert.AreEqual(2000, config.MaxMessageLength);
             Assert.IsFalse(string.IsNullOrEmpty(config.ErrorMessagePrefix));
             Assert.IsFalse(string.IsNullOrEmpty(config.TimeoutMessage));

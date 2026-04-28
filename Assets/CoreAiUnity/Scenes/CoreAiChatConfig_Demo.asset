@@ -22,7 +22,7 @@ MonoBehaviour:
   _typingIndicatorText: 
   _chatWidth: 500
   _chatHeight: 700
-  _sendOnShiftEnter: 1
+  _sendOnShiftEnter: 0
   _maxMessageLength: 2000
   _errorMessagePrefix: "\u26A0\uFE0F \u041E\u0448\u0438\u0431\u043A\u0430: "
   _timeoutMessage: "\u23F3 \u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0435\u0432\u044B\u0441\u0438\u043B
