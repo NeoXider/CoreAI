@@ -2,6 +2,8 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Messaging;
+using MessagePipe;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
 #endif
@@ -41,7 +43,12 @@ namespace CoreAI.Composition
 
             builder.Register<ILlmClient>(c =>
                 new LoggingLlmClientDecorator(
-                    new RoutingLlmClient(c.Resolve<ILlmClientRegistry>()),
+                    new RoutingLlmClient(
+                        c.Resolve<ILlmClientRegistry>(),
+                        c.Resolve<IPublisher<LlmBackendSelected>>(),
+                        c.Resolve<IPublisher<LlmRequestStarted>>(),
+                        c.Resolve<IPublisher<LlmRequestCompleted>>(),
+                        c.Resolve<IPublisher<LlmUsageReported>>()),
                     c.Resolve<IGameLogger>(),
                     llmTimeout), Lifetime.Singleton);
 
@@ -66,7 +73,7 @@ namespace CoreAI.Composition
         }
 
         /// <summary>
-        /// Порядок выбора: CoreAISettingsAsset (Auto/LlmUnity/OpenAiHttp/NoLlm) → LLMUnity → Stub.
+        /// Resolves the global fallback LLM client from the configured execution mode.
         /// </summary>
         internal static ILlmClient ResolveLlmClient(
             CoreAISettingsAsset settings,
@@ -75,41 +82,40 @@ namespace CoreAI.Composition
             ILlmAgentProvider agentProvider)
         {
 #if UNITY_WEBGL
-            // WebGL: no local native LLMUnity backend. Allow HTTP/Offline only.
-            if (settings != null && settings.BackendType == LlmBackendType.OpenAiHttp)
+            LlmExecutionMode webGlMode = settings != null ? settings.ExecutionMode : LlmExecutionMode.Auto;
+            if (IsHttpMode(webGlMode))
             {
-                return new OpenAiChatLlmClient(settings);
+                return BuildHttpClient(settings, webGlMode);
             }
 
-            if (settings != null && settings.BackendType == LlmBackendType.Offline)
+            if (webGlMode == LlmExecutionMode.Offline)
             {
-                return new OfflineLlmClient(settings);
+                return BuildOfflineClient(settings);
             }
 
-            // Auto/LlmUnity/default → Stub in WebGL
-            return new StubLlmClient();
+            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto) ?? BuildOfflineClient(settings);
 #endif
 #if COREAI_NO_LLM
-            // Build without any external LLM dependencies (HTTP / LLMUnity).
-            // Keep the pipeline alive for UI smoke tests.
-            if (settings != null && settings.BackendType == LlmBackendType.Offline)
+            if (settings != null && settings.ExecutionMode == LlmExecutionMode.Offline)
             {
-                return new OfflineLlmClient(settings);
+                return BuildOfflineClient(settings);
             }
 
             return new StubLlmClient();
 #else
             if (settings != null)
             {
-                switch (settings.BackendType)
+                switch (settings.ExecutionMode)
                 {
-                    case LlmBackendType.OpenAiHttp:
-                        return new OpenAiChatLlmClient(settings);
-                    case LlmBackendType.Offline:
-                        return new OfflineLlmClient(settings);
-                    case LlmBackendType.Auto:
+                    case LlmExecutionMode.ClientOwnedApi:
+                    case LlmExecutionMode.ClientLimited:
+                    case LlmExecutionMode.ServerManagedApi:
+                        return BuildHttpClient(settings, settings.ExecutionMode);
+                    case LlmExecutionMode.Offline:
+                        return BuildOfflineClient(settings);
+                    case LlmExecutionMode.Auto:
                         return TryResolveAutoClient(settings, logger, memoryStore, agentProvider);
-                    case LlmBackendType.LlmUnity:
+                    case LlmExecutionMode.LocalModel:
                         return ResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
                 }
             }
@@ -130,47 +136,82 @@ namespace CoreAI.Composition
         {
 #if UNITY_WEBGL
             // WebGL: try HTTP only, otherwise Offline.
-            ILlmClient http = TryResolveHttpApiClient(settings);
-            return http ?? new OfflineLlmClient(settings);
+            ILlmClient http = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
+            return http ?? BuildOfflineClient(settings);
 #else
             bool httpFirst = settings != null && settings.AutoPriority == LlmAutoPriority.HttpFirst;
 
             if (httpFirst)
             {
-                ILlmClient httpClient = TryResolveHttpApiClient(settings);
+                ILlmClient httpClient = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
                 if (httpClient != null) return httpClient;
 
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
                 if (llmUnityClient != null) return llmUnityClient;
 
-                return new OfflineLlmClient(settings);
+                return BuildOfflineClient(settings);
             }
             else
             {
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
                 if (llmUnityClient != null) return llmUnityClient;
 
-                ILlmClient httpClient2 = TryResolveHttpApiClient(settings);
+                ILlmClient httpClient2 = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
                 if (httpClient2 != null) return httpClient2;
 
-                return new OfflineLlmClient(settings);
+                return BuildOfflineClient(settings);
             }
 #endif
         }
 
-        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings)
+        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode)
         {
 #if COREAI_NO_LLM
             return null;
 #else
-            if (settings != null && settings.UseHttpApi && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
+            if (settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
                 !string.IsNullOrEmpty(settings.ModelName))
             {
-                return new OpenAiChatLlmClient(settings);
+                return BuildHttpClient(settings, mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode);
             }
 
             return null;
 #endif
+        }
+
+        internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode)
+        {
+#if COREAI_NO_LLM
+            return new StubLlmClient();
+#else
+            if (mode == LlmExecutionMode.ServerManagedApi)
+            {
+                return new ServerManagedLlmClient(
+                    new ServerManagedCoreSettingsAdapter(settings),
+                    settings,
+                    GameLoggerUnscopedFallback.Instance);
+            }
+
+            ILlmClient client = new OpenAiChatLlmClient(settings);
+            return mode == LlmExecutionMode.ClientLimited
+                ? new ClientLimitedLlmClientDecorator(
+                    client,
+                    settings != null ? settings.MaxClientLimitedRequestsPerSession : 0,
+                    settings != null ? settings.MaxClientLimitedPromptChars : 0)
+                : client;
+#endif
+        }
+
+        internal static bool IsHttpMode(LlmExecutionMode mode)
+        {
+            return mode == LlmExecutionMode.ClientOwnedApi ||
+                   mode == LlmExecutionMode.ClientLimited ||
+                   mode == LlmExecutionMode.ServerManagedApi;
+        }
+
+        private static ILlmClient BuildOfflineClient(CoreAISettingsAsset settings)
+        {
+            return settings != null ? new OfflineLlmClient(settings) : new StubLlmClient();
         }
 
         private static ILlmClient TryResolveLlmUnityClient(
@@ -214,5 +255,28 @@ namespace CoreAI.Composition
             ILlmClient client = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
             return client ?? new StubLlmClient();
         }
+
+#if !COREAI_NO_LLM
+        private sealed class ServerManagedCoreSettingsAdapter : IOpenAiHttpSettings
+        {
+            private readonly CoreAISettingsAsset _settings;
+
+            public ServerManagedCoreSettingsAdapter(CoreAISettingsAsset settings)
+            {
+                _settings = settings;
+            }
+
+            public string ApiBaseUrl => _settings.ApiBaseUrl;
+            public string ApiKey => _settings.ApiKey;
+            public string AuthorizationHeader => "";
+            public string Model => _settings.ModelName;
+            public float Temperature => _settings.Temperature;
+            public int RequestTimeoutSeconds => _settings.RequestTimeoutSeconds;
+            public int MaxTokens => _settings.MaxTokens;
+            public bool LogLlmInput => _settings.LogLlmInput;
+            public bool LogLlmOutput => _settings.LogLlmOutput;
+            public bool EnableHttpDebugLogging => _settings.EnableHttpDebugLogging;
+        }
+#endif
     }
 }

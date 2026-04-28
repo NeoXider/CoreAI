@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using CoreAI.Ai;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEngine;
@@ -44,9 +45,17 @@ namespace CoreAI.Infrastructure.Llm.Editor
             // Backend Type
             SerializedProperty backendTypeProp = serializedObject.FindProperty("backendType");
             EditorGUILayout.PropertyField(backendTypeProp, new GUIContent("LLM Backend"));
+            SerializedProperty executionModeProp = serializedObject.FindProperty("executionMode");
+            EditorGUILayout.PropertyField(executionModeProp, new GUIContent(
+                "LLM Mode",
+                "Public runtime mode. Use Auto to preserve legacy backend selection."));
+            EditorGUILayout.HelpBox(
+                "Use one global mode here for simple projects. Use LlmRoutingManifest profiles to run several modes at the same time for different roles.",
+                MessageType.Info);
+            DrawProductionWarnings(settings);
 
             // Auto Priority — только если выбран Auto
-            if (settings.BackendType == LlmBackendType.Auto)
+            if (settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto)
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("autoPriority"),
                     new GUIContent("Auto Priority", "Какой бэкенд пробовать первым в Auto режиме"));
@@ -62,8 +71,9 @@ namespace CoreAI.Infrastructure.Llm.Editor
             if (_showHttpApi)
             {
                 // В Auto режиме обе секции доступны для настройки
-                bool isAuto = settings.BackendType == LlmBackendType.Auto;
-                EditorGUI.BeginDisabledGroup(!isAuto && settings.BackendType != LlmBackendType.OpenAiHttp);
+                bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+                bool isHttpMode = settings.UseHttpApi;
+                EditorGUI.BeginDisabledGroup(!isAuto && !isHttpMode);
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("apiBaseUrl"),
                     new GUIContent("Base URL", "https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)"));
@@ -73,8 +83,19 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Model", "gpt-4o-mini, qwen3.5-4b, llama-3-8b"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("requestTimeoutSeconds"),
                     new GUIContent("Timeout (sec)", "Таймаут HTTP-запроса"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxClientLimitedRequestsPerSession"),
+                    new GUIContent("ClientLimited Max Requests", "0 = no local request limit"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxClientLimitedPromptChars"),
+                    new GUIContent("ClientLimited Max Prompt Chars", "0 = no local prompt-size limit"));
 
                 EditorGUI.EndDisabledGroup();
+
+                if (settings.ExecutionMode == LlmExecutionMode.ServerManagedApi)
+                {
+                    EditorGUILayout.HelpBox(
+                        "ServerManagedApi should point to your backend proxy. Leave provider keys on the server, not in the client asset.",
+                        MessageType.Warning);
+                }
 
                 if (isAuto)
                 {
@@ -91,8 +112,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _showLlmUnity = EditorGUILayout.BeginFoldoutHeaderGroup(_showLlmUnity, "💾 LLMUnity (локальная модель)");
             if (_showLlmUnity)
             {
-                bool isAuto = settings.BackendType == LlmBackendType.Auto;
-                EditorGUI.BeginDisabledGroup(!isAuto && settings.BackendType != LlmBackendType.LlmUnity);
+                bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+                EditorGUI.BeginDisabledGroup(!isAuto && settings.ExecutionMode != LlmExecutionMode.LocalModel);
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
@@ -311,6 +332,17 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawProductionWarnings(CoreAISettingsAsset settings)
+        {
+            string warning = CoreAI.Editor.CoreAIProductionSettingsValidator.GetWebGlClientKeyWarning(
+                settings,
+                EditorUserBuildSettings.activeBuildTarget == BuildTarget.WebGL);
+            if (!string.IsNullOrEmpty(warning))
+            {
+                EditorGUILayout.HelpBox(warning, MessageType.Warning);
+            }
         }
 
         private static bool IsLlmUnityPackageInstalled()

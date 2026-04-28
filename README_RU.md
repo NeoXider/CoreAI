@@ -15,10 +15,11 @@
 - 🌊 **Стриминг, переживший разорванные теги** — stateful SSE-аккумуляция собирает фрагментированные `<think>` блоки и tool calls.
 - 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
 - ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
+- 🧭 **LLM-режимы под разные production-сценарии** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** **v0.24.2** · диагностика HTTP-ошибок · `ToolExecutionPolicy` hardening · SSE tool-call accumulation · Agent Control API
+**Версия:** актуальные номера берутся из [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Линия **`1.0.0`** добавляет публичные LLM-режимы и mixed-mode routing по ролям.
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

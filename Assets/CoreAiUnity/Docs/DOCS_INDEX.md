@@ -18,7 +18,7 @@ Install → open scene → connect LLM → press Play.
 | 1a | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | 🎯 **One class for everyone** — `CoreAi.AskAsync` / `Stream` / `TryGet*` (beginner + pro guide) |
 | 1c | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | 💬 Drop-in chat panel + demo scene in one click |
 | 2 | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) | 🏗️ Build an NPC in 3 lines, agent modes, recipes |
-| 3 | [COREAI_SETTINGS](COREAI_SETTINGS.md) | ⚙️ Backends, models, temperature, timeout, streaming toggle |
+| 3 | [COREAI_SETTINGS](COREAI_SETTINGS.md) | ⚙️ LLM modes, routing profiles, models, timeout, streaming toggle |
 | 4 | [CHAT_TOOL_CALLING](CHAT_TOOL_CALLING.md) | 🛒 Worked example: merchant NPC with inventory |
 | 4b | [EXAMPLES](EXAMPLES.md) | 📖 Enemies, crafting, auto-repair, merchant, guard |
 
@@ -57,6 +57,7 @@ DI, threading, spec, pipelines.
 | # | Document | You will learn |
 |---|----------|----------------|
 | 10 | [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | 🗺️ Code map, LLM → commands pipeline, PR checklist |
+| 10a | [ARCHITECTURE](ARCHITECTURE.md) | Clean architecture layers, LLM modes, MessagePipe events |
 | 10b | [COMMAND_FLOW_DIAGRAM](COMMAND_FLOW_DIAGRAM.md) | 🗺️ Diagram: how a command travels through the system |
 | 11 | [DGF_SPEC](DGF_SPEC.md) | 📐 Normative spec: DI, threads, authority, §9.4 main-thread rules |
 | 12 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | 🛠️ MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |

@@ -15,10 +15,13 @@
 - 🌊 **Streaming that survives split tags** — stateful SSE accumulation handles fragmented `<think>` blocks and tool calls across chunks.
 - 💬 **Chat panel in one click** — `CoreAI → Setup → Create Chat Demo Scene` → Press Play.
 - ⚡ **One-liner from any script** — `await CoreAi.AskAsync("…")` — no DI boilerplate for your first feature.
+- 🧭 **LLM modes for production choices** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, or mixed per-role routing profiles.
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
+
+**Current stable line:** `1.0.0` introduces the public LLM mode surface and mixed-mode role routing.
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

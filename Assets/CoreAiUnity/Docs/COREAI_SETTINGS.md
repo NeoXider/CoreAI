@@ -27,7 +27,28 @@ var settings = CoreAISettingsAsset.Instance;
 
 ### 3. Configure backend
 
-In the Inspector, choose **LLM Backend**:
+In the Inspector, choose **LLM Mode** for the public runtime behavior and keep **LLM Backend** for legacy compatibility:
+
+| Mode | When to use |
+|------|-------------|
+| **Auto** | Keep existing backend selection rules |
+| **LocalModel** | Local GGUF through LLMUnity |
+| **ClientOwnedApi** | OpenAI-compatible HTTP where the user/developer owns the provider key |
+| **ClientLimited** | OpenAI-compatible HTTP with local request and prompt-size limits |
+| **ServerManagedApi** | Game backend proxy owns provider credentials; recommended for production WebGL/multiplayer |
+| **Offline** | Deterministic responses for tests/builds without live LLM access |
+
+For one-mode projects, configure `CoreAISettingsAsset` directly. For mixed projects, use `LlmRoutingManifest` profiles so different roles can run different modes at the same time.
+
+For `ServerManagedApi`, keep provider keys on your backend. If the backend requires a user/session token, register it at runtime:
+
+```csharp
+ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJwt);
+```
+
+CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings.
+
+Legacy **LLM Backend** still maps to modes for existing scenes:
 
 | Backend | When to use |
 |---------|-------------|
@@ -35,6 +56,23 @@ In the Inspector, choose **LLM Backend**:
 | **LlmUnity** | Local GGUF model on the scene only |
 | **OpenAiHttp** | HTTP API only — LM Studio, OpenAI, Qwen API |
 | **Offline** | No model — deterministic responses for tests/builds |
+
+### Mixed-mode routing
+
+Use `LlmRoutingManifest` when one scene needs multiple modes:
+
+| Role | Example profile |
+|------|-----------------|
+| `PlayerChat` | `ServerManagedApi` for safe production chat |
+| `Analyzer` | `Offline` or `ClientLimited` for cheaper background checks |
+| `Creator` | `LocalModel` for local prototyping |
+| `*` | fallback profile |
+
+Each profile can set mode, context window, HTTP settings, LLMUnity agent name, and ClientLimited caps.
+
+### Production validation
+
+Use `CoreAI/Validate Production Settings` before WebGL releases. CoreAI warns when a WebGL build uses `ClientOwnedApi` with a non-empty API key, because public WebGL builds expose client assets. Use `ServerManagedApi` for public WebGL.
 
 ### Auto priority
 

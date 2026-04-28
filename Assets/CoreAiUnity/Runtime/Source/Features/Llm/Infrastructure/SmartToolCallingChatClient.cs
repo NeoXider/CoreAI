@@ -23,10 +23,11 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IReadOnlyList<CoreAI.Ai.ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
         private readonly string _roleId;
+        private readonly string _traceId;
 
         /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3)
+            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3, string traceId = "")
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -34,6 +35,7 @@ namespace CoreAI.Infrastructure.Llm
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _originalTools = tools ?? new List<CoreAI.Ai.ILlmTool>();
             _roleId = roleId ?? "Unknown";
+            _traceId = traceId ?? "";
             _maxConsecutiveErrors = maxConsecutiveErrors;
         }
 
@@ -47,7 +49,7 @@ namespace CoreAI.Infrastructure.Llm
 
             // Fresh policy per top-level request so duplicates reset between independent calls
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
-                _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors);
+                _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId);
 
             while (true)
             {

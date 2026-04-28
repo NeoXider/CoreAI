@@ -27,6 +27,13 @@ namespace CoreAI.Composition
 
             MessagePipeOptions opts = builder.RegisterMessagePipe();
             builder.RegisterMessageBroker<ApplyAiGameCommand>(opts);
+            builder.RegisterMessageBroker<LlmBackendSelected>(opts);
+            builder.RegisterMessageBroker<LlmRequestStarted>(opts);
+            builder.RegisterMessageBroker<LlmRequestCompleted>(opts);
+            builder.RegisterMessageBroker<LlmUsageReported>(opts);
+            builder.RegisterMessageBroker<LlmToolCallStarted>(opts);
+            builder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
+            builder.RegisterMessageBroker<LlmToolCallFailed>(opts);
             builder.Register<MessagePipeAiCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
 
             builder.RegisterBuildCallback(static resolver =>

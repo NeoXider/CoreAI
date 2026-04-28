@@ -12,6 +12,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Bearer-токен (API ключ).</summary>
         string ApiKey { get; }
 
+        /// <summary>
+        /// Full Authorization header value. When empty, clients fall back to <see cref="ApiKey"/> as a bearer token.
+        /// </summary>
+        string AuthorizationHeader { get; }
+
         /// <summary>Название модели.</summary>
         string Model { get; }
 

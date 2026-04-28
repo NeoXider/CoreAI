@@ -20,6 +20,7 @@ namespace CoreAI.Ai
         private readonly IDataOverlayVersionStore _dataOverlayVersions;
         private readonly AgentMemoryPolicy _memoryPolicy;
         private readonly ICoreAISettings _settings;
+        private readonly IEnumerable<IAiPromptContextProvider> _contextProviders;
 
         /// <summary>Создаёт композер с цепочкой провайдеров промптов из DI.</summary>
         public AiPromptComposer(
@@ -28,7 +29,8 @@ namespace CoreAI.Ai
             ILuaScriptVersionStore luaScriptVersions,
             IDataOverlayVersionStore dataOverlayVersions = null,
             AgentMemoryPolicy memoryPolicy = null,
-            ICoreAISettings settings = null)
+            ICoreAISettings settings = null,
+            IEnumerable<IAiPromptContextProvider> contextProviders = null)
         {
             _systemPrompts = systemPrompts;
             _userTemplates = userTemplates;
@@ -36,6 +38,7 @@ namespace CoreAI.Ai
             _dataOverlayVersions = dataOverlayVersions ?? new NullDataOverlayVersionStore();
             _memoryPolicy = memoryPolicy;
             _settings = settings;
+            _contextProviders = contextProviders ?? Array.Empty<IAiPromptContextProvider>();
         }
 
         /// <summary>
@@ -90,6 +93,47 @@ namespace CoreAI.Ai
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Appends runtime prompt context sections for a single request.
+        /// </summary>
+        public string AppendRuntimeContext(string systemPrompt, AiTaskRequest request, string roleId, string traceId)
+        {
+            if (_contextProviders == null)
+            {
+                return systemPrompt ?? "";
+            }
+
+            StringBuilder sections = new();
+            foreach (IAiPromptContextProvider provider in _contextProviders)
+            {
+                if (provider == null)
+                {
+                    continue;
+                }
+
+                string section = provider.BuildContext(request, roleId, traceId);
+                if (string.IsNullOrWhiteSpace(section))
+                {
+                    continue;
+                }
+
+                if (sections.Length == 0)
+                {
+                    sections.AppendLine("## Runtime Context");
+                }
+
+                sections.AppendLine(section.Trim());
+                sections.AppendLine();
+            }
+
+            if (sections.Length == 0)
+            {
+                return systemPrompt ?? "";
+            }
+
+            return (systemPrompt ?? "").TrimEnd() + "\n\n" + sections.ToString().TrimEnd();
         }
 
         /// <summary>User-часть для LLM: шаблон роли (<c>{telemetry}</c>, <c>{hint}</c>, <c>{ключ}</c> из телеметрии) или JSON по умолчанию, плюс контекст ремонта Lua.</summary>

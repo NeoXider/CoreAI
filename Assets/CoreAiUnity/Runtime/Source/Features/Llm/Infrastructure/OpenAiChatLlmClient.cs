@@ -70,6 +70,7 @@ namespace CoreAI.Infrastructure.Llm
 
             public string ApiBaseUrl => _s.ApiBaseUrl;
             public string ApiKey => _s.ApiKey;
+            public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;

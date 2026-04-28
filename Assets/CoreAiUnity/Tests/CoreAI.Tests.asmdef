@@ -9,6 +9,7 @@
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
     "VContainer",
+    "MessagePipe",
     "undream.llmunity.Runtime"
   ],
   "includePlatforms": [

@@ -28,6 +28,7 @@ namespace CoreAI.Ai
         private readonly IRoleStructuredResponsePolicy _structuredPolicy;
         private readonly IAiOrchestrationMetrics _metrics;
         private readonly ICoreAISettings _settings;
+        private readonly IConversationContextManager _contextManager;
 
         /// <summary>Собирает зависимости оркестратора (регистрация через VContainer).</summary>
         public AiOrchestrator(
@@ -40,7 +41,8 @@ namespace CoreAI.Ai
             AgentMemoryPolicy memoryPolicy,
             IRoleStructuredResponsePolicy structuredPolicy,
             IAiOrchestrationMetrics metrics,
-            ICoreAISettings settings)
+            ICoreAISettings settings,
+            IConversationContextManager contextManager = null)
         {
             _authority = authority;
             _llm = llm;
@@ -52,6 +54,8 @@ namespace CoreAI.Ai
             _structuredPolicy = structuredPolicy ?? new NoOpRoleStructuredResponsePolicy();
             _metrics = metrics ?? new NullAiOrchestrationMetrics();
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _contextManager = contextManager ??
+                new DeterministicConversationContextManager(new NullConversationSummaryStore());
         }
 
         /// <summary>
@@ -66,6 +70,7 @@ namespace CoreAI.Ai
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
             string systemBase = _promptComposer.GetSystemPrompt(roleId);
+            systemBase = _promptComposer.AppendRuntimeContext(systemBase, task, roleId, traceId);
 
             string system = systemBase;
             bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
@@ -82,45 +87,14 @@ namespace CoreAI.Ai
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
-            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = null;
-
-            if (roleConfig.WithChatHistory && _memoryStore != null)
-            {
-                ChatMessage[] history = _memoryStore.GetChatHistory(roleId,
-                    roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30);
-                if (history != null && history.Length > 0)
-                {
-                    chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
-                    int maxTokens = roleConfig.ContextTokens > 0 ? roleConfig.ContextTokens : 8192;
-                    int budgetTokens = maxTokens / 2;
-
-                    List<ChatMessage> filteredHistory = new();
-                    for (int i = history.Length - 1; i >= 0; i--)
-                    {
-                        int estimatedTokens = string.IsNullOrEmpty(history[i].Content) ? 0 : history[i].Content.Length / 3;
-                        if (budgetTokens - estimatedTokens < 0 && filteredHistory.Count > 0)
-                        {
-                            break;
-                        }
-
-                        budgetTokens -= estimatedTokens;
-                        filteredHistory.Insert(0, history[i]);
-                    }
-
-                    foreach (ChatMessage msg in filteredHistory)
-                    {
-                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
-                            ? Microsoft.Extensions.AI.ChatRole.User
-                            : Microsoft.Extensions.AI.ChatRole.Assistant;
-                        chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
-                    }
-                }
-            }
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
+                BuildChatHistory(roleId, roleConfig, ref system);
 
             return new RequestBundle
             {
                 RoleId = roleId,
                 TraceId = traceId,
+                Snapshot = snap,
                 SystemPrompt = system,
                 UserPayload = user,
                 Tools = tools,
@@ -138,66 +112,14 @@ namespace CoreAI.Ai
                 return null;
             }
 
-            string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
-            string traceId = string.IsNullOrWhiteSpace(task.TraceId)
-                ? Guid.NewGuid().ToString("N")
-                : task.TraceId.Trim();
-            GameSessionSnapshot snap = _telemetry.BuildSnapshot();
-            string systemBase = _promptComposer.GetSystemPrompt(roleId);
-
-            // ===== ТИП 1: MemoryTool — явная память через function call =====
-            string system = systemBase;
-            bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
-            if (useMemoryTool &&
-                _memoryStore != null && _memoryStore.TryLoad(roleId, out AgentMemoryState mem) &&
-                !string.IsNullOrWhiteSpace(mem?.Memory))
-            {
-                system = systemBase.Trim() + "\n\n## Memory\n" + mem.Memory.Trim();
-            }
-
-            string user = _promptComposer.BuildUserPayload(snap, task);
-
-            // Get tools for this role (includes MemoryTool if enabled)
-            IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
-            system = AppendToolContract(system, tools, task);
-
-            // ===== ТИП 2: ChatHistory — автоматическая история чата =====
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig =
-                _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
-            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = null;
-
-            if (roleConfig.WithChatHistory && _memoryStore != null)
-            {
-                ChatMessage[] history = _memoryStore.GetChatHistory(roleId, roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30);
-                if (history != null && history.Length > 0)
-                {
-                    chatHistory = new List<Microsoft.Extensions.AI.ChatMessage>(history.Length);
-                    int maxTokens = roleConfig.ContextTokens > 0 ? roleConfig.ContextTokens : 8192;
-                    int budgetTokens = maxTokens / 2; // Резервируем половину бюджета для системного промпта и ответа модели
-
-                    List<ChatMessage> filteredHistory = new List<ChatMessage>();
-                    // Идем с конца (от свежих к старым), чтобы оставить самые актуальные
-                    for (int i = history.Length - 1; i >= 0; i--)
-                    {
-                        int estimatedTokens = string.IsNullOrEmpty(history[i].Content) ? 0 : history[i].Content.Length / 3;
-                        if (budgetTokens - estimatedTokens < 0 && filteredHistory.Count > 0)
-                        {
-                            break; // Лимит контекста исчерпан
-                        }
-                        
-                        budgetTokens -= estimatedTokens;
-                        filteredHistory.Insert(0, history[i]); // Вставляем в начало, восстанавливая порядок
-                    }
-
-                    foreach (ChatMessage msg in filteredHistory)
-                    {
-                        Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
-                            ? Microsoft.Extensions.AI.ChatRole.User
-                            : Microsoft.Extensions.AI.ChatRole.Assistant;
-                        chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
-                    }
-                }
-            }
+            RequestBundle bundle = BuildRequest(task);
+            string roleId = bundle.RoleId;
+            string traceId = bundle.TraceId;
+            string system = bundle.SystemPrompt;
+            string user = bundle.UserPayload;
+            IReadOnlyList<ILlmTool> tools = bundle.Tools;
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = bundle.RoleConfig;
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = bundle.ChatHistory;
 
             int maxAttempts = _settings.MaxLlmRequestRetries > 0 ? _settings.MaxLlmRequestRetries : 2;
             int? maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
@@ -270,7 +192,7 @@ namespace CoreAI.Ai
             {
                 _metrics.RecordStructuredRetry(roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
-                string userRetry = _promptComposer.BuildUserPayload(snap, retryTask);
+                string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
                 Stopwatch sw = Stopwatch.StartNew();
                 LlmCompletionResult second = await _llm.CompleteAsync(
                     new LlmCompletionRequest
@@ -511,12 +433,60 @@ namespace CoreAI.Ai
         {
             public string RoleId;
             public string TraceId;
+            public GameSessionSnapshot Snapshot;
             public string SystemPrompt;
             public string UserPayload;
             public IReadOnlyList<ILlmTool> Tools;
             public List<Microsoft.Extensions.AI.ChatMessage> ChatHistory;
             public AgentMemoryPolicy.RoleMemoryConfig RoleConfig;
             public AiTaskRequest Task;
+        }
+
+        private List<Microsoft.Extensions.AI.ChatMessage> BuildChatHistory(
+            string roleId,
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+            ref string system)
+        {
+            if (!roleConfig.WithChatHistory || _memoryStore == null)
+            {
+                return null;
+            }
+
+            int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
+            ChatMessage[] history = _memoryStore.GetChatHistory(roleId, maxMessages);
+            if (history == null || history.Length == 0)
+            {
+                return null;
+            }
+
+            ConversationContextSnapshot snapshot = _contextManager.BuildSnapshot(roleId, history, roleConfig);
+            if (snapshot == null)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(snapshot.Summary))
+            {
+                system = system.Trim() + "\n\n## Conversation Summary\n" + snapshot.Summary.Trim();
+            }
+
+            ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
+            if (recent.Length == 0)
+            {
+                return null;
+            }
+
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
+                new(recent.Length);
+            foreach (ChatMessage msg in recent)
+            {
+                Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
+                    ? Microsoft.Extensions.AI.ChatRole.User
+                    : Microsoft.Extensions.AI.ChatRole.Assistant;
+                chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
+            }
+
+            return chatHistory;
         }
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)

@@ -53,24 +53,34 @@ Produces `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeSc
 
 ## 4. Connect an LLM backend
 
-Open `Resources/CoreAISettings` (or create one via **Create → CoreAI → Core AI Settings**) and pick a backend:
+Open `Resources/CoreAISettings` (or create one via **Create → CoreAI → Core AI Settings**) and pick an **LLM Mode**:
 
-### A. Local — LLMUnity (good for offline tests & shipping)
+### A. LocalModel — LLMUnity
 
-1. **Backend Type** → `LlmUnity` (or `Auto`).
+1. **LLM Mode** → `LocalModel` (or `Auto`).
 2. Select a GGUF model on the `LlmManager` object (for example **Qwen3.5-4B**). If the list is empty, download a model via the LLMUnity Model Manager.
 3. On play, `CoreAILifetimeScope` discovers `LLMAgent` automatically.
 
 > LLMUnity is installed automatically as a Unity Package Manager dependency. Plugin reference: [LLMUnity on GitHub](https://github.com/undreamai/LLMUnity).
 
-### B. HTTP API — LM Studio / OpenAI / vLLM / Ollama
+### B. ClientOwnedApi — LM Studio / OpenAI / vLLM / Ollama
 
-1. **Backend Type** → `OpenAiHttp`.
+1. **LLM Mode** → `ClientOwnedApi`.
 2. **Api Base Url** → e.g. `http://localhost:1234/v1` (LM Studio).
 3. **Model** → the model name your server exposes (e.g. `qwen3.5-4b`).
 4. **Api Key** → only required for OpenAI itself.
 
 > 💡 Not sure which to pick? Install [LM Studio](https://lmstudio.ai), load **Qwen3.5-4B** or **Gemma 4 26B**, start the local server, and choose HTTP API in Unity. That's the fastest path to a working setup.
+
+### C. ClientLimited
+
+Choose `ClientLimited` when you need local request or prompt-size limits for prototypes. This is useful for demos and local control, but it is not a production security boundary.
+
+### D. ServerManagedApi
+
+Choose `ServerManagedApi` when the Unity client should call your backend proxy and the backend owns provider credentials. This is the recommended production path for WebGL, multiplayer, classrooms, and shared API budgets.
+
+For mixed setups, assign different modes per role in `LlmRoutingManifest`; for example `PlayerChat → ServerManagedApi`, `Analyzer → ClientLimited`, `Creator → LocalModel`.
 
 ---
 
@@ -80,7 +90,8 @@ Open `Resources/CoreAISettings` (or create one via **Create → CoreAI → Core 
 
 | Setting | Purpose |
 |---------|---------|
-| `Backend Type` | `LlmUnity` / `OpenAiHttp` / `Auto` / `Stub` |
+| `LLM Mode` | `LocalModel` / `ClientOwnedApi` / `ClientLimited` / `ServerManagedApi` / `Auto` / `Offline` |
+| `Backend Type` | Legacy backend selector retained for old assets |
 | `Model` / `Api Base Url` / `Api Key` | Backend credentials |
 | `Temperature` / `Max Tokens` / `Request Timeout` | Generation controls |
 | `Enable Streaming` | Global streaming default (new in 0.20) |

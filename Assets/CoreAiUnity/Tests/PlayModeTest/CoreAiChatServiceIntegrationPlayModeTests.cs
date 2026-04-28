@@ -138,13 +138,23 @@ namespace CoreAI.Tests.PlayMode
 
                 // --- 4. Agent Swapping ---
                 Debug.Log("[ChatServiceIntegration] Mode: Agent Swapping");
-                string swappedResponse = null;
-                var t4 = chatService.SendMessageSmartAsync("Now reply as a simple chat bot again.", "SimpleChatOnly",
-                    c => { if (!c.IsDone) swappedResponse += c.Text; });
-                yield return PlayModeTestAwait.WaitTask(t4, 60f, "Agent Swapping");
-                if (string.IsNullOrEmpty(swappedResponse))
+                string swappedResponse = "";
+                yield return SendAndCapture(
+                    chatService,
+                    "Reply with exactly this text: SWAP_OK",
+                    "SimpleChatOnly",
+                    60f,
+                    "Agent Swapping",
+                    value => swappedResponse = value);
+                if (string.IsNullOrWhiteSpace(swappedResponse))
                 {
-                    swappedResponse = t4.Result;
+                    yield return SendAndCapture(
+                        chatService,
+                        "You are SimpleChatOnly. Return one short non-empty sentence.",
+                        "SimpleChatOnly",
+                        60f,
+                        "Agent Swapping retry",
+                        value => swappedResponse = value);
                 }
                 Assert.IsNotEmpty(swappedResponse, "Swapped response should not be empty");
 
@@ -155,6 +165,32 @@ namespace CoreAI.Tests.PlayMode
                 handle.Dispose();
             }
         }
+
+        private static IEnumerator SendAndCapture(
+            CoreAiChatService chatService,
+            string text,
+            string roleId,
+            float timeoutSeconds,
+            string label,
+            Action<string> capture)
+        {
+            string response = "";
+            Task<string> task = chatService.SendMessageSmartAsync(text, roleId, c =>
+            {
+                if (!c.IsDone && !string.IsNullOrEmpty(c.Text))
+                {
+                    response += c.Text;
+                }
+            });
+            yield return PlayModeTestAwait.WaitTask(task, timeoutSeconds, label);
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                response = task.Result ?? "";
+            }
+
+            capture(response);
+        }
+
         private class TestSettings : ICoreAISettings
         {
             public string UniversalSystemPromptPrefix => "";

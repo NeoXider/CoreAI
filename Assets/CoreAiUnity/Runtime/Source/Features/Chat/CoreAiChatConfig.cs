@@ -54,8 +54,8 @@ namespace CoreAI.Chat
         [SerializeField] private int _chatHeight = 700;
 
         [Header("Ввод")]
-        [Tooltip("Если true — Shift+Enter отправляет сообщение. Если false — Enter отправляет.")]
-        [SerializeField] private bool _sendOnShiftEnter = true;
+        [Tooltip("Если true — Shift+Enter отправляет сообщение. Если false — Enter отправляет, а Shift+Enter вставляет перенос строки.")]
+        [SerializeField] private bool _sendOnShiftEnter = false;
 
         [Tooltip("Максимальная длина сообщения (0 = без лимита).")]
         [SerializeField] private int _maxMessageLength = 2000;

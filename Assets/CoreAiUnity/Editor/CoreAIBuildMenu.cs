@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using CoreAI.Composition;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Prompts;
@@ -226,13 +227,12 @@ namespace CoreAI.Editor
             SetPropertyIfExists(so, "llmRoutingManifest", routing);
             so.ApplyModifiedPropertiesWithoutUndo();
 
-            // 5. Если бэкенд = LlmUnity (или Auto с LlmUnityFirst) — создать LLM + LLMAgent
             bool needsLlmUnity = false;
             if (coreAiSettings != null)
             {
-                LlmBackendType backend = coreAiSettings.BackendType;
-                needsLlmUnity = backend == LlmBackendType.LlmUnity
-                                || (backend == LlmBackendType.Auto
+                LlmExecutionMode mode = coreAiSettings.ExecutionMode;
+                needsLlmUnity = mode == LlmExecutionMode.LocalModel
+                                || (mode == LlmExecutionMode.Auto
                                     && coreAiSettings.AutoPriority == LlmAutoPriority.LlmUnityFirst);
             }
 
@@ -241,7 +241,6 @@ namespace CoreAI.Editor
                 TryCreateLlmUnityObjects(scopeGo);
             }
 
-            // 6. Финализация
             EditorUtility.SetDirty(scope);
             EditorSceneManager.MarkSceneDirty(scopeGo.scene);
             Selection.activeGameObject = scopeGo;

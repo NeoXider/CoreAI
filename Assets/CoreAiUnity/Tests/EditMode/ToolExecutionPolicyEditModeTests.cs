@@ -1,6 +1,7 @@
 #if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -225,6 +226,33 @@ namespace CoreAI.Tests.EditMode
             var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsTrue(result.Succeeded);
             Assert.IsNotNull(result.Result);
+        }
+
+        [Test]
+        public async Task ExecuteSingle_AsyncTool_WaitsForCompletion()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), false, "test", 3);
+            bool completed = false;
+            Func<CancellationToken, Task<string>> func = async ct =>
+            {
+                await Task.Delay(75, ct);
+                completed = true;
+                return "async-ok";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(func,
+                new MEAI.AIFunctionFactoryOptions { Name = "async_tool", Description = "Async tool" }));
+            MEAI.FunctionCallContent fc = MakeToolCall("async_tool");
+
+            Stopwatch sw = Stopwatch.StartNew();
+            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            sw.Stop();
+
+            Assert.IsTrue(result.Succeeded);
+            Assert.IsTrue(completed);
+            Assert.GreaterOrEqual(sw.ElapsedMilliseconds, 50);
+            Assert.AreEqual("async-ok", result.Result.Result.ToString());
         }
 
         [Test]

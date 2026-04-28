@@ -18,6 +18,7 @@ namespace CoreAI.Tests.EditMode
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
+            Assert.AreEqual(LlmExecutionMode.Auto, settings.ExecutionMode);
             Assert.AreEqual(LlmAutoPriority.LlmUnityFirst, settings.AutoPriority);
             Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
             Assert.AreEqual("", settings.ApiKey);
@@ -41,6 +42,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.OfflineUseCustomResponse);
             Assert.AreEqual("Offline mode: LLM unavailable", settings.OfflineCustomResponse);
             Assert.AreEqual("*", settings.OfflineCustomResponseRoles);
+            Assert.AreEqual(0, settings.MaxClientLimitedRequestsPerSession);
+            Assert.AreEqual(0, settings.MaxClientLimitedPromptChars);
 
             Object.DestroyImmediate(settings);
         }
@@ -59,13 +62,16 @@ namespace CoreAI.Tests.EditMode
             // Переключаем на HTTP
             settings.ConfigureHttpApi("https://api.openai.com/v1", "sk-test", "gpt-4");
             Assert.AreEqual(LlmBackendType.OpenAiHttp, settings.BackendType);
+            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, settings.ExecutionMode);
             Assert.AreEqual(true, settings.UseHttpApi);
+            Assert.AreEqual(true, settings.UseClientOwnedApi);
             Assert.AreEqual(false, settings.UseLlmUnity);
             Assert.AreEqual(false, settings.UseOffline);
 
             // Переключаем на Offline
             settings.ConfigureOffline();
             Assert.AreEqual(LlmBackendType.Offline, settings.BackendType);
+            Assert.AreEqual(LlmExecutionMode.Offline, settings.ExecutionMode);
             Assert.AreEqual(false, settings.UseHttpApi);
             Assert.AreEqual(false, settings.UseLlmUnity);
             Assert.AreEqual(true, settings.UseOffline);
@@ -73,6 +79,7 @@ namespace CoreAI.Tests.EditMode
             // Переключаем на Auto
             settings.ConfigureAuto();
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
+            Assert.AreEqual(LlmExecutionMode.Auto, settings.ExecutionMode);
             Assert.AreEqual(false, settings.UseHttpApi);
             Assert.AreEqual(true, settings.UseLlmUnity);
             Assert.AreEqual(false, settings.UseOffline);
@@ -87,12 +94,43 @@ namespace CoreAI.Tests.EditMode
             settings.ConfigureHttpApi("https://api.test.com/v1", "sk-123", "test-model", 0.5f, 60, 2048);
 
             Assert.AreEqual(LlmBackendType.OpenAiHttp, settings.BackendType);
+            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, settings.ExecutionMode);
             Assert.AreEqual("https://api.test.com/v1", settings.ApiBaseUrl);
             Assert.AreEqual("sk-123", settings.ApiKey);
             Assert.AreEqual("test-model", settings.ModelName);
             Assert.AreEqual(0.5f, settings.Temperature);
             Assert.AreEqual(60, settings.RequestTimeoutSeconds);
             Assert.AreEqual(2048, settings.MaxTokens);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ConfigureClientLimited_ShouldSetModeAndLimits()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureClientLimited("https://api.test.com/v1", "sk-123", "test-model", 3, 512);
+
+            Assert.AreEqual(LlmExecutionMode.ClientLimited, settings.ExecutionMode);
+            Assert.AreEqual(true, settings.UseHttpApi);
+            Assert.AreEqual(true, settings.UseClientLimited);
+            Assert.AreEqual(3, settings.MaxClientLimitedRequestsPerSession);
+            Assert.AreEqual(512, settings.MaxClientLimitedPromptChars);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ConfigureServerManagedApi_ShouldAllowEmptyProviderKey()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureServerManagedApi("https://game.example.com/v1", "proxy-model");
+
+            Assert.AreEqual(LlmExecutionMode.ServerManagedApi, settings.ExecutionMode);
+            Assert.AreEqual(true, settings.UseHttpApi);
+            Assert.AreEqual(true, settings.UseServerManagedApi);
+            Assert.AreEqual("", settings.ApiKey);
+            Assert.AreEqual("https://game.example.com/v1", settings.ApiBaseUrl);
 
             Object.DestroyImmediate(settings);
         }

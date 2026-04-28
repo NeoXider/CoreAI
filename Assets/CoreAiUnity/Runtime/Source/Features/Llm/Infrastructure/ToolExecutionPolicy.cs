@@ -1,12 +1,16 @@
 #if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Messaging;
+using MessagePipe;
 using MEAI = Microsoft.Extensions.AI;
+using Newtonsoft.Json;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -23,6 +27,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IReadOnlyList<ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
         private readonly string _roleId;
+        private readonly string _traceId;
         private readonly int _maxConsecutiveErrors;
 
         private int _consecutiveErrors;
@@ -34,13 +39,15 @@ namespace CoreAI.Infrastructure.Llm
             IReadOnlyList<ILlmTool> originalTools,
             bool allowDuplicateToolCalls,
             string roleId,
-            int maxConsecutiveErrors = 3)
+            int maxConsecutiveErrors = 3,
+            string traceId = "")
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _originalTools = originalTools ?? new List<ILlmTool>();
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _roleId = roleId ?? "Unknown";
+            _traceId = traceId ?? "";
             _maxConsecutiveErrors = Math.Max(1, maxConsecutiveErrors);
         }
 
@@ -121,6 +128,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (aiFunc == null)
             {
+                PublishFailed(BuildInfo(fc), $"Tool '{fc.Name}' not found", 0d);
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"),
@@ -130,10 +138,14 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
+                LlmToolCallInfo info = BuildInfo(fc);
+                PublishStarted(info);
+                Stopwatch sw = Stopwatch.StartNew();
                 MEAI.AIFunctionArguments args = fc.Arguments != null
                     ? new MEAI.AIFunctionArguments(fc.Arguments)
                     : null;
                 object result = await aiFunc.InvokeAsync(args, cancellationToken);
+                sw.Stop();
                 string resultText = result?.ToString() ?? "";
                 bool succeeded = !resultText.Contains("\"Success\":false") &&
                                  !resultText.Contains("\"success\":false");
@@ -142,6 +154,15 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
                         $"[ToolPolicy] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
+                }
+
+                if (succeeded)
+                {
+                    PublishCompleted(info, SafeResultJson(resultText), sw.Elapsed.TotalMilliseconds);
+                }
+                else
+                {
+                    PublishFailed(info, SafeResultJson(resultText), sw.Elapsed.TotalMilliseconds);
                 }
 
                 // Notify subscribers
@@ -164,11 +185,101 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 _logger.LogError(GameLogFeature.Llm, $"[ToolPolicy] {fc.Name} threw: {ex.Message}");
+                PublishFailed(BuildInfo(fc), ex.Message, 0d);
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"),
                     Succeeded = false
                 };
+            }
+        }
+
+        private LlmToolCallInfo BuildInfo(MEAI.FunctionCallContent fc)
+        {
+            return new LlmToolCallInfo(
+                _traceId,
+                _roleId,
+                fc?.CallId ?? "",
+                fc?.Name ?? "",
+                SafeArgumentsJson(fc));
+        }
+
+        private string SafeArgumentsJson(MEAI.FunctionCallContent fc)
+        {
+            if (!_settings.LogToolCallArguments || fc?.Arguments == null)
+            {
+                return "";
+            }
+
+            try
+            {
+                return JsonConvert.SerializeObject(fc.Arguments);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private string SafeResultJson(string result)
+        {
+            if (!_settings.LogToolCallResults || string.IsNullOrEmpty(result))
+            {
+                return "";
+            }
+
+            const int max = 2000;
+            return result.Length <= max ? result : result.Substring(0, max);
+        }
+
+        private void PublishStarted(LlmToolCallInfo info)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallStarted>()
+                    .Publish(new LlmToolCallStarted(info));
+            }
+            catch
+            {
+            }
+        }
+
+        private void PublishCompleted(LlmToolCallInfo info, string resultJson, double durationMs)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallCompleted>()
+                    .Publish(new LlmToolCallCompleted(info, resultJson, durationMs));
+            }
+            catch
+            {
+            }
+        }
+
+        private void PublishFailed(LlmToolCallInfo info, string error, double durationMs)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallFailed>()
+                    .Publish(new LlmToolCallFailed(info, error, durationMs));
+            }
+            catch
+            {
             }
         }
 

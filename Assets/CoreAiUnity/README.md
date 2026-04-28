@@ -24,6 +24,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 | **Agent** | `AgentBuilder`, tools, memory |
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |
+| **LLM modes** | `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, mixed routing |
 | **Docs · Tests · Install** | End of this file |
 
 ---
@@ -48,6 +49,8 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 ## Changelog
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
+
+Current stable line: **`1.0.0`**. It introduces public LLM execution modes and multi-mode role routing.
 
 ---
 
@@ -99,8 +102,8 @@ Create your own — implement `ILlmTool` and register via `AgentBuilder.WithTool
 
 ## 🌊 Streaming & cancellation
 
-- HTTP: `MeaiOpenAiChatClient` parses OpenAI-compatible SSE. Cancellation aborts `UnityWebRequest` immediately.
-- Local: `LlmUnityMeaiChatClient` bridges LLMUnity's frame callbacks to `IAsyncEnumerable`.
+- `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`: `MeaiOpenAiChatClient` parses OpenAI-compatible SSE. Cancellation aborts `UnityWebRequest` immediately.
+- `LocalModel`: `LlmUnityMeaiChatClient` bridges LLMUnity's frame callbacks to `IAsyncEnumerable`.
 - Both paths run through `ThinkBlockStreamFilter` — a state machine that removes `<think>…</think>` blocks even when tags are split across chunks.
 
 **Priority:** UI toggle → `AgentMemoryPolicy.SetStreamingEnabled(role, bool)` → `AgentBuilder.WithStreaming(bool)` → `CoreAISettings.EnableStreaming` (default `true`).

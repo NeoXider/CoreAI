@@ -5,6 +5,78 @@ using System.Threading.Tasks;
 
 namespace CoreAI.Ai
 {
+    /// <summary>
+    /// Stable error category for LLM failures that UI, retry policies, and backend integrations can handle without parsing strings.
+    /// </summary>
+    public enum LlmErrorCode
+    {
+        /// <summary>No error was reported.</summary>
+        None = 0,
+
+        /// <summary>The request exceeded its timeout.</summary>
+        Timeout = 1,
+
+        /// <summary>The caller cancelled the request.</summary>
+        Cancelled = 2,
+
+        /// <summary>The provider returned no usable content.</summary>
+        EmptyResponse = 3,
+
+        /// <summary>Authorization failed or the token has expired.</summary>
+        AuthExpired = 4,
+
+        /// <summary>The backend or local limiter rejected the request because quota was exhausted.</summary>
+        QuotaExceeded = 5,
+
+        /// <summary>The provider or backend rate limited the request.</summary>
+        RateLimited = 6,
+
+        /// <summary>The provider or backend is unavailable.</summary>
+        BackendUnavailable = 7,
+
+        /// <summary>The request was malformed or rejected by validation.</summary>
+        InvalidRequest = 8,
+
+        /// <summary>The provider returned an error that does not fit a more specific category.</summary>
+        ProviderError = 9,
+
+        /// <summary>Routing could not resolve a usable backend.</summary>
+        RoutingError = 10
+    }
+
+    /// <summary>
+    /// Exception type used by LLM adapters to preserve structured failure details across abstraction layers.
+    /// </summary>
+    public sealed class LlmClientException : Exception
+    {
+        /// <summary>Creates an exception with structured LLM failure metadata.</summary>
+        public LlmClientException(
+            string message,
+            LlmErrorCode errorCode = LlmErrorCode.ProviderError,
+            int? httpStatus = null,
+            int? retryAfterSeconds = null,
+            string providerErrorBody = null)
+            : base(message ?? "")
+        {
+            ErrorCode = errorCode;
+            HttpStatus = httpStatus;
+            RetryAfterSeconds = retryAfterSeconds;
+            ProviderErrorBody = providerErrorBody ?? "";
+        }
+
+        /// <summary>Stable failure category.</summary>
+        public LlmErrorCode ErrorCode { get; }
+
+        /// <summary>HTTP status code when the failure came from an HTTP transport.</summary>
+        public int? HttpStatus { get; }
+
+        /// <summary>Provider hint for when the request may be retried.</summary>
+        public int? RetryAfterSeconds { get; }
+
+        /// <summary>Raw provider error body, intended for diagnostics only.</summary>
+        public string ProviderErrorBody { get; }
+    }
+
     /// <summary>Вход одного вызова <see cref="ILlmClient.CompleteAsync"/> (роль, промпты, трассировка).</summary>
     public sealed class LlmCompletionRequest
     {
@@ -69,6 +141,21 @@ namespace CoreAI.Ai
         /// <summary>Описание сбоя или отмены.</summary>
         public string Error { get; set; } = "";
 
+        /// <summary>Stable failure category for UI and retry policies.</summary>
+        public LlmErrorCode ErrorCode { get; set; } = LlmErrorCode.None;
+
+        /// <summary>HTTP status code when the failure came from an HTTP backend.</summary>
+        public int? HttpStatus { get; set; }
+
+        /// <summary>Provider hint for when the request may be retried.</summary>
+        public int? RetryAfterSeconds { get; set; }
+
+        /// <summary>Raw provider error body, intended for diagnostics only.</summary>
+        public string ProviderErrorBody { get; set; } = "";
+
+        /// <summary>Model identifier used by the provider when known.</summary>
+        public string Model { get; set; } = "";
+
         /// <summary>Заполняется OpenAI-compatible HTTP при наличии <c>usage</c> в JSON.</summary>
         public int? PromptTokens { get; set; }
 
@@ -90,6 +177,18 @@ namespace CoreAI.Ai
 
         /// <summary>Ошибка стриминга (если есть).</summary>
         public string Error { get; set; }
+
+        /// <summary>Stable failure category for UI and retry policies.</summary>
+        public LlmErrorCode ErrorCode { get; set; } = LlmErrorCode.None;
+
+        /// <summary>HTTP status code when the failure came from an HTTP backend.</summary>
+        public int? HttpStatus { get; set; }
+
+        /// <summary>Provider hint for when the request may be retried.</summary>
+        public int? RetryAfterSeconds { get; set; }
+
+        /// <summary>Model identifier used by the provider when known.</summary>
+        public string Model { get; set; } = "";
 
         /// <summary>Usage — заполняется только в финальном чанке, если бэкенд отдаёт usage.</summary>
         public int? PromptTokens { get; set; }
@@ -132,13 +231,26 @@ namespace CoreAI.Ai
             LlmCompletionResult result = await CompleteAsync(request, cancellationToken).ConfigureAwait(false);
             if (result == null)
             {
-                yield return new LlmStreamChunk { IsDone = true, Error = "null result" };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "null result",
+                    ErrorCode = LlmErrorCode.ProviderError
+                };
                 yield break;
             }
 
             if (!result.Ok)
             {
-                yield return new LlmStreamChunk { IsDone = true, Error = result.Error };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = result.Error,
+                    ErrorCode = result.ErrorCode,
+                    HttpStatus = result.HttpStatus,
+                    RetryAfterSeconds = result.RetryAfterSeconds,
+                    Model = result.Model
+                };
                 yield break;
             }
 
@@ -148,7 +260,8 @@ namespace CoreAI.Ai
                 IsDone = true,
                 PromptTokens = result.PromptTokens,
                 CompletionTokens = result.CompletionTokens,
-                TotalTokens = result.TotalTokens
+                TotalTokens = result.TotalTokens,
+                Model = result.Model
             };
         }
 #endif

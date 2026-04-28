@@ -93,7 +93,7 @@ flowchart LR
 ```
 
 1. The **game** calls **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (role, hint, **`Priority`**, **`CancellationScope`**, optional Lua repair fields, **`TraceId`**).
-2. The default implementation is **`QueuedAiOrchestrator`** (concurrency limit, priority, canceling the previous task with the same **`CancellationScope`**) around **`AiOrchestrator`**. **`AiOrchestrator`** assigns **`TraceId`**, assembles prompts, calls **`ILlmClient.CompleteAsync`**; with **`IRoleStructuredResponsePolicy`** for a role, **one** retry is allowed with a **`structured_retry:`** hint in user/hint. Then **`ApplyAiGameCommand`** is published (**`AiEnvelope`**, **`TraceId`**, …). Metrics — **`IAiOrchestrationMetrics`** (log under **`GameLogFeature.Metrics`**).
+2. The default implementation is **`QueuedAiOrchestrator`** (concurrency limit, priority, canceling the previous task with the same **`CancellationScope`**) around **`AiOrchestrator`**. **`AiOrchestrator`** assigns **`TraceId`**, assembles prompts, asks **`IConversationContextManager`** to prepare long chat history, then calls **`ILlmClient.CompleteAsync`**; with **`IRoleStructuredResponsePolicy`** for a role, **one** retry is allowed with a **`structured_retry:`** hint in user/hint. Then **`ApplyAiGameCommand`** is published (**`AiEnvelope`**, **`TraceId`**, …). Metrics — **`IAiOrchestrationMetrics`** (log under **`GameLogFeature.Metrics`**).
 3. In DI, **`ILlmClient`** is **`LoggingLlmClientDecorator`** around **`RoutingLlmClient`** (or a legacy single client): inside — **`OpenAiChatLlmClient`** / **`MeaiLlmUnityClient`** / **`StubLlmClient`** per **`LlmRoutingManifest`** and role. Log **`GameLogFeature.Llm`** (`LLM ▶` / `LLM ◀` / `LLM ⏱`), backend line **`RoutingLlmClient→OpenAiHttp`**, etc. For “is this stub?” — **`LoggingLlmClientDecorator.Unwrap(client)`**.
 4. Subscriber **`AiGameCommandRouter`** receives **`ApplyAiGameCommand`** from MessagePipe and **marshals handling to the Unity main thread** (`UniTask.SwitchToMainThread`), then calls **`LuaAiEnvelopeProcessor.Process`**: Lua is extracted from text, executed in the sandbox with API from **`IGameLuaRuntimeBindings`**; **`[MessagePipe]`** logs include the same task **`traceId`**.
 5. On success / failure, **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** are published (**`TraceId`** preserved). For the **Programmer** role on error, the orchestrator is invoked again with repair context and the same **`TraceId`** (up to **3 attempts** by default, configurable via **`CoreAISettings.MaxLuaRepairRetries`**).
@@ -119,14 +119,45 @@ Beginner rule: set `CancellationScope = roleId` for UI/chat-style “only latest
 Advanced rule: use stable domain scopes (`arena_wave_plan`, `npc:merchant:dialogue`) and priority bands
 for predictable gameplay scheduling.
 
+### 3.2 Long Context Management
+
+Chat history is not sent blindly forever. When `AgentMemoryPolicy.RoleMemoryConfig.WithChatHistory` is enabled, `AiOrchestrator` loads recent stored chat and passes it to `IConversationContextManager`.
+
+The default `DeterministicConversationContextManager` uses the role `ContextTokens` budget. Fresh turns remain in `LlmCompletionRequest.ChatHistory`; older turns are compacted into `## Conversation Summary` in the system prompt and can be stored through `IConversationSummaryStore`. This is deterministic and does not spend another LLM request.
+
+Production projects can replace `IConversationContextManager` with an implementation that calls a backend summarizer, stores summaries per user/session/topic, or applies stricter privacy rules. Keep the output short and factual because it becomes part of every later request.
+
+### 3.3 Tool Call Observability
+
+Tool calls are awaited by `ToolExecutionPolicy.ExecuteSingleAsync`, including async `AIFunction` implementations. The policy publishes `LlmToolCallStarted`, `LlmToolCallCompleted`, and `LlmToolCallFailed`.
+
+Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized `ArgumentsJson`. Use `Info.CallId` when correlating start/completed/failed logs, especially when providers issue several tool calls in one response.
+
 ---
 
-## 4. LLM: two backends
+## 4. LLM: execution modes and routing
 
-| Mode | Where it is configured | When it is selected |
-|--------|-------------------|------------------|
-| **LLMUnity** (`LLMAgent` in scene) | **LLM** / **LLMAgent** inspector | By default when HTTP is off: actual client is **`MeaiLlmUnityClient`**, wrapped in **`LoggingLlmClientDecorator`** in the container. See [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). |
-| **OpenAI-compatible HTTP** | **CoreAI → LLM → OpenAI-compatible HTTP** asset, field on **`CoreAILifetimeScope`** | **`OpenAiHttpLlmSettings.UseOpenAiCompatibleHttp`** — then inside the decorator the implementation is **`OpenAiChatLlmClient`**. |
+`LlmExecutionMode` is the public mode surface. One project can use a single global mode from `CoreAISettingsAsset`, or several modes at once through `LlmRoutingManifest` profiles.
+
+| Mode | Runtime client path | When to use |
+|--------|-------------------|-------------|
+| **LocalModel** | `MeaiLlmUnityClient` via `LLMAgent` | Local/offline prototyping and shipped local models |
+| **ClientOwnedApi** | `OpenAiChatLlmClient` | User/developer owns the provider key |
+| **ClientLimited** | `ClientLimitedLlmClientDecorator` → `OpenAiChatLlmClient` | Local caps for demos or prototypes |
+| **ServerManagedApi** | `ServerManagedLlmClient` pointed at a backend proxy | Production WebGL/multiplayer/school/SaaS deployment |
+| **Offline** | `OfflineLlmClient` or `StubLlmClient` | Tests and builds without live model access |
+
+`RoutingLlmClient` resolves a role through `LlmClientRegistry`, annotates `LlmCompletionRequest.RoutingProfileId`, and publishes `LlmBackendSelected`, `LlmRequestStarted`, `LlmRequestCompleted`, and `LlmUsageReported` via MessagePipe. Diagnostics and UI code should subscribe to those messages instead of inspecting registry internals.
+
+`ServerManagedApi` supports dynamic backend authorization:
+
+```csharp
+ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJwt);
+```
+
+Provider failures use `LlmErrorCode` on `LlmCompletionResult`, `LlmStreamChunk`, and `LlmRequestCompleted`, so callers can handle `QuotaExceeded`, `AuthExpired`, `RateLimited`, `BackendUnavailable`, and other stable categories without parsing error text.
+
+For mixed routing, create profiles such as `player_server`, `analyzer_limited`, and `creator_local`, then map role ids to those profiles. A single request always resolves to one concrete backend, but the scene can keep multiple profiles active.
 
 Symbol **`COREAI_NO_LLM`** (manual opt-out): the container keeps a chain with **`StubLlmClient`** / HTTP as needed — details in DGF_SPEC §5.2.
 
@@ -146,12 +177,13 @@ By default, per-role streaming override is enabled for roles with tools (`AgentM
 - **Built-in roles:** see **`BuiltInAgentRoleIds`** and **`AgentRolesAndPromptsTests`**.
 - **Custom agents:** use **`AgentBuilder`** to create agents with unique tools. See [AGENT_BUILDER.md](AGENT_BUILDER.md).
 - **User payload:** default JSON like `{"telemetry":{...},"hint":"..."}` from **`GameSessionSnapshot.Telemetry`**; Lua repair adds **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
+- **Runtime context:** register `IAiPromptContextProvider` implementations to append per-request context such as current quest, lesson slot, learner profile, or objective under `## Runtime Context`.
 - **Agent memory (optional):** the agent persists memory via **MEAI tool calling**:
   - `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` — overwrite
   - `{"name": "memory", "arguments": {"action": "append", "content": "..."}}` — append
   - `{"name": "memory", "arguments": {"action": "clear"}}` — clear
 
-  By default memory is **off for all roles** except **Creator** (see `AgentMemoryPolicy`). At Unity runtime, memory is stored under `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`.
+  By default memory is **off for all roles** except **Creator** (see `AgentMemoryPolicy`). At Unity runtime, memory is stored under `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`. For multi-user or session-scoped products, wrap a store with `ScopedAgentMemoryStoreDecorator` and provide an `IAgentMemoryScopeProvider`.
 
 ---
 

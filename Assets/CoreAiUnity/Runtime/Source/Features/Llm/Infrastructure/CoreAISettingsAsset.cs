@@ -1,3 +1,4 @@
+using CoreAI.Ai;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
@@ -84,6 +85,10 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private LlmBackendType backendType = LlmBackendType.Auto;
 
+        [Tooltip("Product-facing LLM mode. Auto preserves legacy backend selection.")]
+        [SerializeField]
+        private LlmExecutionMode executionMode = LlmExecutionMode.Auto;
+
         [Tooltip("Приоритет в Auto режиме: LLMUnity сначала или HTTP API сначала.")] [SerializeField]
         private LlmAutoPriority autoPriority = LlmAutoPriority.LlmUnityFirst;
 
@@ -107,6 +112,11 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip("Максимум токенов в ответе. 0 = без лимита.")] [SerializeField]
         private int maxTokens = 4096;
+
+        [Header("Client limits")]
+        [SerializeField] [Min(0)] private int maxClientLimitedRequestsPerSession;
+
+        [SerializeField] [Min(0)] private int maxClientLimitedPromptChars;
 
         [Tooltip("Таймаут HTTP-запроса в секундах. 0 = без таймаута.")] [SerializeField] [Min(0)]
         private int requestTimeoutSeconds = 120;
@@ -243,14 +253,30 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Тип текущего бэкенда.</summary>
         public LlmBackendType BackendType => backendType;
 
+        /// <summary>Product-facing LLM execution mode.</summary>
+        public LlmExecutionMode ExecutionMode => ResolveExecutionMode(executionMode, backendType);
+
         /// <summary>Используется ли HTTP API.</summary>
-        public bool UseHttpApi => backendType == LlmBackendType.OpenAiHttp;
+        public bool UseHttpApi =>
+            ExecutionMode == LlmExecutionMode.ClientOwnedApi ||
+            ExecutionMode == LlmExecutionMode.ClientLimited ||
+            ExecutionMode == LlmExecutionMode.ServerManagedApi ||
+            backendType == LlmBackendType.OpenAiHttp;
 
         /// <summary>Используется ли LLMUnity.</summary>
-        public bool UseLlmUnity => backendType == LlmBackendType.LlmUnity || backendType == LlmBackendType.Auto;
+        public bool UseLlmUnity => ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto;
 
         /// <summary>Используется ли офлайн режим (без LLM).</summary>
-        public bool UseOffline => backendType == LlmBackendType.Offline;
+        public bool UseOffline => ExecutionMode == LlmExecutionMode.Offline;
+
+        /// <summary>Whether the current mode uses a user-owned provider key.</summary>
+        public bool UseClientOwnedApi => ExecutionMode == LlmExecutionMode.ClientOwnedApi;
+
+        /// <summary>Whether the current mode applies local client-side limits.</summary>
+        public bool UseClientLimited => ExecutionMode == LlmExecutionMode.ClientLimited;
+
+        /// <summary>Whether the current mode delegates provider access to a backend service.</summary>
+        public bool UseServerManagedApi => ExecutionMode == LlmExecutionMode.ServerManagedApi;
 
         /// <summary>Приоритет бэкендов в Auto режиме.</summary>
         public LlmAutoPriority AutoPriority => autoPriority;
@@ -317,7 +343,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // Для LLMUnity возвращаем имя GGUF файла
-                if (backendType == LlmBackendType.LlmUnity || backendType == LlmBackendType.Auto)
+                if (ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto)
                 {
                     if (!string.IsNullOrWhiteSpace(ggufModelPath))
                     {
@@ -334,6 +360,14 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Максимум токенов в ответе.</summary>
         public int MaxTokens => maxTokens;
+
+        /// <summary>Maximum client-limited requests allowed in the current session; zero disables this limit.</summary>
+        public int MaxClientLimitedRequestsPerSession =>
+            maxClientLimitedRequestsPerSession < 0 ? 0 : maxClientLimitedRequestsPerSession;
+
+        /// <summary>Maximum client-limited prompt characters per request; zero disables this limit.</summary>
+        public int MaxClientLimitedPromptChars =>
+            maxClientLimitedPromptChars < 0 ? 0 : maxClientLimitedPromptChars;
 
         /// <summary>Таймаут HTTP-запроса.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds <= 0 ? 120 : requestTimeoutSeconds;
@@ -448,12 +482,62 @@ namespace CoreAI.Infrastructure.Llm
             int maxTokens = 4096)
         {
             backendType = LlmBackendType.OpenAiHttp;
+            executionMode = LlmExecutionMode.ClientOwnedApi;
             apiBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:1234/v1" : baseUrl;
             apiKey = key ?? "";
             modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
             this.maxTokens = maxTokens <= 0 ? 4096 : maxTokens;
+        }
+
+        /// <summary>
+        /// Switches to a user-owned OpenAI-compatible HTTP API.
+        /// </summary>
+        public void ConfigureClientOwnedApi(
+            string baseUrl,
+            string key,
+            string model,
+            float temperature = 0.2f,
+            int timeoutSeconds = 120,
+            int maxTokens = 4096)
+        {
+            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
+            executionMode = LlmExecutionMode.ClientOwnedApi;
+        }
+
+        /// <summary>
+        /// Switches to an OpenAI-compatible HTTP API with local client-side limits.
+        /// </summary>
+        public void ConfigureClientLimited(
+            string baseUrl,
+            string key,
+            string model,
+            int maxRequestsPerSession,
+            int maxPromptChars,
+            float temperature = 0.2f,
+            int timeoutSeconds = 120,
+            int maxTokens = 4096)
+        {
+            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
+            executionMode = LlmExecutionMode.ClientLimited;
+            maxClientLimitedRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
+            maxClientLimitedPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
+        }
+
+        /// <summary>
+        /// Switches to a backend-managed OpenAI-compatible proxy without requiring a provider key in the client.
+        /// </summary>
+        public void ConfigureServerManagedApi(
+            string backendBaseUrl,
+            string model,
+            string backendAuthToken = "",
+            float temperature = 0.2f,
+            int timeoutSeconds = 120,
+            int maxTokens = 4096)
+        {
+            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens);
+            executionMode = LlmExecutionMode.ServerManagedApi;
         }
 
         /// <summary>
@@ -469,6 +553,7 @@ namespace CoreAI.Infrastructure.Llm
             int numGpuLayers = 99)
         {
             backendType = LlmBackendType.LlmUnity;
+            executionMode = LlmExecutionMode.LocalModel;
             llmUnityAgentName = agentName ?? "";
             ggufModelPath = string.IsNullOrWhiteSpace(ggufPath) ? "Qwen3.5-2B-Q4_K_M.gguf" : ggufPath;
             llmUnityKeepAlive = keepAlive;
@@ -484,6 +569,7 @@ namespace CoreAI.Infrastructure.Llm
         public void ConfigureOffline()
         {
             backendType = LlmBackendType.Offline;
+            executionMode = LlmExecutionMode.Offline;
         }
 
         /// <summary>
@@ -492,6 +578,30 @@ namespace CoreAI.Infrastructure.Llm
         public void ConfigureAuto()
         {
             backendType = LlmBackendType.Auto;
+            executionMode = LlmExecutionMode.Auto;
+        }
+
+        /// <summary>
+        /// Maps legacy backend settings to the public execution mode surface.
+        /// </summary>
+        public static LlmExecutionMode ResolveExecutionMode(LlmExecutionMode mode, LlmBackendType legacyBackend)
+        {
+            if (mode != LlmExecutionMode.Auto)
+            {
+                return mode;
+            }
+
+            switch (legacyBackend)
+            {
+                case LlmBackendType.LlmUnity:
+                    return LlmExecutionMode.LocalModel;
+                case LlmBackendType.OpenAiHttp:
+                    return LlmExecutionMode.ClientOwnedApi;
+                case LlmBackendType.Offline:
+                    return LlmExecutionMode.Offline;
+                default:
+                    return LlmExecutionMode.Auto;
+            }
         }
 
         #endregion
@@ -530,6 +640,16 @@ namespace CoreAI.Infrastructure.Llm
             if (maxConcurrentOrchestrations < 1)
             {
                 maxConcurrentOrchestrations = 2;
+            }
+
+            if (maxClientLimitedRequestsPerSession < 0)
+            {
+                maxClientLimitedRequestsPerSession = 0;
+            }
+
+            if (maxClientLimitedPromptChars < 0)
+            {
+                maxClientLimitedPromptChars = 0;
             }
 
             if (llmRequestTimeoutSeconds < 0f)

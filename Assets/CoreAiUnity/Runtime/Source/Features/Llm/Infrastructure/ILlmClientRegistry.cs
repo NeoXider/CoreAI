@@ -3,21 +3,27 @@ using CoreAI.Ai;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Разрешение <see cref="ILlmClient"/> по роли агента (потокобезопасно для чтения после сборки).
+    /// Resolves inner <see cref="ILlmClient"/> instances by agent role.
     /// </summary>
     public interface ILlmClientRegistry
     {
-        /// <summary>Внутренний клиент для роли (без декораторов логирования снаружи).</summary>
+        /// <summary>Inner client for a role before outer logging decorators.</summary>
         ILlmClient ResolveClientForRole(string roleId);
 
-        /// <summary>Контекстное окно (токены) для роли с учетом профиля маршрутизации (default: 8192).</summary>
+        /// <summary>Context window in tokens for the role route.</summary>
         int ResolveContextWindowForRole(string roleId);
+
+        /// <summary>Product-facing execution mode for the role route.</summary>
+        LlmExecutionMode ResolveExecutionModeForRole(string roleId);
+
+        /// <summary>Routing profile id for the role route.</summary>
+        string ResolveProfileIdForRole(string roleId);
     }
 
-    /// <summary>Смена маршрутизации без пересоздания VContainer scope.</summary>
+    /// <summary>Rebuilds LLM routing without recreating the VContainer scope.</summary>
     public interface ILlmRoutingController
     {
-        /// <summary>Пересобрать клиенты из манифеста (или сброс на legacy-клиент).</summary>
+        /// <summary>Applies a manifest or falls back to the legacy client when routing is disabled.</summary>
         void ApplyManifest(LlmRoutingManifest manifest);
     }
 }

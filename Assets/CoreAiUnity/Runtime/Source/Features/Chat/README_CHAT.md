@@ -245,12 +245,17 @@ new AgentBuilder("JsonParser")
     .Build();
 ```
 
-## Streaming (both backends)
+## Streaming and LLM modes
 
-| Backend | Mechanism | Real streaming? |
-|---------|-----------|-----------------|
-| **HTTP API** (OpenAI, LM Studio) | SSE (`stream: true`) → parsing `data:` chunks | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
-| **LLMUnity** (local GGUF) | `LLMAgent.Chat(callback)` → deltas via ConcurrentQueue | ✅ Yes |
+| Mode | Mechanism | Real streaming? |
+|------|-----------|-----------------|
+| **LocalModel** | LLMUnity `LLMAgent.Chat(callback)` → deltas via ConcurrentQueue | ✅ Yes |
+| **ClientOwnedApi** | OpenAI-compatible SSE (`stream: true`) | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
+| **ClientLimited** | Local limits → OpenAI-compatible SSE | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
+| **ServerManagedApi** | Backend proxy using an OpenAI-compatible streaming endpoint | ✅ Yes when the backend streams SSE; ⚠️ WebGL caveat still applies |
+| **Offline** | Deterministic local response | Single final chunk |
+
+For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `LlmRoutingManifest`, for example `PlayerChat → ServerManagedApi` and `Analyzer → ClientLimited`.
 
 > ⚠️ **WebGL caveat (0.25.x).** In a built WebGL player the `UnityWebRequest` wrapper
 > (emscripten `XMLHttpRequest`) does not deliver SSE incrementally — all chunks arrive in one block at

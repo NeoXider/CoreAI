@@ -112,11 +112,12 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Added OpenRouter headers");
             }
 
-            if (!string.IsNullOrEmpty(_settings.ApiKey))
+            string authorizationHeader = ResolveAuthorizationHeader();
+            if (!string.IsNullOrEmpty(authorizationHeader))
             {
-                webReq.SetRequestHeader("Authorization", "Bearer " + _settings.ApiKey);
+                webReq.SetRequestHeader("Authorization", authorizationHeader);
                 _logger.LogInfo(GameLogFeature.Llm,
-                    $"MeaiOpenAiChatClient: API key set (len={_settings.ApiKey.Length})");
+                    $"MeaiOpenAiChatClient: Authorization header set (len={authorizationHeader.Length})");
             }
 
             _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Timeout={_settings.RequestTimeoutSeconds}s");
@@ -140,7 +141,7 @@ namespace CoreAI.Infrastructure.Llm
                     ? $"{webReq.error} | Body: {responseBody}"
                     : webReq.error;
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {errorDetail}");
-                throw new Exception($"HTTP error: {errorDetail}");
+                throw BuildHttpException(webReq, responseBody, errorDetail);
             }
 
             // Логируем ответ от модели если включено
@@ -271,9 +272,10 @@ namespace CoreAI.Infrastructure.Llm
                 webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
                 webReq.SetRequestHeader("X-Title", "CoreAI");
             }
-            if (!string.IsNullOrEmpty(_settings.ApiKey))
+            string authorizationHeader = ResolveAuthorizationHeader();
+            if (!string.IsNullOrEmpty(authorizationHeader))
             {
-                webReq.SetRequestHeader("Authorization", "Bearer " + _settings.ApiKey);
+                webReq.SetRequestHeader("Authorization", authorizationHeader);
             }
             webReq.timeout = _settings.RequestTimeoutSeconds;
 
@@ -339,6 +341,7 @@ namespace CoreAI.Infrastructure.Llm
                         : webReq.error;
                     _logger.LogWarning(GameLogFeature.Llm,
                         $"MeaiOpenAiChatClient: stream error — {streamErr}");
+                    throw BuildHttpException(webReq, streamBody, streamErr);
                 }
             }
             finally
@@ -373,6 +376,96 @@ namespace CoreAI.Infrastructure.Llm
                     yield return update;
                 }
             }
+        }
+
+        private static LlmClientException BuildHttpException(
+            UnityWebRequest request,
+            string responseBody,
+            string errorDetail)
+        {
+            int status = (int)request.responseCode;
+            LlmErrorCode code = MapHttpStatus(status, responseBody, errorDetail);
+            int? retryAfter = null;
+            string retryHeader = request.GetResponseHeader("Retry-After");
+            if (int.TryParse(retryHeader, out int parsedRetry))
+            {
+                retryAfter = parsedRetry;
+            }
+
+            return new LlmClientException(
+                $"HTTP error {status}: {ExtractProviderMessage(responseBody, errorDetail)}",
+                code,
+                status > 0 ? status : null,
+                retryAfter,
+                responseBody);
+        }
+
+        private string ResolveAuthorizationHeader()
+        {
+            if (!string.IsNullOrWhiteSpace(_settings.AuthorizationHeader))
+            {
+                return _settings.AuthorizationHeader.Trim();
+            }
+
+            return string.IsNullOrWhiteSpace(_settings.ApiKey)
+                ? ""
+                : "Bearer " + _settings.ApiKey;
+        }
+
+        private static LlmErrorCode MapHttpStatus(int status, string body, string fallback)
+        {
+            string text = ((body ?? "") + " " + (fallback ?? "")).ToLowerInvariant();
+            if (status == 401 || status == 403)
+            {
+                return LlmErrorCode.AuthExpired;
+            }
+
+            if (status == 409 || text.Contains("quota") || text.Contains("quota_exceeded"))
+            {
+                return LlmErrorCode.QuotaExceeded;
+            }
+
+            if (status == 429 || text.Contains("rate"))
+            {
+                return LlmErrorCode.RateLimited;
+            }
+
+            if (status == 400 || status == 422)
+            {
+                return LlmErrorCode.InvalidRequest;
+            }
+
+            if (status >= 500 || status == 0)
+            {
+                return LlmErrorCode.BackendUnavailable;
+            }
+
+            return LlmErrorCode.ProviderError;
+        }
+
+        private static string ExtractProviderMessage(string responseBody, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+            {
+                return fallback ?? "";
+            }
+
+            try
+            {
+                JObject root = JObject.Parse(responseBody);
+                string message = root["error"]?["message"]?.ToString()
+                                 ?? root["message"]?.ToString()
+                                 ?? root["detail"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    return message;
+                }
+            }
+            catch
+            {
+            }
+
+            return fallback ?? responseBody;
         }
 
         /// <summary>

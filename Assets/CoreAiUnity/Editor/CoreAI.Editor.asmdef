@@ -2,6 +2,7 @@
   "name": "CoreAI.Editor",
   "rootNamespace": "CoreAI.Editor",
   "references": [
+    "CoreAI.Core",
     "CoreAI.Source",
     "VContainer",
     "undream.llmunity.Runtime"

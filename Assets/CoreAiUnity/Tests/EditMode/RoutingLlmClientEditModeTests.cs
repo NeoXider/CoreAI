@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Messaging;
+using MessagePipe;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -32,7 +34,11 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult(new LlmCompletionResult
                 {
                     Ok = true,
-                    Content = string.Concat(_parts)
+                    Content = string.Concat(_parts),
+                    Model = "test-model",
+                    PromptTokens = 10,
+                    CompletionTokens = 5,
+                    TotalTokens = 15
                 });
             }
 
@@ -48,13 +54,23 @@ namespace CoreAI.Tests.EditMode
                     await Task.Yield();
                 }
 
-                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Text = string.Empty,
+                    Model = "test-model",
+                    PromptTokens = 10,
+                    CompletionTokens = 5,
+                    TotalTokens = 15
+                };
             }
         }
 
         private sealed class FakeRegistry : ILlmClientRegistry
         {
             private readonly Dictionary<string, ILlmClient> _byRole = new();
+            private readonly Dictionary<string, string> _profileByRole = new();
+            private readonly Dictionary<string, LlmExecutionMode> _modeByRole = new();
             private readonly ILlmClient _fallback;
 
             public FakeRegistry(ILlmClient fallback)
@@ -65,6 +81,8 @@ namespace CoreAI.Tests.EditMode
             public void Register(string roleId, ILlmClient client)
             {
                 _byRole[roleId] = client;
+                _profileByRole[roleId] = roleId + "Profile";
+                _modeByRole[roleId] = LlmExecutionMode.ClientOwnedApi;
             }
 
             public ILlmClient ResolveClientForRole(string roleId)
@@ -73,6 +91,22 @@ namespace CoreAI.Tests.EditMode
             }
 
             public int ResolveContextWindowForRole(string roleId) => 4096;
+
+            public LlmExecutionMode ResolveExecutionModeForRole(string roleId) =>
+                _modeByRole.TryGetValue(roleId, out LlmExecutionMode mode) ? mode : LlmExecutionMode.Auto;
+
+            public string ResolveProfileIdForRole(string roleId) =>
+                _profileByRole.TryGetValue(roleId, out string profileId) ? profileId : "fallback";
+        }
+
+        private sealed class CapturingPublisher<T> : IPublisher<T>
+        {
+            public readonly List<T> Messages = new();
+
+            public void Publish(T message)
+            {
+                Messages.Add(message);
+            }
         }
 
         [Test]
@@ -144,6 +178,40 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(chunks[0].IsDone);
             StringAssert.Contains("null", chunks[0].Error);
             Assert.AreEqual(0, fallback.StreamingCalls, "При null-запросе не должен вызывать внутренний клиент");
+        }
+
+        [Test]
+        public async Task CompleteAsync_PublishesRoutingEvents()
+        {
+            StreamingMockLlm roleClient = new("ok");
+            FakeRegistry registry = new(new StreamingMockLlm("fallback"));
+            registry.Register("Merchant", roleClient);
+            CapturingPublisher<LlmBackendSelected> selected = new();
+            CapturingPublisher<LlmRequestStarted> started = new();
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            CapturingPublisher<LlmUsageReported> usage = new();
+            RoutingLlmClient routing = new(registry, selected, started, completed, usage);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Merchant",
+                TraceId = "trace-1",
+                UserPayload = "hello"
+            };
+
+            LlmCompletionResult result = await routing.CompleteAsync(request);
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("MerchantProfile", request.RoutingProfileId);
+            Assert.AreEqual(4096, request.ContextWindowTokens);
+            Assert.AreEqual(1, selected.Messages.Count);
+            Assert.AreEqual(1, started.Messages.Count);
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.AreEqual(1, usage.Messages.Count);
+            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, selected.Messages[0].ExecutionMode);
+            Assert.IsTrue(completed.Messages[0].Success);
+            Assert.AreEqual(15, usage.Messages[0].TotalTokens);
+            Assert.AreEqual("test-model", usage.Messages[0].Model);
         }
     }
 }

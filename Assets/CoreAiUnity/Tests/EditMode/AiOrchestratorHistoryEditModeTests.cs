@@ -41,6 +41,7 @@ namespace CoreAI.Tests.EditMode
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public List<CoreAI.Ai.ChatMessage> FakeHistory { get; set; } = new();
+            public List<(string Role, string Content)> Appended { get; } = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {
@@ -51,7 +52,10 @@ namespace CoreAI.Tests.EditMode
             public void Save(string roleId, AgentMemoryState state) { }
             public void Clear(string roleId) { }
             public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                Appended.Add((role, content));
+            }
 
             public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
@@ -104,6 +108,14 @@ namespace CoreAI.Tests.EditMode
         private sealed class NullUsr : IAgentUserPromptTemplateProvider
         {
             public bool TryGetUserTemplate(string roleId, out string template) { template = null; return false; }
+        }
+
+        private sealed class StaticContextProvider : IAiPromptContextProvider
+        {
+            public string BuildContext(AiTaskRequest request, string roleId, string traceId)
+            {
+                return $"slot={request.SourceTag};role={roleId};trace={traceId}";
+            }
         }
 
         [Test]
@@ -183,6 +195,68 @@ namespace CoreAI.Tests.EditMode
             
             // Verify most recent messages were kept
             Assert.IsTrue(llm.LastRequest.ChatHistory[^1].Text.Contains("19"), "Should keep the most recent message");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_CompactsOldHistory_IntoSystemSummary()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+
+            for (int i = 0; i < 10; i++)
+            {
+                string content = $"old-context-{i}-".PadRight(90, 'x');
+                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = content
+                });
+            }
+
+            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null),
+                memory, policy, null, null, new TestSettings(),
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
+            StringAssert.Contains("## Conversation Summary", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("old-context-0", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AppendsRuntimePromptContext()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            AiPromptComposer composer = new(
+                new NullSys(),
+                new NullUsr(),
+                null,
+                contextProviders: new IAiPromptContextProvider[] { new StaticContextProvider() });
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "Hi",
+                TraceId = "trace-context",
+                SourceTag = "practice-slot"
+            });
+
+            StringAssert.Contains("## Runtime Context", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("slot=practice-slot", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("trace=trace-context", llm.LastRequest.SystemPrompt);
         }
     }
 }

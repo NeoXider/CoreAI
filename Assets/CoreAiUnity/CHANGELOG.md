@@ -2,6 +2,42 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.0.2] - 2026-04-28
+
+### Long context and tool-call identity
+
+- ✨ **Context compaction in orchestration** — `AiOrchestrator` now asks the portable context manager to prepare chat history. Recent turns stay in `ChatHistory`; older turns become a `## Conversation Summary` system section when the token budget is tight.
+- ✨ **Tool lifecycle identity** — `ToolExecutionPolicy` publishes `LlmToolCallInfo` with `CallId` for start/completed/failed events, making async and parallel diagnostics correlate to the exact provider tool call.
+- 🧪 **EditMode coverage:** added regressions for deterministic context summary behavior and awaited async tool execution.
+- 📝 **Docs:** architecture and developer guide updated for context management and tool-call event identity.
+- 🔧 Package **`1.0.2`**. Dependency **`com.nexoider.coreai 1.0.2`**.
+
+## [1.0.1] - 2026-04-28
+
+### Production runtime extension points
+
+- ✨ **ServerManagedApi production path** — added `ServerManagedLlmClient` and `ServerManagedAuthorization.SetProvider(...)` so WebGL and SaaS projects can call a backend proxy with dynamic user/session tokens while keeping provider keys off the client.
+- ✨ **Usage and typed error propagation** — `RoutingLlmClient` now publishes `LlmUsageReported`, forwards typed `LlmErrorCode` values, and maps HTTP auth/quota/rate-limit/backend failures into stable categories.
+- ✨ **Runtime prompt context and scoped memory** — Unity composition can consume the new Core contracts for per-request context and user/session/topic memory isolation.
+- ✨ **Tool lifecycle observability** — Unity registers brokers and publishes tool start/completed/failed events around MEAI tool execution.
+- ✨ **Production diagnostics** — `CoreAI/Validate Production Settings` and the settings inspector warn when WebGL is configured with `ClientOwnedApi` and a non-empty API key.
+- 🧪 **EditMode coverage:** targeted production-extension run passed `12/12` for routing usage events, ServerManaged auth hook, scoped memory, and runtime prompt context.
+- 📝 **Docs:** architecture, settings, developer guide, and changelogs updated for production extension points.
+- 🔧 Package **`1.0.1`**. Dependency **`com.nexoider.coreai 1.0.1`**.
+
+## [1.0.0] - 2026-04-28
+
+### LLM execution modes and routing
+
+- ✨ **Four public LLM modes** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, and `ServerManagedApi` are now first-class runtime concepts over the existing LLMUnity / OpenAI-compatible HTTP / Offline clients.
+- ✨ **Single-mode and mixed-mode routing** — `CoreAISettingsAsset` configures a simple global mode, while `LlmRoutingManifest` profiles can keep several modes active at once for different roles in the same scene.
+- ✨ **ClientLimited guard** — added local request and prompt-size limits through `ClientLimitedLlmClientDecorator`.
+- ✨ **MessagePipe observability** — Unity registers brokers for `LlmBackendSelected`, `LlmRequestStarted`, and `LlmRequestCompleted`; `RoutingLlmClient` publishes routing diagnostics for UI subscribers.
+- 🔧 **Editor UX** — `CoreAISettingsAssetEditor` exposes the public LLM mode field, single-mode vs routing-profile guidance, ClientLimited limit fields, and ServerManagedApi key-safety guidance.
+- 🧪 **EditMode coverage:** focused tests for settings helpers, routing metadata/events, ClientLimited limits, and mixed-mode manifest resolution. Targeted run: 16/16 passed.
+- 📝 **Docs:** architecture, settings, quick start, developer guide, docs index, chat README, package READMEs, and changelogs updated for the 1.0.0 mode surface.
+- 🔧 Package **`1.0.0`**. Dependency **`com.nexoider.coreai 1.0.0`**.
+
 ## [0.25.14] - 2026-04-27
 
 ### CoreAiChatPanel (streaming, stop, history, display)

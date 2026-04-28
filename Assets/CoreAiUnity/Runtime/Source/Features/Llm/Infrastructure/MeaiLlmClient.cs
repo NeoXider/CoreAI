@@ -123,7 +123,8 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
-            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, allowDuplicates, request.Tools, _currentRoleId, _settings.MaxToolCallRetries);
+            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, allowDuplicates,
+                request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId);
 
             List<MEAI.ChatMessage> chatMessages = new()
             {
@@ -178,7 +179,7 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiLlmClient: {ex.Message}");
-                return new LlmCompletionResult { Ok = false, Error = ex.Message };
+                return FromException(ex);
             }
 
             // Логируем все сообщения в ответе для отладки tool calling
@@ -209,10 +210,16 @@ namespace CoreAI.Infrastructure.Llm
             string text = response.Text;
             if (string.IsNullOrEmpty(text))
             {
-                return new LlmCompletionResult { Ok = false, Error = "Empty response from LLM" };
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "Empty response from LLM",
+                    ErrorCode = LlmErrorCode.EmptyResponse,
+                    Model = ResolveModelName()
+                };
             }
 
-            LlmCompletionResult result = new() { Ok = true, Content = text };
+            LlmCompletionResult result = new() { Ok = true, Content = text, Model = ResolveModelName() };
             if (response.Usage != null)
             {
                 result.PromptTokens = (int)(response.Usage.InputTokenCount ?? 0);
@@ -221,6 +228,51 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return result;
+        }
+
+        private LlmCompletionResult FromException(Exception ex)
+        {
+            if (ex is OperationCanceledException)
+            {
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = ex.Message,
+                    ErrorCode = LlmErrorCode.Cancelled,
+                    Model = ResolveModelName()
+                };
+            }
+
+            if (ex is LlmClientException llmEx)
+            {
+                return new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = llmEx.Message,
+                    ErrorCode = llmEx.ErrorCode,
+                    HttpStatus = llmEx.HttpStatus,
+                    RetryAfterSeconds = llmEx.RetryAfterSeconds,
+                    ProviderErrorBody = llmEx.ProviderErrorBody,
+                    Model = ResolveModelName()
+                };
+            }
+
+            return new LlmCompletionResult
+            {
+                Ok = false,
+                Error = ex.Message,
+                ErrorCode = LlmErrorCode.ProviderError,
+                Model = ResolveModelName()
+            };
+        }
+
+        private string ResolveModelName()
+        {
+            return _settings switch
+            {
+                CoreAISettingsAsset asset => asset.ModelName,
+                _ => ""
+            };
         }
 
         /// <summary>
@@ -289,7 +341,7 @@ namespace CoreAI.Infrastructure.Llm
             // Shared policy for the entire streaming session
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             ToolExecutionPolicy policy = new(_logger, _settings, request.Tools, allowDuplicates,
-                _currentRoleId, _settings.MaxToolCallRetries);
+                _currentRoleId, _settings.MaxToolCallRetries, request.TraceId);
 
             while (true)
             {
@@ -776,6 +828,7 @@ namespace CoreAI.Infrastructure.Llm
 
             public string ApiBaseUrl => _s.ApiBaseUrl;
             public string ApiKey => _s.ApiKey;
+            public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;

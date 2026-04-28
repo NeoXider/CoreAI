@@ -31,6 +31,9 @@ namespace CoreAI.Composition
             builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+            builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
+            builder.Register<NullConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
+            builder.Register<DeterministicConversationContextManager>(Lifetime.Singleton).As<IConversationContextManager>();
             builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
             builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),
