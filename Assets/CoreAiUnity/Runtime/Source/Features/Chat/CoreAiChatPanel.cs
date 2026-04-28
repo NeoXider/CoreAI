@@ -657,8 +657,8 @@ namespace CoreAI.Chat
 
             if (!isEnter) return;
 
-            bool requireShift = config == null || config.SendOnShiftEnter;
-            bool shouldSend = requireShift ? evt.shiftKey : !evt.shiftKey;
+            bool sendOnShiftEnter = config != null && config.SendOnShiftEnter;
+            bool shouldSend = ShouldSubmitOnEnter(sendOnShiftEnter, evt.shiftKey);
 
             if (!shouldSend) return;
 
@@ -808,7 +808,12 @@ namespace CoreAI.Chat
 
         private bool CanStopActiveGeneration()
         {
-            return _isStreaming && !_streamTerminalChunkReceived;
+            return IsRequestInProgress();
+        }
+
+        internal static bool ShouldSubmitOnEnter(bool sendOnShiftEnter, bool shiftHeld)
+        {
+            return sendOnShiftEnter ? shiftHeld : !shiftHeld;
         }
 
         internal static bool IsChatInputLocked(bool isSending, bool isStreaming, bool isStopping, bool isClearing)
