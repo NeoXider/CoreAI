@@ -106,6 +106,13 @@ namespace CoreAI.Ai
             }
 
             StringBuilder sections = new();
+            if (_memoryPolicy != null &&
+                _memoryPolicy.TryGetRuntimeContextProvider(roleId, out IAgentRuntimeContextProvider roleProvider) &&
+                roleProvider != null)
+            {
+                AppendContextSection(sections, roleProvider.BuildContext(request, roleId, traceId));
+            }
+
             foreach (IAiPromptContextProvider provider in _contextProviders)
             {
                 if (provider == null)
@@ -113,19 +120,7 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                string section = provider.BuildContext(request, roleId, traceId);
-                if (string.IsNullOrWhiteSpace(section))
-                {
-                    continue;
-                }
-
-                if (sections.Length == 0)
-                {
-                    sections.AppendLine("## Runtime Context");
-                }
-
-                sections.AppendLine(section.Trim());
-                sections.AppendLine();
+                AppendContextSection(sections, provider.BuildContext(request, roleId, traceId));
             }
 
             if (sections.Length == 0)
@@ -134,6 +129,22 @@ namespace CoreAI.Ai
             }
 
             return (systemPrompt ?? "").TrimEnd() + "\n\n" + sections.ToString().TrimEnd();
+        }
+
+        private static void AppendContextSection(StringBuilder sections, string section)
+        {
+            if (string.IsNullOrWhiteSpace(section))
+            {
+                return;
+            }
+
+            if (sections.Length == 0)
+            {
+                sections.AppendLine("## Runtime Context");
+            }
+
+            sections.AppendLine(section.Trim());
+            sections.AppendLine();
         }
 
         /// <summary>User-часть для LLM: шаблон роли (<c>{telemetry}</c>, <c>{hint}</c>, <c>{ключ}</c> из телеметрии) или JSON по умолчанию, плюс контекст ремонта Lua.</summary>

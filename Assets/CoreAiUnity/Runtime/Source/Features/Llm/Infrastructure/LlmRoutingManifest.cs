@@ -82,5 +82,82 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Role-to-profile routing rules.</summary>
         public IReadOnlyList<LlmRoleRouteEntry> Routes => routes;
+
+        /// <summary>Converts this Unity asset to the portable CoreAI route table.</summary>
+        public LlmRouteTable ToRouteTable()
+        {
+            List<LlmRouteProfile> portableProfiles = new();
+            foreach (LlmBackendProfileEntry profile in profiles)
+            {
+                if (profile == null || string.IsNullOrWhiteSpace(profile.profileId))
+                {
+                    continue;
+                }
+
+                portableProfiles.Add(new LlmRouteProfile
+                {
+                    ProfileId = profile.profileId.Trim(),
+                    Mode = ResolveProfileMode(profile),
+                    Model = profile.httpSettings != null
+                        ? profile.httpSettings.Model
+                        : profile.unityAgentGameObjectName ?? "",
+                    ContextWindowTokens = profile.contextWindowTokens < 256 ? 8192 : profile.contextWindowTokens,
+                    Capabilities = new[] { "chat", "streaming", "tools" }
+                });
+            }
+
+            List<LlmRouteRule> portableRules = new();
+            foreach (LlmRoleRouteEntry route in routes)
+            {
+                if (route == null ||
+                    string.IsNullOrWhiteSpace(route.rolePattern) ||
+                    string.IsNullOrWhiteSpace(route.profileId))
+                {
+                    continue;
+                }
+
+                portableRules.Add(new LlmRouteRule
+                {
+                    RolePattern = route.rolePattern.Trim(),
+                    ProfileId = route.profileId.Trim(),
+                    SortOrder = route.sortOrder
+                });
+            }
+
+            return new LlmRouteTable
+            {
+                Profiles = portableProfiles,
+                Rules = portableRules
+            };
+        }
+
+        private static LlmExecutionMode ResolveProfileMode(LlmBackendProfileEntry profile)
+        {
+            if (profile.executionMode != LlmExecutionMode.Auto)
+            {
+                return profile.executionMode;
+            }
+
+            if (profile.httpSettings != null && profile.httpSettings.ExecutionMode != LlmExecutionMode.ClientOwnedApi)
+            {
+                return profile.httpSettings.ExecutionMode;
+            }
+
+            switch (profile.kind)
+            {
+                case LlmBackendKind.LlmUnity:
+                case LlmBackendKind.LocalModel:
+                    return LlmExecutionMode.LocalModel;
+                case LlmBackendKind.ClientLimited:
+                    return LlmExecutionMode.ClientLimited;
+                case LlmBackendKind.ServerManagedApi:
+                    return LlmExecutionMode.ServerManagedApi;
+                case LlmBackendKind.Stub:
+                case LlmBackendKind.Offline:
+                    return LlmExecutionMode.Offline;
+                default:
+                    return LlmExecutionMode.ClientOwnedApi;
+            }
+        }
     }
 }

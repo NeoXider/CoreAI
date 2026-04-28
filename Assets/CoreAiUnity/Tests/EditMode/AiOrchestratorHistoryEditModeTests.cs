@@ -118,6 +118,27 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class StaticRoleContextProvider : IAgentRuntimeContextProvider
+        {
+            public string BuildContext(AiTaskRequest request, string roleId, string traceId)
+            {
+                return $"role-context={roleId};slot={request.SourceTag}";
+            }
+        }
+
+        private sealed class StubTool : ILlmTool
+        {
+            public StubTool(string name)
+            {
+                Name = name;
+            }
+
+            public string Name { get; }
+            public string Description => "stub";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+        }
+
         [Test]
         public async Task RunTaskAsync_TruncatesChatHistory_ByMaxMessages()
         {
@@ -257,6 +278,75 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("## Runtime Context", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("slot=practice-slot", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("trace=trace-context", llm.LastRequest.SystemPrompt);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AppendsPerRoleRuntimeContext()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            policy.SetRuntimeContextProvider("Teacher", new StaticRoleContextProvider());
+            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, memoryPolicy: policy);
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                SourceTag = "theory"
+            });
+
+            StringAssert.Contains("role-context=Teacher", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("slot=theory", llm.LastRequest.SystemPrompt);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_FiltersTools_ByAllowedToolNames()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Teacher");
+            policy.SetToolsForRole("Teacher", new ILlmTool[]
+            {
+                new StubTool("spawn_quiz"),
+                new StubTool("spawn_drag_and_drop")
+            });
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null),
+                new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = new[] { "spawn_drag_and_drop" }
+            });
+
+            Assert.AreEqual(1, llm.LastRequest.Tools.Count);
+            Assert.AreEqual("spawn_drag_and_drop", llm.LastRequest.Tools[0].Name);
+            CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ChatOnly_SendsNoTools()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Teacher");
+            policy.SetToolsForRole("Teacher", new ILlmTool[] { new StubTool("spawn_quiz") });
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null),
+                new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                ForcedToolMode = LlmToolChoiceMode.None
+            });
+
+            Assert.AreEqual(0, llm.LastRequest.Tools.Count);
         }
     }
 }

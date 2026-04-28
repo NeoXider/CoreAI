@@ -13,12 +13,15 @@ MonoBehaviour:
   m_Name: CoreAISettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
   backendType: 2
+  executionMode: 0
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
   apiKey: 
   modelName: qwen3.5-4b
   temperature: 0.1
   maxTokens: 2048
+  maxClientLimitedRequestsPerSession: 0
+  maxClientLimitedPromptChars: 0
   requestTimeoutSeconds: 120
   llmUnityAgentName: 
   ggufModelPath: Qwen3.5-4B-Q4_K_M.gguf
@@ -41,7 +44,7 @@ MonoBehaviour:
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
   enableMeaiDebugLogging: 0
-  enableHttpDebugLogging: 0
+  enableHttpDebugLogging: 1
   logLlmInput: 1
   logLlmOutput: 1
   logTokenUsage: 1

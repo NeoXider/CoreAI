@@ -33,6 +33,11 @@ namespace CoreAI.Ai
         /// <summary>
         /// Uses deterministic offline responses for tests, demos, or builds without live LLM access.
         /// </summary>
-        Offline = 5
+        Offline = 5,
+
+        /// <summary>
+        /// Alias for deterministic stub/offline responses in tests and demos.
+        /// </summary>
+        Stub = Offline
     }
 }

@@ -15,6 +15,7 @@ namespace CoreAI.Ai
     {
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
+        private readonly Dictionary<string, IAgentRuntimeContextProvider> _runtimeContextProviders = new();
         private static readonly MemoryLlmTool _memoryToolInstance = new();
 
         /// <summary>
@@ -29,6 +30,45 @@ namespace CoreAI.Ai
             }
 
             _customTools[roleId] = new List<ILlmTool>(tools);
+        }
+
+        /// <summary>Registers a runtime context provider for a single role.</summary>
+        public void SetRuntimeContextProvider(string roleId, IAgentRuntimeContextProvider provider)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            if (provider == null)
+            {
+                _runtimeContextProviders.Remove(roleId);
+                return;
+            }
+
+            _runtimeContextProviders[roleId] = provider;
+        }
+
+        /// <summary>Clears the runtime context provider for a single role.</summary>
+        public void ClearRuntimeContextProvider(string roleId)
+        {
+            if (!string.IsNullOrWhiteSpace(roleId))
+            {
+                _runtimeContextProviders.Remove(roleId.Trim());
+            }
+        }
+
+        /// <summary>Returns the runtime context provider for a role, when configured.</summary>
+        public bool TryGetRuntimeContextProvider(string roleId, out IAgentRuntimeContextProvider provider)
+        {
+            provider = null;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                roleId = BuiltInAgentRoleIds.Creator;
+            }
+
+            return _runtimeContextProviders.TryGetValue(roleId.Trim(), out provider);
         }
 
         /// <summary>Конфигурация памяти для одной роли.</summary>

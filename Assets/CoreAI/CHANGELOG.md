@@ -1,5 +1,24 @@
 # Changelog
 
+## [v1.2.0] — 2026-04-29
+
+### RedoSchool lesson/practice orchestration APIs
+
+- Added per-role runtime context providers on `AgentMemoryPolicy` so lesson slots can inject context without UI prompt-spaghetti.
+- Added `AllowedToolNames` filtering and chat-only tool suppression on `AiTaskRequest`/`LlmCompletionRequest`.
+- Added `ILlmToolCallHistory`, `ScriptedLlmClient`, `LlmToolResultEnvelope`, and `IAgentTurnTraceSink` for deterministic tests, structured tool results, and diagnostics.
+- Package version **`1.2.0`**; aligned with `com.nexoider.coreaiunity` **`1.2.0`**.
+
+## [v1.1.0] — 2026-04-29
+
+### Portable LLM routing and policy contracts
+
+- ✨ **Portable routing model** — added `LlmRouteProfile`, `LlmRouteRule`, `LlmRouteTable`, `ILlmRouteResolver`, and `LlmRouteResolver` under `CoreAI.Core`; `LlmExecutionMode.Stub` is now an alias for offline deterministic responses.
+- ✨ **Portable registry and policy contracts** — added `ILlmClientRegistry`, `ILlmAuthContextProvider`, `ILlmEntitlementPolicy`, `LlmEntitlementDecision`, `ILlmUsageSink`, and `LlmUsageRecord`.
+- ✨ **Provider error DTO** — added `LlmProviderError` for stable backend/provider codes such as `quota_exceeded`, `subscription_required`, `model_not_allowed`, and `rate_limited`.
+- 📝 **Docs:** added `Assets/CoreAI/Docs/LLM_ROUTING.md`.
+- 🔧 Package version **`1.1.0`**; aligned with `com.nexoider.coreaiunity` **`1.1.0`**.
+
 ## [v1.0.3] — 2026-04-29
 
 ### Unity chat UX alignment

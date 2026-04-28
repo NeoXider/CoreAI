@@ -29,6 +29,7 @@ namespace CoreAI.Ai
         private readonly IAiOrchestrationMetrics _metrics;
         private readonly ICoreAISettings _settings;
         private readonly IConversationContextManager _contextManager;
+        private readonly IAgentTurnTraceSink _traceSink;
 
         /// <summary>Собирает зависимости оркестратора (регистрация через VContainer).</summary>
         public AiOrchestrator(
@@ -42,7 +43,8 @@ namespace CoreAI.Ai
             IRoleStructuredResponsePolicy structuredPolicy,
             IAiOrchestrationMetrics metrics,
             ICoreAISettings settings,
-            IConversationContextManager contextManager = null)
+            IConversationContextManager contextManager = null,
+            IAgentTurnTraceSink traceSink = null)
         {
             _authority = authority;
             _llm = llm;
@@ -56,6 +58,7 @@ namespace CoreAI.Ai
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _contextManager = contextManager ??
                 new DeterministicConversationContextManager(new NullConversationSummaryStore());
+            _traceSink = traceSink ?? new NullAgentTurnTraceSink();
         }
 
         /// <summary>
@@ -83,6 +86,7 @@ namespace CoreAI.Ai
 
             string user = _promptComposer.BuildUserPayload(snap, task);
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
+            tools = FilterToolsForRequest(tools, task);
             system = AppendToolContract(system, tools, task);
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
@@ -148,6 +152,7 @@ namespace CoreAI.Ai
                             ChatHistory = chatHistory,
                             TraceId = traceId,
                             Tools = tools,
+                            AllowedToolNames = task.AllowedToolNames,
                             AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
                             ForcedToolMode = task.ForcedToolMode,
                             RequiredToolName = task.RequiredToolName ?? "",
@@ -183,6 +188,7 @@ namespace CoreAI.Ai
 
             if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
             {
+                RecordTrace(bundle, result, null, result?.Error ?? "empty response");
                 return null;
             }
 
@@ -203,6 +209,7 @@ namespace CoreAI.Ai
                         ChatHistory = chatHistory,
                         TraceId = traceId,
                         Tools = tools,
+                        AllowedToolNames = task.AllowedToolNames,
                         AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
                         ForcedToolMode = task.ForcedToolMode,
                         RequiredToolName = task.RequiredToolName ?? "",
@@ -215,12 +222,14 @@ namespace CoreAI.Ai
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
+                    RecordTrace(bundle, second, null, second?.Error ?? "structured retry failed");
                     return null;
                 }
 
                 content = second.Content;
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
                 {
+                    RecordTrace(bundle, second, content, "structured validation failed");
                     return null;
                 }
             }
@@ -248,6 +257,7 @@ namespace CoreAI.Ai
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             });
             _metrics.RecordCommandPublished(roleId, traceId);
+            RecordTrace(bundle, result, content, null);
             return content;
         }
 
@@ -291,6 +301,7 @@ namespace CoreAI.Ai
                 ChatHistory = bundle.ChatHistory,
                 TraceId = bundle.TraceId,
                 Tools = bundle.Tools,
+                AllowedToolNames = task.AllowedToolNames,
                 AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
@@ -426,6 +437,11 @@ namespace CoreAI.Ai
                     DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
                 });
                 _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
+                RecordTrace(bundle, null, content, null);
+            }
+            else if (!string.IsNullOrEmpty(terminalError))
+            {
+                RecordTrace(bundle, null, null, terminalError);
             }
         }
 
@@ -489,6 +505,29 @@ namespace CoreAI.Ai
             return chatHistory;
         }
 
+        private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse, string error)
+        {
+            if (_traceSink == null || bundle == null)
+            {
+                return;
+            }
+
+            _traceSink.Record(new AgentTurnTrace
+            {
+                TraceId = bundle.TraceId,
+                RoleId = bundle.RoleId,
+                RoutingProfileId = "",
+                Model = result?.Model ?? "",
+                SystemPromptPreview = SingleLine(bundle.SystemPrompt, 4000),
+                UserPayload = bundle.UserPayload,
+                AssistantResponse = assistantResponse ?? result?.Content ?? "",
+                Error = error ?? "",
+                PromptTokens = result?.PromptTokens ?? 0,
+                CompletionTokens = result?.CompletionTokens ?? 0,
+                TotalTokens = result?.TotalTokens ?? 0
+            });
+        }
+
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
         {
             string hint = (task.Hint ?? "").Trim();
@@ -515,8 +554,52 @@ namespace CoreAI.Ai
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? "",
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
+                AllowedToolNames = task.AllowedToolNames,
                 MaxOutputTokens = task.MaxOutputTokens
             };
+        }
+
+        private static IReadOnlyList<ILlmTool> FilterToolsForRequest(IReadOnlyList<ILlmTool> tools, AiTaskRequest task)
+        {
+            if (tools == null || tools.Count == 0 || task == null)
+            {
+                return tools;
+            }
+
+            if (task.ForcedToolMode == LlmToolChoiceMode.None)
+            {
+                return Array.Empty<ILlmTool>();
+            }
+
+            if (task.AllowedToolNames == null || task.AllowedToolNames.Length == 0)
+            {
+                return tools;
+            }
+
+            HashSet<string> allowed = new(StringComparer.Ordinal);
+            foreach (string name in task.AllowedToolNames)
+            {
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    allowed.Add(name.Trim());
+                }
+            }
+
+            if (allowed.Count == 0)
+            {
+                return tools;
+            }
+
+            List<ILlmTool> filtered = new();
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool != null && allowed.Contains(tool.Name))
+                {
+                    filtered.Add(tool);
+                }
+            }
+
+            return filtered;
         }
 
         private static string AppendToolContract(

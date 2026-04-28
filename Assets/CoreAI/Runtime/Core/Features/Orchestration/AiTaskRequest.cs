@@ -65,6 +65,12 @@ namespace CoreAI.Ai
         public string RequiredToolName { get; set; } = "";
 
         /// <summary>
+        /// Optional per-request allowlist of tool names. Empty or null keeps all role tools available.
+        /// Combine with <see cref="ForcedToolMode"/> to model context-step policies.
+        /// </summary>
+        public string[] AllowedToolNames { get; set; }
+
+        /// <summary>
         /// Per-call override of the LLM response token budget. <c>null</c> or <c>0</c> = use the
         /// per-agent/default fallback chain. Positive value wins over per-agent and global defaults.
         /// Propagated to

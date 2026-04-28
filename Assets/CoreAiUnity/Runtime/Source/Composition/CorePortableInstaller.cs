@@ -2,6 +2,7 @@ using System;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Config;
+using CoreAI.Messaging;
 using CoreAI.Session;
 using CoreAI.Sandbox;
 using VContainer;
@@ -34,6 +35,10 @@ namespace CoreAI.Composition
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
             builder.Register<NullConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
             builder.Register<DeterministicConversationContextManager>(Lifetime.Singleton).As<IConversationContextManager>();
+            builder.Register<NullLlmUsageSink>(Lifetime.Singleton).As<ILlmUsageSink>();
+            builder.Register<AllowAllLlmEntitlementPolicy>(Lifetime.Singleton).As<ILlmEntitlementPolicy>();
+            builder.Register<InMemoryLlmToolCallHistory>(Lifetime.Singleton).As<ILlmToolCallHistory>();
+            builder.Register<NullAgentTurnTraceSink>(Lifetime.Singleton).As<IAgentTurnTraceSink>();
             builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
             builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),

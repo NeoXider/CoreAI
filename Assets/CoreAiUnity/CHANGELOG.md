@@ -2,6 +2,24 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.0] - 2026-04-29
+
+### RedoSchool orchestration support
+
+- Added Unity DI registration for the default tool-call history and no-op agent trace sink.
+- Added EditMode coverage for per-role runtime context, allowed tool filtering, chat-only tool suppression, scripted LLM responses, structured tool result envelopes, and tool-call history.
+- Package **`1.2.0`**. Dependency **`com.nexoider.coreai 1.2.0`**.
+
+## [1.1.0] - 2026-04-29
+
+### Portable LLM routing adapter
+
+- ✨ **Manifest to core route table** — `LlmRoutingManifest` now converts profiles and rules into portable `LlmRouteTable`.
+- 🔧 **Registry uses core resolver** — `LlmClientRegistry` keeps Unity-specific client construction, but route matching now goes through `CoreAI.Core` `LlmRouteResolver`.
+- ✨ **Production policy surface** — Unity can now build on core entitlement, usage, auth context, and provider error contracts while keeping ScriptableObjects, VContainer, HTTP/SSE, and LLMUnity in the Unity package.
+- 🧪 **EditMode coverage:** added route resolver priority, route table validation, manifest conversion, provider error mapping, and usage aggregation tests.
+- 🔧 Package **`1.1.0`**. Dependency **`com.nexoider.coreai 1.1.0`**.
+
 ## [1.0.3] - 2026-04-29
 
 ### Chat UX and HTTP model selection

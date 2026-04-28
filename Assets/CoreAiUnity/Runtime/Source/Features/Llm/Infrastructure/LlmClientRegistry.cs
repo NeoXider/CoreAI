@@ -14,7 +14,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// Кэш <see cref="ILlmClient"/> по profileId + матчинг ролей по <see cref="LlmRoutingManifest"/>.
     /// </summary>
-    public sealed class LlmClientRegistry : ILlmClientRegistry, ILlmRoutingController
+    public sealed class LlmClientRegistry : CoreAI.Ai.ILlmClientRegistry, ILlmRoutingController
     {
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
@@ -25,7 +25,7 @@ namespace CoreAI.Infrastructure.Llm
         private Dictionary<string, ILlmClient> _byProfileId = new(StringComparer.Ordinal);
         private Dictionary<string, int> _contextByProfileId = new(StringComparer.Ordinal);
         private Dictionary<string, LlmExecutionMode> _modeByProfileId = new(StringComparer.Ordinal);
-        private List<(string pattern, string profileId, int order)> _routes = new();
+        private ILlmRouteResolver _routeResolver = new LlmRouteResolver(new LlmRouteTable());
         private bool _useManifestRouting;
 
         /// <param name="logger">Логи конфигурации маршрутизации (без прямого Unity Debug).</param>
@@ -56,11 +56,19 @@ namespace CoreAI.Infrastructure.Llm
                     _byProfileId.Clear();
                     _contextByProfileId.Clear();
                     _modeByProfileId.Clear();
-                    _routes.Clear();
+                    _routeResolver = new LlmRouteResolver(new LlmRouteTable());
                     return;
                 }
 
                 _useManifestRouting = true;
+                LlmRouteTable routeTable = manifest.ToRouteTable();
+                IReadOnlyList<string> validationErrors = routeTable.Validate();
+                foreach (string error in validationErrors)
+                {
+                    _logger.LogWarning(GameLogFeature.Llm, "LlmRoutingManifest: " + error);
+                }
+
+                _routeResolver = new LlmRouteResolver(routeTable);
                 Dictionary<string, ILlmClient> newClients = new(StringComparer.Ordinal);
                 Dictionary<string, int> newContexts = new(StringComparer.Ordinal);
                 Dictionary<string, LlmExecutionMode> newModes = new(StringComparer.Ordinal);
@@ -89,14 +97,6 @@ namespace CoreAI.Infrastructure.Llm
                 _byProfileId = newClients;
                 _contextByProfileId = newContexts;
                 _modeByProfileId = newModes;
-                _routes = manifest.Routes
-                    .Where(r => r != null && !string.IsNullOrWhiteSpace(r.profileId) &&
-                                !string.IsNullOrWhiteSpace(r.rolePattern))
-                    .Select(r => (Pattern: r.rolePattern.Trim(), ProfileId: r.profileId.Trim(), Order: r.sortOrder))
-                    .OrderBy(t => t.Order)
-                    .ThenBy(t => t.Pattern == "*" ? 1 : 0)
-                    .Select(t => (t.Pattern, t.ProfileId, t.Order))
-                    .ToList();
             }
         }
 
@@ -106,22 +106,16 @@ namespace CoreAI.Infrastructure.Llm
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
-                if (!_useManifestRouting || _routes.Count == 0 || _byProfileId.Count == 0)
+                if (!_useManifestRouting || _byProfileId.Count == 0)
                 {
                     return _legacyFallback;
                 }
 
-                foreach ((string pattern, string profileId, int _) in _routes)
+                LlmRouteResolution resolution = _routeResolver.Resolve(role);
+                if (resolution.Found &&
+                    _byProfileId.TryGetValue(resolution.Profile.ProfileId, out ILlmClient client))
                 {
-                    if (!RoleMatches(pattern, role))
-                    {
-                        continue;
-                    }
-
-                    if (_byProfileId.TryGetValue(profileId, out ILlmClient client))
-                    {
-                        return client;
-                    }
+                    return client;
                 }
 
                 return _legacyFallback;
@@ -133,22 +127,16 @@ namespace CoreAI.Infrastructure.Llm
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
-                if (!_useManifestRouting || _routes.Count == 0 || _contextByProfileId.Count == 0)
+                if (!_useManifestRouting || _contextByProfileId.Count == 0)
                 {
                     return 8192;
                 }
 
-                foreach ((string pattern, string profileId, int _) in _routes)
+                LlmRouteResolution resolution = _routeResolver.Resolve(role);
+                if (resolution.Found &&
+                    _contextByProfileId.TryGetValue(resolution.Profile.ProfileId, out int ctx))
                 {
-                    if (!RoleMatches(pattern, role))
-                    {
-                        continue;
-                    }
-
-                    if (_contextByProfileId.TryGetValue(profileId, out int ctx))
-                    {
-                        return ctx < 256 ? 8192 : ctx;
-                    }
+                    return ctx < 256 ? 8192 : ctx;
                 }
 
                 return 8192;
@@ -171,36 +159,19 @@ namespace CoreAI.Infrastructure.Llm
             string role = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
             lock (_gate)
             {
-                if (!_useManifestRouting || _routes.Count == 0 || _byProfileId.Count == 0)
+                if (!_useManifestRouting || _byProfileId.Count == 0)
                 {
                     return "fallback";
                 }
 
-                foreach ((string pattern, string profileId, int _) in _routes)
+                LlmRouteResolution resolution = _routeResolver.Resolve(role);
+                if (resolution.Found && _byProfileId.ContainsKey(resolution.Profile.ProfileId))
                 {
-                    if (!RoleMatches(pattern, role))
-                    {
-                        continue;
-                    }
-
-                    if (_byProfileId.ContainsKey(profileId))
-                    {
-                        return profileId;
-                    }
+                    return resolution.Profile.ProfileId;
                 }
 
                 return "fallback";
             }
-        }
-
-        private static bool RoleMatches(string pattern, string roleId)
-        {
-            if (pattern == "*")
-            {
-                return true;
-            }
-
-            return string.Equals(pattern, roleId, StringComparison.Ordinal);
         }
 
         private ILlmClient BuildProfileClient(LlmBackendProfileEntry p)
