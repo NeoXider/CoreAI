@@ -2,6 +2,24 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.4] - 2026-04-29
+
+### Docs + tests: custom chat roles and `ToolsOnly`
+
+- **`README_CHAT.md`** — section *Custom roles — not locked to “one persona”* (`CoreAiChatConfig.RoleId`, registering multiple roles, **`AgentMode.ToolsOnly`** expectations, host-only `BuildAiTaskRequest` policy, EN + RU `<details>` summary). Cross-links to tool policy and streaming/tool sections.
+- **EditMode:** `CoreAiChatPanelBuildRequestEditModeTests` — default `BuildAiTaskRequest` shape (`RoleId`, `Hint`, `SourceTag`, `AllowedToolNames` null) and subclass allowlist injection.
+- **PlayMode:** `CoreAiChatPanelBuildRequestPlayModeTests` — same checks in a player frame (no LLM; complements EditMode for lifecycle/domain differences).
+- Package **`1.2.4`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+
+## [1.2.3] - 2026-04-29
+
+### Docs: chat host hook for tool policy (`BuildAiTaskRequest`)
+
+- **`CoreAiChatPanel.BuildAiTaskRequest(string, string)`** — clarified in xmldocs: default minimal `AiTaskRequest` (`RoleId` + `Hint` + `SourceTag=Chat`); hosts override to inject **tool policy** (`AllowedToolNames`, `ForcedToolMode`, `RequiredToolName`, etc.). The same override is used for **typed UI sends** and **`SubmitMessageFromExternalAsync`** (both build the request through this method).
+- **`README_CHAT.md`** — new subsection *Custom `AiTaskRequest` (tool policy)* describing the override pattern and parity with streaming / orchestrator.
+- **`IChatRequestConfigurator`** — xmldocs corrected: no longer reference non-existent `CoreAiChatExternalSubmitOptions.ConfigureRequest` or claim registration on `CoreAiChatPanel`; the interface remains a **preview** contract for future DI-style wiring; until then **`BuildAiTaskRequest`** is the supported extension point.
+- Package **`1.2.3`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+
 ## [1.2.2] - 2026-04-29
 
 ### Streaming parity + `AllowedToolNames` empty = no tools

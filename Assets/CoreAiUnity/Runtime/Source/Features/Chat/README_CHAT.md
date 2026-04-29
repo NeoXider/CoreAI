@@ -46,6 +46,65 @@ Configure in the Inspector:
 4. Assign your `CoreAiChatConfig`
 5. **Done!** The chat uses the current CoreAI backend
 
+<a id="custom-roles-agentmode"></a>
+
+## Custom roles — not locked to “one persona” (`CoreAiChatConfig.RoleId`)
+
+The panel is **not** hardwired to a single teaching or player role. Routing uses the **`Role ID`** field on your **`CoreAiChatConfig`**: it must match a role you registered with **`AgentBuilder`** and **`ApplyToPolicy(AgentMemoryPolicy)`** during composition (typically in your **`LifetimeScope`** setup). Requests from the UI go through the **same orchestrator / MEAI pipeline** as `CoreAi.OrchestrateAsync` / `CoreAiChatService` with the same `roleId`.
+
+**What you do as a host game**
+
+1. Register the role (prompt, tools, memory, chat history, etc.).
+2. Point the chat asset at that role id (e.g. `Merchant`, `NpcGuide`, `Teacher`, or your own string).
+3. Optionally **subclass `CoreAiChatPanel`** and override **`BuildAiTaskRequest`** to inject `AllowedToolNames`, `ForcedToolMode`, `RuntimeContext`, and other per-turn policy — see [Custom `AiTaskRequest` (tool policy)](#custom-aitaskrequest-tool-policy) below.
+
+**Game-specific panels** (e.g. a project that only adds lesson-slot policy for one role) apply those rules **only in their overrides**; other roles keep the default minimal `AiTaskRequest` unless you add logic for them.
+
+### `AgentMode.ToolsOnly` in chat
+
+`ToolsOnly` is a normal **`AgentBuilder.WithMode(AgentMode.ToolsOnly)`** setting. The chat **does not block** it: the panel still sends an `AiTaskRequest` with the configured `roleId`, and the orchestrator loads that role’s tools and mode from **`AgentMemoryPolicy`**.
+
+**Product / UX expectations**
+
+- The model is steered toward **calling tools** rather than long free-form chat replies. Visible assistant text may be sparse; you may see **tool rounds** (tool call → result → next step) depending on prompts and backend.
+- If the UX goal is rich dialogue **and** tools, **`ToolsAndChat`** is usually a better fit. Use **`ToolsOnly`** when the scenario is intentionally **tool-centric** (e.g. scripted flows where the bubble is secondary to spawned UI or commands).
+
+See also [Streaming + Tool Calling](#streaming-and-llm-modes) — streaming/tool behaviour follows the agent’s **`AgentMode`** hierarchy documented there.
+
+### Example — register two custom roles
+
+```csharp
+// In LifetimeScope Configure(), after you have SpawnQuizTool or your own ILlmTools:
+
+AgentMemoryPolicy policy = …; // from container or resolved from CoreAI bootstrap
+
+AgentConfig merchant = new AgentBuilder("Merchant")
+    .WithMode(AgentMode.ToolsAndChat)
+    .WithSystemPrompt("You are a merchant. Prefer tools …")
+    .WithTool(/* your ILlmTool */)
+    .WithChatHistory(2048)
+    .Build();
+
+AgentConfig blueprintBot = new AgentBuilder("BlueprintBot")
+    .WithMode(AgentMode.ToolsOnly)
+    .WithSystemPrompt("Respond only via registered tools.")
+    .WithTool(/* blueprint tool */)
+    .Build();
+
+merchant.ApplyToPolicy(policy);
+blueprintBot.ApplyToPolicy(policy);
+```
+
+Create two **`CoreAiChatConfig`** assets (or duplicate one) with **Role ID** = `Merchant` or `BlueprintBot`, assign each to separate **`CoreAiChatPanel`** instances **or** switch configs at runtime if your game drives one panel.
+
+<details>
+<summary>Русский: кратко</summary>
+
+Панель **не привязана** к одной роли: в **`CoreAiChatConfig`** задаётся **Role ID**, тот же, что вы зарегистрировали через **`AgentBuilder`**. Оркестратор и MEAI одинаковы для UI и программных вызовов. **`ToolsOnly`** для чата технически допустим — панель не режет режим агента; на UX рассчитывать на доминирование тулов, не на болтовню. Игровой код может добавлять только своему режиму политику в **`BuildAiTaskRequest`**.
+</details>
+
+**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable).
+
 <a id="persisted-chat-session"></a>
 
 ## Session restore (history after restart) — since 0.25.4
@@ -322,6 +381,25 @@ Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI auto
 > Streaming must be invoked from the **Unity main thread** (from a coroutine, `async void`, `UniTask`, or a normal async method in UI). Wrapping `CompleteStreamingAsync` in `Task.Run` will throw `"Create can only be called from the main thread"` because `UnityWebRequest` is created off the main thread.
 
 ## Extension via inheritance
+
+### Custom `AiTaskRequest` (tool policy)
+
+By default `CoreAiChatPanel` builds a **minimal** `AiTaskRequest` (`RoleId`, `Hint`, `SourceTag="Chat"`). If your game needs **the same tool policy on every chat path** (player input, `SubmitMessageFromExternalAsync`, tests that drive the panel), override **`BuildAiTaskRequest(string userText, string roleId)`** and copy in `AllowedToolNames`, `ForcedToolMode`, `RequiredToolName`, `RuntimeContext`, etc. — exactly as you would for `CoreAi.OrchestrateAsync` / `CoreAi.StreamChunksAsync(AiTaskRequest, …)`.
+
+`CoreAiChatExternalSubmitOptions` does **not** include a per-submit request mutator; use a subclass override or build the `AiTaskRequest` yourself and call `CoreAiChatService` / `CoreAi` directly when you must bypass the panel’s builder.
+
+```csharp
+public class LessonChatPanel : CoreAiChatPanel
+{
+    protected override AiTaskRequest BuildAiTaskRequest(string userText, string roleId)
+    {
+        var req = base.BuildAiTaskRequest(userText, roleId);
+        // e.g. copy AllowedToolNames / ForcedToolMode from your lesson/session layer
+        // MyLessonPolicy.Apply(req);
+        return req;
+    }
+}
+```
 
 ```csharp
 public class MyGameChatPanel : CoreAiChatPanel
