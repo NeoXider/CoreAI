@@ -509,11 +509,18 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            // Strip fenced code blocks to avoid matching JSON inside them
+            // Strip fenced code blocks to avoid matching JSON inside them when giving **non-tool** examples.
             string textForSearch = StripCodeBlocks(text);
 
             // Find all balanced JSON objects that look like tool calls
             List<JsonSpan> candidates = FindToolCallJsonSpans(textForSearch);
+            // Models (e.g. LLMUnity + Qwen) often wrap tool JSON in ```json fences. StripCodeBlocks removes
+            // `{`/`}` from search text, so the first pass finds nothing — second pass scans raw text.
+            if (candidates.Count == 0)
+            {
+                candidates = FindToolCallJsonSpans(text);
+            }
+
             if (candidates.Count == 0)
             {
                 return false;
@@ -569,6 +576,21 @@ namespace CoreAI.Infrastructure.Llm
 
             cleanedText = cleanBuilder.ToString().Trim();
             return true;
+        }
+
+        /// <summary>
+        /// Strips embedded tool-call JSON (<c>name</c> + <c>arguments</c>) from assistant text for chat UI.
+        /// Used when the orchestrator could not separate tool JSON from prose in the streaming path
+        /// (same rules as <see cref="TryExtractToolCallsFromText"/>; does not execute tools).
+        /// </summary>
+        public static string StripEmbeddedToolCallJsonForDisplay(string assistantText)
+        {
+            if (string.IsNullOrWhiteSpace(assistantText))
+            {
+                return assistantText ?? string.Empty;
+            }
+
+            return TryExtractToolCallsFromText(assistantText, out _, out string cleaned) ? cleaned : assistantText;
         }
 
         /// <summary>Removes fenced code blocks (```...```) from text to prevent false positive tool call detection.</summary>

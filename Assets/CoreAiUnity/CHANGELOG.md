@@ -2,6 +2,17 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.5] - 2026-04-30
+
+### Chat: hide leaked tool-call JSON in assistant bubble (LLMUnity / text-shaped tools)
+
+- **`MeaiLlmClient.TryExtractToolCallsFromText`** — second pass runs **`FindToolCallJsonSpans`** on **raw** assistant text when the first pass (which ignores brace characters inside fenced `` ``` `` blocks ) finds nothing, so JSON wrapped as `` ```json ... ``` `` is discoverable again and tools still execute in-stream.
+- **`MeaiLlmClient.StripEmbeddedToolCallJsonForDisplay`** — host UI can strip any remaining leaked JSON using the same rules (no tool execution).
+
+### Meta
+
+- Package **`1.2.5`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+
 ## [1.2.4] - 2026-04-29
 
 ### Docs + tests: custom chat roles and `ToolsOnly`

@@ -1,6 +1,6 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity layer for CoreAI: unified MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode, per-agent MaxOutputTokens, unified MaxTokens fallback for HTTP+LLMUnity. Depends on com.nexoider.coreai 1.2.1+.",
