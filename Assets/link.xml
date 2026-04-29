@@ -11,4 +11,9 @@
   
   <!-- Сохраняем наши скрипты, чтобы рефлексия MEAI работала с MemoryTool -->
   <assembly fullname="CoreAI.Core" preserve="all"/>
+
+  <!-- Unity/WebGL: VContainer + DI цепочка к MessagePipe (см. CoreServicesInstaller / MessagePipeAiCommandSink) -->
+  <assembly fullname="CoreAI.Source">
+    <type fullname="CoreAI.Infrastructure.Messaging.MessagePipeAiCommandSink" preserve="all"/>
+  </assembly>
 </linker>

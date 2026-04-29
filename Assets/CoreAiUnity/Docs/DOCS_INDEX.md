@@ -56,8 +56,8 @@ DI, threading, spec, pipelines.
 
 | # | Document | You will learn |
 |---|----------|----------------|
-| 10 | [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | 🗺️ Code map, LLM → commands pipeline, PR checklist |
-| 10a | [ARCHITECTURE](ARCHITECTURE.md) | Clean architecture layers, LLM modes, MessagePipe events |
+| 10 | [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | 🗺️ Code map, LLM → commands pipeline, PR checklist; **child scope + `GlobalMessagePipe` for LLM subscribers** |
+| 10a | [ARCHITECTURE](ARCHITECTURE.md) | Clean architecture layers, LLM modes, MessagePipe; **§ child LifetimeScope vs `GlobalMessagePipe`** |
 | 10b | [COMMAND_FLOW_DIAGRAM](COMMAND_FLOW_DIAGRAM.md) | 🗺️ Diagram: how a command travels through the system |
 | 11 | [DGF_SPEC](DGF_SPEC.md) | 📐 Normative spec: DI, threads, authority, §9.4 main-thread rules |
 | 12 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | 🛠️ MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |

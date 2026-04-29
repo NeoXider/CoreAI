@@ -2,7 +2,20 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.1] - 2026-04-29
+
+### WebGL packaging + DI regression test
+
+- **UPM `link.xml`** at package root `Assets/CoreAiUnity/link.xml` (the monorepo file `Assets/link.xml` is **not** inside `path=Assets/CoreAiUnity`, so consumers need the copy in the package folder).
+- **EditMode:** `CoreServicesInstallerEditModeTests.RegisterCore_Builds_AndResolves_IAiGameCommandSink_As_MessagePipeSink` — guards `RegisterCore` + factory-registered `IAiGameCommandSink` against VContainer constructor-analysis failures on IL2CPP.
+- **Docs:** WebGL / IL2CPP note in `DEVELOPER_GUIDE.md` §2.1.
+- Package **`1.2.1`**. Dependency **`com.nexoider.coreai 1.2.0`** (unchanged).
+
 ## [1.2.0] - 2026-04-29
+
+### WebGL / IL2CPP DI
+
+- **`MessagePipeAiCommandSink`** — registered via an explicit factory in `CoreServicesInstaller` so VContainer does not rely on constructor metadata analysis (fixes `VContainerException: Type does not found injectable constructor` on WebGL builds). `[Preserve]` on the sink and `link.xml` entry for `CoreAI.Source` avoid managed-code stripping edge cases.
 
 ### RedoSchool orchestration support
 

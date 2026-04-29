@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <!-- WebGL/IL2CPP: keep command sink + DI chain (factory registration in CoreServicesInstaller). -->
+  <assembly fullname="CoreAI.Source">
+    <type fullname="CoreAI.Infrastructure.Messaging.MessagePipeAiCommandSink" preserve="all"/>
+  </assembly>
+</linker>

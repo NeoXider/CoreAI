@@ -34,7 +34,12 @@ namespace CoreAI.Composition
             builder.RegisterMessageBroker<LlmToolCallStarted>(opts);
             builder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
             builder.RegisterMessageBroker<LlmToolCallFailed>(opts);
-            builder.Register<MessagePipeAiCommandSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+
+            // WebGL/IL2CPP: VContainer's TypeAnalyzer may fail on constructor metadata for
+            // MessagePipeAiCommandSink; explicit factory matches QueuedAiOrchestrator registration.
+            builder.Register<IAiGameCommandSink>(c =>
+                    new MessagePipeAiCommandSink(c.Resolve<IPublisher<ApplyAiGameCommand>>()),
+                Lifetime.Singleton);
 
             builder.RegisterBuildCallback(static resolver =>
             {
