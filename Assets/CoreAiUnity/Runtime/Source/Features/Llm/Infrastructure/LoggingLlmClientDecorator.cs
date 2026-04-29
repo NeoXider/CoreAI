@@ -342,7 +342,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return
-                $"tokens н/д (LLMUnity не отдаёт usage в Chat) | outChars={outChars} | оценка скорости н/д{outWordsPart}{budgetSuffix}";
+                $"tokens н/д (бэкенд не вернул usage для этого ответа — типично для стриминга/локальных клиентов и части Chat API) | outChars={outChars} | оценка скорости н/д{outWordsPart}{budgetSuffix}";
         }
 
         /// <summary>

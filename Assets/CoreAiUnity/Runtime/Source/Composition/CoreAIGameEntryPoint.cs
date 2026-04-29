@@ -46,7 +46,9 @@ namespace CoreAI.Composition
 
                 if (_isInitialized)
                 {
-                    _logger.Warn(
+                    // Ожидаемо при втором LifetimeScope в процессе (additive scene / тесты без domain reload)
+                    // или пока первый scope ещё не Dispose. Не Warning — иначе шум и stack trace в консоли.
+                    _logger.Debug(
                         "CoreAI already initialized in this process. Duplicate CoreAIGameEntryPoint start skipped.",
                         LogTag.Composition);
                     return;
