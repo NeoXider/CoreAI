@@ -43,7 +43,7 @@ MonoBehaviour:
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
-  enableMeaiDebugLogging: 0
+  enableMeaiDebugLogging: 1
   enableHttpDebugLogging: 1
   logLlmInput: 1
   logLlmOutput: 1
@@ -56,4 +56,4 @@ MonoBehaviour:
   logMeaiToolCallingSteps: 1
   llmRequestTimeoutSeconds: 120
   maxConcurrentOrchestrations: 2
-  logOrchestrationMetrics: 0
+  logOrchestrationMetrics: 1

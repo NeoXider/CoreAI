@@ -6,20 +6,22 @@ using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using CoreAI.Session;
+using MessagePipe;
 using UnityEngine;
 using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    ///  setup   PlayMode .
-    ///  CoreAISettingsAsset     (HTTP, LLMUnity  Offline).
-    ///   LogAssert.Expect   .
+    /// PlayMode setup: LLM из <see cref="CoreAISettingsAsset"/> (HTTP, LLMUnity, Offline).
+    /// В <see cref="Initialize"/> вызывается <see cref="GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics"/>,
+    /// чтобы при отсутствии сцены с <c>CoreAILifetimeScope</c> события <c>LlmToolCall*</c> публиковались в <see cref="GlobalMessagePipe"/>.
     /// </summary>
     public sealed class TestAgentSetup : IDisposable
     {
@@ -47,6 +49,9 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public IEnumerator Initialize()
         {
+            // Чтобы ToolExecutionPolicy публиковал LlmToolCall* и тесты могли подписаться через GlobalMessagePipe.
+            GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
+
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
             if (settings == null)
             {
@@ -190,6 +195,13 @@ namespace CoreAI.Tests.PlayMode
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
+            // Тот же CoreAISettingsAsset, что и у HTTP/Auto клиента — таймауты и флаги логирования LLM совпадают с Instance.
+            CoreAISettingsAsset orchestratorSettings = CoreAISettingsAsset.Instance;
+            if (orchestratorSettings == null)
+            {
+                orchestratorSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            }
+
             Orchestrator = new AiOrchestrator(
                 new SoloAuthorityHost(),
                 Client,
@@ -199,7 +211,8 @@ namespace CoreAI.Tests.PlayMode
                 MemoryStore,
                 Policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(),
+                orchestratorSettings);
         }
 
         private void SetupLogAsserts()

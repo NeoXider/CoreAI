@@ -2,6 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.6] - 2026-04-30
+
+### Composition: `GlobalMessagePipe` in minimal PlayMode fixtures
+
+- **`GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics`** — registers MessagePipe brokers for `LlmRequestStarted` / `LlmRequestCompleted` / `LlmUsageReported` / `LlmToolCallStarted` / `LlmToolCallCompleted` / `LlmToolCallFailed` / `LlmBackendSelected` and calls **`GlobalMessagePipe.SetProvider`** when no provider exists yet. **`ToolExecutionPolicy`** otherwise skips publishing tool-call events (`GlobalMessagePipe.IsInitialized` guard).
+- **`TestAgentSetup.Initialize`** — invokes the bootstrap at start so PlayMode tests without `CoreAILifetimeScope` can subscribe to **`GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()`** and observe real tool traffic.
+- **`TestAgentSetup` orchestrator** — uses **`CoreAISettingsAsset.Instance`** (when present) as **`ICoreAISettings`** for `AiOrchestrator` so timeouts and logging flags match the HTTP/MEAI client settings.
+- **PlayMode:** `AgentMemoryOpenAiApiPlayModeTests` — verbose LLM logging toggle, explicit `AgentMemoryState.Memory` assertions (non-empty write, append preserves baseline + marker, clear removes row), orchestrator reply logging.
+- **EditMode:** `GlobalMessagePipeMinimalBootstrapEditModeTests` — idempotent bootstrap + publish/subscribe smoke for `LlmToolCallCompleted`.
+- **Docs:** `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md` — note bootstrap + PlayMode `TestAgentSetup` behaviour.
+- Package **`1.2.6`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+
 ## [1.2.5] - 2026-04-30
 
 ### Chat: hide leaked tool-call JSON in assistant bubble (LLMUnity / text-shaped tools)

@@ -152,6 +152,8 @@ Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `C
 
 **Note (child `LifetimeScope`):** those events are published with `IPublisher<T>` from **`CoreAILifetimeScope`**. If your title uses a **child** scope and a **second** `RegisterMessagePipe()`, constructor-injected `ISubscriber<LlmRequestStarted>` (and related types) resolved **only** in the child may attach to a **different** broker graph, so you will see **no** LLM telemetry despite live completions. Use **`GlobalMessagePipe.GetSubscriber<T>()`** after the parent scope has built (same provider as `CoreServicesInstaller`’s `SetProvider`), or avoid a second `RegisterMessagePipe` and extend the parent pipe for game-only events.
 
+**Note (PlayMode tests without a scene scope):** `ToolExecutionPolicy` publishes `LlmToolCall*` via **`GlobalMessagePipe`** only if a provider exists. For package PlayMode fixtures, call **`GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics()`** (or use **`TestAgentSetup`**, which invokes it in **`Initialize`**) before asserting on tool-call messages.
+
 `ServerManagedApi` supports dynamic backend authorization:
 
 ```csharp
