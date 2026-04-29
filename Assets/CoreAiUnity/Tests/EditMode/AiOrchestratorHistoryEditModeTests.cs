@@ -302,6 +302,77 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task RunTaskAsync_EmptyAllowedToolNames_SendsNoTools()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Teacher");
+            policy.SetToolsForRole("Teacher", new ILlmTool[]
+            {
+                new StubTool("spawn_quiz"),
+                new StubTool("spawn_drag_and_drop")
+            });
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null),
+                new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = Array.Empty<string>()
+            });
+
+            Assert.AreEqual(0, llm.LastRequest.Tools.Count);
+            CollectionAssert.AreEqual(Array.Empty<string>(), llm.LastRequest.AllowedToolNames);
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_UsesSameToolFiltering_AsRunTaskAsync()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Teacher");
+            policy.SetToolsForRole("Teacher", new ILlmTool[]
+            {
+                new StubTool("spawn_quiz"),
+                new StubTool("spawn_drag_and_drop")
+            });
+            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null);
+            AiTaskRequest task = new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "hi",
+                AllowedToolNames = new[] { "spawn_drag_and_drop" },
+                ForcedToolMode = LlmToolChoiceMode.RequireAny
+            };
+
+            AiOrchestrator orchestratorSync = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+            await orchestratorSync.RunTaskAsync(task);
+
+            int syncToolCount = llm.LastRequest.Tools.Count;
+            string syncFirstTool = llm.LastRequest.Tools.Count > 0 ? llm.LastRequest.Tools[0].Name : "";
+            LlmToolChoiceMode syncMode = llm.LastRequest.ForcedToolMode;
+            CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
+
+            TestLlmClient llmStream = new();
+            AiOrchestrator orchestratorStream = new AiOrchestrator(
+                new TestAuthority(), llmStream, new TestSink(), new TestTelemetry(),
+                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+
+            await foreach (LlmStreamChunk _ in orchestratorStream.RunStreamingAsync(task, default))
+            {
+            }
+
+            Assert.AreEqual(syncToolCount, llmStream.LastRequest.Tools.Count, "Streaming path must attach the same tool count as non-streaming.");
+            Assert.AreEqual(syncFirstTool, llmStream.LastRequest.Tools.Count > 0 ? llmStream.LastRequest.Tools[0].Name : "");
+            Assert.AreEqual(syncMode, llmStream.LastRequest.ForcedToolMode);
+            CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llmStream.LastRequest.AllowedToolNames);
+        }
+
+        [Test]
         public async Task RunTaskAsync_FiltersTools_ByAllowedToolNames()
         {
             TestLlmClient llm = new();

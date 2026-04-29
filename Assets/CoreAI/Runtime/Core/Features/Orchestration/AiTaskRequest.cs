@@ -65,8 +65,13 @@ namespace CoreAI.Ai
         public string RequiredToolName { get; set; } = "";
 
         /// <summary>
-        /// Optional per-request allowlist of tool names. Empty or null keeps all role tools available.
-        /// Combine with <see cref="ForcedToolMode"/> to model context-step policies.
+        /// Optional per-request allowlist of tool names after filtering registered role tools.
+        /// <list type="bullet">
+        /// <item><description><c>null</c> — do not filter; all tools registered for the role are offered (subject to <see cref="ForcedToolMode"/>).</description></item>
+        /// <item><description>non-null <b>empty</b> array — offer <b>no</b> tools for this turn (chat-only), same effect as an allowlist that matches nothing.</description></item>
+        /// <item><description>non-empty array — only listed tool names are attached to the LLM request.</description></item>
+        /// </list>
+        /// Combine with <see cref="ForcedToolMode"/> to model context-step policies (e.g. <see cref="LlmToolChoiceMode.None"/> to strip tools regardless of this list).
         /// </summary>
         public string[] AllowedToolNames { get; set; }
 

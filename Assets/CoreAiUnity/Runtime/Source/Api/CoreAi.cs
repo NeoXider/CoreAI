@@ -131,6 +131,21 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// Streaming turn with a full <see cref="AiTaskRequest"/> (same path as
+        /// <see cref="SendMessageStreamingAsync"/> for UI). Use this when the host must pass
+        /// per-call fields such as <see cref="AiTaskRequest.AllowedToolNames"/> and
+        /// <see cref="AiTaskRequest.ForcedToolMode"/> so streaming matches
+        /// <see cref="OrchestrateAsync"/> semantics.
+        /// </summary>
+        public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
+            AiTaskRequest task,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageStreamingAsync(task, cancellationToken);
+        }
+
+        /// <summary>
         /// «Умная» отправка: сама выбирает стриминг или non-streaming исходя из иерархии
         /// флагов <see cref="CoreAiChatService.IsStreamingEnabled(string, bool?)"/>
         /// (UI / per-agent / global). <paramref name="onChunk"/> вызывается на каждый

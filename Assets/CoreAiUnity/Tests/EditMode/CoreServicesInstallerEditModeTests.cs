@@ -2,9 +2,7 @@ using System;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
-using CoreAI.Logging;
 using CoreAI.Messaging;
-using MessagePipe;
 using NUnit.Framework;
 using VContainer;
 
@@ -15,15 +13,13 @@ namespace CoreAI.Tests.EditMode
     /// <see cref="IAiGameCommandSink"/> must resolve without VContainer constructor analysis on
     /// <see cref="MessagePipeAiCommandSink"/>.
     /// </summary>
+    /// <remarks>
+    /// No <c>[TearDown]</c>: <c>GlobalMessagePipe.SetProvider(null)</c> is invalid (MessagePipe always resolves
+    /// <c>EventFactory</c> from the argument). The next <c>RegisterCore</c> build replaces the static provider;
+    /// <see cref="CoreAI.Logging.Log.Instance"/> is refreshed in the same callback.
+    /// </remarks>
     public sealed class CoreServicesInstallerEditModeTests
     {
-        [TearDown]
-        public void TearDown()
-        {
-            GlobalMessagePipe.SetProvider(null);
-            Log.Instance = null;
-        }
-
         [Test]
         public void RegisterCore_Builds_AndResolves_IAiGameCommandSink_As_MessagePipeSink()
         {

@@ -571,9 +571,14 @@ namespace CoreAI.Ai
                 return Array.Empty<ILlmTool>();
             }
 
-            if (task.AllowedToolNames == null || task.AllowedToolNames.Length == 0)
+            if (task.AllowedToolNames == null)
             {
                 return tools;
+            }
+
+            if (task.AllowedToolNames.Length == 0)
+            {
+                return Array.Empty<ILlmTool>();
             }
 
             HashSet<string> allowed = new(StringComparer.Ordinal);
@@ -587,7 +592,7 @@ namespace CoreAI.Ai
 
             if (allowed.Count == 0)
             {
-                return tools;
+                return Array.Empty<ILlmTool>();
             }
 
             List<ILlmTool> filtered = new();

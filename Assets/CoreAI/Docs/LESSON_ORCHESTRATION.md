@@ -12,8 +12,10 @@ Global `IAiPromptContextProvider` registrations still work and run after the per
 
 Use `AiTaskRequest.AllowedToolNames` to narrow the role's registered tools for one turn:
 
-- `null` or empty: all role tools are available.
-- `ForcedToolMode = None`: no tools are sent.
+- `null`: do not filter — all role tools are available.
+- non-null **empty** array: **no** tools are attached (chat-only turn, unless you also use other mechanisms).
+- non-empty array: only the listed tool names are attached after filtering.
+- `ForcedToolMode = None`: no tools are sent (takes precedence over the allowlist).
 - `ForcedToolMode = RequireAny`: the request expects at least one available tool.
 - `ForcedToolMode = RequireSpecific`: set `RequiredToolName` and include that tool in the allowlist.
 

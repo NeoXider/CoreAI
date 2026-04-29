@@ -2,6 +2,14 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.2.2] - 2026-04-29
+
+### Streaming parity + `AllowedToolNames` empty = no tools
+
+- **`CoreAi.StreamChunksAsync(AiTaskRequest, CancellationToken)`** — forwards to `CoreAiChatService.SendMessageStreamingAsync` so hosts pass `AllowedToolNames` / `ForcedToolMode` on streaming turns.
+- Depends on **`com.nexoider.coreai 1.2.1`** (orchestrator: empty allowlist strips tools; see Core CHANGELOG).
+- **EditMode:** `AiOrchestratorHistoryEditModeTests` — empty allowlist + sync vs streaming tool parity; `CoreServicesInstallerEditModeTests` — TearDown no longer calls `SetProvider(null)`.
+
 ## [1.2.1] - 2026-04-29
 
 ### WebGL packaging + DI regression test

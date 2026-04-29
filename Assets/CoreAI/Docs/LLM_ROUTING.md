@@ -27,7 +27,7 @@
 Lesson and practice orchestrators can keep routing portable while adding per-turn policy:
 
 - `AgentMemoryPolicy.SetRuntimeContextProvider(roleId, provider)` injects role-specific runtime context before each request. Per-role context is appended before global `IAiPromptContextProvider` sections.
-- `AiTaskRequest.AllowedToolNames` narrows the role's tools for the current lesson slot. Null or empty keeps legacy behavior.
+- `AiTaskRequest.AllowedToolNames` narrows the role's tools for the current lesson slot: **`null`** = offer all registered tools; **empty array** = offer no tools; **non-empty** = allowlist only.
 - `AiTaskRequest.ForcedToolMode = None` sends no tools for theory/chat-only turns.
 - `ScriptedLlmClient`, `ILlmToolCallHistory`, `LlmToolResultEnvelope`, and `IAgentTurnTraceSink` support deterministic orchestration tests without network/model dependencies.
 
