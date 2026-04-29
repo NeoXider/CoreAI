@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -37,9 +38,32 @@ namespace CoreAI.Tests.EditMode
             policy.SetToolsForRole("TestRole", tools);
 
             IReadOnlyList<ILlmTool> retrieved = policy.GetToolsForRole("TestRole");
-            // SetToolsForRole может добавить MemoryTool автоматически
-            Assert.GreaterOrEqual(retrieved.Count, 2);
+            // Кастомный список уже содержит memory — синглтон из политики не дублируется.
+            Assert.AreEqual(2, retrieved.Count);
             Assert.AreEqual("memory", retrieved[0].Name);
+        }
+
+        [Test]
+        public void AgentMemoryPolicy_GetToolsForRole_DedupesMemory_AfterAgentBuilderApplyToPolicy()
+        {
+            AgentMemoryPolicy policy = new();
+            new AgentBuilder(BuiltInAgentRoleIds.Creator)
+                .WithMode(AgentMode.ToolsAndChat)
+                .WithMemory(MemoryToolAction.Append)
+                .Build()
+                .ApplyToPolicy(policy);
+
+            IReadOnlyList<ILlmTool> tools = policy.GetToolsForRole(BuiltInAgentRoleIds.Creator);
+            int memoryCount = 0;
+            foreach (ILlmTool t in tools)
+            {
+                if (string.Equals(t.Name, "memory", StringComparison.OrdinalIgnoreCase))
+                {
+                    memoryCount++;
+                }
+            }
+
+            Assert.AreEqual(1, memoryCount);
         }
 
         [Test]
@@ -75,7 +99,7 @@ namespace CoreAI.Tests.EditMode
             // В EditMode без LLM — ожидаем ошибку подключения, но не ArgumentNullException
             Assert.IsTrue(task.IsCompleted || task.Status == TaskStatus.WaitingForActivation);
 
-            Object.DestroyImmediate(settings);
+            UnityEngine.Object.DestroyImmediate(settings);
 #endif
         }
 

@@ -512,14 +512,9 @@ namespace CoreAI.Infrastructure.Llm
             // Strip fenced code blocks to avoid matching JSON inside them when giving **non-tool** examples.
             string textForSearch = StripCodeBlocks(text);
 
-            // Find all balanced JSON objects that look like tool calls
+            // Find all balanced JSON objects that look like tool calls (only outside fenced ``` blocks;
+            // StripCodeBlocks blanks ```...``` so examples like ```json {"name":...} ``` are not matched).
             List<JsonSpan> candidates = FindToolCallJsonSpans(textForSearch);
-            // Models (e.g. LLMUnity + Qwen) often wrap tool JSON in ```json fences. StripCodeBlocks removes
-            // `{`/`}` from search text, so the first pass finds nothing — second pass scans raw text.
-            if (candidates.Count == 0)
-            {
-                candidates = FindToolCallJsonSpans(text);
-            }
 
             if (candidates.Count == 0)
             {

@@ -202,6 +202,8 @@ namespace CoreAI.Tests.PlayMode
                 orchestratorSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             }
 
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(Policy, BuiltInAgentRoleIds.Creator);
+
             Orchestrator = new AiOrchestrator(
                 new SoloAuthorityHost(),
                 Client,

@@ -223,15 +223,12 @@ namespace CoreAI.Tests.PlayMode
             IAiGameCommandSink sink,
             InventoryTool.IInventoryProvider inventoryProvider)
         {
-            //  InventoryTool  MemoryTool  Merchant
-            policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
-            {
-                new MemoryLlmTool(),
-                new InventoryLlmTool(inventoryProvider)
-            });
-
-            //    Merchant
-            policy.EnableMemoryTool(BuiltInAgentRoleIds.Merchant);
+            new AgentBuilder(BuiltInAgentRoleIds.Merchant)
+                .WithMode(AgentMode.ToolsAndChat)
+                .WithMemory(MemoryToolAction.Append)
+                .WithTool(new InventoryLlmTool(inventoryProvider))
+                .Build()
+                .ApplyToPolicy(policy);
 
             return new AiOrchestrator(
                 new SoloAuthorityHost(),

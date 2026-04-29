@@ -155,6 +155,7 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
 
                 //     MemoryStore (   store')
                 ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
@@ -386,7 +387,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[AllToolCalls.ExecuteLua] Client: {handle.Client.GetType().Name}");
 
                 InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
@@ -406,9 +406,12 @@ namespace CoreAI.Tests.PlayMode
                     
                     //  execute_lua tool  Programmer
                     AgentMemoryPolicy policyWithLua = new();
-                    policyWithLua.EnableMemoryTool(BuiltInAgentRoleIds.Programmer);
-                    policyWithLua.SetToolsForRole(BuiltInAgentRoleIds.Programmer,
-                        new ILlmTool[] { new LuaLlmTool(new TestLuaExecutor(sink), tempSettings, CoreAI.Logging.NullLog.Instance) });
+                    new AgentBuilder(BuiltInAgentRoleIds.Programmer)
+                        .WithMode(AgentMode.ToolsAndChat)
+                        .WithMemory(MemoryToolAction.Append)
+                        .WithTool(new LuaLlmTool(new TestLuaExecutor(sink), tempSettings, CoreAI.Logging.NullLog.Instance))
+                        .Build()
+                        .ApplyToPolicy(policyWithLua);
 
                     AiOrchestrator orch =
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);

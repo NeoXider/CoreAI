@@ -255,6 +255,8 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
+                AgentMemoryPolicy npcChatPolicy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(npcChatPolicy, BuiltInAgentRoleIds.AiNpc);
                 AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     capturing,
@@ -262,7 +264,7 @@ namespace CoreAI.Tests.PlayMode
                     new SessionTelemetryCollector(),
                     composer,
                     store,
-                    new AgentMemoryPolicy(),
+                    npcChatPolicy,
                     new NoOpRoleStructuredResponsePolicy(),
                     new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
 
@@ -320,11 +322,7 @@ namespace CoreAI.Tests.PlayMode
                 ListSink sink = new();
 
                 AgentMemoryPolicy policy = new();
-                policy.SetToolsForRole(BuiltInAgentRoleIds.AiNpc, new List<ILlmTool>
-                {
-                    new MemoryLlmTool()
-                });
-                policy.EnableMemoryTool(BuiltInAgentRoleIds.AiNpc);
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.AiNpc);
 
                 BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
                 AiPromptComposer composer = new(

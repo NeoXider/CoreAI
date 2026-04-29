@@ -218,6 +218,8 @@ namespace CoreAI.Tests.PlayMode
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
+            AgentMemoryPolicy memPolicy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(memPolicy);
             AiOrchestrator inner = new(
                 host,
                 new StubLlmClient(),
@@ -225,7 +227,7 @@ namespace CoreAI.Tests.PlayMode
                 telemetry,
                 composer,
                 new NullAgentMemoryStore(),
-                new AgentMemoryPolicy(),
+                memPolicy,
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
             QueuedAiOrchestrator queued = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });

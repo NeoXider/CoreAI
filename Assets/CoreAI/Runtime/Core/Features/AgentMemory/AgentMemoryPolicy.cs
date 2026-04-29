@@ -281,19 +281,37 @@ namespace CoreAI.Ai
         {
             List<ILlmTool> tools = new();
 
-            // Добавляем MemoryTool если включён
-            if (IsMemoryEnabled(roleId))
+            if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom) && custom != null && custom.Count > 0)
+            {
+                bool customHasMemory = ListContainsMemoryTool(custom);
+
+                // Singleton memory только если память включена и AgentBuilder ещё не положил свой MemoryLlmTool.
+                if (IsMemoryEnabled(roleId) && !customHasMemory)
+                {
+                    tools.Add(_memoryToolInstance);
+                }
+
+                tools.AddRange(custom);
+            }
+            else if (IsMemoryEnabled(roleId))
             {
                 tools.Add(_memoryToolInstance);
             }
 
-            // Добавляем кастомные инструменты для роли
-            if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom))
+            return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
+        }
+
+        private static bool ListContainsMemoryTool(List<ILlmTool> list)
+        {
+            foreach (ILlmTool t in list)
             {
-                tools.AddRange(custom);
+                if (t != null && string.Equals(t.Name, "memory", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
-            return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
+            return false;
         }
 
         // ===== Дополнительные системные промпты (слой 3: AgentBuilder) =====

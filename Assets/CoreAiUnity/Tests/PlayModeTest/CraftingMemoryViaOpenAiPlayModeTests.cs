@@ -99,6 +99,7 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
                 // Local models often re-emit identical tool payloads across iterations; duplicate guard
                 // otherwise hits max consecutive errors. Harness sink is idempotent for these crafts.
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
@@ -247,7 +248,8 @@ namespace CoreAI.Tests.PlayMode
                             $"[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
 
                         bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                                               craft4Name.ToLowerInvariant() == craft2Name.ToLowerInvariant();
+                                               CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
+                                                   craft2Name);
 
                         if (!isDeterministic)
                         {
@@ -284,12 +286,13 @@ namespace CoreAI.Tests.PlayMode
                 string craft2Final = craftedNames[1];
                 string craft4Final = craftedNames[3];
                 Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
+                bool namesMatch = CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft2Final, craft4Final);
                 Debug.Log($"[CraftingMemory.OpenAI] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
-                          $" {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? " SAME" : " DIFFERENT")}");
+                          $" {(namesMatch ? " SAME" : " DIFFERENT")} (whitespace-insensitive)");
                 Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
 
-                Assert.AreEqual(craft2Final.ToLowerInvariant(), craft4Final.ToLowerInvariant(),
-                    $"Determinism failed: craft #4 must repeat craft #2 name. Craft2='{craft2Final}' Craft4='{craft4Final}'");
+                Assert.IsTrue(namesMatch,
+                    $"Determinism failed: craft #4 must repeat craft #2 name (whitespace-insensitive). Craft2='{craft2Final}' Craft4='{craft4Final}'");
                 Debug.Log("[CraftingMemory.OpenAI] ");
                 Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
                 Debug.Log("[CraftingMemory.OpenAI] ");
@@ -327,6 +330,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
@@ -693,6 +697,28 @@ namespace CoreAI.Tests.PlayMode
             // Markdown bold: **WeaponName** (one word, after higher-priority patterns)
             new("\\*\\*([A-Z][A-Za-z0-9_]{3,})\\*\\*"),
         };
+
+        /// <summary>
+        /// Compares craft names for the determinism step: models often drift on whitespace
+        /// (e.g. <c>SteelHardwood Spear</c> vs <c>SteelHardwoodSpear</c>).
+        /// </summary>
+        public static string NormalizeForDeterminismComparison(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return string.Empty;
+            }
+
+            return Regex.Replace(name, @"\s+", "");
+        }
+
+        public static bool NamesMatchForDeterminism(string a, string b)
+        {
+            return string.Equals(
+                NormalizeForDeterminismComparison(a),
+                NormalizeForDeterminismComparison(b),
+                StringComparison.OrdinalIgnoreCase);
+        }
 
         public static string ExtractName(string payload)
         {

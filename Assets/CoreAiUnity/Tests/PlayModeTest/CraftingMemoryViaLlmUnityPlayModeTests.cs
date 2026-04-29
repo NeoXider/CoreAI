@@ -114,6 +114,7 @@ namespace CoreAI.Tests.PlayMode
                 LuaLlmTool luaTool = new(luaExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
 
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
                 // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
                 // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
@@ -253,7 +254,8 @@ namespace CoreAI.Tests.PlayMode
                             $"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
 
                         bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                                               craft4Name.ToLowerInvariant() == craft2Name.ToLowerInvariant();
+                                               CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
+                                                   craft2Name);
 
                         if (!isDeterministic)
                         {
@@ -290,9 +292,10 @@ namespace CoreAI.Tests.PlayMode
                 string craft2Final = craftedNames[1];
                 string craft4Final = craftedNames[3];
                 Debug.Log($"[CraftingMemory.LLMUnity] Crafted items: {string.Join(" | ", craftedNames)}");
+                bool namesMatch = CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft2Final, craft4Final);
                 Debug.Log(
                     $"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
-                    $" {(craft2Final.ToLowerInvariant() == craft4Final.ToLowerInvariant() ? " SAME" : " DIFFERENT")}");
+                    $" {(namesMatch ? " SAME" : " DIFFERENT")} (whitespace-insensitive)");
 
                 //    
                 if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))

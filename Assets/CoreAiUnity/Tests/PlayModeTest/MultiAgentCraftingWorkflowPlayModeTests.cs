@@ -92,6 +92,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy);
                 // Local GGUF models often re-emit the same memory tool payload across tool-loop iterations;
                 // duplicate rejection would abort Programmer (and sometimes other roles) before execute_lua.
                 policy.ConfigureRole(BuiltInAgentRoleIds.Creator, allowDuplicateToolCalls: true);
@@ -339,6 +340,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 InMemoryStore store = new();
                 AgentMemoryPolicy policy = new();
+                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy);
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
                     new BuiltInDefaultAgentSystemPromptProvider(),
