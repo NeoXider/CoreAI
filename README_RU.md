@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). **Линия `1.5.3`:** опциональная **LLM-свёртка длинного контекста** (per-role и глобальный предохранитель), **`SelectingConversationContextManager`**, детерминированный rollup + умный путь, **`FileConversationSummaryStore`** / in-memory summaries, плюс история **`1.4.x`** (HTTP `Retry-After`, `TryRepairToolName`, единый tool pipeline по режимам LLM).
+**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). **Core portable `1.5.5`.** **Unity `1.5.6`:** доводка **main-thread** для `CoreAiChatPanel` после ответа LLM (в т.ч. **streaming** в `RunAgentTurnAsync`), плюс **1.5.5** PlayMode-тесты non-streaming внешней отправки. **Контекст / свёртка (1.5.3+):** опциональная **LLM-свёртка**, **`SelectingConversationContextManager`**, **`FileConversationSummaryStore`**, бюджет токенов; плюс история **`1.4.x`** (`Retry-After`, tool pipeline).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

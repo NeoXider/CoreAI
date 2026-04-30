@@ -168,6 +168,26 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(chunks[4].IsDone);
         }
 
+        private static async Task AssertEventually(
+            Func<bool> condition,
+            string message,
+            int timeoutMs = 5000,
+            int pollMs = 20)
+        {
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return;
+                }
+
+                await Task.Delay(pollMs);
+            }
+
+            Assert.IsTrue(condition(), message);
+        }
+
         [Test]
         public async Task QueuedAiOrchestrator_Streaming_RespectsMaxConcurrent()
         {
@@ -232,10 +252,11 @@ namespace CoreAI.Tests.EditMode
             Task<List<LlmStreamChunk>> latestStream = CollectAsync(queued.RunStreamingAsync(
                 new AiTaskRequest { Hint = "latest-stream", CancellationScope = "npc" }));
 
-            await Task.Delay(50);
+            await AssertEventually(
+                () => oldStream.IsCompleted,
+                "Older pending stream should complete immediately when superseded.");
 
             Assert.AreEqual(1, inner.ExecutionLog.Count, "Only blocker should be active.");
-            Assert.IsTrue(oldStream.IsCompleted, "Older pending stream should complete immediately when superseded.");
             AssertHasCancelledTerminal(oldStream.Result);
 
             inner.Gates[0].TrySetResult(null);
@@ -261,9 +282,10 @@ namespace CoreAI.Tests.EditMode
 
             await Task.Delay(50);
             queued.CancelTasks("npc");
-            await Task.Delay(50);
+            await AssertEventually(
+                () => pendingStream.IsCompleted,
+                "Pending stream should complete when its scope is cancelled.");
 
-            Assert.IsTrue(pendingStream.IsCompleted, "Pending stream should complete when its scope is cancelled.");
             AssertHasCancelledTerminal(pendingStream.Result);
             Assert.AreEqual(1, inner.ExecutionLog.Count, "Cancelled pending stream must not start later.");
 

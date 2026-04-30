@@ -2,29 +2,40 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
-## [1.5.5] - 2026-05-01
+## [1.5.6] - 2026-04-30
 
-### Test Coverage & Portability (Architectural Refactoring)
+### Fixed / hardening — chat panel main thread (WebGL / async continuations)
 
-- **`AiOrchestratorRefactorEditModeTests`** — new test suite for the Core architectural refactor (BuildCompletionRequest field forwarding, SanitizeAndPublish post-processing, and DIM fallback availability for ILlmClient and IAiOrchestrationService without #if UNITY guards).
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.5`**.
+- **`CoreAiChatPanel.RunAgentTurnAsync`** — outer `finally` now **`await UniTask.SwitchToMainThread`** (best-effort; warning on failure) before **`FinishStreaming`**, **`HideTypingIndicator`**, **`_isSending = false`**, and send-button refresh, so the **streaming/agent** path matches the non-streaming marshaling story (UI Toolkit must not be mutated from arbitrary thread-pool continuations after HTTP).
+- **`CoreAiChatPanel.SendNonStreamingAsync`** — **`try`/`finally`** structure: always **`await UniTask.SwitchToMainThread`** in `finally` before a defensive **`HideTypingIndicator`**; empty **`FormatResponseText`** result shows the configured **“no response”** line (same as empty raw body) and does not fire completion callbacks with empty text.
+
+### Meta
+
+- Package **`1.5.6`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+
+## [1.5.5] - 2026-04-29
+
+### Tests: non-streaming chat panel (WebGL-relevant path)
+
+- **PlayMode:** `CoreAiChatPanelNonStreamingPlayModeTests` — `SubmitMessageFromExternalAsync` with **streaming off**, stub `CoreAiChatService` / `IAiOrchestrationService`, **no** `UIDocument`: asserts **`OnAiResponseCompleted`**, return text, and **`_isSending == false`** after the turn; second case overrides **`FormatResponseText`** to empty and asserts **null** result and **no** completion fire (matches “No response” UI path).
+- **Dependency:** unchanged **`com.nexoider.coreai 1.5.5`**.
 
 ### Meta
 
 - Package **`1.5.5`**. Dependency **`com.nexoider.coreai 1.5.5`**.
 
-## [1.5.4] - 2026-05-01
+## [1.5.4] - 2026-04-29
 
-### Concurrency & Lifecycle Hardening Tests
+### WebGL / browser: chat UI after non-streaming LLM turns
 
-- **`QueuedAiOrchestratorEditModeTests`** — new tests covering `IDisposable` lifecycle, Double-Dispose safety, and Thread-Safe eviction via atomic scope locks.
-- **`ToolExecutionPolicyEditModeTests`** — regression tests for robust boolean JSON parsing (`IsToolResultSuccess`).
-- **`LlmExecutionModesEditModeTests`** — verification of `volatile` fields and multi-threading hardening.
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.4`**.
+- **`CoreAiChatPanel.RunAgentTurnAsync`** — `finally` now **`await UniTask.SwitchToMainThread`** before `HideTypingIndicator`, reset of `_isSending`, and send-button refresh so UI Toolkit updates always run on the Unity player loop (WebGL runs inside the browser; continuations after HTTP must not mutate `VisualElement` off-thread).
+- **`CoreAiChatPanel.SendNonStreamingAsync`** — after **`SendMessageAsync`**, **`await UniTask.SwitchToMainThread`** before hiding typing and appending the assistant bubble; nested `try`/`finally` also switches before a defensive **`HideTypingIndicator`**.
+- **Empty formatted replies** — if **`FormatResponseText`** yields empty text, show **`No response.`** (same as empty raw response) instead of an empty bubble.
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.5`**.
 
 ### Meta
 
-- Package **`1.5.4`**. Dependency **`com.nexoider.coreai 1.5.4`**.
+- Package **`1.5.4`**. Dependency **`com.nexoider.coreai 1.5.5`**.
 
 ## [1.5.3] - 2026-04-30
 

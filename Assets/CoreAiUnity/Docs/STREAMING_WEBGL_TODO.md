@@ -1,6 +1,6 @@
 # TODO — WebGL SSE streaming in `MeaiOpenAiChatClient`
 
-**Status:** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). SSE incremental delivery (real streaming chunks in WebGL) remains a known limitation; non-streaming fallback is the recommended path for WebGL builds.
+**Status:** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). SSE incremental delivery (real streaming chunks in WebGL) remains a known limitation; non-streaming fallback is the recommended path for WebGL builds. **UI threading:** from **v1.5.6** (`CoreAiChatPanel`), **`RunAgentTurnAsync`** and **`SendNonStreamingAsync`** marshal typing/streaming cleanup via **`UniTask.SwitchToMainThread`** so UI Toolkit is not updated off the player loop after HTTP (see `CoreAiUnity` [CHANGELOG](../CHANGELOG.md)).
 
 **Affected code:** `Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` → `MeaiOpenAiChatClient.CompleteStreamingAsync` (or equivalent streaming entry point in your tree).
 

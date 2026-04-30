@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: unified MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode, per-agent MaxOutputTokens, TryRepairToolName, HTTP retry with Retry-After, memory store propagation fix for HTTP modes, context budget/transcript/FileConversationSummaryStore, optional LLM-assisted context compaction (v1.5.3), thread-safety audit hardening (v1.5.5). Portable LLM pipeline classes moved to CoreAI.Core. Depends on com.nexoider.coreai 1.5.5+.",
+  "description": "Unity layer for CoreAI: unified MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode, per-agent MaxOutputTokens, TryRepairToolName, HTTP retry with Retry-After, memory store propagation fix for HTTP modes, context budget/transcript/FileConversationSummaryStore, optional LLM-assisted context compaction. v1.5.4+: WebGL/browser — CoreAiChatPanel marshals UI Toolkit updates to the main thread after LLM completion. v1.5.6+: same main-thread guard in RunAgentTurnAsync finally (streaming path); SendNonStreamingAsync try/finally cleanup. v1.5.5+: PlayMode CoreAiChatPanelNonStreamingPlayModeTests. Portable LLM pipeline in CoreAI.Core. Depends on com.nexoider.coreai 1.5.5+.",
   "dependencies": {
     "com.nexoider.coreai": "1.5.5"
   }

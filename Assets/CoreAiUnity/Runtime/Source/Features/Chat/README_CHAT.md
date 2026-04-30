@@ -46,7 +46,9 @@ Configure in the Inspector:
 4. Assign your `CoreAiChatConfig`
 5. **Done!** The chat uses the current CoreAI backend
 
-<a id="custom-roles-agentmode"></a>
+### WebGL (browser build)
+
+`UnityWebRequest` runs under the browser's same-origin / CORS / HTTPS rules. For **`CoreAiChatPanel`**, use **`com.nexoider.coreaiunity` ≥ **1.5.6** (minimum **1.5.4** for non-streaming bubbles; **1.5.6** also marshals **streaming** cleanup in `RunAgentTurnAsync` `finally`). After LLM completion, the panel **`await`s `UniTask.SwitchToMainThread`** before toggling the typing indicator, finishing streaming state, or adding assistant bubbles, so UI Toolkit is not updated from the wrong synchronization context. **1.5.5** adds PlayMode tests `CoreAiChatPanelNonStreamingPlayModeTests` for the non-streaming external-submit path.
 
 ## Custom roles — not locked to “one persona” (`CoreAiChatConfig.RoleId`)
 

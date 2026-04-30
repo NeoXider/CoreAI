@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -1016,6 +1017,17 @@ namespace CoreAI.Chat
             }
             finally
             {
+                // WebGL / некоторые провайдеры продолжают async после HTTP не на главном потоке;
+                // UI Toolkit не обновляет typing / кнопку без маршалинга.
+                try
+                {
+                    await UniTask.SwitchToMainThread(cancellationToken: CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] RunAgentTurnAsync finally: SwitchToMainThread: {ex.Message}");
+                }
+
                 FinishStreaming();
                 HideTypingIndicator();
                 _isSending = false;
@@ -1149,22 +1161,37 @@ namespace CoreAI.Chat
         {
             ShowTypingIndicator();
 
-            string response = await _chatService.SendMessageAsync(request, ct);
-            HideTypingIndicator();
-
-            if (string.IsNullOrEmpty(response))
+            try
             {
-                AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
-                return null;
-            }
+                string response = await _chatService.SendMessageAsync(request, ct);
+                await UniTask.SwitchToMainThread(ct);
+                HideTypingIndicator();
 
-            // Убираем <think> блоки из финального ответа
-            response = StripThinkBlocks(response);
-            string formatted = FormatResponseText(response);
-            AddMessage(formatted, isUser: false);
-            OnResponseReceived(formatted);
-            OnAiResponseCompleted?.Invoke(formatted);
-            return formatted;
+                if (string.IsNullOrEmpty(response))
+                {
+                    AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
+                    return null;
+                }
+
+                // Убираем <think> блоки из финального ответа
+                response = StripThinkBlocks(response);
+                string formatted = FormatResponseText(response);
+                if (string.IsNullOrEmpty(formatted))
+                {
+                    AddMessage(config?.NoResponseMessage ?? "No response.", isUser: false);
+                    return null;
+                }
+
+                AddMessage(formatted, isUser: false);
+                OnResponseReceived(formatted);
+                OnAiResponseCompleted?.Invoke(formatted);
+                return formatted;
+            }
+            finally
+            {
+                await UniTask.SwitchToMainThread(CancellationToken.None);
+                HideTypingIndicator();
+            }
         }
 
         // ===================== Think-Block Filter =====================

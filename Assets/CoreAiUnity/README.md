@@ -24,7 +24,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 | **Agent** | `AgentBuilder`, tools, memory |
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |
-| **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG `1.5.3`](../CoreAI/CHANGELOG.md) |
+| **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG `1.5.3`+](CHANGELOG.md) |
 | **LLM modes** | `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, mixed routing |
 | **Docs · Tests · Install** | End of this file |
 
@@ -51,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current stable line: **`1.5.5`** — optional **LLM-assisted transcript compaction** (global + **per-role** via `AgentBuilder.WithLlmContextCompaction` / `AgentMemoryPolicy`), token **context budget**, **file-backed conversation summaries**, plus the unified MEAI/tool pipeline, streaming stack, and thread-safety audit hardening from earlier lines. Bump **`version`** in [`package.json`](package.json) when you ship.
+Current release line (this package): **`1.5.6`** — extends **1.5.x** WebGL/async hardening: `CoreAiChatPanel` marshals UI cleanup to the **main thread** in **`RunAgentTurnAsync`** `finally` (streaming path) and in **`SendNonStreamingAsync`** `finally`, and treats empty **formatted** replies like “no response”. **1.5.5** adds **PlayMode** `CoreAiChatPanelNonStreamingPlayModeTests`. Depends on **`com.nexoider.coreai` `1.5.5`**. See [CHANGELOG.md](CHANGELOG.md). Bump **`version`** in [`package.json`](package.json) when you ship.
 
 ---
 
