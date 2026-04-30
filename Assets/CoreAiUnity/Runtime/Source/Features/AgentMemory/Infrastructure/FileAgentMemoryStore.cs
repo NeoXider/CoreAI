@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using CoreAI.Ai;
 using CoreAI.Logging;
 using UnityEngine;
@@ -15,8 +16,9 @@ namespace CoreAI.Infrastructure.AiMemory
     /// Поддерживает 2 типа памяти:
     /// 1) MemoryTool — явная память через function call (memory поле)
     /// 2) ChatHistory — полная история диалога (chatHistory поле)
+    /// Также реализует <see cref="IConversationTranscriptStore"/> с миграцией из плоской истории.
     /// </summary>
-    public sealed class FileAgentMemoryStore : IAgentMemoryStore
+    public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore
     {
         [Serializable]
         private sealed class Persisted
@@ -24,10 +26,12 @@ namespace CoreAI.Infrastructure.AiMemory
             public string lastSystemPrompt;
             public string memory;
             public string chatHistoryJson; // JSON массив ChatMessage[]
+            public string transcriptEntriesJson;
         }
 
         private readonly string _dir;
         private readonly Dictionary<string, List<ChatMessage>> _ephemeralHistory = new();
+        private readonly Dictionary<string, List<ConversationEntry>> _transcripts = new();
         private readonly ILog _log;
 
         /// <summary>Каталог памяти: CoreAI/AgentMemory под persistentDataPath.</summary>
@@ -130,6 +134,11 @@ namespace CoreAI.Infrastructure.AiMemory
                 _ephemeralHistory.Remove(roleId);
             }
 
+            if (_transcripts.ContainsKey(roleId))
+            {
+                _transcripts.Remove(roleId);
+            }
+
             _loadedRoles.Remove(roleId); // re-sync _ephemeralHistory on next access after removing the list above
 
             // Очищаем с диска
@@ -143,6 +152,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     if (p != null)
                     {
                         p.chatHistoryJson = "";
+                        p.transcriptEntriesJson = "";
                         File.WriteAllText(path, JsonUtility.ToJson(p, true));
                     }
                 }
@@ -170,6 +180,8 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private readonly HashSet<string> _loadedRoles = new();
 
+        private static readonly JsonSerializerOptions TranscriptJson = new() { WriteIndented = true };
+
         #region Chat History Methods
 
         [Serializable]
@@ -191,24 +203,56 @@ namespace CoreAI.Infrastructure.AiMemory
                 _ephemeralHistory[roleId] = new List<ChatMessage>();
             }
 
+            if (!_transcripts.ContainsKey(roleId))
+            {
+                _transcripts[roleId] = new List<ConversationEntry>();
+            }
+
             try
             {
                 string path = GetPath(roleId);
-                if (File.Exists(path))
+                if (!File.Exists(path))
                 {
-                    string existingJson = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+                    return;
+                }
 
-                    if (p != null && !string.IsNullOrEmpty(p.chatHistoryJson))
+                string existingJson = File.ReadAllText(path);
+                Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
+                if (p == null)
+                {
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(p.chatHistoryJson))
+                {
+                    ChatMessageArrayWrapper wrapper =
+                        JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
+                    if (wrapper.Items != null && wrapper.Items.Length > 0)
                     {
-                        ChatMessageArrayWrapper wrapper =
-                            JsonUtility.FromJson<ChatMessageArrayWrapper>(p.chatHistoryJson);
-                        if (wrapper.Items != null)
+                        _ephemeralHistory[roleId].InsertRange(0, wrapper.Items);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(p.transcriptEntriesJson))
+                {
+                    try
+                    {
+                        List<ConversationEntry> loaded =
+                            JsonSerializer.Deserialize<List<ConversationEntry>>(p.transcriptEntriesJson, TranscriptJson);
+                        if (loaded != null && loaded.Count > 0)
                         {
-                            // Вставляем дисковую историю в начало
-                            _ephemeralHistory[roleId].InsertRange(0, wrapper.Items);
+                            _transcripts[roleId].InsertRange(0, loaded);
                         }
                     }
+                    catch (Exception tex)
+                    {
+                        _log?.Error($"[FileAgentMemoryStore] Transcript JSON for {roleId}: {tex.Message}");
+                    }
+                }
+
+                if (_transcripts[roleId].Count == 0 && _ephemeralHistory[roleId].Count > 0)
+                {
+                    MigrateTranscriptFromFlatHistory(roleId);
                 }
             }
             catch (Exception ex)
@@ -218,6 +262,57 @@ namespace CoreAI.Infrastructure.AiMemory
             }
         }
 
+        private void MigrateTranscriptFromFlatHistory(string roleId)
+        {
+            foreach (ChatMessage m in _ephemeralHistory[roleId])
+            {
+                _transcripts[roleId].Add(new ConversationEntry
+                {
+                    Kind = MapSpeakerKind(m.Role),
+                    Key = m.Role ?? "",
+                    Content = m.Content ?? "",
+                    Timestamp = m.Timestamp
+                });
+            }
+        }
+
+        private static ConversationEntryKind MapSpeakerKind(string role)
+        {
+            if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConversationEntryKind.Assistant;
+            }
+
+            return ConversationEntryKind.User;
+        }
+
+        private void PersistRoleJsonFile(string roleId)
+        {
+            try
+            {
+                EnsureDir();
+                string path = GetPath(roleId);
+                Persisted p = new();
+                if (File.Exists(path))
+                {
+                    string existingJson = File.ReadAllText(path);
+                    p = JsonUtility.FromJson<Persisted>(existingJson) ?? new Persisted();
+                }
+
+                ChatMessageArrayWrapper wrapper = new() { Items = _ephemeralHistory[roleId].ToArray() };
+                p.chatHistoryJson = JsonUtility.ToJson(wrapper);
+                List<ConversationEntry> tlist = _transcripts.TryGetValue(roleId, out List<ConversationEntry> tl)
+                    ? tl
+                    : new List<ConversationEntry>();
+                p.transcriptEntriesJson = JsonSerializer.Serialize(tlist, TranscriptJson);
+
+                File.WriteAllText(path, JsonUtility.ToJson(p, true));
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[FileAgentMemoryStore] Failed to persist JSON for {roleId}: {ex.Message}");
+            }
+        }
         /// <summary>
         /// Добавляет сообщение в историю.
         /// persistToDisk=false используется для промежуточных tool call (сохраняется только в оперативку).
@@ -242,35 +337,49 @@ namespace CoreAI.Infrastructure.AiMemory
 
             _ephemeralHistory[roleId].Add(newMsg);
 
+            _transcripts[roleId].Add(new ConversationEntry
+            {
+                Kind = MapSpeakerKind(role),
+                Key = role ?? "",
+                Content = content,
+                Timestamp = newMsg.Timestamp
+            });
+
             if (persistToDisk)
             {
-                try
-                {
-                    EnsureDir();
-                    string path = GetPath(roleId);
-                    Persisted p = new();
-
-                    if (File.Exists(path))
-                    {
-                        string existingJson = File.ReadAllText(path);
-                        p = JsonUtility.FromJson<Persisted>(existingJson) ?? new Persisted();
-                    }
-
-                    // Сохраняем ВЕСЬ массив актуальной истории на диск
-                    ChatMessageArrayWrapper newWrapper = new() { Items = _ephemeralHistory[roleId].ToArray() };
-                    p.chatHistoryJson = JsonUtility.ToJson(newWrapper);
-
-                    string newJson = JsonUtility.ToJson(p, true);
-                    File.WriteAllText(path, newJson);
-                }
-                catch (Exception ex)
-                {
-                    _log?.Error(
-                        $"[FileAgentMemoryStore] Failed to append chat history to disk for {roleId}: {ex.Message}");
-                }
+                PersistRoleJsonFile(roleId);
             }
         }
 
+        /// <inheritdoc />
+        public void AppendTranscriptEntry(string roleId, ConversationEntry entry, bool persistToDisk = true)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            EnsureHistoryLoaded(roleId);
+            _transcripts[roleId].Add(entry);
+
+            if (persistToDisk)
+            {
+                PersistRoleJsonFile(roleId);
+            }
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<ConversationEntry> GetTranscriptEntries(string roleId, int maxEntries)
+        {
+            EnsureHistoryLoaded(roleId);
+            if (!_transcripts.TryGetValue(roleId, out List<ConversationEntry> list) || list.Count == 0)
+            {
+                return Array.Empty<ConversationEntry>();
+            }
+
+            int n = maxEntries > 0 ? Math.Min(maxEntries, list.Count) : list.Count;
+            return list.Skip(list.Count - n).ToList();
+        }
         /// <summary>
         /// Возвращает объединенную историю (с диска + из оперативки), отсортированную по времени.
         /// </summary>

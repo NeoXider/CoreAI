@@ -17,12 +17,13 @@
 - 💬 **Chat panel in one click** — `CoreAI → Setup → Create Chat Demo Scene` → Press Play.
 - ⚡ **One-liner from any script** — `await CoreAi.AskAsync("…")` — no DI boilerplate for your first feature.
 - 🧭 **LLM modes for production choices** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, or mixed per-role routing profiles.
+- 🗜️ **Smart long-chat context** — token budget-aware history, rolling **`## Conversation Summary`**, optional **auxiliary LLM compaction** (Kilocode-style), and **per-role** toggles: `AgentBuilder.WithLlmContextCompaction(...)` plus a global kill switch on **`CoreAISettings`**.
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
-**Current stable line:** `1.4.0` — production-grade resilience: HTTP retry with `Retry-After` headers, automatic tool-name repair (`TryRepairToolName`), tool-call diagnostics, and cross-mode parity (all LLM modes use the same pipeline).
+**Current stable line:** `1.5.3` — adds **optional LLM-assisted context compaction** (per-role, gated globally), **`SelectingConversationContextManager`**, deterministic vs smart paths for long transcripts, **`FileConversationSummaryStore`** / in-memory summaries, plus the existing **1.4.x** resilience story (HTTP `Retry-After`, `TryRepairToolName`, unified tool pipeline across LLM modes). Version source: [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) · [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -36,7 +37,7 @@
 |---|---------|
 | [Changelog](#changelog) | Unity + core release notes (single source of truth) |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
-| [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory |
+| [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
 | [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
 | [Quick Start](#-quick-start) | NuGet, UPM, scene |
 | [Documentation](#-documentation) | Map of docs |
@@ -185,6 +186,36 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
 | **Storage** | JSON file on disk | In LLMAgent (RAM) |
 | **Duration** | Between sessions | Current conversation |
 | **For what** | Facts, purchases, quests | Conversation context |
+
+---
+
+### 🗜️ Long conversations — budget, summaries & optional “smart compaction”
+
+When **`WithChatHistory()`** fills the model window, CoreAI keeps a fresh **tail** of messages and folds older turns into **`## Conversation Summary`** in the system prompt (deterministic rollup by default). Newer releases add:
+
+| Feature | What you get |
+|--------|----------------|
+| **Context budget** | `IContextBudgetPolicy` / `HistoryTokenBudget` — system + user + tools shrink what fits in history fairly. |
+| **Persisted summaries** | **`InMemoryConversationSummaryStore`** (process) or **`FileConversationSummaryStore`** (disk under Unity’s **`persistentDataPath`**) — summaries accrue across turns. |
+| **LLM-assisted compaction** *(opt-in)* | Extra **`CompleteAsync`** on role **`__CoreAI_ContextCompaction`** to rewrite the rolling summary (enable globally on **`CoreAISettingsAsset`**, then tune per agent). |
+| **Per-role defaults** | **`AgentBuilder`** agents default **on**; built-in **`Programmer`** defaults **off** (cheaper truncation for tool-heavy Lua roles). **`WithLlmContextCompaction(false)`** to opt out. |
+
+```csharp
+// Custom agent: long chat + smart rollup when global toggle is enabled
+new AgentBuilder("LoreKeeper")
+    .WithChatHistory(8192, persistBetweenSessions: true)
+    .WithLlmContextCompaction(true) // default anyway; explicit for docs
+    .Build()
+    .ApplyToPolicy(policy);
+
+// Programmer-style role: deterministic only for this builder agent
+new AgentBuilder("ToolsFirst")
+    .WithChatHistory(4096)
+    .WithLlmContextCompaction(false)
+    .Build();
+```
+
+Deep dive: [CHANGELOG (Core `v1.5.2–1.5.3`)](Assets/CoreAI/CHANGELOG.md) · [MemorySystem](Assets/CoreAiUnity/Docs/MemorySystem.md) · [ARCHITECTURE](Assets/CoreAiUnity/Docs/ARCHITECTURE.md) · [COREAI_SETTINGS](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md).
 
 ---
 

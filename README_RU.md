@@ -17,10 +17,11 @@
 - 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
 - ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
 - 🧭 **LLM-режимы под разные production-сценарии** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
+- 🗜️ **Длинный чат без «переполнения»** — бюджет токенов на историю, блок **`## Conversation Summary`», опциональная LLM-свёртка (в духе Kilocode)** и переключатели **по ролям**: `AgentBuilder.WithLlmContextCompaction(...)` и глобальный флаг на **`CoreAISettings`**.
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** актуальные номера берутся из [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). **Линия `1.4.0`** — production-grade устойчивость: HTTP retry с `Retry-After`, автоматический ремонт имён инструментов (`TryRepairToolName`), диагностика tool-call trace, кросс-модовый паритет.
+**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). **Линия `1.5.3`:** опциональная **LLM-свёртка длинного контекста** (per-role и глобальный предохранитель), **`SelectingConversationContextManager`**, детерминированный rollup + умный путь, **`FileConversationSummaryStore`** / in-memory summaries, плюс история **`1.4.x`** (HTTP `Retry-After`, `TryRepairToolName`, единый tool pipeline по режимам LLM).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -34,7 +35,7 @@
 |---|--------|
 | [Что нового (0.22 → 0.24)](#-что-нового-022--024) | Последние изменения |
 | [Три входа](#-три-входа-ui--coreai--агенты) | UI · `CoreAi` · агенты |
-| [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, чат, инструменты, память |
+| [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, чат, инструменты, память · длинный диалог и умная свёртка (`v1.5+`) |
 | [Архитектура](#%EF%B8%8F-архитектура) | Два пакета, схема |
 | [Установка](#-установка) | NuGet, `manifest`, Git URL, сцена |
 | [Быстрый старт](#-быстрый-старт) | Первый агент |
@@ -45,6 +46,7 @@
 
 ## 🆕 Что нового (0.22 → 0.24)
 
+- 🗜️ **`1.5.x` (core + Unity)** — контекстный **бюджет** для истории, **`## Conversation Summary`**, сохранение сводок (**`FileConversationSummaryStore`**), опциональная **LLM-свёртка** (роль `__CoreAI_ContextCompaction`), переключатели **глобально и по роли** (`AgentBuilder.WithLlmContextCompaction`, у **Programmer** по умолчанию выкл.). См. [Core CHANGELOG](Assets/CoreAI/CHANGELOG.md) **`v1.5.2–1.5.3`**.
 - 🔧 **0.24.2** — HTTP-ошибки теперь показывают тело ответа API (не только `400 Bad Request`); `ToolExecutionPolicy.maxConsecutiveErrors` нормализуется до ≥ 1; обновление документации.
 - 🧩 **0.24.0–0.24.1** — `SseToolCallAccumulator` для облачного SSE (OpenAI, Anthropic), `ToolExecutionPolicy` единая для streaming/non-streaming, защита JSON-извлечения от code-блоков, дедупликация UI stop.
 - 🎮 **0.22** — Agent Control API: `StopAgent`, `ClearContext`, `OnToolExecuted`, кнопка очистки чата 🗑, Escape-to-stop.
@@ -200,6 +202,34 @@ var agent = new AgentBuilder("Merchant")
     .WithChatHistory()    // Помнит текущий разговор
     .Build();
 ```
+
+---
+
+### 🗜️ Длинные диалоги — бюджет, сводки и «умная» свёртка
+
+Если включён **`WithChatHistory()`** и сообщений становится много, CoreAI сохраняет **хвост** свежих реплик, а более старые сворачивает в блок **`## Conversation Summary`** в system (по умолчанию детерминированно). В актуальных релизах добавлено:
+
+| Возможность | Смысл |
+|-------------|--------|
+| **Бюджет контекста** | `HistoryTokenBudget` из `IContextBudgetPolicy` — честнее делит окно между system/user/tools и историей. |
+| **Сводки на диске** | **`InMemoryConversationSummaryStore`** (процесс) или **`FileConversationSummaryStore`** (`persistentDataPath` в Unity) — сводки живут между ходами. |
+| **LLM-свёртка** *(опционально)* | Доп. вызов **`CompleteAsync`** на роли **`__CoreAI_ContextCompaction`** переписывает rolling-summary; включается в **`CoreAISettings`**, затем можно отключить per-role. |
+| **По умолчанию по роли** | У агентов из **`AgentBuilder`** умное сжатие **включено**; у встроенного **`Programmer`** — **выкл.** (обычно хватает усечённой истории для Lua/tool). **`WithLlmContextCompaction(false)`** — явный офф для кастомной роли. |
+
+```csharp
+new AgentBuilder("LoreKeeper")
+    .WithChatHistory(8192, persistBetweenSessions: true)
+    .WithLlmContextCompaction(true) // по умолчанию так; можно опустить
+    .Build()
+    .ApplyToPolicy(policy);
+
+new AgentBuilder("ToolsFirst")
+    .WithChatHistory(4096)
+    .WithLlmContextCompaction(false) // только детерминированный rollup
+    .Build();
+```
+
+Подробнее: [Core CHANGELOG (`v1.5.2–1.5.3`)](Assets/CoreAI/CHANGELOG.md) · [MemorySystem](Assets/CoreAiUnity/Docs/MemorySystem.md) · [ARCHITECTURE](Assets/CoreAiUnity/Docs/ARCHITECTURE.md) · [COREAI_SETTINGS](Assets/CoreAiUnity/Docs/COREAI_SETTINGS.md).
 
 ---
 

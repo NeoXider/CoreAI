@@ -30,6 +30,9 @@ namespace CoreAI.Ai
         private readonly ICoreAISettings _settings;
         private readonly IConversationContextManager _contextManager;
         private readonly IAgentTurnTraceSink _traceSink;
+        private readonly IContextBudgetPolicy _contextBudgetPolicy;
+        private readonly ITokenEstimator _tokenEstimator;
+        private readonly IConversationCompactionCoordinator _compactionCoordinator;
 
         /// <summary>Собирает зависимости оркестратора (регистрация через VContainer).</summary>
         public AiOrchestrator(
@@ -44,7 +47,10 @@ namespace CoreAI.Ai
             IAiOrchestrationMetrics metrics,
             ICoreAISettings settings,
             IConversationContextManager contextManager = null,
-            IAgentTurnTraceSink traceSink = null)
+            IAgentTurnTraceSink traceSink = null,
+            IContextBudgetPolicy contextBudgetPolicy = null,
+            ITokenEstimator tokenEstimator = null,
+            IConversationCompactionCoordinator compactionCoordinator = null)
         {
             _authority = authority;
             _llm = llm;
@@ -57,15 +63,21 @@ namespace CoreAI.Ai
             _metrics = metrics ?? new NullAiOrchestrationMetrics();
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _contextManager = contextManager ??
-                new DeterministicConversationContextManager(new NullConversationSummaryStore());
+                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore());
             _traceSink = traceSink ?? new NullAgentTurnTraceSink();
+            _contextBudgetPolicy = contextBudgetPolicy ?? new DefaultContextBudgetPolicy();
+            _tokenEstimator = tokenEstimator ?? new HeuristicTokenEstimator();
+            _compactionCoordinator = compactionCoordinator ?? new DefaultConversationCompactionCoordinator();
         }
 
         /// <summary>
         /// Выделенная сборка запроса (переиспользуется в <see cref="RunTaskAsync"/>
         /// и <see cref="RunStreamingAsync"/>).
         /// </summary>
-        private RequestBundle BuildRequest(AiTaskRequest task)
+        private async Task<RequestBundle> BuildRequestAsync(
+            AiTaskRequest task,
+            int contextRetryPass,
+            CancellationToken cancellationToken)
         {
             string roleId = string.IsNullOrWhiteSpace(task.RoleId) ? BuiltInAgentRoleIds.Creator : task.RoleId.Trim();
             string traceId = string.IsNullOrWhiteSpace(task.TraceId)
@@ -91,8 +103,37 @@ namespace CoreAI.Ai
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
-            List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
-                BuildChatHistory(roleId, roleConfig, ref system);
+
+            int contextWindowTokens = roleConfig.ContextTokens > 0
+                ? roleConfig.ContextTokens
+                : _settings.ContextWindowTokens;
+
+            ConversationContextBuildArgs ctxBuildArgs = null;
+            int? resolvedMaxOutput = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
+            if (roleConfig.WithChatHistory && _memoryStore != null)
+            {
+                ContextBudgetRequest budgetRequest = new()
+                {
+                    MaxContextTokens = contextWindowTokens,
+                    SystemPrompt = system,
+                    UserPayload = user,
+                    Tools = tools,
+                    MaxOutputTokens = resolvedMaxOutput,
+                    ContextRetryLevel = contextRetryPass
+                };
+                ContextBudget budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                ctxBuildArgs = new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = budget.HistoryTokenBudget,
+                    SourceBudget = budget,
+                    UseLlmContextCompaction = _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction
+                };
+            }
+
+            (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory) =
+                await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
+                    .ConfigureAwait(false);
+            system = updatedSystem;
 
             return new RequestBundle
             {
@@ -104,7 +145,10 @@ namespace CoreAI.Ai
                 Tools = tools,
                 ChatHistory = chatHistory,
                 RoleConfig = roleConfig,
-                Task = task
+                Task = task,
+                ContextWindowTokens = contextWindowTokens,
+                HistoryTokenBudget = ctxBuildArgs?.HistoryTokenBudget ?? 0,
+                ChatHistoryMessageCount = chatHistory?.Count ?? 0
             };
         }
 
@@ -116,44 +160,87 @@ namespace CoreAI.Ai
                 return null;
             }
 
-            RequestBundle bundle = BuildRequest(task);
-            string roleId = bundle.RoleId;
-            string traceId = bundle.TraceId;
-            string system = bundle.SystemPrompt;
-            string user = bundle.UserPayload;
-            IReadOnlyList<ILlmTool> tools = bundle.Tools;
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig = bundle.RoleConfig;
-            List<Microsoft.Extensions.AI.ChatMessage> chatHistory = bundle.ChatHistory;
-
-            int? maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
+            RequestBundle bundle = null;
+            string roleId;
+            string traceId;
+            string system;
+            string user;
+            IReadOnlyList<ILlmTool> tools;
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig;
+            List<Microsoft.Extensions.AI.ChatMessage> chatHistory;
+            int? maxOutputTokens;
             LlmCompletionResult result = null;
+            int contextPass = 0;
+            bool contextCompactionApplied = false;
 
-            // Single invocation — network-level retries (429/5xx) are handled by
-            // LoggingLlmClientDecorator. Timeouts are enforced by the Unity-aware
-            // caller (CoreAiChatService) via UniTask.CancelAfterSlim, which is
-            // compatible with WebGL's single-threaded execution model.
+            // Single invocation for non-context failures; one optional tighter-history rebuild when the
+            // provider reports context-length overflow. Network retries remain in LoggingLlmClientDecorator.
             try
             {
-                Stopwatch sw = Stopwatch.StartNew();
-                result = await _llm.CompleteAsync(
-                    new LlmCompletionRequest
+                while (true)
+                {
+                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken).ConfigureAwait(false);
+                    roleId = bundle.RoleId;
+                    traceId = bundle.TraceId;
+                    system = bundle.SystemPrompt;
+                    user = bundle.UserPayload;
+                    tools = bundle.Tools;
+                    roleConfig = bundle.RoleConfig;
+                    chatHistory = bundle.ChatHistory;
+                    maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
+
+                    Stopwatch sw = Stopwatch.StartNew();
+                    try
                     {
-                        AgentRoleId = roleId,
-                        SystemPrompt = system,
-                        UserPayload = user,
-                        ChatHistory = chatHistory,
-                        TraceId = traceId,
-                        Tools = tools,
-                        AllowedToolNames = task.AllowedToolNames,
-                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
-                        ForcedToolMode = task.ForcedToolMode,
-                        RequiredToolName = task.RequiredToolName ?? "",
-                        MaxOutputTokens = maxOutputTokens
-                    },
-                    cancellationToken);
-                sw.Stop();
-                _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
-                    sw.Elapsed.TotalMilliseconds);
+                        result = await _llm.CompleteAsync(
+                            new LlmCompletionRequest
+                            {
+                                AgentRoleId = roleId,
+                                SystemPrompt = system,
+                                UserPayload = user,
+                                ChatHistory = chatHistory,
+                                TraceId = traceId,
+                                Tools = tools,
+                                AllowedToolNames = task.AllowedToolNames,
+                                AllowDuplicateToolCalls =
+                                    _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
+                                ForcedToolMode = task.ForcedToolMode,
+                                RequiredToolName = task.RequiredToolName ?? "",
+                                MaxOutputTokens = maxOutputTokens,
+                                ContextWindowTokens = bundle.ContextWindowTokens
+                            },
+                            cancellationToken);
+                    }
+                    finally
+                    {
+                        sw.Stop();
+                        _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
+                            sw.Elapsed.TotalMilliseconds);
+                    }
+
+                    if (result != null && result.Ok && !string.IsNullOrEmpty(result.Content))
+                    {
+                        break;
+                    }
+
+                    if (contextCompactionApplied)
+                    {
+                        RecordTrace(bundle, result, null, result?.Error ?? "empty response");
+                        return null;
+                    }
+
+                    if (result != null &&
+                        _compactionCoordinator.ShouldRetryOnceAfterContextOverflow(result,
+                            contextCompactionApplied))
+                    {
+                        contextCompactionApplied = true;
+                        contextPass = 1;
+                        continue;
+                    }
+
+                    RecordTrace(bundle, result, null, result?.Error ?? "empty response");
+                    return null;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -163,12 +250,6 @@ namespace CoreAI.Ai
             {
                 Log.Instance.Error($"[AiOrchestrator] Task execution failed: {ex.Message}", LogTag.Llm);
                 RecordTrace(bundle, result, null, ex.Message);
-                return null;
-            }
-
-            if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
-            {
-                RecordTrace(bundle, result, null, result?.Error ?? "empty response");
                 return null;
             }
 
@@ -193,7 +274,8 @@ namespace CoreAI.Ai
                         AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
                         ForcedToolMode = task.ForcedToolMode,
                         RequiredToolName = task.RequiredToolName ?? "",
-                        MaxOutputTokens = maxOutputTokens
+                        MaxOutputTokens = maxOutputTokens,
+                        ContextWindowTokens = bundle.ContextWindowTokens
                     },
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();
@@ -272,7 +354,7 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            RequestBundle bundle = BuildRequest(task);
+            RequestBundle bundle = await BuildRequestAsync(task, 0, cancellationToken).ConfigureAwait(false);
             System.Text.StringBuilder accumulated = new();
             int chunkCount = 0;
             string terminalError = null;
@@ -292,7 +374,8 @@ namespace CoreAI.Ai
                 AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
-                MaxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens)
+                MaxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens),
+                ContextWindowTokens = bundle.ContextWindowTokens
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -453,40 +536,52 @@ namespace CoreAI.Ai
             public List<Microsoft.Extensions.AI.ChatMessage> ChatHistory;
             public AgentMemoryPolicy.RoleMemoryConfig RoleConfig;
             public AiTaskRequest Task;
+            public int ContextWindowTokens;
+            public int HistoryTokenBudget;
+            public int ChatHistoryMessageCount;
         }
 
-        private List<Microsoft.Extensions.AI.ChatMessage> BuildChatHistory(
+        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory)> BuildChatHistoryAsync(
             string roleId,
             AgentMemoryPolicy.RoleMemoryConfig roleConfig,
-            ref string system)
+            string system,
+            ConversationContextBuildArgs buildArgs,
+            string traceId,
+            CancellationToken cancellationToken)
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
-                return null;
+                return (system, null);
             }
 
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
             ChatMessage[] history = _memoryStore.GetChatHistory(roleId, maxMessages);
             if (history == null || history.Length == 0)
             {
-                return null;
+                return (system, null);
             }
 
-            ConversationContextSnapshot snapshot = _contextManager.BuildSnapshot(roleId, history, roleConfig);
+            ConversationContextSnapshot snapshot =
+                _contextManager is IAsyncConversationContextManager asyncCtx
+                    ? await asyncCtx
+                        .BuildSnapshotAsync(roleId, history, roleConfig, buildArgs, traceId, cancellationToken)
+                        .ConfigureAwait(false)
+                    : _contextManager.BuildSnapshot(roleId, history, roleConfig, buildArgs);
             if (snapshot == null)
             {
-                return null;
+                return (system, null);
             }
 
+            string resultSystem = system;
             if (!string.IsNullOrWhiteSpace(snapshot.Summary))
             {
-                system = system.Trim() + "\n\n## Conversation Summary\n" + snapshot.Summary.Trim();
+                resultSystem = resultSystem.Trim() + "\n\n## Conversation Summary\n" + snapshot.Summary.Trim();
             }
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
             if (recent.Length == 0)
             {
-                return null;
+                return (resultSystem, null);
             }
 
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
@@ -499,7 +594,7 @@ namespace CoreAI.Ai
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
             }
 
-            return chatHistory;
+            return (resultSystem, chatHistory);
         }
 
         private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse, string error)
@@ -521,7 +616,9 @@ namespace CoreAI.Ai
                 Error = error ?? "",
                 PromptTokens = result?.PromptTokens ?? 0,
                 CompletionTokens = result?.CompletionTokens ?? 0,
-                TotalTokens = result?.TotalTokens ?? 0
+                TotalTokens = result?.TotalTokens ?? 0,
+                HistoryTokenBudget = bundle.HistoryTokenBudget,
+                ChatHistoryMessageCount = bundle.ChatHistoryMessageCount
             });
         }
 

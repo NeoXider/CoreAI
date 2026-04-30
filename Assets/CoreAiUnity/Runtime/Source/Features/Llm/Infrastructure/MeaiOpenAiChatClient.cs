@@ -426,6 +426,11 @@ namespace CoreAI.Infrastructure.Llm
         private static LlmErrorCode MapHttpStatus(int status, string body, string fallback)
         {
             string text = ((body ?? "") + " " + (fallback ?? "")).ToLowerInvariant();
+            if (status == 413)
+            {
+                return LlmErrorCode.ContextLengthExceeded;
+            }
+
             if (status == 401 || status == 403)
             {
                 return LlmErrorCode.AuthExpired;
@@ -439,6 +444,13 @@ namespace CoreAI.Infrastructure.Llm
             if (status == 429 || text.Contains("rate"))
             {
                 return LlmErrorCode.RateLimited;
+            }
+
+            if (text.Contains("context_length_exceeded") || text.Contains("maximum context") ||
+                text.Contains("context window") || text.Contains("too many tokens") ||
+                text.Contains("token limit"))
+            {
+                return LlmErrorCode.ContextLengthExceeded;
             }
 
             if (status == 400 || status == 422)

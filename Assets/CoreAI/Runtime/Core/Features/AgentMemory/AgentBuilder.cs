@@ -52,6 +52,9 @@ namespace CoreAI.Ai
         private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
         private bool _overrideUniversalPrefix;
+        /// <summary>Null = default true (LLM-assisted compaction when global setting allows).</summary>
+        private bool? _useLlmContextCompaction;
+
         private readonly ICoreAISettings _settings;
 
         public AgentBuilder(string roleId, ICoreAISettings settings = null)
@@ -243,6 +246,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Enables or disables LLM-assisted folding of overflowing chat history for this agent.
+        /// When disabled, only deterministic compaction applies. Default when not called: enabled (still gated by global <see cref="ICoreAISettings.EnableLlmContextCompaction"/>).
+        /// </summary>
+        public AgentBuilder WithLlmContextCompaction(bool enabled)
+        {
+            _useLlmContextCompaction = enabled;
+            return this;
+        }
+
+        /// <summary>
         /// Отключить universalSystemPromptPrefix из CoreAISettings для этой роли.
         /// Полезно когда роли нужен полностью кастомный системный промпт
         /// без общих правил (например, роль-парсер или роль-валидатор).
@@ -291,7 +304,8 @@ namespace CoreAI.Ai
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 EnableStreaming = _enableStreaming,
                 MemoryDefaultAction = _memoryDefaultAction,
-                OverrideUniversalPrefix = _overrideUniversalPrefix
+                OverrideUniversalPrefix = _overrideUniversalPrefix,
+                UseLlmContextCompaction = _useLlmContextCompaction ?? true
             };
         }
     }
@@ -319,6 +333,9 @@ namespace CoreAI.Ai
         public MemoryToolAction MemoryDefaultAction { get; internal set; }
         public bool OverrideUniversalPrefix { get; internal set; }
 
+        /// <summary>LLM-assisted transcript compaction for this agent (global gate still applies).</summary>
+        public bool UseLlmContextCompaction { get; internal set; }
+
         /// <summary>
         /// Применить конфигурацию к политике.
         /// </summary>
@@ -337,6 +354,7 @@ namespace CoreAI.Ai
 
             policy.ConfigureChatHistory(RoleId, WithChatHistory, ContextWindowTokens,
                 PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
+            policy.ConfigureLlmContextCompaction(RoleId, UseLlmContextCompaction);
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
 
             // Регистрируем дополнительный системный промпт (слой 3)

@@ -9,6 +9,7 @@ using CoreAI.Infrastructure.Prompts;
 using CoreAI.Infrastructure.World;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Authority;
+using System.IO;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -120,15 +121,22 @@ namespace CoreAI.Composition
                     new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), aiNetworkExecutionPolicy),
                 Lifetime.Singleton);
 
-            // ── 7. Core Portable (orchestrator, agent memory, Lua sandbox) ─
-            builder.RegisterCorePortable();
+            builder.Register<IConversationSummaryStore>(_ =>
+                    new FileConversationSummaryStore(
+                        Path.Combine(Application.persistentDataPath, "CoreAI", "ConversationSummaries"),
+                        null),
+                Lifetime.Singleton);
+
+            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: true);
 
             // Runtime overrides: файловые версии скриптов и агентной памяти
             builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
-            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
+            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
+                .As<IAgentMemoryStore>()
+                .As<IConversationTranscriptStore>();
 
             // ── 8. Entry Points ────────────────────────────────────────────
             builder.RegisterEntryPoint<AiGameCommandRouter>();

@@ -2,6 +2,38 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.3] - 2026-04-30
+
+### LLM-assisted context compaction wiring
+
+- **`ConversationContextManagerFactories.Create`** — wired into **`RegisterCorePortable`** so **`CoreAILifetimeScope`** honours **`ICoreAISettings.EnableLlmContextCompaction`** without moving logic out of Core.
+- **`SelectingConversationContextManager`** — registered when global compaction is enabled; each request selects LLM vs deterministic rollup via **`ConversationContextBuildArgs.UseLlmContextCompaction`** (from **`AgentMemoryPolicy.RoleMemoryConfig`**).
+- **Per-role defaults:** built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlayerChat`**, **`Merchant`**, **`CoreMechanicAI`** default **on**; **`Programmer`** defaults **off** (deterministic only). Override via **`AgentBuilder.WithLlmContextCompaction(bool)`**.
+- **EditMode tests:** `ConversationContextCompactionEditModeTests` (factory routing, selecting wrapper, LLM skip/invoke), `LlmCompactionPerRoleEditModeTests` (orchestrator per-role gate with `SplitCountingLlm`, `AgentBuilder` API).
+- **PlayMode tests:** `LlmCompactionPerRolePlayModeTests` (same gates under Unity lifecycle with stub LLM).
+- **`ARCHITECTURE.md`** — updated context manager narrative.
+- **`README.md`** — documents v1.5.3 features including LLM-assisted compaction and `AgentBuilder` API.
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.3`**.
+
+### Meta
+
+- Package **`1.5.3`**. Dependency **`com.nexoider.coreai 1.5.3`**.
+
+## [1.5.2] - 2026-04-30
+
+### Context & persistence wiring
+
+- **`RegisterCorePortable()`** registers default **`InMemoryConversationSummaryStore`**; **`CoreAILifetimeScope`** registers **`FileConversationSummaryStore`**, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`** (`persistentDataPath/CoreAI/ConversationSummaries`).
+- **`FileAgentMemoryStore`** now exposes **`IConversationTranscriptStore`** (structured transcript JSON + lazy migration).
+- **`MeaiOpenAiChatClient`** maps HTTP **413** and common context-overload payloads to **`LlmErrorCode.ContextLengthExceeded`**.
+- **EditMode tests:** `AiOrchestratorHistoryEditModeTests` context-overflow retry (`RunTaskAsync_RetriesOnce_OnContextLengthExceeded`), `FileConversationSummaryStoreEditModeTests`.
+- **`ARCHITECTURE.md`**, **`MemorySystem.md`** — budget/summary/transcript narrative.
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.2`**.
+
+### Meta
+
+- Package **`1.5.2`**. Dependency **`com.nexoider.coreai 1.5.2`**.
+
 ## [1.5.1] - 2026-04-30
 
 ### 🛡️ WebGL Stability: UniTask-based timeout + error propagation

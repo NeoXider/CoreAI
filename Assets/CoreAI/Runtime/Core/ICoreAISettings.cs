@@ -82,5 +82,11 @@ namespace CoreAI
         /// </para>
         /// </summary>
         int MaxTokens => 0;
+
+        /// <summary>
+        /// When true and the host registers an <see cref="Ai"/>, overflowing chat history may be summarized with an auxiliary
+        /// LLM call (extra latency/cost). When false, compaction uses the deterministic bullet rollup only.
+        /// </summary>
+        bool EnableLlmContextCompaction => false;
     }
 }

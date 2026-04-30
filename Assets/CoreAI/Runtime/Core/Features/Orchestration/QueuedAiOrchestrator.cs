@@ -94,6 +94,21 @@ namespace CoreAI.Ai
 
             Enqueue(work);
 
+            // Если work item был вытеснен из _streamPending другим элементом с тем же
+            // CancellationScope ещё ДО запуска (Enqueue нового scope-элемента удаляет
+            // предшественников и пишет cancelled-чанк + Complete в их queue), очередь
+            // уже завершена синхронно. В этом случае сливаем чанки без await, чтобы
+            // не зависеть от SynchronizationContext (Unity main-thread) для completion.
+            if (queue.IsCompleted)
+            {
+                foreach (LlmStreamChunk chunk in queue.DrainSync())
+                {
+                    yield return chunk;
+                }
+
+                yield break;
+            }
+
             // ВАЖНО: читаем без cancellationToken. Отмена уже распространяется на
             // _inner.RunStreamingAsync через w.OuterCt; worker (RunOneStreamingAsync)
             // сам запишет терминальный чанк { Error="cancelled" } и вызовет Complete(),
@@ -255,6 +270,11 @@ namespace CoreAI.Ai
 
             // 3. Завершаем удалённые pending-задачи, чтобы вызывающий не висел в ожидании.
             CancelRemovedPending(removedPending, removedStreamPending);
+
+            lock (_queueLock)
+            {
+                TryPumpLocked();
+            }
         }
 
         private long NextSequence()
@@ -501,6 +521,12 @@ namespace CoreAI.Ai
             private readonly SemaphoreSlim _signal = new(0);
             private volatile bool _completed;
 
+            /// <summary>
+            /// true после вызова <see cref="Complete"/>. Позволяет caller'у обнаружить
+            /// вытеснение (eviction) до запуска async-reader'а и слить чанки синхронно.
+            /// </summary>
+            public bool IsCompleted => _completed;
+
             public void Write(LlmStreamChunk chunk)
             {
                 _queue.Enqueue(chunk);
@@ -519,22 +545,40 @@ namespace CoreAI.Ai
                 _signal.Release();
             }
 
+            /// <summary>
+            /// Синхронно сливает все чанки из очереди. Используется когда очередь
+            /// уже <see cref="IsCompleted"/> до начала async-чтения (eviction path).
+            /// </summary>
+            public List<LlmStreamChunk> DrainSync()
+            {
+                List<LlmStreamChunk> result = new();
+                while (_queue.TryDequeue(out LlmStreamChunk chunk))
+                {
+                    result.Add(chunk);
+                }
+
+                return result;
+            }
+
             public async Task<(bool hasValue, LlmStreamChunk chunk)> TryTakeAsync(CancellationToken ct)
             {
-                await _signal.WaitAsync(ct).ConfigureAwait(false);
-                if (_queue.TryDequeue(out LlmStreamChunk chunk))
+                // Try dequeue before waiting: producer may Write+Complete on another continuation
+                // before this reader reaches WaitAsync; Semaphore permits must not be consumed
+                // without observing the matching queue item.
+                while (true)
                 {
-                    return (true, chunk);
-                }
+                    if (_queue.TryDequeue(out LlmStreamChunk chunk))
+                    {
+                        return (true, chunk);
+                    }
 
-                // Очередь пуста и Complete() подал сигнал — отпускаем следующий
-                // сигнал на случай, если есть ещё ожидающие читатели.
-                if (_completed)
-                {
-                    _signal.Release();
-                }
+                    if (_completed)
+                    {
+                        return (false, default);
+                    }
 
-                return (false, default);
+                    await _signal.WaitAsync(ct).ConfigureAwait(false);
+                }
             }
         }
     }

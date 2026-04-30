@@ -41,7 +41,10 @@ namespace CoreAI.Ai
         ProviderError = 9,
 
         /// <summary>Routing could not resolve a usable backend.</summary>
-        RoutingError = 10
+        RoutingError = 10,
+
+        /// <summary>The request exceeded the model or provider context window.</summary>
+        ContextLengthExceeded = 11
     }
 
     /// <summary>

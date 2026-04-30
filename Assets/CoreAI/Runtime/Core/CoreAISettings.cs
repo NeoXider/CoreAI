@@ -37,6 +37,7 @@ namespace CoreAI
         private static bool? _logMeaiToolCallingSteps;
         private static bool? _allowDuplicateToolCalls;
         private static bool? _enableStreaming;
+        private static bool? _enableLlmContextCompaction;
 
         #endregion
 
@@ -59,6 +60,7 @@ namespace CoreAI
         private const bool DefaultLogMeaiToolCallingSteps = true;
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
+        private const bool DefaultEnableLlmContextCompaction = false;
 
         internal const string DefaultUniversalSystemPromptPrefix =
             "CRITICAL RULES FOR ALL AGENTS:\n" +
@@ -265,6 +267,19 @@ namespace CoreAI
             set => _enableStreaming = value;
         }
 
+        /// <summary>
+        /// LLM-assisted свёртка истории при нехватке бюджета токенов (иначе детерминированный bullet rollup).
+        /// По умолчанию: выключено.
+        /// </summary>
+        public static bool EnableLlmContextCompaction
+        {
+            get =>
+                _enableLlmContextCompaction ??
+                Instance?.EnableLlmContextCompaction ??
+                DefaultEnableLlmContextCompaction;
+            set => _enableLlmContextCompaction = value;
+        }
+
         #endregion
 
         /// <summary>
@@ -293,6 +308,7 @@ namespace CoreAI
             _logMeaiToolCallingSteps = null;
             _allowDuplicateToolCalls = null;
             _enableStreaming = null;
+            _enableLlmContextCompaction = null;
         }
     }
 }

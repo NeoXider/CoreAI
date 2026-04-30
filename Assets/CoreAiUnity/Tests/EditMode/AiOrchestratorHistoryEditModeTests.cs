@@ -29,7 +29,6 @@ namespace CoreAI.Tests.EditMode
             public LlmCompletionRequest LastRequest { get; private set; }
 
             public void SetTools(IReadOnlyList<ILlmTool> tools) { }
-            public IReadOnlyList<ILlmTool> GetTools() => Array.Empty<ILlmTool>();
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
             {
@@ -156,10 +155,11 @@ namespace CoreAI.Tests.EditMode
             // Настраиваем агента с лимитом в 15 сообщений
             policy.ConfigureChatHistory("test_role", enabled: true, tokens: 8192, persist: false, maxChatHistoryMessages: 15);
 
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memory, policy, null, null, new TestSettings());
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
 
             // Act
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "Hi" });
@@ -182,25 +182,23 @@ namespace CoreAI.Tests.EditMode
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
             
-            // We set ContextTokens = 300. The budget is tokens / 2 = 150.
-            // Estimated tokens per char is char.Length / 3.
-            // So budget is 150 * 3 = 450 characters roughly.
-            // Let's create messages of 100 characters each.
-            // 450 characters / 100 characters = ~4.5 messages allowed via token limit.
-            
+            // ContextTokens = 300. Composer must receive TestSettings: otherwise CoreAISettings'
+            // default universal prefix balloons system prompt size and eats the whole budget.
+            // DefaultContextBudgetPolicy reserves completion headroom; disable memory/tools for a slim fixed prompt.
+            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 300, persist: false, maxChatHistoryMessages: 50);
+            policy.DisableMemoryTool("test_role");
+            policy.SetToolsForRole("test_role", System.Array.Empty<ILlmTool>());
             for (int i = 0; i < 20; i++)
             {
                 string content = "A".PadRight(100, 'A') + i; // 100 chars + number
                 memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage { Role = "user", Content = content });
             }
 
-            // Настраиваем агента (без жесткого лимита по сообщениям, но с жестким лимитом по токенам)
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 300, persist: false, maxChatHistoryMessages: 50);
-
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memory, policy, null, null, new TestSettings());
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
 
             // Act
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -209,7 +207,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             
-            // Expected length: ~4 messages (150 token budget * 3 = 450 chars. 450 / 100 chars = 4).
+            // Expected: several recent lines (not full 20); count depends on heuristic estimator + budget policy.
             int expectedCount = llm.LastRequest.ChatHistory.Count;
             Assert.Less(expectedCount, 20, "History should be significantly truncated due to token budget");
             Assert.GreaterOrEqual(expectedCount, 3, "At least a few messages should be kept within budget");
@@ -237,10 +235,11 @@ namespace CoreAI.Tests.EditMode
 
             policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
 
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memory, policy, null, null, new TestSettings(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
@@ -258,14 +257,18 @@ namespace CoreAI.Tests.EditMode
         {
             TestLlmClient llm = new();
             AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
             AiPromptComposer composer = new(
                 new NullSys(),
                 new NullUsr(),
                 null,
-                contextProviders: new IAiPromptContextProvider[] { new StaticContextProvider() });
+                null,
+                policy,
+                settings,
+                new IAiPromptContextProvider[] { new StaticContextProvider() });
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+                composer, new TestMemoryStore(), policy, null, null, settings);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -286,10 +289,11 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llm = new();
             AgentMemoryPolicy policy = new();
             policy.SetRuntimeContextProvider("Teacher", new StaticRoleContextProvider());
-            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, memoryPolicy: policy);
+            TestSettings settings = new();
+            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+                composer, new TestMemoryStore(), policy, null, null, settings);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -312,10 +316,11 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_quiz"),
                 new StubTool("spawn_drag_and_drop")
             });
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                new TestMemoryStore(), policy, null, null, new TestSettings());
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -338,7 +343,6 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_quiz"),
                 new StubTool("spawn_drag_and_drop")
             });
-            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null);
             AiTaskRequest task = new AiTaskRequest
             {
                 RoleId = "Teacher",
@@ -347,9 +351,11 @@ namespace CoreAI.Tests.EditMode
                 ForcedToolMode = LlmToolChoiceMode.RequireAny
             };
 
+            TestSettings settings = new();
+            AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
             AiOrchestrator orchestratorSync = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+                composer, new TestMemoryStore(), policy, null, null, settings);
             await orchestratorSync.RunTaskAsync(task);
 
             int syncToolCount = llm.LastRequest.Tools.Count;
@@ -360,7 +366,7 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llmStream = new();
             AiOrchestrator orchestratorStream = new AiOrchestrator(
                 new TestAuthority(), llmStream, new TestSink(), new TestTelemetry(),
-                composer, new TestMemoryStore(), policy, null, null, new TestSettings());
+                composer, new TestMemoryStore(), policy, null, null, settings);
 
             await foreach (LlmStreamChunk _ in orchestratorStream.RunStreamingAsync(task, default))
             {
@@ -383,10 +389,11 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_quiz"),
                 new StubTool("spawn_drag_and_drop")
             });
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                new TestMemoryStore(), policy, null, null, new TestSettings());
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -399,6 +406,62 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
         }
 
+        private sealed class ContextFailThenOkLlm : ILlmClient
+        {
+            public int Calls { get; private set; }
+
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                if (Calls == 1)
+                {
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "context_length_exceeded",
+                        ErrorCode = LlmErrorCode.ContextLengthExceeded
+                    });
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "after-compact" });
+            }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_RetriesOnce_OnContextLengthExceeded()
+        {
+            ContextFailThenOkLlm llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            for (int i = 0; i < 24; i++)
+            {
+                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = new string('w', 80) + i
+                });
+            }
+
+            policy.ConfigureChatHistory("role_ctx", enabled: true, tokens: 2048, persist: false,
+                maxChatHistoryMessages: 50);
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            string content = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "role_ctx", Hint = "Hi" });
+
+            Assert.AreEqual(2, llm.Calls);
+            Assert.AreEqual("after-compact", content);
+        }
+
         [Test]
         public async Task RunTaskAsync_ChatOnly_SendsNoTools()
         {
@@ -406,10 +469,11 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             policy.DisableMemoryTool("Teacher");
             policy.SetToolsForRole("Teacher", new ILlmTool[] { new StubTool("spawn_quiz") });
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                new TestMemoryStore(), policy, null, null, new TestSettings());
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings);
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {

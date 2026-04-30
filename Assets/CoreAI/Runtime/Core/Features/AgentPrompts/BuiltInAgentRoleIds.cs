@@ -29,6 +29,12 @@ namespace CoreAI.Ai
         /// <summary>Торговец/NPC с инвентарём для продажи предметов игроку.</summary>
         public const string Merchant = "Merchant";
 
+        /// <summary>
+        /// Auxiliary routing-only id for transcript compaction completions (never a playable agent).
+        /// Host routing may steer this toward a lighter model profile.
+        /// </summary>
+        public const string ContextCompactionAux = "__CoreAI_ContextCompaction";
+
         /// <summary>Все встроенные роли (для тестов и валидации манифестов).</summary>
         public static readonly IReadOnlyList<string> AllBuiltInRoles = new[]
         {

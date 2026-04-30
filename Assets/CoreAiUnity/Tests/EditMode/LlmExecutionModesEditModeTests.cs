@@ -175,6 +175,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LlmErrorCode.AuthExpired, LlmProviderError.MapCode("subscription_required"));
             Assert.AreEqual(LlmErrorCode.InvalidRequest, LlmProviderError.MapCode("model_not_allowed"));
             Assert.AreEqual(LlmErrorCode.RateLimited, LlmProviderError.MapCode("rate_limited"));
+            Assert.AreEqual(LlmErrorCode.ContextLengthExceeded, LlmProviderError.MapCode("context_length_exceeded"));
         }
 
         [Test]

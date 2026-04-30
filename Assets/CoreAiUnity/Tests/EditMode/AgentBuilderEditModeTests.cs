@@ -38,6 +38,17 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("You are a test agent.", config.SystemPrompt);
             Assert.AreEqual(0, config.Tools.Count);
             Assert.AreEqual(AgentMode.ToolsAndChat, config.Mode);
+            Assert.IsTrue(config.UseLlmContextCompaction, "Smart compaction should default on for AgentBuilder agents.");
+        }
+
+        [Test]
+        public void Builder_WithLlmContextCompaction_OverridesDefault()
+        {
+            AgentConfig config = new AgentBuilder("NoSmart")
+                .WithSystemPrompt("x")
+                .WithLlmContextCompaction(false)
+                .Build();
+            Assert.IsFalse(config.UseLlmContextCompaction);
         }
 
         [Test]

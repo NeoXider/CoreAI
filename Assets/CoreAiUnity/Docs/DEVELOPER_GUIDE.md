@@ -124,7 +124,7 @@ for predictable gameplay scheduling.
 
 Chat history is not sent blindly forever. When `AgentMemoryPolicy.RoleMemoryConfig.WithChatHistory` is enabled, `AiOrchestrator` loads recent stored chat and passes it to `IConversationContextManager`.
 
-The default `DeterministicConversationContextManager` uses the role `ContextTokens` budget. Fresh turns remain in `LlmCompletionRequest.ChatHistory`; older turns are compacted into `## Conversation Summary` in the system prompt and can be stored through `IConversationSummaryStore`. This is deterministic and does not spend another LLM request.
+The default `DeterministicConversationContextManager` uses the role `ContextTokens` budget (and the portable token budget when enabled). Fresh turns remain in `LlmCompletionRequest.ChatHistory`; older turns are compacted into `## Conversation Summary` in the system prompt. Summaries are stored in `IConversationSummaryStore`: **`RegisterCorePortable`** wires **`InMemoryConversationSummaryStore`** by default (accumulation for the process); Unity’s **`CoreAILifetimeScope`** overrides with **`FileConversationSummaryStore`** for disk persistence. This compaction is deterministic and does not spend another LLM request.
 
 Production projects can replace `IConversationContextManager` with an implementation that calls a backend summarizer, stores summaries per user/session/topic, or applies stricter privacy rules. Keep the output short and factual because it becomes part of every later request.
 

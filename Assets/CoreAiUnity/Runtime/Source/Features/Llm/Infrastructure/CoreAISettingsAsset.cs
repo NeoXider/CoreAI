@@ -190,6 +190,12 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool enableStreaming = true;
 
+        [Tooltip(
+            "Доп. вызов LLM для свёртки части истории, если она не укладывается в HistoryTokenBudget. " +
+            "Дороже и медленнее, чем детерминированный bullet rollup (по умолчанию выкл.).")]
+        [SerializeField]
+        private bool enableLlmContextCompaction = false;
+
         [Header("🔌 Offline режим (без LLM)")]
         [Tooltip("Возвращать кастомный текст вместо заглушки по ролям.")]
         [SerializeField]
@@ -422,6 +428,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Глобальное включение стриминга ответов LLM (по умолчанию true).</summary>
         public bool EnableStreaming => enableStreaming;
+
+        /// <summary>LLM-assisted compaction длинной истории (иначе только детерминированная свёртка).</summary>
+        public bool EnableLlmContextCompaction => enableLlmContextCompaction;
 
         // Отладка
         /// <summary>MEAI debug logging.</summary>

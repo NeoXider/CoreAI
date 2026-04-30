@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Ai;
+using CoreAI;
 using CoreAI.Authority;
 using CoreAI.Config;
 using CoreAI.Messaging;
@@ -10,15 +11,27 @@ using VContainer;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Регистрация портативных сервисов (сборка CoreAI.Core).
+    /// Registers portable orchestration services (CoreAI.Core).
+    /// Registers <see cref="InMemoryConversationSummaryStore"/> as <see cref="IConversationSummaryStore"/> by default so
+    /// deterministic context compaction persists across turns for each role until the host overrides it or clears summaries.
+    /// Pass <paramref name="suppressDefaultConversationSummaryStore"/> when the host registers its own implementation first
+    /// (Unity <see cref="CoreAILifetimeScope"/> uses <see cref="FileConversationSummaryStore"/> this way).
     /// </summary>
     public static class CorePortableInstaller
     {
         /// <summary>
-        /// Регистрирует оркестратор, очередь, песочницу Lua, телеметрию, память и чат — вызывать из Unity scope после инфраструктуры.
+        /// Регистрация портабельных сервисов оркестрации. По умолчанию включает
+        /// <see cref="InMemoryConversationSummaryStore"/> — накопление свёрток истории между ходами;
+        /// для Unity с файловым store вызовите с <paramref name="suppressDefaultConversationSummaryStore"/><c>true</c>
+        /// после регистрации своего <see cref="IConversationSummaryStore"/>.
         /// </summary>
-        public static void RegisterCorePortable(this IContainerBuilder builder)
+        public static void RegisterCorePortable(this IContainerBuilder builder,
+            bool suppressDefaultConversationSummaryStore = false)
         {
+            if (!suppressDefaultConversationSummaryStore)
+            {
+                builder.Register<InMemoryConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
+            }
             builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
             builder.Register<Func<IAiOrchestrationService>>(c =>
             {
@@ -33,8 +46,18 @@ namespace CoreAI.Composition
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
-            builder.Register<NullConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
-            builder.Register<DeterministicConversationContextManager>(Lifetime.Singleton).As<IConversationContextManager>();
+            builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
+            builder.Register<HeuristicTokenEstimator>(Lifetime.Singleton).As<ITokenEstimator>();
+            builder.Register<DefaultConversationCompactionCoordinator>(Lifetime.Singleton).As<IConversationCompactionCoordinator>();
+
+            builder.Register<IConversationContextManager>(c =>
+                    ConversationContextManagerFactories.Create(
+                        c.Resolve<ICoreAISettings>().EnableLlmContextCompaction,
+                        c.Resolve<IConversationSummaryStore>(),
+                        c.Resolve<ITokenEstimator>(),
+                        c.Resolve<ILlmClient>(),
+                        null),
+                Lifetime.Singleton);
             builder.Register<NullLlmUsageSink>(Lifetime.Singleton).As<ILlmUsageSink>();
             builder.Register<AllowAllLlmEntitlementPolicy>(Lifetime.Singleton).As<ILlmEntitlementPolicy>();
             builder.Register<InMemoryLlmToolCallHistory>(Lifetime.Singleton).As<ILlmToolCallHistory>();

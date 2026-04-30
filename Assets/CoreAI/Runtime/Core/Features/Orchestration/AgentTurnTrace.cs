@@ -37,5 +37,11 @@ namespace CoreAI.Ai
 
         /// <summary>Total tokens.</summary>
         public int TotalTokens { get; set; }
+
+        /// <summary>Estimated history budget last applied (0 when chat history off).</summary>
+        public int HistoryTokenBudget { get; set; }
+
+        /// <summary>Chat messages sent as MEAI history for this turn.</summary>
+        public int ChatHistoryMessageCount { get; set; }
     }
 }

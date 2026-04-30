@@ -24,6 +24,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 | **Agent** | `AgentBuilder`, tools, memory |
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |
+| **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG `1.5.3`](../CoreAI/CHANGELOG.md) |
 | **LLM modes** | `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, mixed routing |
 | **Docs · Tests · Install** | End of this file |
 
@@ -50,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current stable line: **`1.0.0`**. It introduces public LLM execution modes and multi-mode role routing.
+Current stable line: **`1.5.3`** — optional **LLM-assisted transcript compaction** (global + **per-role** via `AgentBuilder.WithLlmContextCompaction` / `AgentMemoryPolicy`), token **context budget**, **file-backed conversation summaries**, plus the unified MEAI/tool pipeline and streaming stack from earlier lines. Bump **`version`** in [`package.json`](package.json) when you ship.
 
 ---
 
@@ -68,6 +69,8 @@ var blacksmith = new AgentBuilder("Blacksmith")
 blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
 await blacksmith.Ask("Show me your swords");
 ```
+
+**Long chats (1.5+):** turn on **`WithChatHistory()`** — older turns collapse into **`## Conversation Summary`** under a **`HistoryTokenBudget`**. Optionally enable **`Enable LLM Context Compaction`** on [**`CoreAISettings`**](Docs/COREAI_SETTINGS.md) for auxiliary summarizer calls (`__CoreAI_ContextCompaction` role); use **`AgentBuilder.WithLlmContextCompaction(false)`** for tool-heavy coding agents (**`Programmer`** defaults off in built-in roles).
 
 Docs: [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [TOOL_CALL_SPEC](Docs/TOOL_CALL_SPEC.md) · [MemorySystem](Docs/MemorySystem.md)
 
@@ -117,7 +120,7 @@ Deep dive: [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md).
 | Level | Documents |
 |-------|-----------|
 | 🟢 Beginner | [QUICK_START](Docs/QUICK_START.md) · [QUICK_START_FULL](Docs/QUICK_START_FULL.md) · [COREAI_SINGLETON_API](Docs/COREAI_SINGLETON_API.md) · [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SETTINGS](Docs/COREAI_SETTINGS.md) · [EXAMPLES](Docs/EXAMPLES.md) |
-| 💬 Chat & streaming | [README_CHAT](Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md) |
+| 💬 Chat & streaming | [README_CHAT](Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md) · [ARCHITECTURE](Docs/ARCHITECTURE.md) (context budget / compaction) |
 | 🟡 Intermediate | [TOOL_CALL_SPEC](Docs/TOOL_CALL_SPEC.md) · [MemorySystem](Docs/MemorySystem.md) · [AI_AGENT_ROLES](Docs/AI_AGENT_ROLES.md) · [WORLD_COMMANDS](Docs/WORLD_COMMANDS.md) · [TROUBLESHOOTING](Docs/TROUBLESHOOTING.md) |
 | 🔴 Architecture | [DEVELOPER_GUIDE](Docs/DEVELOPER_GUIDE.md) · [DGF_SPEC](Docs/DGF_SPEC.md) · [MEAI_TOOL_CALLING](../CoreAI/Docs/MEAI_TOOL_CALLING.md) · [MULTIPLAYER_AI](Docs/MULTIPLAYER_AI.md) |
 

@@ -328,6 +328,16 @@ settings.ConfigureHttpApi("http://localhost:1234/v1", "", "qwen3.5-4b");
 
 ---
 
+## 📎 Chat history compaction (conversation summaries)
+
+Without extra setup, **`RegisterCorePortable()`** wires **`InMemoryConversationSummaryStore`**: older turns that no longer fit the token budget become a deterministic **`## Conversation Summary`** block, and summaries **accumulate in memory per role** for the app process.
+
+Unity scenes using **`CoreAILifetimeScope`** switch to **`FileConversationSummaryStore`** under **`%persistentDataPath%/CoreAI/ConversationSummaries`** so compaction survives restarts (`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`).
+
+This is separate from **`FileAgentMemoryStore`** transcript JSON; orchestration details are in [ARCHITECTURE.md](ARCHITECTURE.md) and [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
+
+---
+
 ## 🔑 How it works
 
 ### Settings priority

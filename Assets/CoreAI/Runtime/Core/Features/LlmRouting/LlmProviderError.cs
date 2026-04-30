@@ -36,6 +36,9 @@ namespace CoreAI.Ai
                 case "model_not_allowed":
                 case "invalid_request":
                     return LlmErrorCode.InvalidRequest;
+                case "context_length_exceeded":
+                case "context_exceeded":
+                    return LlmErrorCode.ContextLengthExceeded;
                 case "backend_unavailable":
                     return LlmErrorCode.BackendUnavailable;
                 default:

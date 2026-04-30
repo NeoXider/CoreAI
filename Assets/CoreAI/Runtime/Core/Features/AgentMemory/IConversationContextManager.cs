@@ -8,9 +8,13 @@ namespace CoreAI.Ai
         /// <summary>
         /// Builds a context snapshot for the current request.
         /// </summary>
+        /// <param name="buildArgs">
+        /// Optional per-request limits; when null, implementations should use legacy defaults from <paramref name="roleConfig"/>.
+        /// </param>
         ConversationContextSnapshot BuildSnapshot(
             string roleId,
             ChatMessage[] history,
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig);
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+            ConversationContextBuildArgs buildArgs = null);
     }
 }

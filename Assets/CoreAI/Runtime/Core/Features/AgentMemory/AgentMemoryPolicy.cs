@@ -98,8 +98,16 @@ namespace CoreAI.Ai
             /// <summary>Per-role LLM response token cap; null = use per-call/global/provider fallback.</summary>
             public int? MaxOutputTokens;
 
+            /// <summary>
+            /// When true, long chat history may be folded with an auxiliary LLM request (requires global <see cref="ICoreAISettings.EnableLlmContextCompaction"/>).
+            /// When false, only deterministic truncation/summary applies. Built-in <see cref="BuiltInAgentRoleIds.Programmer"/> defaults to false.
+            /// </summary>
+            public bool UseLlmContextCompaction;
+
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
-                bool withChatHistory = false, bool persistChatHistory = false, int contextTokens = 8192, bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null)
+                bool withChatHistory = false, bool persistChatHistory = false, int contextTokens = 8192,
+                bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
+                bool useLlmContextCompaction = true)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -109,6 +117,7 @@ namespace CoreAI.Ai
                 AllowDuplicateToolCalls = allowDuplicateToolCalls;
                 MaxChatHistoryMessages = maxChatHistoryMessages;
                 MaxOutputTokens = maxOutputTokens;
+                UseLlmContextCompaction = useLlmContextCompaction;
             }
         }
 
@@ -116,13 +125,29 @@ namespace CoreAI.Ai
         {
             if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
             {
-                c = new RoleMemoryConfig();
+                c = new RoleMemoryConfig(useMemoryTool: true, defaultAction: MemoryToolAction.Append);
             }
 
             c.WithChatHistory = enabled;
             c.ContextTokens = tokens;
             c.PersistChatHistory = persist;
             c.MaxChatHistoryMessages = maxChatHistoryMessages;
+            _roleConfigs[roleId] = c;
+        }
+
+        /// <summary>
+        /// Per-role opt-in/out for LLM-assisted transcript compaction (still requires global <see cref="ICoreAISettings.EnableLlmContextCompaction"/>).
+        /// </summary>
+        public void ConfigureLlmContextCompaction(string roleId, bool enabled)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            RoleMemoryConfig c = GetRoleConfig(roleId);
+            c.UseLlmContextCompaction = enabled;
             _roleConfigs[roleId] = c;
         }
 
@@ -134,9 +159,12 @@ namespace CoreAI.Ai
             // По умолчанию: агентные роли используют MemoryTool с append.
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
+                bool smartCompaction =
+                    roleId != BuiltInAgentRoleIds.Programmer;
                 _roleConfigs[roleId] = new RoleMemoryConfig(
-                    true,
-                    MemoryToolAction.Append);
+                    useMemoryTool: true,
+                    defaultAction: MemoryToolAction.Append,
+                    useLlmContextCompaction: smartCompaction);
             }
 
             // PlayerChat is the drop-in chat panel role. It should restore the visible conversation
@@ -144,7 +172,8 @@ namespace CoreAI.Ai
             _roleConfigs[BuiltInAgentRoleIds.PlayerChat] = new RoleMemoryConfig(
                 useMemoryTool: false,
                 withChatHistory: true,
-                persistChatHistory: true);
+                persistChatHistory: true,
+                useLlmContextCompaction: true);
         }
 
         /// <summary>
@@ -216,7 +245,8 @@ namespace CoreAI.Ai
                 PersistChatHistory = existing.PersistChatHistory,
                 ContextTokens = existing.ContextTokens,
                 MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
-                MaxOutputTokens = existing.MaxOutputTokens
+                MaxOutputTokens = existing.MaxOutputTokens,
+                UseLlmContextCompaction = existing.UseLlmContextCompaction
             };
         }
 

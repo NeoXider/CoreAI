@@ -90,6 +90,19 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
 | **HTTP/OpenAI** | Works | ❌ No (needs chat object) |
 | **Persistence** | ✅ FileAgentMemoryStore | ✅ FileAgentMemoryStore |
 
+**v1.5.2:** deterministic compaction folds older turns into **`## Conversation Summary`**. **`RegisterCorePortable()`** defaults to **`InMemoryConversationSummaryStore`** (per-role summaries for the process); Unity **`CoreAILifetimeScope`** overrides with **`FileConversationSummaryStore`** (`%persistentDataPath%/CoreAI/ConversationSummaries`) for persistence across launches. **`FileAgentMemoryStore`** implements **`IConversationTranscriptStore`** (structured `ConversationEntry` rows; optional tool lines for future MEAI hooks).
+
+**v1.5.3:** optional **LLM-assisted compaction** (Kilocode-style). When **`ICoreAISettings.EnableLlmContextCompaction`** is `true` on **`CoreAISettingsAsset`**, overflowing history may be summarized by an auxiliary LLM call instead of the deterministic bullet rollup. The system is gated at two levels:
+
+| Level | Toggle | Default |
+|-------|--------|---------|
+| **Global** | `CoreAISettingsAsset.EnableLlmContextCompaction` | `false` |
+| **Per-role** | `AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction` | `true` for most roles; `false` for **Programmer** |
+
+Per-role override: **`AgentBuilder.WithLlmContextCompaction(bool)`** or **`AgentMemoryPolicy.ConfigureLlmContextCompaction(roleId, bool)`**. When the global toggle is off, all roles use deterministic compaction regardless of their per-role setting.
+
+Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__CoreAI_ContextCompaction`** and configurable options (`LlmContextCompactionOptions`). If the auxiliary LLM call fails, the system falls back to the deterministic bullet summary.
+
 ---
 
 ## Architecture

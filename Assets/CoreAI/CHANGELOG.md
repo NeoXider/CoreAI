@@ -1,5 +1,30 @@
 # Changelog
 
+## [v1.5.3] — 2026-04-30
+
+### LLM-assisted context compaction (portable)
+
+- **`LlmAssistedConversationContextManager`** — optional auxiliary `ILlmClient.CompleteAsync` to fold evicted history into a rolling summary (Kilocode-style); sync **`BuildSnapshot`** remains deterministic via **`DeterministicConversationContextManager`**.
+- **`IAsyncConversationContextManager.BuildSnapshotAsync`** — **`AiOrchestrator`** now awaits this path when building chat history (including streaming), passing the orchestration trace id for compaction logs.
+- **`ICoreAISettings.EnableLlmContextCompaction`** (default false) — **`RegisterCorePortable`** wires **`ConversationContextManagerFactories.Create(...)`** so Unity can enable LLM compaction from **`CoreAISettingsAsset`** without moving logic out of Core.
+- **`SelectingConversationContextManager`** — when global compaction is enabled, each request selects LLM vs deterministic rollup using **`ConversationContextBuildArgs.UseLlmContextCompaction`** (from **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**, gated by **`ICoreAISettings`**).
+- **`RoleMemoryConfig.UseLlmContextCompaction`** — defaults true for **`AgentBuilder`** agents and built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlayerChat`**, **`Merchant`**, **`CoreMechanicAI`**; built-in **`Programmer`** defaults false (deterministic truncation/summary only). **`AgentBuilder.WithLlmContextCompaction(bool)`** and **`AgentMemoryPolicy.ConfigureLlmContextCompaction`** override per role.
+
+#### Package **`1.5.3`**.
+
+## [v1.5.2] — 2026-04-30
+
+### Context budget, compaction, and transcripts (portable core)
+
+- **Budget & estimation** — portable `ContextBudget`, `ContextBudgetRequest`, `IContextBudgetPolicy` (`DefaultContextBudgetPolicy`), and `ITokenEstimator` (`HeuristicTokenEstimator`, ~chars/4). `AiOrchestrator` allocates a `HistoryTokenBudget` from role/context window minus completion reserve and estimated system/user/tool-contract size, fed into `IConversationContextManager.BuildSnapshot` via `ConversationContextBuildArgs`.
+- **Persisted summaries** — portable `InMemoryConversationSummaryStore` (process lifetime, per role) is the default backing store for deterministic compaction; `FileConversationSummaryStore` (System.IO + System.Text.Json) for cross-launch persistence under a host-supplied directory. **`RegisterCorePortable`** registers the in-memory implementation unless the host passes **`suppressDefaultConversationSummaryStore: true`** after registering its own `IConversationSummaryStore` (Unity **`CoreAILifetimeScope`** registers `FileConversationSummaryStore` at `%persistentDataPath%/CoreAI/ConversationSummaries` this way). **`AiOrchestrator`** without DI uses **`InMemoryConversationSummaryStore`** instead of **`NullConversationSummaryStore`**. Use **`NullConversationSummaryStore`** only when tests need no accumulation.
+- **Context overflow retry** — new `LlmErrorCode.ContextLengthExceeded`. HTTP mapping in `MeaiOpenAiChatClient` (413 + common overload phrases) and provider code mapping in `LlmProviderError`. `AiOrchestrator.RunTaskAsync` may **`CompleteAsync` once more** at `ContextBudgetRequest.ContextRetryLevel = 1` (halved history budget) via `IConversationCompactionCoordinator`.
+- **`LlmCompletionRequest.ContextWindowTokens`** is now populated from orchestration.
+- **`AgentTurnTrace`** adds `HistoryTokenBudget` / `ChatHistoryMessageCount`; portable `ConversationHistoryBudgetApplied` messaging DTO added.
+- **Transcript hooks** — `ConversationEntry`, `IConversationTranscriptStore`, `NullConversationTranscriptStore`; `FileAgentMemoryStore` implements transcript persistence (`transcriptEntriesJson`) plus migration from flat chat.
+
+#### Package **`1.5.2`**.
+
 ## [v1.5.1] — 2026-04-30
 
 ### WebGL Stability: Retry + Timeout + Error Propagation
