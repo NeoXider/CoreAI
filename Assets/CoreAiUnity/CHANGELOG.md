@@ -2,6 +2,102 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.4.0] - 2026-04-30
+
+### 🛡️ Resilience: HTTP retry with Retry-After + exponential backoff
+
+Inspired by [Kilo (OpenCode)](https://github.com/nicholasgriffintn/kilo) `retry.ts` — production-grade HTTP retry at the transport layer, independent of the tool-calling retry loop.
+
+- **`MeaiOpenAiChatClient.BuildHttpException`** — parses `Retry-After-Ms` header (millisecond precision, used by Azure / LiteLLM) with priority over `Retry-After` (seconds). Both convert to `LlmClientException.RetryAfterSeconds`.
+- **`LoggingLlmClientDecorator`** — new retry loop for `RateLimited` (429) and `BackendUnavailable` (5xx):
+  - Attempts: `settings.MaxLlmRequestRetries` (injected via `LlmPipelineInstaller`).
+  - Delay: server `Retry-After` header → exponential backoff `2s → 4s → 8s → 16s → 30s` (capped).
+  - Log: `LLM ↺ traceId=… | RateLimited — retry 1/2 after 30s`.
+  - Tool-call errors are **not affected** — same immediate, count-based retry as before.
+- **`LlmPipelineInstaller`** — passes `settings.MaxLlmRequestRetries` to `LoggingLlmClientDecorator`.
+
+### 🔧 Resilience: TryRepairToolName — automatic tool name casing repair
+
+Inspired by Kilo's `experimental_repairToolCall` hook — model writes `MEMORY` instead of `memory`, system silently fixes it before execution.
+
+- **`ToolExecutionPolicy.TryRepairToolName`** — case-insensitive lookup among registered `ILlmTool` names. Returns a new `FunctionCallContent` with the corrected name, or `null` if the tool is genuinely unknown.
+- Called in `ExecuteSingleAsync` before `AIFunction` resolution — completely transparent to calling code.
+- When no tools are registered (e.g. tools only in `ChatOptions`), skips repair and passes through.
+- On unknown tool: structured error with available tool names for model self-correction.
+
+### 🧪 Tests
+
+**EditMode (12 new tests):**
+- `TryRepairToolName_ExactMatch_ReturnsSameFc` — exact match passes through.
+- `TryRepairToolName_WrongCase_ReturnsRepaired` — `MEMORY` → `memory`.
+- `TryRepairToolName_MixedCase_ReturnsRepaired` — `Spawn_Quiz` → `spawn_quiz`.
+- `TryRepairToolName_UnknownTool_ReturnsNull` — genuinely unknown tool.
+- `TryRepairToolName_NullFc_ReturnsNull` — null guard.
+- `ExecuteSingle_WrongCaseName_IsRepaired` — end-to-end: `MEMORY` executes successfully.
+- `ExecuteSingle_TrulyUnknownTool_ReturnsFailed` — error with available tool list.
+- `ComputeBackoff_ExponentialCurve_CappedAt30` — backoff curve: `2→4→8→16→30`.
+- `ToolCallInMiddleOfLongText_PrefixAndSuffixPreserved`.
+- `CodeBlockFollowedByRealToolCall_OnlyRealCallExtracted`.
+- `ToolCallWithArrayArguments_ExtractedCorrectly`.
+- `CleanedText_IsTrimmable_NoLeadingTrailingJson`.
+
+**PlayMode (3 new hybrid real-LLM tests — `ToolNameRepairPlayModeTests.cs`):**
+- `WrongCasing_Repair_ToolExecuted_RealLlmContinues` — scripted `MEMORY` → repair → tool executes → real LLM responds.
+- `UnknownTool_ErrorFedBack_RealLlmSelfCorrects` — scripted unknown tool → error in chat history → real LLM self-corrects.
+- `MixedCaseWithTextPrefix_ToolRepaired_TextPreserved` — `"Working on it... {\"name\":\"Memory\",...}"` → repair + prefix preserved.
+
+### Coverage matrix
+
+All changes work across **every LLM mode**: `Auto`, `Local Model`, `Client Owned Api`, `Client Limited`, `Server Managed Api`. All modes delegate internally to `MeaiLlmClient` → `SmartToolCallingChatClient` → `ToolExecutionPolicy`.
+
+### Meta
+
+- Package **`1.4.0`**. Dependency **`com.nexoider.coreai 1.4.0`** (bumped — adds `TryRepairToolName`, retry backoff).
+
+
+### Tool-calling test coverage: chain, parallel, native+text, fail/success reset
+
+Adds the scenarios that the 1.3.0 fix did not pin down explicitly. Code paths from 1.3.0 are unchanged — these tests guard the **edges** so future regressions in any one of them surface fast.
+
+- **`ToolCallExtractionParityEditModeTests.NonStreaming_ChainOfTwoToolsThenText_ExecutesBothAndStripsAll`** — model emits `tool_a → tool_b → "Done."` across three iterations (text-shape JSON each time). Both tools execute exactly once, both traces captured in order, the final assistant text contains `"Done."` and **neither** tool's JSON.
+- **`ToolCallExtractionParityEditModeTests.NonStreaming_TwoParallelToolCalls_BothExecuteInSameIteration`** — single response returns two native `FunctionCallContent` items. `ToolExecutionPolicy.ExecuteBatchAsync` runs both; trace list has both with `source=native`; loop terminates after the second iteration's text reply.
+- **`ToolCallExtractionParityEditModeTests.NonStreaming_NativeToolCallWithTextPrefix_NativeWins_TextNotLeaked`** — response has both a `TextContent` containing pseudo-JSON and a real `FunctionCallContent`. Native path takes priority (text-extraction is gated on `nativeCalls.Count == 0`), so no phantom call is invented from the prefix.
+- **`ToolCallExtractionParityEditModeTests.Streaming_FailureThenSuccess_ResetsConsecutiveErrorsAndContinues`** — flaky tool fails on iteration 1, succeeds on iteration 2 (different args), text on iteration 3. Confirms `ToolExecutionPolicy.RecordSuccess()` resets the counter so the third turn doesn't trip max-errors. Final `IsDone` chunk carries `[fail, success]` traces and `Error == null`.
+
+### Meta
+
+- Package **`1.3.1`**. Dependency **`com.nexoider.coreai 1.3.0`** (unchanged — this is a tests-only release).
+
+## [1.3.0] - 2026-04-30
+
+### Tool calling: stream/non-stream parity + diagnostics
+
+Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-text** (Ollama, llama.cpp, LM Studio, some Qwen builds) behave identically across streaming and non-streaming paths. Production symptom: `memory` tool emitted as text after a goodbye line, JSON leaked into the chat panel, no persistence happened.
+
+- **`SmartToolCallingChatClient.GetResponseAsync`** — non-streaming loop now also scans every `MEAI.TextContent` in the response for tool-call JSON and feeds the resulting `FunctionCallContent` through the same `ToolExecutionPolicy` path as native calls. The cleaned text replaces the raw assistant text on the next iteration so the model does not see its own JSON twice. Public read-only **`LastExecutedToolCalls`** mirrors what the streaming path returns.
+- **`MeaiLlmClient.CompleteStreamingAsync`** — extraction gate switched from "AIFunction count > 0" to "request.Tools count > 0". When a tool was *requested* but no AIFunction was bound (e.g., `MemoryLlmTool` with `IAgentMemoryStore == null`), the loop now strips the JSON, logs a warning, and emits cleaned text instead of leaking the raw tool call. A startup warning fires once when this mismatch is detected.
+- **`MeaiLlmClient.BuildAIFunctions`** — now logs a warning when `MemoryLlmTool` is requested for a role but `_memoryStore` is `null`, instead of silently dropping it.
+- **`AiOrchestrator`** (defense-in-depth) — both sync and streaming paths now run **`LlmToolCallTextExtractor.StripForDisplay`** on the assistant text before persisting to chat history or publishing **`ApplyAiGameCommand`**. Logs `tool-call JSON leaked through extraction; stripped for chat/envelope` if the strip changed anything.
+
+### Diagnostics: per-call log line + tail summary
+
+- **`ToolExecutionPolicy`** — emits a dedicated `[ToolCall]` log line after every tool invocation (native, text-extracted, missing, duplicate). Format: `[ToolCall] traceId=… role=… tool=memory status=OK dur=12ms args={…} result=…`. Honours **`ICoreAISettings.LogToolCalls`** / `LogToolCallArguments` / `LogToolCallResults` independently of the verbose `LogMeaiToolCallingSteps` switch.
+- **`LlmToolCallTrace`** (new portable struct in `CoreAI.Ai`) — one `(name, success, durationMs, source)` record per call. Source is one of `native` / `text` / `duplicate` / `missing`.
+- **`LlmCompletionResult.ExecutedToolCalls`** / **`LlmStreamChunk.ExecutedToolCalls`** — same trace list, populated for both paths (final chunk only on streaming).
+- **`LoggingLlmClientDecorator`** — appends `tools=[memory(ok,12ms),other(fail,0ms,duplicate)]` to the final `LLM ◀` line. Empty tail when no tools fired so plain text turns stay one-line.
+
+### Portable extractor
+
+- **`CoreAI.Ai.LlmToolCallTextExtractor`** (new in `com.nexoider.coreai 1.3.0`) — engine-agnostic `TryExtract` / `StripForDisplay`, available to anything that depends on the portable core. Existing **`MeaiLlmClient.TryExtractToolCallsFromText`** / `StripEmbeddedToolCallJsonForDisplay` keep their public surface for backward compatibility.
+
+### Tests
+
+- **EditMode:** `ToolCallExtractionParityEditModeTests` — non-streaming text-shaped tool execution + strip; missing-tool synthetic trace; streaming JSON-strip when AIFunction not bound; pass-through when no tools requested; `FormatExecutedTools` rendering; portable-extractor multi-match.
+
+### Meta
+
+- Package **`1.3.0`**. Dependency **`com.nexoider.coreai 1.3.0`** (bumped — adds `LlmToolCallTextExtractor` and `LlmToolCallTrace` / `ExecutedToolCalls`).
+
 ## [1.2.6] - 2026-04-30
 
 ### Composition: `GlobalMessagePipe` in minimal PlayMode fixtures

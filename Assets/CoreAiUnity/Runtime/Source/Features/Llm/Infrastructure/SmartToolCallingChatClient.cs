@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using MEAI = Microsoft.Extensions.AI;
 
@@ -39,6 +40,14 @@ namespace CoreAI.Infrastructure.Llm
             _maxConsecutiveErrors = maxConsecutiveErrors;
         }
 
+        /// <summary>
+        /// Tool calls observed during the most recent <see cref="GetResponseAsync"/> invocation.
+        /// Populated even when the model emitted JSON-as-text (handled identically to native
+        /// FunctionCallContent), so the logging decorator can surface them.
+        /// </summary>
+        public IReadOnlyList<LlmToolCallTrace> LastExecutedToolCalls { get; private set; } =
+            Array.Empty<LlmToolCallTrace>();
+
         public async Task<MEAI.ChatResponse> GetResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
@@ -51,57 +60,115 @@ namespace CoreAI.Infrastructure.Llm
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId);
 
-            while (true)
+            try
             {
-                iteration++;
-                await Task.Yield(); // Force async boundary to ensure previous LLMUnity states (like isGenerating) are fully flushed
-
-                if (_settings.LogMeaiToolCallingSteps)
+                while (true)
                 {
-                    _logger.LogInfo(GameLogFeature.Llm,
-                        $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
-                }
+                    iteration++;
+                    await Task.Yield(); // Force async boundary to ensure previous LLMUnity states (like isGenerating) are fully flushed
 
-                MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
-
-                // Проверяем tool calls
-                List<MEAI.AIContent> allContents =
-                    response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
-                    ?? new List<MEAI.AIContent>();
-
-                List<MEAI.FunctionCallContent> toolCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
-                if (toolCalls.Count == 0)
-                {
-                    // Модель вернула текст — выходим
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
-                            $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
+                            $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
                     }
 
-                    return response;
+                    MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
+
+                    List<MEAI.AIContent> allContents =
+                        response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
+                        ?? new List<MEAI.AIContent>();
+
+                    List<MEAI.FunctionCallContent> nativeCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
+
+                    // Text-mode fallback: providers that emit tool calls as JSON inside an assistant
+                    // text turn (Ollama, llama.cpp, LM Studio, some Qwen builds) — same recovery path
+                    // as the streaming loop, so behaviour is identical regardless of mode.
+                    List<MEAI.FunctionCallContent> textCalls = new();
+                    string cleanedAssistantText = null;
+                    bool hasTextExtraction = false;
+                    if (nativeCalls.Count == 0 && (options?.Tools?.Count ?? 0) > 0)
+                    {
+                        string assistantText = ExtractAssistantText(response);
+                        if (!string.IsNullOrEmpty(assistantText) &&
+                            MeaiLlmClient.TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText))
+                        {
+                            hasTextExtraction = true;
+                            if (_settings.LogMeaiToolCallingSteps)
+                            {
+                                _logger.LogInfo(GameLogFeature.Llm,
+                                    $"[SmartToolCall] Iteration {iteration}: extracted {textCalls.Count} text-shaped tool call(s) from assistant text.");
+                            }
+                        }
+                    }
+
+                    List<MEAI.FunctionCallContent> toolCalls = nativeCalls.Count > 0 ? nativeCalls : textCalls;
+
+                    if (toolCalls.Count == 0)
+                    {
+                        if (_settings.LogMeaiToolCallingSteps)
+                        {
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
+                        }
+
+                        return response;
+                    }
+
+                    if (_settings.LogMeaiToolCallingSteps)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})");
+                    }
+
+                    ToolExecutionPolicy.BatchToolCallResult batch =
+                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken);
+
+                    if (policy.IsMaxErrorsReached)
+                    {
+                        return policy.BuildMaxErrorsResponse();
+                    }
+
+                    // Build assistant turn for the next round. For text-mode extraction, we replace the
+                    // raw assistant text with the *cleaned* version so the model does not see its own
+                    // JSON tool call duplicated as text.
+                    List<MEAI.AIContent> assistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
+                    if (hasTextExtraction && !string.IsNullOrWhiteSpace(cleanedAssistantText))
+                    {
+                        assistantContents.Add(new MEAI.TextContent(cleanedAssistantText));
+                    }
+
+                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
+                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                 }
-
-                if (_settings.LogMeaiToolCallingSteps)
-                {
-                    _logger.LogInfo(GameLogFeature.Llm,
-                        $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s)");
-                }
-
-                // Execute via shared policy (handles duplicates, errors, notifications)
-                ToolExecutionPolicy.BatchToolCallResult batch =
-                    await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken);
-
-                // Check max errors guard
-                if (policy.IsMaxErrorsReached)
-                {
-                    return policy.BuildMaxErrorsResponse();
-                }
-
-                // Добавляем результаты в историю
-                messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, toolCalls.Cast<MEAI.AIContent>().ToList()));
-                messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
             }
+            finally
+            {
+                LastExecutedToolCalls = policy.ExecutedTraces.ToList();
+            }
+        }
+
+        /// <summary>
+        /// Concatenates every <see cref="MEAI.TextContent"/> in a non-streaming response into a single string.
+        /// Used by the text-mode tool-call fallback. Returns empty string when the response has no text.
+        /// </summary>
+        private static string ExtractAssistantText(MEAI.ChatResponse response)
+        {
+            if (response?.Messages == null) return string.Empty;
+            System.Text.StringBuilder sb = new();
+            foreach (MEAI.ChatMessage m in response.Messages)
+            {
+                if (m.Contents == null) continue;
+                foreach (MEAI.AIContent c in m.Contents)
+                {
+                    if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    {
+                        if (sb.Length > 0) sb.Append('\n');
+                        sb.Append(tc.Text);
+                    }
+                }
+            }
+            return sb.ToString();
         }
 
         public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(

@@ -132,6 +132,36 @@ namespace CoreAI.Ai
         public string RequiredToolName { get; set; } = "";
     }
 
+    /// <summary>
+    /// Diagnostic record describing one tool call observed during an LLM turn.
+    /// Captured by the tool-calling cycle (native FunctionCallContent or text-extracted JSON)
+    /// regardless of streaming/non-streaming path, so the logging decorator can surface
+    /// what tools the model actually invoked. Failure source is captured in <see cref="Success"/>.
+    /// </summary>
+    public readonly struct LlmToolCallTrace
+    {
+        /// <summary>Constructs a trace entry for one observed tool call.</summary>
+        public LlmToolCallTrace(string name, bool success, double durationMs, string source)
+        {
+            Name = name ?? "";
+            Success = success;
+            DurationMs = durationMs;
+            Source = source ?? "";
+        }
+
+        /// <summary>Tool name (matches <see cref="ILlmTool.Name"/>).</summary>
+        public string Name { get; }
+
+        /// <summary>True if the tool returned a non-error result (no <c>"success":false</c>) and did not throw.</summary>
+        public bool Success { get; }
+
+        /// <summary>Wall-clock execution time in milliseconds.</summary>
+        public double DurationMs { get; }
+
+        /// <summary>How this call was discovered: <c>native</c> (FunctionCallContent), <c>text</c> (extracted JSON), or <c>duplicate</c> / <c>missing</c>.</summary>
+        public string Source { get; }
+    }
+
     /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>
     public sealed class LlmCompletionResult
     {
@@ -167,6 +197,13 @@ namespace CoreAI.Ai
 
         /// <summary>Суммарные токены из usage (HTTP).</summary>
         public int? TotalTokens { get; set; }
+
+        /// <summary>
+        /// Tool calls observed during this turn (native + text-extracted, in execution order).
+        /// Empty when the model produced only text. Used by <see cref="LoggingLlmClientDecorator"/>
+        /// to log <c>tools=[name(ok,12ms),name(fail,4ms)]</c>.
+        /// </summary>
+        public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
     }
 
     /// <summary>Один чанк стриминга от LLM: текстовый фрагмент или признак завершения.</summary>
@@ -197,6 +234,13 @@ namespace CoreAI.Ai
         public int? PromptTokens { get; set; }
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
+
+        /// <summary>
+        /// Tool calls executed in this streaming turn (final chunk only). Empty for intermediate
+        /// chunks. Mirrors <see cref="LlmCompletionResult.ExecutedToolCalls"/> so the logging
+        /// decorator can render the same diagnostic across stream and non-stream paths.
+        /// </summary>
+        public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
     }
 
     /// <summary>

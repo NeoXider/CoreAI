@@ -11,7 +11,8 @@
 
 **One repo, two packages:** a portable C# core and a Unity layer with DI, chat UI, and tests. Whether you want a *demo running in five minutes* or a *multi-agent pipeline with tools and Lua*, the same building blocks apply.
 
-- 🧠 **Agents that call your code** — not just text generation, but real function calling with tool retry and memory.
+- 🧠 **Agents that call your code** — not just text generation, but real function calling with tool retry, auto-repair, and memory.
+- 🛡️ **Self-healing resilience** — `TryRepairToolName` auto-fixes tool name casing; HTTP retry reads `Retry-After` headers with exponential backoff.
 - 🌊 **Streaming that survives split tags** — stateful SSE accumulation handles fragmented `<think>` blocks and tool calls across chunks.
 - 💬 **Chat panel in one click** — `CoreAI → Setup → Create Chat Demo Scene` → Press Play.
 - ⚡ **One-liner from any script** — `await CoreAi.AskAsync("…")` — no DI boilerplate for your first feature.
@@ -21,7 +22,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
-**Current stable line:** `1.0.0` introduces the public LLM mode surface and mixed-mode role routing.
+**Current stable line:** `1.4.0` — production-grade resilience: HTTP retry with `Retry-After` headers, automatic tool-name repair (`TryRepairToolName`), tool-call diagnostics, and cross-mode parity (all LLM modes use the same pipeline).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -187,9 +188,20 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
 
 ---
 
-### 🔄 Tool Call Retry — AI Learns from Mistakes
+### 🔄 Tool Call Retry + Self-Healing — AI Learns from Mistakes
 
-Small models (Qwen3.5-2B) sometimes forget the format. CoreAI automatically gives **3 retries** + checks fenced Lua blocks immediately.
+Small models (Qwen3.5-2B) sometimes forget the format or case of tool names. CoreAI automatically:
+
+- 🔧 **Repairs tool name casing** — `TryRepairToolName` silently maps `MEMORY` → `memory`, `Spawn_Quiz` → `spawn_quiz` before execution fails.
+- ♻️ **Retries on failure** — up to **3 retries** with error feedback injected into chat history so the model self-corrects.
+- 🌐 **Retries HTTP errors** — `429 (Rate Limited)` and `5xx` responses trigger automatic retry with `Retry-After` header support or exponential backoff (**2s → 4s**, configurable in Inspector).
+- ✅ **Checks fenced Lua blocks** immediately.
+
+```
+Model says: {"name":"MEMORY", ...}
+     ↓ TryRepairToolName
+Executes: {"name":"memory", ...}  ← silently fixed, no error shown
+```
 
 ---
 
@@ -244,12 +256,24 @@ The repository consists of **two packages**:
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   AiOrchestrator                              │
-│  • Priority queue  • Retry logic  • Tool calling              │
+│  • Priority queue  • JSON strip (defense-in-depth)            │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                     LLM Client                               │
+│              LoggingLlmClientDecorator                        │
+│  • HTTP retry (429/5xx)  • Retry-After  • Exp. backoff        │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM Client (MeaiLlmClient)               │
 │  • LLMUnity (local GGUF)  • OpenAI HTTP  • Stub             │
+│  • TryExtractToolCallsFromText (JSON-in-text → tool call)    │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│               SmartToolCallingChatClient                      │
+│  • TryRepairToolName (MEMORY → memory)                       │
+│  • Duplicate detection  • Consecutive error tracking          │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -405,8 +429,16 @@ Start from the index and pick the level that matches your goal:
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode — large fast suite (no real LLM): prompts, streaming, Lua sandbox, tools, rate limit, CoreAi facade, orchestrator streaming, …
+  ├── EditMode — large fast suite (no real LLM): prompts, streaming, Lua sandbox,
+  │              tools, rate limit, CoreAi facade, tool name repair, backoff math,
+  │              orchestrator streaming, tool call extraction parity, …
   └── PlayMode — integration tests with a configured HTTP or local GGUF backend
+                 ├── FullPipelineResiliencePlayModeTests — streaming/non-streaming
+                 │   tool calls with no-JSON-leak guarantees, memory write/read,
+                 │   orchestrator merchant + inventory, trace diagnostics
+                 ├── ToolNameRepairPlayModeTests — hybrid scripted+real-LLM:
+                 │   wrong casing repair, unknown tool self-correction, mixed-case
+                 └── StreamingToolCallingPlayModeTests — cancel, state parity
 ```
 
 Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for HTTP — see [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)). Real-model memory recall may **Ignore** (not fail) if the local OpenAI-compatible server returns **HTTP 5xx** — see [TROUBLESHOOTING](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).

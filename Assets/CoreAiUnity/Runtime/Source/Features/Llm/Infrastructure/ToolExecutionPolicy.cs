@@ -32,6 +32,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private int _consecutiveErrors;
         private readonly HashSet<string> _executedSignatures = new();
+        private readonly List<LlmToolCallTrace> _executedTraces = new();
 
         public ToolExecutionPolicy(
             IGameLogger logger,
@@ -58,13 +59,29 @@ namespace CoreAI.Infrastructure.Llm
         public bool IsMaxErrorsReached => _consecutiveErrors >= _maxConsecutiveErrors;
 
         /// <summary>
-        /// Reset duplicate signatures and error counter. Call at the start of each
+        /// Snapshot of every tool call observed during this request lifetime
+        /// (native, text-extracted, duplicate, missing). Order preserved.
+        /// </summary>
+        public IReadOnlyList<LlmToolCallTrace> ExecutedTraces => _executedTraces;
+
+        /// <summary>
+        /// Reset duplicate signatures, error counter, and trace log. Call at the start of each
         /// top-level request to allow the same tool to be used across independent requests.
         /// </summary>
         public void Reset()
         {
             _consecutiveErrors = 0;
             _executedSignatures.Clear();
+            _executedTraces.Clear();
+        }
+
+        /// <summary>
+        /// Record a synthetic trace entry for a tool call that was not actually invoked
+        /// (e.g., text-extracted JSON when no AIFunction is bound, or duplicate suppressed).
+        /// </summary>
+        public void RecordSyntheticTrace(string toolName, bool success, double durationMs, string source)
+        {
+            _executedTraces.Add(new LlmToolCallTrace(toolName, success, durationMs, source));
         }
 
         /// <summary>
@@ -108,10 +125,44 @@ namespace CoreAI.Infrastructure.Llm
                 results.Add(new MEAI.FunctionResultContent(fc.CallId,
                     "Error: You just executed this exact same tool call with the exact same arguments on the previous step. " +
                     "Do not repeat identical steps. Proceed to the NEXT step or provide a final text response."));
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate"));
             }
 
             RecordFailure();
             return results;
+        }
+
+        /// <summary>
+        /// Tries to repair a tool call where the model used the wrong casing or a slightly
+        /// different name. Returns the repaired FunctionCallContent if a case-insensitive match
+        /// is found among registered tools; null if the name cannot be resolved at all.
+        /// Mirrors Kilo's <c>experimental_repairToolCall</c> hook.
+        /// </summary>
+        public MEAI.FunctionCallContent TryRepairToolName(MEAI.FunctionCallContent fc)
+        {
+            if (fc == null) return null;
+
+            // If no tools registered (e.g. tools only in ChatOptions), skip repair — let AIFunction lookup decide
+            if (_originalTools.Count == 0) return fc;
+
+            // Already an exact match — nothing to repair
+            if (_originalTools.Any(t => string.Equals(t.Name, fc.Name, StringComparison.Ordinal)))
+                return fc;
+
+            // Case-insensitive fallback
+            ILlmTool match = _originalTools.FirstOrDefault(
+                t => string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+            {
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"[ToolPolicy] ⚡ Repaired tool name casing: '{fc.Name}' → '{match.Name}'");
+                return new MEAI.FunctionCallContent(fc.CallId, match.Name, fc.Arguments);
+            }
+
+            _logger.LogWarning(GameLogFeature.Llm,
+                $"[ToolPolicy] ✖ Unknown tool name: '{fc.Name}' — no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]");
+            return null;
         }
 
         /// <summary>
@@ -123,12 +174,30 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
+            // === Kilo-style repair: fix wrong casing before lookup ===
+            MEAI.FunctionCallContent repairedFc = TryRepairToolName(fc);
+            if (repairedFc == null)
+            {
+                // Name not found even after case-insensitive search
+                RecordSyntheticTrace(fc.Name ?? "", false, 0d, "unknown-tool");
+                LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found (no repair match)");
+                return new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId,
+                        $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]"),
+                    Succeeded = false
+                };
+            }
+            fc = repairedFc;
+
             MEAI.AIFunction aiFunc = chatOptions?.Tools?.OfType<MEAI.AIFunction>()
                 .FirstOrDefault(f => string.Equals(f.Name, fc.Name, StringComparison.Ordinal));
 
             if (aiFunc == null)
             {
                 PublishFailed(BuildInfo(fc), $"Tool '{fc.Name}' not found", 0d);
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "missing"));
+                LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found");
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"),
@@ -156,14 +225,18 @@ namespace CoreAI.Infrastructure.Llm
                         $"[ToolPolicy] {fc.Name}: {(succeeded ? "SUCCESS" : "FAILED")}");
                 }
 
+                double elapsedMs = sw.Elapsed.TotalMilliseconds;
                 if (succeeded)
                 {
-                    PublishCompleted(info, SafeResultJson(resultText), sw.Elapsed.TotalMilliseconds);
+                    PublishCompleted(info, SafeResultJson(resultText), elapsedMs);
                 }
                 else
                 {
-                    PublishFailed(info, SafeResultJson(resultText), sw.Elapsed.TotalMilliseconds);
+                    PublishFailed(info, SafeResultJson(resultText), elapsedMs);
                 }
+
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native"));
+                LogCallLine(fc, succeeded, elapsedMs, resultText);
 
                 // Notify subscribers
                 try
@@ -186,12 +259,47 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _logger.LogError(GameLogFeature.Llm, $"[ToolPolicy] {fc.Name} threw: {ex.Message}");
                 PublishFailed(BuildInfo(fc), ex.Message, 0d);
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native"));
+                LogCallLine(fc, false, 0d, $"threw: {ex.Message}");
                 return new ToolCallResult
                 {
                     Result = new MEAI.FunctionResultContent(fc.CallId, $"Error: {ex.Message}"),
                     Succeeded = false
                 };
             }
+        }
+
+        /// <summary>
+        /// Standalone diagnostic line emitted after every tool call (regardless of source) so operators
+        /// can see exactly which tool ran with which args and whether it succeeded. Honours the
+        /// <see cref="ICoreAISettings.LogToolCalls"/> / <c>LogToolCallArguments</c> / <c>LogToolCallResults</c>
+        /// switches independently of the streaming-step trace.
+        /// </summary>
+        private void LogCallLine(MEAI.FunctionCallContent fc, bool succeeded, double durationMs, string resultText)
+        {
+            if (!_settings.LogToolCalls)
+            {
+                return;
+            }
+
+            string status = succeeded ? "OK" : "FAIL";
+            string args = "";
+            if (_settings.LogToolCallArguments && fc?.Arguments != null && fc.Arguments.Count > 0)
+            {
+                try { args = " args=" + JsonConvert.SerializeObject(fc.Arguments); } catch { args = ""; }
+            }
+
+            string preview = "";
+            if (_settings.LogToolCallResults && !string.IsNullOrEmpty(resultText))
+            {
+                const int max = 240;
+                string trimmed = resultText.Length <= max ? resultText : resultText.Substring(0, max) + "…";
+                preview = " result=" + trimmed.Replace('\n', ' ');
+            }
+
+            string traceTag = string.IsNullOrEmpty(_traceId) ? "" : $"traceId={_traceId} ";
+            _logger.LogInfo(GameLogFeature.Llm,
+                $"[ToolCall] {traceTag}role={_roleId} tool={fc?.Name ?? "?"} status={status} dur={durationMs:F0}ms{args}{preview}");
         }
 
         private LlmToolCallInfo BuildInfo(MEAI.FunctionCallContent fc)

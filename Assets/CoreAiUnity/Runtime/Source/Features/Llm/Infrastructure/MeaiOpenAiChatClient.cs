@@ -386,10 +386,21 @@ namespace CoreAI.Infrastructure.Llm
             int status = (int)request.responseCode;
             LlmErrorCode code = MapHttpStatus(status, responseBody, errorDetail);
             int? retryAfter = null;
-            string retryHeader = request.GetResponseHeader("Retry-After");
-            if (int.TryParse(retryHeader, out int parsedRetry))
+            // Check ms-precision header first (used by Azure/LiteLLM), then fall back to seconds
+            string retryMsHeader = request.GetResponseHeader("Retry-After-Ms");
+            if (!string.IsNullOrEmpty(retryMsHeader) &&
+                float.TryParse(retryMsHeader, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float retryMs))
             {
-                retryAfter = parsedRetry;
+                retryAfter = (int)System.Math.Ceiling(retryMs / 1000f);
+            }
+            else
+            {
+                string retryHeader = request.GetResponseHeader("Retry-After");
+                if (int.TryParse(retryHeader, out int parsedRetry))
+                {
+                    retryAfter = parsedRetry;
+                }
             }
 
             return new LlmClientException(

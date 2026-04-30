@@ -20,17 +20,23 @@ namespace CoreAI.Infrastructure.Llm
         private const int UserPreviewChars = 1600;
         private const int ResponsePreviewChars = 2400;
 
+        private const int MaxRetryCapSeconds = 30;
+
         private readonly ILlmClient _inner;
         private readonly IGameLogger _logger;
         private readonly string _backendLabel;
         private readonly float _requestTimeoutSeconds;
+        private readonly int _maxHttpRetryAttempts;
 
         /// <param name="requestTimeoutSeconds">0 — без лимита; иначе отмена <see cref="CompleteAsync"/> по истечении секунд (совместно с внешним token).</param>
-        public LoggingLlmClientDecorator(ILlmClient inner, IGameLogger logger, float requestTimeoutSeconds = 0f)
+        /// <param name="maxHttpRetryAttempts">Максимум повторов при HTTP 429/5xx с паузой по Retry-After или exponential backoff. 0 — выключено.</param>
+        public LoggingLlmClientDecorator(ILlmClient inner, IGameLogger logger,
+            float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0)
         {
             _inner = inner;
             _logger = logger;
             _requestTimeoutSeconds = requestTimeoutSeconds < 0f ? 0f : requestTimeoutSeconds;
+            _maxHttpRetryAttempts = maxHttpRetryAttempts < 0 ? 0 : maxHttpRetryAttempts;
             _backendLabel = inner?.GetType().Name ?? "?";
         }
 
@@ -82,7 +88,7 @@ namespace CoreAI.Infrastructure.Llm
                 $"  {FormatPromptBudgetLine(system, user, request.Tools)}");
 
             Stopwatch sw = Stopwatch.StartNew();
-            LlmCompletionResult result;
+            LlmCompletionResult result = null;
             using (CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
                 if (_requestTimeoutSeconds > 0f)
@@ -101,6 +107,38 @@ namespace CoreAI.Infrastructure.Llm
                     _logger.LogWarning(GameLogFeature.Llm,
                         $"LLM ⏱ traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | {msg}");
                     return new LlmCompletionResult { Ok = false, Error = msg };
+                }
+                catch (LlmClientException httpEx) when (
+                    IsRetryableHttpError(httpEx, out int httpWait) &&
+                    _maxHttpRetryAttempts > 0)
+                {
+                    // HTTP 429/5xx — retry with Retry-After or exponential backoff
+                    bool exhausted = true;
+                    for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
+                    {
+                        int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s");
+                        await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            result = await _inner.CompleteAsync(request, linked.Token).ConfigureAwait(false);
+                            exhausted = false;
+                            break;
+                        }
+                        catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
+                        {
+                            // will retry again if attempts remain
+                        }
+                    }
+                    if (exhausted)
+                    {
+                        sw.Stop();
+                        string msg = $"{httpEx.ErrorCode} after {_maxHttpRetryAttempts} retries: {httpEx.Message}";
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}");
+                        return new LlmCompletionResult { Ok = false, Error = msg };
+                    }
                 }
             }
 
@@ -132,11 +170,33 @@ namespace CoreAI.Infrastructure.Llm
 
             string content = result.Content ?? "";
             string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
+            string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.LogInfo(GameLogFeature.Llm,
-                $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}\n" +
+                $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
                 $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
 
             return result;
+        }
+
+        /// <summary>Exponential backoff: 2s → 4s → 8s… capped at <see cref="MaxRetryCapSeconds"/>.</summary>
+        private static int ComputeBackoff(int attempt)
+            => (int)Math.Min(2 * Math.Pow(2, attempt), MaxRetryCapSeconds);
+
+        /// <summary>
+        /// Returns true if the exception is a retryable HTTP error (429 or 5xx)
+        /// and we have retry budget left.
+        /// </summary>
+        private static bool IsRetryableHttpError(Exception ex, out int retryAfterSeconds)
+        {
+            retryAfterSeconds = 0;
+            if (ex is LlmClientException llmEx &&
+                (llmEx.ErrorCode == LlmErrorCode.RateLimited ||
+                 llmEx.ErrorCode == LlmErrorCode.BackendUnavailable))
+            {
+                retryAfterSeconds = llmEx.RetryAfterSeconds ?? 0;
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -190,6 +250,7 @@ namespace CoreAI.Infrastructure.Llm
             int? completionTokens = null;
             int? totalTokens = null;
             string terminalError = null;
+            IReadOnlyList<CoreAI.Ai.LlmToolCallTrace> executedTools = Array.Empty<CoreAI.Ai.LlmToolCallTrace>();
 
             using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             if (_requestTimeoutSeconds > 0f)
@@ -275,6 +336,10 @@ namespace CoreAI.Infrastructure.Llm
                         if (current.CompletionTokens.HasValue) completionTokens = current.CompletionTokens;
                         if (current.TotalTokens.HasValue) totalTokens = current.TotalTokens;
                         if (!string.IsNullOrEmpty(current.Error)) terminalError = current.Error;
+                        if (current.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
+                        {
+                            executedTools = current.ExecutedToolCalls;
+                        }
                     }
 
                     yield return current;
@@ -297,22 +362,60 @@ namespace CoreAI.Infrastructure.Llm
                     PromptTokens = promptTokens,
                     CompletionTokens = completionTokens,
                     TotalTokens = totalTokens,
-                    Error = terminalError ?? ""
+                    Error = terminalError ?? "",
+                    ExecutedToolCalls = executedTools
                 };
                 string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser, streamTools);
+                string toolsLine = FormatExecutedTools(executedTools);
 
                 if (!string.IsNullOrEmpty(terminalError))
                 {
                     _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}");
+                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}");
                 }
                 else
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
-                        $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}\n" +
+                        $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
                         $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Renders the executed-tool diagnostic shown at the tail of every <c>LLM ◀</c> line.
+        /// Returns an empty string when no tool was invoked, so plain text turns stay one-line.
+        /// Format: <c> | tools=[name(ok,12ms),name(fail,4ms,native)]</c>.
+        /// </summary>
+        internal static string FormatExecutedTools(IReadOnlyList<CoreAI.Ai.LlmToolCallTrace> traces)
+        {
+            if (traces == null || traces.Count == 0)
+            {
+                return "";
+            }
+
+            StringBuilder sb = new();
+            sb.Append(" | tools=[");
+            for (int i = 0; i < traces.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                CoreAI.Ai.LlmToolCallTrace t = traces[i];
+                string status = t.Success ? "ok" : "fail";
+                sb.Append(t.Name);
+                sb.Append('(');
+                sb.Append(status);
+                sb.Append(',');
+                sb.Append(t.DurationMs.ToString("F0"));
+                sb.Append("ms");
+                if (!string.IsNullOrEmpty(t.Source) && t.Source != "native")
+                {
+                    sb.Append(',');
+                    sb.Append(t.Source);
+                }
+                sb.Append(')');
+            }
+            sb.Append(']');
+            return sb.ToString();
         }
 
         private static string FormatTokenLine(

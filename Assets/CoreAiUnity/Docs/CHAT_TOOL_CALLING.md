@@ -96,3 +96,33 @@ Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
 
 **PlayerChat** has no tools — dialogue only.  
 **Merchant** is an NPC with tools for grounded replies.
+
+## Stream/non-stream parity (since 1.3.0)
+
+Both paths handle three tool-call shapes identically:
+
+1. **Native** — provider populates `delta.tool_calls` (OpenAI, Anthropic, etc.). Extracted as `MEAI.FunctionCallContent`.
+2. **Text JSON** — model emits `{"name":"...","arguments":{...}}` inside an assistant text turn (Ollama, llama.cpp, LM Studio, some Qwen builds). The pipeline scans assistant text for balanced `{...}` objects with both `name` and `arguments` keys, executes them through the same `ToolExecutionPolicy`, and strips the JSON from the visible reply.
+3. **Requested but unbound** — request lists a tool (e.g., `MemoryLlmTool`) that the backend could not bind (e.g., `IAgentMemoryStore` is `null`). The pipeline strips the JSON, logs a warning, and emits cleaned text. Nothing is executed; the trace records `source=missing`.
+
+### Diagnostics
+
+Every tool call gets a dedicated log line:
+
+```
+[ToolCall] traceId=abc123 role=Merchant tool=memory status=OK dur=12ms args={"action":"append","content":"..."} result={"Success":true,...}
+```
+
+Toggles in `CoreAISettingsAsset`:
+
+| Flag | Adds |
+|------|------|
+| `LogToolCalls` | the line itself (status + duration) |
+| `LogToolCallArguments` | the `args=` portion |
+| `LogToolCallResults` | a 240-char preview of the result |
+
+The `LLM ◀` summary line also gets a tail like `tools=[memory(ok,12ms),get_inventory(ok,4ms)]` listing every tool that ran in the turn.
+
+### Defense-in-depth
+
+`AiOrchestrator` runs `LlmToolCallTextExtractor.StripForDisplay` on the assistant text before persisting to chat history or publishing `ApplyAiGameCommand`. If a brand-new tool-call shape ever leaks past streaming/non-streaming extraction, this catches it and logs `tool-call JSON leaked through extraction; stripped for chat/envelope`.

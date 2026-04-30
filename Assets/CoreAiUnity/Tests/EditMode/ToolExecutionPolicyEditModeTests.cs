@@ -322,6 +322,133 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(response);
             Assert.IsTrue(response.Text.Contains("error"), "Should contain error description");
         }
+
+        // ==================== TryRepairToolName ====================
+
+        [Test]
+        public void TryRepairToolName_ExactMatch_ReturnsSameFc()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            var fc = MakeToolCall("memory");
+            var repaired = policy.TryRepairToolName(fc);
+
+            Assert.IsNotNull(repaired);
+            Assert.AreEqual("memory", repaired.Name, "Exact match should be returned as-is");
+            Assert.AreSame(fc, repaired, "Should return the same instance for exact match");
+        }
+
+        [Test]
+        public void TryRepairToolName_WrongCase_ReturnsRepaired()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            var fc = MakeToolCall("MEMORY");
+            var repaired = policy.TryRepairToolName(fc);
+
+            Assert.IsNotNull(repaired, "Should repair wrong casing");
+            Assert.AreEqual("memory", repaired.Name, "Name should be corrected to registered casing");
+            Assert.AreNotSame(fc, repaired, "Should return new instance with repaired name");
+        }
+
+        [Test]
+        public void TryRepairToolName_MixedCase_ReturnsRepaired()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "spawn_quiz" } },
+                false, "test", 3);
+
+            var repaired = policy.TryRepairToolName(MakeToolCall("Spawn_Quiz"));
+            Assert.IsNotNull(repaired);
+            Assert.AreEqual("spawn_quiz", repaired.Name);
+        }
+
+        [Test]
+        public void TryRepairToolName_UnknownTool_ReturnsNull()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            var result = policy.TryRepairToolName(MakeToolCall("completely_unknown_tool_xyz"));
+            Assert.IsNull(result, "Unknown tool should return null");
+        }
+
+        [Test]
+        public void TryRepairToolName_NullFc_ReturnsNull()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            Assert.IsNull(policy.TryRepairToolName(null));
+        }
+
+        [Test]
+        public async Task ExecuteSingle_WrongCaseName_IsRepaired()
+        {
+            // Model called "MEMORY" but tool is registered as "memory"
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            var opts = MakeChatOptions(("memory", "Memory saved"));
+            var fc = MakeToolCall("MEMORY"); // wrong casing from model
+
+            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            Assert.IsTrue(result.Succeeded, "Tool should succeed after name repair");
+        }
+
+        [Test]
+        public async Task ExecuteSingle_TrulyUnknownTool_ReturnsFailed()
+        {
+            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            var opts = MakeChatOptions(("memory", "ok"));
+            var result = await policy.ExecuteSingleAsync(MakeToolCall("totally_unknown"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Result.Result.ToString().Contains("Unknown tool") ||
+                          result.Result.Result.ToString().Contains("not found"),
+                "Error message should mention the unknown tool");
+        }
+
+        // ==================== ComputeBackoff (LoggingLlmClientDecorator) ====================
+
+        [Test]
+        public void ComputeBackoff_ZeroAttempt_Returns2s()
+        {
+            // Access via reflection since it's private static
+            var method = typeof(LoggingLlmClientDecorator)
+                .GetMethod("ComputeBackoff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.IsNotNull(method, "ComputeBackoff should exist");
+
+            int val = (int)method.Invoke(null, new object[] { 0 });
+            Assert.AreEqual(2, val, "attempt=0: 2 * 2^0 = 2s");
+        }
+
+        [Test]
+        public void ComputeBackoff_ExponentialCurve_CappedAt30()
+        {
+            var method = typeof(LoggingLlmClientDecorator)
+                .GetMethod("ComputeBackoff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.IsNotNull(method);
+
+            // attempt 0 → 2*2^0=2, attempt 1 → 4, attempt 2 → 8, attempt 3 → 16, attempt 4 → 30 (capped)
+            int[] expected = { 2, 4, 8, 16, 30, 30, 30 };
+            for (int i = 0; i < expected.Length; i++)
+            {
+                int val = (int)method.Invoke(null, new object[] { i });
+                Assert.AreEqual(expected[i], val, $"attempt={i} should give {expected[i]}s");
+            }
+        }
     }
 }
 #endif
+

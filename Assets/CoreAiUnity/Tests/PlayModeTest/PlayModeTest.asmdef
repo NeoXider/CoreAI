@@ -8,6 +8,7 @@
     "undream.llmunity.Runtime",
     "MoonSharp.Interpreter",
     "VContainer",
+    "UniTask",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
@@ -20,6 +21,7 @@
     "Newtonsoft.Json.dll",
     "Microsoft.Extensions.AI.dll",
     "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
     "System.Text.Json.dll"
   ],
   "autoReferenced": false,

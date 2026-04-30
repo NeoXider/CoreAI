@@ -480,17 +480,43 @@ var agent = new AgentBuilder("MyAgent")
 ### Generation temperature, output tokens, and duplicate tool calls
 
 #### Duplicate tool calls
-By default CoreAI **disallows** calling the same tool with identical arguments repeatedly in a row (`AllowDuplicateToolCalls = false`). This protects small local models (2B, 4B) from infinite loops. For stronger models (API or 30B+ local), duplicates can be useful. You can allow duplicates globally in `CoreAISettings`, or override **per agent**:
+By default CoreAI **disallows** calling the same tool with identical arguments repeatedly in a row (`AllowDuplicateToolCalls = false`). This protects small local models (2B, 4B) from infinite loops. For stronger models (API or 30B+ local), duplicates can be useful — for example a watchdog agent that polls a status tool until it returns "ready", or an animation agent that legitimately re-fires the same `play_animation` call.
+
+There are **three** layers, evaluated from broadest to narrowest:
+
+| Layer | Where | Default | Effect |
+|------|------|------|------|
+| Global | `CoreAISettings.AllowDuplicateToolCalls` | `false` (reject) | Baseline for every agent that does not override |
+| Per-role | `AgentBuilder.WithAllowDuplicateToolCalls(bool)` | unset → falls back to global | Wins over the global setting |
+| Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt regardless of role/global setting (used by tools like `world_command` and `execute_lua`) |
+
+Examples:
 
 ```csharp
-var animAgent = new AgentBuilder("Dancer")
-    .WithAllowDuplicateToolCalls(true)  // May spam animation calls
+// Strong model that polls a status tool — let it re-call.
+var watchdog = new AgentBuilder("Watchdog")
+    .WithAllowDuplicateToolCalls(true)
     .Build();
 
-var smartAgent = new AgentBuilder("Programmer")
-    .WithAllowDuplicateToolCalls(false) // Explicitly forbid spamming the same bad code
+// Small model that occasionally loops — keep the guard on for this agent
+// even if the global default is true.
+var planner = new AgentBuilder("Programmer")
+    .WithAllowDuplicateToolCalls(false)
     .Build();
 ```
+
+When a duplicate is rejected, the policy returns a synthetic tool result of:
+
+> `Error: You just executed this exact same tool call with the exact same arguments on the previous step. Do not repeat identical steps. Proceed to the NEXT step or provide a final text response.`
+
+The trace surfaces it as `source=duplicate` in the per-call diagnostic line:
+
+```
+[ToolCall] traceId=… role=… tool=memory status=FAIL dur=0ms …
+LLM ◀ … | tools=[memory(fail,0ms,duplicate)]
+```
+
+If you see this line repeatedly, that's the signal to either (a) flip `WithAllowDuplicateToolCalls(true)` for that agent, (b) mark the specific tool with `AllowDuplicates = true`, or (c) tighten the system prompt to stop the model retrying.
 
 > 💡 *Note: For some tools (e.g. `world_command` → `play_animation` or `execute_lua`), duplicates are always allowed at the tool level.*
 

@@ -397,6 +397,64 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, calls.Count);
             Assert.AreEqual("tool", calls[0].Name);
         }
+
+        [Test]
+        public void ToolCallInMiddleOfLongText_PrefixAndSuffixPreserved()
+        {
+            // Real-world pattern: model writes text, then tool call JSON, then nothing
+            string prefix = "I will save this to memory now. ";
+            string json = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"save me\"}}";
+            string suffix = " Done processing.";
+            string text = prefix + json + suffix;
+
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.That(cleaned, Does.Contain("I will save this to memory now."));
+            Assert.That(cleaned, Does.Contain("Done processing."));
+            Assert.That(cleaned, Does.Not.Contain("\"name\":\"memory\""));
+        }
+
+        [Test]
+        public void CodeBlockFollowedByRealToolCall_OnlyRealCallExtracted()
+        {
+            // Model shows an example in code block, then makes a real call
+            string text = "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\n" +
+                          "Now I will actually call it:\n" +
+                          "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"real\"}}";
+
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found, "Should extract the real call outside the code block");
+            Assert.AreEqual(1, calls.Count, "Only the non-code-block call should be extracted");
+            Assert.AreEqual("write", calls[0].Arguments?["action"]?.ToString());
+        }
+
+        [Test]
+        public void ToolCallWithArrayArguments_ExtractedCorrectly()
+        {
+            string text = "{\"name\":\"batch_tool\",\"arguments\":{\"items\":[1,2,3],\"mode\":\"sync\"}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("batch_tool", calls[0].Name);
+        }
+
+        [Test]
+        public void CleanedText_IsTrimmable_NoLeadingTrailingJson()
+        {
+            // Tool call at very start of text — cleaned should not start with JSON
+            string text = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"x\"}} Here is my answer.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.That(cleaned.TrimStart(), Does.Not.StartWith("{\"name\""),
+                "Cleaned text should not start with JSON tool call");
+            Assert.That(cleaned, Does.Contain("Here is my answer."));
+        }
     }
 #endif
 }
+

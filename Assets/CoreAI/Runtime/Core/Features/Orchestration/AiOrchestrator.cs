@@ -238,6 +238,19 @@ namespace CoreAI.Ai
             // Память уже сохранена через FunctionInvokingChatClient -> MemoryTool.ExecuteAsync()
             // Дополнительный fallback парсинг не нужен - всё через единый MEAI pipeline
 
+            // Defense-in-depth: even though SmartToolCallingChatClient and MeaiLlmClient strip
+            // tool-call JSON in their respective loops, sanitise the assistant text once more
+            // before it crosses into chat history / ApplyAiGameCommand. A new tool-call shape
+            // we don't recognise can still be spotted by this engine-agnostic check.
+            string sanitisedContent = LlmToolCallTextExtractor.StripForDisplay(content);
+            if (!string.Equals(sanitisedContent, content, StringComparison.Ordinal))
+            {
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] role='{roleId}' trace='{traceId}' tool-call JSON leaked through extraction; stripped for chat/envelope.",
+                    LogTag.Llm);
+                content = sanitisedContent;
+            }
+
             if (roleConfig.WithChatHistory && _memoryStore != null)
             {
                 _memoryStore.AppendChatMessage(roleId, "user", user, roleConfig.PersistChatHistory);
@@ -414,6 +427,17 @@ namespace CoreAI.Ai
                         Error = "structured validation failed: " + (failReason ?? "")
                     };
                     yield break;
+                }
+
+                // Defense-in-depth: same strip as non-streaming, in case any tool-call JSON
+                // slipped past the streaming extractor (new shape, unbound tool, etc.).
+                string sanitisedStream = LlmToolCallTextExtractor.StripForDisplay(content);
+                if (!string.Equals(sanitisedStream, content, StringComparison.Ordinal))
+                {
+                    Log.Instance.Warn(
+                        $"[AiOrchestrator] (stream) role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked through extraction; stripped for chat/envelope.",
+                        LogTag.Llm);
+                    content = sanitisedStream;
                 }
 
                 if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)

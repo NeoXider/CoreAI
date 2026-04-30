@@ -198,9 +198,29 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Разрешить/запретить этому агенту вызывать одни и те же инструменты с одинаковыми аргументами подряд.
-        /// Переопределяет глобальную настройку CoreAISettings.AllowDuplicateToolCalls.
+        /// Per-agent override for duplicate tool-call detection. Default behaviour is to <b>reject</b>
+        /// a tool call whose <c>(name, args)</c> signature exactly matches a previous one within the
+        /// same request — this prevents loops where a model re-invokes the same tool forever.
+        /// <para>
+        /// Pass <c>true</c> to <b>opt out</b> (large/strong models occasionally re-call a tool on
+        /// purpose, e.g. polling for state). Pass <c>false</c> to force-enable the guard for this
+        /// role even if the global <see cref="ICoreAISettings.AllowDuplicateToolCalls"/> is <c>true</c>.
+        /// </para>
+        /// <para>
+        /// Granularity:
+        /// <list type="number">
+        ///   <item>Global default: <see cref="ICoreAISettings.AllowDuplicateToolCalls"/> (off — reject).</item>
+        ///   <item>Per-role override: this method.</item>
+        ///   <item>Per-tool override: <see cref="ILlmTool.AllowDuplicates"/> on the tool itself —
+        ///     even when role/global reject duplicates, a tool that returns <c>true</c> here is
+        ///     never blocked (useful for read-only "ping" tools).</item>
+        /// </list>
+        /// </para>
         /// </summary>
+        /// <example>
+        /// // Allow this agent to call its tool repeatedly (e.g. status-poll loop).
+        /// new AgentBuilder("Watchdog").WithAllowDuplicateToolCalls(true).Build();
+        /// </example>
         public AgentBuilder WithAllowDuplicateToolCalls(bool allow)
         {
             _allowDuplicateToolCalls = allow;

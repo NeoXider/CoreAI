@@ -1,6 +1,6 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.2.1",
+  "version": "1.4.0",
   "displayName": "CoreAI",
   "unity": "6000.0",
   "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI.",

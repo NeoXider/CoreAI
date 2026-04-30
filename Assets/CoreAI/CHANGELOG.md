@@ -1,5 +1,29 @@
 # Changelog
 
+## [v1.4.0] — 2026-04-30
+
+### Resilience: TryRepairToolName + HTTP retry with Retry-After
+
+Two production resilience features inspired by [Kilo (OpenCode)](https://github.com/nicholasgriffintn/kilo).
+
+- ✨ **`ToolExecutionPolicy.TryRepairToolName`** — case-insensitive tool name repair before `AIFunction` resolution. Model writes `MEMORY` → system silently maps to `memory`. Empty tool list → passthrough (backwards compatible). Unknown tool → structured error with available names for self-correction.
+- ✨ **`LoggingLlmClientDecorator` HTTP retry** — retries `RateLimited` (429) and `BackendUnavailable` (5xx) with `Retry-After` header or exponential backoff (2s→4s→8s→16s→30s cap). `maxHttpRetryAttempts` injected from `ICoreAISettings.MaxLlmRequestRetries`.
+- ✨ **`MeaiOpenAiChatClient.BuildHttpException`** — parses `Retry-After-Ms` (ms precision, Azure/LiteLLM) with priority over `Retry-After` (seconds).
+- ✨ **`ComputeBackoff(attempt)`** — exponential backoff helper: `2^(attempt+1)` capped at 30s.
+- 🧪 **EditMode:** `TryRepairToolName` (5 tests), `ExecuteSingle` repair (2 tests), `ComputeBackoff` curve, text-extraction edge cases (4 tests).
+- 🧪 **PlayMode:** `ToolNameRepairPlayModeTests` — 3 hybrid scripted+real-LLM tests for repair, self-correction, and mixed-case text prefix.
+- 🔧 Package version **`1.4.0`**; align `com.nexoider.coreaiunity` to **`1.4.0`**.
+
+## [v1.3.0] — 2026-04-30
+
+### Portable text-extractor + tool-call diagnostic surface
+
+- ✨ **`CoreAI.Ai.LlmToolCallTextExtractor`** — engine-agnostic helper that extracts (`TryExtract`) or strips (`StripForDisplay`) embedded tool-call JSON from assistant text. Same brace-counted, code-block-aware logic that the Unity-side streaming pipeline used internally, now portable so the orchestrator and any other consumer can apply identical rules at boundary points.
+- ✨ **`LlmToolCallTrace`** struct in `CoreAI.Ai` — `(Name, Success, DurationMs, Source)` record for one tool call. Source is `native` / `text` / `duplicate` / `missing`.
+- ✨ **`LlmCompletionResult.ExecutedToolCalls`** + **`LlmStreamChunk.ExecutedToolCalls`** — non-empty when the turn invoked tools. Stream propagates the list on the `IsDone` chunk; non-streaming on the result. Used by Unity-side `LoggingLlmClientDecorator` to render `tools=[name(ok,12ms)]` on every `LLM ◀` line.
+- 🛡 **`AiOrchestrator`** runs `LlmToolCallTextExtractor.StripForDisplay` on the assistant text before persisting to chat history or publishing `ApplyAiGameCommand`, both for sync and streaming paths. Logs a warning if the strip changed anything (defense-in-depth — should be a no-op once Unity-side extraction succeeds).
+- Package version **`1.3.0`**; align `com.nexoider.coreaiunity` to **`1.3.0`**.
+
 ## [v1.2.1] — 2026-04-29
 
 ### AllowedToolNames semantics + streaming facade

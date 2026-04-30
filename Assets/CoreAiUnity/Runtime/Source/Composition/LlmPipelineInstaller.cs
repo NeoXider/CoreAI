@@ -50,7 +50,8 @@ namespace CoreAI.Composition
                         c.Resolve<IPublisher<LlmRequestCompleted>>(),
                         c.Resolve<IPublisher<LlmUsageReported>>()),
                     c.Resolve<IGameLogger>(),
-                    llmTimeout), Lifetime.Singleton);
+                    llmTimeout,
+                    settings != null ? settings.MaxLlmRequestRetries : 0), Lifetime.Singleton);
 
             // Orchestrator настройки
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;

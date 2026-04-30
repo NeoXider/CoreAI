@@ -227,6 +227,9 @@ namespace CoreAI.Infrastructure.Llm
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
             }
 
+            // Carry the tool-call diagnostic out of the smart-tool client so the logging
+            // decorator can render the same `tools=[...]` line for stream and non-stream paths.
+            result.ExecutedToolCalls = functionClient.LastExecutedToolCalls;
             return result;
         }
 
@@ -338,6 +341,13 @@ namespace CoreAI.Infrastructure.Llm
             int maxToolIterations = Math.Max(1, _settings.MaxToolCallRetries + 1);
             int toolIteration = 0;
 
+            if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
+            {
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"MeaiLlmClient: Streaming role='{_currentRoleId}' requested {(request.Tools?.Count ?? 0)} tool(s) but 0 AIFunction(s) were bound. " +
+                    "Tool calls will be stripped from output without execution. Verify tool registration.");
+            }
+
             // Shared policy for the entire streaming session
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             ToolExecutionPolicy policy = new(_logger, _settings, request.Tools, allowDuplicates,
@@ -349,7 +359,12 @@ namespace CoreAI.Infrastructure.Llm
                 toolIteration++;
                 if (toolIteration > maxToolIterations + 1)
                 {
-                    yield return new LlmStreamChunk { IsDone = true, Error = "tool loop exceeded max iterations" };
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = "tool loop exceeded max iterations",
+                        ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                    };
                     yield break;
                 }
 
@@ -434,7 +449,12 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        yield return new LlmStreamChunk { IsDone = true, Error = "max consecutive tool errors reached" };
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = "max consecutive tool errors reached",
+                            ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        };
                         yield break;
                     }
 
@@ -442,8 +462,42 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // === Path 2: Text-based tool call extraction (primary for local models) ===
-                if (aiTools.Count > 0 && TryExtractToolCallsFromText(visibleText, out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
+                // Run extraction whenever the *request* declared tools, not just when the
+                // backend successfully bound AIFunctions. This way, a tool that was requested
+                // but couldn't be bound (e.g., MemoryLlmTool with a null store) still has its
+                // JSON stripped from the visible reply — we just can't execute it.
+                bool requestHadTools = (request.Tools?.Count ?? 0) > 0;
+                if (requestHadTools && TryExtractToolCallsFromText(visibleText, out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
                 {
+                    if (aiTools.Count == 0)
+                    {
+                        // Tool was requested but no AIFunction is bound. Strip the JSON, warn,
+                        // and finish as a plain text turn — there is nothing to execute and we
+                        // must not loop forever asking a model that has no tools to call them.
+                        foreach (MEAI.FunctionCallContent fc in toolCalls)
+                        {
+                            policy.RecordSyntheticTrace(fc.Name ?? "", false, 0d, "missing");
+                        }
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Streaming saw {toolCalls.Count} text-shaped tool call(s) but no AIFunction is bound for this role. " +
+                            "Stripping JSON and emitting cleaned text. Check tool registration / IAgentMemoryStore wiring.");
+
+                        if (!string.IsNullOrWhiteSpace(cleanedText))
+                        {
+                            yield return new LlmStreamChunk { Text = cleanedText };
+                        }
+
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Text = string.Empty,
+                            ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        };
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            $"MeaiLlmClient: Streaming completed (text-only, JSON stripped, length={cleanedText?.Length ?? 0})");
+                        yield break;
+                    }
+
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
@@ -471,7 +525,12 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        yield return new LlmStreamChunk { IsDone = true, Error = "max consecutive tool errors reached" };
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = "max consecutive tool errors reached",
+                            ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        };
                         yield break;
                     }
 
@@ -484,7 +543,12 @@ namespace CoreAI.Infrastructure.Llm
                     yield return new LlmStreamChunk { Text = chunk };
                 }
 
-                yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Text = string.Empty,
+                    ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                };
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, total length={visibleText.Length})");
                 yield break;
@@ -787,6 +851,18 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 MemoryTool mt = new(_memoryStore, roleId);
                                 result.Add(mt.CreateAIFunction());
+                            }
+                            else
+                            {
+                                // Memory tool was requested for this role but the orchestrator
+                                // could not bind a store. The model may still emit memory tool
+                                // JSON; the streaming/non-streaming loops will strip it from the
+                                // visible reply but cannot persist anything. Warn loudly so the
+                                // operator knows the tool is silently a no-op.
+                                _logger.LogWarning(GameLogFeature.Llm,
+                                    $"MeaiLlmClient: 'memory' tool requested for role '{roleId}' but IAgentMemoryStore is null. " +
+                                    "Tool calls to 'memory' will be stripped from output without execution. " +
+                                    "Wire IAgentMemoryStore (CoreServicesInstaller) to enable persistence.");
                             }
 
                             break;

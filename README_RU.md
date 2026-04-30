@@ -11,7 +11,8 @@
 
 **Одно хранилище, два пакета:** портативное ядро C# и Unity-слой с DI, панелью чата и тестами. Хотите *демо за пять минут* — или *многошаговый пайплайн с инструментами и Lua* — используются одни и те же кирпичики.
 
-- 🧠 **Агенты, которые вызывают ваш код** — не просто генерация текста, а реальный function calling с ретраем и памятью.
+- 🧠 **Агенты, которые вызывают ваш код** — не просто генерация текста, а реальный function calling с ретраем, авто-ремонтом и памятью.
+- 🛡️ **Самовосстанавливающаяся устойчивость** — `TryRepairToolName` автоматически чинит регистр имён инструментов; HTTP retry читает `Retry-After` заголовки с экспоненциальным backoff.
 - 🌊 **Стриминг, переживший разорванные теги** — stateful SSE-аккумуляция собирает фрагментированные `<think>` блоки и tool calls.
 - 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
 - ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
@@ -19,7 +20,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** актуальные номера берутся из [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Линия **`1.0.0`** добавляет публичные LLM-режимы и mixed-mode routing по ролям.
+**Версия:** актуальные номера берутся из [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). **Линия `1.4.0`** — production-grade устойчивость: HTTP retry с `Retry-After`, автоматический ремонт имён инструментов (`TryRepairToolName`), диагностика tool-call trace, кросс-модовый паритет.
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -202,16 +203,19 @@ var agent = new AgentBuilder("Merchant")
 
 ---
 
-### 🔄 Tool Call Retry — AI учится на ошибках
+### 🔄 Tool Call Retry + Самовосстановление — AI учится на ошибках
 
-Маленькие модели (Qwen3.5-2B) иногда забывают формат. CoreAI автоматически даёт **3 попытки**:
+Маленькие модели (Qwen3.5-2B) иногда забывают формат или регистр имён. CoreAI автоматически:
+
+- 🔧 **Чинит регистр имён** — `TryRepairToolName` молча конвертирует `MEMORY` → `memory`, `Spawn_Quiz` → `spawn_quiz` до того, как выполнение провалится.
+- ♻️ **Повтор при ошибке** — до **3 попыток** с обратной связью ошибки в историю чата, чтобы модель сама исправилась.
+- 🌐 **Повтор HTTP-ошибок** — `429 (Rate Limited)` и `5xx` триггерят автоматический retry с поддержкой заголовка `Retry-After` или экспоненциальным backoff (**2s → 4s**, настраивается в Inspector).
+- ✅ **Немедленная проверка Lua-блоков**.
 
 ```
-Attempt 1: Model returns wrong format
-  ↓
-System: "ERROR: Use this format: {"name": "tool", "arguments": {...}}"
-  ↓
-Attempt 2: Model fixes the format ✅
+Модель говорит: {"name":"MEMORY", ...}
+     ↓ TryRepairToolName
+Исполняется: {"name":"memory", ...}  ← молча исправлено, ошибка не показана
 ```
 
 ---
@@ -415,8 +419,16 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 ```
 Unity → Window → General → Test Runner
-  ├── EditMode — большой быстрый набор (без реального LLM): промпты, стрим, Lua, инструменты, rate limit, фасад CoreAi, стрим оркестратора, …
+  ├── EditMode — большой быстрый набор (без реального LLM): промпты, стрим, Lua,
+  │              инструменты, rate limit, фасад CoreAi, ремонт имён, backoff мат.,
+  │              стрим оркестратора, паритет извлечения tool-call, …
   └── PlayMode — интеграция с настроенным HTTP или локальным GGUF
+                 ├── FullPipelineResiliencePlayModeTests — стрим/не-стрим
+                 │   tool calls с гарантией no-JSON-leak, memory write/read,
+                 │   оркестратор merchant + инвентарь, trace-диагностика
+                 ├── ToolNameRepairPlayModeTests — гибрид скрипт+реальный LLM:
+                 │   ремонт регистра, самокоррекция неизвестного инструмента
+                 └── StreamingToolCallingPlayModeTests — отмена, state parity
 ```
 
 В CI сначала гоняй EditMode. PlayMode опционален и требует бэкенд (для HTTP — переменные окружения, см. [LLMUNITY_SETUP_AND_MODELS](Assets/CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
@@ -432,12 +444,24 @@ Unity → Window → General → Test Runner
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   AiOrchestrator                              │
-│  • Priority queue  • Retry logic  • Tool calling              │
+│  • Priority queue  • JSON strip (defense-in-depth)            │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                     LLM Client                               │
+│              LoggingLlmClientDecorator                        │
+│  • HTTP retry (429/5xx)  • Retry-After  • Exp. backoff        │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM Client (MeaiLlmClient)               │
 │  • LLMUnity (local GGUF)  • OpenAI HTTP  • Stub             │
+│  • TryExtractToolCallsFromText (JSON-in-text → tool call)    │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│               SmartToolCallingChatClient                      │
+│  • TryRepairToolName (MEMORY → memory)                       │
+│  • Дедупликация  • Счётчик ошибок подряд                      │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -449,7 +473,7 @@ Unity → Window → General → Test Runner
 ┌─────────────────────────────────────────────────────────────┐
 │                   Tools (ILlmTool)                           │
 │  🧠 Memory  📜 Lua  🎒 Inventory  ⚙️ GameConfig  + Ваши!    │
-└─────────────────────────────────────────────────────────────┘
+└──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   Game World                                 │

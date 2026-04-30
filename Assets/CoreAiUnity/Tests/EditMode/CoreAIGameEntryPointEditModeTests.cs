@@ -66,7 +66,10 @@ namespace CoreAI.Tests.EditMode
             Assert.AreSame(orchestrator1, CoreAIAgent.Orchestrator);
             Assert.AreSame(policy1, CoreAIAgent.Policy);
             Assert.AreSame(memoryStore1, CoreAIAgent.MemoryStore);
-            Assert.AreEqual(1, logger2.WarnCount, "Duplicate start should be reported exactly once.");
+            // Duplicate-start is reported via Debug (not Warn) to keep the console quiet
+            // when additive scenes / tests legitimately spin up a second LifetimeScope.
+            Assert.AreEqual(1, logger2.DebugCount, "Duplicate start should be reported exactly once via Debug.");
+            Assert.AreEqual(0, logger2.WarnCount, "Duplicate start must not emit a Warning.");
 
             first.Dispose();
             second.Dispose();
@@ -74,8 +77,9 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestLogger : ILog
         {
+            public int DebugCount { get; private set; }
             public int WarnCount { get; private set; }
-            public void Debug(string message, string tag = null) { }
+            public void Debug(string message, string tag = null) => DebugCount++;
             public void Info(string message, string tag = null) { }
             public void Warn(string message, string tag = null) => WarnCount++;
             public void Error(string message, string tag = null) { }
