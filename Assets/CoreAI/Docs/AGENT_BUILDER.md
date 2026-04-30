@@ -366,7 +366,25 @@ var merchant = new AgentBuilder("Merchant")
 
 ## Quick Actions and Events (no classes)
 
-### 1. WithEventTool (beginner-friendly)
+**Recommendation:** start with **`WithAction`** whenever the tool maps to a concrete C# callback — **MEAI** infers the JSON schema from the delegate. Use **`WithEventTool`** when you want loose coupling via **`CoreAiEvents`**. Reserve a custom **`ILlmTool`** class ([next section](#building-a-custom-tool-via-classes)) for advanced control (custom schemas, portability, or non-delegate wiring).
+
+### 1. WithAction (recommended for direct C# tools)
+
+Passes any C# `Delegate` (`Action` or `Func`) into the agent pipeline. **Microsoft.Extensions.AI** builds the tool schema from the delegate parameters — no handwritten JSON Schema for normal cases.
+
+```csharp
+var agent = new AgentBuilder("Helper")
+    // Parameterless method
+    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
+    
+    // Method with parameters (the agent infers amount(int) and item(string))
+    .WithAction("give_item", "Gives an item", (int amount, string item) => {
+        inventory.Add(item, amount);
+    })
+    .Build();
+```
+
+### 2. WithEventTool (decoupled events)
 
 Lets the agent raise a global `CoreAiEvents` event that any `MonoBehaviour` can subscribe to.
 
@@ -393,22 +411,6 @@ void Start()
         player.AddGold(amount);
     });
 }
-```
-
-### 2. WithAction (advanced)
-
-Passes any C# `Delegate` (`Action` or `Func`) straight into the agent. **MEAI** parses the delegate arguments and gives the model the correct JSON schema. No custom classes required.
-
-```csharp
-var agent = new AgentBuilder("Helper")
-    // Parameterless method
-    .WithAction("heal_player", "Heals the player fully", () => player.Heal())
-    
-    // Method with parameters (the agent infers amount(int) and item(string))
-    .WithAction("give_item", "Gives an item", (int amount, string item) => {
-        inventory.Add(item, amount);
-    })
-    .Build();
 ```
 
 > 💡 **How does the model know when to call Action/Event?**

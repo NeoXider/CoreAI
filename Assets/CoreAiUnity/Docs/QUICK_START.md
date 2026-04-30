@@ -33,10 +33,10 @@ NuGet DLLs, VContainer/MoonSharp/UniTask/MessagePipe/LLMUnity Git dependencies �
 
 You have **two** options:
 
-### 3a. Classic AI-only scene
+### 3a. Bare scene (lifetime scope — no demo UI)
 
 ```
-CoreAI → Create Scene Setup
+CoreAI → Setup → Create Bare Scene (advanced)
 ```
 
 Creates `CoreAILifetimeScope` with every required asset (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest`, `CoreAiPrefabRegistry`, `LlmRoutingManifest`, `AiPermissions`). If the backend is `LlmUnity`, it also adds `LLM` and `LLMAgent` GameObjects.

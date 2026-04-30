@@ -46,5 +46,29 @@ namespace CoreAI.Ai
             PlayerChat,
             Merchant
         };
+
+        /// <summary>
+        /// Returns <c>true</c> when <paramref name="roleId"/> matches one of the built-in roles
+        /// listed in <see cref="AllBuiltInRoles"/>. Built-in roles always have a manifest/Resources
+        /// fallback prompt, so callers (e.g. <c>AgentBuilder</c> validation) can skip
+        /// "missing system prompt" warnings for them.
+        /// </summary>
+        public static bool IsBuiltIn(string roleId)
+        {
+            if (string.IsNullOrEmpty(roleId))
+            {
+                return false;
+            }
+
+            for (int i = 0; i < AllBuiltInRoles.Count; i++)
+            {
+                if (string.Equals(AllBuiltInRoles[i], roleId, System.StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

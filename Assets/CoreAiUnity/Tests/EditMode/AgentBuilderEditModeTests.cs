@@ -196,17 +196,68 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ApplyToPolicy_ToolsOnly_DefaultsStreamingOverrideToTrue()
+        public void ValidateOnBuild_CustomRole_WithoutSystemPrompt_ReportsMissingPrompt()
         {
-            AgentMemoryPolicy policy = new();
-            AgentConfig config = new AgentBuilder("ToolsOnlyRole")
-                .WithMode(AgentMode.ToolsOnly)
-                .Build();
+            var builder = new AgentBuilder("CustomNpc")
+            {
+                SuppressBuildWarnings = true
+            };
+            IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
 
-            config.ApplyToPolicy(policy);
+            Assert.That(issues.Any(i => i.Code == AgentBuilderIssueCode.MissingSystemPrompt), Is.True);
+        }
 
-            Assert.IsTrue(policy.TryGetStreamingOverride("ToolsOnlyRole", out bool enabled));
-            Assert.IsTrue(enabled);
+        [Test]
+        public void ValidateOnBuild_BuiltInRole_WithoutSystemPrompt_SkipsMissingPrompt()
+        {
+            var builder = new AgentBuilder(BuiltInAgentRoleIds.Creator)
+            {
+                SuppressBuildWarnings = true
+            };
+            IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
+
+            Assert.That(issues.Any(i => i.Code == AgentBuilderIssueCode.MissingSystemPrompt), Is.False);
+        }
+
+        [Test]
+        public void ValidateOnBuild_ToolsOnlyWithoutTools_ReportsNoTools()
+        {
+            var builder = new AgentBuilder("Npc")
+            {
+                SuppressBuildWarnings = true
+            };
+            builder.WithMode(AgentMode.ToolsOnly);
+
+            IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
+
+            Assert.That(issues.Any(i => i.Code == AgentBuilderIssueCode.NoToolsForToolMode), Is.True);
+        }
+
+        [Test]
+        public void ValidateOnBuild_CompactionTrue_GlobalGateOff_ReportsCompactionGate()
+        {
+            try
+            {
+                // Ensure static override is deterministic for the test body
+                CoreAISettings.ResetOverrides();
+                CoreAISettings.EnableLlmContextCompaction = false;
+
+                var builder = new AgentBuilder("CompactionRole")
+                {
+                    SuppressBuildWarnings = true
+                };
+                builder.WithSystemPrompt("x");
+                builder.WithMode(AgentMode.ChatOnly);
+                builder.WithLlmContextCompaction(true);
+
+                IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
+
+                Assert.That(issues.Any(i => i.Code == AgentBuilderIssueCode.CompactionGateDisabled), Is.True);
+            }
+            finally
+            {
+                CoreAISettings.ResetOverrides();
+            }
         }
     }
 }

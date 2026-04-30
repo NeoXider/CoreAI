@@ -315,8 +315,13 @@ CoreAI использует [Microsoft.Extensions.AI](https://www.nuget.org/pack
 
 > 💡 **Проще всего:** Клонируй этот репозиторий и скопируй всю папку `Assets/Packages/` в свой проект.
 
-### 2. Установи зависимости в manifest.json (обязательно)
-Unity Package Manager не поддерживает автоматическое скачивание Git-зависимостей из других пакетов. Открой файл `Packages/manifest.json` в своем проекте и добавь эти строки в блок `"dependencies"`:
+### 2. Зависимости Git в manifest.json (обязательно)
+
+Unity Package Manager сам не подтягивает все транзитивные Git-пакеты за вас.
+
+**Предпочтительно:** когда в проект уже добавлен CoreAiUnity, используй меню **CoreAI → Setup → Install Git Dependencies** — недостающие ключи допишутся в `manifest.json`, существующие пины не трогаются.
+
+**Или вручную:** открой файл `Packages/manifest.json` и добавь строки в блок `"dependencies"`:
 
 ```json
     "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
@@ -329,7 +334,7 @@ Unity Package Manager не поддерживает автоматическое
 
 *(После сохранения файла Unity сама скачает все нужные библиотеки: VContainer, MoonSharp, UniTask, MessagePipe и LLMUnity)*
 
-### 3. Установи CoreAI пакеты через Git URL
+### 3. Пакеты CoreAI через Git URL
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
 
 **Шаг 1 — Ядро (чистый C#, без UnityEngine):**
@@ -342,21 +347,27 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-### 3. Настрой сцену (один клик)
+### 4. Собери сцену
 
-После установки используй меню:
+**Чатовая демо-сцена (лучший первый запуск):**
 
 ```
-CoreAI → Create Scene Setup
+CoreAI → Setup → Create Chat Demo Scene
 ```
 
-Это автоматически:
-- ✅ Создаст `CoreAILifetimeScope` на сцене
-- ✅ Сгенерирует все необходимые ассеты настроек (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest` и др.)
-- ✅ Назначит ассеты на scope
-- ✅ Создаст `LLM` + `LLMAgent` объекты (если бэкенд = LLMUnity)
+**Облегчённая сцена (только scope и ассеты — без UI демо):**
 
-### 4. Настрой LLM бэкенд
+```
+CoreAI → Setup → Create Bare Scene (advanced)
+```
+
+Оба пункта:
+- ✅ Создадут или подготовят `CoreAILifetimeScope` на сцене  
+- ✅ Сгенерируют нужные ассеты (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest` и др.)  
+- ✅ Пропишут ссылки на scope  
+- ✅ При бэкенде LLMUnity могут добавить `LLM` + `LLMAgent` (wizard «голой» сцены)
+
+### 5. Настрой LLM бэкенд
 
 Открой настройки: **CoreAI → Settings** и выбери бэкенд:
 
@@ -365,6 +376,20 @@ CoreAI → Create Scene Setup
 | **LLMUnity** (локально) | Скачай GGUF модель (напр. Qwen3.5-4B) через LLMUnity Model Manager |
 | **HTTP API** (LM Studio, OpenAI) | Укажи `API Base URL` и `API Key` в Settings |
 | **Auto** | CoreAI сам выберет лучший доступный бэкенд |
+
+### 6. Первый агент
+
+```csharp
+var storyteller = new AgentBuilder("Storyteller")
+    .WithSystemPrompt("You are a campfire storyteller. Share tales about the world.")
+    .WithMemory()
+    .WithChatHistory()
+    .WithMode(AgentMode.ChatOnly)
+    .Build();
+```
+
+> 📖 Полный гайд: [QUICK_START.md](Assets/CoreAiUnity/Docs/QUICK_START.md)  
+> 🏗️ Справочник AgentBuilder: [AGENT_BUILDER.md](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 **Готово!** AI-агенты работают. 🎉
 
@@ -405,6 +430,8 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 ---
 
 ## 📚 Документация
+
+**Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**. Корневой README_RU — навигатор по-русски; за деталями переходи по ссылкам на англоязычные файлы.
 
 Сначала: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.
 

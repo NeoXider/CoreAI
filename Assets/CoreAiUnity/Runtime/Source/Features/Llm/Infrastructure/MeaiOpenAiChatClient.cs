@@ -98,54 +98,81 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Request JSON={json}");
             }
 
-            using UnityWebRequest webReq = new(url, "POST");
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-            webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            webReq.downloadHandler = new DownloadHandlerBuffer();
-            webReq.SetRequestHeader("Content-Type", "application/json");
+            // LM Studio returns HTTP 400 with {"error":"Model reloaded."} while GGUF reloads — retry quietly.
+            const int transientLocalLlmReloadMaxAttempts = 10;
 
-            // OpenRouter требует эти заголовки
-            if (url.Contains("openrouter"))
+            string responseJson = null;
+
+            for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
-                webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
-                webReq.SetRequestHeader("X-Title", "CoreAI");
-                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Added OpenRouter headers");
-            }
+                using UnityWebRequest webReq = new(url, "POST");
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+                webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                webReq.downloadHandler = new DownloadHandlerBuffer();
+                webReq.SetRequestHeader("Content-Type", "application/json");
 
-            string authorizationHeader = ResolveAuthorizationHeader();
-            if (!string.IsNullOrEmpty(authorizationHeader))
-            {
-                webReq.SetRequestHeader("Authorization", authorizationHeader);
-                _logger.LogInfo(GameLogFeature.Llm,
-                    $"MeaiOpenAiChatClient: Authorization header set (len={authorizationHeader.Length})");
-            }
-
-            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Timeout={_settings.RequestTimeoutSeconds}s");
-            webReq.timeout = _settings.RequestTimeoutSeconds;
-
-            UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
-            while (!op.isDone)
-            {
-                if (cancellationToken.IsCancellationRequested)
+                // OpenRouter требует эти заголовки
+                if (url.Contains("openrouter"))
                 {
-                    try { webReq.Abort(); } catch { /* ignore */ }
-                    cancellationToken.ThrowIfCancellationRequested();
+                    webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                    webReq.SetRequestHeader("X-Title", "CoreAI");
+                    _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Added OpenRouter headers");
                 }
-                await Task.Yield();
-            }
 
-            if (webReq.result != UnityWebRequest.Result.Success)
-            {
-                string responseBody = webReq.downloadHandler?.text ?? "";
-                string errorDetail = !string.IsNullOrEmpty(responseBody)
-                    ? $"{webReq.error} | Body: {responseBody}"
+                string authorizationHeader = ResolveAuthorizationHeader();
+                if (!string.IsNullOrEmpty(authorizationHeader))
+                {
+                    webReq.SetRequestHeader("Authorization", authorizationHeader);
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiOpenAiChatClient: Authorization header set (len={authorizationHeader.Length})");
+                }
+
+                _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Timeout={_settings.RequestTimeoutSeconds}s");
+                webReq.timeout = _settings.RequestTimeoutSeconds;
+
+                UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
+                while (!op.isDone)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        try { webReq.Abort(); } catch { /* ignore */ }
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    await Task.Yield();
+                }
+
+                if (webReq.result == UnityWebRequest.Result.Success)
+                {
+                    responseJson = webReq.downloadHandler.text;
+                    break;
+                }
+
+                string failureBody = webReq.downloadHandler?.text ?? "";
+                string errorDetail = !string.IsNullOrEmpty(failureBody)
+                    ? $"{webReq.error} | Body: {failureBody}"
                     : webReq.error;
                 _logger.LogWarning(GameLogFeature.Llm, $"MeaiOpenAiChatClient: {errorDetail}");
-                throw BuildHttpException(webReq, responseBody, errorDetail);
+
+                bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
+                    && IsTransientLocalLlmReloadError((int)webReq.responseCode, failureBody, webReq.error);
+
+                if (canRetryTransient)
+                {
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiOpenAiChatClient: transient local LLM / reload response (attempt {attempt}/{transientLocalLlmReloadMaxAttempts}); retrying after backoff...");
+                    await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
+                    continue;
+                }
+
+                throw BuildHttpException(webReq, failureBody, errorDetail);
+            }
+
+            if (responseJson == null)
+            {
+                throw new InvalidOperationException("MeaiOpenAiChatClient: request completed without success or typed error.");
             }
 
             // Логируем ответ от модели если включено
-            string responseJson = webReq.downloadHandler.text;
             if (_settings.EnableHttpDebugLogging)
             {
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Response JSON={responseJson}");
@@ -256,100 +283,123 @@ namespace CoreAI.Infrastructure.Llm
 
             string json = JsonConvert.SerializeObject(req);
 
-            // ВАЖНО: UnityWebRequest и DownloadHandlerBuffer создаются из нативного
-            // Unity API и требуют главного потока. Вызывающий код должен
-            // выполняться на main thread (например, через UniTask/coroutine),
-            // Task.Run приведёт к исключению "Create can only be called from the main thread".
-            using UnityWebRequest webReq = new(url, "POST");
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-            webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            webReq.downloadHandler = new DownloadHandlerBuffer();
-            webReq.SetRequestHeader("Content-Type", "application/json");
-            webReq.SetRequestHeader("Accept", "text/event-stream");
+            // LM Studio: same transient 400 "Model reloaded." as non-streaming — retry only if nothing was streamed yet.
+            const int transientLocalLlmReloadMaxAttempts = 10;
 
-            if (url.Contains("openrouter"))
+            for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
-                webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
-                webReq.SetRequestHeader("X-Title", "CoreAI");
-            }
-            string authorizationHeader = ResolveAuthorizationHeader();
-            if (!string.IsNullOrEmpty(authorizationHeader))
-            {
-                webReq.SetRequestHeader("Authorization", authorizationHeader);
-            }
-            webReq.timeout = _settings.RequestTimeoutSeconds;
+                // ВАЖНО: UnityWebRequest и DownloadHandlerBuffer создаются из нативного
+                // Unity API и требуют главного потока. Вызывающий код должен
+                // выполняться на main thread (например, через UniTask/coroutine),
+                // Task.Run приведёт к исключению "Create can only be called from the main thread".
+                using UnityWebRequest webReq = new(url, "POST");
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+                webReq.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                webReq.downloadHandler = new DownloadHandlerBuffer();
+                webReq.SetRequestHeader("Content-Type", "application/json");
+                webReq.SetRequestHeader("Accept", "text/event-stream");
 
-            _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: POST (stream) {url}");
-
-            UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
-            int lastProcessed = 0;
-            bool cancelled = false;
-            SseToolCallAccumulator toolAccumulator = new();
-            try
-            {
-                // Poll for SSE chunks
-                while (!op.isDone)
+                if (url.Contains("openrouter"))
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                    webReq.SetRequestHeader("X-Title", "CoreAI");
+                }
+                string authorizationHeader = ResolveAuthorizationHeader();
+                if (!string.IsNullOrEmpty(authorizationHeader))
+                {
+                    webReq.SetRequestHeader("Authorization", authorizationHeader);
+                }
+                webReq.timeout = _settings.RequestTimeoutSeconds;
+
+                _logger.LogInfo(GameLogFeature.Llm,
+                    $"MeaiOpenAiChatClient: POST (stream) {url} (attempt {attempt}/{transientLocalLlmReloadMaxAttempts})");
+
+                UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
+                int lastProcessed = 0;
+                bool cancelled = false;
+                SseToolCallAccumulator toolAccumulator = new();
+                try
+                {
+                    // Poll for SSE chunks
+                    while (!op.isDone)
                     {
-                        cancelled = true;
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            cancelled = true;
+                            try { webReq.Abort(); } catch { /* ignore */ }
+                            cancellationToken.ThrowIfCancellationRequested();
+                        }
+
+                        string partial = webReq.downloadHandler?.text ?? "";
+                        if (partial.Length > lastProcessed)
+                        {
+                            string newData = partial.Substring(lastProcessed);
+                            lastProcessed = partial.Length;
+
+                            foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(newData, toolAccumulator))
+                            {
+                                yield return update;
+                            }
+                        }
+
+                        await Task.Yield();
+                    }
+
+                    // Process any remaining data after request completed
+                    if (webReq.result == UnityWebRequest.Result.Success)
+                    {
+                        string fullText = webReq.downloadHandler?.text ?? "";
+                        if (fullText.Length > lastProcessed)
+                        {
+                            string remaining = fullText.Substring(lastProcessed);
+                            foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(remaining, toolAccumulator))
+                            {
+                                yield return update;
+                            }
+                        }
+
+                        // Flush any accumulated partial tool calls at stream end
+                        MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
+                        if (flushed != null)
+                        {
+                            yield return flushed;
+                        }
+
+                        yield break;
+                    }
+
+                    if (webReq.result != UnityWebRequest.Result.Success && !cancelled &&
+                        !cancellationToken.IsCancellationRequested)
+                    {
+                        string streamBody = webReq.downloadHandler?.text ?? "";
+                        string streamErr = !string.IsNullOrEmpty(streamBody)
+                            ? $"{webReq.error} | Body: {streamBody}"
+                            : webReq.error;
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            $"MeaiOpenAiChatClient: stream error — {streamErr}");
+
+                        bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
+                            && lastProcessed == 0
+                            && IsTransientLocalLlmReloadError((int)webReq.responseCode, streamBody, webReq.error);
+
+                        if (canRetryTransient)
+                        {
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...");
+                            await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
+                            continue;
+                        }
+
+                        throw BuildHttpException(webReq, streamBody, streamErr);
+                    }
+                }
+                finally
+                {
+                    // If consumer stops enumeration early (or token cancels), close request aggressively.
+                    if (!op.isDone)
+                    {
                         try { webReq.Abort(); } catch { /* ignore */ }
-                        cancellationToken.ThrowIfCancellationRequested();
                     }
-
-                    string partial = webReq.downloadHandler?.text ?? "";
-                    if (partial.Length > lastProcessed)
-                    {
-                        string newData = partial.Substring(lastProcessed);
-                        lastProcessed = partial.Length;
-
-                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(newData, toolAccumulator))
-                        {
-                            yield return update;
-                        }
-                    }
-
-                    await Task.Yield();
-                }
-
-                // Process any remaining data after request completed
-                if (webReq.result == UnityWebRequest.Result.Success)
-                {
-                    string fullText = webReq.downloadHandler?.text ?? "";
-                    if (fullText.Length > lastProcessed)
-                    {
-                        string remaining = fullText.Substring(lastProcessed);
-                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(remaining, toolAccumulator))
-                        {
-                            yield return update;
-                        }
-                    }
-
-                    // Flush any accumulated partial tool calls at stream end
-                    MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
-                    if (flushed != null)
-                    {
-                        yield return flushed;
-                    }
-                }
-                else if (webReq.result != UnityWebRequest.Result.Success && !cancelled &&
-                         !cancellationToken.IsCancellationRequested)
-                {
-                    string streamBody = webReq.downloadHandler?.text ?? "";
-                    string streamErr = !string.IsNullOrEmpty(streamBody)
-                        ? $"{webReq.error} | Body: {streamBody}"
-                        : webReq.error;
-                    _logger.LogWarning(GameLogFeature.Llm,
-                        $"MeaiOpenAiChatClient: stream error — {streamErr}");
-                    throw BuildHttpException(webReq, streamBody, streamErr);
-                }
-            }
-            finally
-            {
-                // If consumer stops enumeration early (or token cancels), close request aggressively.
-                if (!op.isDone)
-                {
-                    try { webReq.Abort(); } catch { /* ignore */ }
                 }
             }
         }
@@ -409,6 +459,32 @@ namespace CoreAI.Infrastructure.Llm
                 status > 0 ? status : null,
                 retryAfter,
                 responseBody);
+        }
+
+        /// <summary>
+        /// LM Studio often returns <c>{"error":"Model reloaded."}</c> while a GGUF recycle is in flight.
+        /// Unity may report <see cref="UnityWebRequest.responseCode"/> as 0 even when the transport error string
+        /// or body still mentions the failure — match on body + <paramref name="unityTransportError"/> text, not only numeric status.
+        /// </summary>
+        private static bool IsTransientLocalLlmReloadError(int httpStatus, string responseBody, string unityTransportError)
+        {
+            string text = $"{responseBody ?? ""} {unityTransportError ?? ""}".ToLowerInvariant();
+
+            if (!(text.Contains("model reloaded") ||
+                  text.Contains("model is loading") ||
+                  text.Contains("loading the model") ||
+                  text.Contains("model not ready")))
+            {
+                return false;
+            }
+
+            // When we have a clear LM-Studio reload phrase, retry regardless of httpStatus (handles responseCode==0).
+            if (httpStatus == 401 || httpStatus == 403)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private string ResolveAuthorizationHeader()

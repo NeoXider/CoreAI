@@ -20,11 +20,40 @@ namespace CoreAI.Infrastructure.Llm.Editor
     [CustomEditor(typeof(CoreAISettingsAsset))]
     public sealed class CoreAISettingsAssetEditor : UnityEditor.Editor
     {
-        private bool _showHttpApi = true;
-        private bool _showLlmUnity = true;
-        private bool _showGeneral = true;
-        private bool _showOffline = true;
-        private bool _showDebug = false;
+        private const string PrefAdvancedOpen = "CoreAI.SettingsEditor.AdvancedOpen";
+        private const string PrefHttpOpen = "CoreAI.SettingsEditor.HttpOpen";
+        private const string PrefLlmUnityOpen = "CoreAI.SettingsEditor.LlmUnityOpen";
+        private const string PrefGeneralOpen = "CoreAI.SettingsEditor.GeneralOpen";
+        private const string PrefOfflineOpen = "CoreAI.SettingsEditor.OfflineOpen";
+        private const string PrefDebugOpen = "CoreAI.SettingsEditor.DebugOpen";
+
+        private bool _showAdvanced;
+        private bool _showHttpApi;
+        private bool _showLlmUnity;
+        private bool _showGeneral;
+        private bool _showOffline;
+        private bool _showDebug;
+
+        private void OnEnable()
+        {
+            // Persist foldout state across selections so power users do not re-expand on every click.
+            _showAdvanced = EditorPrefs.GetBool(PrefAdvancedOpen, false);
+            _showHttpApi = EditorPrefs.GetBool(PrefHttpOpen, true);
+            _showLlmUnity = EditorPrefs.GetBool(PrefLlmUnityOpen, true);
+            _showGeneral = EditorPrefs.GetBool(PrefGeneralOpen, false);
+            _showOffline = EditorPrefs.GetBool(PrefOfflineOpen, false);
+            _showDebug = EditorPrefs.GetBool(PrefDebugOpen, false);
+        }
+
+        private void OnDisable()
+        {
+            EditorPrefs.SetBool(PrefAdvancedOpen, _showAdvanced);
+            EditorPrefs.SetBool(PrefHttpOpen, _showHttpApi);
+            EditorPrefs.SetBool(PrefLlmUnityOpen, _showLlmUnity);
+            EditorPrefs.SetBool(PrefGeneralOpen, _showGeneral);
+            EditorPrefs.SetBool(PrefOfflineOpen, _showOffline);
+            EditorPrefs.SetBool(PrefDebugOpen, _showDebug);
+        }
 
         // Test connection state
         private bool _isTestingConnection;
@@ -49,39 +78,115 @@ namespace CoreAI.Infrastructure.Llm.Editor
         {
             CoreAISettingsAsset settings = (CoreAISettingsAsset)target;
 
-            // Заголовок
+            // Header
             EditorGUILayout.Space();
             Rect titleRect = EditorGUILayout.GetControlRect(false, 24);
             GUI.Label(titleRect, "🤖 CoreAI Settings", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("Единая конфигурация LLM для всего проекта", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("Project-wide LLM configuration", EditorStyles.miniLabel);
             EditorGUILayout.Space();
 
-            // Backend Type
+            // ═══ ESSENTIALS ═══ (always visible — the four fields a beginner needs)
+            DrawEssentialsBlock(settings);
+
+            EditorGUILayout.Space();
+
+            // 🔍 Test connection button (always visible — beginners need it)
+            DrawTestConnectionButton(settings);
+
+            EditorGUILayout.Space(8);
+
+            // ═══ ADVANCED ═══ (collapsed by default; everything else lives here)
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced,
+                "⚙️  Advanced Settings (routing, prompts, retry, debug)", true, EditorStyles.foldoutHeader);
+
+            if (_showAdvanced)
+            {
+                EditorGUILayout.HelpBox(
+                    "Beginners can leave these alone. Touch only when you need per-role routing, prompt prefixes, retry tuning, or debug logs.",
+                    MessageType.None);
+
+                EditorGUILayout.Space(4);
+
+                DrawAdvancedSections(settings);
+            }
+
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space();
+
+            // Quick action buttons
+            DrawFooterButtons(settings);
+
+            // Test result message (set by DrawTestConnectionButton)
+            if (!string.IsNullOrEmpty(_testResultMessage))
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.HelpBox(_testResultMessage, _testResultType);
+            }
+
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        /// <summary>
+        /// The 4 fields a beginner needs to make CoreAI work: Backend, Base URL, API Key, Model.
+        /// Plus Auto-Priority when relevant. Everything else lives in Advanced.
+        /// </summary>
+        private void DrawEssentialsBlock(CoreAISettingsAsset settings)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Essentials", EditorStyles.boldLabel);
+
             SerializedProperty backendTypeProp = serializedObject.FindProperty("backendType");
-            EditorGUILayout.PropertyField(backendTypeProp, new GUIContent("LLM Backend"));
+            EditorGUILayout.PropertyField(backendTypeProp, new GUIContent("LLM Backend",
+                "Auto = pick the best available; HTTP API = LM Studio / OpenAI / etc.; LLMUnity = local GGUF; Offline = stub"));
+
             SerializedProperty executionModeProp = serializedObject.FindProperty("executionMode");
-            EditorGUILayout.PropertyField(executionModeProp, new GUIContent(
-                "LLM Mode",
+            EditorGUILayout.PropertyField(executionModeProp, new GUIContent("LLM Mode",
                 "Public runtime mode. Use Auto to preserve legacy backend selection."));
-            EditorGUILayout.HelpBox(
-                "Use one global mode here for simple projects. Use LlmRoutingManifest profiles to run several modes at the same time for different roles.",
-                MessageType.Info);
+
             DrawProductionWarnings(settings);
 
-            // Auto Priority — только если выбран Auto
+            // Auto Priority — only if Auto mode
             if (settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto)
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("autoPriority"),
-                    new GUIContent("Auto Priority", "Какой бэкенд пробовать первым в Auto режиме"));
+                    new GUIContent("Auto Priority", "Which backend to try first when in Auto mode"));
             }
 
-            EditorGUILayout.Space();
+            // Show the right "essential connection" fields based on the active backend
+            bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+            bool showHttpEssentials = isAuto || settings.UseHttpApi;
+            bool showLlmUnityEssentials = isAuto || settings.ExecutionMode == LlmExecutionMode.LocalModel;
 
-            // 🔍 Кнопка проверки подключения
-            DrawTestConnectionButton(settings);
+            if (showHttpEssentials)
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("HTTP API connection", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("apiBaseUrl"),
+                    new GUIContent("Base URL", "https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio)"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("apiKey"),
+                    new GUIContent("API Key", "Bearer token. Leave empty for LM Studio."));
+                DrawHttpModelField(serializedObject.FindProperty("modelName"));
+            }
 
-            // HTTP API секция
-            _showHttpApi = EditorGUILayout.BeginFoldoutHeaderGroup(_showHttpApi, "🌐 HTTP API (OpenAI-compatible)");
+            if (showLlmUnityEssentials)
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("LLMUnity (local model)", EditorStyles.miniBoldLabel);
+                DrawGgufModelDropdown(serializedObject.FindProperty("ggufModelPath"));
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// All advanced sections (the original five foldouts), collected under the "Advanced" umbrella.
+        /// </summary>
+        private void DrawAdvancedSections(CoreAISettingsAsset settings)
+        {
+            // HTTP API section
+            _showHttpApi = EditorGUILayout.BeginFoldoutHeaderGroup(_showHttpApi, "🌐 HTTP API (advanced)");
             if (_showHttpApi)
             {
                 // В Auto режиме обе секции доступны для настройки
@@ -202,6 +307,11 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("LLM Timeout (sec)", "Таймаут запроса к LLM"));
 
                 EditorGUILayout.Space(4);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableLlmContextCompaction"),
+                    new GUIContent("Enable LLM Context Compaction (global)",
+                        "When on, roles with AgentBuilder.WithLlmContextCompaction(true) may use an auxiliary LLM call to fold long transcripts. When off, only deterministic compaction runs."));
+
+                EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("Retry лимиты", EditorStyles.miniBoldLabel);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxLuaRepairRetries"),
                     new GUIContent("Lua Repair Retries",
@@ -272,21 +382,22 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
 
-            EditorGUILayout.Space();
-
-            // Кнопки быстрого доступа
+        private void DrawFooterButtons(CoreAISettingsAsset settings)
+        {
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("📋 Copy API Key", GUILayout.Height(24)))
             {
                 EditorGUIUtility.systemCopyBuffer = settings.ApiKey;
-                Debug.Log("[CoreAI] API Key скопирован в буфер обмена");
+                Debug.Log("[CoreAI] API Key copied to clipboard");
             }
 
             if (GUILayout.Button("🔄 Reset", GUILayout.Height(24)))
             {
-                if (EditorUtility.DisplayDialog("Reset Settings", "Сбросить все настройки к значениям по умолчанию?",
-                        "Да", "Отмена"))
+                if (EditorUtility.DisplayDialog("Reset Settings",
+                        "Reset all settings to default values?",
+                        "Reset", "Cancel"))
                 {
                     settings.ConfigureAuto();
                     settings.ConfigureHttpApi("http://localhost:1234/v1", "", "gpt-4o-mini");
@@ -296,15 +407,6 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             EditorGUILayout.EndHorizontal();
-
-            // Результат теста подключения
-            if (!string.IsNullOrEmpty(_testResultMessage))
-            {
-                EditorGUILayout.Space();
-                EditorGUILayout.HelpBox(_testResultMessage, _testResultType);
-            }
-
-            serializedObject.ApplyModifiedProperties();
         }
 
         private static void DrawLlmUnityWiringStatus()

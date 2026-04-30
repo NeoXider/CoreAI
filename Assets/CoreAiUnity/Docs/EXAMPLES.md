@@ -8,6 +8,7 @@ Practical CoreAI examples from simple to advanced scenarios.
 
 ## Contents
 
+- [Choosing tools: `WithAction` vs custom `ILlmTool`](#choosing-tools-withaction-vs-custom-illmtool)
 - [Example 1: Spawning an enemy via AI](#example-1-spawning-an-enemy-via-ai)
 - [Example 2: Weapon crafting (CoreMechanicAI + Programmer)](#example-2-weapon-crafting-coremechanicai--programmer)
 - [Example 3: Auto-repair Lua code](#example-3-auto-repair-lua-code)
@@ -15,6 +16,16 @@ Practical CoreAI examples from simple to advanced scenarios.
 - [Example 5: Adaptive difficulty](#example-5-adaptive-difficulty)
 - [Example 6: Custom storyteller agent](#example-6-custom-storyteller-agent)
 - [Example 7: NPC with memory and events](#example-7-npc-with-memory-and-events)
+
+---
+
+## Choosing tools: `WithAction` vs custom `ILlmTool`
+
+**Default path:** use **`AgentBuilder.WithAction`** (and **`WithEventTool`** when you want a decoupled `CoreAiEvents` bus). Behind the scenes, **Microsoft.Extensions.AI** derives the JSON parameter schema from your delegate signature, so you almost never write raw JSON Schema by hand.
+
+**Escape hatch:** implement **`ILlmTool`** / subclass **`LlmToolBase`** when you need bespoke schemas, shared tools across hosts, or logic that cannot be expressed as a single `Delegate`. That pattern is heavier — reach for it when MEAI cannot model your surface.
+
+Example 7 below uses **`WithAction`** for synchronous game callbacks; **[AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)** contrasts all three approaches in detail.
 
 ---
 

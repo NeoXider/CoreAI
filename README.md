@@ -346,8 +346,13 @@ CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.E
 
 > 💡 **Easiest way:** Clone this repo and copy the entire `Assets/Packages/` folder into your project.
 
-### 2. Add dependencies to manifest.json (required)
-Unity Package Manager does not support automatic downloading of Git dependencies from other packages. Open your project's `Packages/manifest.json` file and add these lines to the `"dependencies"` block:
+### 2. Add Git dependencies to manifest.json (required)
+
+Unity Package Manager does not transitively pull every Git dependency for you.
+
+**Preferred:** After CoreAiUnity is in the project, use **CoreAI → Setup → Install Git Dependencies**. It merges any *missing* package keys only — pins you manage by hand stay untouched.
+
+**Manual alternative:** Edit `Packages/manifest.json` and add these entries under `"dependencies"`:
 
 ```json
     "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
@@ -360,7 +365,7 @@ Unity Package Manager does not support automatic downloading of Git dependencies
 
 *(After saving the file, Unity will automatically download VContainer, MoonSharp, UniTask, MessagePipe, and LLMUnity).*
 
-### 3. Install CoreAI packages via Git URL
+### 3. Install CoreAI packages (Git URL)
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
 
 **Step 1 — Core engine (pure C#, no UnityEngine):**
@@ -373,21 +378,27 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-### 3. Setup Scene (one click)
+### 4. Setup scene
 
-After installation, use the menu:
+**Recommended first try (chat UI + scope):**
 
 ```
-CoreAI → Create Scene Setup
+CoreAI → Setup → Create Chat Demo Scene
 ```
 
-This will automatically:
+**Bare wiring (lifetime scope + settings assets — no demo UI):**
+
+```
+CoreAI → Setup → Create Bare Scene (advanced)
+```
+
+Either path can:
 - ✅ Create `CoreAILifetimeScope` on the scene
-- ✅ Generate all required settings assets (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest`, etc.)
-- ✅ Assign assets to the scope
-- ✅ Create `LLM` + `LLMAgent` objects (if backend is set to LLMUnity)
+- ✅ Ensure required assets (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest`, etc.)
+- ✅ Assign references on the scope
+- ✅ Optionally add `LLM` + `LLMAgent` when the backend is LLMUnity (bare-scene wizard)
 
-### 4. Configure LLM Backend
+### 5. Configure LLM backend
 
 Open settings: **CoreAI → Settings** and choose your backend:
 
@@ -397,7 +408,7 @@ Open settings: **CoreAI → Settings** and choose your backend:
 | **HTTP API** (LM Studio, OpenAI) | Set `API Base URL` and `API Key` in Settings |
 | **Auto** | CoreAI picks the best available backend automatically |
 
-### 5. Create Your Agent
+### 6. Create your first agent
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")
@@ -414,6 +425,8 @@ var storyteller = new AgentBuilder("Storyteller")
 ---
 
 ## 📚 Documentation
+
+**Language:** In-depth Markdown under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) is maintained in **English**. [README_RU.md](README_RU.md) mirrors this page for Russian navigation; follow the linked guides for detail.
 
 Start from the index and pick the level that matches your goal:
 

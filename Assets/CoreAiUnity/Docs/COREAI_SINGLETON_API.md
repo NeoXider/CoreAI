@@ -11,7 +11,7 @@ A single class **`CoreAI.CoreAi`** — one entry point to the LLM and orchestrat
 
 ## Minimum for beginners (3 steps)
 
-1. **Scene with CoreAI** — menu **CoreAI → Setup → Create Chat Demo Scene** or **CoreAI → Create Scene Setup** (includes `CoreAILifetimeScope`).
+1. **Scene with CoreAI** — menu **CoreAI → Setup → Create Chat Demo Scene** (full UI demo) or **CoreAI → Setup → Create Bare Scene (advanced)** (`CoreAILifetimeScope` + assets only).
 2. **Backend** — in `CoreAISettings` set HTTP (LM Studio) or LLMUnity; see [QUICK_START](QUICK_START.md).
 3. **Code** — on any `MonoBehaviour`:
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.AgentMemory;
+using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
@@ -64,8 +65,27 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Установить системный промпт агента.
+        /// Sets the system prompt for this agent (Layer 3 in CoreAI's prompt composition).
         /// </summary>
+        /// <remarks>
+        /// <para>The final system prompt sent to the model is composed of THREE layers, in order:</para>
+        /// <list type="number">
+        ///   <item><b>Layer 1 — Universal Prefix.</b> Project-wide rules from
+        ///   <see cref="ICoreAISettings.UniversalSystemPromptPrefix"/> (e.g. style, safety, output format).
+        ///   Skip this layer for the current role with <see cref="WithOverrideUniversalPrefix"/>.</item>
+        ///   <item><b>Layer 2 — Role base prompt.</b> Loaded by
+        ///   <c>AiPromptComposer</c> from the <c>AgentPromptsManifest</c> ScriptableObject (Unity) or
+        ///   <c>Resources/Prompts/{RoleId}.txt</c>. For built-in roles
+        ///   (<see cref="BuiltInAgentRoleIds"/>) there is also a code-side fallback string.</item>
+        ///   <item><b>Layer 3 — This builder's prompt.</b> The text passed to <c>WithSystemPrompt</c>
+        ///   is appended after Layer 2 as additional role guidance.</item>
+        /// </list>
+        /// <para>This means the literal string you pass here is <i>not</i> the full prompt the model sees;
+        /// it is concatenated with the universal prefix and the role base prompt. To inspect the final
+        /// composed prompt at runtime, enable <c>logLlmInput</c> on <c>CoreAISettingsAsset</c> or read
+        /// <c>AgentTurnTrace.SystemPrompt</c>.</para>
+        /// <para>See <c>DEVELOPER_GUIDE.md → Prompt Layers</c> for the full breakdown.</para>
+        /// </remarks>
         public AgentBuilder WithSystemPrompt(string prompt)
         {
             _systemPrompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
@@ -273,21 +293,33 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Сконфигурировать агента в политике.
+        /// Builds the <see cref="AgentConfig"/>. Emits non-fatal warnings via <see cref="Log.Instance"/>
+        /// for likely misconfigurations (empty system prompt, tool-using mode without tools, compaction
+        /// without the global gate). Warnings never throw — gameplay code continues to work.
         /// </summary>
+        /// <remarks>
+        /// Set <see cref="SuppressBuildWarnings"/> to <c>true</c> to silence validation (e.g. for tests
+        /// that intentionally build minimal agents). Use <see cref="ValidateOnBuild"/> for the full set
+        /// of issue codes if you want to assert on them in your own checks.
+        /// </remarks>
         public AgentConfig Build()
         {
-            // Размер контекста: 0 → минимальный, null → из CoreAISettings, явно → использовать явно
+            // Context size: 0 → minimal, null → fall back to CoreAISettings, explicit → use as-is.
             int ctxTokens = _contextWindowTokens ?? _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // Температура: null → из ICoreAISettings → из CoreAISettings, явно → использовать явно
+            // Temperature: null → fall back to ICoreAISettings → CoreAISettings, explicit → use as-is.
             float temp = _temperature ?? _settings?.Temperature ?? CoreAISettings.Temperature;
 
-            // Промпт НЕ включает universalPrefix — он приклеивается в AiPromptComposer
-            // при финальной сборке (3-слойная архитектура):
-            //   Слой 1: universalSystemPromptPrefix (общие правила)
-            //   Слой 2: базовый промпт из Manifest/Resources (.txt файлы)
-            //   Слой 3: дополнительный промпт из AgentBuilder (этот)
+            // Prompt does NOT include universalPrefix — it is appended by AiPromptComposer at
+            // final composition time (three-layer architecture):
+            //   Layer 1: universalSystemPromptPrefix (project-wide rules)
+            //   Layer 2: role base prompt from Manifest / Resources (.txt files)
+            //   Layer 3: extra prompt from this builder (the one above)
+
+            if (!SuppressBuildWarnings)
+            {
+                EmitBuildWarnings();
+            }
 
             return new AgentConfig
             {
@@ -307,6 +339,101 @@ namespace CoreAI.Ai
                 OverrideUniversalPrefix = _overrideUniversalPrefix,
                 UseLlmContextCompaction = _useLlmContextCompaction ?? true
             };
+        }
+
+        /// <summary>
+        /// When <c>true</c>, <see cref="Build"/> does not emit validation warnings.
+        /// Default <c>false</c>. Useful for unit tests that intentionally construct partial agents.
+        /// </summary>
+        public bool SuppressBuildWarnings { get; set; }
+
+        /// <summary>
+        /// Returns the validation issues that <see cref="Build"/> would emit, without actually building.
+        /// Useful for editor tooling and tests. Returns an empty list when there is nothing to flag.
+        /// </summary>
+        public IReadOnlyList<AgentBuilderIssue> ValidateOnBuild()
+        {
+            List<AgentBuilderIssue> issues = new();
+            CollectIssues(issues);
+            return issues;
+        }
+
+        private void EmitBuildWarnings()
+        {
+            List<AgentBuilderIssue> issues = new();
+            CollectIssues(issues);
+            if (issues.Count == 0)
+            {
+                return;
+            }
+
+            ILog log = Log.Instance ?? NullLog.Instance;
+            foreach (AgentBuilderIssue issue in issues)
+            {
+                log.Warn($"[AgentBuilder:{_roleId}] {issue.Code}: {issue.Message}", LogTag.Core);
+            }
+        }
+
+        private void CollectIssues(List<AgentBuilderIssue> issues)
+        {
+            if (string.IsNullOrWhiteSpace(_systemPrompt))
+            {
+                bool hasManifestFallback = !string.IsNullOrEmpty(_roleId)
+                    && BuiltInAgentRoleIds.IsBuiltIn(_roleId);
+                if (!hasManifestFallback)
+                {
+                    issues.Add(new AgentBuilderIssue(
+                        AgentBuilderIssueCode.MissingSystemPrompt,
+                        "WithSystemPrompt(...) was not called and the role has no built-in fallback. " +
+                        "The agent will rely solely on the universal prefix (Layer 1) and any manifest entry (Layer 2). " +
+                        "If neither exists, the model gets an empty role prompt."));
+                }
+            }
+
+            if ((_mode == AgentMode.ToolsAndChat || _mode == AgentMode.ToolsOnly) && _tools.Count == 0)
+            {
+                issues.Add(new AgentBuilderIssue(
+                    AgentBuilderIssueCode.NoToolsForToolMode,
+                    $"Mode is {_mode} but no tools were registered. " +
+                    "Add tools with WithTool(...), WithAction(...), WithEventTool(...), or WithMemory(), " +
+                    "or switch to AgentMode.ChatOnly."));
+            }
+
+            if (_mode == AgentMode.ToolsOnly && _tools.Count == 0)
+            {
+                // ToolsOnly without tools is degenerate — the agent has nothing to do.
+                // Already reported by the rule above; no extra issue here.
+            }
+
+            if (_useLlmContextCompaction == true)
+            {
+                bool? globalGate = _settings?.EnableLlmContextCompaction;
+                bool effective = globalGate ?? CoreAISettings.EnableLlmContextCompaction;
+                if (!effective)
+                {
+                    issues.Add(new AgentBuilderIssue(
+                        AgentBuilderIssueCode.CompactionGateDisabled,
+                        "WithLlmContextCompaction(true) was requested but the global gate " +
+                        "ICoreAISettings.EnableLlmContextCompaction is false. Compaction will fall back to " +
+                        "deterministic-only behavior. Enable the global gate on CoreAISettingsAsset to opt in."));
+                }
+            }
+
+            if (_maxChatHistoryMessages <= 0 && _withChatHistory)
+            {
+                issues.Add(new AgentBuilderIssue(
+                    AgentBuilderIssueCode.InvalidChatHistorySize,
+                    $"WithChatHistory was enabled with maxChatHistoryMessages={_maxChatHistoryMessages}. " +
+                    "Use a positive value (default 30) or omit the parameter."));
+            }
+
+            if (_temperature is < 0f or > 2f)
+            {
+                issues.Add(new AgentBuilderIssue(
+                    AgentBuilderIssueCode.TemperatureOutOfRange,
+                    $"WithTemperature({_temperature}) is outside the typical 0.0–2.0 range. " +
+                    "Most providers clamp or reject values outside this range."));
+            }
         }
     }
 

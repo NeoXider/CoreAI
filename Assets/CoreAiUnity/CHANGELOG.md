@@ -13,6 +13,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **PlayMode tests:** `LlmCompactionPerRolePlayModeTests` (same gates under Unity lifecycle with stub LLM).
 - **`ARCHITECTURE.md`** — updated context manager narrative.
 - **`README.md`** — documents v1.5.3 features including LLM-assisted compaction and `AgentBuilder` API.
+- **Editor onboarding** — **`CoreAI → Setup → Install Git Dependencies`** merges missing Git UPM entries into `Packages/manifest.json`; scene menu **`CoreAI → Setup → Create Bare Scene (advanced)`** supersedes the old root **`CoreAI → Create Scene Setup`** path; **`CoreAISettingsAsset` Inspector** shows **Essentials** + collapsed **Advanced** (global LLM compaction toggle under Advanced → General).
+- **README / README_RU** — Quick Start documents the manifest menu shortcut, Chat Demo vs bare scene, and clarifies that detailed Markdown guides ship in English.
+- **Documentation** — **`EXAMPLES.md`**, **`AGENT_BUILDER.md`**, **`QUICK_START.md`**, **`COREAI_SINGLETON_API.md`** steer beginners toward **`WithAction`** before custom **`ILlmTool`**.
+- **EditMode tests:** `AgentBuilderEditModeTests` coverage for **`ValidateOnBuild`** / compaction gate / built-in-role prompt fallback.
 - **Dependency:** bumped to **`com.nexoider.coreai 1.5.3`**.
 
 ### Meta

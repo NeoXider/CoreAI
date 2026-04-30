@@ -170,6 +170,36 @@ var spy = new SpyLogger();
 Log.Instance = spy;
 ```
 
+### 3.5 Prompt Layers (what the model actually sees)
+
+The system prompt sent to the model is **not** the literal string you pass to `AgentBuilder.WithSystemPrompt`. CoreAI composes the final prompt from three independent layers, in this order, in `AiPromptComposer`:
+
+| Layer | Source | Configured by | Purpose |
+|------|--------|---------------|---------|
+| **1 — Universal Prefix** | `ICoreAISettings.UniversalSystemPromptPrefix` (default: 4 baseline rules) | `CoreAISettingsAsset` Inspector → **General → Universal Prompt Prefix** | Project-wide guard rails that apply to every role (style, safety, output format). |
+| **2 — Role base prompt** | `AgentPromptsManifest` ScriptableObject **OR** `Resources/Prompts/{RoleId}.txt` **OR** built-in fallback string for `BuiltInAgentRoleIds` | `AgentPromptsManifest` asset | Stable per-role instructions (Creator, Programmer, PlayerChat, Merchant, etc.). |
+| **3 — Builder additional prompt** | `AgentBuilder.WithSystemPrompt(...)` text | Code | Per-instance refinement (this specific NPC, this scene-bound storyteller). |
+
+**Composition order:** `Layer 1 + "\n\n" + Layer 2 + "\n\n" + Layer 3`. Each layer is optional. If Layer 2 is missing for a custom role, only Layers 1 + 3 are used.
+
+**Skipping the universal prefix.** Roles that need a fully custom prompt (strict JSON parsers, validators) opt out per role:
+
+```csharp
+new AgentBuilder("JsonParser")
+    .WithSystemPrompt("You are a strict JSON parser. Output JSON only.")
+    .WithOverrideUniversalPrefix() // skips Layer 1 for this role
+    .Build();
+```
+
+**How to inspect the actual final prompt.** Two options:
+
+1. Toggle `Log LLM Input` on `CoreAISettingsAsset` (Inspector → Debug → Log LLM Input). The composed prompt is dumped to the console for every request.
+2. Read `AgentTurnTrace.SystemPrompt` from the orchestrator (Unity tools and EditMode tests already do this — see `AiOrchestratorHistoryEditModeTests`).
+
+**Common confusion.** A frequent first-time issue is "I wrote *You are a pirate*, but the agent keeps mentioning rules I never wrote." That's Layer 1 leaking through. Either edit `UniversalSystemPromptPrefix` on the asset, or call `WithOverrideUniversalPrefix()` for that single role. Editing the prefix changes behavior for every agent that does not opt out — make that edit deliberately.
+
+**Why three layers and not one big prompt?** It keeps the universal rules in one place (a single asset edit propagates to every NPC), keeps role catalogues reusable across projects (Layer 2), and lets per-instance customization stay in code with the rest of the agent definition (Layer 3) — without copy-pasting the universal rules into every `WithSystemPrompt` call.
+
 ---
 
 ## 4. LLM: execution modes and routing

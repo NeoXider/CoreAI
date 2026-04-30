@@ -179,7 +179,7 @@ namespace CoreAI.Editor
             }
         }
 
-        [MenuItem("CoreAI/Create Scene Setup", priority = 4)]
+        [MenuItem("CoreAI/Setup/Create Bare Scene (advanced)", priority = 8)]
         public static void CreateSceneSetup()
         {
             // 1. Проверка: не дублировать CoreAILifetimeScope
@@ -187,9 +187,9 @@ namespace CoreAI.Editor
             if (existingScope != null)
             {
                 if (!EditorUtility.DisplayDialog(
-                        "CoreAI — Scene Setup",
-                        "CoreAILifetimeScope уже существует на сцене.\nОткрыть его в Inspector?",
-                        "Открыть", "Отмена"))
+                        "CoreAI — Bare Scene Setup",
+                        "CoreAILifetimeScope already exists in this scene.\nSelect it in the Inspector?",
+                        "Select", "Cancel"))
                 {
                     return;
                 }
@@ -204,7 +204,7 @@ namespace CoreAI.Editor
 
             // 3. Создаём GameObject с CoreAILifetimeScope
             GameObject scopeGo = new("CoreAILifetimeScope");
-            Undo.RegisterCreatedObjectUndo(scopeGo, "Create CoreAI Scene Setup");
+            Undo.RegisterCreatedObjectUndo(scopeGo, "Create CoreAI Bare Scene Setup");
             CoreAILifetimeScope scope = scopeGo.AddComponent<CoreAILifetimeScope>();
 
             // 4. Назначаем ассеты
@@ -247,7 +247,7 @@ namespace CoreAI.Editor
             EditorGUIUtility.PingObject(scopeGo);
 
             CoreAIEditorLog.Log(
-                "Scene Setup: CoreAILifetimeScope создан" +
+                "Bare scene: CoreAILifetimeScope created" +
                 (needsLlmUnity ? " + LLM + LLMAgent." : "."));
         }
 
