@@ -1,0 +1,66 @@
+using System;
+using CoreAI.Messaging;
+using MessagePipe;
+
+namespace CoreAI.Infrastructure.Llm
+{
+    /// <summary>
+    /// Unity-side implementation of <see cref="IToolCallEventPublisher"/>
+    /// that delegates to <see cref="GlobalMessagePipe"/> for tool-call lifecycle events.
+    /// </summary>
+    public sealed class MessagePipeToolCallEventPublisher : IToolCallEventPublisher
+    {
+        public static readonly MessagePipeToolCallEventPublisher Instance = new();
+
+        public void PublishStarted(LlmToolCallInfo info)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallStarted>()
+                    .Publish(new LlmToolCallStarted(info));
+            }
+            catch
+            {
+            }
+        }
+
+        public void PublishCompleted(LlmToolCallInfo info, string resultJson, double durationMs)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallCompleted>()
+                    .Publish(new LlmToolCallCompleted(info, resultJson, durationMs));
+            }
+            catch
+            {
+            }
+        }
+
+        public void PublishFailed(LlmToolCallInfo info, string error, double durationMs)
+        {
+            if (!GlobalMessagePipe.IsInitialized)
+            {
+                return;
+            }
+
+            try
+            {
+                GlobalMessagePipe.GetPublisher<LlmToolCallFailed>()
+                    .Publish(new LlmToolCallFailed(info, error, durationMs));
+            }
+            catch
+            {
+            }
+        }
+    }
+}

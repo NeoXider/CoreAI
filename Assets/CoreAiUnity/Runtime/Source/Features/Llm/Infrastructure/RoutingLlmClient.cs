@@ -12,7 +12,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// Делегирует <see cref="CompleteAsync"/> в <see cref="ILlmClientRegistry"/> по <see cref="LlmCompletionRequest.AgentRoleId"/>.
     /// </summary>
-    public sealed class RoutingLlmClient : ILlmClient
+    public sealed class RoutingLlmClient : ILlmClient, ILlmPreflightAnnotator
     {
         private readonly ILlmClientRegistry _registry;
         private readonly IPublisher<LlmBackendSelected> _backendSelectedPublisher;

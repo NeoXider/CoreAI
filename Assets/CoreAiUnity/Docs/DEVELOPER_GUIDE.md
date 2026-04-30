@@ -26,8 +26,8 @@ For teams who **wire the core into their own game** or **extend this repository*
 
 | Assembly | Folder | Constraint |
 |--------|-------|-------------|
-| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. |
-| **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, Lua bindings (`report` / `add`). Package **`com.nexoider.coreaiunity`**. |
+| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. Since **v1.5.0** also owns portable LLM pipeline: **`LoggingLlmClientDecorator`**, **`ToolExecutionPolicy`**, **`SmartToolCallingChatClient`**, **`ClientLimitedLlmClientDecorator`**, portable abstractions **`IToolCallEventPublisher`**, **`IToolExecutionNotifier`**, **`ILlmPreflightAnnotator`**, and **`ILog`**. |
+| **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, Lua bindings (`report` / `add`). Unity-side adapters: **`MessagePipeToolCallEventPublisher`**, **`CoreAiToolExecutionNotifier`**. Package **`com.nexoider.coreaiunity`**. |
 | **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit, no Play Mode. |
 | **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (orchestrator, optionally LM Studio via env). |
 | **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Demo arena; depends on Source. |
@@ -130,9 +130,45 @@ Production projects can replace `IConversationContextManager` with an implementa
 
 ### 3.3 Tool Call Observability
 
-Tool calls are awaited by `ToolExecutionPolicy.ExecuteSingleAsync`, including async `AIFunction` implementations. The policy publishes `LlmToolCallStarted`, `LlmToolCallCompleted`, and `LlmToolCallFailed`.
+Tool calls are awaited by `ToolExecutionPolicy.ExecuteSingleAsync` (portable, `CoreAI.Core`), including async `AIFunction` implementations. The policy publishes tool lifecycle events through the **`IToolCallEventPublisher`** abstraction:
+
+| Event | When |
+|-------|------|
+| `LlmToolCallStarted` | Immediately before `AIFunction.InvokeAsync` |
+| `LlmToolCallCompleted` | After successful invocation |
+| `LlmToolCallFailed` | After failed invocation, exception, or missing tool |
+
+In Unity, `MessagePipeToolCallEventPublisher` bridges these calls to `GlobalMessagePipe`. Non-Unity hosts can supply their own implementation or use `NullToolCallEventPublisher`.
+
+Additionally, `IToolExecutionNotifier.NotifyToolExecuted` fires after each successful tool execution — in Unity this delegates to `CoreAi.NotifyToolExecuted` via `CoreAiToolExecutionNotifier`.
+
+Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionPolicy` with the same adapters, ensuring **identical event sequences** regardless of execution path.
 
 Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized `ArgumentsJson`. Use `Info.CallId` when correlating start/completed/failed logs, especially when providers issue several tool calls in one response.
+
+### 3.4 Logging Architecture (v1.5.0)
+
+Since v1.5.0, CoreAI uses **two logging interfaces**:
+
+| Interface | Package | Used by | Static access |
+|-----------|---------|---------|---------------|
+| **`ILog`** | `CoreAI.Core` (portable) | `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingLlmClientDecorator` | `Log.Instance` |
+| **`IGameLogger`** | `CoreAI.Source` (Unity) | `MeaiLlmClient`, `RoutingLlmClient`, Unity-side infrastructure | DI-injected |
+
+In production, `CoreServicesInstaller` registers `UnityLog : ILog` and sets `Log.Instance` to that adapter. Both interfaces write to the same Unity console.
+
+**Key rule for tool-call diagnostics**: the `[ToolCall]` per-call diagnostic line is written by `ToolExecutionPolicy` via `ILog` (`Log.Instance`), **not** `IGameLogger`. If a PlayMode test uses a `SpyLogger : IGameLogger` to capture log lines, it must **also** implement `ILog` and set `Log.Instance = spy` before invoking the pipeline, otherwise `[ToolCall]` lines are silently dropped to `NullLog`.
+
+```csharp
+// PlayMode test pattern:
+private sealed class SpyLogger : IGameLogger, ILog { ... }
+
+[TearDown] public void TearDown() => Log.Instance = NullLog.Instance;
+
+// In test body:
+var spy = new SpyLogger();
+Log.Instance = spy;
+```
 
 ---
 
@@ -483,4 +519,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 1.4 (April 2026) — UPM release checklist (version + CHANGELOG + docs), README sync with `package.json`.
+**Version of this guide:** 1.5 (April 2026) — Portable LLM pipeline decoupling (IToolCallEventPublisher, IToolExecutionNotifier), MessagePipe event test suite, UPM v1.5.0.

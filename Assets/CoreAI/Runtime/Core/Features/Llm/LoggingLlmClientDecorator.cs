@@ -6,13 +6,14 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Оборачивает <see cref="ILlmClient"/>: сквозной <see cref="LlmCompletionRequest.TraceId"/>, время вызова,
-    /// токены (если бэкенд заполнил <see cref="LlmCompletionResult"/>), превью промптов и ответа.
+    /// Wraps <see cref="ILlmClient"/>: trace IDs, call timing,
+    /// tokens (if the backend fills <see cref="LlmCompletionResult"/>),
+    /// prompt/response previews, and HTTP retry with exponential backoff.
     /// </summary>
     public sealed class LoggingLlmClientDecorator : ILlmClient
     {
@@ -23,27 +24,27 @@ namespace CoreAI.Infrastructure.Llm
         private const int MaxRetryCapSeconds = 30;
 
         private readonly ILlmClient _inner;
-        private readonly IGameLogger _logger;
+        private readonly ILog _logger;
         private readonly string _backendLabel;
         private readonly float _requestTimeoutSeconds;
         private readonly int _maxHttpRetryAttempts;
 
-        /// <param name="requestTimeoutSeconds">0 — без лимита; иначе отмена <see cref="CompleteAsync"/> по истечении секунд (совместно с внешним token).</param>
-        /// <param name="maxHttpRetryAttempts">Максимум повторов при HTTP 429/5xx с паузой по Retry-After или exponential backoff. 0 — выключено.</param>
-        public LoggingLlmClientDecorator(ILlmClient inner, IGameLogger logger,
+        /// <param name="requestTimeoutSeconds">0 — no limit; otherwise cancel <see cref="CompleteAsync"/> after N seconds (combined with external token).</param>
+        /// <param name="maxHttpRetryAttempts">Max retries for HTTP 429/5xx with Retry-After or exponential backoff. 0 — disabled.</param>
+        public LoggingLlmClientDecorator(ILlmClient inner, ILog logger,
             float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0)
         {
             _inner = inner;
-            _logger = logger;
+            _logger = logger ?? NullLog.Instance;
             _requestTimeoutSeconds = requestTimeoutSeconds < 0f ? 0f : requestTimeoutSeconds;
             _maxHttpRetryAttempts = maxHttpRetryAttempts < 0 ? 0 : maxHttpRetryAttempts;
             _backendLabel = inner?.GetType().Name ?? "?";
         }
 
-        /// <summary>Нижележащий клиент (без декораторов — самый внешний из цепочки).</summary>
+        /// <summary>Inner client (without decorators — the outermost in the chain).</summary>
         public ILlmClient Inner => _inner;
 
-        /// <summary>Снимает все <see cref="LoggingLlmClientDecorator"/> с вершины цепочки.</summary>
+        /// <summary>Peels all <see cref="LoggingLlmClientDecorator"/> from the top of the chain.</summary>
         public static ILlmClient Unwrap(ILlmClient client)
         {
             ILlmClient c = client;
@@ -62,11 +63,11 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (request == null)
             {
-                _logger.LogWarning(GameLogFeature.Llm, $"LLM | backend={_backendLabel} | request=null");
+                _logger.Warn($"LLM | backend={_backendLabel} | request=null", LogTag.Llm);
                 return new LlmCompletionResult { Ok = false, Error = "LlmCompletionRequest is null" };
             }
 
-            if (_inner is RoutingLlmClient routing)
+            if (_inner is ILlmPreflightAnnotator routing)
             {
                 routing.PreflightAnnotate(request);
             }
@@ -81,64 +82,55 @@ namespace CoreAI.Infrastructure.Llm
                 ? _backendLabel
                 : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
 
-            _logger.LogInfo(GameLogFeature.Llm,
+            _logger.Info(
                 $"LLM ▶ traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({system.Length} симв.): {Preview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} симв.): {Preview(user, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(system, user, request.Tools)}");
+                $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = null;
-            using (CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            // Timeout is now enforced by the Unity-aware caller (CoreAiChatService)
+            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
+            // This decorator only handles logging and HTTP 429/5xx retries.
+            try
             {
-                if (_requestTimeoutSeconds > 0f)
+                result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // honour caller cancellation (timeout or user stop)
+            }
+            catch (LlmClientException httpEx) when (
+                IsRetryableHttpError(httpEx, out int httpWait) &&
+                _maxHttpRetryAttempts > 0)
+            {
+                // HTTP 429/5xx — retry with Retry-After or exponential backoff
+                bool exhausted = true;
+                for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
                 {
-                    linked.CancelAfter(TimeSpan.FromSeconds(_requestTimeoutSeconds));
+                    int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
+                    _logger.Warn(
+                        $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s", LogTag.Llm);
+                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                        exhausted = false;
+                        break;
+                    }
+                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
+                    {
+                        // will retry again if attempts remain
+                    }
                 }
-
-                try
-                {
-                    result = await _inner.CompleteAsync(request, linked.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                if (exhausted)
                 {
                     sw.Stop();
-                    string msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
-                    _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLM ⏱ traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | {msg}");
+                    string msg = $"{httpEx.ErrorCode} after {_maxHttpRetryAttempts} retries: {httpEx.Message}";
+                    _logger.Warn(
+                        $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
                     return new LlmCompletionResult { Ok = false, Error = msg };
-                }
-                catch (LlmClientException httpEx) when (
-                    IsRetryableHttpError(httpEx, out int httpWait) &&
-                    _maxHttpRetryAttempts > 0)
-                {
-                    // HTTP 429/5xx — retry with Retry-After or exponential backoff
-                    bool exhausted = true;
-                    for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
-                    {
-                        int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
-                        _logger.LogWarning(GameLogFeature.Llm,
-                            $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s");
-                        await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
-                        try
-                        {
-                            result = await _inner.CompleteAsync(request, linked.Token).ConfigureAwait(false);
-                            exhausted = false;
-                            break;
-                        }
-                        catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
-                        {
-                            // will retry again if attempts remain
-                        }
-                    }
-                    if (exhausted)
-                    {
-                        sw.Stop();
-                        string msg = $"{httpEx.ErrorCode} after {_maxHttpRetryAttempts} retries: {httpEx.Message}";
-                        _logger.LogWarning(GameLogFeature.Llm,
-                            $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}");
-                        return new LlmCompletionResult { Ok = false, Error = msg };
-                    }
                 }
             }
 
@@ -147,39 +139,30 @@ namespace CoreAI.Infrastructure.Llm
 
             if (result == null)
             {
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | результат null");
+                _logger.Warn(
+                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | результат null", LogTag.Llm);
                 return new LlmCompletionResult { Ok = false, Error = "null result" };
-            }
-
-            if (!result.Ok && _requestTimeoutSeconds > 0f && !cancellationToken.IsCancellationRequested &&
-                string.Equals(result.Error, "Cancelled", StringComparison.Ordinal))
-            {
-                string msg = $"LLM request timeout ({_requestTimeoutSeconds}s)";
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"LLM ⏱ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {msg}");
-                return new LlmCompletionResult { Ok = false, Error = msg };
             }
 
             if (!result.Ok)
             {
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(без текста)"}");
+                _logger.Warn(
+                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(без текста)"}", LogTag.Llm);
                 return result;
             }
 
             string content = result.Content ?? "";
             string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
-            _logger.LogInfo(GameLogFeature.Llm,
+            _logger.Info(
                 $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
-                $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
+                $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
 
             return result;
         }
 
         /// <summary>Exponential backoff: 2s → 4s → 8s… capped at <see cref="MaxRetryCapSeconds"/>.</summary>
-        private static int ComputeBackoff(int attempt)
+        internal static int ComputeBackoff(int attempt)
             => (int)Math.Min(2 * Math.Pow(2, attempt), MaxRetryCapSeconds);
 
         /// <summary>
@@ -200,15 +183,14 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Декорированный стриминг: пробрасывает чанки наружу как есть (чтобы UI
-        /// видел токены по мере поступления), но параллельно накапливает превью
-        /// ответа для финального лога. Таймаут из <c>_requestTimeoutSeconds</c>
-        /// применяется ко всему стриму.
+        /// Decorated streaming: forwards chunks to the caller as-is (so UI sees tokens
+        /// as they arrive) while accumulating a preview for the final log line.
+        /// Timeout from <c>_requestTimeoutSeconds</c> applies to the whole stream.
         /// </summary>
         /// <remarks>
-        /// Без этого override'а default-реализация <see cref="ILlmClient.CompleteStreamingAsync"/>
-        /// делала fallback к <see cref="CompleteAsync"/> и выдавала весь ответ одним
-        /// чанком в конце генерации — стриминг в UI не был виден.
+        /// Without this override, <see cref="ILlmClient.CompleteStreamingAsync"/>
+        /// would fall back to <see cref="CompleteAsync"/> and emit the entire response as
+        /// one chunk — streaming was invisible in the UI.
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
@@ -216,12 +198,12 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (request == null)
             {
-                _logger.LogWarning(GameLogFeature.Llm, $"LLM stream | backend={_backendLabel} | request=null");
+                _logger.Warn($"LLM stream | backend={_backendLabel} | request=null", LogTag.Llm);
                 yield return new LlmStreamChunk { IsDone = true, Error = "LlmCompletionRequest is null" };
                 yield break;
             }
 
-            if (_inner is RoutingLlmClient routing)
+            if (_inner is ILlmPreflightAnnotator routing)
             {
                 routing.PreflightAnnotate(request);
             }
@@ -237,11 +219,11 @@ namespace CoreAI.Infrastructure.Llm
             string streamUser = request.UserPayload ?? "";
             IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
-            _logger.LogInfo(GameLogFeature.Llm,
+            _logger.Info(
                 $"LLM ▶ (stream) traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({streamSystem.Length} симв.): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
                 $"  user ({streamUser.Length} симв.): {Preview(request.UserPayload, UserPreviewChars)}\n" +
-                $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}");
+                $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             StringBuilder accumulated = new();
@@ -252,24 +234,21 @@ namespace CoreAI.Infrastructure.Llm
             string terminalError = null;
             IReadOnlyList<CoreAI.Ai.LlmToolCallTrace> executedTools = Array.Empty<CoreAI.Ai.LlmToolCallTrace>();
 
-            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            if (_requestTimeoutSeconds > 0f)
-            {
-                linked.CancelAfter(TimeSpan.FromSeconds(_requestTimeoutSeconds));
-            }
+            // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
+            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
 
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
             string initError = null;
             try
             {
-                enumerator = _inner.CompleteStreamingAsync(request, linked.Token).GetAsyncEnumerator(linked.Token);
+                enumerator = _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception ex)
             {
                 sw.Stop();
                 initError = ex.Message;
-                _logger.LogWarning(GameLogFeature.Llm,
-                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}");
+                _logger.Warn(
+                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}", LogTag.Llm);
             }
 
             if (initError != null)
@@ -284,35 +263,33 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     bool hasNext;
                     LlmStreamChunk current = null;
-                    bool failedWithTimeout = false;
-                    bool failedWithException = false;
                     string exceptionMessage = null;
+                    bool wasCancelled = false;
 
                     try
                     {
                         hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
                         current = hasNext ? enumerator.Current : null;
                     }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        failedWithTimeout = true;
+                        terminalError = "cancelled";
+                        wasCancelled = true;
                         hasNext = false;
                     }
                     catch (Exception ex)
                     {
-                        failedWithException = true;
                         exceptionMessage = ex.Message;
                         hasNext = false;
                     }
 
-                    if (failedWithTimeout)
+                    if (wasCancelled)
                     {
-                        terminalError = $"LLM stream timeout ({_requestTimeoutSeconds}s)";
                         yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
                         yield break;
                     }
 
-                    if (failedWithException)
+                    if (exceptionMessage != null)
                     {
                         terminalError = exceptionMessage;
                         yield return new LlmStreamChunk { IsDone = true, Error = exceptionMessage };
@@ -370,14 +347,14 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!string.IsNullOrEmpty(terminalError))
                 {
-                    _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}");
+                    _logger.Warn(
+                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}", LogTag.Llm);
                 }
                 else
                 {
-                    _logger.LogInfo(GameLogFeature.Llm,
+                    _logger.Info(
                         $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
-                        $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}");
+                        $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
                 }
             }
         }
@@ -449,12 +426,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Маркер блока памяти в system, как в <see cref="CoreAI.Ai.AiOrchestrator"/> (BuildRequest).
+        /// Memory section delimiter in system prompt, as in <see cref="CoreAI.Ai.AiOrchestrator"/> (BuildRequest).
         /// </summary>
         internal const string OrchestratorMemorySectionDelimiter = "\n\n## Memory\n";
 
         /// <summary>
-        /// Делит <paramref name="systemPrompt"/> на «чистый» системный текст и тело памяти после <see cref="OrchestratorMemorySectionDelimiter"/>.
+        /// Splits <paramref name="systemPrompt"/> into clean system text and memory body after <see cref="OrchestratorMemorySectionDelimiter"/>.
         /// </summary>
         internal static void SplitSystemCoreAndMemory(string systemPrompt, out string corePrompt, out string memoryBody)
         {
@@ -476,11 +453,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Грубая оценка размера промпта для логов и бюджетирования, когда API не возвращает usage.
-        /// estTok = ceil(chars/4) на каждую часть (эвристика для латиницы/смеси; для оптимизации сравнивайте относительные величины).
-        /// Слова — по пробелам (для русского без дефисов как разделителей слов).
-        /// Разбор system: всего / core (промпт без ## Memory) / memory / оценка каталога tools (имя+описание+schema;
-        /// для LLMUnity близко к тексту, добавляемому к system внутри адаптера; при native tool calling JSON может отличаться).
+        /// Rough prompt size estimate for logging and budgeting when the API doesn't return usage.
         /// </summary>
         internal static string FormatPromptBudgetLine(
             string systemPrompt,
@@ -515,7 +488,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Оценка символов, которые LLMUnity добавляет к system при наличии tools (см. LlmUnityMeaiChatClient).
+        /// Estimate characters that LLMUnity adds to system when tools are present.
         /// </summary>
         internal static int EstimateToolsCatalogChars(IReadOnlyList<ILlmTool> tools)
         {

@@ -27,6 +27,7 @@ Quick reference: which tests to run after touching `MeaiLlmClient`, `SmartToolCa
 - `MeaiLlmClientEditModeTests` (unchanged, validates the parser)
 - `SmartToolCallingChatClientEditModeTests` (unchanged, validates retry/duplicate behaviour)
 - `ToolExecutionPolicyEditModeTests`
+- `MessagePipeEventPublishingEditModeTests` ← **v1.5.0: all 8 MessagePipe event types, streaming/non-streaming parity, child scope subscriptions**
 
 **PlayMode** — Test Runner → PlayMode tab:
 
@@ -102,3 +103,16 @@ Pins the summary tail appended to `LLM ◀`: `tools=[memory(ok,12ms),missing_too
 4. Confirm the chat panel does not display the JSON. Confirm `ApplyAiGameCommand.JsonPayload` (router log) does not contain `"name":"memory"`.
 
 If any of these assertions fail at runtime, the corresponding EditMode/PlayMode test would also fail — they're the same invariants.
+
+---
+
+## Gotcha: dual logging system (v1.5.0)
+
+Since v1.5.0, tool-call diagnostics use two logging interfaces:
+
+- **`ILog`** (portable, `Log.Instance`) — used by `ToolExecutionPolicy` for `[ToolCall]` per-call lines.
+- **`IGameLogger`** (Unity) — used by `MeaiLlmClient` for `MeaiLlmClient: ...` infrastructure lines.
+
+In production both write to the same console via `UnityLog`. But in **PlayMode tests**, if your `SpyLogger` only implements `IGameLogger`, the `[ToolCall]` lines go to `NullLog` and are invisible.
+
+**Fix**: make `SpyLogger` implement both `IGameLogger` and `ILog`, and set `Log.Instance = spy` before invoking the pipeline. Always reset with `[TearDown] Log.Instance = NullLog.Instance`.

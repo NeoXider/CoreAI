@@ -5,6 +5,7 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 
 namespace CoreAI.Chat
@@ -93,20 +94,38 @@ namespace CoreAI.Chat
         /// настройки запроса (например <see cref="AiTaskRequest.ForcedToolMode"/> для
         /// детерминированного tool-calling) без потери остальной chat-механики.
         /// </summary>
+        /// <remarks>
+        /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
+        /// — fully compatible with WebGL's single-threaded execution model.
+        /// Exceptions are NOT swallowed; callers (e.g. <c>CoreAiChatPanel</c>) are responsible
+        /// for catching and displaying errors to the user.
+        /// </remarks>
         public async System.Threading.Tasks.Task<string> SendMessageAsync(
             AiTaskRequest request,
             CancellationToken ct = default)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
+
+            CancellationTokenSource timeoutCts = null;
+            IDisposable timerHandle = null;
+            CancellationToken effectiveCt = ct;
             try
             {
-                string result = await _orchestrator.RunTaskAsync(request, ct);
+                float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+                if (timeoutSec > 0)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    effectiveCt = timeoutCts.Token;
+                }
+
+                string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
                 return result ?? "";
             }
-            catch (Exception ex)
+            finally
             {
-                _logger?.LogWarning(GameLogFeature.Llm, $"[CoreAiChatService] Error: {ex.Message}");
-                return null;
+                timerHandle?.Dispose();
+                timeoutCts?.Dispose();
             }
         }
 
@@ -133,15 +152,39 @@ namespace CoreAI.Chat
         /// Стриминг ответа на полный <see cref="AiTaskRequest"/>. См.
         /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken)"/> о применении.
         /// </summary>
+        /// <remarks>
+        /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
+        /// — fully compatible with WebGL's single-threaded execution model.
+        /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             AiTaskRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken ct = default)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
-            await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(request, ct))
+
+            CancellationTokenSource timeoutCts = null;
+            IDisposable timerHandle = null;
+            CancellationToken effectiveCt = ct;
+            try
             {
-                yield return chunk;
+                float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+                if (timeoutSec > 0)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    effectiveCt = timeoutCts.Token;
+                }
+
+                await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(request, effectiveCt))
+                {
+                    yield return chunk;
+                }
+            }
+            finally
+            {
+                timerHandle?.Dispose();
+                timeoutCts?.Dispose();
             }
         }
 

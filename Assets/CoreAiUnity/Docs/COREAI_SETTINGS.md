@@ -210,7 +210,7 @@ The Inspector includes an **LLMUnity status** panel:
 | **Max Output Tokens** | `4096` | Global LLM response token limit — applied uniformly to **both** HTTP API and LLMUnity. Per-agent override: `AgentBuilder.WithMaxOutputTokens`. Per-call override: `AiTaskRequest.MaxOutputTokens`. Per-request override: `LlmCompletionRequest.MaxOutputTokens`. `0` = unlimited (provider default). |
 | **Context Window** | `8192` | Context window (tokens) |
 | **Max Concurrent** | `2` | Parallel orchestrator tasks |
-| **LLM Timeout** | `15` | LLM request timeout (seconds) |
+| **LLM Timeout** | `15` | LLM request timeout (seconds). v1.5.1: enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (WebGL-compatible). |
 | **Lua Repair Retries** | `3` | Max consecutive failed Lua repair attempts for Programmer (counter resets on success) |
 | **Tool Call Retries** | `3` | Max consecutive failed tool calls before aborting the agent (counter resets on success) |
 

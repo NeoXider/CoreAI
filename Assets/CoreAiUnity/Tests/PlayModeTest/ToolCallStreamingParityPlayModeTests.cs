@@ -8,6 +8,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -31,11 +32,18 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM
     public sealed class ToolCallStreamingParityPlayModeTests
     {
+        [TearDown]
+        public void TearDown()
+        {
+            Log.Instance = NullLog.Instance;
+        }
+
         [UnityTest]
         public IEnumerator Streaming_TextShapedToolCall_ExecutesAndStripsFromChunks() => UniTask.ToCoroutine(async () =>
         {
             var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             var spy = new SpyLogger();
+            Log.Instance = spy; // ToolExecutionPolicy writes [ToolCall] via Log.Instance
             var memStore = new InMemoryMemoryStore();
 
             // Two-script: first stream emits text + JSON; second stream finishes with text.
@@ -92,6 +100,7 @@ namespace CoreAI.Tests.PlayMode
         {
             var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             var spy = new SpyLogger();
+            Log.Instance = spy; // ToolExecutionPolicy writes [ToolCall] via Log.Instance
             var memStore = new InMemoryMemoryStore();
 
             int iter = 0;
@@ -190,13 +199,19 @@ namespace CoreAI.Tests.PlayMode
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<ChatMessage>();
         }
 
-        private sealed class SpyLogger : IGameLogger
+        private sealed class SpyLogger : IGameLogger, ILog
         {
             public readonly List<string> AllLines = new();
+            // IGameLogger
             public void LogDebug(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
             public void LogInfo(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
             public void LogWarning(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
             public void LogError(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
+            // ILog (used by ToolExecutionPolicy via Log.Instance)
+            public void Debug(string message, string tag = null) => AllLines.Add(message);
+            public void Info(string message, string tag = null) => AllLines.Add(message);
+            public void Warn(string message, string tag = null) => AllLines.Add(message);
+            public void Error(string message, string tag = null) => AllLines.Add(message);
         }
     }
 #endif

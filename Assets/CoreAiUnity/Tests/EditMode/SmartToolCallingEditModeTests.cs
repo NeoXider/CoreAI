@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using NUnit.Framework;
 using UnityEngine;
@@ -34,7 +34,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         private CoreAISettingsAsset _settings;
-        private NullGameLogger _logger;
         private AIFunction _dummyFunc;
         private CoreAI.Ai.ILlmTool _dummyLlmTool;
 
@@ -50,7 +49,6 @@ namespace CoreAI.Tests.EditMode
         public void Setup()
         {
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            _logger = new NullGameLogger();
             _dummyFunc = AIFunctionFactory.Create((Func<string>)(() => "Success"), new AIFunctionFactoryOptions { Name = "dummy_tool" });
             _dummyLlmTool = new DummyLlmTool();
         }
@@ -61,7 +59,7 @@ namespace CoreAI.Tests.EditMode
             // Убеждаемся, что разные независимые вызовы (новые реквесты) могут использовать один и тот же инструмент.
             MockChatClient mockInner = new MockChatClient();
             SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole"
+                mockInner, NullLog.Instance, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole"
             );
 
             ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };
@@ -90,7 +88,7 @@ namespace CoreAI.Tests.EditMode
             // это будет заблокировано внутри SmartToolCallingChatClient.
             MockChatClient mockInner = new MockChatClient();
             SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, _logger, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole", maxConsecutiveErrors: 2
+                mockInner, NullLog.Instance, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole", maxConsecutiveErrors: 2
             );
 
             ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };

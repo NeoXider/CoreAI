@@ -10,6 +10,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using CoreAI.Infrastructure.World;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using LLMUnity;
@@ -123,8 +124,9 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
-            SmartToolCallingChatClient functionClient = new(_innerClient, _logger, _settings, allowDuplicates,
-                request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId);
+            SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
+                request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
+                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
 
             List<MEAI.ChatMessage> chatMessages = new()
             {
@@ -350,8 +352,9 @@ namespace CoreAI.Infrastructure.Llm
 
             // Shared policy for the entire streaming session
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
-            ToolExecutionPolicy policy = new(_logger, _settings, request.Tools, allowDuplicates,
-                _currentRoleId, _settings.MaxToolCallRetries, request.TraceId);
+            ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
+                _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
+                MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
 
             while (true)
             {

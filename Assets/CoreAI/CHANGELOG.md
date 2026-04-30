@@ -1,5 +1,46 @@
 # Changelog
 
+## [v1.5.1] — 2026-04-30
+
+### WebGL Stability: Retry + Timeout + Error Propagation
+
+Critical fixes for WebGL (Emscripten) production stability. Eliminates LLM pipeline hangs and silent failures in single-threaded environments.
+
+#### Retry Multiplier Fix
+- **`AiOrchestrator.RunTaskAsync`** — removed the `for (attempt...)` retry loop. The orchestrator now invokes `_llm.CompleteAsync` exactly **once**. Network-level retries (HTTP 429/5xx, exponential backoff) remain exclusively in `LoggingLlmClientDecorator`, eliminating the `M × N` retry multiplier bug where orchestrator retries × decorator retries caused up to `2 × 3 = 6` redundant requests on a single failure.
+
+#### WebGL-Compatible Timeouts
+- **`AiOrchestrator.RunTaskAsync` / `RunStreamingAsync`** — removed all `CancellationTokenSource.CancelAfter()` calls. These relied on `System.Threading.Timer`, which is non-functional in WebGL's Emscripten runtime (single-threaded, no native timer callbacks), causing indefinite hangs on timeout.
+- **`LoggingLlmClientDecorator.CompleteAsync` / `CompleteStreamingAsync`** — same removal of `CancelAfter` and linked `CancellationTokenSource` wrapping. `cancellationToken` from the caller is passed through directly.
+- **`CoreAiChatService`** — timeout responsibility now lives here, using **`CancelAfterSlim`** from `Cysharp.Threading.Tasks` (UniTask). This mechanism is based on Unity's `PlayerLoop` and is fully compatible with WebGL's execution model. Both `SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` with `CancelAfterSlim(TimeSpan)` when `LlmRequestTimeoutSeconds > 0`.
+
+#### Error Propagation
+- **`CoreAiChatService.SendMessageAsync`** — removed the `catch (Exception)` block that silently swallowed errors and returned `null`. Exceptions now propagate to `CoreAiChatPanel`, which already has a `catch (Exception ex)` block that displays the error message to the user (e.g., "Error: Connection refused") instead of showing a generic "No response." message.
+
+#### Package version **`1.5.1`**.
+
+## [v1.5.0] — 2026-04-30
+
+### Architecture: Portable LLM pipeline decoupling
+
+Migrated core LLM pipeline classes into `CoreAI.Core` (portable, `noEngineReferences: true`):
+
+#### Moved from `CoreAI.Source` → `CoreAI.Core`
+- **`LoggingLlmClientDecorator`** — `IGameLogger` → `ILog`, `RoutingLlmClient` type-check → `ILlmPreflightAnnotator`.
+- **`ToolExecutionPolicy`** — `IGameLogger` → `ILog`, `GlobalMessagePipe` → `IToolCallEventPublisher`, `CoreAi.NotifyToolExecuted` → `IToolExecutionNotifier`.
+- **`SmartToolCallingChatClient`** — `IGameLogger` → `ILog`, portable `LlmToolCallTextExtractor`.
+- **`ClientLimitedLlmClientDecorator`** — already portable, moved for consistency.
+
+#### New portable abstractions
+- **`IToolCallEventPublisher`** + `NullToolCallEventPublisher` — lifecycle events without MessagePipe dependency.
+- **`IToolExecutionNotifier`** + `NullToolExecutionNotifier` — subscriber notification without `CoreAi` static dependency.
+- **`ILlmPreflightAnnotator`** — replaces hard type-check against `RoutingLlmClient`.
+
+#### Documentation
+- Updated `ARCHITECTURE.md`, `STREAMING_ARCHITECTURE.md`, `DEVELOPER_GUIDE.md` to reflect the adapter chain.
+
+- Package version **`1.5.0`**.
+
 ## [v1.4.0] — 2026-04-30
 
 ### Resilience: TryRepairToolName + HTTP retry with Retry-After

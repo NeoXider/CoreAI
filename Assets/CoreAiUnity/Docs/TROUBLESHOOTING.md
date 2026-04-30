@@ -145,6 +145,8 @@ CoreAISettings → ⚙️ General → LLM Timeout = 120
 
 For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
+> **v1.5.1 note:** Timeout is now enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (PlayerLoop-based), which is fully compatible with **WebGL**. The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) no longer uses `CancellationTokenSource.CancelAfter()`, which relied on `System.Threading.Timer` and caused indefinite hangs in WebGL/Emscripten builds. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
+
 ---
 
 ## 📜 Problem: Lua failed

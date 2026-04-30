@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using NUnit.Framework;
 using MEAI = Microsoft.Extensions.AI;
 
@@ -49,7 +49,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, new NullLogger(), settings,
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
                 allowDuplicateToolCalls: true,
                 tools: new List<ILlmTool> { new TestTool("memory") },
                 roleId: "Teacher", maxConsecutiveErrors: 3);
@@ -83,7 +83,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, new NullLogger(), settings,
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
                 allowDuplicateToolCalls: true,
                 tools: new List<ILlmTool>(), roleId: "X", maxConsecutiveErrors: 3);
 
@@ -115,7 +115,7 @@ namespace CoreAI.Tests.EditMode
 
             var settings = new StubSettings();
             // memoryStore is null → BuildAIFunctions drops MemoryLlmTool → aiTools=0
-            var client = new MeaiLlmClient(inner, new NullLogger(), settings, memoryStore: null);
+            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
 
             var request = new LlmCompletionRequest
             {
@@ -150,7 +150,7 @@ namespace CoreAI.Tests.EditMode
             var inner = new StreamingScripted(
                 new[] { "Plain reply with {braces} but no tool keys." });
 
-            var client = new MeaiLlmClient(inner, new NullLogger(), new StubSettings(), null);
+            var client = new MeaiLlmClient(inner, new NullGameLogger(), new StubSettings(), null);
             var request = new LlmCompletionRequest
             {
                 AgentRoleId = "X",
@@ -193,7 +193,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ => { bCount++; return Task.FromResult<object>("{\"Success\":true}"); });
 
             var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, new NullLogger(), settings,
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
                 allowDuplicateToolCalls: false,
                 tools: new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
                 roleId: "Chain", maxConsecutiveErrors: 3);
@@ -247,7 +247,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ => { bCount++; return Task.FromResult<object>("{\"Success\":true}"); });
 
             var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, new NullLogger(), settings,
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
                 allowDuplicateToolCalls: false,
                 tools: new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
                 roleId: "Parallel", maxConsecutiveErrors: 3);
@@ -296,7 +296,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, new NullLogger(), settings,
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
                 allowDuplicateToolCalls: false,
                 tools: new List<ILlmTool> { new TestTool("real_tool") },
                 roleId: "NativeWins", maxConsecutiveErrors: 3);
@@ -337,7 +337,7 @@ namespace CoreAI.Tests.EditMode
             };
 
             var settings = new StubSettings();
-            var client = new MeaiLlmClient(inner, new NullLogger(), settings, memoryStore: null);
+            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
 
             var request = new LlmCompletionRequest
             {
@@ -486,13 +486,13 @@ namespace CoreAI.Tests.EditMode
             return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc }));
         }
 
-        private sealed class SpyLogger : IGameLogger
+        private sealed class SpyLogger : ILog
         {
             public readonly List<string> AllLines = new();
-            public void LogDebug(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
-            public void LogInfo(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
-            public void LogWarning(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
-            public void LogError(GameLogFeature f, string m, UnityEngine.Object c = null) => AllLines.Add(m);
+            public void Debug(string message, string tag = null) => AllLines.Add(message);
+            public void Info(string message, string tag = null) => AllLines.Add(message);
+            public void Warn(string message, string tag = null) => AllLines.Add(message);
+            public void Error(string message, string tag = null) => AllLines.Add(message);
         }
 
         private static MEAI.AIFunction MakeAIFunction(string name,
@@ -583,12 +583,12 @@ namespace CoreAI.Tests.EditMode
             public bool EnableStreaming => true;
         }
 
-        private sealed class NullLogger : IGameLogger
+        private sealed class NullGameLogger : CoreAI.Infrastructure.Logging.IGameLogger
         {
-            public void LogDebug(GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogInfo(GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogWarning(GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogError(GameLogFeature f, string m, UnityEngine.Object c = null) { }
+            public void LogDebug(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
+            public void LogInfo(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
+            public void LogWarning(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
+            public void LogError(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
         }
     }
 }

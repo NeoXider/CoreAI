@@ -2,6 +2,7 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Logging;
 using CoreAI.Messaging;
 using MessagePipe;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -49,7 +50,7 @@ namespace CoreAI.Composition
                         c.Resolve<IPublisher<LlmRequestStarted>>(),
                         c.Resolve<IPublisher<LlmRequestCompleted>>(),
                         c.Resolve<IPublisher<LlmUsageReported>>()),
-                    c.Resolve<IGameLogger>(),
+                    c.Resolve<ILog>(),
                     llmTimeout,
                     settings != null ? settings.MaxLlmRequestRetries : 0), Lifetime.Singleton);
 

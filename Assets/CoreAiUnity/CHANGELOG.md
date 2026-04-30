@@ -2,6 +2,76 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.1] - 2026-04-30
+
+### 🛡️ WebGL Stability: UniTask-based timeout + error propagation
+
+- **`CoreAiChatService.SendMessageAsync`** / **`SendMessageStreamingAsync`** — timeout is now enforced at the Unity layer via **`CancelAfterSlim`** (`Cysharp.Threading.Tasks`), which uses Unity's `PlayerLoop` and is fully compatible with WebGL's single-threaded execution model. Previously, timeout relied on `CancellationTokenSource.CancelAfter` (backed by `System.Threading.Timer`), which hangs indefinitely in WebGL/Emscripten.
+- **Error propagation** — `SendMessageAsync` no longer swallows exceptions with a `catch` block that returned `null`. Errors now propagate to `CoreAiChatPanel`, which displays the error message to the user instead of a generic "No response."
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.1`** (retry multiplier fix, `CancelAfter` removal from orchestrator and decorator).
+
+### Meta
+
+- Package **`1.5.1`**. Dependency **`com.nexoider.coreai 1.5.1`**.
+
+## [1.5.0] - 2026-04-30
+
+### 🏗️ Architecture: Portable LLM pipeline decoupling
+
+Migrated core LLM pipeline components from `CoreAI.Source` (Unity-dependent) to `CoreAI.Core` (portable, `noEngineReferences: true`). These classes now run in any .NET host without `UnityEngine`.
+
+#### Moved to `CoreAI.Core` (`CoreAI.Infrastructure.Llm` namespace)
+- **`LoggingLlmClientDecorator`** — LLM request/response logging, retry with exponential backoff, prompt budget diagnostics. Now uses `ILog` (portable) instead of `IGameLogger` (Unity).
+- **`ToolExecutionPolicy`** — duplicate detection, consecutive-error tracking, per-call `[ToolCall]` diagnostics. Now uses `ILog`, `IToolCallEventPublisher`, `IToolExecutionNotifier` instead of Unity-specific `IGameLogger`, `GlobalMessagePipe`, `CoreAi.NotifyToolExecuted`.
+- **`SmartToolCallingChatClient`** — MEAI `IChatClient` wrapper with automatic tool-call loop, text-based extraction fallback, and error tracking. Now uses `ILog` and portable `LlmToolCallTextExtractor`.
+- **`ClientLimitedLlmClientDecorator`** — per-session request/prompt-size limits (already had no engine dependencies).
+
+#### New portable abstractions (`CoreAI.Core`)
+- **`ILlmPreflightAnnotator`** — replaces hard type-check against `RoutingLlmClient` in `LoggingLlmClientDecorator`.
+- **`IToolCallEventPublisher`** + `NullToolCallEventPublisher` — portable contract for tool-call lifecycle events.
+- **`IToolExecutionNotifier`** + `NullToolExecutionNotifier` — portable contract for tool execution subscriber notification.
+
+#### New Unity-side adapters (`CoreAI.Source`)
+- **`MessagePipeToolCallEventPublisher`** — bridges `IToolCallEventPublisher` to `GlobalMessagePipe`.
+- **`CoreAiToolExecutionNotifier`** — bridges `IToolExecutionNotifier` to `CoreAi.NotifyToolExecuted`.
+- **`RoutingLlmClient`** — now implements `ILlmPreflightAnnotator`.
+
+#### Breaking changes
+- `LoggingLlmClientDecorator` constructor: `IGameLogger` → `ILog`.
+- `ToolExecutionPolicy` constructor: `IGameLogger` → `ILog`, adds optional `IToolCallEventPublisher` + `IToolExecutionNotifier`.
+- `SmartToolCallingChatClient` constructor: `IGameLogger` → `ILog`, adds optional `IToolCallEventPublisher` + `IToolExecutionNotifier`.
+
+#### Tests
+- All EditMode tests updated to use `ILog` / `NullLog.Instance` instead of `IGameLogger` stubs.
+- **`MessagePipeEventPublishingEditModeTests`** — 12 new tests verifying all 8 MessagePipe event types:
+  - Bootstrap & broker smoke (7 event types publish/subscribe roundtrip + idempotency).
+  - `ToolExecutionPolicy` → `MessagePipeToolCallEventPublisher` integration (success, fail, throw, not-found, batch).
+  - `SmartToolCallingChatClient` end-to-end (non-streaming tool lifecycle).
+  - Streaming/non-streaming parity (identical event counts and tool names).
+  - VContainer child scope subscription (parent publishes, child receives all 8 types).
+  - `ApplyAiGameCommand` roundtrip via VContainer.
+
+#### Documentation
+- `ARCHITECTURE.md` — updated MessagePipe boundary to describe `IToolCallEventPublisher` → `MessagePipeToolCallEventPublisher` adapter chain.
+- `STREAMING_ARCHITECTURE.md` — updated file paths for `ToolExecutionPolicy` and `SmartToolCallingChatClient` (now in `CoreAI.Core`); updated notification row.
+- `DEVELOPER_GUIDE.md` — updated assembly table, section 3.3 Tool Call Observability, **new section 3.4 Logging Architecture** (ILog vs IGameLogger), guide version 1.5.
+- `TESTING_TOOL_CALLING.md` — added `MessagePipeEventPublishingEditModeTests`, new "Gotcha: dual logging system" section.
+- `TOOL_CALL_SPEC.md` — engine-agnostic pattern updated for v1.5.0.
+- `GameTemplateGuides/02_AiOrchestration.md` — updated for portable `LoggingLlmClientDecorator`, added tool-call lifecycle point.
+- `GameTemplateGuides/03_AgentRolesAndProfiles.md` — debugging section updated for `ILog` / MessagePipe events.
+- `CoreAI/CHANGELOG.md` — added v1.5.0 entry.
+
+#### Fixes
+- `ToolCallStreamingParityPlayModeTests.SpyLogger` — now implements both `IGameLogger` and `ILog`; sets `Log.Instance = spy` so `[ToolCall]` diagnostic lines are captured. Added `[TearDown]` to reset `Log.Instance`.
+- `LoggingLlmClientDecoratorEditModeTests` — removed dead `AllOnSettings : IGameLogSettings` stub (leftover from pre-1.5.0).
+- `CoreAI.Core/AssemblyInfo.cs` — added `InternalsVisibleTo("CoreAI.Tests")` for EditMode test access to `internal` helpers.
+- `CoreAI.Tests.asmdef` — added `MessagePipe.VContainer` assembly reference.
+
+### Meta
+
+- Package **`1.5.0`**. Dependency **`com.nexoider.coreai 1.5.0`**.
+
+
 ## [1.4.1] - 2026-04-30
 
 ### 🐛 Fix: `IAgentMemoryStore` not propagated to HTTP clients

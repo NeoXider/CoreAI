@@ -125,65 +125,45 @@ namespace CoreAI.Ai
             AgentMemoryPolicy.RoleMemoryConfig roleConfig = bundle.RoleConfig;
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory = bundle.ChatHistory;
 
-            int maxAttempts = _settings.MaxLlmRequestRetries > 0 ? _settings.MaxLlmRequestRetries : 2;
             int? maxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
             LlmCompletionResult result = null;
 
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            // Single invocation — network-level retries (429/5xx) are handled by
+            // LoggingLlmClientDecorator. Timeouts are enforced by the Unity-aware
+            // caller (CoreAiChatService) via UniTask.CancelAfterSlim, which is
+            // compatible with WebGL's single-threaded execution model.
+            try
             {
-                using CancellationTokenSource delayCts = new();
-                if (_settings.LlmRequestTimeoutSeconds > 0)
-                {
-                    delayCts.CancelAfter(TimeSpan.FromSeconds(_settings.LlmRequestTimeoutSeconds));
-                }
-
-                using CancellationTokenSource linkedCts =
-                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, delayCts.Token);
-
-                try
-                {
-                    Stopwatch sw = Stopwatch.StartNew();
-                    result = await _llm.CompleteAsync(
-                        new LlmCompletionRequest
-                        {
-                            AgentRoleId = roleId,
-                            SystemPrompt = system,
-                            UserPayload = user,
-                            ChatHistory = chatHistory,
-                            TraceId = traceId,
-                            Tools = tools,
-                            AllowedToolNames = task.AllowedToolNames,
-                            AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
-                            ForcedToolMode = task.ForcedToolMode,
-                            RequiredToolName = task.RequiredToolName ?? "",
-                            MaxOutputTokens = maxOutputTokens
-                        },
-                        linkedCts.Token);
-                    sw.Stop();
-                    _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
-                        sw.Elapsed.TotalMilliseconds);
-
-                    if (result != null && result.Ok)
+                Stopwatch sw = Stopwatch.StartNew();
+                result = await _llm.CompleteAsync(
+                    new LlmCompletionRequest
                     {
-                        break;
-                    }
-                }
-                catch (OperationCanceledException) when (delayCts.IsCancellationRequested &&
-                                                         !cancellationToken.IsCancellationRequested)
-                {
-                    if (attempt == maxAttempts)
-                    {
-                        return null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Instance.Error($"[AiOrchestrator] Task execution failed (attempt {attempt}/{maxAttempts}): {ex.Message}", LogTag.Llm);
-                    if (attempt == maxAttempts)
-                    {
-                        return null;
-                    }
-                }
+                        AgentRoleId = roleId,
+                        SystemPrompt = system,
+                        UserPayload = user,
+                        ChatHistory = chatHistory,
+                        TraceId = traceId,
+                        Tools = tools,
+                        AllowedToolNames = task.AllowedToolNames,
+                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
+                        ForcedToolMode = task.ForcedToolMode,
+                        RequiredToolName = task.RequiredToolName ?? "",
+                        MaxOutputTokens = maxOutputTokens
+                    },
+                    cancellationToken);
+                sw.Stop();
+                _metrics.RecordLlmCompletion(roleId, traceId, result != null && result.Ok,
+                    sw.Elapsed.TotalMilliseconds);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // honour caller cancellation
+            }
+            catch (Exception ex)
+            {
+                Log.Instance.Error($"[AiOrchestrator] Task execution failed: {ex.Message}", LogTag.Llm);
+                RecordTrace(bundle, result, null, ex.Message);
+                return null;
             }
 
             if (result == null || !result.Ok || string.IsNullOrEmpty(result.Content))
@@ -297,14 +277,8 @@ namespace CoreAI.Ai
             int chunkCount = 0;
             string terminalError = null;
 
-            using CancellationTokenSource timeoutCts = new();
-            if (_settings.LlmRequestTimeoutSeconds > 0)
-            {
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(_settings.LlmRequestTimeoutSeconds));
-            }
-
-            using CancellationTokenSource linkedCts =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
+            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
 
             LlmCompletionRequest req = new()
             {
@@ -326,7 +300,7 @@ namespace CoreAI.Ai
             string initError = null;
             try
             {
-                enumerator = _llm.CompleteStreamingAsync(req, linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
+                enumerator = _llm.CompleteStreamingAsync(req, cancellationToken).GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -345,18 +319,18 @@ namespace CoreAI.Ai
                 {
                     bool hasNext;
                     LlmStreamChunk current = null;
-                    bool failedTimeout = false;
                     string exceptionMessage = null;
+                    bool wasCancelled = false;
 
                     try
                     {
                         hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
                         current = hasNext ? enumerator.Current : null;
                     }
-                    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested &&
-                                                              !cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        failedTimeout = true;
+                        terminalError = "cancelled";
+                        wasCancelled = true;
                         hasNext = false;
                     }
                     catch (Exception ex)
@@ -365,9 +339,8 @@ namespace CoreAI.Ai
                         hasNext = false;
                     }
 
-                    if (failedTimeout)
+                    if (wasCancelled)
                     {
-                        terminalError = $"orchestrator stream timeout ({_settings.LlmRequestTimeoutSeconds}s)";
                         yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
                         yield break;
                     }

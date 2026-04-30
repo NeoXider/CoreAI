@@ -140,6 +140,8 @@ This pattern enables:
 - **Easier porting** — new engines implement the same interfaces
 - **One API** — the LLM invokes tools the same way on every platform
 
+Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingLlmClientDecorator`, and `ClientLimitedLlmClientDecorator` live in `CoreAI.Core` (portable). Tool lifecycle events flow through `IToolCallEventPublisher` → `MessagePipeToolCallEventPublisher` (Unity adapter). Tool subscriber notifications flow through `IToolExecutionNotifier` → `CoreAiToolExecutionNotifier` (Unity adapter).
+
 ## Available tools
 
 ### 1. Actions and events (`DelegateLlmTool`)

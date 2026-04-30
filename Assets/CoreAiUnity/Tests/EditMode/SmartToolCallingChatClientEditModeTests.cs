@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using NUnit.Framework;
 using MEAI = Microsoft.Extensions.AI;
 
@@ -35,7 +35,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction failTool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":false,\"Error\":\"boom\"}"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
@@ -75,7 +75,7 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>(json);
             });
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
@@ -120,7 +120,7 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>(json);
             });
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
@@ -155,7 +155,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction successTool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 true, new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
 
@@ -194,7 +194,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":true}"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
                 new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
@@ -229,7 +229,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
                 Task.FromResult<object>("{\"Success\":true}"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
                 new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
@@ -264,7 +264,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction tool = MakeAIFunction("always_ok", _ =>
                 Task.FromResult<object>("{\"Success\":true}"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: false,
                 new List<CoreAI.Ai.ILlmTool> { new AllowDupTool("always_ok") }, "TestRole", 3);
@@ -292,7 +292,7 @@ namespace CoreAI.Tests.EditMode
                 return MakeToolCallResponse("missing_tool", "call_" + callCount);
             });
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: true, // отключаем дубликаты, чтобы увидеть именно not-found
                 new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
@@ -321,7 +321,7 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction tool = MakeAIFunction("broken_tool",
                 _ => throw new InvalidOperationException("boom from tool"));
 
-            SmartToolCallingChatClient client = new(fakeInner, new NullLogger(),
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
                 UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
                 allowDuplicateToolCalls: true,
                 new List<CoreAI.Ai.ILlmTool>(), "TestRole", 3);
@@ -434,21 +434,21 @@ namespace CoreAI.Tests.EditMode
         /// <summary>
         /// Логгер-заглушка (ничего не делает).
         /// </summary>
-        private sealed class NullLogger : IGameLogger
+        private sealed class NullLogger : ILog
         {
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Debug(string message, string tag = null)
             {
             }
 
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Info(string message, string tag = null)
             {
             }
 
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Warn(string message, string tag = null)
             {
             }
 
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Error(string message, string tag = null)
             {
             }
         }

@@ -46,8 +46,8 @@ Key files:
 | Wrapper | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs` |
 | HTTP SSE | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` |
 | LLMUnity | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityMeaiChatClient.cs` |
-| Tool execution policy | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/ToolExecutionPolicy.cs` |
-| Non-streaming tool loop | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/SmartToolCallingChatClient.cs` |
+| Tool execution policy (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs` |
+| Non-streaming tool loop (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/SmartToolCallingChatClient.cs` |
 | UI | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs` |
 | Service | `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs` |
 
@@ -222,7 +222,7 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 |-----------|-------------|
 | Duplicate detection | Signature-based (name + arguments hash). Blocks repeated identical calls within one request cycle. Per-tool `AllowDuplicates` flag overrides. |
 | Consecutive error tracking | Counter resets on success, increments on failure. Agent aborts at `MaxToolCallRetries` threshold. |
-| Notification | Every tool execution fires `CoreAi.NotifyToolExecuted(roleId, toolName, args, result)`. |
+| Notification | Every tool execution fires `IToolCallEventPublisher.PublishStarted/Completed/Failed` (portable) → `MessagePipeToolCallEventPublisher` adapter → `GlobalMessagePipe`. Also calls `IToolExecutionNotifier.NotifyToolExecuted` → `CoreAiToolExecutionNotifier` adapter → `CoreAi.NotifyToolExecuted`. |
 
 ### Stop / clear guarantees
 
@@ -232,7 +232,42 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 - **Cancellation cleanup (0.25.6+)** cancels the active request CTS and resets streaming/sending UI state even when the static `CoreAi.StopAgent(roleId)` path is unavailable.
 - **`ClearChat()`** calls `StopActiveGeneration()` before clearing history.
 
-## 8. Known limitations
+## 8. Timeout & retry architecture (v1.5.1)
+
+### Timeout enforcement
+
+> **Rule:** Timeout responsibility lives exclusively in the **Unity layer** (`CoreAiChatService`), not in the portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`).
+
+Before v1.5.1, `AiOrchestrator` and `LoggingLlmClientDecorator` both used `CancellationTokenSource.CancelAfter()` to enforce request timeouts. This relies on `System.Threading.Timer`, which is **non-functional in WebGL** (Emscripten single-threaded model, no native timer callbacks), causing indefinite hangs.
+
+In v1.5.1:
+- `AiOrchestrator` and `LoggingLlmClientDecorator` **pass `cancellationToken` through** without wrapping it in timeout-linked sources.
+- `CoreAiChatService.SendMessageAsync` and `SendMessageStreamingAsync` create a linked `CancellationTokenSource` with **`CancelAfterSlim(TimeSpan)`** from `Cysharp.Threading.Tasks` (UniTask), which uses Unity's `PlayerLoop` — fully WebGL-compatible.
+- The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (default: 300s).
+
+```csharp
+// Inside CoreAiChatService.SendMessageAsync (simplified)
+float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+if (timeoutSec > 0)
+{
+    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec)); // UniTask PlayerLoop
+    effectiveCt = timeoutCts.Token;
+}
+string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
+```
+
+### Retry centralization
+
+> **Rule:** Network-level retries (HTTP 429, 5xx, exponential backoff) are handled **exclusively** by `LoggingLlmClientDecorator`. The orchestrator invokes the LLM client exactly once per request.
+
+Before v1.5.1, `AiOrchestrator.RunTaskAsync` had its own `for (attempt...)` retry loop, creating an `M × N` retry multiplier (e.g., 2 orchestrator retries × 3 decorator retries = 6 actual network requests on a single failure).
+
+### Error propagation
+
+`CoreAiChatService` no longer swallows exceptions. Errors from `AiOrchestrator` → `LoggingLlmClientDecorator` → `ILlmClient` propagate to `CoreAiChatPanel`, which catches `Exception` and displays the error message to the user.
+
+## 9. Known limitations
 
 - **No output-length timeout** — there is a per-request cancellation token but no *total response length* guard. Add one externally if you need it.
 - **Mobile** — `UnityWebRequest` SSE streaming has been tested on Desktop and Editor. On mobile, behaviour depends on the OS HTTP stack; measure before shipping.

@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using NUnit.Framework;
 using MEAI = Microsoft.Extensions.AI;
 
@@ -18,13 +18,13 @@ namespace CoreAI.Tests.EditMode
     {
         // ==================== Helpers ====================
 
-        private sealed class StubLogger : IGameLogger
+        private sealed class StubLogger : ILog
         {
             public readonly List<string> Logs = new();
-            public void LogDebug(GameLogFeature feature, string msg, UnityEngine.Object context = null) => Logs.Add($"[DBG] {msg}");
-            public void LogInfo(GameLogFeature feature, string msg, UnityEngine.Object context = null) => Logs.Add($"[INFO] {msg}");
-            public void LogWarning(GameLogFeature feature, string msg, UnityEngine.Object context = null) => Logs.Add($"[WARN] {msg}");
-            public void LogError(GameLogFeature feature, string msg, UnityEngine.Object context = null) => Logs.Add($"[ERR] {msg}");
+            public void Debug(string message, string tag = null) => Logs.Add($"[DBG] {message}");
+            public void Info(string message, string tag = null) => Logs.Add($"[INFO] {message}");
+            public void Warn(string message, string tag = null) => Logs.Add($"[WARN] {message}");
+            public void Error(string message, string tag = null) => Logs.Add($"[ERR] {message}");
         }
 
         private sealed class StubSettings : ICoreAISettings

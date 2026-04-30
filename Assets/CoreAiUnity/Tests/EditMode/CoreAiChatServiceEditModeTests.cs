@@ -120,13 +120,16 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task SendMessageAsync_Error_ReturnsNull()
+        public void SendMessageAsync_Error_PropagatesException()
         {
+            // v1.5.1: CoreAiChatService no longer swallows exceptions.
+            // Errors propagate to the caller (CoreAiChatPanel), which displays them.
             FakeAiOrchestrator orchestrator = new(null, errorMessage: "connection refused");
             CoreAiChatService service = new(orchestrator);
 
-            string response = await service.SendMessageAsync("hi", "TestRole");
-            Assert.IsNull(response);
+            var ex = Assert.ThrowsAsync<System.Exception>(
+                async () => await service.SendMessageAsync("hi", "TestRole"));
+            Assert.AreEqual("connection refused", ex.Message);
         }
 
         [Test]
@@ -232,6 +235,53 @@ namespace CoreAI.Tests.EditMode
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
         }
 
+        // ===================== v1.5.1 — Timeout + Error Propagation =====================
+
+        [Test]
+        public async Task SendMessageAsync_WithTimeoutSettings_PassesCancellationToken()
+        {
+            // v1.5.1: timeout is now enforced by CoreAiChatService via UniTask CancelAfterSlim.
+            // Verify that when LlmRequestTimeoutSeconds > 0, the orchestrator receives
+            // a different CancellationToken (linked with timeout) than the caller's original.
+            TokenCapturingOrchestrator orchestrator = new();
+            StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 30f };
+            CoreAiChatService service = new(orchestrator, settings: settings);
+
+            await service.SendMessageAsync("hi", "TestRole");
+
+            // The service should have created a linked CTS with CancelAfterSlim
+            Assert.IsTrue(orchestrator.LastCancellationToken.CanBeCanceled,
+                "When timeout > 0, orchestrator should receive a cancellable token");
+        }
+
+        [Test]
+        public async Task SendMessageAsync_NoTimeoutSettings_PassesOriginalToken()
+        {
+            // When LlmRequestTimeoutSeconds = 0, no timeout CTS is created
+            TokenCapturingOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator); // no settings = no timeout
+
+            using CancellationTokenSource cts = new();
+            await service.SendMessageAsync(
+                new AiTaskRequest { RoleId = "Role", Hint = "hi" }, cts.Token);
+
+            // Should pass the caller's token directly (not a linked one)
+            Assert.AreEqual(cts.Token, orchestrator.LastCancellationToken,
+                "Without timeout settings, original token should pass through");
+        }
+
+        [Test]
+        public async Task SendMessageAsync_NullResult_ReturnsEmptyString()
+        {
+            // AiOrchestrator may return null on soft failures;
+            // CoreAiChatService should convert to "" (not crash)
+            FakeAiOrchestrator orchestrator = new(content: null);
+            CoreAiChatService service = new(orchestrator);
+
+            string response = await service.SendMessageAsync("hi", "TestRole");
+            Assert.AreEqual("", response, "null result from orchestrator → empty string");
+        }
+
         // ===================== Helpers =====================
 
         private sealed class StubSettings : ICoreAISettings
@@ -245,7 +295,8 @@ namespace CoreAI.Tests.EditMode
             public bool EnableHttpDebugLogging => false;
             public bool LogMeaiToolCallingSteps => false;
             public bool EnableMeaiDebugLogging => false;
-            public float LlmRequestTimeoutSeconds => 15f;
+            public float? LlmRequestTimeoutSecondsOverride { get; set; }
+            public float LlmRequestTimeoutSeconds => LlmRequestTimeoutSecondsOverride ?? 15f;
             public int MaxLlmRequestRetries => 2;
             public bool LogTokenUsage => false;
             public bool LogLlmLatency => false;
@@ -325,6 +376,33 @@ namespace CoreAI.Tests.EditMode
 
                 yield return new LlmStreamChunk { Text = _content ?? "" };
                 yield return new LlmStreamChunk { IsDone = true };
+            }
+
+            public void CancelTasks(string scopeId) { }
+        }
+
+        /// <summary>
+        /// Captures the CancellationToken received by RunTaskAsync so tests can
+        /// verify whether the service wraps it in a timeout-linked CTS.
+        /// </summary>
+        private sealed class TokenCapturingOrchestrator : IAiOrchestrationService
+        {
+            public CancellationToken LastCancellationToken { get; private set; }
+
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                LastCancellationToken = ct;
+                return Task.FromResult("ok");
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                LastCancellationToken = ct;
+                yield return new LlmStreamChunk { Text = "ok", IsDone = true };
+                await Task.CompletedTask;
             }
 
             public void CancelTasks(string scopeId) { }

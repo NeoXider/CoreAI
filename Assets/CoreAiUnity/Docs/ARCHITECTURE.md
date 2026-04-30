@@ -39,7 +39,14 @@ For mixed projects, use `LlmRoutingManifest` profiles. Each profile has its own 
 
 ## MessagePipe Boundary
 
-The portable core defines message contracts only. The Unity layer registers brokers in `CoreServicesInstaller` and publishes LLM routing/status/usage messages from `RoutingLlmClient`. Tool execution also publishes `LlmToolCallStarted`, `LlmToolCallCompleted`, and `LlmToolCallFailed`.
+The portable core defines message contracts only. The Unity layer registers brokers in `CoreServicesInstaller` and publishes LLM routing/status/usage messages from `RoutingLlmClient`.
+
+Since **v1.5.0**, tool lifecycle events (`LlmToolCallStarted`, `LlmToolCallCompleted`, `LlmToolCallFailed`) are published through a two-layer adapter chain:
+1. **`ToolExecutionPolicy`** (portable, `CoreAI.Core`) calls **`IToolCallEventPublisher.PublishStarted/Completed/Failed`** — no MessagePipe dependency.
+2. **`MessagePipeToolCallEventPublisher`** (Unity, `CoreAI.Source`) implements `IToolCallEventPublisher` and delegates to **`GlobalMessagePipe.GetPublisher<T>()`**.
+3. **`IToolExecutionNotifier.NotifyToolExecuted`** → **`CoreAiToolExecutionNotifier`** bridges to `CoreAi.NotifyToolExecuted` for static event subscribers.
+
+Both streaming and non-streaming paths wire these adapters identically (in `MeaiLlmClient`), ensuring event parity regardless of execution path.
 
 Tool lifecycle events expose `LlmToolCallInfo` through `Info`. It carries `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized arguments, so observers can correlate start/completed/failed events for the exact tool call. The old direct properties remain as accessors for compatibility.
 
@@ -61,8 +68,16 @@ If the game adds a **child** `LifetimeScope` (VContainer parent = `CoreAILifetim
 
 `IConversationContextManager` prepares long chat history before each LLM call. The default `DeterministicConversationContextManager` keeps recent messages in `ChatHistory` and compacts older turns into a `## Conversation Summary` system section using `IConversationSummaryStore`. This keeps long chats within budget without requiring a second model call; projects can replace the manager with an LLM-backed summarizer later.
 
+## Timeout & Retry Rule (v1.5.1)
+
+**Timeout:** enforced exclusively by `CoreAiChatService` via UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). The portable layer (`AiOrchestrator`, `LoggingLlmClientDecorator`) passes `CancellationToken` through without wrapping. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) §8.
+
+**Retries:** network-level retries (HTTP 429, 5xx, exponential backoff) are handled exclusively by `LoggingLlmClientDecorator`. The orchestrator invokes the LLM exactly once per task.
+
+**Error propagation:** `CoreAiChatService` does not swallow exceptions; `CoreAiChatPanel` catches and displays them.
+
 ## WebGL Rule
 
-`LocalModel` cannot use native LLMUnity in WebGL. WebGL projects should use `ServerManagedApi` for production, or `ClientOwnedApi` only for local/dev scenarios where key exposure is acceptable.
+`LocalModel` cannot use native LLMUnity in WebGL. WebGL projects should use `ServerManagedApi` for production, or `ClientOwnedApi` only for local/dev scenarios where key exposure is acceptable. Timeout in WebGL uses `CancelAfterSlim` (UniTask PlayerLoop) — `CancellationTokenSource.CancelAfter` is not functional in Emscripten (v1.5.1 fix).
 
 **VContainer / IL2CPP:** `CoreServicesInstaller` registers **`IAiGameCommandSink`** with an explicit factory so player builds do not require constructor reflection on `MessagePipeAiCommandSink`. The package ships **`link.xml`** at `Assets/CoreAiUnity/link.xml`. EditMode guard: `CoreServicesInstallerEditModeTests`.

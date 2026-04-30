@@ -6,38 +6,44 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using MEAI = Microsoft.Extensions.AI;
+using Newtonsoft.Json;
 
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Кастомный tool-calling цикл: счётчик ОШИБОК сбрасывается при успехе, копится при провале.
-    /// Делегирует duplicate detection, error tracking и notification в <see cref="ToolExecutionPolicy"/>.
+    /// Custom tool-calling loop: error counter resets on success, increments on failure.
+    /// Delegates duplicate detection, error tracking and notification to <see cref="ToolExecutionPolicy"/>.
     /// </summary>
     public sealed class SmartToolCallingChatClient : MEAI.IChatClient
     {
         private readonly MEAI.IChatClient _innerClient;
-        private readonly IGameLogger _logger;
+        private readonly ILog _logger;
         private readonly int _maxConsecutiveErrors;
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<CoreAI.Ai.ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
         private readonly string _roleId;
         private readonly string _traceId;
+        private readonly IToolCallEventPublisher _eventPublisher;
+        private readonly IToolExecutionNotifier _notifier;
 
-        /// <param name="maxConsecutiveErrors">Сколько неудач подряд допустимо до прерывания агента.</param>
-        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3, string traceId = "")
+        /// <param name="maxConsecutiveErrors">How many failures in a row are allowed before aborting.</param>
+        public SmartToolCallingChatClient(MEAI.IChatClient innerClient, ILog logger, ICoreAISettings settings,
+            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3, string traceId = "",
+            IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
             _originalTools = tools ?? new List<CoreAI.Ai.ILlmTool>();
             _roleId = roleId ?? "Unknown";
             _traceId = traceId ?? "";
             _maxConsecutiveErrors = maxConsecutiveErrors;
+            _eventPublisher = eventPublisher ?? NullToolCallEventPublisher.Instance;
+            _notifier = notifier ?? NullToolExecutionNotifier.Instance;
         }
 
         /// <summary>
@@ -58,19 +64,20 @@ namespace CoreAI.Infrastructure.Llm
 
             // Fresh policy per top-level request so duplicates reset between independent calls
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
-                _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId);
+                _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
+                _eventPublisher, _notifier);
 
             try
             {
                 while (true)
                 {
                     iteration++;
-                    await Task.Yield(); // Force async boundary to ensure previous LLMUnity states (like isGenerating) are fully flushed
+                    await Task.Yield(); // Force async boundary to ensure previous states are fully flushed
 
                     if (_settings.LogMeaiToolCallingSteps)
                     {
-                        _logger.LogInfo(GameLogFeature.Llm,
-                            $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}");
+                        _logger.Info(
+                            $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}", LogTag.Llm);
                     }
 
                     MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
@@ -91,13 +98,13 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         string assistantText = ExtractAssistantText(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
-                            MeaiLlmClient.TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText))
+                            TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText))
                         {
                             hasTextExtraction = true;
                             if (_settings.LogMeaiToolCallingSteps)
                             {
-                                _logger.LogInfo(GameLogFeature.Llm,
-                                    $"[SmartToolCall] Iteration {iteration}: extracted {textCalls.Count} text-shaped tool call(s) from assistant text.");
+                                _logger.Info(
+                                    $"[SmartToolCall] Iteration {iteration}: extracted {textCalls.Count} text-shaped tool call(s) from assistant text.", LogTag.Llm);
                             }
                         }
                     }
@@ -108,8 +115,8 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         if (_settings.LogMeaiToolCallingSteps)
                         {
-                            _logger.LogInfo(GameLogFeature.Llm,
-                                $"[SmartToolCall] Iteration {iteration}: Text response, stopping.");
+                            _logger.Info(
+                                $"[SmartToolCall] Iteration {iteration}: Text response, stopping.", LogTag.Llm);
                         }
 
                         return response;
@@ -117,8 +124,8 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (_settings.LogMeaiToolCallingSteps)
                     {
-                        _logger.LogInfo(GameLogFeature.Llm,
-                            $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})");
+                        _logger.Info(
+                            $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})", LogTag.Llm);
                     }
 
                     ToolExecutionPolicy.BatchToolCallResult batch =
@@ -146,6 +153,44 @@ namespace CoreAI.Infrastructure.Llm
             {
                 LastExecutedToolCalls = policy.ExecutedTraces.ToList();
             }
+        }
+
+        /// <summary>
+        /// Extracts tool calls from assistant text using the portable <see cref="LlmToolCallTextExtractor"/>.
+        /// Converts the generic matches into MEAI <see cref="MEAI.FunctionCallContent"/> objects.
+        /// </summary>
+        internal static bool TryExtractToolCallsFromText(
+            string text,
+            out List<MEAI.FunctionCallContent> toolCalls,
+            out string cleanedText)
+        {
+            toolCalls = new List<MEAI.FunctionCallContent>();
+            cleanedText = text ?? string.Empty;
+
+            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches,
+                    out cleanedText))
+            {
+                return false;
+            }
+
+            foreach (LlmToolCallTextExtractor.Match m in matches)
+            {
+                try
+                {
+                    Dictionary<string, object> arguments =
+                        JsonConvert.DeserializeObject<Dictionary<string, object>>(m.ArgumentsJson)
+                        ?? new Dictionary<string, object>();
+
+                    string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
+                    toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
+                }
+                catch
+                {
+                    // skip malformed matches
+                }
+            }
+
+            return toolCalls.Count > 0;
         }
 
         /// <summary>

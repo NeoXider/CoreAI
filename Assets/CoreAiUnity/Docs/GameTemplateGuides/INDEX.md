@@ -5,8 +5,8 @@ Short recipes for games built on the CoreAI template. Normative spec: [DGF_SPEC.
 | Document | Status | Description |
 |----------|--------|-------------|
 | [01_NetworkHostAuthority.md](01_NetworkHostAuthority.md) | draft | DGF §5, DEVELOPER_GUIDE §3, AI_AGENT_ROLES |
-| [02_AiOrchestration.md](02_AiOrchestration.md) | draft | DEVELOPER_GUIDE §3–4, TraceId, LLM decorator, DGF §6 |
-| [03_AgentRolesAndProfiles.md](03_AgentRolesAndProfiles.md) | draft | Links to AI_AGENT_ROLES, prompts, BuiltInAgentRoleIds |
+| [02_AiOrchestration.md](02_AiOrchestration.md) | updated v1.5 | DEVELOPER_GUIDE §3–4, TraceId, LLM decorator, ILog/IToolCallEventPublisher, DGF §6 |
+| [03_AgentRolesAndProfiles.md](03_AgentRolesAndProfiles.md) | updated v1.5 | Links to AI_AGENT_ROLES, prompts, BuiltInAgentRoleIds, MessagePipe tool events |
 | [04_SingleVsMultiplayer.md](04_SingleVsMultiplayer.md) | draft | Single core pipeline, DGF §5 |
 | [05_ReferenceGame.md](05_ReferenceGame.md) | draft | DEVELOPER_GUIDE §8, `_exampleGame`, playbook |
 

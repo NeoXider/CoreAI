@@ -1,6 +1,6 @@
 # TODO — WebGL SSE streaming in `MeaiOpenAiChatClient`
 
-**Status:** Known regression; not scheduled for 0.25.3. An application-side workaround is available.
+**Status:** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). SSE incremental delivery (real streaming chunks in WebGL) remains a known limitation; non-streaming fallback is the recommended path for WebGL builds.
 
 **Affected code:** `Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` → `MeaiOpenAiChatClient.CompleteStreamingAsync` (or equivalent streaming entry point in your tree).
 

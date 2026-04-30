@@ -1,9 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
-using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 
@@ -11,36 +12,28 @@ namespace CoreAI.Tests.EditMode
 {
     public sealed class LoggingLlmClientDecoratorEditModeTests
     {
-        private sealed class SpyLogger : IGameLogger
+        private sealed class SpyLogger : ILog
         {
             public readonly List<string> Lines = new();
 
-            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Debug(string message, string tag = null)
             {
-                Lines.Add($"D:{feature}:{message}");
+                Lines.Add($"D:{tag}:{message}");
             }
 
-            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Info(string message, string tag = null)
             {
-                Lines.Add($"I:{feature}:{message}");
+                Lines.Add($"I:{tag}:{message}");
             }
 
-            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Warn(string message, string tag = null)
             {
-                Lines.Add($"W:{feature}:{message}");
+                Lines.Add($"W:{tag}:{message}");
             }
 
-            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            public void Error(string message, string tag = null)
             {
-                Lines.Add($"E:{feature}:{message}");
-            }
-        }
-
-        private sealed class AllOnSettings : IGameLogSettings
-        {
-            public bool ShouldLog(GameLogFeature feature, GameLogLevel level)
-            {
-                return true;
+                Lines.Add($"E:{tag}:{message}");
             }
         }
 
@@ -97,24 +90,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task Timeout_LogsWarningAndReturnsError()
+        public void CallerCancellation_RethrowsOperationCancelled()
         {
+            // v1.5.1: decorator no longer enforces its own CancelAfter timeout.
+            // Instead, it re-throws OperationCanceledException when the caller's
+            // token is cancelled (timeout is now enforced by CoreAiChatService
+            // via UniTask CancelAfterSlim).
+            //
+            // We pre-cancel the CTS to avoid depending on System.Threading.Timer
+            // (unreliable in Unity EditMode without a SynchronizationContext).
             SpyLogger spy = new();
-            MockLlm inner = new(5000, new LlmCompletionResult { Ok = true, Content = "late" });
-            LoggingLlmClientDecorator dec = new(inner, spy, 0.05f);
+            MockLlm inner = new(0, new LlmCompletionResult { Ok = true, Content = "late" });
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f);
             using CancellationTokenSource cts = new();
+            cts.Cancel(); // pre-cancel — CompleteAsync should throw immediately
             LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Programmer,
                 TraceId = "t-out",
                 UserPayload = "x"
             };
-            LlmCompletionResult r = await dec.CompleteAsync(req, cts.Token);
-            Assert.IsFalse(r.Ok);
-            Assert.IsTrue(r.Error?.Contains("timeout") == true || r.Error?.Contains("Timeout") == true);
-            string joined = string.Join("\n", spy.Lines);
-            StringAssert.Contains("t-out", joined);
-            StringAssert.Contains("LLM ⏱", joined);
+            Assert.CatchAsync<OperationCanceledException>(
+                async () => await dec.CompleteAsync(req, cts.Token));
         }
 
         /// <summary>
