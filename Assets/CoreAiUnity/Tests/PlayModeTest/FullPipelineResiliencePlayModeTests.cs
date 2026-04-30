@@ -36,6 +36,11 @@ namespace CoreAI.Tests.PlayMode
     {
         private TestAgentSetup _setup;
 
+        /// <summary>0 = not probed, 1 = OK, -1 = failed (skip remaining tests quickly).</summary>
+        private static int s_liveLlmProbeState;
+
+        private static string s_liveLlmProbeFailMessage = "";
+
         [UnitySetUp]
         public IEnumerator Setup()
         {
@@ -44,6 +49,15 @@ namespace CoreAI.Tests.PlayMode
             yield return _setup.Initialize();
             if (!_setup.IsReady)
                 Assert.Ignore($"LLM backend not available ({_setup.BackendName}). Skipping.");
+
+            if (_setup.Client is OfflineLlmClient)
+            {
+                Assert.Inconclusive(
+                    "FullPipelineResilience needs HTTP or LLMUnity with a tool-capable model. " +
+                    "OfflineLlmClient does not execute tools.");
+            }
+
+            yield return EnsureLiveLlmReachableOnce();
         }
 
         [UnityTearDown]
@@ -52,6 +66,41 @@ namespace CoreAI.Tests.PlayMode
             _setup?.Dispose();
             LogAssert.ignoreFailingMessages = false;
             yield return null;
+        }
+
+        /// <summary>
+        /// HTTP <see cref="TestAgentSetup"/> leaves <see cref="TestAgentSetup.IsReady"/> true even when the server
+        /// returns 500. One cheap non-stream call marks the whole fixture Inconclusive instead of five red failures.
+        /// </summary>
+        private IEnumerator EnsureLiveLlmReachableOnce()
+        {
+            if (s_liveLlmProbeState == -1)
+                Assert.Inconclusive(s_liveLlmProbeFailMessage);
+            if (s_liveLlmProbeState == 1)
+                yield break;
+
+            var probeRequest = new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "Reply with exactly one word: pong.",
+                UserPayload = "ping",
+                Tools = new List<ILlmTool>()
+            };
+
+            LlmCompletionResult probeResult = null;
+            Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r, CancellationToken.None);
+            yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability");
+
+            if (probeResult == null || !probeResult.Ok || string.IsNullOrWhiteSpace(probeResult.Content))
+            {
+                s_liveLlmProbeState = -1;
+                s_liveLlmProbeFailMessage =
+                    "Live LLM did not return OK text (check CoreAISettings ApiBaseUrl / local server / CORS). " +
+                    $"Probe: {probeResult?.Error ?? "null result"}";
+                Assert.Inconclusive(s_liveLlmProbeFailMessage);
+            }
+
+            s_liveLlmProbeState = 1;
         }
 
         // =====================================================================

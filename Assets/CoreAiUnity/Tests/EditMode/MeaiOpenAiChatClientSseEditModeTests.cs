@@ -50,6 +50,15 @@ namespace CoreAI.Tests.EditMode
             MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
             Assert.AreEqual("a\nb", r.Text);
         }
+
+        [Test]
+        public void ParseCompletion_EmptyContent_UsesReasoningContent_CamelCase()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoningContent\":\"Hello camel\"}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("Hello camel", r.Text);
+        }
     }
 }
 #endif

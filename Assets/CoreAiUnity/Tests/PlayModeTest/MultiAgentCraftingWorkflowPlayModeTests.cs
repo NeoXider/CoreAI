@@ -371,10 +371,17 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("creator", sink);
                     LogAgentMemory(store, "Creator");
 
-                    Assert.IsTrue(
-                        store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState _creatorMemQuick) &&
-                        !string.IsNullOrWhiteSpace(_creatorMemQuick.Memory),
-                        "Creator did not write memory");
+                    bool creatorMemoryOk =
+                        store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorMemQuick) &&
+                        !string.IsNullOrWhiteSpace(creatorMemQuick.Memory);
+
+                    if (!creatorMemoryOk && sink.Items.Count == 0)
+                    {
+                        Assert.Inconclusive(
+                            "Creator: no orchestrator output — check LLM / LM Studio (model reload, load errors).");
+                    }
+
+                    Assert.IsTrue(creatorMemoryOk, "Creator did not write memory");
                 }
 
                 // ===== COREMECHANIC =====
@@ -398,10 +405,19 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("mechanic", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
 
-                    Assert.IsTrue(
-                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState _mechanicMemQuick) &&
-                        !string.IsNullOrWhiteSpace(_mechanicMemQuick.Memory),
-                        "CoreMechanicAI did not write memory");
+                    bool mechanicMemoryOk =
+                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicMemQuick) &&
+                        !string.IsNullOrWhiteSpace(mechanicMemQuick.Memory);
+
+                    if (!mechanicMemoryOk && sink.Items.Count == 0)
+                    {
+                        Assert.Inconclusive(
+                            "CoreMechanic: no orchestrator output — usually local LLM HTTP errors " +
+                            "(e.g. LM Studio \"Model reloaded.\" or model load canceled). Retry when the model is idle.");
+                    }
+
+                    Assert.IsTrue(mechanicMemoryOk,
+                        "CoreMechanicAI did not write memory (model may have skipped the memory tool).");
                 }
 
                 // =====   =====

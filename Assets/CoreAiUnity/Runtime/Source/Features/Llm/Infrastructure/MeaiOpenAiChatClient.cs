@@ -197,7 +197,7 @@ namespace CoreAI.Infrastructure.Llm
                 return "";
 
             if (contentToken.Type == JTokenType.String)
-                return contentToken.ToString();
+                return contentToken.Value<string>() ?? "";
 
             if (contentToken.Type == JTokenType.Array)
             {
@@ -227,14 +227,44 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string ParseAssistantMessageVisibleText(JToken msg)
         {
-            if (msg == null) return "";
+            if (msg == null || msg.Type == JTokenType.Null || msg.Type == JTokenType.Undefined)
+                return "";
 
-            string content = StripRedactedThinkingBlock(ExtractMessageContentString(msg["content"]));
+            if (msg.Type == JTokenType.String)
+                return StripRedactedThinkingBlock(msg.Value<string>() ?? "");
+
+            if (msg.Type != JTokenType.Object)
+                return "";
+
+            JObject m = (JObject)msg;
+
+            string content = StripRedactedThinkingBlock(ExtractMessageContentString(m["content"]));
             if (!string.IsNullOrWhiteSpace(content))
                 return content;
 
-            string reasoning = msg["reasoning_content"]?.ToString() ?? "";
-            return StripRedactedThinkingBlock(reasoning);
+            // OpenAI-style snake_case; some gateways use camelCase. Value<string>() avoids JValue.ToString quirks.
+            foreach (string key in new[] { "reasoning_content", "reasoningContent", "reasoning" })
+            {
+                JToken t = SelectPropertyCaseInsensitive(m, key);
+                if (t == null || t.Type == JTokenType.Null) continue;
+                if (t.Type != JTokenType.String) continue;
+                string reasoning = t.Value<string>() ?? "";
+                reasoning = StripRedactedThinkingBlock(reasoning);
+                if (!string.IsNullOrWhiteSpace(reasoning))
+                    return reasoning;
+            }
+
+            return "";
+        }
+
+        private static JToken SelectPropertyCaseInsensitive(JObject obj, string name)
+        {
+            foreach (JProperty p in obj.Properties())
+            {
+                if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+                    return p.Value;
+            }
+            return null;
         }
 
         internal static MEAI.ChatResponse ParseResponse(string json)
