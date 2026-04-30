@@ -183,7 +183,61 @@ namespace CoreAI.Infrastructure.Llm
             return response;
         }
 
-        private static MEAI.ChatResponse ParseResponse(string json)
+        private static string StripRedactedThinkingBlock(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            return System.Text.RegularExpressions.Regex.Replace(text,
+                @"<think>[\s\S]*?</think>\s*", "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+        }
+
+        private static string ExtractMessageContentString(JToken contentToken)
+        {
+            if (contentToken == null || contentToken.Type == JTokenType.Null)
+                return "";
+
+            if (contentToken.Type == JTokenType.String)
+                return contentToken.ToString();
+
+            if (contentToken.Type == JTokenType.Array)
+            {
+                StringBuilder sb = new();
+                foreach (JToken part in contentToken)
+                {
+                    if (part.Type == JTokenType.String)
+                    {
+                        if (sb.Length > 0) sb.Append('\n');
+                        sb.Append(part.ToString());
+                    }
+                    else if (part is JObject o)
+                    {
+                        string t = o["text"]?.ToString();
+                        if (!string.IsNullOrEmpty(t))
+                        {
+                            if (sb.Length > 0) sb.Append('\n');
+                            sb.Append(t);
+                        }
+                    }
+                }
+                return sb.ToString();
+            }
+
+            return contentToken.ToString();
+        }
+
+        private static string ParseAssistantMessageVisibleText(JToken msg)
+        {
+            if (msg == null) return "";
+
+            string content = StripRedactedThinkingBlock(ExtractMessageContentString(msg["content"]));
+            if (!string.IsNullOrWhiteSpace(content))
+                return content;
+
+            string reasoning = msg["reasoning_content"]?.ToString() ?? "";
+            return StripRedactedThinkingBlock(reasoning);
+        }
+
+        internal static MEAI.ChatResponse ParseResponse(string json)
         {
             try
             {
@@ -195,15 +249,9 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 JToken msg = choices[0]["message"];
-                // reasoning_content (Qwen/LM Studio, OpenAI-совм.) — цепь размышлений; в ответе Assistant используем только content
-                string content = msg?["content"]?.ToString() ?? "";
-
-                // Strip <think>...</think> blocks if any
-                if (!string.IsNullOrEmpty(content))
-                {
-                    content = System.Text.RegularExpressions.Regex.Replace(content, @"<think>[\s\S]*?</think>\s*", "",
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
-                }
+                // Prefer `content`; support multimodal JSON arrays; if still empty, use `reasoning_content`
+                // (some reasoning setups leave `content` blank in non-streaming completions).
+                string content = ParseAssistantMessageVisibleText(msg);
 
                 JArray toolCalls = msg?["tool_calls"] as JArray;
 

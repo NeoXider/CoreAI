@@ -1,10 +1,10 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.7: WebGL — CoreAiChatService marshals to main thread after RunTaskAsync (orchestrator uses ConfigureAwait(false)); CoreAi.AskAsync no longer uses ConfigureAwait(false); SendStreamingAsync switches per chunk + finally on WebGL; RunAgentTurnAsync catch/error paths + explicit PlayerLoopTiming.Update. Prior WebGL chat fixes 1.5.4–1.5.6. Depends on com.nexoider.coreai 1.5.5+.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.8: non-streaming completion — robust assistant text (multimodal content[] + reasoning_content fallback); MeaiLlmClient falls back to ConcatenateAssistantTextContents when ChatResponse.Text is empty; depends on com.nexoider.coreai 1.5.6+. v1.5.7: WebGL main-thread marshaling for chat.",
   "dependencies": {
-    "com.nexoider.coreai": "1.5.5"
+    "com.nexoider.coreai": "1.5.6"
   }
 }

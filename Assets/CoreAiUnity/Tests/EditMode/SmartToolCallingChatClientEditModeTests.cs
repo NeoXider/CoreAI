@@ -46,6 +46,18 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, callCount, "Agent must stop after 3 consecutive errors");
         }
 
+        [Test]
+        public void ConcatenateAssistantTextContents_JoinsMultipleTextParts()
+        {
+            MEAI.ChatMessage msg = new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+            {
+                new MEAI.TextContent("line1"),
+                new MEAI.TextContent("line2")
+            });
+            MEAI.ChatResponse response = new(msg);
+            Assert.AreEqual("line1\nline2", SmartToolCallingChatClient.ConcatenateAssistantTextContents(response));
+        }
+
         /// <summary>
         /// 2 ошибки, потом успех → счётчик сбрасывается.
         /// Затем ещё 3 ошибки подряд → агент прерывается.

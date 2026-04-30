@@ -32,6 +32,24 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(u);
             Assert.AreEqual("out", u.Text);
         }
+
+        [Test]
+        public void ParseCompletion_EmptyContent_UsesReasoningContent()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Hello from reasoning\"}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("Hello from reasoning", r.Text);
+        }
+
+        [Test]
+        public void ParseCompletion_ContentAsTextPartsArray_JoinsText()
+        {
+            const string json =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"a\"},{\"type\":\"text\",\"text\":\"b\"}]}}]}";
+            MEAI.ChatResponse r = MeaiOpenAiChatClient.ParseResponse(json);
+            Assert.AreEqual("a\nb", r.Text);
+        }
     }
 }
 #endif

@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.5.6] — 2026-04-30
+
+### LLM — MEAI assistant text helper
+
+- **`SmartToolCallingChatClient.ConcatenateAssistantTextContents(ChatResponse)`** — joins all **`TextContent`** parts in **`response.Messages`**. Used by **`com.nexoider.coreaiunity`** **`MeaiLlmClient.CompleteAsync`** when **`ChatResponse.Text`** is empty but messages still hold text (provider / MEAI shape differences).
+
+#### Package **`1.5.6`**.
+
 ## [v1.5.5] — 2026-05-01
 
 ### Architecture Refactoring — 3 Improvements

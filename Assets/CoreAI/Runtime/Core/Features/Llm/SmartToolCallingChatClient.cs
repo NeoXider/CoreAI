@@ -96,7 +96,7 @@ namespace CoreAI.Infrastructure.Llm
                     bool hasTextExtraction = false;
                     if (nativeCalls.Count == 0 && (options?.Tools?.Count ?? 0) > 0)
                     {
-                        string assistantText = ExtractAssistantText(response);
+                        string assistantText = ConcatenateAssistantTextContents(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
                             TryExtractToolCallsFromText(assistantText, out textCalls, out cleanedAssistantText))
                         {
@@ -194,10 +194,11 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Concatenates every <see cref="MEAI.TextContent"/> in a non-streaming response into a single string.
-        /// Used by the text-mode tool-call fallback. Returns empty string when the response has no text.
+        /// Concatenates every <see cref="MEAI.TextContent"/> in <paramref name="response"/> messages.
+        /// Use when <see cref="MEAI.ChatResponse.Text"/> is empty but <see cref="MEAI.ChatMessage"/> items
+        /// still carry text (some providers / MEAI versions).
         /// </summary>
-        private static string ExtractAssistantText(MEAI.ChatResponse response)
+        public static string ConcatenateAssistantTextContents(MEAI.ChatResponse response)
         {
             if (response?.Messages == null) return string.Empty;
             System.Text.StringBuilder sb = new();

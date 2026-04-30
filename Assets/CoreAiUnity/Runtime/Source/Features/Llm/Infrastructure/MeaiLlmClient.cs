@@ -212,6 +212,11 @@ namespace CoreAI.Infrastructure.Llm
             string text = response.Text;
             if (string.IsNullOrEmpty(text))
             {
+                text = SmartToolCallingChatClient.ConcatenateAssistantTextContents(response);
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
                 return new LlmCompletionResult
                 {
                     Ok = false,
