@@ -995,6 +995,7 @@ namespace CoreAI.Chat
             }
             catch (OperationCanceledException)
             {
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 FinishStreaming();
                 HideTypingIndicator();
                 if (_stopRequestedByUser)
@@ -1010,6 +1011,7 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 FinishStreaming();
                 Debug.LogError($"[CoreAiChatPanel] Error: {ex.Message}");
                 AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + ex.Message, isUser: false);
@@ -1017,11 +1019,9 @@ namespace CoreAI.Chat
             }
             finally
             {
-                // WebGL / некоторые провайдеры продолжают async после HTTP не на главном потоке;
-                // UI Toolkit не обновляет typing / кнопку без маршалинга.
                 try
                 {
-                    await UniTask.SwitchToMainThread(cancellationToken: CancellationToken.None);
+                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -1094,6 +1094,9 @@ namespace CoreAI.Chat
             {
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
+#if UNITY_WEBGL
+                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, ct);
+#endif
                     if (chunk.IsDone)
                     {
                         _streamTerminalChunkReceived = true;
@@ -1144,12 +1147,24 @@ namespace CoreAI.Chat
                     return null;
                 }
 
+#if UNITY_WEBGL
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, ct);
+#endif
                 OnResponseReceived(fullResponse);
                 OnAiResponseCompleted?.Invoke(fullResponse);
                 return fullResponse;
             }
             finally
             {
+                try
+                {
+                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] SendStreamingAsync finally: SwitchToMainThread: {ex.Message}");
+                }
+
                 FinishStreaming();
                 HideTypingIndicator();
                 _streamTerminalChunkReceived = false;
@@ -1164,7 +1179,7 @@ namespace CoreAI.Chat
             try
             {
                 string response = await _chatService.SendMessageAsync(request, ct);
-                await UniTask.SwitchToMainThread(ct);
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 HideTypingIndicator();
 
                 if (string.IsNullOrEmpty(response))
@@ -1189,7 +1204,7 @@ namespace CoreAI.Chat
             }
             finally
             {
-                await UniTask.SwitchToMainThread(CancellationToken.None);
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 HideTypingIndicator();
             }
         }

@@ -2,6 +2,22 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.7] - 2026-04-30
+
+### WebGL: chat stack main-thread affinity (orchestrator `ConfigureAwait(false)`)
+
+Orchestrator / LLM pipeline resumes on thread-pool continuations in several places. In **WebGL** that can leave **`CoreAiChatPanel`** and **`CoreAi.AskAsync`** callers past `RunTaskAsync` **off** the Unity player loop so logs show `SmartToolCall` complete but **UI Toolkit** never updates.
+
+- **`CoreAiChatService.SendMessageAsync`** — after **`RunTaskAsync`**, **`await UniTask.SwitchToMainThread(PlayerLoopTiming.Update)`** before returning (no-op if already on main thread).
+- **`CoreAi.AskAsync`** — removed **`ConfigureAwait(false)`** so the default sync-context capture applies to Unity-hosted code.
+- **`CoreAiChatPanel.RunAgentTurnAsync`** — **`OperationCanceledException`** / general **`catch`**: **`SwitchToMainThread`** before **`AddMessage`**; **`finally`** uses **`PlayerLoopTiming.Update`** explicitly.
+- **`CoreAiChatPanel.SendNonStreamingAsync`** — **`SwitchToMainThread`** uses **`PlayerLoopTiming.Update`** + **`CancellationToken.None`** for the post-HTTP marshal (avoid spurious cancel while switching); **`finally`** unchanged pattern with explicit timing.
+- **`CoreAiChatPanel.SendStreamingAsync`** — **`#if UNITY_WEBGL`**: **`SwitchToMainThread`** at **each** streamed chunk before UI mutations (and again before **`OnResponseReceived`**); **`finally`** marshals before **`FinishStreaming`** / **`HideTypingIndicator`** (all platforms).
+
+### Meta
+
+- Package **`1.5.7`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+
 ## [1.5.6] - 2026-04-30
 
 ### Fixed / hardening — chat panel main thread (WebGL / async continuations)

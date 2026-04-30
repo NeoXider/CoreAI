@@ -120,6 +120,11 @@ namespace CoreAI.Chat
                 }
 
                 string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
+                // Orchestrator + LLM stack use ConfigureAwait(false); on WebGL (and some player
+                // builds) continuations can otherwise resume without Unity's player loop context,
+                // so UI Toolkit callers see "LLM OK" logs but no bubble. Always marshal back here
+                // (no-op if already on main thread).
+                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
                 return result ?? "";
             }
             finally

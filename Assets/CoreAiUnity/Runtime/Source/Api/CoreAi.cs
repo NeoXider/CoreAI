@@ -83,7 +83,9 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            return await svc.SendMessageAsync(userMessage, roleId, cancellationToken).ConfigureAwait(false);
+            // Do not use ConfigureAwait(false): Unity WebGL may fail to resume on the Unity
+            // synchronization context; chat / UI callers need main-thread affinity.
+            return await svc.SendMessageAsync(userMessage, roleId, cancellationToken);
         }
 
         /// <summary>
