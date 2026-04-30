@@ -4,7 +4,7 @@
 
 ### Resilience: TryRepairToolName + HTTP retry with Retry-After
 
-Two production resilience features inspired by [Kilo (OpenCode)](https://github.com/nicholasgriffintn/kilo).
+Two production resilience features for robust LLM orchestration.
 
 - ✨ **`ToolExecutionPolicy.TryRepairToolName`** — case-insensitive tool name repair before `AIFunction` resolution. Model writes `MEMORY` → system silently maps to `memory`. Empty tool list → passthrough (backwards compatible). Unknown tool → structured error with available names for self-correction.
 - ✨ **`LoggingLlmClientDecorator` HTTP retry** — retries `RateLimited` (429) and `BackendUnavailable` (5xx) with `Retry-After` header or exponential backoff (2s→4s→8s→16s→30s cap). `maxHttpRetryAttempts` injected from `ICoreAISettings.MaxLlmRequestRetries`.

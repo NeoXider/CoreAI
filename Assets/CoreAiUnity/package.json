@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: unified MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode, per-agent MaxOutputTokens, TryRepairToolName, HTTP retry with Retry-After. Depends on com.nexoider.coreai 1.4.0+.",
+  "description": "Unity layer for CoreAI: unified MEAI pipeline, CoreAISettingsAsset, LLM backend switching, WorldCommand tool, CoreAi singleton API, Control API (StopAgent, ClearContext, OnToolExecuted), ForcedToolMode, per-agent MaxOutputTokens, TryRepairToolName, HTTP retry with Retry-After, memory store propagation fix for HTTP modes. Depends on com.nexoider.coreai 1.4.0+.",
   "dependencies": {
     "com.nexoider.coreai": "1.4.0"
   }

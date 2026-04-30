@@ -2,11 +2,21 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.4.1] - 2026-04-30
+
+### 🐛 Fix: `IAgentMemoryStore` not propagated to HTTP clients
+
+- **`LlmPipelineInstaller.BuildHttpClient`** — now accepts and forwards `IAgentMemoryStore` to `OpenAiChatLlmClient` and `ServerManagedLlmClient`.
+- **Root cause:** `BuildHttpClient` was called without `memoryStore` in all HTTP execution modes (`ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, and `Auto` HTTP fallback). The memory tool's `AIFunction` was never bound in `MeaiLlmClient`, causing tool calls to `memory` to be silently stripped from streaming output.
+- **Impact:** `memory` tool now works correctly in all LLM execution modes, not just `LocalModel`.
+- **`TryResolveHttpApiClient`** — also updated to propagate `memoryStore`.
+- **Test:** `LlmPipelineInstallerEditModeTests.BuildHttpClient_PassesMemoryStore_ToOpenAiChatLlmClient`.
+
 ## [1.4.0] - 2026-04-30
 
 ### 🛡️ Resilience: HTTP retry with Retry-After + exponential backoff
 
-Inspired by [Kilo (OpenCode)](https://github.com/nicholasgriffintn/kilo) `retry.ts` — production-grade HTTP retry at the transport layer, independent of the tool-calling retry loop.
+Production-grade HTTP retry at the transport layer, independent of the tool-calling retry loop.
 
 - **`MeaiOpenAiChatClient.BuildHttpException`** — parses `Retry-After-Ms` header (millisecond precision, used by Azure / LiteLLM) with priority over `Retry-After` (seconds). Both convert to `LlmClientException.RetryAfterSeconds`.
 - **`LoggingLlmClientDecorator`** — new retry loop for `RateLimited` (429) and `BackendUnavailable` (5xx):
@@ -18,7 +28,7 @@ Inspired by [Kilo (OpenCode)](https://github.com/nicholasgriffintn/kilo) `retry.
 
 ### 🔧 Resilience: TryRepairToolName — automatic tool name casing repair
 
-Inspired by Kilo's `experimental_repairToolCall` hook — model writes `MEMORY` instead of `memory`, system silently fixes it before execution.
+Automatic tool name casing repair — model writes `MEMORY` instead of `memory`, system silently fixes it before execution.
 
 - **`ToolExecutionPolicy.TryRepairToolName`** — case-insensitive lookup among registered `ILlmTool` names. Returns a new `FunctionCallContent` with the corrected name, or `null` if the tool is genuinely unknown.
 - Called in `ExecuteSingleAsync` before `AIFunction` resolution — completely transparent to calling code.

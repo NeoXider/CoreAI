@@ -86,7 +86,7 @@ namespace CoreAI.Composition
             LlmExecutionMode webGlMode = settings != null ? settings.ExecutionMode : LlmExecutionMode.Auto;
             if (IsHttpMode(webGlMode))
             {
-                return BuildHttpClient(settings, webGlMode);
+                return BuildHttpClient(settings, webGlMode, memoryStore);
             }
 
             if (webGlMode == LlmExecutionMode.Offline)
@@ -94,7 +94,7 @@ namespace CoreAI.Composition
                 return BuildOfflineClient(settings);
             }
 
-            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto) ?? BuildOfflineClient(settings);
+            return TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore) ?? BuildOfflineClient(settings);
 #endif
 #if COREAI_NO_LLM
             if (settings != null && settings.ExecutionMode == LlmExecutionMode.Offline)
@@ -111,7 +111,7 @@ namespace CoreAI.Composition
                     case LlmExecutionMode.ClientOwnedApi:
                     case LlmExecutionMode.ClientLimited:
                     case LlmExecutionMode.ServerManagedApi:
-                        return BuildHttpClient(settings, settings.ExecutionMode);
+                        return BuildHttpClient(settings, settings.ExecutionMode, memoryStore);
                     case LlmExecutionMode.Offline:
                         return BuildOfflineClient(settings);
                     case LlmExecutionMode.Auto:
@@ -137,14 +137,14 @@ namespace CoreAI.Composition
         {
 #if UNITY_WEBGL
             // WebGL: try HTTP only, otherwise Offline.
-            ILlmClient http = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
+            ILlmClient http = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
             return http ?? BuildOfflineClient(settings);
 #else
             bool httpFirst = settings != null && settings.AutoPriority == LlmAutoPriority.HttpFirst;
 
             if (httpFirst)
             {
-                ILlmClient httpClient = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
+                ILlmClient httpClient = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
                 if (httpClient != null) return httpClient;
 
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
@@ -157,7 +157,7 @@ namespace CoreAI.Composition
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
                 if (llmUnityClient != null) return llmUnityClient;
 
-                ILlmClient httpClient2 = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto);
+                ILlmClient httpClient2 = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
                 if (httpClient2 != null) return httpClient2;
 
                 return BuildOfflineClient(settings);
@@ -165,7 +165,7 @@ namespace CoreAI.Composition
 #endif
         }
 
-        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode)
+        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode, IAgentMemoryStore memoryStore = null)
         {
 #if COREAI_NO_LLM
             return null;
@@ -173,14 +173,14 @@ namespace CoreAI.Composition
             if (settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
                 !string.IsNullOrEmpty(settings.ModelName))
             {
-                return BuildHttpClient(settings, mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode);
+                return BuildHttpClient(settings, mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode, memoryStore);
             }
 
             return null;
 #endif
         }
 
-        internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode)
+        internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode, IAgentMemoryStore memoryStore = null)
         {
 #if COREAI_NO_LLM
             return new StubLlmClient();
@@ -190,10 +190,11 @@ namespace CoreAI.Composition
                 return new ServerManagedLlmClient(
                     new ServerManagedCoreSettingsAdapter(settings),
                     settings,
-                    GameLoggerUnscopedFallback.Instance);
+                    GameLoggerUnscopedFallback.Instance,
+                    memoryStore);
             }
 
-            ILlmClient client = new OpenAiChatLlmClient(settings);
+            ILlmClient client = new OpenAiChatLlmClient(settings, memoryStore);
             return mode == LlmExecutionMode.ClientLimited
                 ? new ClientLimitedLlmClientDecorator(
                     client,
