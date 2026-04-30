@@ -216,11 +216,27 @@ namespace CoreAI.Infrastructure.Llm
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Streaming pass-through. Tool calling is NOT supported in streaming mode —
+        /// native FunctionCallContent in stream updates will pass through unexecuted.
+        /// When tools are present, callers should prefer non-streaming
+        /// (<see cref="GetResponseAsync"/>) or enforce non-streaming at the orchestrator level.
+        /// </summary>
         public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            // BUG-8: warn when streaming is used with tools — the tool-calling loop,
+            // duplicate detection, and consecutive error protection are bypassed.
+            if (options?.Tools != null && options.Tools.Count > 0)
+            {
+                _logger.Warn(
+                    $"[SmartToolCall] ⚠ Streaming requested with {options.Tools.Count} tool(s) active. " +
+                    "Tool calling loop is NOT supported in streaming mode — tool calls will pass through unexecuted. " +
+                    "Consider using non-streaming mode when tools are registered.", LogTag.Llm);
+            }
+
             await foreach (MEAI.ChatResponseUpdate u in _innerClient.GetStreamingResponseAsync(chatMessages, options,
                                cancellationToken))
             {

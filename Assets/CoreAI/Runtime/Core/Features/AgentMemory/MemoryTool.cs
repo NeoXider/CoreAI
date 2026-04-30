@@ -38,7 +38,9 @@ namespace CoreAI.Ai
         }
 
 
-        public async Task<string> ExecuteAsync(
+        // BUG-7 fix: method is fully synchronous — removed async keyword to avoid
+        // generating an unnecessary state machine. Returns Task.FromResult directly.
+        public Task<string> ExecuteAsync(
             string action,
             string? content = null,
             CancellationToken cancellationToken = default)
@@ -56,7 +58,7 @@ namespace CoreAI.Ai
 
             if (string.IsNullOrEmpty(action))
             {
-                return SerializeResult(new MemoryResult { Success = false, Error = "Action is required" });
+                return Task.FromResult(SerializeResult(new MemoryResult { Success = false, Error = "Action is required" }));
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -68,8 +70,8 @@ namespace CoreAI.Ai
                     case "write":
                         if (string.IsNullOrEmpty(content))
                         {
-                            return SerializeResult(new MemoryResult
-                                { Success = false, Error = "Content is required for write action" });
+                            return Task.FromResult(SerializeResult(new MemoryResult
+                                { Success = false, Error = "Content is required for write action" }));
                         }
 
                         // Записываем память (полная замена)
@@ -81,17 +83,17 @@ namespace CoreAI.Ai
                                 LogTag.Memory);
                         }
 
-                        return SerializeResult(new MemoryResult
+                        return Task.FromResult(SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"DONE: Memory saved for {_roleId}."
-                        });
+                        }));
 
                     case "append":
                         if (string.IsNullOrEmpty(content))
                         {
-                            return SerializeResult(new MemoryResult
-                                { Success = false, Error = "Content is required for append action" });
+                            return Task.FromResult(SerializeResult(new MemoryResult
+                                { Success = false, Error = "Content is required for append action" }));
                         }
 
                         string currentState = _store.TryLoad(_roleId, out AgentMemoryState existing)
@@ -102,12 +104,12 @@ namespace CoreAI.Ai
                         // Это защищает от зацикливания tool call в FunctionInvokingChatClient
                         if (currentState.Contains(content, StringComparison.OrdinalIgnoreCase))
                         {
-                            return SerializeResult(new MemoryResult
+                            return Task.FromResult(SerializeResult(new MemoryResult
                             {
                                 Success = true,
                                 Message =
                                     $"Content already exists in memory for role: {_roleId}. Continue with your task."
-                            });
+                            }));
                         }
 
                         string newMemory = string.IsNullOrEmpty(currentState)
@@ -122,11 +124,11 @@ namespace CoreAI.Ai
                                 LogTag.Memory);
                         }
 
-                        return SerializeResult(new MemoryResult
+                        return Task.FromResult(SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"DONE: Content appended to memory for {_roleId}."
-                        });
+                        }));
 
                     case "clear":
                         _store.Clear(_roleId);
@@ -137,18 +139,18 @@ namespace CoreAI.Ai
                                 LogTag.Memory);
                         }
 
-                        return SerializeResult(new MemoryResult
+                        return Task.FromResult(SerializeResult(new MemoryResult
                         {
                             Success = true,
                             Message = $"DONE: Memory cleared for {_roleId}."
-                        });
+                        }));
 
                     default:
-                        return SerializeResult(new MemoryResult
+                        return Task.FromResult(SerializeResult(new MemoryResult
                         {
                             Success = false,
                             Error = $"Unknown action: '{action}'. Valid actions: write, append, clear"
-                        });
+                        }));
                 }
             }
             catch (Exception ex)
@@ -158,11 +160,11 @@ namespace CoreAI.Ai
                     Log.Instance.Error($"[Tool Call] memory: FAILED - {ex.Message}", LogTag.Memory);
                 }
 
-                return SerializeResult(new MemoryResult
+                return Task.FromResult(SerializeResult(new MemoryResult
                 {
                     Success = false,
                     Error = $"Memory operation failed: {ex.Message}"
-                });
+                }));
             }
         }
 

@@ -10,17 +10,21 @@ namespace CoreAI.Ai
     /// <summary>
     /// Ограничение параллелизма, приоритет очереди и отмена предыдущей задачи с тем же <see cref="AiTaskRequest.CancellationScope"/>.
     /// </summary>
-    public sealed class QueuedAiOrchestrator : IAiOrchestrationService
+    public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
         private readonly int _maxConcurrent;
-        private readonly object _queueLock = new();
+
+        // BUG-1 fix: single lock for both queue and scope operations to eliminate deadlock risk.
+        // Previously _scopeLock was nested inside _queueLock in some paths but taken independently
+        // in ReleaseScopeToken, creating an inconsistent lock ordering hazard.
+        private readonly object _lock = new();
         private readonly List<WorkItem> _pending = new();
         private readonly List<StreamWorkItem> _streamPending = new();
-        private readonly object _scopeLock = new();
         private readonly Dictionary<string, CancellationTokenSource> _scopeTokens = new(StringComparer.Ordinal);
         private int _inFlight;
         private long _nextSequence;
+        private bool _disposed;
 
         /// <param name="inner">Фактический оркестратор (обычно <see cref="AiOrchestrator"/>).</param>
         /// <param name="options">Лимит параллелизма и пр.</param>
@@ -172,7 +176,7 @@ namespace CoreAI.Ai
             {
                 ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
 
-                lock (_queueLock)
+                lock (_lock)
                 {
                     _inFlight--;
                     TryPumpLocked();
@@ -208,7 +212,7 @@ namespace CoreAI.Ai
             {
                 ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
 
-                lock (_queueLock)
+                lock (_lock)
                 {
                     _inFlight--;
                     TryPumpLocked();
@@ -249,29 +253,27 @@ namespace CoreAI.Ai
             List<StreamWorkItem> removedStreamPending = null;
             CancellationTokenSource activeToCancel = null;
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 removedPending = _pending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
                 removedStreamPending = _streamPending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
                 _pending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
                 _streamPending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
 
-                lock (_scopeLock)
+                if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
                 {
-                    if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
-                    {
-                        activeToCancel = prev;
-                        _scopeTokens.Remove(scopeKey);
-                    }
+                    activeToCancel = prev;
+                    _scopeTokens.Remove(scopeKey);
                 }
             }
 
-            activeToCancel?.Cancel();
+            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose from ReleaseScopeToken.
+            SafeCancel(activeToCancel);
 
             // 3. Завершаем удалённые pending-задачи, чтобы вызывающий не висел в ожидании.
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 TryPumpLocked();
             }
@@ -318,7 +320,7 @@ namespace CoreAI.Ai
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 _pending.Add(work);
                 if (!string.IsNullOrEmpty(scopeKey))
@@ -326,15 +328,12 @@ namespace CoreAI.Ai
                     work.ScopeKey = scopeKey;
                     work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
 
-                    lock (_scopeLock)
+                    if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
                     {
-                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
-                        {
-                            activeToCancel = prev;
-                        }
-
-                        _scopeTokens[scopeKey] = work.ScopeCancellation;
+                        activeToCancel = prev;
                     }
+
+                    _scopeTokens[scopeKey] = work.ScopeCancellation;
 
                     removedPending = _pending.FindAll(w =>
                         !ReferenceEquals(w, work) &&
@@ -352,10 +351,11 @@ namespace CoreAI.Ai
                 _pending.Sort(CompareWorkItems);
             }
 
-            activeToCancel?.Cancel();
+            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
+            SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 TryPumpLocked();
             }
@@ -376,7 +376,7 @@ namespace CoreAI.Ai
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 _streamPending.Add(work);
                 if (!string.IsNullOrEmpty(scopeKey))
@@ -384,15 +384,12 @@ namespace CoreAI.Ai
                     work.ScopeKey = scopeKey;
                     work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
 
-                    lock (_scopeLock)
+                    if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
                     {
-                        if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
-                        {
-                            activeToCancel = prev;
-                        }
-
-                        _scopeTokens[scopeKey] = work.ScopeCancellation;
+                        activeToCancel = prev;
                     }
+
+                    _scopeTokens[scopeKey] = work.ScopeCancellation;
 
                     removedPending = _pending.FindAll(w =>
                         string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
@@ -410,10 +407,11 @@ namespace CoreAI.Ai
                 _streamPending.Sort(CompareStreamWorkItems);
             }
 
-            activeToCancel?.Cancel();
+            // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
+            SafeCancel(activeToCancel);
             CancelRemovedPending(removedPending, removedStreamPending);
 
-            lock (_queueLock)
+            lock (_lock)
             {
                 TryPumpLocked();
             }
@@ -422,7 +420,7 @@ namespace CoreAI.Ai
         private void CancelPending(WorkItem work)
         {
             bool removed;
-            lock (_queueLock)
+            lock (_lock)
             {
                 removed = _pending.Remove(work);
             }
@@ -437,7 +435,7 @@ namespace CoreAI.Ai
         private void CancelPending(StreamWorkItem work)
         {
             bool removed;
-            lock (_queueLock)
+            lock (_lock)
             {
                 removed = _streamPending.Remove(work);
             }
@@ -476,6 +474,9 @@ namespace CoreAI.Ai
             }
         }
 
+        /// <summary>
+        /// BUG-1 fix: uses the single <see cref="_lock"/> instead of the removed _scopeLock.
+        /// </summary>
         private void ReleaseScopeToken(string scopeKey, CancellationTokenSource scopeCancellation)
         {
             if (string.IsNullOrEmpty(scopeKey) || scopeCancellation == null)
@@ -483,7 +484,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            lock (_scopeLock)
+            lock (_lock)
             {
                 if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource cur) &&
                     ReferenceEquals(cur, scopeCancellation))
@@ -492,7 +493,27 @@ namespace CoreAI.Ai
                 }
             }
 
-            scopeCancellation.Dispose();
+            SafeDispose(scopeCancellation);
+        }
+
+        /// <summary>
+        /// BUG-2 fix: Cancel a CTS that may have already been disposed by a concurrent ReleaseScopeToken.
+        /// </summary>
+        private static void SafeCancel(CancellationTokenSource cts)
+        {
+            if (cts == null) return;
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { /* already disposed by ReleaseScopeToken — benign */ }
+        }
+
+        /// <summary>
+        /// Safe dispose that swallows ObjectDisposedException (double-dispose guard).
+        /// </summary>
+        private static void SafeDispose(CancellationTokenSource cts)
+        {
+            if (cts == null) return;
+            try { cts.Dispose(); }
+            catch (ObjectDisposedException) { /* already disposed — benign */ }
         }
 
         private static async IAsyncEnumerable<LlmStreamChunk> ReadStreamingQueue(AsyncChunkQueue queue)
@@ -506,6 +527,28 @@ namespace CoreAI.Ai
                 }
 
                 yield return chunk;
+            }
+        }
+
+        /// <summary>
+        /// ARCH-5: Disposes all outstanding scope CancellationTokenSources.
+        /// Safe to call multiple times.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            List<CancellationTokenSource> toDispose;
+            lock (_lock)
+            {
+                toDispose = new List<CancellationTokenSource>(_scopeTokens.Values);
+                _scopeTokens.Clear();
+            }
+
+            foreach (CancellationTokenSource cts in toDispose)
+            {
+                SafeDispose(cts);
             }
         }
 

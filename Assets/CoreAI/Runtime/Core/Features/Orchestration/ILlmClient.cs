@@ -272,7 +272,9 @@ namespace CoreAI.Ai
         /// в UI окажется «невидимым» и пользователь увидит ответ одномоментно.
         /// </para>
         /// </summary>
-#if UNITY_2021_3_OR_NEWER
+        // ARCH-7: Removed stale #if UNITY_2021_3_OR_NEWER guard — the package minimum
+        // is Unity 6000.0 which fully supports C# 8 DIM and IAsyncEnumerable.
+        // The DIM fallback is now unconditionally available for non-Unity .NET hosts and test runners.
         virtual async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
@@ -314,6 +316,5 @@ namespace CoreAI.Ai
                 Model = result.Model
             };
         }
-#endif
     }
 }

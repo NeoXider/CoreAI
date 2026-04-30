@@ -78,16 +78,20 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. Sell weapons and remember purchases.")
     .WithTool(new InventoryLlmTool(myInventory))  // Знает свой ассортимент
     .WithMemory()                                  // Помнит покупателей
-    .Build();
+    .Build();                                      // → AgentConfig (чертеж в памяти)
 
+// Подключает чертёж к глобальной политике (её создаёт CoreAILifetimeScope при старте).
+// Оркестратор ищет инструменты и системный промпт по RoleId ("Blacksmith") в этой политике.
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
-// Вызови агента — одна строка, никакого бойлерплейта:
+// Ask* идут через CoreAIAgent.Orchestrator — нужен Play и сцена с CoreAILifetimeScope.
 merchant.Ask("Покажи мечи");
-
-// Или с callback:
 merchant.Ask("Покажи мечи", (response) => Debug.Log(response));
 ```
+
+- **`Build()`** — даёт `AgentConfig` (id роли, тулы, промпты). Сам по себе рантайм о нём не знает.
+- **`ApplyToPolicy(CoreAIAgent.Policy)`** — регистрирует роль в живой `AgentMemoryPolicy`, чтобы **`RunTask`/маршрутизация тулов** видела твой `InventoryLlmTool` и слитый промпт для `"Blacksmith"`. Без этого роль — просто строка без стека.
+- **`Ask` / `AskAsync`** — обёртка над **`CoreAIAgent.Orchestrator`** (`AiTaskRequest` с `RoleId` из конфига). То же, что взять **`IAiOrchestrationService`** из DI — см. [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 
 **3 режима агентов:**
 - 🛒 **ToolsAndChat** — вызывает инструменты И отвечает текстом (Merchant, Crafter, Advisor)

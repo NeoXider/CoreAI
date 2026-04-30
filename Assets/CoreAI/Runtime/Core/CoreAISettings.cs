@@ -9,12 +9,21 @@ namespace CoreAI
     /// </summary>
     public static class CoreAISettings
     {
+        // ARCH-1 fix: lock protects ResetOverrides atomicity and Instance assignment
+        // so parallel test runners or async continuations don't see partial state.
+        private static readonly object _lock = new();
+
         /// <summary>
         /// DI-зарегистрированный экземпляр настроек.
         /// Устанавливается из <c>CoreAILifetimeScope</c> при старте, либо вручную из теста.
         /// Если null — используются значения по умолчанию.
         /// </summary>
-        public static ICoreAISettings Instance { get; set; }
+        public static ICoreAISettings Instance
+        {
+            get { lock (_lock) return _instance; }
+            set { lock (_lock) _instance = value; }
+        }
+        private static ICoreAISettings _instance;
 
         #region Override storage (nullable — null means "use Instance")
 
@@ -289,26 +298,29 @@ namespace CoreAI
         /// </summary>
         public static void ResetOverrides()
         {
-            _maxLuaRepairRetries = null;
-            _enableMeaiDebugLogging = null;
-            _llmRequestTimeoutSeconds = null;
-            _maxLlmRequestRetries = null;
-            _enableHttpDebugLogging = null;
-            _logTokenUsage = null;
-            _logLlmLatency = null;
-            _logLlmConnectionErrors = null;
-            _contextWindowTokens = null;
-            _universalSystemPromptPrefix = null;
-            _universalSystemPromptPrefixSet = false;
-            _temperature = null;
-            _maxToolCallRetries = null;
-            _logToolCalls = null;
-            _logToolCallArguments = null;
-            _logToolCallResults = null;
-            _logMeaiToolCallingSteps = null;
-            _allowDuplicateToolCalls = null;
-            _enableStreaming = null;
-            _enableLlmContextCompaction = null;
+            lock (_lock)
+            {
+                _maxLuaRepairRetries = null;
+                _enableMeaiDebugLogging = null;
+                _llmRequestTimeoutSeconds = null;
+                _maxLlmRequestRetries = null;
+                _enableHttpDebugLogging = null;
+                _logTokenUsage = null;
+                _logLlmLatency = null;
+                _logLlmConnectionErrors = null;
+                _contextWindowTokens = null;
+                _universalSystemPromptPrefix = null;
+                _universalSystemPromptPrefixSet = false;
+                _temperature = null;
+                _maxToolCallRetries = null;
+                _logToolCalls = null;
+                _logToolCallArguments = null;
+                _logToolCallResults = null;
+                _logMeaiToolCallingSteps = null;
+                _allowDuplicateToolCalls = null;
+                _enableStreaming = null;
+                _enableLlmContextCompaction = null;
+            }
         }
     }
 }

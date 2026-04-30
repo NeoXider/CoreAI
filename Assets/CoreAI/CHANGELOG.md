@@ -1,5 +1,63 @@
 # Changelog
 
+## [v1.5.5] — 2026-05-01
+
+### Architecture Refactoring — 3 Improvements
+
+Continuation of the v1.5.4 audit. Addresses remaining deferred items: code deduplication, stale preprocessor guards, and orchestrator decomposition.
+
+#### ARCH-6: Request Builder Extraction
+
+- 🏗 **`AiOrchestrator.BuildCompletionRequest`** — extracted `LlmCompletionRequest` construction into a single private method. Eliminates 3x copy-paste between `RunTaskAsync` (main invocation), `RunTaskAsync` (structured retry), and `RunStreamingAsync`. Adding a new field to `LlmCompletionRequest` now requires updating exactly one method instead of three.
+
+#### ARCH-7: Remove Stale `#if UNITY` from Portable Interfaces
+
+- 🏗 **`ILlmClient.CompleteStreamingAsync`** — removed `#if UNITY_2021_3_OR_NEWER` guard around the Default Interface Method (DIM) fallback. The package minimum is `unity: 6000.0` which fully supports C# 8 DIM and `IAsyncEnumerable`. The streaming interface is now unconditionally available for non-Unity .NET test runners and pure .NET hosts.
+- 🏗 **`IAiOrchestrationService.RunStreamingAsync`** — same removal of stale `#if UNITY_2021_3_OR_NEWER` guard.
+
+#### ARCH-3 (partial): Post-Processing Extraction
+
+- 🏗 **`AiOrchestrator.SanitizeAndPublish`** — extracted shared post-processing logic into a single private method: tool-call JSON sanitization (defense-in-depth strip), chat history persistence (`AppendChatMessage`), and game command publishing (`ApplyAiGameCommand`). Both `RunTaskAsync` and `RunStreamingAsync` now call this method instead of duplicating ~35 lines each.
+
+#### Metrics
+
+| Metric | Before | After |
+|--------|--------|-------|
+| `AiOrchestrator.cs` lines | 803 | 751 |
+| `LlmCompletionRequest` construction sites | 3 | 1 |
+| Post-processing duplication sites | 2 | 1 |
+| `#if UNITY` in portable Core | 2 | 0 |
+
+#### Package **`1.5.5`**.
+
+## [v1.5.4] — 2026-05-01
+
+### Comprehensive Audit — 8 Bug Fixes + 6 Architectural Improvements
+
+Full code audit of CoreAI.Core covering orchestration, LLM pipeline, tool calling, memory, routing, streaming, and sandbox subsystems.
+
+#### Bug Fixes
+
+- 🐛 **BUG-1: `QueuedAiOrchestrator` deadlock risk** — merged `_scopeLock` into `_queueLock` (now a single `_lock`) to eliminate inconsistent lock ordering between `CancelTasks`/`Enqueue` (which nested `_scopeLock` inside `_queueLock`) and `ReleaseScopeToken` (which took `_scopeLock` independently).
+- 🐛 **BUG-2: CTS Dispose-after-Cancel race** — `activeToCancel?.Cancel()` in `QueuedAiOrchestrator.Enqueue` and `CancelTasks` now guarded with `SafeCancel` (catches `ObjectDisposedException`) to handle the race with concurrent `ReleaseScopeToken.Dispose()`.
+- 🐛 **BUG-3: `ClientLimitedLlmClientDecorator` counter drift** — `_requestCount` now decrements back when the limit is exceeded, so rejected requests don't permanently consume quota.
+- 🐛 **BUG-4: `InGameLlmChatService` orphan responses** — split single `_lock` into `_historyLock` and `_rateLock`. History snapshot and append are atomic relative to `ClearHistory()`. Rate limiting no longer contends with history operations.
+- 🐛 **BUG-5: `ToolExecutionPolicy` false positive tool failures** — replaced `string.Contains("\"Success\":false")` with `JObject.Parse`-based detection via `IsToolResultSuccess()`. Falls back to string heuristic only for non-JSON results.
+- 🐛 **BUG-6: `LlmToolCallTextExtractor.StripCodeBlocks` offset safety** — added `Debug.Assert(result.Length == text.Length)` to catch offset desync if regex behavior changes.
+- 🐛 **BUG-7: `MemoryTool.ExecuteAsync` unnecessary state machine** — removed `async` keyword from fully synchronous method. Returns `Task.FromResult` directly, eliminating overhead.
+- 🐛 **BUG-8: `SmartToolCallingChatClient` streaming tool-calling bypass** — added runtime warning log when streaming is used with registered tools. Documents that tool-calling loop, duplicate detection, and consecutive error protection are bypassed in streaming mode.
+
+#### Architectural Improvements
+
+- 🏗 **ARCH-1: `CoreAISettings` thread safety** — added `_lock` around `Instance` getter/setter and `ResetOverrides()` to prevent torn reads from parallel test runners or async continuations.
+- 🏗 **ARCH-2: `CoreAIAgent` thread safety** — static properties now backed by `volatile` fields to prevent torn reads when `Initialize` is called from Unity main thread and properties are accessed from ThreadPool continuations.
+- 🏗 **ARCH-4: `AgentMemoryPolicy` thread safety** — added `_lock` to all dictionary/set operations (`_roleConfigs`, `_customTools`, `_runtimeContextProviders`, `_additionalSystemPrompts`, `_overrideUniversalPrefix`, `_streamingOverrides`). Prevents dictionary corruption from concurrent coroutine/async access.
+- 🏗 **ARCH-5: `QueuedAiOrchestrator` `IDisposable`** — implements `IDisposable` to clean up `CancellationTokenSource` objects in `_scopeTokens` on shutdown. Safe for double-dispose.
+- 🏗 **ARCH-9: `InMemoryAiOrchestrationMetrics` bounded storage** — added `MaxRoles = 256` cap with least-used eviction to prevent unbounded per-role dictionary growth from dynamically generated roleIds.
+- 📝 **TODO.md** — updated version header, marked 4 completed items from this audit.
+
+#### Package **`1.5.4`**.
+
 ## [v1.5.3] — 2026-04-30
 
 ### LLM-assisted context compaction (portable)

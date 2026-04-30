@@ -13,6 +13,9 @@ namespace CoreAI.Ai
         private readonly Dictionary<string, RoleMetrics> _perRole = new(StringComparer.Ordinal);
         private DateTime _lastSuccessUtc = DateTime.UtcNow;
 
+        // ARCH-9: cap per-role dictionary to prevent unbounded growth from dynamic roleIds.
+        private const int MaxRoles = 256;
+
         /// <summary>Общее число completion запросов.</summary>
         public int TotalCompletions { get; private set; }
 
@@ -136,6 +139,23 @@ namespace CoreAI.Ai
             roleId ??= "";
             if (!_perRole.TryGetValue(roleId, out RoleMetrics rm))
             {
+                // ARCH-9: evict the least-used entry when cap is reached.
+                if (_perRole.Count >= MaxRoles)
+                {
+                    string evictKey = null;
+                    int minCompletions = int.MaxValue;
+                    foreach (KeyValuePair<string, RoleMetrics> kvp in _perRole)
+                    {
+                        if (kvp.Value.Completions < minCompletions)
+                        {
+                            minCompletions = kvp.Value.Completions;
+                            evictKey = kvp.Key;
+                        }
+                    }
+
+                    if (evictKey != null) _perRole.Remove(evictKey);
+                }
+
                 rm = new RoleMetrics(roleId);
                 _perRole[roleId] = rm;
             }

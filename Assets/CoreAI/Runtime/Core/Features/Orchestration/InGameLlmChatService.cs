@@ -17,7 +17,8 @@ namespace CoreAI.Ai
         private readonly IAgentSystemPromptProvider _systemPrompts;
         private readonly List<(string Role, string Text)> _turns = new();
         private readonly int _maxMessages;
-        private readonly object _lock = new();
+        private readonly object _historyLock = new();
+        private readonly object _rateLock = new();
 
         // Rate limiter
         private readonly int _maxRequestsPerWindow;
@@ -51,7 +52,7 @@ namespace CoreAI.Ai
         {
             get
             {
-                lock (_lock)
+                lock (_historyLock)
                 {
                     return _turns.Count / 2;
                 }
@@ -61,7 +62,7 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public void ClearHistory()
         {
-            lock (_lock)
+            lock (_historyLock)
             {
                 _turns.Clear();
             }
@@ -92,9 +93,12 @@ namespace CoreAI.Ai
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
-            List<Microsoft.Extensions.AI.ChatMessage> history = new();
-            lock (_lock)
+            // BUG-4 fix: snapshot history under lock, release during LLM call,
+            // then re-acquire to append the response atomically.
+            List<Microsoft.Extensions.AI.ChatMessage> history;
+            lock (_historyLock)
             {
+                history = new List<Microsoft.Extensions.AI.ChatMessage>(_turns.Count + 1);
                 foreach ((string role, string text) in _turns)
                 {
                     ChatRole chatRole = role == "User"
@@ -118,7 +122,7 @@ namespace CoreAI.Ai
 
             if (result.Ok && !string.IsNullOrEmpty(result.Content))
             {
-                lock (_lock)
+                lock (_historyLock)
                 {
                     _turns.Add(("User", message.Trim()));
                     _turns.Add(("Assistant", result.Content.Trim()));
@@ -143,7 +147,7 @@ namespace CoreAI.Ai
         {
             if (_maxRequestsPerWindow <= 0) return true; // Лимит отключён
 
-            lock (_lock)
+            lock (_rateLock)
             {
                 DateTime now = DateTime.UtcNow;
                 DateTime cutoff = now - _rateLimitWindow;

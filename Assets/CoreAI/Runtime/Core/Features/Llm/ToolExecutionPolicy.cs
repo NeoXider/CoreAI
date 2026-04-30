@@ -219,8 +219,7 @@ namespace CoreAI.Infrastructure.Llm
                 object result = await aiFunc.InvokeAsync(args, cancellationToken);
                 sw.Stop();
                 string resultText = result?.ToString() ?? "";
-                bool succeeded = !resultText.Contains("\"Success\":false") &&
-                                 !resultText.Contains("\"success\":false");
+                bool succeeded = IsToolResultSuccess(resultText);
 
                 if (_settings.LogMeaiToolCallingSteps)
                 {
@@ -434,6 +433,46 @@ namespace CoreAI.Infrastructure.Llm
         {
             public List<MEAI.AIContent> Results;
             public bool AnyFailed;
+        }
+        /// <summary>
+        /// Determines whether a tool result indicates success. Uses proper JSON parsing
+        /// to check for a top-level "Success" or "success" property set to false.
+        /// Falls back to a string heuristic when the result is not valid JSON.
+        /// </summary>
+        internal static bool IsToolResultSuccess(string resultText)
+        {
+            if (string.IsNullOrEmpty(resultText))
+            {
+                return true; // empty result is not a failure signal
+            }
+
+            // Fast path: if the text doesn't contain the word at all, it's a success.
+            if (!resultText.Contains("success", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Attempt structured JSON parse for reliable detection.
+            try
+            {
+                Newtonsoft.Json.Linq.JObject json = Newtonsoft.Json.Linq.JObject.Parse(resultText);
+                Newtonsoft.Json.Linq.JToken token =
+                    json["Success"] ?? json["success"] ?? json["SUCCESS"];
+                if (token != null && token.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+                {
+                    return (bool)token;
+                }
+
+                // Property exists but is not boolean — treat as success (no explicit failure signal).
+                return true;
+            }
+            catch
+            {
+                // Not valid JSON — fall back to string heuristic on the raw text.
+                // This preserves backward compatibility for tools that return plain text.
+                return !resultText.Contains("\"Success\":false") &&
+                       !resultText.Contains("\"success\":false");
+            }
         }
     }
 }

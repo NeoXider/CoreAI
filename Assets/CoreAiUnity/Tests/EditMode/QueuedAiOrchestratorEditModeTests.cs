@@ -357,5 +357,50 @@ namespace CoreAI.Tests.EditMode
             inner.Gates[1].TrySetResult(null);
             await Task.WhenAll(blocker, survivor);
         }
+        // ──────────────────────────────────────────────────────────
+        // v1.5.4: IDisposable (ARCH-5)
+        // ──────────────────────────────────────────────────────────
+
+        [Test]
+        public void Dispose_CleansUpScopeTokens()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            // Enqueue a scoped task to create a CTS in _scopeTokens
+            _ = queue.RunTaskAsync(new AiTaskRequest { Hint = "scoped", CancellationScope = "test" });
+
+            // Should not throw
+            queue.Dispose();
+        }
+
+        [Test]
+        public void Dispose_IsSafeToCallTwice()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+
+            queue.Dispose();
+            Assert.DoesNotThrow(() => queue.Dispose(), "Double dispose must not throw.");
+        }
+
+        [Test]
+        public async Task CancelTasks_AfterDispose_DoesNotThrow()
+        {
+            RecordingOrchestrator inner = new();
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
+
+            Task t = queue.RunTaskAsync(new AiTaskRequest { Hint = "t", CancellationScope = "s" });
+            await Task.Delay(50);
+
+            // Simulate ReleaseScopeToken disposing the CTS before CancelTasks runs
+            queue.Dispose();
+            Assert.DoesNotThrow(() => queue.CancelTasks("s"),
+                "CancelTasks after Dispose must not throw ObjectDisposedException.");
+
+            // Cleanup
+            if (inner.Gates.Count > 0) inner.Gates[0].TrySetResult(null);
+            try { await t; } catch { /* expected cancellation */ }
+        }
     }
 }

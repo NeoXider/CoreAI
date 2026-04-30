@@ -84,9 +84,15 @@ namespace CoreAI.Infrastructure.Llm
                 return "ClientLimited prompt character limit exceeded";
             }
 
-            if (_maxRequestsPerSession > 0 && Interlocked.Increment(ref _requestCount) > _maxRequestsPerSession)
+            if (_maxRequestsPerSession > 0)
             {
-                return "ClientLimited request limit exceeded";
+                int count = Interlocked.Increment(ref _requestCount);
+                if (count > _maxRequestsPerSession)
+                {
+                    // BUG-3 fix: roll back so rejected requests don't permanently consume quota.
+                    Interlocked.Decrement(ref _requestCount);
+                    return "ClientLimited request limit exceeded";
+                }
             }
 
             return "";

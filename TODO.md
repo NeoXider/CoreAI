@@ -1,5 +1,5 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-04-27 | **Текущая версия:** v0.25.4 (core) / v0.25.8 (unity)
+**Обновлено:** 2026-05-01 | **Текущая версия:** v1.5.5 (core) / v0.25.8 (unity)
 
 ## 🚧 Open — приоритет на 0.26.x
 
@@ -78,8 +78,8 @@
 
 ### 🛠️ Tool Calling
 
-- [ ] **`SmartToolCallingChatClient.GetStreamingResponseAsync` — просто проксирует** `_innerClient.GetStreamingResponseAsync` без tool-calling loop, duplicate detection и consecutive-error защиты. Для стриминговых ответов защита от зацикливания ВЫКЛЮЧЕНА. Нужно либо реализовать streaming tool-calling (MEAI это поддерживает через `StreamingResponseUpdate.Contents`), либо явно документировать ограничение и форсить non-streaming при наличии тулов.
-- [ ] **`SmartToolCallingChatClient` определение успеха** — сейчас `string.Contains("\"Success\":false")`. Это бьётся на тулах, где в **аргументах** пользователь случайно попросил поиск строки `Success:false`, или когда результат содержит экранированный JSON. Нужен честный JSON parse (уже используется `Newtonsoft.Json` — можно попробовать `JObject.Parse().Value<bool>("Success")`).
+- [x] **`SmartToolCallingChatClient.GetStreamingResponseAsync` — просто проксирует** — добавлено предупреждение в лог при стриминге с тулами (v1.5.2). Streaming tool-calling loop остаётся TODO.
+- [x] **`SmartToolCallingChatClient` / `ToolExecutionPolicy` определение успеха** — заменён `string.Contains` на `JObject.Parse` с fallback (v1.5.2).
 - [ ] **Tool result truncation** — длинные результаты тулов (например `get_hierarchy` в большой сцене) могут переполнить context window. Добавить `maxToolResultChars` с мягким truncation и префиксом `[...truncated]`.
 - [ ] **Tool timeout** — отдельный инструмент не имеет таймаута (пустой `CancellationToken` пробрасывается). Нужен per-tool timeout (`[LlmTool(TimeoutMs=5000)]`), особенно для внешних HTTP-вызовов.
 - [ ] **Tool-level AllowDuplicates** — работает только для проверки дубликатов, но не для tool-specific retry policy. Полезно было бы добавить `MaxConsecutiveErrors` на тул.
@@ -94,8 +94,9 @@
 ### ⚡ Performance / Ресурсы
 
 - [ ] **Нет metrics для rate limiter'а** — сколько запросов было отклонено за последние N минут? Нужен `IRateLimiterMetrics` и отображение в `OrchestrationDashboard`.
-- [ ] **`InGameLlmChatService._lock` — coarse-grained** — блокирует и rate limiter, и историю. При пиковой нагрузке это может стать bottleneck. Разделить на `_rateLock` и `_historyLock`.
+- [x] **`InGameLlmChatService._lock` — coarse-grained** — разделён на `_rateLock` и `_historyLock` (v1.5.2).
 - [ ] **Tool call history никогда не очищается** — `SmartToolCallingChatClient.executedSignatures` живёт только внутри одного `GetResponseAsync`, но `messages` в длинной сессии растёт (каждый вызов добавляет 2 сообщения). Добавить truncation старых tool calls через N раундов.
+- [x] **`InMemoryAiOrchestrationMetrics` — unbounded per-role storage** — добавлен cap MaxRoles=256 с LRU eviction (v1.5.2).
 
 ### 🧪 Тесты
 

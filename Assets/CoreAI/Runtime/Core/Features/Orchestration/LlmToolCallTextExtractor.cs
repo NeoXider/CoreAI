@@ -128,7 +128,12 @@ namespace CoreAI.Ai
         public static string StripCodeBlocks(string text)
         {
             if (string.IsNullOrEmpty(text)) return text;
-            return CodeBlockRegex.Replace(text, m => new string(' ', m.Length));
+            string result = CodeBlockRegex.Replace(text, m => new string(' ', m.Length));
+            // BUG-6 safety: StripCodeBlocks MUST preserve length so that span offsets
+            // found in the replaced text map correctly back to the original.
+            System.Diagnostics.Debug.Assert(result.Length == text.Length,
+                $"StripCodeBlocks length mismatch: {result.Length} vs {text.Length}");
+            return result;
         }
 
         /// <summary>Quick textual heuristic before full JSON parsing.</summary>

@@ -193,22 +193,7 @@ namespace CoreAI.Ai
                     try
                     {
                         result = await _llm.CompleteAsync(
-                            new LlmCompletionRequest
-                            {
-                                AgentRoleId = roleId,
-                                SystemPrompt = system,
-                                UserPayload = user,
-                                ChatHistory = chatHistory,
-                                TraceId = traceId,
-                                Tools = tools,
-                                AllowedToolNames = task.AllowedToolNames,
-                                AllowDuplicateToolCalls =
-                                    _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
-                                ForcedToolMode = task.ForcedToolMode,
-                                RequiredToolName = task.RequiredToolName ?? "",
-                                MaxOutputTokens = maxOutputTokens,
-                                ContextWindowTokens = bundle.ContextWindowTokens
-                            },
+                            BuildCompletionRequest(bundle, task, user, maxOutputTokens),
                             cancellationToken);
                     }
                     finally
@@ -262,21 +247,7 @@ namespace CoreAI.Ai
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
                 Stopwatch sw = Stopwatch.StartNew();
                 LlmCompletionResult second = await _llm.CompleteAsync(
-                    new LlmCompletionRequest
-                    {
-                        AgentRoleId = roleId,
-                        SystemPrompt = system,
-                        UserPayload = userRetry,
-                        ChatHistory = chatHistory,
-                        TraceId = traceId,
-                        Tools = tools,
-                        AllowedToolNames = task.AllowedToolNames,
-                        AllowDuplicateToolCalls = _memoryPolicy?.GetRoleConfig(roleId).AllowDuplicateToolCalls,
-                        ForcedToolMode = task.ForcedToolMode,
-                        RequiredToolName = task.RequiredToolName ?? "",
-                        MaxOutputTokens = maxOutputTokens,
-                        ContextWindowTokens = bundle.ContextWindowTokens
-                    },
+                    BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
                     cancellationToken).ConfigureAwait(false);
                 sw.Stop();
                 _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok,
@@ -296,43 +267,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // ===== ОБРАБОТКА MemoryTool через MEAI function calling =====
-            // Память уже сохранена через FunctionInvokingChatClient -> MemoryTool.ExecuteAsync()
-            // Дополнительный fallback парсинг не нужен - всё через единый MEAI pipeline
-
-            // Defense-in-depth: even though SmartToolCallingChatClient and MeaiLlmClient strip
-            // tool-call JSON in their respective loops, sanitise the assistant text once more
-            // before it crosses into chat history / ApplyAiGameCommand. A new tool-call shape
-            // we don't recognise can still be spotted by this engine-agnostic check.
-            string sanitisedContent = LlmToolCallTextExtractor.StripForDisplay(content);
-            if (!string.Equals(sanitisedContent, content, StringComparison.Ordinal))
-            {
-                Log.Instance.Warn(
-                    $"[AiOrchestrator] role='{roleId}' trace='{traceId}' tool-call JSON leaked through extraction; stripped for chat/envelope.",
-                    LogTag.Llm);
-                content = sanitisedContent;
-            }
-
-            if (roleConfig.WithChatHistory && _memoryStore != null)
-            {
-                _memoryStore.AppendChatMessage(roleId, "user", user, roleConfig.PersistChatHistory);
-                _memoryStore.AppendChatMessage(roleId, "assistant", content, roleConfig.PersistChatHistory);
-            }
-
-            _commandSink.Publish(new ApplyAiGameCommand
-            {
-                CommandTypeId = Envelope,
-                JsonPayload = content,
-                SourceRoleId = roleId,
-                SourceTaskHint = task.Hint ?? "",
-                SourceTag = task.SourceTag ?? "",
-                LuaRepairGeneration = task.LuaRepairGeneration,
-                TraceId = traceId,
-                LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
-                DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
-            });
-            _metrics.RecordCommandPublished(roleId, traceId);
-            RecordTrace(bundle, result, content, null);
+            content = SanitizeAndPublish(bundle, task, content, user, result);
             return content;
         }
 
@@ -362,21 +297,9 @@ namespace CoreAI.Ai
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
             // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
 
-            LlmCompletionRequest req = new()
-            {
-                AgentRoleId = bundle.RoleId,
-                SystemPrompt = bundle.SystemPrompt,
-                UserPayload = bundle.UserPayload,
-                ChatHistory = bundle.ChatHistory,
-                TraceId = bundle.TraceId,
-                Tools = bundle.Tools,
-                AllowedToolNames = task.AllowedToolNames,
-                AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
-                ForcedToolMode = task.ForcedToolMode,
-                RequiredToolName = task.RequiredToolName ?? "",
-                MaxOutputTokens = ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens),
-                ContextWindowTokens = bundle.ContextWindowTokens
-            };
+            LlmCompletionRequest req = BuildCompletionRequest(
+                bundle, task, bundle.UserPayload,
+                ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens));
 
             Stopwatch sw = Stopwatch.StartNew();
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
@@ -485,39 +408,7 @@ namespace CoreAI.Ai
                     yield break;
                 }
 
-                // Defense-in-depth: same strip as non-streaming, in case any tool-call JSON
-                // slipped past the streaming extractor (new shape, unbound tool, etc.).
-                string sanitisedStream = LlmToolCallTextExtractor.StripForDisplay(content);
-                if (!string.Equals(sanitisedStream, content, StringComparison.Ordinal))
-                {
-                    Log.Instance.Warn(
-                        $"[AiOrchestrator] (stream) role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked through extraction; stripped for chat/envelope.",
-                        LogTag.Llm);
-                    content = sanitisedStream;
-                }
-
-                if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
-                {
-                    _memoryStore.AppendChatMessage(bundle.RoleId, "user", bundle.UserPayload,
-                        bundle.RoleConfig.PersistChatHistory);
-                    _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
-                        bundle.RoleConfig.PersistChatHistory);
-                }
-
-                _commandSink.Publish(new ApplyAiGameCommand
-                {
-                    CommandTypeId = Envelope,
-                    JsonPayload = content,
-                    SourceRoleId = bundle.RoleId,
-                    SourceTaskHint = task.Hint ?? "",
-                    SourceTag = task.SourceTag ?? "",
-                    LuaRepairGeneration = task.LuaRepairGeneration,
-                    TraceId = bundle.TraceId,
-                    LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
-                    DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
-                });
-                _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
-                RecordTrace(bundle, null, content, null);
+                content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, null);
             }
             else if (!string.IsNullOrEmpty(terminalError))
             {
@@ -620,6 +511,52 @@ namespace CoreAI.Ai
                 HistoryTokenBudget = bundle.HistoryTokenBudget,
                 ChatHistoryMessageCount = bundle.ChatHistoryMessageCount
             });
+        }
+
+        /// <summary>
+        /// ARCH-3 (partial): Shared post-processing for both sync and streaming paths.
+        /// Sanitizes tool-call JSON, persists chat history, publishes the game command envelope.
+        /// </summary>
+        private string SanitizeAndPublish(
+            RequestBundle bundle,
+            AiTaskRequest task,
+            string content,
+            string userPayload,
+            LlmCompletionResult result)
+        {
+            // Defense-in-depth: strip any leaked tool-call JSON the pipeline missed.
+            string sanitised = LlmToolCallTextExtractor.StripForDisplay(content);
+            if (!string.Equals(sanitised, content, StringComparison.Ordinal))
+            {
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked; stripped.",
+                    LogTag.Llm);
+                content = sanitised;
+            }
+
+            if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
+            {
+                _memoryStore.AppendChatMessage(bundle.RoleId, "user", userPayload,
+                    bundle.RoleConfig.PersistChatHistory);
+                _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
+                    bundle.RoleConfig.PersistChatHistory);
+            }
+
+            _commandSink.Publish(new ApplyAiGameCommand
+            {
+                CommandTypeId = Envelope,
+                JsonPayload = content,
+                SourceRoleId = bundle.RoleId,
+                SourceTaskHint = task.Hint ?? "",
+                SourceTag = task.SourceTag ?? "",
+                LuaRepairGeneration = task.LuaRepairGeneration,
+                TraceId = bundle.TraceId,
+                LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
+                DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
+            });
+            _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
+            RecordTrace(bundle, result, content, null);
+            return content;
         }
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
@@ -791,6 +728,33 @@ namespace CoreAI.Ai
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// ARCH-6: Single source of truth for <see cref="LlmCompletionRequest"/> construction.
+        /// Eliminates 3x copy-paste between RunTaskAsync (main + structured retry) and RunStreamingAsync.
+        /// </summary>
+        private LlmCompletionRequest BuildCompletionRequest(
+            RequestBundle bundle,
+            AiTaskRequest task,
+            string userPayload,
+            int? maxOutputTokens)
+        {
+            return new LlmCompletionRequest
+            {
+                AgentRoleId = bundle.RoleId,
+                SystemPrompt = bundle.SystemPrompt,
+                UserPayload = userPayload,
+                ChatHistory = bundle.ChatHistory,
+                TraceId = bundle.TraceId,
+                Tools = bundle.Tools,
+                AllowedToolNames = task.AllowedToolNames,
+                AllowDuplicateToolCalls = bundle.RoleConfig.AllowDuplicateToolCalls,
+                ForcedToolMode = task.ForcedToolMode,
+                RequiredToolName = task.RequiredToolName ?? "",
+                MaxOutputTokens = maxOutputTokens,
+                ContextWindowTokens = bundle.ContextWindowTokens
+            };
         }
 
         /// <inheritdoc />

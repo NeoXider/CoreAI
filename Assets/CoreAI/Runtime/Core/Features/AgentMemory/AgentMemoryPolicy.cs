@@ -13,6 +13,9 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class AgentMemoryPolicy
     {
+        // ARCH-4 fix: lock protects all dictionary/set read-write operations
+        // against concurrent access from different coroutines/async continuations.
+        private readonly object _lock = new();
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
         private readonly Dictionary<string, List<ILlmTool>> _customTools = new();
         private readonly Dictionary<string, IAgentRuntimeContextProvider> _runtimeContextProviders = new();
@@ -23,13 +26,16 @@ namespace CoreAI.Ai
         /// </summary>
         public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
         {
-            if (tools == null || tools.Count == 0)
+            lock (_lock)
             {
-                _customTools.Remove(roleId);
-                return;
-            }
+                if (tools == null || tools.Count == 0)
+                {
+                    _customTools.Remove(roleId);
+                    return;
+                }
 
-            _customTools[roleId] = new List<ILlmTool>(tools);
+                _customTools[roleId] = new List<ILlmTool>(tools);
+            }
         }
 
         /// <summary>Registers a runtime context provider for a single role.</summary>
@@ -41,13 +47,16 @@ namespace CoreAI.Ai
             }
 
             roleId = roleId.Trim();
-            if (provider == null)
+            lock (_lock)
             {
-                _runtimeContextProviders.Remove(roleId);
-                return;
-            }
+                if (provider == null)
+                {
+                    _runtimeContextProviders.Remove(roleId);
+                    return;
+                }
 
-            _runtimeContextProviders[roleId] = provider;
+                _runtimeContextProviders[roleId] = provider;
+            }
         }
 
         /// <summary>Clears the runtime context provider for a single role.</summary>
@@ -55,7 +64,10 @@ namespace CoreAI.Ai
         {
             if (!string.IsNullOrWhiteSpace(roleId))
             {
-                _runtimeContextProviders.Remove(roleId.Trim());
+                lock (_lock)
+                {
+                    _runtimeContextProviders.Remove(roleId.Trim());
+                }
             }
         }
 
@@ -68,7 +80,10 @@ namespace CoreAI.Ai
                 roleId = BuiltInAgentRoleIds.Creator;
             }
 
-            return _runtimeContextProviders.TryGetValue(roleId.Trim(), out provider);
+            lock (_lock)
+            {
+                return _runtimeContextProviders.TryGetValue(roleId.Trim(), out provider);
+            }
         }
 
         /// <summary>Конфигурация памяти для одной роли.</summary>
@@ -123,16 +138,19 @@ namespace CoreAI.Ai
 
         public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist, int maxChatHistoryMessages = 30)
         {
-            if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
+            lock (_lock)
             {
-                c = new RoleMemoryConfig(useMemoryTool: true, defaultAction: MemoryToolAction.Append);
-            }
+                if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
+                {
+                    c = new RoleMemoryConfig(useMemoryTool: true, defaultAction: MemoryToolAction.Append);
+                }
 
-            c.WithChatHistory = enabled;
-            c.ContextTokens = tokens;
-            c.PersistChatHistory = persist;
-            c.MaxChatHistoryMessages = maxChatHistoryMessages;
-            _roleConfigs[roleId] = c;
+                c.WithChatHistory = enabled;
+                c.ContextTokens = tokens;
+                c.PersistChatHistory = persist;
+                c.MaxChatHistoryMessages = maxChatHistoryMessages;
+                _roleConfigs[roleId] = c;
+            }
         }
 
         /// <summary>
@@ -146,9 +164,12 @@ namespace CoreAI.Ai
             }
 
             roleId = roleId.Trim();
-            RoleMemoryConfig c = GetRoleConfig(roleId);
-            c.UseLlmContextCompaction = enabled;
-            _roleConfigs[roleId] = c;
+            lock (_lock)
+            {
+                RoleMemoryConfig c = GetRoleConfigLocked(roleId);
+                c.UseLlmContextCompaction = enabled;
+                _roleConfigs[roleId] = c;
+            }
         }
 
 
@@ -189,9 +210,12 @@ namespace CoreAI.Ai
 
             roleId = roleId.Trim();
 
-            if (_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config))
+            lock (_lock)
             {
-                return config.UseMemoryTool;
+                if (_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config))
+                {
+                    return config.UseMemoryTool;
+                }
             }
 
             // Неизвестная роль — тоже включаем по умолчанию
@@ -210,6 +234,15 @@ namespace CoreAI.Ai
 
             roleId = roleId.Trim();
 
+            lock (_lock)
+            {
+                return GetRoleConfigLocked(roleId);
+            }
+        }
+
+        /// <summary>Internal helper called under <see cref="_lock"/>.</summary>
+        private RoleMemoryConfig GetRoleConfigLocked(string roleId)
+        {
             if (_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config))
             {
                 return config;
@@ -234,20 +267,23 @@ namespace CoreAI.Ai
 
             roleId = roleId.Trim();
 
-            RoleMemoryConfig existing = GetRoleConfig(roleId);
-
-            _roleConfigs[roleId] = new RoleMemoryConfig
+            lock (_lock)
             {
-                UseMemoryTool = useMemoryTool ?? existing.UseMemoryTool,
-                DefaultAction = defaultAction ?? existing.DefaultAction,
-                AllowDuplicateToolCalls = allowDuplicateToolCalls ?? existing.AllowDuplicateToolCalls,
-                WithChatHistory = existing.WithChatHistory,
-                PersistChatHistory = existing.PersistChatHistory,
-                ContextTokens = existing.ContextTokens,
-                MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
-                MaxOutputTokens = existing.MaxOutputTokens,
-                UseLlmContextCompaction = existing.UseLlmContextCompaction
-            };
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+
+                _roleConfigs[roleId] = new RoleMemoryConfig
+                {
+                    UseMemoryTool = useMemoryTool ?? existing.UseMemoryTool,
+                    DefaultAction = defaultAction ?? existing.DefaultAction,
+                    AllowDuplicateToolCalls = allowDuplicateToolCalls ?? existing.AllowDuplicateToolCalls,
+                    WithChatHistory = existing.WithChatHistory,
+                    PersistChatHistory = existing.PersistChatHistory,
+                    ContextTokens = existing.ContextTokens,
+                    MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
+                    MaxOutputTokens = existing.MaxOutputTokens,
+                    UseLlmContextCompaction = existing.UseLlmContextCompaction
+                };
+            }
         }
 
         /// <summary>
@@ -261,11 +297,14 @@ namespace CoreAI.Ai
             }
 
             roleId = roleId.Trim();
-            RoleMemoryConfig existing = GetRoleConfig(roleId);
-            existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
-                ? maxOutputTokens.Value
-                : null;
-            _roleConfigs[roleId] = existing;
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
+                    ? maxOutputTokens.Value
+                    : null;
+                _roleConfigs[roleId] = existing;
+            }
         }
 
         /// <summary>
@@ -309,26 +348,37 @@ namespace CoreAI.Ai
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
-            List<ILlmTool> tools = new();
-
-            if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom) && custom != null && custom.Count > 0)
+            lock (_lock)
             {
-                bool customHasMemory = ListContainsMemoryTool(custom);
+                List<ILlmTool> tools = new();
 
-                // Singleton memory только если память включена и AgentBuilder ещё не положил свой MemoryLlmTool.
-                if (IsMemoryEnabled(roleId) && !customHasMemory)
+                if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom) && custom != null && custom.Count > 0)
+                {
+                    bool customHasMemory = ListContainsMemoryTool(custom);
+
+                    // Singleton memory только если память включена и AgentBuilder ещё не положил свой MemoryLlmTool.
+                    if (IsMemoryEnabledLocked(roleId) && !customHasMemory)
+                    {
+                        tools.Add(_memoryToolInstance);
+                    }
+
+                    tools.AddRange(custom);
+                }
+                else if (IsMemoryEnabledLocked(roleId))
                 {
                     tools.Add(_memoryToolInstance);
                 }
 
-                tools.AddRange(custom);
+                return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
             }
-            else if (IsMemoryEnabled(roleId))
-            {
-                tools.Add(_memoryToolInstance);
-            }
+        }
 
-            return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
+        /// <summary>Check memory enabled under <see cref="_lock"/>.</summary>
+        private bool IsMemoryEnabledLocked(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId)) roleId = BuiltInAgentRoleIds.Creator;
+            roleId = roleId.Trim();
+            return _roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config) ? config.UseMemoryTool : true;
         }
 
         private static bool ListContainsMemoryTool(List<ILlmTool> list)
@@ -362,13 +412,16 @@ namespace CoreAI.Ai
             if (string.IsNullOrWhiteSpace(roleId)) return;
             roleId = roleId.Trim();
 
-            if (string.IsNullOrWhiteSpace(prompt))
+            lock (_lock)
             {
-                _additionalSystemPrompts.Remove(roleId);
-            }
-            else
-            {
-                _additionalSystemPrompts[roleId] = prompt.Trim();
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    _additionalSystemPrompts.Remove(roleId);
+                }
+                else
+                {
+                    _additionalSystemPrompts[roleId] = prompt.Trim();
+                }
             }
         }
 
@@ -379,7 +432,10 @@ namespace CoreAI.Ai
         {
             prompt = null;
             if (string.IsNullOrWhiteSpace(roleId)) return false;
-            return _additionalSystemPrompts.TryGetValue(roleId.Trim(), out prompt);
+            lock (_lock)
+            {
+                return _additionalSystemPrompts.TryGetValue(roleId.Trim(), out prompt);
+            }
         }
 
         /// <summary>
@@ -392,10 +448,13 @@ namespace CoreAI.Ai
             if (string.IsNullOrWhiteSpace(roleId)) return;
             roleId = roleId.Trim();
 
-            if (shouldOverride)
-                _overrideUniversalPrefix.Add(roleId);
-            else
-                _overrideUniversalPrefix.Remove(roleId);
+            lock (_lock)
+            {
+                if (shouldOverride)
+                    _overrideUniversalPrefix.Add(roleId);
+                else
+                    _overrideUniversalPrefix.Remove(roleId);
+            }
         }
 
         /// <summary>
@@ -404,7 +463,10 @@ namespace CoreAI.Ai
         public bool IsUniversalPrefixOverridden(string roleId)
         {
             if (string.IsNullOrWhiteSpace(roleId)) return false;
-            return _overrideUniversalPrefix.Contains(roleId.Trim());
+            lock (_lock)
+            {
+                return _overrideUniversalPrefix.Contains(roleId.Trim());
+            }
         }
 
         // ===== Streaming (per-role override) =====
@@ -419,13 +481,16 @@ namespace CoreAI.Ai
             if (string.IsNullOrWhiteSpace(roleId)) return;
             roleId = roleId.Trim();
 
-            if (enabled.HasValue)
+            lock (_lock)
             {
-                _streamingOverrides[roleId] = enabled.Value;
-            }
-            else
-            {
-                _streamingOverrides.Remove(roleId);
+                if (enabled.HasValue)
+                {
+                    _streamingOverrides[roleId] = enabled.Value;
+                }
+                else
+                {
+                    _streamingOverrides.Remove(roleId);
+                }
             }
         }
 
@@ -436,7 +501,10 @@ namespace CoreAI.Ai
         {
             enabled = false;
             if (string.IsNullOrWhiteSpace(roleId)) return false;
-            return _streamingOverrides.TryGetValue(roleId.Trim(), out enabled);
+            lock (_lock)
+            {
+                return _streamingOverrides.TryGetValue(roleId.Trim(), out enabled);
+            }
         }
 
         /// <summary>

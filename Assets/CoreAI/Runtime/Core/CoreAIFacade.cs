@@ -24,21 +24,40 @@ namespace CoreAI.Ai
     /// </example>
     public static class CoreAIAgent
     {
+        // ARCH-2 fix: volatile backing fields prevent torn reads when Initialize
+        // is called from the Unity main thread and properties are accessed from
+        // async continuations on ThreadPool.
+        private static volatile IAiOrchestrationService _orchestrator;
+        private static volatile AgentMemoryPolicy _policy;
+        private static volatile IAgentMemoryStore _memoryStore;
+
         /// <summary>
         /// Глобальный оркестратор. Устанавливается при инициализации CoreAILifetimeScope.
         /// <para>Если null — CoreAI ещё не инициализован (не был Play или нет CoreAILifetimeScope на сцене).</para>
         /// </summary>
-        public static IAiOrchestrationService Orchestrator { get; private set; }
+        public static IAiOrchestrationService Orchestrator
+        {
+            get => _orchestrator;
+            private set => _orchestrator = value;
+        }
 
         /// <summary>
         /// Глобальная политика памяти/инструментов. Устанавливается при инициализации CoreAILifetimeScope.
         /// </summary>
-        public static AgentMemoryPolicy Policy { get; private set; }
+        public static AgentMemoryPolicy Policy
+        {
+            get => _policy;
+            private set => _policy = value;
+        }
 
         /// <summary>
         /// Глобальное хранилище памяти. Устанавливается при инициализации CoreAILifetimeScope.
         /// </summary>
-        public static IAgentMemoryStore MemoryStore { get; private set; }
+        public static IAgentMemoryStore MemoryStore
+        {
+            get => _memoryStore;
+            private set => _memoryStore = value;
+        }
 
         /// <summary>Инициализация (вызывается из CoreAILifetimeScope / CoreAIGameEntryPoint).</summary>
         public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)

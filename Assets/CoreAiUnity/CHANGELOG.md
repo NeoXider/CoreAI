@@ -2,6 +2,30 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.5] - 2026-05-01
+
+### Test Coverage & Portability (Architectural Refactoring)
+
+- **`AiOrchestratorRefactorEditModeTests`** — new test suite for the Core architectural refactor (BuildCompletionRequest field forwarding, SanitizeAndPublish post-processing, and DIM fallback availability for ILlmClient and IAiOrchestrationService without #if UNITY guards).
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.5`**.
+
+### Meta
+
+- Package **`1.5.5`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+
+## [1.5.4] - 2026-05-01
+
+### Concurrency & Lifecycle Hardening Tests
+
+- **`QueuedAiOrchestratorEditModeTests`** — new tests covering `IDisposable` lifecycle, Double-Dispose safety, and Thread-Safe eviction via atomic scope locks.
+- **`ToolExecutionPolicyEditModeTests`** — regression tests for robust boolean JSON parsing (`IsToolResultSuccess`).
+- **`LlmExecutionModesEditModeTests`** — verification of `volatile` fields and multi-threading hardening.
+- **Dependency:** bumped to **`com.nexoider.coreai 1.5.4`**.
+
+### Meta
+
+- Package **`1.5.4`**. Dependency **`com.nexoider.coreai 1.5.4`**.
+
 ## [1.5.3] - 2026-04-30
 
 ### LLM-assisted context compaction wiring

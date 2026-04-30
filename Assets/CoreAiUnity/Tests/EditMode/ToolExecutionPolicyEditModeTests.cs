@@ -448,6 +448,62 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(expected[i], val, $"attempt={i} should give {expected[i]}s");
             }
         }
+        // ==================== v1.5.4: IsToolResultSuccess (BUG-5) ====================
+
+        [Test]
+        public void IsToolResultSuccess_EmptyString_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(""));
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(null));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_JsonSuccessFalse_ReturnsFalse()
+        {
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess("{\"Success\":false,\"Error\":\"not found\"}"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_JsonSuccessTrue_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"Success\":true,\"Message\":\"done\"}"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_LowercaseProperty_ReturnsFalse()
+        {
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess("{\"success\":false}"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_NestedEscapedJson_NoFalsePositive()
+        {
+            // The nested JSON contains "success":false in an escaped string, but the TOP-LEVEL
+            // Success property is true — should not be a false positive.
+            string json = "{\"Success\":true,\"Data\":\"{\\\"success\\\":false}\"}";
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess(json),
+                "Nested escaped JSON should not trigger false positive");
+        }
+
+        [Test]
+        public void IsToolResultSuccess_NonJsonWithSuccessFalse_FallsBackToStringHeuristic()
+        {
+            // Non-JSON text that contains the heuristic string
+            Assert.IsFalse(ToolExecutionPolicy.IsToolResultSuccess(
+                "Operation result: \"Success\":false, please retry."));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_PlainText_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("Memory saved for role: teacher"));
+        }
+
+        [Test]
+        public void IsToolResultSuccess_NoSuccessProperty_ReturnsTrue()
+        {
+            Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"result\":\"ok\",\"count\":42}"));
+        }
     }
 }
 #endif

@@ -23,7 +23,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
-**Current stable line:** `1.5.3` — adds **optional LLM-assisted context compaction** (per-role, gated globally), **`SelectingConversationContextManager`**, deterministic vs smart paths for long transcripts, **`FileConversationSummaryStore`** / in-memory summaries, plus the existing **1.4.x** resilience story (HTTP `Retry-After`, `TryRepairToolName`, unified tool pipeline across LLM modes). Version source: [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) · [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json).
+**Current stable line:** `1.5.5` — adds **optional LLM-assisted context compaction** (per-role, gated globally), **`SelectingConversationContextManager`**, deterministic vs smart paths for long transcripts, **`FileConversationSummaryStore`** / in-memory summaries, plus the existing **1.4.x** resilience story (HTTP `Retry-After`, `TryRepairToolName`, unified tool pipeline across LLM modes) and **v1.5.4/v1.5.5** architectural refactoring for thread safety and deduplication. Version source: [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) · [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -78,16 +78,20 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithTool(new InventoryLlmTool(myInventory))  // Knows their stock
     .WithMemory()                                  // Remembers buyers
     .WithMaxOutputTokens(512)                      // Per-agent reply budget
-    .Build();
+    .Build();                                      // → AgentConfig (in-memory blueprint)
 
+// Attach that blueprint to the global policy created at startup (CoreAILifetimeScope).
+// The orchestrator looks up tools/system prompt by RoleId ("Blacksmith") from this policy.
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
-// Call the agent — one line, zero boilerplate:
+// Ask* uses CoreAIAgent.Orchestrator (same startup wiring). Needs Play + CoreAILifetimeScope on scene.
 merchant.Ask("Show me your swords");
-
-// Or with a callback:
 merchant.Ask("Show me your swords", (response) => Debug.Log(response));
 ```
+
+- **`Build()`** — returns `AgentConfig` (role id, tools, prompts, mode). Still unknown to the runtime until registered.
+- **`ApplyToPolicy(CoreAIAgent.Policy)`** — writes into the live `AgentMemoryPolicy` so **`RunTask` / tool routing** can find this role’s tools and merged prompts. Without it, `"Blacksmith"` is just a string the model never gets the right stack for.
+- **`Ask` / `AskAsync`** — thin wrappers over **`CoreAIAgent.Orchestrator`** → `AiTaskRequest` with `RoleId` from the config. Same idea as resolving `IAiOrchestrationService` from DI — see [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
 

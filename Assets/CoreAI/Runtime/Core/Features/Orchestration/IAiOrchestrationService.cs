@@ -25,7 +25,7 @@ namespace CoreAI.Ai
         /// таймаут, авторити) <b>обязана</b> явно переопределять этот метод. Иначе default-fallback
         /// тихо убивает стриминг — аналогично контракту <see cref="ILlmClient.CompleteStreamingAsync"/>.
         /// </remarks>
-#if UNITY_2021_3_OR_NEWER
+        // ARCH-7: Removed stale #if UNITY_2021_3_OR_NEWER — Unity 6000.0 minimum supports DIM.
         virtual async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
@@ -41,7 +41,6 @@ namespace CoreAI.Ai
             yield return new LlmStreamChunk { Text = content };
             yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
         }
-#endif
 
         /// <summary>
         /// Отменяет все текущие и ожидающие задачи для указанного scope.

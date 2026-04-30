@@ -51,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current stable line: **`1.5.3`** — optional **LLM-assisted transcript compaction** (global + **per-role** via `AgentBuilder.WithLlmContextCompaction` / `AgentMemoryPolicy`), token **context budget**, **file-backed conversation summaries**, plus the unified MEAI/tool pipeline and streaming stack from earlier lines. Bump **`version`** in [`package.json`](package.json) when you ship.
+Current stable line: **`1.5.5`** — optional **LLM-assisted transcript compaction** (global + **per-role** via `AgentBuilder.WithLlmContextCompaction` / `AgentMemoryPolicy`), token **context budget**, **file-backed conversation summaries**, plus the unified MEAI/tool pipeline, streaming stack, and thread-safety audit hardening from earlier lines. Bump **`version`** in [`package.json`](package.json) when you ship.
 
 ---
 
