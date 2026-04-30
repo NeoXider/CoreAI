@@ -8,7 +8,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 Some OpenAI-compatible providers return **no usable `ChatResponse.Text`** even though the JSON body carries text (multimodal **`content` as an array**, or **`reasoning_content`** with empty **`content`**). **`MeaiLlmClient.CompleteAsync`** would then return **`EmptyResponse`**, so logs could show **`[SmartToolCall] Text response, stopping`** while the chat bubble never appeared.
 
-- **`MeaiOpenAiChatClient.ParseResponse`** — parses **`message.content`** as string **or** array of parts (`text` fields); if still empty after stripping `<think>` / legacy blocks, uses **`reasoning_content`**.
+- **`MeaiOpenAiChatClient.ParseResponse`** — parses **`message.content`** as string **or** array of parts (`text` fields); if still empty after stripping `<think>` / legacy blocks, uses **`reasoning_content`**. **Parsing uses `JObject.Parse`**: `DeserializeObject<Dictionary<string,object>>` left **`choices`** in a shape where **`as JArray`** was null, so **assistant text was always empty** in tests and at runtime.
 - **`MeaiLlmClient.CompleteAsync`** — if **`response.Text`** is empty, concatenates **`TextContent`** from **`response.Messages`** via **`SmartToolCallingChatClient.ConcatenateAssistantTextContents`** (portable Core **1.5.6**).
 - **EditMode tests:** `ParseCompletion_EmptyContent_UsesReasoningContent`, `ParseCompletion_ContentAsTextPartsArray_JoinsText`.
 - **Dependency:** **`com.nexoider.coreai 1.5.6`**.

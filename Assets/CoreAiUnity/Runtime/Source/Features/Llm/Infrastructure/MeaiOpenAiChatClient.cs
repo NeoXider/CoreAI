@@ -241,14 +241,16 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                Dictionary<string, object> root = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
-                JArray choices = root?["choices"] as JArray;
+                // JObject.Parse: Dictionary<string,object> deserialization often maps "choices" to List<JObject>
+                // or similar, so `as JArray` was null and tests / runtime saw empty assistant text.
+                JObject root = JObject.Parse(json);
+                JArray choices = root["choices"] as JArray;
                 if (choices == null || choices.Count == 0)
                 {
                     return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, ""));
                 }
 
-                JToken msg = choices[0]["message"];
+                JToken msg = choices[0]?["message"];
                 // Prefer `content`; support multimodal JSON arrays; if still empty, use `reasoning_content`
                 // (some reasoning setups leave `content` blank in non-streaming completions).
                 string content = ParseAssistantMessageVisibleText(msg);
@@ -281,8 +283,7 @@ namespace CoreAI.Infrastructure.Llm
                     response.Messages[0] = new MEAI.ChatMessage(MEAI.ChatRole.Assistant, contents);
                 }
 
-                JObject usage = root?["usage"] as JObject;
-                if (usage != null)
+                if (root["usage"] is JObject usage)
                 {
                     response.Usage = new MEAI.UsageDetails
                     {
