@@ -93,3 +93,7 @@ FirebaseCppApp-*.so
 /[Aa]ssets/[Ss]treamingAssets/LlamaLib-*.meta
 # LLMUnity build cache/artifacts (large native binaries)
 /LLMUnityBuild/
+
+# Roslyn analyzer tool projects (Unity .gitignore ignores *.sln / *.csproj globally)
+!Tools/**/*.csproj
+!Tools/**/*.sln

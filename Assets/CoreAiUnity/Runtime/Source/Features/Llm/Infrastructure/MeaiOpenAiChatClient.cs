@@ -131,6 +131,8 @@ namespace CoreAI.Infrastructure.Llm
                 webReq.timeout = _settings.RequestTimeoutSeconds;
 
                 UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
+                // WebGL / player: UnityWebRequest must be polled from the main thread; ConfigureAwait(false)
+                // can resume on a thread pool worker and freeze the request (op never completes in UI).
                 while (!op.isDone)
                 {
                     if (cancellationToken.IsCancellationRequested)
@@ -138,7 +140,7 @@ namespace CoreAI.Infrastructure.Llm
                         try { webReq.Abort(); } catch { /* ignore */ }
                         cancellationToken.ThrowIfCancellationRequested();
                     }
-                    await Task.Delay(0, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(0, cancellationToken);
                 }
 
                 if (webReq.result == UnityWebRequest.Result.Success)
@@ -160,7 +162,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
                         $"MeaiOpenAiChatClient: transient local LLM / reload response (attempt {attempt}/{transientLocalLlmReloadMaxAttempts}); retrying after backoff...");
-                    await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
                     continue;
                 }
 
@@ -397,9 +399,9 @@ namespace CoreAI.Infrastructure.Llm
                 int lastProcessed = 0;
                 bool cancelled = false;
                 SseToolCallAccumulator toolAccumulator = new();
-                try
+                    try
                 {
-                    // Poll for SSE chunks
+                    // Poll for SSE chunks (same main-thread rule as non-streaming SendWebRequest loop).
                     while (!op.isDone)
                     {
                         if (cancellationToken.IsCancellationRequested)
@@ -421,7 +423,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        await Task.Delay(0, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(0, cancellationToken);
                     }
 
                     // Process any remaining data after request completed
@@ -465,7 +467,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             _logger.LogInfo(GameLogFeature.Llm,
                                 "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...");
-                            await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken).ConfigureAwait(false);
+                            await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
                             continue;
                         }
 

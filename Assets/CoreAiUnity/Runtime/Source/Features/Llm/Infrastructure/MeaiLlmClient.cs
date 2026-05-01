@@ -175,8 +175,7 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: Calling GetResponseAsync with {chatMessages.Count} messages, {aiTools.Count} tools");
                 response = await functionClient
-                    .GetResponseAsync(chatMessages, chatOptions, cancellationToken)
-                    .ConfigureAwait(false);
+                    .GetResponseAsync(chatMessages, chatOptions, cancellationToken);
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: GetResponseAsync completed, has {response.Messages?.Count ?? 0} messages in response");
             }

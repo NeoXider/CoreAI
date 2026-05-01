@@ -1,0 +1,11 @@
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.csproj.AssemblyReference.cache
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.GeneratedMSBuildEditorConfig.editorconfig
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.AssemblyInfoInputs.cache
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.AssemblyInfo.cs
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.csproj.CoreCompileInputs.cache
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.sourcelink.json
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\bin\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.deps.json
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\bin\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.dll
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\bin\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.pdb
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.dll
+C:\Git\CoreAI\Tools\CoreAI.UnityAsyncAnalyzers\obj\Release\netstandard2.0\CoreAI.UnityAsyncAnalyzers.pdb
