@@ -9,8 +9,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Пример инструмента для Chat Agent: получение инвентаря NPC/торговца.
-    /// Демонстрирует как модель может вызвать инструмент ПЕРЕД ответом пользователю.
+    /// Sample tool for chat agents: fetch NPC/merchant inventory so the model can call it before answering the player.
     /// </summary>
     public sealed class InventoryTool
     {

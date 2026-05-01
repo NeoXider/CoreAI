@@ -8,8 +8,7 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// MEAI AIFunction для выполнения Lua скриптов от Programmer агента.
-    /// Используется в function calling pipeline вместо fenced Lua блоков.
+    /// MEAI <see cref="AIFunction"/> that runs Lua for the Programmer agent, used in the native tool-calling path instead of fenced Lua blocks.
     /// </summary>
     public sealed class LuaTool
     {
@@ -24,10 +23,7 @@ namespace CoreAI.Ai
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        /// <summary>
-        /// Создаёт AIFunction для MEAI function calling.
-        /// Модель вызывает этот инструмент когда хочет выполнить Lua код.
-        /// </summary>
+        /// <summary>Builds the MEAI tool surface for <c>execute_lua</c>.</summary>
         public AIFunction CreateAIFunction()
         {
             Func<string, CancellationToken, Task<string>> func = ExecuteAsync;
@@ -39,11 +35,9 @@ namespace CoreAI.Ai
             return AIFunctionFactory.Create(func, options);
         }
 
-        /// <summary>
-        /// Выполняет Lua код переданный моделью.
-        /// </summary>
-        /// <param name="code">Lua код для выполнения</param>
-        /// <param name="cancellationToken">Токен отмены</param>
+        /// <summary>Runs Lua returned from the model payload.</summary>
+        /// <param name="code">Source to execute.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
         public async Task<string> ExecuteAsync(
             string code,
             CancellationToken cancellationToken = default)
@@ -98,9 +92,7 @@ namespace CoreAI.Ai
             return JsonConvert.SerializeObject(result);
         }
 
-        /// <summary>
-        /// Результат выполнения Lua.
-        /// </summary>
+        /// <summary>Lua execution outcome for JSON serialization back to the model.</summary>
         public sealed class LuaResult
         {
             public bool Success { get; set; }
@@ -108,9 +100,7 @@ namespace CoreAI.Ai
             public string Error { get; set; }
         }
 
-        /// <summary>
-        /// Интерфейс исполнителя Lua - позволяет тестировать без Unity.
-        /// </summary>
+        /// <summary>Abstraction over the concrete Lua host (testable without Unity).</summary>
         public interface ILuaExecutor
         {
             Task<LuaResult> ExecuteAsync(string code, CancellationToken cancellationToken);

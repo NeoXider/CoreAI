@@ -80,43 +80,43 @@ namespace CoreAI.Ai
         public string ProviderErrorBody { get; }
     }
 
-    /// <summary>Вход одного вызова <see cref="ILlmClient.CompleteAsync"/> (роль, промпты, трассировка).</summary>
+    /// <summary>Input for one <see cref="ILlmClient.CompleteAsync"/> call: role, prompts, tracing.</summary>
     public sealed class LlmCompletionRequest
     {
-        /// <summary>Роль для маршрутизации бэкенда и системного промпта.</summary>
+        /// <summary>Role id for backend routing and system prompt selection.</summary>
         public string AgentRoleId { get; set; } = "";
 
-        /// <summary>Системная инструкция модели.</summary>
+        /// <summary>System instruction for the model.</summary>
         public string SystemPrompt { get; set; } = "";
 
-        /// <summary>User-часть (опционально, если ChatHistory не используется или дополняет его).</summary>
+        /// <summary>Optional user-facing payload when <see cref="ChatHistory"/> is absent or supplementary.</summary>
         public string UserPayload { get; set; } = "";
 
-        /// <summary>История чата (опционально). Если задана, используется для MEAI.</summary>
+        /// <summary>Optional MEAI chat history.</summary>
         public IList<Microsoft.Extensions.AI.ChatMessage> ChatHistory { get; set; }
 
-        /// <summary>Сквозной id для логов (оркестратор / декоратор LLM / роутер команд).</summary>
+        /// <summary>End-to-end trace id (orchestrator / LLM decorator / command router).</summary>
         public string TraceId { get; set; } = "";
 
-        /// <summary>Краткая метка выбранного бэкенда после маршрутизации по роли (для логов LLM).</summary>
+        /// <summary>Short backend label after role routing (LLM logs).</summary>
         public string RoutingProfileId { get; set; } = "";
 
-        /// <summary>Бюджет контекста в токенах для роли (по умолчанию 8192, может быть переопределен маршрутизацией).</summary>
+        /// <summary>Context budget in tokens (default 8192; routing may override).</summary>
         public int ContextWindowTokens { get; set; } = 8192;
 
-        /// <summary>Опциональный лимит токенов ответа модели.</summary>
+        /// <summary>Optional max completion tokens for the model.</summary>
         public int? MaxOutputTokens { get; set; }
 
-        /// <summary>Температура генерации (по умолчанию 0.1, переопределяется на уровне агента).</summary>
+        /// <summary>Sampling temperature (default 0.1; agent policy may override).</summary>
         public float Temperature { get; set; } = 0.1f;
 
-        /// <summary>Инструменты (tools), доступные модели для вызова.</summary>
+        /// <summary>Tools exposed to the model for this request.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }
 
         /// <summary>Optional per-request allowlist of tool names after orchestrator filtering.</summary>
         public IReadOnlyList<string> AllowedToolNames { get; set; }
 
-        /// <summary>Разрешить/запретить вызов одного и того же инструмента подряд (null = перекладывается на глобальные настройки).</summary>
+        /// <summary>Allow the same tool with identical args back-to-back; <c>null</c> defers to global settings.</summary>
         public bool? AllowDuplicateToolCalls { get; set; }
 
         /// <summary>
@@ -165,16 +165,16 @@ namespace CoreAI.Ai
         public string Source { get; }
     }
 
-    /// <summary>Результат вызова модели: текст ответа, ошибка и опционально usage-токены.</summary>
+    /// <summary>Model completion: text, error state, optional usage.</summary>
     public sealed class LlmCompletionResult
     {
-        /// <summary>При <c>false</c> смотреть <see cref="Error"/>.</summary>
+        /// <summary>When <c>false</c>, inspect <see cref="Error"/>.</summary>
         public bool Ok { get; set; }
 
-        /// <summary>Сырой ответ модели (текст/JSON конверта).</summary>
+        /// <summary>Raw model text (or JSON command payload).</summary>
         public string Content { get; set; } = "";
 
-        /// <summary>Описание сбоя или отмены.</summary>
+        /// <summary>Failure or cancellation message.</summary>
         public string Error { get; set; } = "";
 
         /// <summary>Stable failure category for UI and retry policies.</summary>
@@ -192,13 +192,13 @@ namespace CoreAI.Ai
         /// <summary>Model identifier used by the provider when known.</summary>
         public string Model { get; set; } = "";
 
-        /// <summary>Заполняется OpenAI-compatible HTTP при наличии <c>usage</c> в JSON.</summary>
+        /// <summary>Set from OpenAI-compatible HTTP when the payload includes <c>usage</c>.</summary>
         public int? PromptTokens { get; set; }
 
-        /// <summary>Токены completion из usage (HTTP).</summary>
+        /// <summary>Completion tokens from usage (HTTP).</summary>
         public int? CompletionTokens { get; set; }
 
-        /// <summary>Суммарные токены из usage (HTTP).</summary>
+        /// <summary>Total tokens from usage (HTTP).</summary>
         public int? TotalTokens { get; set; }
 
         /// <summary>
@@ -209,16 +209,16 @@ namespace CoreAI.Ai
         public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
     }
 
-    /// <summary>Один чанк стриминга от LLM: текстовый фрагмент или признак завершения.</summary>
+    /// <summary>One streaming chunk: text fragment and completion markers.</summary>
     public sealed class LlmStreamChunk
     {
-        /// <summary>Текстовый фрагмент ответа (может быть пустым при завершении).</summary>
+        /// <summary>Text delta (may be empty on terminal chunks).</summary>
         public string Text { get; set; } = "";
 
-        /// <summary>true если это последний чанк и стрим завершён.</summary>
+        /// <summary><c>true</c> when the stream has finished.</summary>
         public bool IsDone { get; set; }
 
-        /// <summary>Ошибка стриминга (если есть).</summary>
+        /// <summary>Streaming failure text, if any.</summary>
         public string Error { get; set; }
 
         /// <summary>Stable failure category for UI and retry policies.</summary>
@@ -233,7 +233,7 @@ namespace CoreAI.Ai
         /// <summary>Model identifier used by the provider when known.</summary>
         public string Model { get; set; } = "";
 
-        /// <summary>Usage — заполняется только в финальном чанке, если бэкенд отдаёт usage.</summary>
+        /// <summary>Usage fields: populated on the final chunk when the backend reports usage.</summary>
         public int? PromptTokens { get; set; }
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
@@ -247,34 +247,28 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
-    /// Абстракция вызова модели (DGF_SPEC §5.2, §7). Реализации — в Core (stub) и Unity-слое (LLMUnity, OpenAI-compatible HTTP).
+    /// Model invocation abstraction (DGF_SPEC §5.2, §7). Implementations live in Core (stub) and Unity (LLMUnity, OpenAI-compatible HTTP).
     /// </summary>
     public interface ILlmClient
     {
-        /// <summary>Один запрос к модели; поддерживает отмену и таймауты снаружи (декоратор).</summary>
+        /// <summary>Single completion; cancellation and timeouts are applied by outer decorators.</summary>
         Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default);
 
-        /// <summary>Установить инструменты (tools), доступные модели для вызова. Default: no-op.</summary>
+        /// <summary>Attach tools for subsequent calls. Default implementation is no-op.</summary>
         virtual void SetTools(IReadOnlyList<ILlmTool> tools)
         {
         }
 
         /// <summary>
-        /// Стриминг ответа модели: возвращает чанки текста по мере генерации.
-        /// По умолчанию делает fallback к <see cref="CompleteAsync"/> и отдаёт результат одним чанком.
-        /// <para>
-        /// ⚠️ <b>ВАЖНО для обёрток/декораторов.</b> Любой <see cref="ILlmClient"/>, который
-        /// оборачивает другой клиент (логирование, роутинг по ролям, тайм-ауты, повторы),
-        /// <b>обязан явно переопределять</b> этот метод и делегировать его в нижележащий
-        /// клиент через <c>await foreach</c>. Иначе будет вызван default-fallback, который
-        /// свернёт весь поток в один финальный чанк после окончания генерации — стриминг
-        /// в UI окажется «невидимым» и пользователь увидит ответ одномоментно.
-        /// </para>
+        /// Streaming completion: yields text chunks as they arrive.
+        /// Default implementation falls back to <see cref="CompleteAsync"/> and emits one terminal chunk.
         /// </summary>
-        // ARCH-7: Removed stale #if UNITY_2021_3_OR_NEWER guard — the package minimum
-        // is Unity 6000.0 which fully supports C# 8 DIM and IAsyncEnumerable.
-        // The DIM fallback is now unconditionally available for non-Unity .NET hosts and test runners.
+        /// <remarks>
+        /// <b>Wrappers must override.</b> Any <see cref="ILlmClient"/> that decorates another client (logging, routing, timeout, retry)
+        /// must override this member and delegate with <c>await foreach</c>. Otherwise the default DIM body collapses the stream into
+        /// a single final chunk after <see cref="CompleteAsync"/> returns, so UI streaming appears to buffer entirely.
+        /// </remarks>
         virtual async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]

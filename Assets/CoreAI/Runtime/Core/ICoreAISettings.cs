@@ -1,97 +1,92 @@
 namespace CoreAI
 {
     /// <summary>
-    /// Глобальные настройки CoreAI (инфраструктура, логирование, лимиты агентов).
+    /// Host-wide CoreAI settings: infrastructure switches, logging, and agent limits.
     /// </summary>
     public interface ICoreAISettings
     {
-        /// <summary>Максимум подряд неудачных попыток Programmer починить Lua код перед прерыванием.</summary>
+        /// <summary>Max consecutive Programmer Lua repair attempts before stopping the retry loop.</summary>
         int MaxLuaRepairRetries { get; }
-        
-        /// <summary>Включить подробное логирование MEAI pipeline (запросы, ответы, json).</summary>
+
+        /// <summary>Verbose MEAI pipeline logging (requests, responses, JSON).</summary>
         bool EnableMeaiDebugLogging { get; }
-        
-        /// <summary>Таймаут запросов к LLM (в секундах).</summary>
+
+        /// <summary>LLM request timeout in seconds.</summary>
         float LlmRequestTimeoutSeconds { get; }
-        
-        /// <summary>Количество попыток повторного запроса к LLM при сетевых ошибках.</summary>
+
+        /// <summary>Retry count for transient LLM network failures.</summary>
         int MaxLlmRequestRetries { get; }
-        
-        /// <summary>Включить низкоуровневое логирование HTTP запросов/ответов.</summary>
+
+        /// <summary>Low-level HTTP request/response logging.</summary>
         bool EnableHttpDebugLogging { get; }
-        
-        /// <summary>Логировать потребление токенов (input, output, total).</summary>
+
+        /// <summary>Log token usage (prompt, completion, total).</summary>
         bool LogTokenUsage { get; }
-        
-        /// <summary>Логировать задержку LLM (latency).</summary>
+
+        /// <summary>Log end-to-end LLM latency.</summary>
         bool LogLlmLatency { get; }
-        
-        /// <summary>Логировать ошибки соединения с LLM.</summary>
+
+        /// <summary>Log LLM connection errors.</summary>
         bool LogLlmConnectionErrors { get; }
-        
-        /// <summary>Размер контекстного окна модели в токенах.</summary>
+
+        /// <summary>Model context window size in tokens.</summary>
         int ContextWindowTokens { get; }
-        
-        /// <summary>Универсальный префикс системного промпта (правила для всех агентов).</summary>
+
+        /// <summary>Universal system prompt prefix applied ahead of every agent system string.</summary>
         string UniversalSystemPromptPrefix { get; }
-        
-        /// <summary>Общая температура генерации по умолчанию (0.0 - 2.0).</summary>
+
+        /// <summary>Default sampling temperature (0.0–2.0).</summary>
         float Temperature { get; }
-        
-        /// <summary>Максимальное количество подряд неудачных вызовов инструментов (ошибок) до прерывания агента.</summary>
+
+        /// <summary>Max consecutive tool-call failures before aborting the agent turn.</summary>
         int MaxToolCallRetries { get; }
-        
-        /// <summary>Логировать факт вызова инструментов агентом.</summary>
+
+        /// <summary>Emit a line when any tool is invoked.</summary>
         bool LogToolCalls { get; }
-        
-        /// <summary>Логировать переданные в инструменты аргументы.</summary>
+
+        /// <summary>Log serialized tool arguments (can be noisy).</summary>
         bool LogToolCallArguments { get; }
-        
-        /// <summary>Логировать результаты выполнения инструментов.</summary>
+
+        /// <summary>Log tool results returned to the model.</summary>
         bool LogToolCallResults { get; }
-        
-        /// <summary>Логировать промежуточные шаги MEAI function calling цикла.</summary>
+
+        /// <summary>Log MEAI function-calling iterations and internal retries.</summary>
         bool LogMeaiToolCallingSteps { get; }
-        
-        /// <summary>Разрешить агенту вызывать один и тот же инструмент с теми же аргументами подряд. 
-        /// Если отключено - защищает от зацикливания, но мешает выполнять одно действие много раз.</summary>
+
+        /// <summary>
+        /// Allow identical back-to-back tool calls. When <c>false</c>, guards against accidental loops but blocks intentional repeats.
+        /// </summary>
         bool AllowDuplicateToolCalls { get; }
 
         /// <summary>
-        /// Глобальное включение стриминга ответов LLM (SSE для HTTP, callback для LLMUnity).
-        /// Может быть переопределено на уровне роли через <c>AgentBuilder.WithStreaming()</c>
-        /// или <c>AgentMemoryPolicy.SetStreamingEnabled()</c>, а также на уровне UI
-        /// через <c>CoreAiChatConfig.EnableStreaming</c>.
-        /// По умолчанию: true.
+        /// Global streaming toggle for LLM completions (SSE on HTTP APIs, callbacks on LLMUnity).
+        /// Per-role override: <c>AgentBuilder.WithStreaming()</c> / <c>AgentMemoryPolicy.SetStreamingEnabled()</c>.
+        /// UI layer may further override via <c>CoreAiChatConfig.EnableStreaming</c>. Default host implementations typically return <c>true</c>.
         /// </summary>
         bool EnableStreaming { get; }
 
         /// <summary>
-        /// Дефолтный лимит токенов в ответе LLM. Применяется ко **всем** бэкендам (HTTP API и LLMUnity)
-        /// единообразно: подкладывается в <c>ChatOptions.MaxOutputTokens</c>, если запрос не задал его явно.
+        /// Default max output tokens for both HTTP and LLMUnity when callers omit explicit limits.
+        /// Applied through <c>ChatOptions.MaxOutputTokens</c> when absent on the outgoing request.
         /// <para>
-        /// <b>Приоритет:</b> <c>LlmCompletionRequest.MaxOutputTokens</c> (per-request) →
-        /// <c>AiTaskRequest.MaxOutputTokens</c> (per-call) → per-agent policy →
-        /// <c>ICoreAISettings.MaxTokens</c> (этот фолбэк)
-        /// → провайдер-default.
+        /// Priority: <c>LlmCompletionRequest.MaxOutputTokens</c> → <c>AiTaskRequest.MaxOutputTokens</c> → per-agent policy →
+        /// <see cref="MaxTokens"/> (this fallback) → provider default.
         /// </para>
         /// <para>
-        /// <c>0</c> или отрицательное значение трактуется как «не задан» — фолбэк не применяется,
-        /// решает провайдер. Default interface member возвращает <c>0</c>, чтобы новое поле не ломало
-        /// существующих реализаторов (тестовые stub'ы и т.п.).
+        /// <c>0</c> or negative means unset — skip this fallback. Default interface member returns <c>0</c> so legacy stub settings compile unchanged.
         /// </para>
         /// </summary>
         int MaxTokens => 0;
 
         /// <summary>
-        /// When true and the host registers an <see cref="Ai"/>, overflowing chat history may be summarized with an auxiliary
-        /// LLM call (extra latency/cost). When false, compaction uses the deterministic bullet rollup only.
+        /// When true, overflowing chat history may be summarized via an auxiliary LLM call (extra latency/cost).
+        /// When false, compaction stays on the deterministic bullet rollup.
         /// </summary>
         bool EnableLlmContextCompaction => false;
 
         /// <summary>
-        /// Routes MEAI tool invocations (<see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/>) through this marshaler so host-specific APIs stay on the correct thread.
-        /// Default: <see cref="PassThroughLlmAsyncMarshaler.Instance"/> (portable); Unity resolves to the player loop.
+        /// Marshaler for MEAI <see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/> so tool bodies run on the host’s required thread.
+        /// Default portable implementation: <see cref="PassThroughLlmAsyncMarshaler.Instance"/>.
         /// </summary>
         ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;
     }

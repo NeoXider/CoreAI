@@ -13,8 +13,8 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Реализация пайплайна оркестрации: промпты, память, вызов <see cref="ILlmClient"/>,
-    /// опционально один повтор при <see cref="IRoleStructuredResponsePolicy"/>, публикация конверта в шину.
+    /// Orchestration pipeline: prompts, memory, <see cref="ILlmClient"/> invocation,
+    /// optional structured-output retry via <see cref="IRoleStructuredResponsePolicy"/>, command publication.
     /// </summary>
     public sealed class AiOrchestrator : IAiOrchestrationService
     {
@@ -34,7 +34,7 @@ namespace CoreAI.Ai
         private readonly ITokenEstimator _tokenEstimator;
         private readonly IConversationCompactionCoordinator _compactionCoordinator;
 
-        /// <summary>Собирает зависимости оркестратора (регистрация через VContainer).</summary>
+        /// <summary>Constructs orchestrator dependencies (usual registration path: DI container).</summary>
         public AiOrchestrator(
             IAuthorityHost authority,
             ILlmClient llm,
@@ -71,8 +71,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Выделенная сборка запроса (переиспользуется в <see cref="RunTaskAsync"/>
-        /// и <see cref="RunStreamingAsync"/>).
+        /// Builds the request bundle shared by <see cref="RunTaskAsync"/> and <see cref="RunStreamingAsync"/>.
         /// </summary>
         private async Task<RequestBundle> BuildRequestAsync(
             AiTaskRequest task,
@@ -430,15 +429,12 @@ namespace CoreAI.Ai
                     sw.Elapsed.TotalMilliseconds);
             }
 
-            // После окончания стрима — структурная валидация и публикация команды.
             string content = accumulated.ToString();
             if (string.IsNullOrEmpty(terminalError) && !string.IsNullOrEmpty(content))
             {
                 if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
                     !_structuredPolicy.TryValidate(bundle.RoleId, content, out string failReason))
                 {
-                    // Стриминг невозможно «переиграть» без второго стрима,
-                    // поэтому просто сообщаем ошибку валидации наружу.
                     _metrics.RecordStructuredRetry(bundle.RoleId, bundle.TraceId, failReason ?? "");
                     yield return new LlmStreamChunk
                     {
@@ -798,10 +794,9 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
+        /// <remarks>No-op here: queueing and scoped cancellation live in <see cref="QueuedAiOrchestrator"/>.</remarks>
         public void CancelTasks(string cancellationScope)
         {
-            // AiOrchestrator не управляет очередью и токенами (это делает QueuedAiOrchestrator),
-            // поэтому здесь метод пустой.
         }
 
         private static bool IsChatUiSourceTask(AiTaskRequest task)

@@ -5,27 +5,22 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Точка входа «задача для ИИ»: промпты, вызов LLM, память, публикация <see cref="CoreAI.Messaging.ApplyAiGameCommand"/>.
-    /// Реализация по умолчанию — очередь поверх <see cref="AiOrchestrator"/>.
+    /// AI task entry point: prompts, LLM invocation, memory, publishing <see cref="CoreAI.Messaging.ApplyAiGameCommand"/>.
+    /// Typical production wiring layers <see cref="QueuedAiOrchestrator"/> above <see cref="AiOrchestrator"/>.
     /// </summary>
     public interface IAiOrchestrationService
     {
-        /// <summary>Снимок → системный/пользовательский промпт → LLM → команда в шину.</summary>
+        /// <summary>Snapshot → system/user payloads → LLM → command sink.</summary>
         Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Стриминговый вариант <see cref="RunTaskAsync"/>: возвращает чанки модели по мере генерации.
-        /// По умолчанию делает fallback к <see cref="RunTaskAsync"/> и выдаёт результат одним чанком
-        /// с <c>IsDone=true</c>. Конкретные реализации (<see cref="AiOrchestrator"/>,
-        /// <see cref="QueuedAiOrchestrator"/>) должны переопределять этот метод, чтобы пользователь
-        /// получал токены по мере поступления.
+        /// Streaming variant of <see cref="RunTaskAsync"/> yielding model deltas as they arrive.
+        /// Default DIM implementation buffers through <see cref="RunTaskAsync"/> and emits a single text chunk followed by termination.
         /// </summary>
         /// <remarks>
-        /// ⚠️ Любая обёртка над <see cref="IAiOrchestrationService"/> (очередь, логирование,
-        /// таймаут, авторити) <b>обязана</b> явно переопределять этот метод. Иначе default-fallback
-        /// тихо убивает стриминг — аналогично контракту <see cref="ILlmClient.CompleteStreamingAsync"/>.
+        /// Wrappers (queues, decorators, timeouts, authority) <b>must</b> override this method; otherwise streaming is silently reduced
+        /// to buffered completion — same invariant as <see cref="ILlmClient.CompleteStreamingAsync"/>.
         /// </remarks>
-        // ARCH-7: Removed stale #if UNITY_2021_3_OR_NEWER — Unity 6000.0 minimum supports DIM.
         virtual async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
@@ -42,10 +37,7 @@ namespace CoreAI.Ai
             yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
         }
 
-        /// <summary>
-        /// Отменяет все текущие и ожидающие задачи для указанного scope.
-        /// Удобно для ручной остановки агента.
-        /// </summary>
+        /// <summary>Cancels in-flight and queued work for the given cancellation scope (e.g. manual agent stop).</summary>
         void CancelTasks(string cancellationScope);
     }
 }

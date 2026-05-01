@@ -4,42 +4,35 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
-    /// <summary>
-    /// Тип LLM-бэкенда для быстрого переключения в одном месте.
-    /// </summary>
+    /// <summary>Legacy coarse backend selector surfaced in older scenes.</summary>
     public enum LlmBackendType
     {
-        /// <summary>Автоматический выбор: LLMUnity → HTTP API → Offline.</summary>
+        /// <summary>Try LLMUnity, then HTTP, then Offline.</summary>
         Auto = 0,
 
-        /// <summary>Локальная модель через LLMUnity (GGUF на сцене).</summary>
+        /// <summary>On-device GGUF via LLMUnity.</summary>
         LlmUnity = 1,
 
-        /// <summary>HTTP API — OpenAI-compatible (LM Studio, OpenRouter, Qwen API и т.д.).</summary>
+        /// <summary>OpenAI-compatible HTTP (LM Studio, OpenRouter, Qwen, …).</summary>
         OpenAiHttp = 2,
 
-        /// <summary>Офлайн режим — без подключений к LLM, детерминированные ответы для тестов.</summary>
+        /// <summary>No network LLM — deterministic stubs for CI/offline flows.</summary>
         Offline = 3
     }
 
-    /// <summary>
-    /// Приоритет бэкендов в Auto режиме.
-    /// </summary>
+    /// <summary>Preference order inside <see cref="LlmBackendType.Auto"/>.</summary>
     public enum LlmAutoPriority
     {
-        /// <summary>Сначала LLMUnity, затем HTTP API, затем Offline.</summary>
+        /// <summary>LLMUnity → HTTP → Offline.</summary>
         LlmUnityFirst = 0,
 
-        /// <summary>Сначала HTTP API, затем LLMUnity, затем Offline.</summary>
+        /// <summary>HTTP → LLMUnity → Offline.</summary>
         HttpFirst = 1
     }
 
     /// <summary>
-    /// Единые настройки CoreAI — всё в одном ScriptableObject.
-    /// Создаётся через: <c>Create → CoreAI → CoreAI Settings</c>
-    /// 
-    /// Автоматически подхватывается как синглтон через <see cref="Instance"/>.
-    /// Используется по всему проекту для получения API-ключа, URL, модели и других настроек.
+    /// Central CoreAI tuning asset (<c>Create → CoreAI → Core AI Settings</c>).
+    /// Loaded lazily via <see cref="Instance"/> unless <see cref="SetInstance"/> injects another reference.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/CoreAI Settings", fileName = "CoreAISettings")]
     public sealed class CoreAISettingsAsset : ScriptableObject, ICoreAISettings
@@ -48,10 +41,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private static CoreAISettingsAsset _instance;
 
-        /// <summary>
-        /// Глобальный экземпляр настроек. Автоматически ищется в Resources при первом обращении.
-        /// Также назначается через <see cref="SetInstance"/> из LifetimeScope.
-        /// </summary>
+        /// <summary>Resources-backed singleton (<c>CoreAISettings</c>) overridden by LifetimeScope injection.</summary>
         public static CoreAISettingsAsset Instance
         {
             get
@@ -65,13 +55,13 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Установить экземпляр вручную (вызывается из LifetimeScope).</summary>
+        /// <summary>Assign runtime instance from composition root.</summary>
         public static void SetInstance(CoreAISettingsAsset settings)
         {
             _instance = settings;
         }
 
-        /// <summary>Сбросить экземпляр (для тестов).</summary>
+        /// <summary>Clears static cache (tests).</summary>
         public static void ResetInstance()
         {
             _instance = null;
@@ -79,10 +69,10 @@ namespace CoreAI.Infrastructure.Llm
 
         #endregion
 
-        #region Основные настройки LLM
+        #region LLM settings
 
         [Header("🤖 LLM Backend")]
-        [Tooltip("Какой бэкенд использовать: Auto, LLMUnity (локально), HTTP API или без LLM.")]
+        [Tooltip("Runtime backend preset: Auto, LLMUnity, HTTP API, or Offline.")]
         [SerializeField]
         private LlmBackendType backendType = LlmBackendType.Auto;
 
@@ -90,28 +80,31 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private LlmExecutionMode executionMode = LlmExecutionMode.Auto;
 
-        [Tooltip("Приоритет в Auto режиме: LLMUnity сначала или HTTP API сначала.")] [SerializeField]
+        [Tooltip("When backend is Auto, prefer LLMUnity or HTTP API first.")]
+        [SerializeField]
         private LlmAutoPriority autoPriority = LlmAutoPriority.LlmUnityFirst;
 
         [Header("🌐 HTTP API (OpenAI-compatible)")]
         [Tooltip(
-            "База URL без завершающего слэша: https://api.openai.com/v1, http://localhost:1234/v1 (LM Studio), http://localhost:5001/v1 (Qwen) и т.д.")]
+            "Base URL without trailing slash (e.g., https://api.openai.com/v1 or http://localhost:1234/v1 for LM Studio).")]
         [SerializeField]
         private string apiBaseUrl = "http://localhost:1234/v1";
 
-        [Tooltip("API ключ (Bearer токен). Для OpenAI: sk-..., для LM Studio: пусто, для Qwen: ваш ключ.")]
+        [Tooltip("Bearer/API key — required for hosted providers; empty for many local gateways.")]
         [SerializeField]
         private string apiKey = "";
 
-        [Tooltip("Название модели: gpt-4o-mini, qwen3.5-4b, llama-3-8b и т.д.")] [SerializeField]
+        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, …).")]
+        [SerializeField]
         private string modelName = "gpt-4o-mini";
 
-        [Tooltip("Температура генерации: 0.0 — детерминировано, 2.0 — максимально случайно. Общая для всех агентов.")]
+        [Tooltip("Sampling temperature applied when callers do not override (0 deterministic … 2 creative).")]
         [SerializeField]
         [Range(0f, 2f)]
         private float temperature = 0.1f;
 
-        [Tooltip("Максимум токенов в ответе. 0 = без лимита.")] [SerializeField]
+        [Tooltip("Max tokens per completion across HTTP + LLMUnity when no per-call override. 0 = provider default.")]
+        [SerializeField]
         private int maxTokens = 2048;
 
         [Header("Client limits")]
@@ -119,161 +112,175 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField] [Min(0)] private int maxClientLimitedPromptChars;
 
-        [Tooltip("Таймаут HTTP-запроса в секундах. 0 = без таймаута.")] [SerializeField] [Min(0)]
+        [Tooltip("HTTP layer timeout seconds (fallback 120 when unset).")] [SerializeField] [Min(0)]
         private int requestTimeoutSeconds = 120;
 
-        [Header("💾 LLMUnity (локальная модель)")]
-        [Tooltip("Имя GameObject с LLMAgent на сцене. Пусто = найти автоматически.")]
+        [Header("💾 LLMUnity (local model)")]
+        [Tooltip("GameObject hosting LLMAgent; empty auto-detects.")]
         [SerializeField]
         private string llmUnityAgentName = "";
 
-        [Tooltip("Путь к .gguf модели. Пусто = автоопределение через Model Manager.")] [SerializeField]
+        [Tooltip("Relative GGUF path; falls back to LLMUnity model manager hints when empty.")]
+        [SerializeField]
         private string ggufModelPath = "Qwen3.5-2B-Q4_K_M.gguf";
 
-        [Tooltip("Не уничтожать LLMUnity GameObject при смене сцены.")] [SerializeField]
+        [Tooltip("Keep LLMAgent alive across loads (persist service).")] [SerializeField]
         private bool llmUnityDontDestroyOnLoad = true;
 
-        [Tooltip("Таймаут запуска LLMUnity сервиса (секунды).")] [SerializeField] [Min(5f)]
+        [Tooltip("Seconds to wait for LLMUnity service startup.")]
+        [SerializeField] [Min(5f)]
         private float llmUnityStartupTimeoutSeconds = 120f;
 
-        [Tooltip("Задержка после запуска LLMUnity сервиса (секунды).")] [SerializeField] [Min(0f)]
+        [Tooltip("Delay after local model server reports ready.")]
+        [SerializeField] [Min(0f)]
         private float llmUnityStartupDelaySeconds = 1f;
 
-        [Tooltip("Не останавливать LLMUnity сервер между запросами (keep-alive). Ускоряет тесты.")] [SerializeField]
+        [Tooltip("Keep LLMUnity server warm between turns (faster tests).")] [SerializeField]
         private bool llmUnityKeepAlive = false;
 
         [Tooltip(
-            "Включить режим размышлений (thinking/reasoning). Поддерживается Qwen3.5, DeepSeek и др. Работает как для API так и для LLMUnity.")]
+            "Strip/enable reasoning tags for models that emit <think> blocks (Qwen3.5, DeepSeek, …). Works for HTTP + LLMUnity.")]
         [SerializeField]
         private bool enableReasoning = false;
 
-        [Tooltip("Максимум параллельных чатов с LLMUnity. 1 = последовательно.")] [SerializeField] [Min(1)]
+        [Tooltip("Concurrent LLMUnity chat sessions (1 = strictly serial).")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
 
-        [Tooltip("Количество слоев для выгрузки на GPU. 0 = CPU, 99 = все слои (как LM Studio).")]
+        [Tooltip("GPU offload depth (0 = CPU only, 99 = all layers — LM Studio style).")]
         [SerializeField]
         [Min(0)]
         private int llmUnityNumGPULayers = 99;
 
-        [Header("⚙️ Общие настройки")]
+        [Header("⚙️ Shared agent defaults")]
         [Tooltip(
-            "Универсальный стартовый промпт — идёт ПЕРЕД промптом каждого агента. Задаёт общие правила для всех моделей.")]
+            "Universal system prefix prepended before every agent-specific system prompt.")]
         [TextArea(3, 6)]
         [SerializeField]
         private string universalSystemPromptPrefix = "Respond concisely and to the point. Avoid unnecessary verbosity.";
 
         [Tooltip(
-            "Максимум подряд неудачных Lua repair до прерывания повторов Programmer. Счётчик сбрасывается при успехе.")]
+            "Max Programmer Lua auto-repair attempts before aborting the repair loop (resets after success).")]
         [SerializeField]
         [Min(1)]
         private int maxLuaRepairRetries = 3;
 
-        [Tooltip("Максимум подряд неудачных tool call до прерывания агента. Счётчик сбрасывается при успехе.")]
+        [Tooltip("Max consecutive tool-call failures before stopping the agent turn (resets after success).")]
         [SerializeField]
         [Min(1)]
         private int maxToolCallRetries = 3;
 
-        [Tooltip("Если включено, агент сможет вызывать один инструмент с теми же аргументами дважды за одну сессию. Это полезно, если нужно несколько раз повторить одно действие.")]
+        [Tooltip("Allow identical tool+args invocations back-to-back (needed for intentional repeats).")]
         [SerializeField]
         private bool allowDuplicateToolCalls = false;
 
-        [Tooltip("Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.")]
+        [Tooltip("Transport-level retries for transient HTTP failures / timeouts.")]
         [SerializeField]
         [Min(1)]
         private int maxLlmRequestRetries = 2;
 
-        [Tooltip("Контекстное окно по умолчанию (токены).")] [SerializeField] [Min(256)]
+        [Tooltip("Default context-window hint in tokens.")]
+        [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
 
         [Tooltip(
-            "Глобальное включение стриминга ответов LLM (SSE для HTTP API, callback для LLMUnity). " +
-            "Можно переопределить на уровне роли через AgentBuilder.WithStreaming() или на уровне UI через CoreAiChatConfig.EnableStreaming.")]
+            "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI.")]
         [SerializeField]
         private bool enableStreaming = true;
 
         [Tooltip(
-            "Доп. вызов LLM для свёртки части истории, если она не укладывается в HistoryTokenBudget. " +
-            "Дороже и медленнее, чем детерминированный bullet rollup (по умолчанию выкл.).")]
+            "Optional auxiliary LLM to fold evicted transcript (costlier than deterministic rollup; off by default).")]
         [SerializeField]
         private bool enableLlmContextCompaction = false;
 
-        [Header("🔌 Offline режим (без LLM)")]
-        [Tooltip("Возвращать кастомный текст вместо заглушки по ролям.")]
+        [Header("🔌 Offline mode")]
+        [Tooltip("Serve a fixed string instead of per-role stubs when Offline mode is active.")]
         [SerializeField]
         private bool offlineUseCustomResponse = false;
 
-        [Tooltip("Текст который будет возвращаться вместо всех запросов.")] [SerializeField] [TextArea(3, 8)]
+        [Tooltip("Replacement assistant text returned for matched offline roles.")]
+        [SerializeField] [TextArea(3, 8)]
         private string offlineCustomResponse = "Offline mode: LLM unavailable";
 
-        [Tooltip("Для каких ролей использовать кастомный ответ (* = все).")] [SerializeField]
+        [Tooltip("Comma-separated role ids (or * for everyone) that receive OfflineCustomResponse.")]
+        [SerializeField]
         private string offlineCustomResponseRoles = "*";
 
-        [Header("🔧 Отладка")] [Tooltip("Включить подробное логирование MEAI pipeline.")] [SerializeField]
+        [Header("🔧 Debug")]
+        [Tooltip("Verbose MEAI diagnostics (requests/responses).")]
+        [SerializeField]
         private bool enableMeaiDebugLogging = false;
 
-        [Tooltip("Логировать сырые HTTP request/response (для отладки API).")] [SerializeField]
+        [Tooltip("Dump raw HTTP bodies (noisy — dev only).")] [SerializeField]
         private bool enableHttpDebugLogging = false;
 
-        [Tooltip("Логировать входящие промпты (system, user) и инструменты.")] [SerializeField]
+        [Tooltip("Log composed prompts / tool definitions before dispatch.")]
+        [SerializeField]
         private bool logLlmInput = true;
 
-        [Tooltip("Логировать исходящие ответы модели и результаты tool calls.")] [SerializeField]
+        [Tooltip("Log assistant completions and aggregated tool summaries.")]
+        [SerializeField]
         private bool logLlmOutput = true;
 
-        [Tooltip("Логировать количество токенов (input, output, total) в каждом ответе.")] [SerializeField]
+        [Tooltip("Emit usage.prompt / usage.completion totals when backends provide them.")]
+        [SerializeField]
         private bool logTokenUsage = true;
 
-        [Tooltip("Логировать время отклика LLM (latency в миллисекундах).")] [SerializeField]
+        [Tooltip("Log measured LLM latency in milliseconds.")]
+        [SerializeField]
         private bool logLlmLatency = true;
 
-        [Tooltip("Логировать ошибки подключения к LLM (timeout, network error).")] [SerializeField]
+        [Tooltip("Log transport failures (timeouts, unreachable hosts).")] [SerializeField]
         private bool logLlmConnectionErrors = true;
 
         [Header("🔨 Tool Call Logging")]
-        [Tooltip("Логировать каждый вызов инструмента (название, аргументы, успех/неудача).")]
+        [Tooltip("Emit a line whenever a native tool executes.")]
         [SerializeField]
         private bool logToolCalls = true;
 
-        [Tooltip("Логировать аргументы tool call (может быть многословно).")] [SerializeField]
+        [Tooltip("Serialize tool arguments into logs.")]
+        [SerializeField]
         private bool logToolCallArguments = true;
 
-        [Tooltip("Логировать результаты tool call (ответы инструментов).")] [SerializeField]
+        [Tooltip("Serialize tool outputs into logs.")]
+        [SerializeField]
         private bool logToolCallResults = true;
 
-        [Tooltip("Логировать внутренние шаги MEAI FunctionInvokingChatClient (итерации, retry).")] [SerializeField]
+        [Tooltip("Trace MEAI function-calling iterations / inner retries.")]
+        [SerializeField]
         private bool logMeaiToolCallingSteps = true;
 
-        [Tooltip("Таймаут LLM-запроса в LifetimeScope (секунды). 0 = без ограничения. " +
-                 "Важно: стриминг и tool-calling на локальных/медленных моделях часто требует 60–180с.")] [SerializeField] [Min(0f)]
+        [Tooltip("Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need ≥60–180).")]
+        [SerializeField] [Min(0f)]
         private float llmRequestTimeoutSeconds = 120f;
 
-        [Tooltip("Максимум параллельных задач оркестратора.")] [SerializeField] [Min(1)]
+        [Tooltip("Concurrent orchestrator runs allowed by CoreAILifetimeScope.")] [SerializeField] [Min(1)]
         private int maxConcurrentOrchestrations = 2;
 
-        [Tooltip("Логировать метрики оркестратора.")] [SerializeField]
+        [Tooltip("Emit orchestrator timing / counters to the Unity log.")]
+        [SerializeField]
         private bool logOrchestrationMetrics = false;
 
         #endregion
 
         #region Properties
 
-        /// <summary>Тип текущего бэкенда.</summary>
+        /// <summary>Serialized legacy backend enum.</summary>
         public LlmBackendType BackendType => backendType;
 
         /// <summary>Product-facing LLM execution mode.</summary>
         public LlmExecutionMode ExecutionMode => ResolveExecutionMode(executionMode, backendType);
 
-        /// <summary>Используется ли HTTP API.</summary>
+        /// <summary>True when current mode routes through OpenAI-compatible HTTP.</summary>
         public bool UseHttpApi =>
             ExecutionMode == LlmExecutionMode.ClientOwnedApi ||
             ExecutionMode == LlmExecutionMode.ClientLimited ||
             ExecutionMode == LlmExecutionMode.ServerManagedApi ||
             backendType == LlmBackendType.OpenAiHttp;
 
-        /// <summary>Используется ли LLMUnity.</summary>
+        /// <summary>True when Auto/LocalModel may bind LLMUnity.</summary>
         public bool UseLlmUnity => ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto;
 
-        /// <summary>Используется ли офлайн режим (без LLM).</summary>
+        /// <summary>True when execution mode is Offline.</summary>
         public bool UseOffline => ExecutionMode == LlmExecutionMode.Offline;
 
         /// <summary>Whether the current mode uses a user-owned provider key.</summary>
@@ -285,23 +292,22 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Whether the current mode delegates provider access to a backend service.</summary>
         public bool UseServerManagedApi => ExecutionMode == LlmExecutionMode.ServerManagedApi;
 
-        /// <summary>Приоритет бэкендов в Auto режиме.</summary>
+        /// <summary>Auto-mode backend ordering preference.</summary>
         public LlmAutoPriority AutoPriority => autoPriority;
 
-        // Offline
-        /// <summary>Использовать кастомный ответ вместо заглушки по ролям.</summary>
+        /// <summary>Whether offline replies use <see cref="OfflineCustomResponse"/>.</summary>
         public bool OfflineUseCustomResponse => offlineUseCustomResponse;
 
-        /// <summary>Кастомный текст для Offline режима.</summary>
+        /// <summary>Fallback/custom assistant line for offline flows.</summary>
         public string OfflineCustomResponse => string.IsNullOrWhiteSpace(offlineCustomResponse)
             ? "Offline mode: LLM unavailable"
             : offlineCustomResponse;
 
-        /// <summary>Для каких ролей использовать кастомный ответ (* = все).</summary>
+        /// <summary>Role filter list or <c>*</c> wildcard.</summary>
         public string OfflineCustomResponseRoles =>
             string.IsNullOrWhiteSpace(offlineCustomResponseRoles) ? "*" : offlineCustomResponseRoles;
 
-        /// <summary>Нужно ли использовать кастомный ответ для данной роли.</summary>
+        /// <summary>Returns true when <paramref name="roleId"/> should receive custom offline copy.</summary>
         public bool ShouldUseOfflineCustomResponse(string roleId)
         {
             if (!offlineUseCustomResponse)
@@ -331,15 +337,14 @@ namespace CoreAI.Infrastructure.Llm
             return false;
         }
 
-        // HTTP API
-        /// <summary>Базовый URL API без завершающего слэша.</summary>
+        /// <summary>OpenAI-compatible base URL without trailing slash.</summary>
         public string ApiBaseUrl =>
             string.IsNullOrWhiteSpace(apiBaseUrl) ? "http://localhost:1234/v1" : apiBaseUrl.TrimEnd('/');
 
-        /// <summary>API ключ (Bearer токен).</summary>
+        /// <summary>Bearer-style API credential.</summary>
         public string ApiKey => apiKey ?? "";
 
-        /// <summary>Название модели.</summary>
+        /// <summary>Provider model identifier (HTTP) or GGUF hint (LLMUnity fallback).</summary>
         public string ModelName
         {
             get
@@ -349,7 +354,6 @@ namespace CoreAI.Infrastructure.Llm
                     return modelName;
                 }
 
-                // Для LLMUnity возвращаем имя GGUF файла
                 if (ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto)
                 {
                     if (!string.IsNullOrWhiteSpace(ggufModelPath))
@@ -362,10 +366,10 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Температура генерации.</summary>
+        /// <summary>Serialized temperature fallback.</summary>
         public float Temperature => temperature;
 
-        /// <summary>Максимум токенов в ответе.</summary>
+        /// <summary>Global max-output cap (tokens).</summary>
         public int MaxTokens => maxTokens;
 
         /// <summary>Maximum client-limited requests allowed in the current session; zero disables this limit.</summary>
@@ -376,116 +380,111 @@ namespace CoreAI.Infrastructure.Llm
         public int MaxClientLimitedPromptChars =>
             maxClientLimitedPromptChars < 0 ? 0 : maxClientLimitedPromptChars;
 
-        /// <summary>Таймаут HTTP-запроса.</summary>
+        /// <summary>HTTP adapter timeout backing field.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds <= 0 ? 120 : requestTimeoutSeconds;
 
-        // LLMUnity
-        /// <summary>Имя GameObject с LLMAgent.</summary>
+        /// <summary>Optional LLMAgent GameObject identifier.</summary>
         public string LlmUnityAgentName => llmUnityAgentName;
 
-        /// <summary>Путь к .gguf модели.</summary>
+        /// <summary>Relative GGUF location for LLMUnity.</summary>
         public string GgufModelPath => ggufModelPath ?? "";
 
-        /// <summary>Не уничтожать при смене сцены.</summary>
+        /// <summary>Persist LLMUnity host GameObject.</summary>
         public bool LlmUnityDontDestroyOnLoad => llmUnityDontDestroyOnLoad;
 
-        /// <summary>Таймаут запуска LLMUnity (сек).</summary>
+        /// <summary>Local model readiness timeout.</summary>
         public float LlmUnityStartupTimeoutSeconds =>
             llmUnityStartupTimeoutSeconds < 5f ? 120f : llmUnityStartupTimeoutSeconds;
 
-        /// <summary>Задержка после запуска LLMUnity (сек).</summary>
+        /// <summary>Cooldown after daemon ready signal.</summary>
         public float LlmUnityStartupDelaySeconds => llmUnityStartupDelaySeconds;
 
-        /// <summary>Не останавливать сервер между запросами.</summary>
+        /// <summary>Hold LLMUnity server between prompts.</summary>
         public bool LlmUnityKeepAlive => llmUnityKeepAlive;
 
-        /// <summary>Включить режим размышлений (thinking/reasoning). Для Qwen3.5, DeepSeek и др.</summary>
+        /// <summary>Reasoning-tag cleanup toggle.</summary>
         public bool EnableReasoning => enableReasoning;
 
-        /// <summary>Максимум параллельных чатов.</summary>
+        /// <summary>LLMUnity session concurrency clamp.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
 
-        /// <summary>Слоев выгружено на GPU (0 = CPU).</summary>
+        /// <summary>Exported GPU offload depth.</summary>
         public int NumGPULayers => llmUnityNumGPULayers < 0 ? 0 : llmUnityNumGPULayers;
 
-        // Общие
-        /// <summary>Универсальный стартовый промпт для всех агентов.</summary>
+        /// <summary>Universal system preamble.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";
 
-        /// <summary>Максимум подряд неудачных Lua repair попыток.</summary>
+        /// <summary>Clamp for Programmer Lua retries.</summary>
         public int MaxLuaRepairRetries => maxLuaRepairRetries < 1 ? 3 : maxLuaRepairRetries;
 
-        /// <summary>Максимум подряд неудачных too call до прерывания агента.</summary>
+        /// <summary>Clamp for consecutive failing tool executions.</summary>
         public int MaxToolCallRetries => maxToolCallRetries < 1 ? 3 : maxToolCallRetries;
 
-        /// <summary>Разрешить повторный вызов инструмента.</summary>
+        /// <summary>Duplicate invocation guardrail.</summary>
         public bool AllowDuplicateToolCalls => allowDuplicateToolCalls;
 
-        /// <summary>Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.</summary>
+        /// <summary>Clamp for decorator-level HTTP retries.</summary>
         public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 2 : maxLlmRequestRetries;
 
-        /// <summary>Контекстное окно.</summary>
+        /// <summary>Estimated context-window tokens exposed to budgeting.</summary>
         public int ContextWindowTokens => contextWindowTokens < 256 ? 8192 : contextWindowTokens;
 
-        /// <summary>Глобальное включение стриминга ответов LLM (по умолчанию true).</summary>
+        /// <summary>Global streaming flag.</summary>
         public bool EnableStreaming => enableStreaming;
 
-        /// <summary>LLM-assisted compaction длинной истории (иначе только детерминированная свёртка).</summary>
+        /// <summary>Optional summarizer-assisted memory compaction flag.</summary>
         public bool EnableLlmContextCompaction => enableLlmContextCompaction;
 
         /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
         public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
 
-        // Отладка
-        /// <summary>MEAI debug logging.</summary>
+        /// <inheritdoc />
         public bool EnableMeaiDebugLogging => enableMeaiDebugLogging;
 
-        /// <summary>HTTP debug logging.</summary>
+        /// <inheritdoc />
         public bool EnableHttpDebugLogging => enableHttpDebugLogging;
 
-        /// <summary>Таймаут LLM-запроса.</summary>
+        /// <inheritdoc />
         public float LlmRequestTimeoutSeconds => llmRequestTimeoutSeconds;
 
-        /// <summary>Максимум параллельных оркестраций.</summary>
+        /// <summary>Parallel orchestrator task ceiling.</summary>
         public int MaxConcurrentOrchestrations => maxConcurrentOrchestrations < 1 ? 2 : maxConcurrentOrchestrations;
 
-        /// <summary>Логирование метрик.</summary>
+        /// <summary>Orchestrator metrics logging toggle.</summary>
         public bool LogOrchestrationMetrics => logOrchestrationMetrics;
 
-        /// <summary>Логировать входящие промпты и инструменты.</summary>
+        /// <summary>Log inbound prompts before dispatch.</summary>
         public bool LogLlmInput => logLlmInput;
 
-        /// <summary>Логировать исходящие ответы модели и tool calls.</summary>
+        /// <summary>Log assistant completions / tool summaries.</summary>
         public bool LogLlmOutput => logLlmOutput;
 
-        /// <summary>Логировать количество токенов.</summary>
+        /// <inheritdoc />
         public bool LogTokenUsage => logTokenUsage;
 
-        /// <summary>Логировать время отклика LLM.</summary>
+        /// <inheritdoc />
         public bool LogLlmLatency => logLlmLatency;
 
-        /// <summary>Логировать ошибки подключения.</summary>
+        /// <inheritdoc />
         public bool LogLlmConnectionErrors => logLlmConnectionErrors;
 
-        /// <summary>Логировать вызовы инструментов (название, успех/неудача).</summary>
+        /// <inheritdoc />
         public bool LogToolCalls => logToolCalls;
 
-        /// <summary>Логировать аргументы tool call.</summary>
+        /// <inheritdoc />
         public bool LogToolCallArguments => logToolCallArguments;
 
-        /// <summary>Логировать результаты tool call.</summary>
+        /// <inheritdoc />
         public bool LogToolCallResults => logToolCallResults;
 
-        /// <summary>Логировать шаги MEAI FunctionInvokingChatClient.</summary>
+        /// <inheritdoc />
         public bool LogMeaiToolCallingSteps => logMeaiToolCallingSteps;
 
         #endregion
 
         #region Runtime Configuration
 
-        /// <summary>
-        /// Настроить HTTP API программно (для тестов или динамической конфигурации).
-        /// </summary>
+        /// <summary>Programmatic HTTP preset (tests / runtime bootstrap).</summary>
         public void ConfigureHttpApi(
             string baseUrl,
             string key,
@@ -553,9 +552,7 @@ namespace CoreAI.Infrastructure.Llm
             executionMode = LlmExecutionMode.ServerManagedApi;
         }
 
-        /// <summary>
-        /// Переключить на LLMUnity.
-        /// </summary>
+        /// <summary>Force local GGUF routing via LLMUnity.</summary>
         public void ConfigureLlmUnity(
             string agentName = "",
             string ggufPath = "Qwen3.5-2B-Q4_K_M.gguf",
@@ -576,18 +573,14 @@ namespace CoreAI.Infrastructure.Llm
             llmUnityNumGPULayers = numGpuLayers < 0 ? 0 : numGpuLayers;
         }
 
-        /// <summary>
-        /// Переключить в офлайн режим (без LLM, детерминированные ответы для тестов).
-        /// </summary>
+        /// <summary>Disable networked LLMs (offline/stub).</summary>
         public void ConfigureOffline()
         {
             backendType = LlmBackendType.Offline;
             executionMode = LlmExecutionMode.Offline;
         }
 
-        /// <summary>
-        /// Переключить в автоматический режим (LLMUnity → HTTP API → Offline).
-        /// </summary>
+        /// <summary>Use automatic backend resolution (respects routing manifest + priority).</summary>
         public void ConfigureAuto()
         {
             backendType = LlmBackendType.Auto;
@@ -624,7 +617,6 @@ namespace CoreAI.Infrastructure.Llm
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            // Валидация при изменении в Inspector
             if (requestTimeoutSeconds < 0)
             {
                 requestTimeoutSeconds = 120;

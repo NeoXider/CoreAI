@@ -13,36 +13,29 @@ using UnityEngine;
 namespace CoreAI
 {
     /// <summary>
-    /// Универсальная одна-строчная точка входа CoreAI: ответ «одним куском» (<c>Task</c> + <c>await</c>)
-    /// и стриминговый вызов LLM,
-    /// интеграция с <see cref="IAiOrchestrationService"/> (очередь, метрики, publish command),
-    /// без необходимости вручную доставать сервисы из VContainer или писать свой singleton.
-    ///
-    /// <para>
-    /// <b>Быстрый старт.</b> Добавьте <see cref="CoreAILifetimeScope"/> на сцену и вызывайте:
-    /// </para>
+    /// One-line CoreAI entrypoint: buffered (<c>await</c>) and streaming LLM calls over
+    /// <see cref="IAiOrchestrationService"/> (queue, metrics, command publish) without hand-wiring VContainer.
+    /// <para><b>Quick start.</b> Add <see cref="CoreAILifetimeScope"/> to a scene, then:</para>
     /// <code>
-    /// // Полный ответ одной строкой (асинхронно — только через await, без .Result / .Wait на main):
-    /// string answer = await CoreAi.AskAsync("Привет!", roleId: "PlayerChat");
+    /// // Buffered reply (always await; do not use .Result/.Wait on Unity’s main thread):
+    /// string answer = await CoreAi.AskAsync("Hello!", roleId: "PlayerChat");
     ///
-    /// // Стриминг (чанки по мере генерации):
-    /// await foreach (string chunk in CoreAi.StreamAsync("Расскажи анекдот", "PlayerChat"))
+    /// // Streaming string chunks:
+    /// await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "PlayerChat"))
     ///     label.text += chunk;
     ///
-    /// // Smart — сам решает (стрим если включено в settings/agent/UI):
-    /// await CoreAi.SmartAskAsync("Вопрос", "PlayerChat", onChunk: c => label.text += c);
+    /// // Smart path (streaming if enabled in settings / agent / UI):
+    /// await CoreAi.SmartAskAsync("Question", "PlayerChat", onChunk: c => label.text += c);
     ///
-    /// // Полный оркестратор-пайплайн (память, authority, метрики, publish):
-    /// var task = new AiTaskRequest { RoleId = "Creator", Hint = "Дай JSON-команду" };
+    /// // Full orchestrator (memory, authority, metrics, publish):
+    /// var task = new AiTaskRequest { RoleId = "Creator", Hint = "Emit a JSON command" };
     /// string result = await CoreAi.OrchestrateAsync(task);
     /// await foreach (var chunk in CoreAi.OrchestrateStreamAsync(task))
     ///     Debug.Log(chunk.Text);
     /// </code>
-    ///
     /// <para>
-    /// Сервисы резолвятся лениво из первой найденной <see cref="CoreAILifetimeScope"/>. При смене
-    /// сцены или пересборке scope вызывайте <see cref="Invalidate"/>, иначе используется
-    /// кэшированный контейнер.
+    /// Services resolve lazily from the first located <see cref="CoreAILifetimeScope"/>.
+    /// Call <see cref="Invalidate"/> after scene changes or container rebuilds so cached instances are dropped.
     /// </para>
     /// </summary>
     public static class CoreAi
@@ -53,12 +46,11 @@ namespace CoreAI
         private static IAiOrchestrationService? _orchestrator;
         private static ICoreAISettings? _settings;
 
-        /// <summary>Сервисы CoreAI найдены и готовы к использованию.</summary>
+        /// <summary>True when CoreAI services resolved successfully.</summary>
         public static bool IsReady => TryResolve(out _, out _, out _);
 
         /// <summary>
-        /// Сбросить кэш сервисов. Вызывайте после смены сцены, пересборки VContainer-scope
-        /// или в тестах между фикстурами. Безопасно вызывать многократно.
+        /// Clears cached service references. Call after scene loads, container rebuilds, or between test fixtures; safe to repeat.
         /// </summary>
         public static void Invalidate()
         {
@@ -71,29 +63,22 @@ namespace CoreAI
             }
         }
 
-        // ===================== Chat API (простой слой) =====================
-
         /// <summary>
-        /// Отправить сообщение и дождаться полного ответа. Простой <b>non-streaming</b> путь (один финальный текст),
-        /// без поканкового UI — сохраняет chat history для <paramref name="roleId"/> (если у роли включён ChatHistory).
-        /// Вызывайте только через <c>await</c>; не блокируйте главный поток Unity через <c>.Result</c> или <c>.Wait()</c>
-        /// (см. <c>ToolInvocationMarshaler</c> / player loop — возможен дедлок).
+        /// Sends a chat turn and waits for the full model text (non-streaming). Persists history for
+        /// <paramref name="roleId"/> when ChatHistory is enabled.
         /// </summary>
+        /// <remarks>Use <c>await</c> only; blocking the Unity main thread via <c>.Result</c>/<c>.Wait()</c> risks deadlocks with MEAI marshaling.</remarks>
         public static async Task<string?> AskAsync(
             string userMessage,
             string roleId = "PlayerChat",
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            // Do not use ConfigureAwait(false): Unity WebGL may fail to resume on the Unity
-            // synchronization context; chat / UI callers need main-thread affinity.
             return await svc.SendMessageAsync(userMessage, roleId, cancellationToken);
         }
 
         /// <summary>
-        /// Стриминг ответа LLM как последовательность строковых чанков. Чанки уже очищены
-        /// от <c>&lt;think&gt;</c>-блоков. Последний terminal-чанк (<c>IsDone=true</c>)
-        /// не эмитится как строка — стрим просто заканчивается.
+        /// Streams model text as stripped string chunks (<c>&lt;think&gt;</c> filtered). Terminal empty chunks are not yielded.
         /// </summary>
         public static async IAsyncEnumerable<string> StreamAsync(
             string userMessage,
@@ -121,9 +106,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Стриминг ответа как <see cref="IAsyncEnumerable{T}"/> чанков (с метаданными:
-        /// <see cref="LlmStreamChunk.IsDone"/>, <see cref="LlmStreamChunk.Error"/>, usage).
-        /// Удобно когда нужен детальный контроль терминала/ошибок.
+        /// Raw streaming enumeration with <see cref="LlmStreamChunk"/> metadata (completion flag, errors, usage).
         /// </summary>
         public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
             string userMessage,
@@ -150,10 +133,8 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// «Умная» отправка: сама выбирает стриминг или non-streaming исходя из иерархии
-        /// флагов <see cref="CoreAiChatService.IsStreamingEnabled(string, bool?)"/>
-        /// (UI / per-agent / global). <paramref name="onChunk"/> вызывается на каждый
-        /// текстовый чанк (может быть <c>null</c>). Возвращает полный текст.
+        /// Chooses streaming vs buffered mode using <see cref="CoreAiChatService.IsStreamingEnabled(string, bool?)"/>.
+        /// Optional <paramref name="onChunk"/> receives live text fragments; returns the full concatenated string.
         /// </summary>
         public static Task<string?> SmartAskAsync(
             string userMessage,
@@ -175,12 +156,9 @@ namespace CoreAI
             return svc.SendMessageSmartAsync(userMessage, roleId, adapter, uiStreamingOverride, cancellationToken)!;
         }
 
-        // ===================== Orchestrator API (полный пайплайн) =====================
-
         /// <summary>
-        /// Полный пайплайн оркестратора: snapshot сессии, prompt composer, авторити, очередь,
-        /// retry/structured policy, publish <c>ApplyAiGameCommand</c>, метрики. Возвращает
-        /// финальный текст ответа или <c>null</c>, если задача не прошла authority/валидацию.
+        /// Full orchestrator pass: telemetry snapshot, prompt composition, authority, queued execution,
+        /// structured-response policy, <c>ApplyAiGameCommand</c> publication, metrics. Returns <c>null</c> when authority/validation blocks the turn.
         /// </summary>
         public static Task<string?> OrchestrateAsync(
             AiTaskRequest task,
@@ -191,10 +169,8 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Стриминговый вариант <see cref="OrchestrateAsync"/>. Эмитит чанки по мере генерации,
-        /// очищает <c>&lt;think&gt;</c>, после окончания стрима выполняет structured validation
-        /// и публикует <c>ApplyAiGameCommand</c>. Если стрим закончился ошибкой или валидация
-        /// провалилась — эмитится терминальный чанк с <see cref="LlmStreamChunk.Error"/>.
+        /// Streaming counterpart to <see cref="OrchestrateAsync"/> emitting deltas, filtering <c>&lt;think&gt;</c>,
+        /// then validating structure and publishing <c>ApplyAiGameCommand</c>. Failures surface as terminal <see cref="LlmStreamChunk.Error"/> payloads.
         /// </summary>
         public static IAsyncEnumerable<LlmStreamChunk> OrchestrateStreamAsync(
             AiTaskRequest task,
@@ -205,9 +181,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Удобный хелпер: запустить оркестратор в стриминговом режиме и собрать полный текст,
-        /// попутно вызывая <paramref name="onChunk"/> на каждый новый фрагмент. Удобно, когда
-        /// нужен одновременно «живой» UI и финальный результат для логики.
+        /// Streams an orchestrator turn while accumulating the concatenated assistant text and forwarding fragments to <paramref name="onChunk"/>.
         /// </summary>
         public static async Task<string> OrchestrateStreamCollectAsync(
             AiTaskRequest task,
@@ -237,15 +211,11 @@ namespace CoreAI
             return sb.ToString();
         }
 
-        // ===================== Service accessors =====================
-
-        /// <summary>Получить (и при необходимости резолвнуть) сервис чата.</summary>
+        /// <summary>Gets or resolves the chat service.</summary>
         public static CoreAiChatService GetChatService() => RequireChatService();
 
         /// <summary>
-        /// Безопасный резолв чата без исключения: <c>true</c> если на сцене есть
-        /// <see cref="CoreAILifetimeScope"/> и доступен <see cref="ILlmClient"/>.
-        /// Удобно в UI (кнопка «Спросить AI»), загрузочных экранах и тестах.
+        /// Non-throwing resolver: succeeds when <see cref="CoreAILifetimeScope"/> is present with a usable <see cref="ILlmClient"/>.
         /// </summary>
         public static bool TryGetChatService(out CoreAiChatService? chatService)
         {
@@ -261,12 +231,11 @@ namespace CoreAI
             }
         }
 
-        /// <summary>Получить (и при необходимости резолвнуть) оркестратор.</summary>
+        /// <summary>Gets or resolves <see cref="IAiOrchestrationService"/>.</summary>
         public static IAiOrchestrationService GetOrchestrator() => RequireOrchestrator();
 
         /// <summary>
-        /// Безопасный резолв оркестратора без исключения: <c>true</c> если зарегистрирован
-        /// <see cref="IAiOrchestrationService"/> (обычно после <c>RegisterCorePortable()</c>).
+        /// Non-throwing orchestrator resolver (expects <see cref="IAiOrchestrationService"/> after <c>RegisterCorePortable()</c>).
         /// </summary>
         public static bool TryGetOrchestrator(out IAiOrchestrationService? orchestrator)
         {
@@ -282,7 +251,7 @@ namespace CoreAI
             }
         }
 
-        /// <summary>Получить глобальные настройки CoreAI (из DI или fallback).</summary>
+        /// <summary>Reads host <see cref="ICoreAISettings"/> from DI when available.</summary>
         public static ICoreAISettings? GetSettings()
         {
             lock (SyncRoot)
@@ -293,29 +262,22 @@ namespace CoreAI
             }
         }
 
-        // ===================== Tool Execution Event =====================
-
-        /// <summary>
-        /// Делегат для подписки на события вызова инструментов агентом.
-        /// </summary>
-        /// <param name="roleId">ID роли агента, вызвавшего инструмент.</param>
-        /// <param name="toolName">Имя вызванного инструмента.</param>
-        /// <param name="arguments">Аргументы, переданные модели (может быть null).</param>
-        /// <param name="result">Результат выполнения инструмента (может быть null).</param>
+        /// <summary>Delegate for global tool lifecycle notifications.</summary>
+        /// <param name="roleId">Agent role id.</param>
+        /// <param name="toolName">Tool name.</param>
+        /// <param name="arguments">Model-provided arguments (optional).</param>
+        /// <param name="result">Tool return payload (optional).</param>
         public delegate void ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result);
 
         /// <summary>
-        /// Глобальное событие: модель вызвала инструмент через MEAI pipeline.
-        /// Подписывайтесь для проигрывания звуков, запуска эффектов, логирования.
+        /// Raised after the MEAI stack executes a tool (VFX, audio, analytics, etc.).
         /// <code>
         /// CoreAi.OnToolExecuted += (role, tool, args, result) => Debug.Log($"{role} used {tool}");
         /// </code>
         /// </summary>
         public static event ToolExecutedHandler? OnToolExecuted;
 
-        /// <summary>
-        /// Внутренний метод для SmartToolCallingChatClient: уведомить подписчиков о вызове инструмента.
-        /// </summary>
+        /// <summary>Internal hook for <c>SmartToolCallingChatClient</c> to surface tool calls to <see cref="OnToolExecuted"/>.</summary>
         internal static void NotifyToolExecuted(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result)
         {
             try
@@ -328,11 +290,8 @@ namespace CoreAI
             }
         }
 
-        // ===================== Control API =====================
-
         /// <summary>
-        /// Остановить все текущие и ожидающие задачи для указанного scope (обычно это RoleId агента).
-        /// Отменяет CancellationToken и удаляет задачи из очереди оркестратора.
+        /// Cancels queued/in-flight orchestrator work for <paramref name="cancellationScope"/> (typically a role id).
         /// </summary>
         public static void StopAgent(string cancellationScope)
         {
@@ -342,12 +301,10 @@ namespace CoreAI
             }
         }
 
-        /// <summary>
-        /// Очистить контекст агента (историю чата и/или память/MemoryTool) для указанной роли.
-        /// </summary>
-        /// <param name="roleId">ID роли</param>
-        /// <param name="clearChatHistory">Очищать ли историю чата (контекст сессии)</param>
-        /// <param name="clearLongTermMemory">Очищать ли долговременную память (стэйт агента)</param>
+        /// <summary>Clears chat history and/or long-term memory state for <paramref name="roleId"/>.</summary>
+        /// <param name="roleId">Role id.</param>
+        /// <param name="clearChatHistory">Drop persisted chat turns.</param>
+        /// <param name="clearLongTermMemory">Drop MemoryTool state / saved agent memory.</param>
         public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)
         {
             lock (SyncRoot)
@@ -365,13 +322,10 @@ namespace CoreAI
                     }
                     catch
                     {
-                        // optional: memory store might not be registered
                     }
                 }
             }
         }
-
-        // ===================== Internals =====================
 
         private static CoreAiChatService RequireChatService()
         {
@@ -381,8 +335,8 @@ namespace CoreAI
                 if (!TryResolve(out _chatService, out _, out _settings) || _chatService == null)
                 {
                     throw new InvalidOperationException(
-                        "CoreAi: CoreAILifetimeScope не найден на сцене или ILlmClient не зарегистрирован. " +
-                        "Добавьте CoreAILifetimeScope или вызовите CoreAi.Invalidate() после смены сцены.");
+                        "CoreAi: CoreAILifetimeScope was not found or ILlmClient is not registered. " +
+                        "Add CoreAILifetimeScope to the scene or call CoreAi.Invalidate() after changing scenes.");
                 }
 
                 return _chatService;
@@ -397,8 +351,8 @@ namespace CoreAI
                 if (!TryResolve(out _, out _orchestrator, out _settings) || _orchestrator == null)
                 {
                     throw new InvalidOperationException(
-                        "CoreAi: IAiOrchestrationService не зарегистрирован в CoreAILifetimeScope. " +
-                        "Убедитесь что builder.RegisterCorePortable() вызывается в Configure().");
+                        "CoreAi: IAiOrchestrationService is not registered on CoreAILifetimeScope. " +
+                        "Ensure builder.RegisterCorePortable() runs inside Configure().");
                 }
 
                 return _orchestrator;
@@ -430,7 +384,6 @@ namespace CoreAI
             }
             catch
             {
-                /* optional */
             }
 
             try
@@ -439,10 +392,8 @@ namespace CoreAI
             }
             catch
             {
-                /* optional */
             }
 
-            // ChatService резолвим только если есть ILlmClient (без него он бесполезен).
             if (_chatService == null)
             {
                 _chatService = CoreAiChatService.TryCreateFromScene();

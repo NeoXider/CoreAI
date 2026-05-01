@@ -4,8 +4,11 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Детерминированная заглушка для билдов без модели (DGF_SPEC §5.2).
+    /// Deterministic LLM stub for model-off builds (DGF_SPEC §5.2).
     /// </summary>
+    /// <remarks>
+    /// <see cref="BuiltInAgentRoleIds.Programmer"/> returns a fenced Lua block so demo scenes can exercise orchestration → tool → Lua without a model.
+    /// </remarks>
     public sealed class StubLlmClient : ILlmClient
     {
         /// <inheritdoc />
@@ -16,8 +19,6 @@ namespace CoreAI.Ai
                 ? BuiltInAgentRoleIds.Creator
                 : request.AgentRoleId.Trim();
 
-            // Чтобы в демо-сцене было видно полный пайплайн оркестрации → Lua → report,
-            // Stub для Programmer возвращает валидный fenced-bлок Lua.
             if (role == BuiltInAgentRoleIds.Programmer)
             {
                 string payload = "```lua\nreport('stub: lua executed (Programmer)');\n```";

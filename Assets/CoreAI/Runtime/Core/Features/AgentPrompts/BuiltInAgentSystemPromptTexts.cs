@@ -1,10 +1,9 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Дефолтные системные промпты (англ.) для Qwen/малых моделей: короткие, с явными правилами вывода.
-    /// Переопределяются через <c>Resources/AgentPrompts/System</c> или ScriptableObject-манифест промптов на сцене.
-    /// 
-    /// Каждый промпт может быть дополнен универсальным префиксом через <see cref="WithUniversalPrefix(string)"/>.
+    /// Default English system prompts for small instruction-tuned models: short, explicit output rules.
+    /// Override via <c>Resources/AgentPrompts/System</c> or a scene <c>ScriptableObject</c> manifest.
+    /// Each prompt may be prefixed via <see cref="WithUniversalPrefix(string)"/>.
     /// </summary>
     internal static class BuiltInAgentSystemPromptTexts
     {

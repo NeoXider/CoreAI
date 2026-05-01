@@ -9,13 +9,14 @@ namespace CoreAI.Infrastructure.Llm
     [CreateAssetMenu(menuName = "CoreAI/LLM/OpenAI-compatible HTTP", fileName = "OpenAiHttpLlmSettings")]
     public sealed class OpenAiHttpLlmSettings : ScriptableObject, IOpenAiHttpSettings
     {
-        [Tooltip("Если включено, ILlmClient ходит в HTTP chat/completions вместо LLMAgent на сцене.")] [SerializeField]
+        [Tooltip("When enabled, this profile binds an HTTP OpenAI-compatible client instead of LLMUnity.")]
+        [SerializeField]
         private bool useOpenAiCompatibleHttp;
 
         [SerializeField] private LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi;
 
         [Tooltip(
-            "База без завершающего слэша, например https://api.openai.com/v1 или http://localhost:1234/v1 (LM Studio).")]
+            "Base URL without trailing slash (e.g., https://api.openai.com/v1 or http://localhost:1234/v1 for LM Studio).")]
         [SerializeField]
         private string apiBaseUrl = "https://api.openai.com/v1";
 
@@ -34,13 +35,15 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField] [Min(0)] private int maxPromptChars;
 
-        [Header("🔧 Отладка")] [Tooltip("Логировать входящие промпты (system, user) и инструменты.")] [SerializeField]
+        [Header("🔧 Debug")]
+        [Tooltip("Log outbound prompts/tool definitions.")]
+        [SerializeField]
         private bool logLlmInput = true;
 
-        [Tooltip("Логировать исходящие ответы модели и результаты tool calls.")] [SerializeField]
+        [Tooltip("Log assistant payloads and aggregated tool summaries.")] [SerializeField]
         private bool logLlmOutput = true;
 
-        [Tooltip("Логировать сырые HTTP request/response JSON.")] [SerializeField]
+        [Tooltip("Dump raw HTTP JSON (development only).")] [SerializeField]
         private bool enableHttpDebugLogging = false;
 
         /// <summary>Whether this profile should create an HTTP client.</summary>
