@@ -2,9 +2,29 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.10] - 2026-05-01
+
+### Editor / player — responsive game during LLM HTTP wait
+
+Polling **`UnityWebRequest`** on the main thread with **`await Task.Delay(0)`** could complete too eagerly and **busy-wait** the player loop: the scene appeared frozen until the HTTP response returned.
+
+- **`MeaiOpenAiChatClient`** — non-streaming and SSE poll loops now **`await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken)`** instead of **`Task.Delay(0)`**, so **Update / input / rendering** keep running while waiting for **`op.isDone`**.
+- **`MeaiOpenAiChatClient`** — poll and retry **`await Task.Delay(...)`** paths stay **without** **`ConfigureAwait(false)`** so continuations remain compatible with **WebGL / main-thread UWR** rules.
+- **`MeaiLlmClient.CompleteAsync`** / **`RoutingLlmClient.CompleteAsync`** — removed **`ConfigureAwait(false)`** on inner completion **`await`**s so post-LLM work stays on the Unity sync context where appropriate.
+
+### UPM / tooling
+
+- **`package.json`** — **`author`** block (`NeoXider` + repo URL) so Package Manager is not **Author unknown**.
+- **Roslyn analyzer** **`CAIU001`** — warns on **`ConfigureAwait(false)`** in **`CoreAiUnity` Runtime/Editor** (deployed under **`Assets/CoreAiUnity/RoslynAnalyzers`**); **`Tools/build-analyzers.ps1`**, **`Tools/CoreAI.UnityAsyncAnalyzer.Tests`**.
+- **EditMode** — **`RoslynAnalyzerDeploymentTests`**; test sources use classic namespace blocks for **C# 9** compatibility.
+
+#### Package **`1.5.10`**. Dependency **`com.nexoider.coreai 1.5.10`**.
+
 ## [1.5.9] - 2026-04-30
 
 ### WebGL / single-threaded async — HTTP poll + MEAI completion chain
+
+> **Update:** The **`UnityWebRequest`** poll implementation described in the first bullet below was **replaced in 1.5.10** by **`UniTask.Yield(PlayerLoopTiming.Update)`** and **no `ConfigureAwait(false)`** on the poll `await`s (see **1.5.10**). Portable Core items (**`SmartToolCallingChatClient`**, orchestrator, queue) from **com.nexoider.coreai 1.5.9** are unchanged.
 
 Continuations that always capture `UnitySynchronizationContext` can stall after **`SmartToolCallingChatClient`** returns a text response (logs show **Text response, stopping** but no **GetResponseAsync completed** in **`MeaiLlmClient`**).
 

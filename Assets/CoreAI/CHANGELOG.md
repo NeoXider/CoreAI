@@ -1,5 +1,14 @@
 # Changelog
 
+## [v1.5.10] — 2026-05-01
+
+### Version alignment
+
+- **`com.nexoider.coreai` 1.5.10** is released in lockstep with **`com.nexoider.coreaiunity` 1.5.10** so UPM projects can pin the same version on both packages.
+- **Portable Core** (`Assets/CoreAI`): no additional API or behavior changes in this tag beyond the version bump; Unity-side fixes and tooling live in the Unity package changelog.
+
+#### Package **`1.5.10`**.
+
 ## [v1.5.9] — 2026-04-30
 
 ### Release alignment

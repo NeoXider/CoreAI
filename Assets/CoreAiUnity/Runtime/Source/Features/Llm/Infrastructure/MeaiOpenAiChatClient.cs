@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
+using Cysharp.Threading.Tasks;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -131,8 +132,8 @@ namespace CoreAI.Infrastructure.Llm
                 webReq.timeout = _settings.RequestTimeoutSeconds;
 
                 UnityWebRequestAsyncOperation op = webReq.SendWebRequest();
-                // WebGL / player: UnityWebRequest must be polled from the main thread; ConfigureAwait(false)
-                // can resume on a thread pool worker and freeze the request (op never completes in UI).
+                // Poll on main thread; yield at least one player-loop tick per iteration so the game
+                // keeps rendering/input (Task.Delay(0) can complete synchronously and busy-spin the main thread).
                 while (!op.isDone)
                 {
                     if (cancellationToken.IsCancellationRequested)
@@ -140,7 +141,7 @@ namespace CoreAI.Infrastructure.Llm
                         try { webReq.Abort(); } catch { /* ignore */ }
                         cancellationToken.ThrowIfCancellationRequested();
                     }
-                    await Task.Delay(0, cancellationToken);
+                    await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
                 }
 
                 if (webReq.result == UnityWebRequest.Result.Success)
@@ -401,7 +402,7 @@ namespace CoreAI.Infrastructure.Llm
                 SseToolCallAccumulator toolAccumulator = new();
                     try
                 {
-                    // Poll for SSE chunks (same main-thread rule as non-streaming SendWebRequest loop).
+                    // Poll for SSE chunks; same Yield rule as non-streaming (keep player loop responsive).
                     while (!op.isDone)
                     {
                         if (cancellationToken.IsCancellationRequested)
@@ -423,7 +424,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        await Task.Delay(0, cancellationToken);
+                        await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
                     }
 
                     // Process any remaining data after request completed

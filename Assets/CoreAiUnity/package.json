@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.9: WebGL-friendly async (MeaiOpenAiChatClient poll + MeaiLlmClient); **same package version as com.nexoider.coreai 1.5.9**. v1.5.8: non-streaming completion text fallback.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.10: responsive UnityWebRequest poll (UniTask.Yield), main-thread MEAI awaits, CAIU001 Roslyn analyzer, UPM author metadata.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.9"
+    "com.nexoider.coreai": "1.5.10"
   }
 }
