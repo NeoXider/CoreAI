@@ -119,9 +119,10 @@ namespace CoreAI.Tests.EditMode
             }).GetAwaiter().GetResult();
             Assert.IsTrue(r.Ok, roleId);
             Assert.IsFalse(string.IsNullOrEmpty(r.Content), roleId);
-            if (roleId == BuiltInAgentRoleIds.PlayerChat)
+            if (roleId == BuiltInAgentRoleIds.PlayerChat || roleId == BuiltInAgentRoleIds.AiNpc)
             {
                 StringAssert.StartsWith("[stub]", r.Content);
+                StringAssert.Contains("offline", r.Content.ToLowerInvariant());
             }
             else if (roleId == BuiltInAgentRoleIds.Programmer)
             {

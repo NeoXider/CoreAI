@@ -27,6 +27,7 @@ A guide to resolving typical issues when working with CoreAI.
 - Request timeout
 - `StubLlmClient` instead of a real model
 - No `LLM ▶` / `LLM ◀` logs in the console
+- In **Offline** or **stub** fallback, the chat shows huge JSON or echoes the full system-style payload — expected from **`1.5.18`**: conversational roles (chat, `Teacher`-style ids, etc.) get a **single line** from **Offline Custom Response** (or `[stub] Offline…`); **Chat** requests with `SourceTag = Chat` receive a **trimmed error message** from the orchestrator when the model returns `Ok: false`, instead of an empty string.
 
 ### Diagnostics
 

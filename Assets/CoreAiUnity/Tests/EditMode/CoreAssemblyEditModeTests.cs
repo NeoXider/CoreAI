@@ -41,6 +41,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void StubLlmClient_Teacher_IsShortOfflineMessage()
+        {
+            StubLlmClient client = new();
+            LlmCompletionResult r = client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                UserPayload = "{\"telemetry\":{},\"hint\":\"test\"}"
+            }).GetAwaiter().GetResult();
+
+            Assert.IsTrue(r.Ok);
+            StringAssert.StartsWith("[stub]", r.Content);
+            StringAssert.DoesNotContain("telemetry", r.Content);
+        }
+
+        [Test]
         public void AiPromptComposer_UsesSystemProviderAndTemplates()
         {
             BuiltInDefaultAgentSystemPromptProvider sys = new();

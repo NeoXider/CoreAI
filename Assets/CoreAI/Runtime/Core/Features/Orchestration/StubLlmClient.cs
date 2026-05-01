@@ -24,15 +24,13 @@ namespace CoreAI.Ai
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = payload });
             }
 
-            if (role == BuiltInAgentRoleIds.PlayerChat)
+            if (LlmConversationalRolePolicy.IsConversationalUserFacingRole(role))
             {
-                string reply = "[stub] " + (request.UserPayload ?? "").Trim();
-                if (reply.Length > 200)
+                return Task.FromResult(new LlmCompletionResult
                 {
-                    reply = reply.Substring(0, 200) + "…";
-                }
-
-                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = reply });
+                    Ok = true,
+                    Content = "[stub] Offline — LLM unavailable (stub)."
+                });
             }
 
             int userLen = request.UserPayload?.Length ?? 0;

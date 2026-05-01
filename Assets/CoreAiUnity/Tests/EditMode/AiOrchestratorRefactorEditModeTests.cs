@@ -54,6 +54,37 @@ namespace CoreAI.Tests.EditMode
             public bool IsClient => true;
         }
 
+        private sealed class DenyAiAuthority : IAuthorityHost
+        {
+            public bool CanRunAiTasks => false;
+            public bool IsServer => true;
+            public bool IsClient => true;
+        }
+
+        private sealed class FailingLlmClient : ILlmClient
+        {
+            public string ErrorMessage { get; set; } = "llm failed";
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = ErrorMessage
+                });
+            }
+        }
+
+        private static AiOrchestrator BuildWithAuth(IAuthorityHost auth, ILlmClient llm, CapturingSink sink = null)
+        {
+            return new AiOrchestrator(
+                auth, llm, sink ?? new CapturingSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null),
+                memoryStore: null, memoryPolicy: new AgentMemoryPolicy(),
+                structuredPolicy: null, metrics: null, settings: new TestSettings());
+        }
+
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
             public GameSessionSnapshot BuildSnapshot() => new();
@@ -93,11 +124,7 @@ namespace CoreAI.Tests.EditMode
 
         private static AiOrchestrator Build(CapturingLlmClient llm, CapturingSink sink = null)
         {
-            return new AiOrchestrator(
-                new TestAuthority(), llm, sink ?? new CapturingSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memoryStore: null, memoryPolicy: new AgentMemoryPolicy(),
-                structuredPolicy: null, metrics: null, settings: new TestSettings());
+            return BuildWithAuth(new TestAuthority(), llm, sink);
         }
 
         #endregion
@@ -204,6 +231,57 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("ok", sink.LastCommand.JsonPayload);
             Assert.AreEqual("R", sink.LastCommand.SourceRoleId);
             Assert.AreEqual("stream-hint", sink.LastCommand.SourceTaskHint);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ChatSource_OnLlmFailure_ReturnsErrorText()
+        {
+            FailingLlmClient llm = new() { ErrorMessage = "HTTP 503" };
+            AiOrchestrator orch = BuildWithAuth(new TestAuthority(), llm);
+
+            string result = await orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "hi",
+                SourceTag = "Chat"
+            });
+
+            Assert.IsNotNull(result);
+            StringAssert.Contains("503", result);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_NonChatSource_OnLlmFailure_ReturnsNull()
+        {
+            FailingLlmClient llm = new() { ErrorMessage = "HTTP 503" };
+            AiOrchestrator orch = BuildWithAuth(new TestAuthority(), llm);
+
+            string result = await orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = "hi",
+                SourceTag = "Lua"
+            });
+
+            Assert.IsNull(result);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ChatSource_AuthorityDenied_ReturnsMessage()
+        {
+            CapturingLlmClient llm = new();
+            AiOrchestrator orch = BuildWithAuth(new DenyAiAuthority(), llm);
+
+            string result = await orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "PlayerChat",
+                Hint = "x",
+                SourceTag = "Chat"
+            });
+
+            Assert.IsNotNull(result);
+            StringAssert.Contains("disabled", result.ToLowerInvariant());
+            Assert.AreEqual(0, llm.CallCount, "LLM must not run when authority denies.");
         }
 
         // ─────────────────────────────────────────────────

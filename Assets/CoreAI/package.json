@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.5.17",
+  "version": "1.5.19",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.17: lockstep + Unity marshaler ManagedThreadId gate for Application.isPlaying; v1.5.16: isPlaying mirror; v1.5.15: SmartToolCalling IList Contents.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.19: compaction XML — main system prompt never sent to auxiliary summarizer; v1.5.18: offline/stub chat UX.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

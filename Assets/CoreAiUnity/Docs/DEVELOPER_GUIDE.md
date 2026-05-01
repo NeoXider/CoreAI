@@ -214,7 +214,7 @@ new AgentBuilder("JsonParser")
 | **ClientOwnedApi** | `OpenAiChatLlmClient` | User/developer owns the provider key |
 | **ClientLimited** | `ClientLimitedLlmClientDecorator` → `OpenAiChatLlmClient` | Local caps for demos or prototypes |
 | **ServerManagedApi** | `ServerManagedLlmClient` pointed at a backend proxy | Production WebGL/multiplayer/school/SaaS deployment |
-| **Offline** | `OfflineLlmClient` or `StubLlmClient` | Tests and builds without live model access |
+| **Offline** | `OfflineLlmClient` or `StubLlmClient` | Tests and builds without live model access. **Conversational** roles (chat, `Teacher`-style ids, NPC dialog) receive a single **Offline Custom Response** line from settings — never the full serialized `UserPayload`. **`SourceTag == "Chat"`** failures return a trimmed error string to the orchestrator caller instead of `null`. See **COREAI_SETTINGS.md** (Offline). |
 
 `RoutingLlmClient` resolves a role through `LlmClientRegistry`, annotates `LlmCompletionRequest.RoutingProfileId`, and publishes `LlmBackendSelected`, `LlmRequestStarted`, `LlmRequestCompleted`, and `LlmUsageReported` via MessagePipe. Diagnostics and UI code should subscribe to those messages instead of inspecting registry internals.
 

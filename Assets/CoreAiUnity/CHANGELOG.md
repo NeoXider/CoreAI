@@ -2,6 +2,28 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.19] - 2026-05-01
+
+### Context compaction — main system prompt vs auxiliary summarizer
+
+- **Docs:** **[`MemorySystem.md`](Docs/MemorySystem.md)** — *Separation from the main system prompt* for **`EnableLlmContextCompaction`**: compaction calls use **`LlmContextCompactionOptions.SystemPrompt`** and transcript payload only; **`## Conversation Summary`** is merged into the **primary** turn afterward. **[`COREAI_SETTINGS.md`](Docs/COREAI_SETTINGS.md)** — chat history compaction section notes the same for Inspector users.
+- **Edit Mode:** **[`ConversationContextCompactionEditModeTests`](Tests/EditMode/ConversationContextCompactionEditModeTests.cs)** — asserts **`ChatHistory`** null, default vs custom compaction **`SystemPrompt`**, payload headings, and that orchestrator-only marker / **`## Tool Contract`** never leak into compaction input.
+- **Play Mode (`FastNoLlm`):** **[`LlmCompactionPerRolePlayModeTests`](Tests/PlayMode/FastNoLlm/LlmCompactionPerRolePlayModeTests.cs)** — records last auxiliary **`__CoreAI_ContextCompaction`** request and asserts **`ChatHistory`** null, **`DefaultSystemPrompt`**, and **`UserPayload`** shape.
+- **Dependency:** **`com.nexoider.coreai 1.5.19`**.
+
+#### Package **`1.5.19`**.
+
+## [1.5.18] - 2026-04-30
+
+### Offline client and docs
+
+- **`OfflineLlmClient`:** conversational roles use **`OfflineCustomResponse`** only (no **`[Offline] <payload>`** echo); generic offline JSON drops the **`echo`** field. Log level **Info** for offline path.
+- **Docs:** **`COREAI_SETTINGS.md`** (Offline table), **`DEVELOPER_GUIDE.md`**, **`TROUBLESHOOTING.md`** (offline/stub chat symptoms).
+- **Edit Mode tests:** **`LlmConversationalRolePolicyEditModeTests`**, **`OfflineLlmClientEditModeTests`** (PlayerChat / Teacher), **`AiOrchestratorRefactorEditModeTests`** (Chat vs non-chat failure paths, authority denied).
+- **Dependency:** **`com.nexoider.coreai 1.5.18`**.
+
+#### Package **`1.5.18`**.
+
 ## [1.5.17] - 2026-04-30
 
 ### Editor / MEAI — never probe `Application.isPlaying` off script main

@@ -10,7 +10,10 @@ namespace CoreAI.Ai
         /// <summary>Routed as <see cref="LlmCompletionRequest.AgentRoleId"/> for compaction calls only.</summary>
         public string CompactorAgentRoleId { get; set; } = BuiltInAgentRoleIds.ContextCompactionAux;
 
-        /// <summary>System prompt for the compaction-only completion request.</summary>
+        /// <summary>
+        /// System prompt for the compaction-only completion request (<b>not</b> the main agent role system prompt —
+        /// that prompt is assembled by the orchestrator and must never appear in compaction input).
+        /// </summary>
         public string SystemPrompt { get; set; } = DefaultSystemPrompt;
 
         /// <summary>Caps summarizer completion length.</summary>

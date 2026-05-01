@@ -39,6 +39,9 @@ namespace CoreAI.Tests.PlayMode
 
             public int CompactionCompletes;
 
+            /// <summary>Last auxiliary compaction request only (role <see cref="BuiltInAgentRoleIds.ContextCompactionAux"/>).</summary>
+            public LlmCompletionRequest LastCompactionRequest { get; private set; }
+
             public SplitCountingLlm(ILlmClient inner) => _inner = inner ?? throw new ArgumentNullException(nameof(inner));
 
             public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
@@ -53,6 +56,7 @@ namespace CoreAI.Tests.PlayMode
                         StringComparison.Ordinal))
                 {
                     CompactionCompletes++;
+                    LastCompactionRequest = request;
                     return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "rollup" });
                 }
 
@@ -189,6 +193,14 @@ namespace CoreAI.Tests.PlayMode
             yield return PlayModeTestAwait.WaitTask(t1, 120f, "smart role compaction");
 
             Assert.GreaterOrEqual(counting1.CompactionCompletes, 1, "Compaction LLM expected for roles with smart compaction.");
+            Assert.IsNotNull(counting1.LastCompactionRequest);
+            Assert.IsNull(counting1.LastCompactionRequest.ChatHistory,
+                "Compaction auxiliary call must not replay MEAI chat tail.");
+            Assert.AreEqual(
+                LlmContextCompactionOptions.DefaultSystemPrompt,
+                counting1.LastCompactionRequest.SystemPrompt,
+                "Orchestrator main-role system must not be substituted for compaction system.");
+            StringAssert.StartsWith("## Prior rolling summary", counting1.LastCompactionRequest.UserPayload.TrimStart());
 
             StubLlmClient stub2 = new();
             SplitCountingLlm counting2 = new SplitCountingLlm(stub2);

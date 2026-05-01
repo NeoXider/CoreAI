@@ -112,7 +112,7 @@ namespace CoreAI.Infrastructure.Llm
         private float temperature = 0.1f;
 
         [Tooltip("Максимум токенов в ответе. 0 = без лимита.")] [SerializeField]
-        private int maxTokens = 4096;
+        private int maxTokens = 2048;
 
         [Header("Client limits")]
         [SerializeField] [Min(0)] private int maxClientLimitedRequestsPerSession;
@@ -492,7 +492,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 4096)
+            int maxTokens = 2048)
         {
             backendType = LlmBackendType.OpenAiHttp;
             executionMode = LlmExecutionMode.ClientOwnedApi;
@@ -501,7 +501,7 @@ namespace CoreAI.Infrastructure.Llm
             modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
-            this.maxTokens = maxTokens <= 0 ? 4096 : maxTokens;
+            this.maxTokens = maxTokens <= 0 ? 2048 : maxTokens;
         }
 
         /// <summary>
@@ -513,7 +513,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 4096)
+            int maxTokens = 2048)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
             executionMode = LlmExecutionMode.ClientOwnedApi;
@@ -530,7 +530,7 @@ namespace CoreAI.Infrastructure.Llm
             int maxPromptChars,
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 4096)
+            int maxTokens = 2048)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens);
             executionMode = LlmExecutionMode.ClientLimited;
@@ -547,7 +547,7 @@ namespace CoreAI.Infrastructure.Llm
             string backendAuthToken = "",
             float temperature = 0.2f,
             int timeoutSeconds = 120,
-            int maxTokens = 4096)
+            int maxTokens = 2048)
         {
             ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens);
             executionMode = LlmExecutionMode.ServerManagedApi;

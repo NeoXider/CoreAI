@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", settings.ApiKey);
             Assert.AreEqual("gpt-4o-mini", settings.ModelName);
             Assert.AreEqual(0.1f, settings.Temperature);
-            Assert.AreEqual(4096, settings.MaxTokens);
+            Assert.AreEqual(2048, settings.MaxTokens);
             Assert.AreEqual(120, settings.RequestTimeoutSeconds);
             Assert.AreEqual("", settings.LlmUnityAgentName);
             Assert.AreEqual("Qwen3.5-2B-Q4_K_M.gguf", settings.GgufModelPath);

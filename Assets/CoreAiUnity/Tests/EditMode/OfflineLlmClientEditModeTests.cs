@@ -54,7 +54,8 @@ namespace CoreAI.Tests.EditMode
             });
 
             Assert.IsTrue(result.Ok);
-            Assert.AreEqual("{\"status\": \"offline\", \"role\": \"unknownrole\", \"echo\": \"hello\"}",
+            Assert.AreEqual(
+                "{\"status\": \"offline\", \"role\":\"unknownrole\"}",
                 result.Content);
 
             Object.DestroyImmediate(settings);
@@ -76,6 +77,44 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(result.Ok);
             Assert.IsTrue(result.Content.Contains("```lua"));
             Assert.IsTrue(result.Content.Contains("function noop"));
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public async Task CompleteAsync_PlayerChat_DoesNotEchoUserPayload()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
+
+            string huge = "{\"telemetry\":{},\"hint\":\"hi\",\"blob\":\"" + new string('x', 5000) + "\"}";
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
+                UserPayload = huge
+            });
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(settings.OfflineCustomResponse, result.Content);
+            StringAssert.DoesNotContain("blob\":", result.Content);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public async Task CompleteAsync_TeacherRole_UsesShortOfflineMessage()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                UserPayload = "{\"telemetry\":{},\"hint\":\"ку\"}"
+            });
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(settings.OfflineCustomResponse, result.Content);
 
             Object.DestroyImmediate(settings);
         }

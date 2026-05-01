@@ -103,6 +103,8 @@ Per-role override: **`AgentBuilder.WithLlmContextCompaction(bool)`** or **`Agent
 
 Compaction calls route through `ILlmClient.CompleteAsync` with role id **`__CoreAI_ContextCompaction`** and configurable options (`LlmContextCompactionOptions`). If the auxiliary LLM call fails, the system falls back to the deterministic bullet summary.
 
+**Separation from the main system prompt:** The **full** orchestrator system string (built-in/custom role prompt, universal prefix, `## Memory`, `## Tool Contract`, etc.) is **not** fed into compaction. Only **persisted chat lines** (`IAgentMemoryStore.GetChatHistory` — typically `user` / `assistant` turns) plus the **prior rolling summary** are packed into that completion’s **`UserPayload`**; **`ChatHistory` on that request is `null`**. The compaction call uses **`LlmContextCompactionOptions.SystemPrompt`** (compact “you are a summarizer” instructions), which is unrelated to e.g. `Teacher`/`Creator` prose. After compaction, **`AiOrchestrator`** appends the new summary under **`## Conversation Summary`** into the **main** system prompt for the **primary** model turn — that block is downstream output; it is not sent back through the compaction LLM unless it later ages into history as normal assistant/user text.
+
 ---
 
 ## Architecture

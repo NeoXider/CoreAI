@@ -157,6 +157,12 @@ namespace CoreAI.Ai
         {
             if (!_authority.CanRunAiTasks)
             {
+                string denied = UserFacingChatFailureOrNull(task, "AI execution disabled.");
+                if (denied != null)
+                {
+                    return denied;
+                }
+
                 return null;
             }
 
@@ -213,6 +219,12 @@ namespace CoreAI.Ai
                     if (contextCompactionApplied)
                     {
                         RecordTrace(bundle, result, null, result?.Error ?? "empty response");
+                        string compactionFail = UserFacingChatFailureOrNull(task, result?.Error ?? "empty response");
+                        if (compactionFail != null)
+                        {
+                            return compactionFail;
+                        }
+
                         return null;
                     }
 
@@ -226,6 +238,12 @@ namespace CoreAI.Ai
                     }
 
                     RecordTrace(bundle, result, null, result?.Error ?? "empty response");
+                    string emptyFail = UserFacingChatFailureOrNull(task, result?.Error ?? "empty response");
+                    if (emptyFail != null)
+                    {
+                        return emptyFail;
+                    }
+
                     return null;
                 }
             }
@@ -237,6 +255,12 @@ namespace CoreAI.Ai
             {
                 Log.Instance.Error($"[AiOrchestrator] Task execution failed: {ex.Message}", LogTag.Llm);
                 RecordTrace(bundle, result, null, ex.Message);
+                string thrown = UserFacingChatFailureOrNull(task, ex.Message);
+                if (thrown != null)
+                {
+                    return thrown;
+                }
+
                 return null;
             }
 
@@ -258,6 +282,13 @@ namespace CoreAI.Ai
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
                     RecordTrace(bundle, second, null, second?.Error ?? "structured retry failed");
+                    string retryFail =
+                        UserFacingChatFailureOrNull(task, second?.Error ?? "structured retry failed");
+                    if (retryFail != null)
+                    {
+                        return retryFail;
+                    }
+
                     return null;
                 }
 
@@ -265,6 +296,13 @@ namespace CoreAI.Ai
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
                 {
                     RecordTrace(bundle, second, content, "structured validation failed");
+                    string validFail =
+                        UserFacingChatFailureOrNull(task, "Structured response validation failed.");
+                    if (validFail != null)
+                    {
+                        return validFail;
+                    }
+
                     return null;
                 }
             }
@@ -764,6 +802,38 @@ namespace CoreAI.Ai
         {
             // AiOrchestrator не управляет очередью и токенами (это делает QueuedAiOrchestrator),
             // поэтому здесь метод пустой.
+        }
+
+        private static bool IsChatUiSourceTask(AiTaskRequest task)
+        {
+            return task != null &&
+                   string.Equals(task.SourceTag?.Trim(), "Chat", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// For UI chat flows (<see cref="AiTaskRequest.SourceTag"/> = <c>Chat</c>), return a printable error
+        /// instead of leaving the orchestrator silent (<c>null</c>), which surfaced as empty UI bubbles.
+        /// </summary>
+        private static string UserFacingChatFailureOrNull(AiTaskRequest task, string detail)
+        {
+            if (!IsChatUiSourceTask(task))
+            {
+                return null;
+            }
+
+            string msg = string.IsNullOrWhiteSpace(detail) ? "LLM request failed." : detail.Trim();
+            msg = msg.Replace('\r', ' ').Replace('\n', ' ');
+            while (msg.Contains("  ", StringComparison.Ordinal))
+            {
+                msg = msg.Replace("  ", " ");
+            }
+
+            if (msg.Length > 400)
+            {
+                return msg.Substring(0, 400) + "…";
+            }
+
+            return msg;
         }
     }
 }

@@ -216,6 +216,8 @@ namespace CoreAI.Infrastructure.Llm
                 text = SmartToolCallingChatClient.ConcatenateAssistantTextContents(response);
             }
 
+            text = SanitizeAssistantVisibleText(text, request);
+
             if (string.IsNullOrEmpty(text))
             {
                 return new LlmCompletionResult
@@ -547,9 +549,20 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // === No tool calls — emit text chunks to consumer ===
-                foreach (string chunk in visibleChunks)
+                string sanitizedFull = SanitizeAssistantVisibleText(visibleText, request);
+                if (!string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal))
                 {
-                    yield return new LlmStreamChunk { Text = chunk };
+                    if (!string.IsNullOrEmpty(sanitizedFull))
+                    {
+                        yield return new LlmStreamChunk { Text = sanitizedFull };
+                    }
+                }
+                else
+                {
+                    foreach (string chunk in visibleChunks)
+                    {
+                        yield return new LlmStreamChunk { Text = chunk };
+                    }
                 }
 
                 yield return new LlmStreamChunk
@@ -558,10 +571,30 @@ namespace CoreAI.Infrastructure.Llm
                     Text = string.Empty,
                     ExecutedToolCalls = policy.ExecutedTraces.ToList()
                 };
+                int emittedLen = string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal)
+                    ? visibleText.Length
+                    : sanitizedFull.Length;
                 _logger.LogInfo(GameLogFeature.Llm,
-                    $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, total length={visibleText.Length})");
+                    $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, raw length={visibleText.Length}, emitted length={emittedLen})");
                 yield break;
             }
+        }
+
+        private string SanitizeAssistantVisibleText(string text, LlmCompletionRequest request)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            string stripped = LlmResponseSanitizer.StripLeadingSystemPromptEcho(text, request.SystemPrompt);
+            if (!string.Equals(text, stripped, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(GameLogFeature.Llm,
+                    $"MeaiLlmClient: Removed leading system-prompt echo from assistant text ({text.Length} -> {stripped.Length} chars).");
+            }
+
+            return stripped;
         }
 
         /// <summary>

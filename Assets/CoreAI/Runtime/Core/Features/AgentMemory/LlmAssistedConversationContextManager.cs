@@ -12,6 +12,19 @@ namespace CoreAI.Ai
     /// but older prefix is merged into a rolling summary via an auxiliary <see cref="ILlmClient.CompleteAsync"/> call.
     /// Synchronous <see cref="BuildSnapshot"/> stays deterministic (bullet rollup) to avoid blocking callers.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Important:</b> the orchestrator’s <b>main agent system prompt</b> (role instructions, universal prefix,
+    /// memory block, tool contract, etc.) is <b>never</b> sent to the compaction LLM. Only chat transcript lines from
+    /// <see cref="IAgentMemoryStore.GetChatHistory"/> (plus stored rolling summary) appear in <see cref="LlmCompletionRequest.UserPayload"/>.
+    /// The compaction call uses its own compact <see cref="LlmContextCompactionOptions.SystemPrompt"/> (default via
+    /// <see cref="LlmContextCompactionOptions.DefaultSystemPrompt"/>) and <see cref="LlmCompletionRequest.ChatHistory"/> stays <c>null</c>.
+    /// </para>
+    /// <para>
+    /// After compaction, the orchestrator merges the updated summary under <c>## Conversation Summary</c> into the main
+    /// system prompt separately — that text is consumed by the <b>main</b> model, not re-fed into the compaction pass.
+    /// </para>
+    /// </remarks>
     public sealed class LlmAssistedConversationContextManager : IAsyncConversationContextManager
     {
         private readonly IConversationSummaryStore _summaryStore;
@@ -121,6 +134,7 @@ namespace CoreAI.Ai
             string traceIdBase,
             CancellationToken cancellationToken)
         {
+            // Compactor-only prompts: never the main role system (Teacher, Creator, tool contract, etc.).
             string userPayload = BuildCompactionUserPayload(priorSummary, history, splitExclusive, _options);
             string compactTrace = $"{traceIdBase.Trim()}:compact";
 
@@ -130,7 +144,7 @@ namespace CoreAI.Ai
                     AgentRoleId = _options.CompactorAgentRoleId ?? BuiltInAgentRoleIds.ContextCompactionAux,
                     SystemPrompt = _options.SystemPrompt ?? LlmContextCompactionOptions.DefaultSystemPrompt,
                     UserPayload = userPayload,
-                    ChatHistory = null,
+                    ChatHistory = null, // verbatim tail is not duplicated here; transcript is folded into UserPayload
                     TraceId = compactTrace,
                     Tools = Array.Empty<ILlmTool>(),
                     ForcedToolMode = LlmToolChoiceMode.None,

@@ -256,8 +256,11 @@ When **there is no LLM connection** — the system returns a stub response.
 | **Creator** | `{"created": false, "note": "offline"}` |
 | **CoreMechanicAI** | `{"result": "ok", "value": 0, "note": "offline"}` |
 | **Analyzer** | `{"recommendations": [], "status": "offline"}` |
-| **AINpc/PlayerChat** | `[Offline] <your query>` |
-| **Other** | `{"status": "offline", "role": "..."}` |
+| **AINpc / PlayerChat / roles with `teacher` / role id ending with `chat` (but not `Merchant`)** | **One line**: **Offline Custom Response** (default: `Offline mode: LLM unavailable`). Does **not** echo the serialized user JSON (telemetry/system-sized payloads). Configure under **Custom response** below. |
+| **`StubLlmClient`** (Auto fallback without a model) | Same conversational roles get `[stub] Offline — LLM unavailable (stub).` instead of piping huge JSON replies. |
+| **Other roles** | `{"status":"offline","role":"<roleId>"}` (no `echo` field) |
+
+**Chat UI errors (`SourceTag = Chat`):** when the model returns `Ok: false`, empty output, or the host denies AI tasks, `AiOrchestrator` surfaces a short user-visible string instead of returning `null` (which previously produced an empty-looking chat bubble unless `NoResponseMessage` was shown).
 
 **Custom response:**
 
@@ -335,6 +338,8 @@ Without extra setup, **`RegisterCorePortable()`** wires **`InMemoryConversationS
 Unity scenes using **`CoreAILifetimeScope`** switch to **`FileConversationSummaryStore`** under **`%persistentDataPath%/CoreAI/ConversationSummaries`** so compaction survives restarts (`RegisterCorePortable(suppressDefaultConversationSummaryStore: true)`).
 
 This is separate from **`FileAgentMemoryStore`** transcript JSON; orchestration details are in [ARCHITECTURE.md](ARCHITECTURE.md) and [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
+
+Optional **Enable LLM Context Compaction** (Inspector on **`CoreAISettingsAsset`**, gated per role via **`AgentBuilder.WithLlmContextCompaction`** / **`AgentMemoryPolicy`**) routes an auxiliary **`CompleteAsync`** on role **`__CoreAI_ContextCompaction`**. That request **does not** include the orchestrator’s full main-system string (Teacher/Creator prose, **`## Tool Contract`**, universal prefix, etc.). It uses the compact **`LlmContextCompactionOptions.SystemPrompt`** and a **`UserPayload`** built from the prior rolling summary plus evicted dialogue lines; **`ChatHistory`** on that call is **`null`**. The updated summary is then attached under **`## Conversation Summary`** for the **primary** model only. Details: [MemorySystem.md](MemorySystem.md).
 
 ---
 

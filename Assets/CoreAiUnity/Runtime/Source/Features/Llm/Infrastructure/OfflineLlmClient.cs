@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Logging;
+using Newtonsoft.Json;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -29,7 +30,7 @@ namespace CoreAI.Infrastructure.Llm
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
-            Log.Instance.Warn("[OfflineLlmClient] На сцене нет активной LLM. CoreAI переключился на оффлайн-заглушку (Stub).", LogTag.Llm);
+            Log.Instance.Info("[OfflineLlmClient] Returning offline deterministic response (no live LLM).", LogTag.Llm);
 
             string response;
             string roleId = request.AgentRoleId ?? "";
@@ -39,10 +40,15 @@ namespace CoreAI.Infrastructure.Llm
             {
                 response = _settings.OfflineCustomResponse;
             }
+            else if (LlmConversationalRolePolicy.IsConversationalUserFacingRole(roleId))
+            {
+                // Never echo serialized user payloads (system + telemetry JSON); show one short line instead.
+                response = _settings.OfflineCustomResponse;
+            }
             else
             {
                 // Fallback: заглушка по ролям (как StubLlmClient)
-                response = GetStubResponse(request);
+                response = GetStructuredOfflineStub(request);
             }
 
             return Task.FromResult(new LlmCompletionResult
@@ -52,10 +58,9 @@ namespace CoreAI.Infrastructure.Llm
             });
         }
 
-        private static string GetStubResponse(LlmCompletionRequest request)
+        private static string GetStructuredOfflineStub(LlmCompletionRequest request)
         {
             string role = request.AgentRoleId?.ToLowerInvariant() ?? "";
-            string userPayload = request.UserPayload ?? "";
 
             // Programmer — fenced Lua
             if (role.Contains("programmer"))
@@ -81,20 +86,14 @@ namespace CoreAI.Infrastructure.Llm
                 return "{\"recommendations\": [], \"status\": \"offline\"}";
             }
 
-            // AINpc / PlayerChat — echo
-            if (role.Contains("npc") || role.Contains("playerchat") || role.Contains("chat"))
-            {
-                return $"[Offline] {userPayload}";
-            }
-
             // Merchant — inventory response
             if (role.Contains("merchant"))
             {
                 return "{\"items\": [], \"note\": \"offline\"}";
             }
 
-            // Default — JSON
-            return $"{{\"status\": \"offline\", \"role\": \"{role}\", \"echo\": \"{userPayload}\"}}";
+            string roleToken = JsonConvert.SerializeObject(string.IsNullOrEmpty(role) ? "unknown" : role);
+            return $"{{\"status\": \"offline\", \"role\":{roleToken}}}";
         }
     }
 }

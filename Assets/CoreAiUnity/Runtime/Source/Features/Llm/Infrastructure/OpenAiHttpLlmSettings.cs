@@ -27,7 +27,7 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField] [Min(5)] private int requestTimeoutSeconds = 120;
 
-        [SerializeField] [Min(64)] private int maxTokens = 4096;
+        [SerializeField] [Min(64)] private int maxTokens = 2048;
 
         [Header("Client limits")]
         [SerializeField] [Min(0)] private int maxRequestsPerSession;
@@ -96,7 +96,7 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             float temperature = 0.2f,
             int requestTimeoutSeconds = 120,
-            int maxTokens = 4096,
+            int maxTokens = 2048,
             LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi,
             int maxRequestsPerSession = 0,
             int maxPromptChars = 0)
@@ -108,7 +108,7 @@ namespace CoreAI.Infrastructure.Llm
             this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = temperature;
             this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
-            this.maxTokens = maxTokens < 64 ? 4096 : maxTokens;
+            this.maxTokens = maxTokens < 64 ? 2048 : maxTokens;
             this.maxRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             this.maxPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
         }

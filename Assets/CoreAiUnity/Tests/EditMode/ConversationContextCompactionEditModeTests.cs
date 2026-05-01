@@ -138,6 +138,94 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(snap.WasCompacted);
             Assert.AreEqual("rolled_up_summary", snap.Summary);
             Assert.AreEqual(2, snap.RecentMessages.Length);
+            Assert.IsNull(llm.LastRequest.ChatHistory, "Compaction must not replay tail as ChatHistory on auxiliary request.");
+            Assert.AreEqual(
+                LlmContextCompactionOptions.DefaultSystemPrompt,
+                llm.LastRequest.SystemPrompt,
+                "Main-role system prompt must not be used for compaction.");
+            StringAssert.Contains("## Dialogue lines to fold into the rolling summary", llm.LastRequest.UserPayload);
+            StringAssert.Contains("## Prior rolling summary", llm.LastRequest.UserPayload);
+        }
+
+        /// <summary>
+        /// Guards that compaction never receives the orchestrator&apos;s main role system prose (Teacher contract, etc.).
+        /// </summary>
+        [Test]
+        public async Task Compaction_Request_NeverUsesMainAgentSystem_CompactorPromptOnly()
+        {
+            const string forbiddenOrchestratorSystemSubstring =
+                "Teacher agent REDOSCHOOL_ORCHESTRATOR_EXCLUSIVE_SYSTEM_MARKER_XQ9_NO_COMPACT";
+
+            var store = new InMemoryConversationSummaryStore();
+            var llm = new RecordingLlmClient();
+            ITokenEstimator est = new FlatTokenEstimator(10);
+            var mgr = new LlmAssistedConversationContextManager(store, est, llm);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = $"Hi — only transcript text {Environment.NewLine}(not system)" },
+                new() { Role = "assistant", Content = "ok" },
+                new() { Role = "user", Content = "next" },
+                new() { Role = "assistant", Content = "tail" },
+                new() { Role = "user", Content = "last" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                    "roleX",
+                    history,
+                    new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                    new ConversationContextBuildArgs
+                        { HistoryTokenBudget = 25, UseLlmContextCompaction = true },
+                    "trace-no-leak",
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+            Assert.IsNull(llm.LastRequest.ChatHistory);
+            Assert.AreEqual(
+                LlmContextCompactionOptions.DefaultSystemPrompt,
+                llm.LastRequest.SystemPrompt);
+
+            StringAssert.DoesNotContain(
+                forbiddenOrchestratorSystemSubstring,
+                llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain(
+                forbiddenOrchestratorSystemSubstring,
+                llm.LastRequest.UserPayload);
+
+            StringAssert.DoesNotContain("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("## Tool Contract", llm.LastRequest.UserPayload);
+            StringAssert.StartsWith("trace-no-leak:compact", llm.LastRequest.TraceId);
+        }
+
+        [Test]
+        public async Task Compaction_Request_CustomOptionSystem_OverridesTemplate()
+        {
+            const string compactOnly = "You only summarize transcripts. MAIN_ROLE_FORBIDDEN";
+            var options = new LlmContextCompactionOptions { SystemPrompt = compactOnly };
+
+            var store = new InMemoryConversationSummaryStore();
+            var llm = new RecordingLlmClient();
+            var mgr = new LlmAssistedConversationContextManager(
+                store, new FlatTokenEstimator(10), llm, options);
+
+            ChatMessage[] history =
+            {
+                new() { Role = "user", Content = "a" }, new() { Role = "assistant", Content = "b" },
+                new() { Role = "user", Content = "c" }, new() { Role = "assistant", Content = "d" },
+                new() { Role = "user", Content = "e" }
+            };
+
+            await mgr.BuildSnapshotAsync(
+                    "r",
+                    history,
+                    new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                    new ConversationContextBuildArgs
+                        { HistoryTokenBudget = 25, UseLlmContextCompaction = true },
+                    "t",
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+            Assert.AreEqual(compactOnly, llm.LastRequest.SystemPrompt);
         }
 
         // --- Edge-case tests added by audit gap remediation ---

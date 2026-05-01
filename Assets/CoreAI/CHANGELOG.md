@@ -1,5 +1,22 @@
 # Changelog
 
+## [v1.5.19] — 2026-05-01
+
+### Agent memory — LLM compaction contract (documentation)
+
+- **`LlmAssistedConversationContextManager`** — XML `<remarks>` state that the orchestrator’s **main** system prompt (role instructions, universal prefix, memory, tool contract) is **never** included in the auxiliary compaction `LlmCompletionRequest`; only transcript-related text goes into **`UserPayload`**, **`ChatHistory`** stays **null**, and **`LlmContextCompactionOptions.SystemPrompt`** supplies the summarizer instructions.
+- **`LlmContextCompactionOptions.SystemPrompt`** — property docs clarify it is **compaction-only**, not the primary role system string.
+- **Semver:** lockstep **`1.5.19`** with **`com.nexoider.coreaiunity`** (Unity package ships Edit/Play tests and settings docs for the same contract).
+
+## [v1.5.18] — 2026-04-30
+
+### Offline / stub UX and chat failures (portable Core)
+
+- **`LlmConversationalRolePolicy`** — classifies roles that should get **short user-facing** replies in **stub/offline** flows (e.g. **`PlayerChat`**, **`AINpc`**, ids containing **`teacher` / mentor / tutor`**, names ending with **`chat`**, excluding **`Merchant`**).
+- **`StubLlmClient`** — conversational roles return **`[stub] Offline — LLM unavailable (stub).`** instead of echoing **`UserPayload`** or emitting JSON **`ApplyWaveModifier`** for custom ids like **`Teacher`**.
+- **`AiOrchestrator.RunTaskAsync`** — when **`AiTaskRequest.SourceTag`** is **`Chat`**, LLM failure / empty result / authority denied returns a **short printable message** (error text or default) instead of **`null`**, so **`CoreAiChatService`** can show text in the bubble. Non-chat callers still get **`null`** on failure.
+- **Semver:** lockstep **`1.5.18`** with **`com.nexoider.coreaiunity`**.
+
 ## [v1.5.17] — 2026-04-30
 
 ### Lockstep packaging (Unity — `UnityMainThreadLlmAsyncMarshaler`)
