@@ -61,7 +61,7 @@ namespace CoreAI.Infrastructure.Llm
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
 
-            MeaiOpenAiChatClient innerClient = new(openAiSettings, logger);
+            MeaiOpenAiChatClient innerClient = new(openAiSettings);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
         }
 

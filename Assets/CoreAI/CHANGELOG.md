@@ -1,5 +1,14 @@
 # Changelog
 
+## [v1.5.23] — 2026-05-01
+
+### OpenAI-compatible MEAI HTTP — portable `HttpClient`
+
+- **`MeaiOpenAiChatClient`** — moved to **`CoreAI.Infrastructure.Llm`** in portable **`CoreAI.Core`**: **`System.Net.Http.HttpClient`** for non-streaming and SSE (no **UnityEngine** / **UnityWebRequest**). **`await`** without **`ConfigureAwait(false)`** so synchronization context is preserved when the host sets one (e.g. Unity / WebGL main thread).
+- **`IOpenAiHttpSettings`**, **`OpenAiHttpConstants`** — live next to the client in portable Core (Unity layer re-exports or implements the same settings surface).
+- **`UNITY_EDITOR`:** **`MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory`** — optional **`HttpClient`** factory for EditMode tests with **`HttpMessageHandler`** mocks (**must be cleared after tests**).
+- **Semver:** lockstep **`1.5.23`** with **`com.nexoider.coreaiunity`** (Unity package adds **`MeaiOpenAiChatClientHttpEditModeTests`**).
+
 ## [v1.5.22] — 2026-05-01
 
 ### Lockstep packaging (`com.nexoider.coreaiunity`)

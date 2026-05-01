@@ -2,7 +2,7 @@ namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
     /// Абстракция настроек HTTP API (OpenAI-compatible).
-    /// Позволяет использовать как <see cref="OpenAiHttpLlmSettings"/>, так и <see cref="CoreAISettingsAsset"/>.
+    /// Позволяет использовать разные источники настроек в хосте (Unity asset, server config и т.д.).
     /// </summary>
     public interface IOpenAiHttpSettings
     {
@@ -28,8 +28,6 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Максимум токенов в ответе.</summary>
         int MaxTokens { get; }
-
-        // === Отладка ===
 
         /// <summary>Логировать входящие промпты (system, user) и инструменты.</summary>
         bool LogLlmInput { get; }

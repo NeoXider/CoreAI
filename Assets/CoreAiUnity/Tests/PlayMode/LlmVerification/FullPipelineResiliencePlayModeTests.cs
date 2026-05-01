@@ -70,12 +70,13 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>
         /// HTTP <see cref="TestAgentSetup"/> leaves <see cref="TestAgentSetup.IsReady"/> true even when the server
-        /// returns 500. One cheap non-stream call marks the whole fixture Inconclusive instead of five red failures.
+        /// misbehaves (e.g. 500 or 400 “no model”). One cheap non-stream call skips the fixture with
+        /// <see cref="Assert.Ignore"/> instead of many inconclusive/red SetUp outcomes.
         /// </summary>
         private IEnumerator EnsureLiveLlmReachableOnce()
         {
             if (s_liveLlmProbeState == -1)
-                Assert.Inconclusive(s_liveLlmProbeFailMessage);
+                Assert.Ignore(s_liveLlmProbeFailMessage);
             if (s_liveLlmProbeState == 1)
                 yield break;
 
@@ -94,13 +95,32 @@ namespace CoreAI.Tests.PlayMode
             if (probeResult == null || !probeResult.Ok || string.IsNullOrWhiteSpace(probeResult.Content))
             {
                 s_liveLlmProbeState = -1;
-                s_liveLlmProbeFailMessage =
-                    "Live LLM did not return OK text (check CoreAISettings ApiBaseUrl / local server / CORS). " +
-                    $"Probe: {probeResult?.Error ?? "null result"}";
-                Assert.Inconclusive(s_liveLlmProbeFailMessage);
+                string err = probeResult?.Error ?? "null result";
+                s_liveLlmProbeFailMessage = FormatLiveLlmProbeSkipMessage(err);
+                Assert.Ignore(s_liveLlmProbeFailMessage);
             }
 
             s_liveLlmProbeState = 1;
+        }
+
+        /// <summary>
+        /// Skipped (Assert.Ignore) when the HTTP API is up but misconfigured — e.g. LM Studio returns 400 until a GGUF is loaded.
+        /// </summary>
+        private static string FormatLiveLlmProbeSkipMessage(string error)
+        {
+            string err = error ?? "null result";
+            if (err.IndexOf("no models loaded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                err.IndexOf("load a model", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return
+                    "Live LLM probe skipped: server responded but no model is loaded " +
+                    "(LM Studio / llama.cpp: load a model in the Developer UI or via `lms load`, then re-run). " +
+                    $"Probe: {err}";
+            }
+
+            return
+                "Live LLM probe skipped (check CoreAISettings ApiBaseUrl / local server / CORS / model id). " +
+                $"Probe: {err}";
         }
 
         // =====================================================================

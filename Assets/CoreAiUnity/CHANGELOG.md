@@ -2,6 +2,16 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.23] - 2026-05-01
+
+### Portable HTTP client + EditMode coverage
+
+- **Dependency:** **`com.nexoider.coreai 1.5.23`** — **`MeaiOpenAiChatClient`** in **`CoreAI.Core`** uses **`System.Net.Http.HttpClient`** (not **UnityWebRequest**).
+- **Edit Mode:** **`MeaiOpenAiChatClientHttpEditModeTests`** — non-streaming success, HTTP 429 + **`Retry-After`**, SSE aggregation; asserts client assembly is **`CoreAI.Core`**.
+- **Docs:** root **`README`**, **`COREAI_SETTINGS`**, **`ARCHITECTURE`**, **`DEVELOPER_GUIDE`**, **`PROJECT_ANALYSIS`**, **`CoreAiUnity/README`** — HTTP transport wording updated for **`HttpClient`**.
+
+#### Package **`1.5.23`**.
+
 ## [1.5.22] - 2026-05-01
 
 ### VContainer — single `IAgentMemoryStore` registration

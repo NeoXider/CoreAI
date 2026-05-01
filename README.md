@@ -116,7 +116,7 @@ await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerCh
     if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
 ```
 
-**Streaming pipeline:** HTTP SSE **or** LLMUnity callback → stateful `ThinkBlockStreamFilter` (strips `<think>` blocks split across chunks) → typing indicator → bubble. Cancellation aborts the underlying `UnityWebRequest` for free.
+**Streaming pipeline:** HTTP SSE **or** LLMUnity callback → stateful `ThinkBlockStreamFilter` (strips `<think>` blocks split across chunks) → typing indicator → bubble. Cancellation cancels the in-flight HTTP **`HttpClient`** request / enumerator on the MEAI path.
 
 Docs: [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md)
 

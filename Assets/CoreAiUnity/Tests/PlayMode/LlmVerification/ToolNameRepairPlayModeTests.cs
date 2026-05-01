@@ -51,8 +51,8 @@ namespace CoreAI.Tests.PlayMode
             if (string.IsNullOrEmpty(settings.ApiBaseUrl) ||
                 string.IsNullOrEmpty(settings.ModelName)) return false;
 
-            meaiClient = new MeaiOpenAiChatClient(new SettingsHttpAdapter(settings),
-                GameLoggerUnscopedFallback.Instance);
+            _ = GameLoggerUnscopedFallback.Instance;
+            meaiClient = new MeaiOpenAiChatClient(new SettingsHttpAdapter(settings));
             return true;
         }
 

@@ -119,7 +119,7 @@ await foreach (var chunk in service.SendMessageStreamingAsync("Привет", "P
     if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
 ```
 
-**Цепочка стриминга:** SSE (HTTP) **или** callback LLMUnity → stateful `ThinkBlockStreamFilter` (срезает `<think>`, даже если тег разорван) → индикатор печати → пузырь. Отмена рвёт `UnityWebRequest` на HTTP.
+**Цепочка стриминга:** SSE (HTTP) **или** callback LLMUnity → stateful `ThinkBlockStreamFilter` (срезает `<think>`, даже если тег разорван) → индикатор печати → пузырь. Отмена снимает активный HTTP-запрос / перечислитель на MEAI-пути (`HttpClient`).
 
 Доки: [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md)
 

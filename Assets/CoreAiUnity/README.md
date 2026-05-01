@@ -105,7 +105,7 @@ Create your own — implement `ILlmTool` and register via `AgentBuilder.WithTool
 
 ## 🌊 Streaming & cancellation
 
-- `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`: `MeaiOpenAiChatClient` parses OpenAI-compatible SSE. Cancellation aborts `UnityWebRequest` immediately.
+- `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`: `MeaiOpenAiChatClient` (portable Core, **`HttpClient`**) parses OpenAI-compatible SSE. Cancellation disposes the active request / stream.
 - `LocalModel`: `LlmUnityMeaiChatClient` bridges LLMUnity's frame callbacks to `IAsyncEnumerable`.
 - Both paths run through `ThinkBlockStreamFilter` — a state machine that removes `<think>…</think>` blocks even when tags are split across chunks.
 

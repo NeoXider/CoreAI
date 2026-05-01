@@ -43,11 +43,11 @@
 | `.Wait()`, `.Result;`, `.GetAwaiter().GetResult()` | 0 в runtime (только в тестах) ✓ |
 | `CancellationTokenSource.CancelAfter(...)` | 0 в runtime; таймаут чата через `CancelAfterSlim` (`CoreAiChatService.cs:118`) ✓ |
 | `System.Threading.Timer`, `System.Timers.Timer`, `new Timer(` | 0 ✓ |
-| `TcpClient`, `Socket`, `UdpClient`, `HttpListener`, `NamedPipe` | 0 ✓ — везде `UnityWebRequest` |
-| `HttpClient` тип | 0 (`BuildHttpClient` в `LlmPipelineInstaller.cs` это просто имя метода, возвращает `MeaiOpenAiChatClient` поверх `UnityWebRequest`) ✓ |
+| `TcpClient`, `Socket`, `UdpClient`, `HttpListener`, `NamedPipe` | 0 ✓ — LLM HTTP в portable Core через **`HttpClient`** (`MeaiOpenAiChatClient`); без сырых сокетов в runtime |
+| `HttpClient` | **1** — `Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs` (OpenAI-compatible MEAI); Unity `LlmPipelineInstaller.BuildHttpClient` — фабричное имя, возвращает тот же тип |
 | `Process.Start`, `Environment.Exit` | 0 ✓ |
 | `BinaryFormatter`, `XmlSerializer` | 0 ✓ |
-| HTTP-poll: `await UniTask.Yield(PlayerLoopTiming.Update, ct)` | `MeaiOpenAiChatClient.cs:146,430` ✓ |
+| HTTP SSE / stall budget (OpenAI path) | `MeaiOpenAiChatClient` — `StreamReader.ReadLineAsync` + `Task.WhenAny` (см. исходник), не poll `UnityWebRequest` |
 | `ConfigureAwait(false)` распределение Core (есть) / Unity (нет) | соответствует [`ARCHITECTURE.md:93`](ARCHITECTURE.md) ✓ |
 | MoonSharp coroutines | тикаются из `Update()` (`LuaCoroutineRunner.cs:67`), не из `System.Threading.Thread` ✓ |
 | `LlmUnityMeaiChatClient.cs:333` `Task.Delay(10)` | весь файл за `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL` — не уезжает в WebGL ✓ |
@@ -92,7 +92,7 @@
 ### 1.3. Информационные / гейтнутые моменты
 
 - `LlmUnityMeaiChatClient.cs:333` использует `Task.Delay(10, ct)` вместо `UniTask.Yield(PlayerLoopTiming.Update, ct)`. Файл за `#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL` (строка 1) — на WebGL не попадёт. Стилистически — нарушение правила «WebGL Rule», и при ослаблении гейта проблема всплывёт. Тривиально исправить ради единообразия.
-- Тяжёлые `JsonConvert.SerializeObject(req)` (`MeaiOpenAiChatClient.cs:369`) синхронно на main-thread перед `SendWebRequest`. Для типовых чат-payload не страшно, для больших prompt — заметный кадр.
+- Тяжёлые `JsonConvert.SerializeObject(req)` (`MeaiOpenAiChatClient`) синхронно на потоке вызывающего кода перед `HttpClient.SendAsync`. Для типовых чат-payload не страшно, для больших prompt — заметный кадр на main-thread.
 
 ### 1.4. Тестовый код (в build не идёт, но влияет на CI)
 
@@ -313,8 +313,8 @@ Tool-args в MEAI везде — `Newtonsoft.Json.Linq.JArray/JObject` (см. `C
 - `ConfigureAwait(false)` распределение вокруг границы Core/Unity точно соответствует документации.
 - Tool-lifecycle adapter chain (`ToolExecutionPolicy → IToolCallEventPublisher → MessagePipeToolCallEventPublisher`) реализован чисто.
 - `CoreAISettingsAsset.ToolInvocationMarshaler` корректно отдаёт `UnityMainThreadLlmAsyncMarshaler.Instance` с regression-тестом — не было silent fall-through, как опасался первый прогон аудита.
-- Network — везде `UnityWebRequest`, `HttpClient`/`Socket`/`TcpClient` нет.
-- Polling-цикл `MeaiOpenAiChatClient` использует `UniTask.Yield(PlayerLoopTiming.Update, ct)`, не `Task.Delay`.
+- MEAI OpenAI path — **`System.Net.Http.HttpClient`** в portable **`MeaiOpenAiChatClient`**; иные Unity-вызовы могут по-прежнему использовать **`UnityWebRequest`** там, где это задокументировано.
+- **SSE (HTTP):** `MeaiOpenAiChatClient` читает поток построчно с бюджетом простоя (см. код), без цикла poll **`UnityWebRequest.isDone`**.
 - Таймаут чата — `CancelAfterSlim` в `CoreAiChatService.cs:118` (соответствует «WebGL Rule»).
 - Dispose / IDisposable hygiene в runtime в порядке — leaked CTS / dropped subscription tokens не найдено.
 - `BinaryFormatter`/`XmlSerializer`/`Process.Start`/`Environment.Exit` — отсутствуют.
@@ -322,4 +322,4 @@ Tool-args в MEAI везде — `Newtonsoft.Json.Linq.JArray/JObject` (см. `C
 
 ---
 
-> Снимок обновлён под **v1.5.21** (2026-05-01). Детальная история — [`CHANGELOG.md`](../CHANGELOG.md) / portable [`CHANGELOG.md`](../../CoreAI/CHANGELOG.md).
+> Снимок обновлён под **v1.5.23** (2026-05-01). Детальная история — [`CHANGELOG.md`](../CHANGELOG.md) / portable [`CHANGELOG.md`](../../CoreAI/CHANGELOG.md).

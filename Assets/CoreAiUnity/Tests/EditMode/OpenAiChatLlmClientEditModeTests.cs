@@ -94,13 +94,12 @@ namespace CoreAI.Tests.EditMode
 
             OpenAiChatLlmClient client = new(settings);
 
-            // Ожидаем ошибку подключения (Cannot resolve destination host или timeout)
-            // MeaiOpenAiChatClient логирует через LogWarning, MeaiLlmClient тоже Warning
+            // Сбой сети / таймаут: UWR-тексты, HttpClient SendAsync, или TaskCanceledException при таймауте HttpClient.
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(
-                    ".*\\[Llm\\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error).*"));
+                    @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error|SendAsync failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
             LogAssert.Expect(LogType.Warning,
-                new System.Text.RegularExpressions.Regex(".*\\[Llm\\] MeaiLlmClient: HTTP error.*"));
+                new System.Text.RegularExpressions.Regex(@".*\[Llm\] MeaiLlmClient:.*"));
 
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {

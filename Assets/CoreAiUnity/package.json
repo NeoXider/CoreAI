@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.22",
+  "version": "1.5.23",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.22: RegisterCorePortable suppressDefaultAgentMemoryStore + CoreAILifetimeScope wiring (fixes VContainer IAgentMemoryStore duplicate); EditMode regression tests. v1.5.21: WebGL no file agent memory; forced non-streaming on WebGL player.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.23: depends on Core 1.5.23 (HttpClient MEAI client in portable Core); MeaiOpenAiChatClientHttpEditModeTests. v1.5.22: RegisterCorePortable IAgentMemoryStore wiring; EditMode regression tests.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.22"
+    "com.nexoider.coreai": "1.5.23"
   }
 }
