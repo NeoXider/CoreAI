@@ -22,6 +22,7 @@ namespace CoreAI.Chat
     public class CoreAiChatPanel : MonoBehaviour
     {
         private const string MobileClassName = "coreai-mobile";
+        private const string FullscreenLayoutClassName = "coreai-chat-fullscreen";
         private const string CollapsedClassName = "coreai-collapsed";
         private const string CollapsedPrefsKey = "CoreAI.Chat.Collapsed";
         private const string SendButtonStopClassName = "coreai-chat-send-button-stop";
@@ -365,8 +366,8 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Подгоняет окно чата под экран устройства.
-        /// На маленьких экранах (телефоны/WebGL mobile) ограничивает размеры,
-        /// чтобы панель не выходила за границы viewport.
+        /// На маленьких экранах (телефоны/WebGL mobile) или при
+        /// <see cref="CoreAiChatConfig.UseFullscreenChat"/> панель растягивается почти на весь viewport с полями.
         /// </summary>
         private void ApplyResponsiveSize(VisualElement container)
         {
@@ -382,13 +383,28 @@ namespace CoreAI.Chat
             float maxWidth = Mathf.Max(280f, screenWidth - margin * 2f);
             float maxHeight = Mathf.Max(320f, screenHeight - margin * 2f);
 
-            // На маленьких устройствах панель занимает почти весь экран
-            // с безопасным отступом, чтобы не обрезаться по правому краю.
-            bool useFullScreenLikeLayout = IsMobileScreen();
+            bool useStretchLayout = (config != null && config.UseFullscreenChat) || IsMobileScreen();
 
-            if (useFullScreenLikeLayout)
+            if (useStretchLayout)
             {
-                container.AddToClassList(MobileClassName);
+                if (config != null && config.UseFullscreenChat)
+                {
+                    container.AddToClassList(FullscreenLayoutClassName);
+                }
+                else
+                {
+                    container.RemoveFromClassList(FullscreenLayoutClassName);
+                }
+
+                if (IsMobileScreen())
+                {
+                    container.AddToClassList(MobileClassName);
+                }
+                else
+                {
+                    container.RemoveFromClassList(MobileClassName);
+                }
+
                 container.style.left = margin;
                 container.style.right = margin;
                 container.style.top = margin;
@@ -398,9 +414,11 @@ namespace CoreAI.Chat
                 return;
             }
 
+            container.RemoveFromClassList(FullscreenLayoutClassName);
+            container.RemoveFromClassList(MobileClassName);
+
             // Обычный desktop/tablet режим: сохраняем "плавающее" окно справа снизу,
             // но не даём ему выйти за экран, если конфиг слишком большой.
-            container.RemoveFromClassList(MobileClassName);
             container.style.left = StyleKeyword.Auto;
             container.style.top = StyleKeyword.Auto;
             container.style.right = 24f;

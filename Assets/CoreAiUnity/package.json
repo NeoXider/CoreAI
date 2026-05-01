@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.23",
+  "version": "1.5.26",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.23: depends on Core 1.5.23 (HttpClient MEAI client in portable Core); MeaiOpenAiChatClientHttpEditModeTests. v1.5.22: RegisterCorePortable IAgentMemoryStore wiring; EditMode regression tests.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.26: Core 1.5.26 (SSE HttpClient lifetime fix). v1.5.25: UnityWebRequest WebGL transport, guard, docs.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.23"
+    "com.nexoider.coreai": "1.5.26"
   }
 }

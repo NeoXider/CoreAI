@@ -3,9 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
+#if UNITY_EDITOR
 using System.Net.Http;
-using System.Net.Http.Headers;
+#endif
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,22 +27,29 @@ namespace CoreAI.Infrastructure.Llm
 #endif
 
     /// <summary>
-    /// MEAI <see cref="MEAI.IChatClient"/> для OpenAI-compatible HTTP API.
-    /// Портативная реализация на <see cref="HttpClient"/> — без UnityEngine / UnityWebRequest
-    /// (корректнее для WebGL-браузерного стека и единого поведения таймаутов).
-    /// Continuation после await без <c>ConfigureAwait(false)</c>, чтобы на хостах с главным потоком Unity
-    /// (в т.ч. WebGL) сохранялась привязка к synchronization context, когда он задан.
+    /// MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
+    /// Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
+    /// WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
     /// </summary>
     public sealed class MeaiOpenAiChatClient : MEAI.IChatClient, IDisposable
     {
         private readonly IOpenAiHttpSettings _settings;
+        private readonly IOpenAiHttpTransport _transport;
         private readonly ILog _log;
 
-        public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, ILog? log = null)
+        public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, IOpenAiHttpTransport transport, ILog? log = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? Log.Instance;
         }
+
+#if !UNITY_WEBGL || UNITY_EDITOR
+        public MeaiOpenAiChatClient(IOpenAiHttpSettings settings, ILog? log = null)
+            : this(settings, new HttpClientOpenAiTransport(), log)
+        {
+        }
+#endif
 
         public async Task<MEAI.ChatResponse> GetResponseAsync(
             IEnumerable<MEAI.ChatMessage> chatMessages,
@@ -115,38 +122,33 @@ namespace CoreAI.Infrastructure.Llm
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
                 int transportTimeoutSec = _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
-                _log.Info($"MeaiOpenAiChatClient: Timeout={transportTimeoutSec}s (HttpClient)", LogTag.Llm);
-
-                using HttpClient client = CreateBoundedHttpClient(transportTimeoutSec);
-
-                using HttpRequestMessage httpRequest = new(HttpMethod.Post, url);
-                httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
-                AddCommonHeaders(httpRequest, url, acceptEventStream: false);
+                _log.Info($"MeaiOpenAiChatClient: Timeout={transportTimeoutSec}s ({_transport.DebugLabel})", LogTag.Llm);
 
                 try
                 {
-                    using (HttpResponseMessage response = await client.SendAsync(httpRequest,
-                               HttpCompletionOption.ResponseContentRead, cancellationToken))
-                {
-                    HttpStatusCode statusCode = response.StatusCode;
-                    bool success = response.IsSuccessStatusCode;
-                    cancellationToken.ThrowIfCancellationRequested();
-                    // HttpContent on .NET Standard 2.0 / some Unity profiles has no ReadAsStringAsync(CancellationToken).
-                    string bodyText = await response.Content.ReadAsStringAsync();
+                    OpenAiHttpPostResult postResult = await _transport.PostNonStreamingAsync(
+                        new OpenAiHttpPostRequest
+                        {
+                            Url = url,
+                            JsonBody = json,
+                            AcceptEventStream = false,
+                            TransportTimeoutSeconds = transportTimeoutSec,
+                            Headers = BuildTransportHeaders(url, acceptEventStream: false)
+                        }, cancellationToken);
 
-                    if (success)
+                    if (postResult.IsSuccessStatusCode)
                     {
-                        responseJson = bodyText;
+                        responseJson = postResult.BodyText;
                         break;
                     }
 
-                    string errorDetail = !string.IsNullOrEmpty(bodyText)
-                        ? $"{response.ReasonPhrase} | Body: {bodyText}"
-                        : (response.ReasonPhrase ?? "HTTP error");
+                    string errorDetail = !string.IsNullOrEmpty(postResult.BodyText)
+                        ? $"HTTP {postResult.StatusCode} | Body: {postResult.BodyText}"
+                        : $"HTTP {postResult.StatusCode}";
                     _log.Warn($"MeaiOpenAiChatClient: {errorDetail}", LogTag.Llm);
 
                     bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
-                        && IsTransientLocalLlmReloadError((int)statusCode, bodyText, errorDetail);
+                        && IsTransientLocalLlmReloadError(postResult.StatusCode, postResult.BodyText, errorDetail);
 
                     if (canRetryTransient)
                     {
@@ -157,12 +159,11 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    throw BuildHttpException(statusCode, bodyText, errorDetail, response.Headers);
-                }
+                    throw BuildHttpException(postResult.StatusCode, postResult.BodyText, errorDetail,
+                        postResult.ResponseHeaders);
                 }
                 catch (OperationCanceledException ex)
                 {
-                    // HttpClient uses TaskCanceledException for per-request timeouts; caller token may still be inactive.
                     if (!cancellationToken.IsCancellationRequested)
                     {
                         _log.Warn(
@@ -177,7 +178,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (Exception ex)
                 {
-                    _log.Warn($"MeaiOpenAiChatClient: SendAsync failed: {ex.Message}", LogTag.Llm);
+                    _log.Warn($"MeaiOpenAiChatClient: Send failed: {ex.Message}", LogTag.Llm);
                     throw new LlmClientException($"HTTP send failed: {ex.Message}", LlmErrorCode.BackendUnavailable);
                 }
             }
@@ -201,6 +202,20 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            if (!_transport.SupportsSseStreaming)
+            {
+                _log.Info(
+                    "MeaiOpenAiChatClient: transport has no SSE support — using non-stream completion and simulated streaming updates (WebGL / UnityWebRequest).",
+                    LogTag.Llm);
+                MEAI.ChatResponse full = await GetResponseAsync(chatMessages, options, cancellationToken);
+                foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
+                {
+                    yield return u;
+                }
+
+                yield break;
+            }
+
             List<MEAI.ChatMessage> msgs = chatMessages.ToList();
             string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
@@ -232,25 +247,26 @@ namespace CoreAI.Infrastructure.Llm
             {
                 int streamTransportTimeoutSec = _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
 
-                using HttpClient client = CreateStreamingHttpClient(streamTransportTimeoutSec);
-
-                using HttpRequestMessage httpRequest = new(HttpMethod.Post, url);
-                httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
-                AddCommonHeaders(httpRequest, url, acceptEventStream: true);
+                OpenAiHttpPostRequest transportReq = new()
+                {
+                    Url = url,
+                    JsonBody = json,
+                    AcceptEventStream = true,
+                    TransportTimeoutSeconds = streamTransportTimeoutSec,
+                    Headers = BuildTransportHeaders(url, acceptEventStream: true)
+                };
 
                 _log.Info(
                     $"MeaiOpenAiChatClient: POST (stream) {url} (attempt {attempt}/{transientLocalLlmReloadMaxAttempts})",
                     LogTag.Llm);
 
-                HttpResponseMessage response;
+                OpenAiHttpSseOpenResult openResult;
                 try
                 {
-                    response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
-                        cancellationToken);
+                    openResult = await _transport.OpenSseResponseStreamAsync(transportReq, cancellationToken);
                 }
                 catch (OperationCanceledException ex)
                 {
-                    // HttpClient uses TaskCanceledException for per-request timeouts; caller token may still be inactive.
                     if (!cancellationToken.IsCancellationRequested)
                     {
                         _log.Warn(
@@ -265,23 +281,26 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (Exception ex)
                 {
-                    _log.Warn($"MeaiOpenAiChatClient: stream SendAsync failed: {ex.Message}", LogTag.Llm);
+                    _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}", LogTag.Llm);
                     throw new LlmClientException($"HTTP stream send failed: {ex.Message}", LlmErrorCode.BackendUnavailable);
                 }
 
-                using (response)
+                using (openResult)
                 {
-                    if (!response.IsSuccessStatusCode)
+                    string ctype = TryGetHeaderFirstValue(openResult.ResponseHeaders, "Content-Type") ?? "n/a";
+                    LogStreamingHttpResponseSummary(openResult.StatusCode, openResult.StatusCode >= 200 && openResult.StatusCode < 300, "", ctype);
+
+                    if (openResult.StatusCode < 200 || openResult.StatusCode >= 300)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        string streamBody = await response.Content.ReadAsStringAsync();
+                        string streamBody = openResult.ErrorBodyText ?? "";
                         string streamErr = !string.IsNullOrEmpty(streamBody)
-                            ? $"{response.ReasonPhrase} | Body: {streamBody}"
-                            : (response.ReasonPhrase ?? "HTTP error");
+                            ? $"HTTP {openResult.StatusCode} | Body: {streamBody}"
+                            : $"HTTP {openResult.StatusCode}";
                         _log.Warn($"MeaiOpenAiChatClient: stream error — {streamErr}", LogTag.Llm);
 
                         bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
-                            && IsTransientLocalLlmReloadError((int)response.StatusCode, streamBody, streamErr);
+                            && IsTransientLocalLlmReloadError(openResult.StatusCode, streamBody, streamErr);
 
                         if (canRetryTransient)
                         {
@@ -291,15 +310,22 @@ namespace CoreAI.Infrastructure.Llm
                             continue;
                         }
 
-                        throw BuildHttpException(response.StatusCode, streamBody, streamErr, response.Headers);
+                        throw BuildHttpException(openResult.StatusCode, streamBody, streamErr, openResult.ResponseHeaders);
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
-                    using (Stream stream = await response.Content.ReadAsStreamAsync())
-                    using (StreamReader reader = new(stream, Encoding.UTF8, false, 8192))
+                    Stream? stream = openResult.ResponseStream;
+                    if (stream == null)
+                    {
+                        throw new LlmClientException("HTTP stream: success status but no response stream.",
+                            LlmErrorCode.BackendUnavailable);
+                    }
+
+                    using (StreamReader reader = new(stream, Encoding.UTF8, false, 8192, leaveOpen: true))
                     {
                         SseToolCallAccumulator toolAccumulator = new();
                         DateTime lastProgressUtc = DateTime.UtcNow;
+                        int parsedSseDeltas = 0;
 
                         while (true)
                         {
@@ -341,6 +367,7 @@ namespace CoreAI.Infrastructure.Llm
 
                             foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
                             {
+                                parsedSseDeltas++;
                                 yield return update;
                             }
                         }
@@ -348,7 +375,17 @@ namespace CoreAI.Infrastructure.Llm
                         MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
                         if (flushed != null)
                         {
+                            parsedSseDeltas++;
                             yield return flushed;
+                        }
+
+                        if (parsedSseDeltas == 0)
+                        {
+                            _log.Warn(
+                                "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas — empty body, " +
+                                "non-event-stream payload, or chunk shape not matching OpenAI choices[0].delta (check LM Studio / proxy). " +
+                                "If Content-Type is application/json, try non-streaming mode or EnableHttpDebugLogging for raw body.",
+                                LogTag.Llm);
                         }
                     }
 
@@ -357,54 +394,97 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static HttpClient CreateBoundedHttpClient(int transportTimeoutSec)
+        private List<KeyValuePair<string, string>> BuildTransportHeaders(string url, bool acceptEventStream)
         {
-#if UNITY_EDITOR
-            if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
-            {
-                return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
-            }
-#endif
-            int sec = transportTimeoutSec <= 0 ? 120 : transportTimeoutSec;
-            return new HttpClient { Timeout = TimeSpan.FromSeconds(sec) };
-        }
-
-        /// <summary>
-        /// Длинные SSE: не режем весь запрос <see cref="HttpClient.Timeout"/> — только межбайтовый простой
-        /// (см. цикл чтения + <see cref="Task.Delay"/>), иначе длинная генерация оборвётся.
-        /// </summary>
-        private static HttpClient CreateStreamingHttpClient(int stallBudgetSeconds)
-        {
-#if UNITY_EDITOR
-            if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
-            {
-                return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
-            }
-#endif
-            _ = stallBudgetSeconds;
-            return new HttpClient { Timeout = TimeSpan.FromHours(24) };
-        }
-
-        private void AddCommonHeaders(HttpRequestMessage request, string url, bool acceptEventStream)
-        {
-            if (acceptEventStream)
-            {
-                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-            }
+            _ = acceptEventStream;
+            List<KeyValuePair<string, string>> list = new();
 
             if (url.Contains("openrouter", StringComparison.OrdinalIgnoreCase))
             {
-                request.Headers.TryAddWithoutValidation(OpenAiHttpConstants.HttpRefererHeaderName,
-                    OpenAiHttpConstants.HttpRefererUnityUrl);
-                request.Headers.TryAddWithoutValidation("X-Title", "CoreAI");
+                list.Add(new KeyValuePair<string, string>(OpenAiHttpConstants.HttpRefererHeaderName,
+                    OpenAiHttpConstants.HttpRefererUnityUrl));
+                list.Add(new KeyValuePair<string, string>("X-Title", "CoreAI"));
                 _log.Info("MeaiOpenAiChatClient: Added OpenRouter headers", LogTag.Llm);
             }
 
             string authorizationHeader = ResolveAuthorizationHeader();
             if (!string.IsNullOrEmpty(authorizationHeader))
             {
-                request.Headers.TryAddWithoutValidation("Authorization", authorizationHeader);
+                list.Add(new KeyValuePair<string, string>("Authorization", authorizationHeader));
                 _log.Info($"MeaiOpenAiChatClient: Authorization header set (len={authorizationHeader.Length})",
+                    LogTag.Llm);
+            }
+
+            return list;
+        }
+
+        private static string? TryGetHeaderFirstValue(IReadOnlyDictionary<string, IEnumerable<string>> headers,
+            string name)
+        {
+            if (headers == null) return null;
+            foreach (KeyValuePair<string, IEnumerable<string>> kv in headers)
+            {
+                if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return kv.Value?.FirstOrDefault();
+                }
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<MEAI.AIContent> EnumerableContents(MEAI.ChatMessage msg)
+        {
+            if (msg.Contents == null) yield break;
+            foreach (MEAI.AIContent c in msg.Contents)
+            {
+                yield return c;
+            }
+        }
+
+        private static IEnumerable<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdates(
+            MEAI.ChatResponse response)
+        {
+            if (response?.Messages == null || response.Messages.Count == 0) yield break;
+            MEAI.ChatMessage msg = response.Messages[0];
+
+            if (msg.Contents != null && msg.Contents.Count > 0)
+            {
+                foreach (MEAI.AIContent c in EnumerableContents(msg))
+                {
+                    if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    {
+                        yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, tc.Text);
+                    }
+                    else if (c is MEAI.FunctionCallContent fc)
+                    {
+                        MEAI.ChatResponseUpdate u = new(MEAI.ChatRole.Assistant, "");
+                        u.Contents = new List<MEAI.AIContent> { fc };
+                        yield return u;
+                    }
+                }
+            }
+            else if (!string.IsNullOrEmpty(msg.Text))
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, msg.Text);
+            }
+        }
+
+        private void LogStreamingHttpResponseSummary(int code, bool success, string reason, string contentType)
+        {
+            string reasonOut = reason ?? "";
+            string ctype = string.IsNullOrEmpty(contentType) ? "n/a" : contentType;
+
+            if (success)
+            {
+                _log.Info(
+                    $"MeaiOpenAiChatClient: stream HTTP {code} {reasonOut} | Content-Type: {ctype} | reading SSE body",
+                    LogTag.Llm);
+            }
+            else
+            {
+                _log.Warn(
+                    $"MeaiOpenAiChatClient: stream HTTP {code} {reasonOut} FAILED | Content-Type: {ctype} | reading error body",
                     LogTag.Llm);
             }
         }
@@ -432,12 +512,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private static LlmClientException BuildHttpException(
-            HttpStatusCode statusCode,
+            int statusCode,
             string responseBody,
             string errorDetail,
-            HttpHeaders responseHeaders)
+            IReadOnlyDictionary<string, IEnumerable<string>> responseHeaders)
         {
-            int status = (int)statusCode;
+            int status = statusCode;
             LlmErrorCode code = MapHttpStatus(status, responseBody, errorDetail);
             int? retryAfter = TryParseRetryAfterHeaders(responseHeaders);
 
@@ -449,30 +529,38 @@ namespace CoreAI.Infrastructure.Llm
                 responseBody);
         }
 
-        private static int? TryParseRetryAfterHeaders(HttpHeaders headers)
+        private static int? TryParseRetryAfterHeaders(IReadOnlyDictionary<string, IEnumerable<string>>? headers)
         {
-            if (headers == null)
+            if (headers == null || headers.Count == 0)
             {
                 return null;
             }
 
-            if (headers.TryGetValues("Retry-After-Ms", out IEnumerable<string> msVals))
+            string? retryMsHeader = GetHeaderValues(headers, "Retry-After-Ms")?.FirstOrDefault();
+            if (!string.IsNullOrEmpty(retryMsHeader) &&
+                float.TryParse(retryMsHeader, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float retryMs))
             {
-                string retryMsHeader = msVals.FirstOrDefault();
-                if (!string.IsNullOrEmpty(retryMsHeader) &&
-                    float.TryParse(retryMsHeader, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out float retryMs))
-                {
-                    return (int)Math.Ceiling(retryMs / 1000f);
-                }
+                return (int)Math.Ceiling(retryMs / 1000f);
             }
 
-            if (headers.TryGetValues("Retry-After", out IEnumerable<string> sVals))
+            string? retryHeader = GetHeaderValues(headers, "Retry-After")?.FirstOrDefault();
+            if (int.TryParse(retryHeader, out int parsedRetry))
             {
-                string retryHeader = sVals.FirstOrDefault();
-                if (int.TryParse(retryHeader, out int parsedRetry))
+                return parsedRetry;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string>? GetHeaderValues(IReadOnlyDictionary<string, IEnumerable<string>> headers,
+            string name)
+        {
+            foreach (KeyValuePair<string, IEnumerable<string>> kv in headers)
+            {
+                if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
                 {
-                    return parsedRetry;
+                    return kv.Value;
                 }
             }
 
@@ -717,9 +805,22 @@ namespace CoreAI.Infrastructure.Llm
             foreach (string line in lines)
             {
                 string trimmed = line.Trim();
-                if (!trimmed.StartsWith("data: ", StringComparison.Ordinal)) continue;
-                string data = trimmed.Substring(6);
-                if (data == "[DONE]") yield break;
+                // OpenAI uses "data: {...}"; some local servers (LM Studio, llama.cpp) omit the space after "data:".
+                if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string data = trimmed.Length <= 5 ? "" : trimmed.Substring(5).TrimStart();
+                if (string.IsNullOrEmpty(data))
+                {
+                    continue;
+                }
+
+                if (data == "[DONE]")
+                {
+                    yield break;
+                }
 
                 MEAI.ChatResponseUpdate update = ExtractDeltaUpdate(data, accumulator);
                 if (update != null)
@@ -729,36 +830,69 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
+        internal static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdatesForTests(string raw)
+        {
+            return ParseSseUpdates(raw, new SseToolCallAccumulator());
+        }
+
         private static MEAI.ChatResponseUpdate ExtractDeltaUpdate(string json, SseToolCallAccumulator accumulator)
         {
             try
             {
                 JObject obj = JObject.Parse(json);
-                JToken delta = obj?["choices"]?[0]?["delta"];
-                if (delta == null) return null;
-
-                _ = delta["reasoning_content"]?.ToString();
-
-                string content = delta["content"]?.ToString();
-                JArray toolCallsArray = delta["tool_calls"] as JArray;
-
-                if (toolCallsArray != null && toolCallsArray.Count > 0)
+                JToken choice0 = obj?["choices"]?[0];
+                if (choice0 == null || choice0.Type != JTokenType.Object)
                 {
-                    foreach (JToken tc in toolCallsArray)
-                    {
-                        int index = tc["index"]?.Value<int>() ?? 0;
-                        string callId = tc["id"]?.ToString();
-                        JToken func = tc["function"];
-                        string name = func?["name"]?.ToString();
-                        string argsFrag = func?["arguments"]?.ToString();
+                    return null;
+                }
 
-                        accumulator.Feed(index, callId, name, argsFrag);
+                JObject choice = (JObject)choice0;
+                JToken delta = choice["delta"];
+
+                if (delta != null && delta.Type == JTokenType.Object)
+                {
+                    JObject deltaObj = (JObject)delta;
+                    _ = deltaObj["reasoning_content"]?.ToString();
+
+                    string deltaContent = deltaObj["content"]?.ToString();
+                    JArray toolCallsArray = deltaObj["tool_calls"] as JArray;
+
+                    if (toolCallsArray != null && toolCallsArray.Count > 0)
+                    {
+                        foreach (JToken tc in toolCallsArray)
+                        {
+                            int index = tc["index"]?.Value<int>() ?? 0;
+                            string callId = tc["id"]?.ToString();
+                            JToken func = tc["function"];
+                            string name = func?["name"]?.ToString();
+                            string argsFrag = func?["arguments"]?.ToString();
+
+                            accumulator.Feed(index, callId, name, argsFrag);
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(deltaContent))
+                    {
+                        return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, deltaContent);
                     }
                 }
 
-                if (!string.IsNullOrEmpty(content))
+                // Local servers (LM Studio / llama.cpp) sometimes stream only `message` or `text` per chunk.
+                string messageText = ParseAssistantMessageVisibleText(choice["message"]);
+                if (!string.IsNullOrWhiteSpace(messageText))
                 {
-                    return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, content);
+                    return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, messageText);
+                }
+
+                JToken legacyText = choice["text"];
+                if (legacyText != null && legacyText.Type == JTokenType.String)
+                {
+                    string t = StripRedactedThinkingBlock(legacyText.Value<string>() ?? "");
+                    if (!string.IsNullOrWhiteSpace(t))
+                    {
+                        return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, t);
+                    }
                 }
 
                 return null;

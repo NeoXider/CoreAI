@@ -50,6 +50,13 @@ namespace CoreAI.Chat
         [SerializeField] private string _typingIndicatorText = "";
 
         [Header("UI — Размеры")]
+        [CoreAiChatLayoutOption]
+        [Tooltip(
+            "Если включено, панель растягивается почти на весь экран (отступы от краёв). " +
+            "По умолчанию выключено: плавающее окно справа снизу по ширине/высоте ниже.")]
+        [SerializeField]
+        private bool _useFullscreenChat;
+
         [SerializeField] private int _chatWidth = 500;
         [SerializeField] private int _chatHeight = 700;
 
@@ -91,6 +98,7 @@ namespace CoreAI.Chat
         public Sprite UserAvatarIcon => _userAvatarIcon;
         public bool EnableStreaming => _enableStreaming;
         public string TypingIndicatorText => _typingIndicatorText;
+        public bool UseFullscreenChat => _useFullscreenChat;
         public int ChatWidth => _chatWidth;
         public int ChatHeight => _chatHeight;
         public bool SendOnShiftEnter => _sendOnShiftEnter;

@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
             // Сбой сети / таймаут: UWR-тексты, HttpClient SendAsync, или TaskCanceledException при таймауте HttpClient.
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(
-                    @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error|SendAsync failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
+                    @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error|SendAsync failed:|Send failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(@".*\[Llm\] MeaiLlmClient:.*"));
 

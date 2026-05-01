@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity
+    guid: f59034d50b0ddf34b8161745236be0d0
+  - enabled: 1
     path: Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
     guid: 99c9720ab356a0642a771bea13969a05
   - enabled: 1

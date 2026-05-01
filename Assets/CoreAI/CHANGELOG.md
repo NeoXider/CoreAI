@@ -1,5 +1,30 @@
 # Changelog
 
+## [v1.5.26] — 2026-05-01
+
+### HTTP SSE (`HttpClient`) — keep client until body is read
+
+- **`HttpClientOpenAiTransport.OpenSseResponseStreamAsync`** no longer wraps **`HttpClient`** in **`using`** for the streaming path. Returning from the method disposed **`HttpClient`** immediately, which **canceled** the open SSE request (`The request was aborted: The request was canceled.`, `chunks=0`). **`OpenAiHttpSseOpenResult`** now owns **`HttpClient`** and disposes it **after** the content stream and **`HttpResponseMessage`**.
+- **Semver:** lockstep **`1.5.26`** with **`com.nexoider.coreaiunity`**.
+
+## [v1.5.25] — 2026-05-01
+
+### WebGL-safe HTTP LLM — pluggable transport
+
+- **`IOpenAiHttpTransport`**, **`OpenAiHttpPostRequest`**, **`OpenAiHttpPostResult`**, **`OpenAiHttpSseOpenResult`** — portable HTTP surface for **`/chat/completions`** without **`UnityEngine`** in the contract.
+- **`HttpClientOpenAiTransport`** — default **`System.Net.Http`** implementation (SSE + non-stream); honors **`MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory`** in the Editor.
+- **`MeaiOpenAiChatClient`** — requires **`IOpenAiHttpTransport`**; convenience ctor **`(settings, log)`** when **`!UNITY_WEBGL || UNITY_EDITOR`**. When **`SupportsSseStreaming`** is false, **`GetStreamingResponseAsync`** uses full JSON completion and **simulated** **`ChatResponseUpdate`** yields.
+- **Semver:** lockstep **`1.5.25`** with **`com.nexoider.coreaiunity`** (Unity: **`UnityWebRequestOpenAiTransport`**, WebGL scene guard, docs, tests).
+
+## [v1.5.24] — 2026-05-01
+
+### OpenAI-compatible HTTP streaming (SSE) — local server compatibility
+
+- **`MeaiOpenAiChatClient`** — SSE lines accept **`data:`** with or without a space after the colon (LM Studio / llama.cpp variants). **`ExtractDeltaUpdate`** falls back to **`choices[0].message`** and **`choices[0].text`** when **`delta.content`** is empty so streamed replies are not dropped.
+- **Diagnostics** — log **HTTP status** and **Content-Type** immediately after response headers; **Warn** when the stream ends with **zero** parsed deltas (empty or non–OpenAI-shaped chunks).
+- **Edit Mode** — extra **`MeaiOpenAiChatClientSseEditModeTests`** cases for `data:` variants and message-only chunks.
+- **Semver:** lockstep **`1.5.24`** with **`com.nexoider.coreaiunity`** (Unity package: fullscreen chat option in **`CoreAiChatConfig`**).
+
 ## [v1.5.23] — 2026-05-01
 
 ### OpenAI-compatible MEAI HTTP — portable `HttpClient`

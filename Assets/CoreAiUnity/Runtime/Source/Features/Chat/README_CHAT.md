@@ -35,6 +35,7 @@ Configure in the Inspector:
 - **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
 - **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
+- **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**).
 - **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
 - **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
 

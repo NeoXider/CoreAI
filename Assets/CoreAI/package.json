@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.5.23",
+  "version": "1.5.26",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.23: MEAI OpenAI HTTP via portable System.Net.Http.HttpClient (MeaiOpenAiChatClient in CoreAI.Core); Editor test hooks for mock handlers. v1.5.22: lockstep with coreaiunity. v1.5.21: Newtonsoft-only JSON in portable Core.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.26: HttpClientOpenAiTransport SSE — keep HttpClient alive until response stream is disposed (fixes immediate cancel after headers). v1.5.25: IOpenAiHttpTransport + WebGL UWR path.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

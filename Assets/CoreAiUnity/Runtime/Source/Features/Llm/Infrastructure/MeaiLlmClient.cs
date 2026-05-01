@@ -61,7 +61,13 @@ namespace CoreAI.Infrastructure.Llm
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
 
-            MeaiOpenAiChatClient innerClient = new(openAiSettings);
+            IOpenAiHttpTransport transport;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            transport = new UnityWebRequestOpenAiTransport();
+#else
+            transport = new HttpClientOpenAiTransport();
+#endif
+            MeaiOpenAiChatClient innerClient = new(openAiSettings, transport);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
         }
 

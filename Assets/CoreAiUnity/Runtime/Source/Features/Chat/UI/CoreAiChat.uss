@@ -15,6 +15,11 @@
     right: 24px;
 }
 
+/* CoreAiChatConfig: Use fullscreen chat — stretch to viewport margins (desktop or large screen) */
+.coreai-chat-container.coreai-chat-fullscreen {
+    border-radius: 12px;
+}
+
 /* Header */
 .coreai-chat-header {
     height: 52px;

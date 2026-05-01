@@ -2,7 +2,7 @@
 
 Pick the track that matches your current goal. Every link lands on a self-contained guide; you don't need to read them in order.
 
-> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) · [`com.nexoider.coreaiunity`](../package.json)
+> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.5.26`) · [`com.nexoider.coreaiunity`](../package.json) (`1.5.26`)
 > **Repo README:** [../../../README.md](../../../README.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md)
 
 ---
@@ -32,6 +32,7 @@ Install → open scene → connect LLM → press Play.
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
 | [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` does not deliver SSE incrementally → `chunks=1` + endless typing animation. Workaround + fix plan |
+| [HTTP_TRANSPORT_SPEC](HTTP_TRANSPORT_SPEC.md) | **`IOpenAiHttpTransport`** — `HttpClient` vs `UnityWebRequest` (WebGL); simulated streaming |
 
 ---
 

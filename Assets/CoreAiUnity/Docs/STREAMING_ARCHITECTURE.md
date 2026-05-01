@@ -30,9 +30,10 @@ How CoreAI streams tokens from LLMs into your UI — end-to-end, with every laye
  ┌────────▼─────────┐                         ┌───────────▼──────────┐
  │ MeaiOpenAiChat   │                         │ LlmUnityMeaiChatClient│
  │  Client (HTTP)   │                         │  (local GGUF)         │
- │ • UnityWebRequest│                         │ • LLMAgent.Chat       │
- │ • SSE "data:"    │                         │ • ConcurrentQueue     │
- │ • Abort() on CT  │                         │ • frame callbacks     │
+ │ • IOpenAiHttpTransport                      │ • LLMAgent.Chat       │
+ │   – HttpClient (default)                   │ • ConcurrentQueue     │
+ │   – UnityWebRequest (WebGL player)        │ • frame callbacks     │
+ │ • SSE + simulated stream (see §2)          │                       │
  └────────┬─────────┘                         └───────────┬──────────┘
           │                                               │
           └──────────────► LLM backend ◄──────────────────┘
@@ -44,7 +45,8 @@ Key files:
 |-------|------|
 | Filter (portable) | `Assets/CoreAI/Runtime/Core/Features/Orchestration/ThinkBlockStreamFilter.cs` |
 | Wrapper | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs` |
-| HTTP SSE | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` |
+| HTTP client + transport | `Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs` |
+| HTTP transports | `HttpClientOpenAiTransport.cs`, `UnityWebRequestOpenAiTransport.cs` (Unity) |
 | LLMUnity | `Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmUnityMeaiChatClient.cs` |
 | Tool execution policy (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs` |
 | Non-streaming tool loop (portable) | `Assets/CoreAI/Runtime/Core/Features/Llm/SmartToolCallingChatClient.cs` |
@@ -57,11 +59,15 @@ Key files:
 
 ### HTTP (OpenAI-compatible, LM Studio, vLLM, Ollama)
 
-`MeaiOpenAiChatClient.GetStreamingResponseAsync` uses `UnityWebRequest` with a streaming `DownloadHandlerBuffer`, sends `stream: true`, and parses `data: {...}` lines as Server-Sent Events.
+**Default (Editor, standalone, mobile):** `MeaiOpenAiChatClient` uses **`IOpenAiHttpTransport`** with **`HttpClientOpenAiTransport`**. **`GetStreamingResponseAsync`** sends `stream: true`, opens **`HttpCompletionOption.ResponseHeadersRead`**, and parses **SSE** lines. Prefixes **`data: `** and **`data:`** (no space) are accepted. When **`choices[0].delta.content`** is empty, the parser may use **`choices[0].message`** or **`choices[0].text`**. After response headers arrive, the client logs **HTTP status** and **Content-Type** before reading the body; a stream that ends with no parsed deltas emits a **Warn** diagnostic.
 
-- **Cancellation** → `webReq.Abort()` is called as soon as `CancellationToken.IsCancellationRequested` becomes true. No orphan connection stays open.
-- **Errors** → logged, wrapped into a final `IsDone=true` chunk so UI can dismiss the typing indicator cleanly.
-- **Main thread** → `UnityWebRequest` **must** be created on the Unity main thread. Wrapping the streaming call in `Task.Run` throws *"Create can only be called from the main thread"*.
+**WebGL player:** the browser forbids **`System.Net` / `HttpClient`**. **`UnityWebRequestOpenAiTransport`** implements **`IOpenAiHttpTransport`** with **`SupportsSseStreaming = false`**. The chat client uses a **non-streaming** JSON completion and **simulates** **`ChatResponseUpdate`** yields so MEAI / tool loops stay unchanged (UX: typically one visible chunk). Servers must expose **CORS** for the game origin. See [`HTTP_TRANSPORT_SPEC.md`](HTTP_TRANSPORT_SPEC.md) and **Unity** [Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html).
+
+**Future:** true SSE in WebGL can add another **`IOpenAiHttpTransport`** with **`SupportsSseStreaming = true`** (e.g. **`.jslib`** + **`EventSource`** / **`fetch`** stream reader).
+
+- **Timeouts** → long streams use a **per-read stall budget** (see **`RequestTimeoutSeconds`**) on the **`HttpClient`** path; **`HttpClient.Timeout`** on the streaming client is kept high.
+- **Cancellation** → cooperative via **`CancellationToken`**.
+- **Errors** → logged; failures surface as **`LlmClientException`** / terminal stream chunks where supported.
 
 ### Local (LLMUnity GGUF)
 
@@ -76,7 +82,7 @@ Key files:
 
 Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. **OpenAI-compatible HTTP (LM Studio, vLLM, etc.)** may instead stream a separate `delta.reasoning_content` field; `MeaiOpenAiChatClient` does **not** forward that to MEAI/Chat (it never becomes `update.Text` for the think filter). The tag-based filter only sees **in-content** tags.
 
-`UnityWebRequest.timeout` (mapped to `RequestTimeoutSeconds` on the HTTP settings asset) is a **whole-request** time budget from request start, not a per-chunk or idle timeout — long reasoning phases count against the same limit as the final answer.
+Idle / stall budgets for HTTP SSE are enforced in **`MeaiOpenAiChatClient`** (read-loop timeouts aligned with **`RequestTimeoutSeconds`**), separate from **`HttpClient.Timeout`** on the streaming client (kept high so long generations are not cut off at the transport level).
 
 Those blocks must never reach the UI, but:
 
@@ -270,8 +276,8 @@ Before v1.5.1, `AiOrchestrator.RunTaskAsync` had its own `for (attempt...)` retr
 ## 9. Known limitations
 
 - **No output-length timeout** — there is a per-request cancellation token but no *total response length* guard. Add one externally if you need it.
-- **Mobile** — `UnityWebRequest` SSE streaming has been tested on Desktop and Editor. On mobile, behaviour depends on the OS HTTP stack; measure before shipping.
+- **Mobile** — HTTP streaming behaviour depends on the OS / Mono / IL2CPP stack; measure before shipping.
 - **Partial SSE `tool_calls`** — Cloud providers may split tool call arguments across multiple SSE chunks. The current implementation only handles complete `delta.tool_calls` with both `name` and fully-formed `arguments` in a single chunk. Progressive accumulation across chunks is not yet implemented.
-- **WebGL — `UnityWebRequest` does not deliver SSE incrementally** *(0.25.x, regression report)*. In a built WebGL player, the emscripten `XMLHttpRequest` wrapper typically delivers the response body only in `onload`, so SSE chunks from an OpenAI / HTTP provider accumulate in the browser and reach `MeaiOpenAiChatClient.ParseSseStream` as one buffer. Symptoms: log `LLM ◀ (stream) chunks=1` for responses tens–hundreds of characters long; in `CoreAiChatPanel` the typing indicator never clears and the bubble never appears. **Workaround:** `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR` (example: `Assets/_source/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs` in the RedoSchool project). **Full fix plan:** [`STREAMING_WEBGL_TODO.md`](STREAMING_WEBGL_TODO.md): in 0.26.0 — `protected virtual ShouldUseStreamingForRole()` hook defaulting to `false` on WebGL; in 0.27.0 — a real fetch-SSE bridge via `.jslib`.
+- **WebGL — browser `HttpClient` / XHR may buffer SSE** *(historically reported with incremental delivery)*. In a built WebGL player, the response body sometimes reaches the parser in fewer, larger reads than on desktop. Symptoms can include log `LLM ◀ (stream) chunks=1` for medium-length replies; **`CoreAiChatConfig.EnableStreaming = false`** under **`UNITY_WEBGL && !UNITY_EDITOR`** is the supported workaround (see **`STREAMING_WEBGL_TODO.md`**).
 
 Related deep dives: [LUA_SANDBOX_SECURITY (TODO)](LUA_SANDBOX_SECURITY.md) · [TOOL_CALLING_BEST_PRACTICES (TODO)](TOOL_CALLING_BEST_PRACTICES.md).

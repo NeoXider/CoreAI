@@ -15,6 +15,7 @@ A guide to resolving typical issues when working with CoreAI.
 - [🌍 Problem: World command is not executed](#-problem-world-command-is-not-executed)
 - [⏳ Problem: Tests hang](#-problem-tests-hang)
 - [⏳ PlayMode: HTTP 500 from LM Studio / local API](#playmode-http-500-from-lm-studio--local-api)
+- [🌐 WebGL: HTTP API blocked (CORS)](#-webgl-http-api-blocked-cors)
 - [🔌 Problem: DI / VContainer errors](#-problem-di--vcontainer-errors)
 - [📊 Diagnostics: How to enable verbose logs](#-diagnostics-how-to-enable-verbose-logs)
 
@@ -441,6 +442,25 @@ $env:COREAI_OPENAI_TEST_MODEL = "qwen3.5-4b"
 3. No context / VRAM overload — often causes 500 on the second long request.
 
 When the real-model tests hit a persistent recall failure they end with **`Assert.Ignore`** and an explanation so CI does not fail due to infrastructure.
+
+---
+
+## 🌐 WebGL: HTTP API blocked (CORS)
+
+### Symptoms
+
+- Browser devtools: **Cross-Origin Request Blocked** / **CORS policy** when calling your OpenAI-compatible API from a WebGL build.
+- **`UnityWebRequest`** fails or returns an empty body even though the same URL works from the desktop player or Postman.
+
+### Cause
+
+Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html)). Cross-origin responses must include **`Access-Control-Allow-Origin`** (and usually **`Access-Control-Allow-Headers`** for `Authorization`, `Content-Type`, etc.). CoreAI’s WebGL path uses **`UnityWebRequestOpenAiTransport`** (non-`System.Net`).
+
+### Fix
+
+1. Host the LLM API with CORS enabled for your game’s origin, **or** put a **same-origin** reverse proxy in front of the model (e.g. `https://yourgame.com/api/v1` → LM Studio).
+2. For local dev, browser extensions or a tiny proxy that adds CORS headers are common; shipping builds need a real server config.
+3. See **`HTTP_TRANSPORT_SPEC.md`** for transport selection.
 
 ---
 

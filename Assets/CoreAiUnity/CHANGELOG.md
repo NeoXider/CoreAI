@@ -2,6 +2,39 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.26] - 2026-05-01
+
+### Dependency: Core 1.5.26 — SSE HttpClient lifetime
+
+- **`HttpClientOpenAiTransport`** streaming path no longer disposes **`HttpClient`** before the SSE body is consumed (fixes aborted stream / zero chunks right after HTTP 200).
+- **Dependency:** **`com.nexoider.coreai 1.5.26`**.
+
+#### Package **`1.5.26`**.
+
+## [1.5.25] - 2026-05-01
+
+### WebGL HTTP transport + scene guard
+
+- **`UnityWebRequestOpenAiTransport`** — **`IOpenAiHttpTransport`** for **`UNITY_WEBGL && !UNITY_EDITOR`** (`UnityWebRequest`, non-SSE); **`MeaiLlmClient.CreateHttp`** selects it vs **`HttpClientOpenAiTransport`**.
+- **`CoreAiWebGlLlmUnitySceneGuard`** — optional early-execution component to **`SetActive(false)`** **LLMUnity** roots on WebGL player so **LlamaLib** never initializes from scene objects.
+- **Docs:** **`HTTP_TRANSPORT_SPEC.md`**, **`ARCHITECTURE.md`** (WebGL HTTP + guard), **`STREAMING_ARCHITECTURE.md`** (transports + simulated stream), **`TROUBLESHOOTING.md`** (CORS), **`DOCS_INDEX.md`**.
+- **Edit Mode:** **`MeaiOpenAiWebGlTransportEditModeTests`** — non-SSE transport yields assistant text from full completion.
+- **Dependency:** **`com.nexoider.coreai 1.5.25`**.
+
+#### Package **`1.5.25`**.
+
+## [1.5.24] - 2026-05-01
+
+### Chat layout + docs
+
+- **`CoreAiChatConfig`:** **`UseFullscreenChat`** (default **off**) — stretch the panel to nearly the full viewport with margins; **`CoreAiChatPanel`** applies class **`coreai-chat-fullscreen`** and the same stretch behaviour as small-screen auto layout. **`CoreAiChatLayoutOptionAttribute`** marks layout options for Inspector clarity / future drawers.
+- **`CoreAiChat.uss`:** optional **`coreai-chat-fullscreen`** border-radius tweak.
+- **Edit Mode:** **`CoreAiChatConfigEditModeTests`** asserts default fullscreen **off**.
+- **Docs:** **`README_CHAT.md`**, **`STREAMING_ARCHITECTURE.md`** (HTTP SSE = **`HttpClient`**, paths, WebGL note).
+- **Dependency:** **`com.nexoider.coreai 1.5.24`** (SSE parsing + logging in **`MeaiOpenAiChatClient`**).
+
+#### Package **`1.5.24`**.
+
 ## [1.5.23] - 2026-05-01
 
 ### Portable HTTP client + EditMode coverage
