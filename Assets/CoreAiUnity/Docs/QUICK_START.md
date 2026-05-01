@@ -152,7 +152,7 @@ Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
 | Suite | How to run | What it covers |
 |-------|------------|----------------|
 | **CoreAI.Tests** (EditMode) | Window → General → Test Runner → EditMode | 83 tests: prompts, Lua sandbox, streaming filter, rate limiter, tool-calling duplicates |
-| **CoreAI.PlayModeTests** | Test Runner → PlayMode | End-to-end with a real LLM. Uses `COREAI_OPENAI_TEST_*` env vars (see [LLMUNITY_SETUP_AND_MODELS §7](LLMUNITY_SETUP_AND_MODELS.md)). |
+| **CoreAI.Tests.PlayMode.\*** | Test Runner → Play Mode (filter assembly) | **`FastNoLlm`** (stubs), **`LlmVerification`** (real LLM / HTTP), **`Scenarios`** (workflows). Uses `COREAI_OPENAI_TEST_*` where applicable ([LLMUNITY_SETUP_AND_MODELS §7](LLMUNITY_SETUP_AND_MODELS.md)). |
 
 ---
 

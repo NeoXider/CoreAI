@@ -513,7 +513,9 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 "Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef",
                 "Assets/CoreAiUnity/Editor/CoreAI.Editor.asmdef",
                 "Assets/CoreAiUnity/Tests/CoreAI.Tests.asmdef",
-                "Assets/CoreAiUnity/Tests/PlayModeTest/PlayModeTest.asmdef"
+                "Assets/CoreAiUnity/Tests/PlayMode/LlmInfra/CoreAI.Tests.PlayMode.LlmInfra.asmdef",
+                "Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/CoreAI.Tests.PlayMode.LlmVerification.asmdef",
+                "Assets/CoreAiUnity/Tests/PlayMode/Scenarios/CoreAI.Tests.PlayMode.Scenarios.asmdef",
             };
 
             int changed = 0;

@@ -26,10 +26,12 @@ For teams who **wire the core into their own game** or **extend this repository*
 
 | Assembly | Folder | Constraint |
 |--------|-------|-------------|
-| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. Since **v1.5.0** also owns portable LLM pipeline: **`LoggingLlmClientDecorator`**, **`ToolExecutionPolicy`**, **`SmartToolCallingChatClient`**, **`ClientLimitedLlmClientDecorator`**, portable abstractions **`IToolCallEventPublisher`**, **`IToolExecutionNotifier`**, **`ILlmPreflightAnnotator`**, and **`ILog`**. |
+| **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, **`QueuedAiOrchestrator`** queue, session snapshot, MoonSharp sandbox, Lua parsing, envelope processor. Since **v1.5.0** also owns portable LLM pipeline: **`LoggingLlmClientDecorator`**, **`ToolExecutionPolicy`** (uses **`ILlmAsyncMarshaler`** via **`ICoreAISettings.ToolInvocationMarshaler`**), **`SmartToolCallingChatClient`**, **`ClientLimitedLlmClientDecorator`**, portable abstractions **`IToolCallEventPublisher`**, **`IToolExecutionNotifier`**, **`ILlmPreflightAnnotator`**, and **`ILog`**. |
 | **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, Lua bindings (`report` / `add`). Unity-side adapters: **`MessagePipeToolCallEventPublisher`**, **`CoreAiToolExecutionNotifier`**. Package **`com.nexoider.coreaiunity`**. |
-| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit, no Play Mode. |
-| **CoreAI.PlayModeTests** | `Assets/CoreAiUnity/Tests/PlayMode/` | Play Mode (orchestrator, optionally LM Studio via env). |
+| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit (**includes `UnityMainThreadLlmAsyncMarshalerEditModeTests`**, **v1.5.14** — Edit Mode deadlock regression). |
+| **CoreAI.Tests.PlayMode.FastNoLlm** | `Assets/CoreAiUnity/Tests/PlayMode/FastNoLlm/` | Fast Play Mode: stubs, orchestrator smoke, UITK/chat panel, Lua (**no loaded model / no HTTP LLM dependency** where avoidable). |
+| **CoreAI.Tests.PlayMode.LlmVerification** | `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/` | Live-model probes (**Ignore** without backend/env). |
+| **CoreAI.Tests.PlayMode.Scenarios** | `Assets/CoreAiUnity/Tests/PlayMode/Scenarios/` | Long multi-step game scenarios (crafting workflows, merchants). Supports DLLs **`CoreAI.Tests.PlayMode.Shared`** + **`CoreAI.Tests.PlayMode.LlmInfra`**. |
 | **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Demo arena; depends on Source. |
 
 **Verification:** compile with `dotnet build` on generated `*.csproj` (Unity/Rider) or build from the IDE; **NUnit Edit Mode / Play Mode** — in **Unity Test Runner** (`Window → General → Test Runner`). The source of truth for scenarios involving `UnityEngine` and test assets is Test Runner, not bare `dotnet test` without Unity.
@@ -256,6 +258,8 @@ By default, per-role streaming override is enabled for roles with tools (`AgentM
 
   By default memory is **off for all roles** except **Creator** (see `AgentMemoryPolicy`). At Unity runtime, memory is stored under `Application.persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`. For multi-user or session-scoped products, wrap a store with `ScopedAgentMemoryStoreDecorator` and provide an `IAgentMemoryScopeProvider`.
 
+- **MEAI tools on Unity (`ToolInvocationMarshaler`):** since **v1.5.12**, `ToolExecutionPolicy` wraps MEAI **`AIFunction.InvokeAsync`** in **`ICoreAISettings.ToolInvocationMarshaler`**. The default **`CoreAISettingsAsset`** uses **`UnityMainThreadLlmAsyncMarshaler`** (**`UniTask.SwitchToMainThread`** in Player / packaged builds **only** — since **v1.5.14**, **Edit Mode `!Application.isPlaying`** skips the hop to avoid deadlock with **`Task.Wait`/`Result`** on the editor managed main thread) because **`SmartToolCallingChatClient`** still uses **`ConfigureAwait(false)`** for WebGL. **`MeaiOpenAiChatClient`** also jumps to the player loop before creating **`UnityWebRequest`**.
+
 ---
 
 ## 5.1 MessagePipe extension points (beginner → pro)
@@ -348,7 +352,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 | Assembly | How to run | What it covers |
 |--------|--------|----------------|
 | **CoreAI.Tests** | Test Runner → Edit Mode | Prompts, stub LLM, Lua sandbox, envelope parser, **`LuaAiEnvelopeProcessor`**, repair composer, **`LuaProgrammerPipelineEndToEndEditModeTests`** (orchestrator → envelope → Lua → error → Programmer retry → success). |
-| **CoreAI.PlayModeTests** | Test Runner → Play Mode | Orchestrator across roles; optional real HTTP (env vars **`COREAI_OPENAI_TEST_*`** — see LLMUNITY doc). |
+| **PlayMode assemblies** (`CoreAI.Tests.PlayMode.*`) | Test Runner → Play Mode (**filter by assembly**) | **`FastNoLlm`** — quick stub coverage; **`LlmVerification`** — streaming/HTTP/tool/memory probes (env **`COREAI_OPENAI_TEST_*`** / LLMUNITY — see LLMUNITY doc); **`Scenarios`** — crafting / merchant narratives. Shared helpers: **`Shared`**, **`LlmInfra`**. |
 
 Recommendation: run **Edit Mode** before a PR; Play Mode when DI/scene or the HTTP client changes.
 
@@ -536,7 +540,7 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 ## 10. PR checklist
 
 - **Edit Mode:** `CoreAI.Tests` green (prompts, Lua, parsers, envelope processor).
-- **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run `CoreAI.PlayModeTests`.
+- **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run **`CoreAI.Tests.PlayMode.FastNoLlm`** (always quick), then selectively **`CoreAI.Tests.PlayMode.LlmVerification`** / **`Scenarios`** where your change touches live LLMs or workflows.
 - **Secrets:** do not commit API keys, `.env` with keys, or local model paths with personal data; for CI use environment variables (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
 - **Documentation:** if contracts or flow change (DGF §3 / DI), update **DGF_SPEC** and this guide in the same PR if needed.
 - **UPM release (any change under `Assets/CoreAI` or `Assets/CoreAiUnity`):** bump **`version`** in [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) and [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; dependency = core version); add entries in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** and **[../CHANGELOG.md](../CHANGELOG.md)**; update docs for the affected feature (root **README.md** / **README_RU.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.); if public API changes, add tests as needed.

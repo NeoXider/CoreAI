@@ -315,6 +315,8 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 - Model returns text instead of a tool call
 - `Tool call not recognized` in logs
 - Tool call retries exhausted
+- **`SmartToolCallingChatClientEditModeTests`** (or runtime) stops after **3 LLM rounds** despite successful tools — fixed in **`com.nexoider.coreai` 1.5.15**: MEAI **`ChatMessage.Contents`** is a non-generic **`IList`**; enumerating native **`FunctionCallContent`** must not rely on **`SelectMany` + `Enumerable.Empty<AIContent>()`** over that property.
+- Edit Mode logs show tools **`status=FAIL`** with **`get_isPlaying can only be called from the main thread`** (execution count stays **0**) — fixed from **`com.nexoider.coreaiunity` 1.5.16** onward; **`1.5.17`** documents the hardening (**`UnityMainThreadLlmAsyncMarshaler`**: **`Application.onBeforeRender`** mirror plus **`ManagedThreadId`** gate so worker threads never call **`Application.isPlaying`**).
 
 ### Diagnostics
 

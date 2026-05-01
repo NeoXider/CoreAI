@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Git\\CoreAI\\Tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj": {}
+    "C:\\Git\\CoreAI\\tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj": {}
   },
   "projects": {
-    "C:\\Git\\CoreAI\\Tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj": {
+    "C:\\Git\\CoreAI\\tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Git\\CoreAI\\Tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj",
+        "projectUniqueName": "C:\\Git\\CoreAI\\tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj",
         "projectName": "CoreAI.UnityAsyncAnalyzers",
-        "projectPath": "C:\\Git\\CoreAI\\Tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj",
+        "projectPath": "C:\\Git\\CoreAI\\tools\\CoreAI.UnityAsyncAnalyzers\\CoreAI.UnityAsyncAnalyzers.csproj",
         "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
-        "outputPath": "C:\\Git\\CoreAI\\Tools\\CoreAI.UnityAsyncAnalyzers\\obj\\",
+        "outputPath": "C:\\Git\\CoreAI\\tools\\CoreAI.UnityAsyncAnalyzers\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

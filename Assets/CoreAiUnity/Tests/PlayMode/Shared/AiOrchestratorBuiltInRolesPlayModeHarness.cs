@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -15,9 +15,9 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// :  .    <see cref="StubLlmClient"/>;     <see cref="PlayModeProductionLikeLlmFactory"/> (Auto).
+    /// Shared PlayMode runner: every built-in role through <see cref="AiOrchestrator"/> with a supplied <see cref="ILlmClient"/>.
     /// </summary>
-    public sealed class AiOrchestratorAllRolesPlayModeTests
+    public static class AiOrchestratorBuiltInRolesPlayModeHarness
     {
         private sealed class ListSink : IAiGameCommandSink
         {
@@ -29,47 +29,7 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        [UnityTest]
-        public IEnumerator Orchestrator_EachBuiltInRole_PublishesEnvelope_WithStub()
-        {
-            yield return RunEachBuiltInRoleScenario(new StubLlmClient());
-        }
-
-        /// <summary>
-        ///   ,    stub,      HTTP  LLMUnity (. env  LLMUNITY_SETUP_AND_MODELS 7).
-        ///     ;  /        .
-        /// </summary>
-        [UnityTest]
-        [Timeout(900000)]
-        public IEnumerator Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto()
-        {
-            Debug.Log("[Test] Starting Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.15f, 300,
-                    out PlayModeProductionLikeLlmHandle handle, out string ignore))
-            {
-                Assert.Ignore(ignore);
-            }
-
-            LogAssert.ignoreFailingMessages = true;
-            try
-            {
-                Debug.Log("[Test] LLM handle created, waiting for model...");
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log("[Test] Model ready, running orchestrator...");
-
-                //    NullAgentMemoryStore (   ,   )
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new NullAgentMemoryStore());
-                yield return RunEachBuiltInRoleScenario(clientWithStore);
-                Debug.Log("[Test] Orchestrator completed successfully");
-            }
-            finally
-            {
-                handle.Dispose();
-                LogAssert.ignoreFailingMessages = false;
-            }
-        }
-
-        private static IEnumerator RunEachBuiltInRoleScenario(ILlmClient llm)
+        public static IEnumerator RunEachBuiltInRoleScenario(ILlmClient llm)
         {
             ListSink sink = new();
             SoloAuthorityHost host = new();
@@ -87,7 +47,8 @@ namespace CoreAI.Tests.PlayMode
                 new NullAgentMemoryStore(),
                 new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
             List<string> failedRoles = new();
 
@@ -102,8 +63,6 @@ namespace CoreAI.Tests.PlayMode
                         "playmode test: reply with a single short line of plain text (for example the word OK). No empty reply."
                 });
 
-                // Programmer role     -    retry loop
-                //  retry (4 )   ~30-40,    
                 float timeout = role == BuiltInAgentRoleIds.Programmer ? 300f : 180f;
                 yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'");
 
@@ -127,5 +86,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-
-

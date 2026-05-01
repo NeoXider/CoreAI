@@ -2,6 +2,86 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.17] - 2026-04-30
+
+### Editor / MEAI — never probe `Application.isPlaying` off script main
+
+- **`UnityMainThreadLlmAsyncMarshaler`:** gate **`Application.isPlaying`** reads with mirrored **`ManagedThreadId`** (**`Application.onBeforeRender`**); **`SubsystemRegistration`** no longer primes mirrors (**wrong thread risk**).
+- **Dependency:** **`com.nexoider.coreai 1.5.17`**.
+
+#### Package **`1.5.17`**.
+
+## [1.5.16] - 2026-04-30
+
+### Editor / MEAI — main-thread probe from thread pool
+
+- **`UnityMainThreadLlmAsyncMarshaler`:** under **`UNITY_EDITOR`**, probes **`Application.isPlaying`** safely; **thread-pool** threads use a **`Application.onBeforeRender`** snapshot so Edit Mode tooling stays **inline** when **not playing** / unknown, while **Editor Play Mode** still **marshals** to the player loop (fixes **`get_isPlaying` off-main** + **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** coherence).
+- **Edit Mode tests:** **`UnityMainThreadLlmAsyncMarshalerEditModeTests.InvokeAsync_FromThreadPool_CompletesWithAsyncAwait_AvoidsIsPlayingOnWorker`**.
+- **Dependency:** **`com.nexoider.coreai 1.5.16`**.
+
+#### Package **`1.5.16`**.
+
+## [1.5.15] - 2026-04-30
+
+### Portable Core fix (MEAI `ChatMessage.Contents`)
+
+- Dependency **`com.nexoider.coreai 1.5.15`**: **`SmartToolCallingChatClient`** correctly observes native **`FunctionCallContent`** when **`Contents`** is the MEAI **`IList`** model (fixes **three inner iterations → max consecutive errors** behaviour in **`SmartToolCallingChatClientEditModeTests`**).
+
+#### Package **`1.5.15`**.
+
+## [1.5.14] - 2026-04-30
+
+### Editor / Test Runner — MEAI tool marshaling without deadlocks
+
+- **`UnityMainThreadLlmAsyncMarshaler`:** under **`UNITY_EDITOR`** when **`Application.isPlaying`** is **false**, skips **`UniTask.SwitchToMainThread`** and invokes the MEAI **`AIFunction`** factory **inline** (same thread as the calling continuation). Avoids **deadlock** when Edit Mode code blocks the managed **main thread** on **`Task.Wait` / `.Result`** while **`SmartToolCallingChatClient`** continuations use **`ConfigureAwait(false)`** on the **thread pool**.
+- **Edit Mode tests:** **`UnityMainThreadLlmAsyncMarshalerEditModeTests`** (`Task.Run` + main-thread **`Wait`** + thread-pool **`InvokeAsync`**; sync-factory thread affinity).
+- **Docs:** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`COREAI_SINGLETON_API.md`**; **`CoreAi` API** XML on **`AskAsync`** / class summary.
+- **Dependency:** **`com.nexoider.coreai 1.5.14`**.
+
+#### Package **`1.5.14`**.
+
+## [1.5.13] - 2026-04-30
+
+### Tests & documentation — threading contract
+
+- **Edit Mode:** **`LlmAsyncMarshalerEditModeTests`**, **`CoreAISettingsToolMarshalerEditModeTests`**, extended **`ToolExecutionPolicyEditModeTests`** for **`ToolInvocationMarshaler`**.
+- **Play Mode (`FastNoLlm`):** **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** verifies **`UniTask.SwitchToThreadPool`** then marshaler restores the Unity test thread’s **`ManagedThreadId`** inside the tool factory (inequality pre-check only when not **`UNITY_WEBGL`**).
+- **Docs:** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`Tests/PlayMode/README.md`**.
+- **Dependency:** **`com.nexoider.coreai 1.5.13`**.
+
+#### Package **`1.5.13`**.
+
+## [1.5.12] - 2026-04-30
+
+### LLM / tools — main thread for `UnityWebRequest` and MEAI tools
+
+`SmartToolCallingChatClient` keeps **`ConfigureAwait(false)`** on the inner loop (WebGL-friendly). After the first model response, continuations can run on the **thread pool**, which breaks **`UnityWebRequest`** construction and GameObject-based tools.
+
+- **`MeaiOpenAiChatClient.GetResponseAsync`** / **`GetStreamingResponseAsync`** — **`await UniTask.SwitchToMainThread(PlayerLoopTiming.Update)`** at entry so every HTTP round-trip creates UWR on the player loop.
+- **`UnityMainThreadLlmAsyncMarshaler`** — implements **`ICoreAISettings.ToolInvocationMarshaler`**; **`CoreAISettingsAsset`** returns this instance so tool bodies run on the main thread.
+- **Dependency:** **`com.nexoider.coreai 1.5.12`**.
+
+#### Package **`1.5.12`**.
+
+## [1.5.11] - 2026-05-01
+
+### Testing — Play Mode layout (3 suites + support DLLs)
+
+Legacy single assembly **`PlayModeTest`** is replaced by:
+
+| Assembly | Folder | Role |
+|----------|--------|------|
+| **`CoreAI.Tests.PlayMode.FastNoLlm`** | `Tests/PlayMode/FastNoLlm` | **Fast** runs: stubs, **`CoreAiChatPanel`** smoke, Lua integration, orchestrator built-in roles with **`StubLlmClient`**, compaction gates — **no LLMUnity assembly reference** on this DLL. |
+| **`CoreAI.Tests.PlayMode.LlmVerification`** | `Tests/PlayMode/LlmVerification` | **LLM checks**: streaming/HTTP, tools, memory, chat service, full-pipeline resilience (**`Assert.Ignore`** when no backend). **`AiOrchestratorBuiltInRolesProductionLlmPlayModeTests`** lives here. |
+| **`CoreAI.Tests.PlayMode.Scenarios`** | `Tests/PlayMode/Scenarios` | **Game-style** multi-step flows (crafting memory, multi-agent workflow, merchant scenario). |
+
+Support: **`CoreAI.Tests.PlayMode.Shared`** (`PlayModeTestAwait`, **`AiOrchestratorBuiltInRolesPlayModeHarness`**), **`CoreAI.Tests.PlayMode.LlmInfra`** (`SharedLlmUnity`, **`PlayModeProductionLikeLlmFactory`**, **`TestAgentSetup`**, teardown). Index: **`Tests/PlayMode/README.md`**.
+
+- **Docs:** **`DEVELOPER_GUIDE.md`**, **`QUICK_START.md`**, **`DGF_SPEC.md`**, **`DOCS_INDEX.md`** (Crafting readme path).
+- **Editor:** **`FixLlmUnityAsmdefWiring`** targets the three Play Mode asmdefs that include **`COREAI_HAS_LLMUNITY`** (not **FastNoLlm** / **Shared**).
+
+#### Package **`1.5.11`**. Dependency **`com.nexoider.coreai 1.5.11`**.
+
 ## [1.5.10] - 2026-05-01
 
 ### Editor / player — responsive game during LLM HTTP wait

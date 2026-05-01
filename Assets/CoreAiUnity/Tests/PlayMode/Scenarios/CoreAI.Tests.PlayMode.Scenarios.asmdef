@@ -1,0 +1,41 @@
+{
+  "name": "CoreAI.Tests.PlayMode.Scenarios",
+  "rootNamespace": "",
+  "references": [
+    "CoreAI.Tests.PlayMode.Shared",
+    "CoreAI.Tests.PlayMode.LlmInfra",
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "MessagePipe",
+    "undream.llmunity.Runtime",
+    "MoonSharp.Interpreter",
+    "VContainer",
+    "UniTask",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Newtonsoft.Json.dll",
+    "Microsoft.Extensions.AI.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "System.Text.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [
+    {
+      "name": "ai.undream.llm",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_LLMUNITY"
+    }
+  ],
+  "noEngineReferences": false
+}

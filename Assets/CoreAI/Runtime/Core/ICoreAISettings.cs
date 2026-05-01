@@ -88,5 +88,11 @@ namespace CoreAI
         /// LLM call (extra latency/cost). When false, compaction uses the deterministic bullet rollup only.
         /// </summary>
         bool EnableLlmContextCompaction => false;
+
+        /// <summary>
+        /// Routes MEAI tool invocations (<see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/>) through this marshaler so host-specific APIs stay on the correct thread.
+        /// Default: <see cref="PassThroughLlmAsyncMarshaler.Instance"/> (portable); Unity resolves to the player loop.
+        /// </summary>
+        ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;
     }
 }

@@ -1,5 +1,56 @@
 # Changelog
 
+## [v1.5.17] — 2026-04-30
+
+### Lockstep packaging (Unity — `UnityMainThreadLlmAsyncMarshaler`)
+
+- **Semver:** lockstep **`1.5.17`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change.
+- **`UnityMainThreadLlmAsyncMarshaler`:** **`Application.isPlaying`** is **never** read from non–script-main threads (`ManagedThreadId` vs **`onBeforeRender`** mirror). Avoids **`get_isPlaying` / AggregateException** on MEAI **`Task`/thread-pool paths** (`UnityMainThreadLlmAsyncMarshalerEditModeTests.InvokeAsync_WhenNotPlaying_CompletesUnderMainThreadWait_FromThreadPool`).
+
+## [v1.5.16] — 2026-04-30
+
+### Lockstep packaging (Unity — `UnityMainThreadLlmAsyncMarshaler`)
+
+- **Semver:** lockstep **`1.5.16`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change.
+- **`UnityMainThreadLlmAsyncMarshaler`** (Unity package): **`Application.isPlaying`** is not reliably readable from MEAI continuation **threads** (**main thread / `UnityException`**). Use a **`Application.onBeforeRender`** **mirror**: **edit-time / unknown** ⇒ same **inline** path as **`!playing`** (**`ToolCallExtractionParityEditModeTests`**); **mirror says Editor Play Mode** ⇒ **`UniTask.SwitchToMainThread`** (keeps **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** valid in the Editor).
+
+## [v1.5.15] — 2026-04-30
+
+### LLM — `SmartToolCallingChatClient` native tool calls vs MEAI **10.x** `ChatMessage.Contents`
+
+- **`FlattenAssistantContents`** — walks assistant turns using non-generic **`IList`** contents (MEAI **`ChatMessage.Contents`**), instead of LINQ **`SelectMany(... ?? Enumerable.Empty<AIContent>())`**, which could yield **no** **`FunctionCallContent`** items → false “text-only” exits and **premature consecutive-error stops** (`EditMode` **`SmartToolCallingChatClientEditModeTests`** regressions).
+- **`ConcatenateAssistantTextContents`** — enumerates **`Contents`** via **`object`** for the same **IList** contract.
+- **Semver:** lockstep **`1.5.15`** with **`com.nexoider.coreaiunity`**.
+
+## [v1.5.14] — 2026-04-30
+
+### Lockstep + API clarity (behavior in Unity package)
+
+- **Semver:** lockstep **`1.5.14`** with **`com.nexoider.coreaiunity`** — no new portable **CoreAI.Core** symbols; **Edit Mode** `UnityMainThreadLlmAsyncMarshaler` bypass (**`UNITY_EDITOR`**, **`!Application.isPlaying`**) and regression tests live in the Unity package.
+- **Docs / XML:** **`CoreAi`** static entrypoint comments — **non-streaming** chat is async via **`await`** only; discourage **`.Result` / `.Wait()`** on Unity’s managed **main thread**.
+
+## [v1.5.13] — 2026-04-30
+
+### Verification & docs (lockstep packaging)
+
+- **Edit Mode:** **`LlmAsyncMarshalerEditModeTests`**, **`ToolExecutionPolicyEditModeTests.ExecuteSingle_UsesToolInvocationMarshaler_WhenProvided`**, **`CoreAISettingsToolMarshalerEditModeTests`**.
+- **Docs (Unity monorepo):** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`Assets/CoreAiUnity/Tests/PlayMode/README.md`** — document **`ToolInvocationMarshaler`** + HTTP main-thread semantics.
+- **Semver:** lockstep **`1.5.13`** with **`com.nexoider.coreaiunity`** (no portable API change).
+
+## [v1.5.12] — 2026-04-30
+
+### LLM / tools — Unity thread safety (portable hook)
+
+- **`ILlmAsyncMarshaler`** + **`PassThroughLlmAsyncMarshaler`** — host can marshal MEAI **`AIFunction.InvokeAsync`** before Unity-only tool bodies run.
+- **`ICoreAISettings.ToolInvocationMarshaler`** (default: pass-through) — **`ToolExecutionPolicy`** wraps each native tool call.
+- **Semver:** lockstep **`1.5.12`** with **`com.nexoider.coreaiunity`**.
+
+## [v1.5.11] — 2026-05-01
+
+### Meta
+
+- **Semver:** lockstep **`1.5.11`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change in this tag; sibling Unity package reorganizes Play Mode tests into **`FastNoLlm`**, **`LlmVerification`**, and **`Scenarios`** assemblies (`Assets/CoreAiUnity/Tests/PlayMode/`).
+
 ## [v1.5.10] — 2026-05-01
 
 ### Version alignment

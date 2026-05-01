@@ -13,7 +13,8 @@ using UnityEngine;
 namespace CoreAI
 {
     /// <summary>
-    /// Универсальная одна-строчная точка входа CoreAI: синхронный и стриминговый вызов LLM,
+    /// Универсальная одна-строчная точка входа CoreAI: ответ «одним куском» (<c>Task</c> + <c>await</c>)
+    /// и стриминговый вызов LLM,
     /// интеграция с <see cref="IAiOrchestrationService"/> (очередь, метрики, publish command),
     /// без необходимости вручную доставать сервисы из VContainer или писать свой singleton.
     ///
@@ -21,7 +22,7 @@ namespace CoreAI
     /// <b>Быстрый старт.</b> Добавьте <see cref="CoreAILifetimeScope"/> на сцену и вызывайте:
     /// </para>
     /// <code>
-    /// // Синхронно (одним строкой):
+    /// // Полный ответ одной строкой (асинхронно — только через await, без .Result / .Wait на main):
     /// string answer = await CoreAi.AskAsync("Привет!", roleId: "PlayerChat");
     ///
     /// // Стриминг (чанки по мере генерации):
@@ -73,9 +74,10 @@ namespace CoreAI
         // ===================== Chat API (простой слой) =====================
 
         /// <summary>
-        /// Отправить сообщение и дождаться полного ответа. Простой синхронный путь —
-        /// без чанков, без стриминга, сохраняет chat history для <paramref name="roleId"/>
-        /// (если у роли включён ChatHistory).
+        /// Отправить сообщение и дождаться полного ответа. Простой <b>non-streaming</b> путь (один финальный текст),
+        /// без поканкового UI — сохраняет chat history для <paramref name="roleId"/> (если у роли включён ChatHistory).
+        /// Вызывайте только через <c>await</c>; не блокируйте главный поток Unity через <c>.Result</c> или <c>.Wait()</c>
+        /// (см. <c>ToolInvocationMarshaler</c> / player loop — возможен дедлок).
         /// </summary>
         public static async Task<string?> AskAsync(
             string userMessage,

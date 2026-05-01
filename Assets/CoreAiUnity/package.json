@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.10",
+  "version": "1.5.17",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.10: responsive UnityWebRequest poll (UniTask.Yield), main-thread MEAI awaits, CAIU001 Roslyn analyzer, UPM author metadata.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.17: marshaler probes isPlaying only on mirrored script-main thread. v1.5.16: isPlaying mirror. v1.5.15: SmartToolCalling IList.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.10"
+    "com.nexoider.coreai": "1.5.17"
   }
 }

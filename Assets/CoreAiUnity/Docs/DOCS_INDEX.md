@@ -70,7 +70,8 @@ DI, threading, spec, pipelines.
 
 | Document | Tests | Scope |
 |----------|-------|-------|
-| [CraftingMemory_README](../Tests/PlayModeTest/CraftingMemory_README.md) | 5 | 🤖 Crafting workflow: Creator → CoreMechanic → Programmer |
+| [CraftingMemory_README](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | 5 | 🤖 Crafting workflow: Creator → CoreMechanic → Programmer |
+| [Play Mode layout](../Tests/PlayMode/README.md) | — | **FastNoLlm** vs **LlmVerification** vs **Scenarios** (+ **Shared**, **LlmInfra**) |
 | `ThinkBlockStreamFilterEditModeTests` | 24 | Streaming `<think>` filter, including split-tag cases |
 | `SecureLuaSandboxEditModeTests` | — | Sandbox escape: `io`/`os`/`debug`/`load`/`loadfile`/`dofile`, step/timeout guard |
 | `SmartToolCallingChatClientEditModeTests` | — | Duplicate detection, `AllowDuplicates`, missing tools, exceptions |

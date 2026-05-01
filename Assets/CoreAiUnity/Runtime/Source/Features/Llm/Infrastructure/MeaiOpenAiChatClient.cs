@@ -35,6 +35,8 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, cancellationToken);
+
             List<MEAI.ChatMessage> msgs = chatMessages.ToList();
             string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
@@ -340,10 +342,11 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, cancellationToken);
+
             List<MEAI.ChatMessage> msgs = chatMessages.ToList();
             string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
-            // Build request JSON (reuse same logic as GetResponseAsync)
             List<Dictionary<string, object>> messages = BuildMessagesPayload(msgs);
             List<Dictionary<string, object>> toolsList = BuildToolsPayload(options);
 
@@ -400,7 +403,7 @@ namespace CoreAI.Infrastructure.Llm
                 int lastProcessed = 0;
                 bool cancelled = false;
                 SseToolCallAccumulator toolAccumulator = new();
-                    try
+                try
                 {
                     // Poll for SSE chunks; same Yield rule as non-streaming (keep player loop responsive).
                     while (!op.isDone)

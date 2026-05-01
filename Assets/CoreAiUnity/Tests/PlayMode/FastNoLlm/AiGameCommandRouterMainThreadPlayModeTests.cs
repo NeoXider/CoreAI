@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
@@ -219,7 +220,12 @@ namespace CoreAI.Tests.PlayMode
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
             AgentMemoryPolicy memPolicy = new();
-            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(memPolicy);
+            string creator = BuiltInAgentRoleIds.Creator;
+            AgentConfig toolMemCfg = new AgentBuilder(creator)
+                .WithMode(AgentMode.ToolsAndChat)
+                .WithMemory(MemoryToolAction.Append)
+                .Build();
+            toolMemCfg.ApplyToPolicy(memPolicy);
             AiOrchestrator inner = new(
                 host,
                 new StubLlmClient(),

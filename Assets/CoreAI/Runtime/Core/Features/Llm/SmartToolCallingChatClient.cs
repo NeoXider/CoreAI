@@ -86,9 +86,7 @@ namespace CoreAI.Infrastructure.Llm
                         .GetResponseAsync(messages, options, cancellationToken)
                         .ConfigureAwait(false);
 
-                    List<MEAI.AIContent> allContents =
-                        response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
-                        ?? new List<MEAI.AIContent>();
+                    List<MEAI.AIContent> allContents = FlattenAssistantContents(response);
 
                     List<MEAI.FunctionCallContent> nativeCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
 
@@ -161,6 +159,41 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Collects every <see cref="MEAI.AIContent"/> from assistant messages in <paramref name="response"/>.
+        /// In Microsoft.Extensions.AI 10.x, <see cref="MEAI.ChatMessage.Contents"/> is a non-generic
+        /// <see cref="System.Collections.IList"/>; LINQ <c>SelectMany</c> combined with
+        /// <c>Enumerable.Empty&lt;AIContent&gt;()</c> does not enumerate those items reliably — native
+        /// <see cref="MEAI.FunctionCallContent"/> would be missed, the loop would mis-classify turns as
+        /// text-only or text-shaped tools, and consecutive-error limits would fire early.
+        /// </summary>
+        private static List<MEAI.AIContent> FlattenAssistantContents(MEAI.ChatResponse response)
+        {
+            List<MEAI.AIContent> result = new();
+            if (response?.Messages == null)
+            {
+                return result;
+            }
+
+            foreach (MEAI.ChatMessage m in response.Messages)
+            {
+                if (m?.Contents == null || m.Role != MEAI.ChatRole.Assistant)
+                {
+                    continue;
+                }
+
+                foreach (object obj in m.Contents)
+                {
+                    if (obj is MEAI.AIContent ai)
+                    {
+                        result.Add(ai);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Extracts tool calls from assistant text using the portable <see cref="LlmToolCallTextExtractor"/>.
         /// Converts the generic matches into MEAI <see cref="MEAI.FunctionCallContent"/> objects.
         /// </summary>
@@ -209,10 +242,10 @@ namespace CoreAI.Infrastructure.Llm
             System.Text.StringBuilder sb = new();
             foreach (MEAI.ChatMessage m in response.Messages)
             {
-                if (m.Contents == null) continue;
-                foreach (MEAI.AIContent c in m.Contents)
+                if (m?.Contents == null) continue;
+                foreach (object obj in m.Contents)
                 {
-                    if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    if (obj is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
                     {
                         if (sb.Length > 0) sb.Append('\n');
                         sb.Append(tc.Text);

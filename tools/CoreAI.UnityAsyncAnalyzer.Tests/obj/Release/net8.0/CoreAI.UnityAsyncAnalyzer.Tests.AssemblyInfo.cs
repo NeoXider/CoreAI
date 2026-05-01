@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CoreAI.UnityAsyncAnalyzer.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5661f72304cfda966d57043ca67afceb7d3cecf7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7242c0611aa8403b11835f3ea8079f1a22b712b0")]
 [assembly: System.Reflection.AssemblyProductAttribute("CoreAI.UnityAsyncAnalyzer.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CoreAI.UnityAsyncAnalyzer.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

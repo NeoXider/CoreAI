@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace CoreAI.Tests.PlayMode
 {
@@ -7,7 +7,7 @@ namespace CoreAI.Tests.PlayMode
     /// <para> : <b> </b>  URL      CoreAISettingsAsset.</para>
     /// <para>    env vars: <c>COREAI_OPENAI_TEST_BASE</c> / <c>COREAI_OPENAI_TEST_MODEL</c>.</para>
     /// </summary>
-    internal static class PlayModeOpenAiTestConfig
+    public static class PlayModeOpenAiTestConfig
     {
         /// <summary> URL     .   env var.</summary>
         public const string FallbackLmStudioBaseUrl = "http://192.168.56.1:1234/v1";

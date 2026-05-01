@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета в этой линии идут под **одной версией `1.5.10`** (отзывчивый опрос UWR через **UniTask.Yield**, Roslyn **CAIU001**, поле **author** в UPM; portable ядро синхронизировано с тем же semver). Ранее в **1.5.x**: main-thread для `CoreAiChatPanel`, контекст / свёртка (**1.5.3+**), история **`1.4.x`** (`Retry-After`, tool pipeline).
+**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета в этой линии идут под **одной версией `1.5.11`**. **`1.5.11` (Unity):** Play Mode разбит на **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`** + служебные **`Shared`/`LlmInfra`**. **`1.5.10`:** отзывчивый опрос UWR через **UniTask.Yield**, Roslyn **CAIU001**, поле **author** в UPM. Ранее в **1.5.x**: main-thread для `CoreAiChatPanel`, контекст / свёртка (**1.5.3+**), история **`1.4.x`** (`Retry-After`, tool pipeline).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

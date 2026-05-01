@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
@@ -29,6 +30,8 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class StubSettings : ICoreAISettings
         {
+            private ILlmAsyncMarshaler _toolMarshalerOverride;
+
             public int MaxLuaRepairRetries => 3;
             public bool EnableMeaiDebugLogging => false;
             public float LlmRequestTimeoutSeconds => 30;
@@ -47,6 +50,26 @@ namespace CoreAI.Tests.EditMode
             public bool LogMeaiToolCallingSteps => true;
             public bool AllowDuplicateToolCalls => false;
             public bool EnableStreaming => true;
+
+            public ILlmAsyncMarshaler ToolInvocationMarshaler =>
+                _toolMarshalerOverride ?? PassThroughLlmAsyncMarshaler.Instance;
+
+            public StubSettings WithToolMarshaler(ILlmAsyncMarshaler marshaler)
+            {
+                _toolMarshalerOverride = marshaler;
+                return this;
+            }
+        }
+
+        private sealed class CountingMarshaler : ILlmAsyncMarshaler
+        {
+            public int InvokeCount;
+
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                InvokeCount++;
+                return factory();
+            }
         }
 
         private sealed class StubTool : ILlmTool
@@ -267,6 +290,25 @@ namespace CoreAI.Tests.EditMode
             var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsFalse(result.Succeeded);
             Assert.IsTrue(result.Result.Result.ToString().Contains("not found"));
+        }
+
+        [Test]
+        public async Task ExecuteSingle_UsesToolInvocationMarshaler_WhenProvided()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+
+            ToolExecutionPolicy policy =
+                new(new StubLogger(), settings, new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeChatOptions(("hello", "world"));
+            MEAI.FunctionCallContent fc = MakeToolCall("hello");
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded);
+            Assert.AreEqual(1, countingMarshaler.InvokeCount);
         }
 
         // ==================== ExecuteBatchAsync ====================

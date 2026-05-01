@@ -1,7 +1,8 @@
 {
-  "name": "PlayModeTest",
+  "name": "CoreAI.Tests.PlayMode.LlmInfra",
   "rootNamespace": "",
   "references": [
+    "CoreAI.Tests.PlayMode.Shared",
     "CoreAI.Core",
     "CoreAI.Source",
     "MessagePipe",

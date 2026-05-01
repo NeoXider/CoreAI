@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace CoreAI.Tests.PlayMode
 {
-    internal static class PlayModeTestAwait
+    public static class PlayModeTestAwait
     {
         public static IEnumerator WaitTask(Task task, float timeoutSeconds, string operationName)
         {

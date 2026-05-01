@@ -83,6 +83,8 @@ Ensure the **active** scene has a GameObject with **`CoreAILifetimeScope`**. Aft
 - `AskAsync` — **chat**: prompt + role history, text answer.  
 - `OrchestrateAsync` — **game task**: session snapshot, roles like Creator, publishing a **JSON command** to the game bus. For “talk to NPC” you usually use `Ask` / `Stream`.
 
+**Never on the Unity main thread:** `CoreAi.AskAsync(...).Result`, `.GetAwaiter().GetResult()`, or `.Wait()` — the LLM stack uses **player loop** / **`ToolInvocationMarshaler`** / **HTTP** paths that can deadlock if the managed main thread blocks while a thread-pool continuation waits for **main** (**v1.5.14:** tool marshaling skips **`SwitchToMainThread`** in **Edit Mode !isPlaying** specifically to keep **Test Runner / tooling** safe — still avoid blocking **main** in gameplay). Use **`await`** (e.g. **`async void`** / **UniTask** on UI events).
+
 **Can I call outside `async void`?**  
 You can from `Start` with `StartCoroutine` + wrapper, but simpler — **`async void` on the Unity main thread** or **UniTask**. Do not use `Task.Run` — LLM calls must stay on the **main thread** (see [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)).
 

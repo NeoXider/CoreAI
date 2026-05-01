@@ -1,3 +1,4 @@
+using CoreAI;
 using CoreAI.Ai;
 using UnityEngine;
 
@@ -431,6 +432,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>LLM-assisted compaction длинной истории (иначе только детерминированная свёртка).</summary>
         public bool EnableLlmContextCompaction => enableLlmContextCompaction;
+
+        /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
+        public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
 
         // Отладка
         /// <summary>MEAI debug logging.</summary>

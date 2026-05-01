@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using MEAI = Microsoft.Extensions.AI;
@@ -216,7 +217,13 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.AIFunctionArguments args = fc.Arguments != null
                     ? new MEAI.AIFunctionArguments(fc.Arguments)
                     : null;
-                object result = await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false);
+                ILlmAsyncMarshaler marshaler = _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+                object result = await marshaler
+                    .InvokeAsync<object>(
+                        async () =>
+                            await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false),
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 sw.Stop();
                 string resultText = result?.ToString() ?? "";
                 bool succeeded = IsToolResultSuccess(resultText);

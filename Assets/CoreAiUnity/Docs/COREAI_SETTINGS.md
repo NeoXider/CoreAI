@@ -397,6 +397,14 @@ Priority:
 1. CoreAISettingsAsset (ApiBaseUrl, ApiKey, ModelName)
 2. Env vars: `COREAI_OPENAI_TEST_BASE`, `COREAI_OPENAI_TEST_MODEL`, `COREAI_OPENAI_TEST_API_KEY`
 
+### MEAI tools vs Unity threading (automatic)
+
+Starting **v1.5.12**, **`CoreAISettingsAsset`** binds **`ToolInvocationMarshaler`** to **`UnityMainThreadLlmAsyncMarshaler`**. Portable **`ToolExecutionPolicy`** invokes every MEAI **`AIFunction.InvokeAsync`** via **`ICoreAISettings.ToolInvocationMarshaler`** — there is **no Inspector field** for this. Non-Unity hosts keep the portable default (**`PassThroughLlmAsyncMarshaler`**).
+
+Since **v1.5.14**, in **`UNITY_EDITOR`** while **`Application.isPlaying` is false**, **`UnityMainThreadLlmAsyncMarshaler`** skips **`SwitchToMainThread`** and executes the MEAI tool body on the invoking continuation (typically the thread pool). This avoids **deadlocks** when Edit Mode tests (or tooling) block Unity’s managed main thread on **`Task.Wait()`** / **`Task.Result`** while MEAI **`ConfigureAwait(false)`** chains continue off-thread — the player loop is not pumped while blocked. Built players and Unity **Play Mode** still marshal tool bodies to **`PlayerLoopTiming.Update`**. Automated coverage: **`UnityMainThreadLlmAsyncMarshalerEditModeTests`**.
+
+**HTTP client:** **`MeaiOpenAiChatClient`** executes **`UniTask.SwitchToMainThread`** before allocating **`UnityWebRequest`**, so the next completion request after tool rounds stays valid when continuations resumed on the thread pool.
+
 ---
 
 ### Test hangs on `stopping server`
