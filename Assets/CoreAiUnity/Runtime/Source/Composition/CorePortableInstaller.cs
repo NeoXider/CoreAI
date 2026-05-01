@@ -16,6 +16,9 @@ namespace CoreAI.Composition
     /// deterministic context compaction persists across turns for each role until the host overrides it or clears summaries.
     /// Pass <paramref name="suppressDefaultConversationSummaryStore"/> when the host registers its own implementation first
     /// (Unity <see cref="CoreAILifetimeScope"/> uses <see cref="FileConversationSummaryStore"/> this way).
+    /// Pass <paramref name="suppressDefaultAgentMemoryStore"/> when the host registers <see cref="IAgentMemoryStore"/>
+    /// (e.g. <see cref="CoreAI.Infrastructure.AiMemory.FileAgentMemoryStore"/> or <see cref="NullAgentMemoryStore"/> on WebGL)
+    /// after <c>RegisterCorePortable</c> — otherwise VContainer sees two singletons for the same contract.
     /// </summary>
     public static class CorePortableInstaller
     {
@@ -24,9 +27,13 @@ namespace CoreAI.Composition
         /// <see cref="InMemoryConversationSummaryStore"/> — накопление свёрток истории между ходами;
         /// для Unity с файловым store вызовите с <paramref name="suppressDefaultConversationSummaryStore"/><c>true</c>
         /// после регистрации своего <see cref="IConversationSummaryStore"/>.
+        /// Если хост регистрирует свой <see cref="IAgentMemoryStore"/> (как <see cref="CoreAILifetimeScope"/>),
+        /// передайте <paramref name="suppressDefaultAgentMemoryStore"/><c>true</c>, иначе VContainer увидит два singleton
+        /// на один контракт.
         /// </summary>
         public static void RegisterCorePortable(this IContainerBuilder builder,
-            bool suppressDefaultConversationSummaryStore = false)
+            bool suppressDefaultConversationSummaryStore = false,
+            bool suppressDefaultAgentMemoryStore = false)
         {
             if (!suppressDefaultConversationSummaryStore)
             {
@@ -62,7 +69,11 @@ namespace CoreAI.Composition
             builder.Register<AllowAllLlmEntitlementPolicy>(Lifetime.Singleton).As<ILlmEntitlementPolicy>();
             builder.Register<InMemoryLlmToolCallHistory>(Lifetime.Singleton).As<ILlmToolCallHistory>();
             builder.Register<NullAgentTurnTraceSink>(Lifetime.Singleton).As<IAgentTurnTraceSink>();
-            builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
+            if (!suppressDefaultAgentMemoryStore)
+            {
+                builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
+            }
+
             builder.Register<CompositeRoleStructuredResponsePolicy>(Lifetime.Singleton);
             builder.Register<IRoleStructuredResponsePolicy>(c => c.Resolve<CompositeRoleStructuredResponsePolicy>(),
                 Lifetime.Singleton);

@@ -164,9 +164,13 @@ namespace CoreAI.Composition
                         null),
                 Lifetime.Singleton);
 
-            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: true);
+            builder.RegisterCorePortable(
+                suppressDefaultConversationSummaryStore: true,
+                suppressDefaultAgentMemoryStore: true);
 #else
-            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: false);
+            builder.RegisterCorePortable(
+                suppressDefaultConversationSummaryStore: false,
+                suppressDefaultAgentMemoryStore: true);
 #endif
         }
     }

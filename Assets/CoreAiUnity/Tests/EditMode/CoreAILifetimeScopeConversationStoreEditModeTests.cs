@@ -64,6 +64,8 @@ namespace CoreAI.Tests.EditMode
             {
                 IConversationSummaryStore store = container.Resolve<IConversationSummaryStore>();
                 Assert.IsInstanceOf<FileConversationSummaryStore>(store);
+                IAgentMemoryStore memory = container.Resolve<IAgentMemoryStore>();
+                Assert.IsInstanceOf<FileAgentMemoryStore>(memory);
             }
             finally
             {

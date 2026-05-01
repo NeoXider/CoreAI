@@ -1,5 +1,11 @@
 # Changelog
 
+## [v1.5.22] — 2026-05-01
+
+### Lockstep packaging (`com.nexoider.coreaiunity`)
+
+- **Semver:** lockstep **`1.5.22`** with **`com.nexoider.coreaiunity`**. No portable **CoreAI.Core** API or behavior change; **v1.5.22** composition fix (**`RegisterCorePortable` / `IAgentMemoryStore`**) ships in the Unity package only.
+
 ## [v1.5.21] — 2026-05-01
 
 ### Portable Core — JSON + API hygiene

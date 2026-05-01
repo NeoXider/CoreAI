@@ -2,6 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.22] - 2026-05-01
+
+### VContainer — single `IAgentMemoryStore` registration
+
+- **`RegisterCorePortable`:** optional **`suppressDefaultAgentMemoryStore`** (default **`false`**). When **`true`**, the portable layer does not register **`NullAgentMemoryStore`** as **`IAgentMemoryStore`**.
+- **`RegisterConversationSummaryForCoreAiLifetimeScope`:** passes **`suppressDefaultAgentMemoryStore: true`** for both non-WebGL and WebGL branches so **`CoreAILifetimeScope`** remains the only place that registers **`FileAgentMemoryStore`** or **`NullAgentMemoryStore`**. Fixes **`VContainerException: Conflict implementation type`** when building **`CoreAILifetimeScope`** (regression after **v1.5.21** WebGL memory registration).
+- **Edit Mode:** **`CorePortableAgentMemoryRegistrationEditModeTests`** — suppress path yields a single **`IReadOnlyList<IAgentMemoryStore>`** entry; without suppress, portable Null + host File yields **two** list entries (VContainer does not throw on **Build** for distinct implementation types; duplicate **same** type e.g. WebGL double Null still throws). **`CoreAILifetimeScopeConversationStoreEditModeTests`** also asserts **`IAgentMemoryStore`** type.
+- **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`COREAI_SETTINGS.md`**.
+- **Dependency:** **`com.nexoider.coreai 1.5.22`**.
+
+#### Package **`1.5.22`**.
+
 ## [1.5.21] - 2026-05-01
 
 ### WebGL, composition, diagnostics
