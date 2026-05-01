@@ -138,7 +138,7 @@ namespace CoreAI.Infrastructure.Llm
                         try { webReq.Abort(); } catch { /* ignore */ }
                         cancellationToken.ThrowIfCancellationRequested();
                     }
-                    await Task.Yield();
+                    await Task.Delay(0, cancellationToken).ConfigureAwait(false);
                 }
 
                 if (webReq.result == UnityWebRequest.Result.Success)
@@ -160,7 +160,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _logger.LogInfo(GameLogFeature.Llm,
                         $"MeaiOpenAiChatClient: transient local LLM / reload response (attempt {attempt}/{transientLocalLlmReloadMaxAttempts}); retrying after backoff...");
-                    await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
+                    await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -421,7 +421,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        await Task.Yield();
+                        await Task.Delay(0, cancellationToken).ConfigureAwait(false);
                     }
 
                     // Process any remaining data after request completed
@@ -465,7 +465,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             _logger.LogInfo(GameLogFeature.Llm,
                                 "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...");
-                            await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken);
+                            await Task.Delay(Math.Min(6000, 900 * attempt), cancellationToken).ConfigureAwait(false);
                             continue;
                         }
 

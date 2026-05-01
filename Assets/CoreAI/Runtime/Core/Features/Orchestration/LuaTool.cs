@@ -66,7 +66,7 @@ namespace CoreAI.Ai
 
             try
             {
-                LuaResult result = await _executor.ExecuteAsync(code, cancellationToken);
+                LuaResult result = await _executor.ExecuteAsync(code, cancellationToken).ConfigureAwait(false);
 
                 if (_settings.LogToolCallResults)
                 {

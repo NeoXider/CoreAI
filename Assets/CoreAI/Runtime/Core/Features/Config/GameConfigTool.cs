@@ -78,10 +78,10 @@ namespace CoreAI.Config
                 switch (action)
                 {
                     case "read":
-                        return await ExecuteReadAsync(cancellationToken);
+                        return await ExecuteReadAsync(cancellationToken).ConfigureAwait(false);
 
                     case "update":
-                        return await ExecuteUpdateAsync(content, cancellationToken);
+                        return await ExecuteUpdateAsync(content, cancellationToken).ConfigureAwait(false);
 
                     default:
                         return SerializeResult(new GameConfigResult

@@ -192,9 +192,11 @@ namespace CoreAI.Ai
                     Stopwatch sw = Stopwatch.StartNew();
                     try
                     {
-                        result = await _llm.CompleteAsync(
-                            BuildCompletionRequest(bundle, task, user, maxOutputTokens),
-                            cancellationToken);
+                        result = await _llm
+                            .CompleteAsync(
+                                BuildCompletionRequest(bundle, task, user, maxOutputTokens),
+                                cancellationToken)
+                            .ConfigureAwait(false);
                     }
                     finally
                     {

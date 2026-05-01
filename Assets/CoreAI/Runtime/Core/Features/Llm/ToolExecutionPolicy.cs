@@ -216,7 +216,7 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.AIFunctionArguments args = fc.Arguments != null
                     ? new MEAI.AIFunctionArguments(fc.Arguments)
                     : null;
-                object result = await aiFunc.InvokeAsync(args, cancellationToken);
+                object result = await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false);
                 sw.Stop();
                 string resultText = result?.ToString() ?? "";
                 bool succeeded = IsToolResultSuccess(resultText);
@@ -368,7 +368,7 @@ namespace CoreAI.Infrastructure.Llm
 
             foreach (MEAI.FunctionCallContent fc in toolCalls)
             {
-                ToolCallResult r = await ExecuteSingleAsync(fc, chatOptions, cancellationToken);
+                ToolCallResult r = await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
                 results.Add(r.Result);
                 if (!r.Succeeded) anyFailed = true;
             }

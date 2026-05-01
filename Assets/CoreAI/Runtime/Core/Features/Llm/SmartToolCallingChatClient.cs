@@ -72,7 +72,9 @@ namespace CoreAI.Infrastructure.Llm
                 while (true)
                 {
                     iteration++;
-                    await Task.Yield(); // Force async boundary to ensure previous states are fully flushed
+                    // WebGL/Unity: avoid Task.Yield() per iteration — it posts to SynchronizationContext and
+                    // can stall continuation chains on the single-threaded player loop. Inner awaits use
+                    // ConfigureAwait(false) so continuations do not depend on capturing the sync context.
 
                     if (_settings.LogMeaiToolCallingSteps)
                     {
@@ -80,7 +82,9 @@ namespace CoreAI.Infrastructure.Llm
                             $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}", LogTag.Llm);
                     }
 
-                    MEAI.ChatResponse response = await _innerClient.GetResponseAsync(messages, options, cancellationToken);
+                    MEAI.ChatResponse response = await _innerClient
+                        .GetResponseAsync(messages, options, cancellationToken)
+                        .ConfigureAwait(false);
 
                     List<MEAI.AIContent> allContents =
                         response.Messages?.SelectMany(m => m.Contents ?? Enumerable.Empty<MEAI.AIContent>()).ToList()
@@ -129,7 +133,8 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     ToolExecutionPolicy.BatchToolCallResult batch =
-                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken);
+                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken)
+                            .ConfigureAwait(false);
 
                     if (policy.IsMaxErrorsReached)
                     {

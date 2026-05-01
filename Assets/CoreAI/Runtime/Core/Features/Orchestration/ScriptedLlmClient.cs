@@ -50,7 +50,7 @@ namespace CoreAI.Ai
             if (!string.IsNullOrEmpty(reply))
             {
                 yield return new LlmStreamChunk { Text = reply, Model = "scripted" };
-                await Task.Yield();
+                await Task.Delay(0, cancellationToken).ConfigureAwait(false);
             }
 
             yield return new LlmStreamChunk { IsDone = true, Model = "scripted" };

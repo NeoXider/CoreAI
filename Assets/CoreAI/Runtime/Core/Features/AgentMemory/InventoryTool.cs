@@ -44,7 +44,7 @@ namespace CoreAI.Ai
 
             try
             {
-                List<InventoryItem> items = await _provider.GetInventoryAsync(cancellationToken);
+                List<InventoryItem> items = await _provider.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
 
                 if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
                 {

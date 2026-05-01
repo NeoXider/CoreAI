@@ -218,23 +218,22 @@ namespace CoreAI.Tests.EditMode
             Task<List<LlmStreamChunk>> highStream = CollectAsync(queued.RunStreamingAsync(
                 new AiTaskRequest { Hint = "high-stream", Priority = 10 }));
 
-            await Task.Delay(50);
-            Assert.AreEqual(1, inner.ExecutionLog.Count);
-            Assert.AreEqual("task:blocker", inner.ExecutionLog[0]);
+            await AssertEventually(
+                () => inner.ExecutionLog.Count == 1 && inner.ExecutionLog[0] == "task:blocker",
+                "Only the blocking task should run while MaxConcurrent slots are full.");
 
             inner.Gates[0].TrySetResult(null);
-            await Task.Delay(50);
 
-            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 2);
-            Assert.AreEqual("stream:high-stream", inner.ExecutionLog[1],
+            await AssertEventually(
+                () => inner.ExecutionLog.Count >= 2 && inner.ExecutionLog[1] == "stream:high-stream",
                 "A higher-priority stream should run before a lower-priority non-stream task.");
 
             inner.Gates[1].TrySetResult(null);
             await highStream;
-            await Task.Delay(50);
 
-            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 3);
-            Assert.AreEqual("task:low-task", inner.ExecutionLog[2]);
+            await AssertEventually(
+                () => inner.ExecutionLog.Count >= 3 && inner.ExecutionLog[2] == "task:low-task",
+                "Lower-priority task should run after the high-priority stream.");
 
             inner.Gates[2].TrySetResult(null);
             await Task.WhenAll(blocker, lowTask);
@@ -260,10 +259,10 @@ namespace CoreAI.Tests.EditMode
             AssertHasCancelledTerminal(oldStream.Result);
 
             inner.Gates[0].TrySetResult(null);
-            await Task.Delay(50);
 
-            Assert.GreaterOrEqual(inner.ExecutionLog.Count, 2);
-            Assert.AreEqual("stream:latest-stream", inner.ExecutionLog[1]);
+            await AssertEventually(
+                () => inner.ExecutionLog.Count >= 2 && inner.ExecutionLog[1] == "stream:latest-stream",
+                "After blocker, the latest stream in the same CancellationScope should run.");
 
             inner.Gates[1].TrySetResult(null);
             await latestStream;
@@ -280,7 +279,10 @@ namespace CoreAI.Tests.EditMode
             Task<List<LlmStreamChunk>> pendingStream = CollectAsync(queued.RunStreamingAsync(
                 new AiTaskRequest { Hint = "pending-stream", CancellationScope = "npc" }));
 
-            await Task.Delay(50);
+            await AssertEventually(
+                () => inner.ExecutionLog.Count == 1,
+                "Blocker must be running before we cancel the pending stream.");
+
             queued.CancelTasks("npc");
             await AssertEventually(
                 () => pendingStream.IsCompleted,

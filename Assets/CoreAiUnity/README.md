@@ -51,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current release line (this package): **`1.5.6`** — extends **1.5.x** WebGL/async hardening: `CoreAiChatPanel` marshals UI cleanup to the **main thread** in **`RunAgentTurnAsync`** `finally` (streaming path) and in **`SendNonStreamingAsync`** `finally`, and treats empty **formatted** replies like “no response”. **1.5.5** adds **PlayMode** `CoreAiChatPanelNonStreamingPlayModeTests`. Depends on **`com.nexoider.coreai` `1.5.5`**. See [CHANGELOG.md](CHANGELOG.md). Bump **`version`** in [`package.json`](package.json) when you ship.
+Current release line: **`1.5.9`** for **`com.nexoider.coreaiunity`** and **`com.nexoider.coreai`** (same semver in monorepo) — WebGL-friendly async on HTTP poll + MEAI completion chain, plus earlier **1.5.x** `CoreAiChatPanel` main-thread marshaling. See [CHANGELOG.md](CHANGELOG.md). Bump **`version`** in [`package.json`](package.json) when you ship.
 
 ---
 

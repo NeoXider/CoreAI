@@ -1,5 +1,23 @@
 # Changelog
 
+## [v1.5.9] — 2026-04-30
+
+### Release alignment
+
+- **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** use the **same semver (1.5.9)** in this monorepo drop so UPM consumers can pin one version mentally.
+
+### WebGL / IL2CPP — LLM + orchestration continuation hygiene
+
+Single-threaded Unity player loop: avoid unnecessary **SyncContext-captured** continuations in the hot path.
+
+- **`SmartToolCallingChatClient.GetResponseAsync`** — remove per-iteration **`Task.Yield()`**; add **`ConfigureAwait(false)`** on **`_innerClient.GetResponseAsync`** and **`policy.ExecuteBatchAsync`**.
+- **`AiOrchestrator.RunTaskAsync`** — **`ConfigureAwait(false)`** on primary **`_llm.CompleteAsync`** (structured retry already had it).
+- **`QueuedAiOrchestrator.RunOneAsync`** — **`ConfigureAwait(false)`** on **`_inner.RunTaskAsync`**.
+- **`LuaTool.ExecuteAsync`**, **`ScriptedLlmClient` streaming** — **`ConfigureAwait(false)`** / **`Task.Delay(0)`** instead of bare **`Task.Yield()`**.
+- **`GameConfigTool`**, **`InventoryTool`** — **`ConfigureAwait`** on inner **`await`**s for consistency.
+
+#### Package **`1.5.9`**.
+
 ## [v1.5.6] — 2026-04-30
 
 ### LLM — MEAI assistant text helper

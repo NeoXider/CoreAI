@@ -2,6 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.9] - 2026-04-30
+
+### WebGL / single-threaded async — HTTP poll + MEAI completion chain
+
+Continuations that always capture `UnitySynchronizationContext` can stall after **`SmartToolCallingChatClient`** returns a text response (logs show **Text response, stopping** but no **GetResponseAsync completed** in **`MeaiLlmClient`**).
+
+- **`MeaiOpenAiChatClient`** — replace **`Task.Yield()`** in **`UnityWebRequest`** poll loops with **`await Task.Delay(0, ct).ConfigureAwait(false)`**; retry backoff **`Task.Delay(...).ConfigureAwait(false)`** (non-stream + stream paths).
+- **`MeaiLlmClient.CompleteAsync`** — **`ConfigureAwait(false)`** on **`SmartToolCallingChatClient.GetResponseAsync`**.
+- **Dependency:** **`com.nexoider.coreai 1.5.9`** (same semver as this package; portable changelog: **`SmartToolCallingChatClient`**, **`AiOrchestrator`**, **`QueuedAiOrchestrator`**, tools).
+
+#### Package **`1.5.9`**.
+
 ## [1.5.8] - 2026-04-30
 
 ### LLM: visible assistant text for WebGL / HTTP completions

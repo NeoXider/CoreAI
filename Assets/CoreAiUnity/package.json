@@ -1,10 +1,10 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.8: non-streaming completion — robust assistant text (multimodal content[] + reasoning_content fallback); MeaiLlmClient falls back to ConcatenateAssistantTextContents when ChatResponse.Text is empty; depends on com.nexoider.coreai 1.5.6+. v1.5.7: WebGL main-thread marshaling for chat.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.9: WebGL-friendly async (MeaiOpenAiChatClient poll + MeaiLlmClient); **same package version as com.nexoider.coreai 1.5.9**. v1.5.8: non-streaming completion text fallback.",
   "dependencies": {
-    "com.nexoider.coreai": "1.5.6"
+    "com.nexoider.coreai": "1.5.9"
   }
 }

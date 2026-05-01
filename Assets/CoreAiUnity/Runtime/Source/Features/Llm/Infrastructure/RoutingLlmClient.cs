@@ -66,7 +66,7 @@ namespace CoreAI.Infrastructure.Llm
             ILlmClient inner = Prepare(request, false);
             try
             {
-                LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken);
+                LlmCompletionResult result = await inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
                 PublishCompleted(request, false, result != null && result.Ok, result?.Error ?? "",
                     result?.ErrorCode ?? LlmErrorCode.None);
                 PublishUsage(request, false, result);

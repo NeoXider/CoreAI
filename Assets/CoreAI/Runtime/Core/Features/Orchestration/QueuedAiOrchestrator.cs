@@ -161,7 +161,7 @@ namespace CoreAI.Ai
             {
                 CancellationToken token = w.ScopeCancellation?.Token ?? w.OuterCt;
                 token.ThrowIfCancellationRequested();
-                string result = await _inner.RunTaskAsync(w.Task, token);
+                string result = await _inner.RunTaskAsync(w.Task, token).ConfigureAwait(false);
                 w.Tcs.TrySetResult(result);
             }
             catch (OperationCanceledException)
