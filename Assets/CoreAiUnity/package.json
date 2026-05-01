@@ -4,6 +4,10 @@
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.9: WebGL-friendly async (MeaiOpenAiChatClient poll + MeaiLlmClient); **same package version as com.nexoider.coreai 1.5.9**. v1.5.8: non-streaming completion text fallback.",
+  "author": {
+    "name": "NeoXider",
+    "url": "https://github.com/NeoXider/CoreAI"
+  },
   "dependencies": {
     "com.nexoider.coreai": "1.5.9"
   }
