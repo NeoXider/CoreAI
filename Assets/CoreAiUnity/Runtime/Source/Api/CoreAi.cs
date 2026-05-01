@@ -320,8 +320,9 @@ namespace CoreAI
                             if (clearChatHistory) memStore.ClearChatHistory(roleId);
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        UnityEngine.Debug.LogWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
                     }
                 }
             }
@@ -382,16 +383,18 @@ namespace CoreAI
             {
                 orchestrator = (IAiOrchestrationService)_scope.Container.Resolve(typeof(IAiOrchestrationService));
             }
-            catch
+            catch (Exception ex)
             {
+                UnityEngine.Debug.LogWarning($"[CoreAi] Resolve IAiOrchestrationService: {ex.Message}");
             }
 
             try
             {
                 settings = (ICoreAISettings)_scope.Container.Resolve(typeof(ICoreAISettings));
             }
-            catch
+            catch (Exception ex)
             {
+                UnityEngine.Debug.LogWarning($"[CoreAi] Resolve ICoreAISettings: {ex.Message}");
             }
 
             if (_chatService == null)

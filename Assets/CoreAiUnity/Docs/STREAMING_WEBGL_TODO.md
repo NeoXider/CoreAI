@@ -105,13 +105,7 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 
 ### 3.4. Solution C — UI-level fallback (simplest)
 
-In `CoreAiChatPanel`, add `protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiFallback)`
-and override on WebGL to return `false`. Then `SendToAI` takes the non-streaming path
-(`SendNonStreamingAsync`), which is reliable: `await CompleteAsync` → `AddMessage` →
-`HideTypingIndicator`.
-
-RedoSchool currently does this at app level via reflection
-(`ChatPanelController.ForceNonStreamingOnWebGl`) — worth lifting into the library.
+**Implemented in CoreAI v1.5.21:** `CoreAiChatService.IsStreamingEnabled` returns **`false`** when **`UNITY_WEBGL && !UNITY_EDITOR`** (non-streaming for chat / smart send). `CoreAiChatPanel` exposes **`ShouldUseStreamingForRole`** (default **`false`** on WebGL player). Incremental SSE over UnityWebRequest on WebGL remains unsupported; this avoids the broken streaming UI path.
 
 ---
 

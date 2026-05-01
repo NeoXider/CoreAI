@@ -1,6 +1,7 @@
 using System;
 using CoreAI.Messaging;
 using MessagePipe;
+using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -24,8 +25,9 @@ namespace CoreAI.Infrastructure.Llm
                 GlobalMessagePipe.GetPublisher<LlmToolCallStarted>()
                     .Publish(new LlmToolCallStarted(info));
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishStarted failed: {ex.Message}");
             }
         }
 
@@ -41,8 +43,9 @@ namespace CoreAI.Infrastructure.Llm
                 GlobalMessagePipe.GetPublisher<LlmToolCallCompleted>()
                     .Publish(new LlmToolCallCompleted(info, resultJson, durationMs));
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishCompleted failed: {ex.Message}");
             }
         }
 
@@ -58,8 +61,9 @@ namespace CoreAI.Infrastructure.Llm
                 GlobalMessagePipe.GetPublisher<LlmToolCallFailed>()
                     .Publish(new LlmToolCallFailed(info, error, durationMs));
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishFailed failed: {ex.Message}");
             }
         }
     }

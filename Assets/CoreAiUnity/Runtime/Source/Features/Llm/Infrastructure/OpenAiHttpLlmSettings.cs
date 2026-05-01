@@ -18,7 +18,7 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip(
             "Base URL without trailing slash (e.g., https://api.openai.com/v1 or http://localhost:1234/v1 for LM Studio).")]
         [SerializeField]
-        private string apiBaseUrl = "https://api.openai.com/v1";
+        private string apiBaseUrl = OpenAiHttpConstants.DefaultApiBaseUrl;
 
         [SerializeField] private string apiKey = "";
 
@@ -54,7 +54,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Base API URL without a trailing slash.</summary>
         public string ApiBaseUrl =>
-            string.IsNullOrWhiteSpace(apiBaseUrl) ? "https://api.openai.com/v1" : apiBaseUrl.TrimEnd('/');
+            string.IsNullOrWhiteSpace(apiBaseUrl) ? OpenAiHttpConstants.DefaultApiBaseUrl : apiBaseUrl.TrimEnd('/');
 
         /// <summary>Bearer token for provider-owned or backend-owned authorization.</summary>
         public string ApiKey => apiKey ?? "";
@@ -106,7 +106,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             this.useOpenAiCompatibleHttp = useOpenAiCompatibleHttp;
             this.executionMode = NormalizeHttpMode(executionMode);
-            this.apiBaseUrl = string.IsNullOrWhiteSpace(apiBaseUrl) ? "https://api.openai.com/v1" : apiBaseUrl;
+            this.apiBaseUrl = string.IsNullOrWhiteSpace(apiBaseUrl) ? OpenAiHttpConstants.DefaultApiBaseUrl : apiBaseUrl;
             this.apiKey = apiKey ?? "";
             this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = temperature;

@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.5.19",
+  "version": "1.5.21",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.19: compaction XML — main system prompt never sent to auxiliary summarizer; v1.5.18: offline/stub chat UX.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.21: Newtonsoft-only JSON in portable Core (removed System.Text.Json); LlmStructuredPayloadSanitizer rename; Log.Instance volatile; AgentConfigExtensions fire-and-forget uses Task. v1.5.20: WebGL summary composition; v1.5.19: compaction XML.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

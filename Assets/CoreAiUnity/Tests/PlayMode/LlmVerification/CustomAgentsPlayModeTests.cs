@@ -355,14 +355,19 @@ namespace CoreAI.Tests.PlayMode
 
             public Microsoft.Extensions.AI.AIFunction CreateAIFunction()
             {
+                Func<CancellationToken, Task<object>> handler = async ct =>
+                {
+                    await Task.Delay(10, ct);
+                    return new Dictionary<string, int> { ["waves"] = 5, ["kills"] = 42 };
+                };
+
                 return Microsoft.Extensions.AI.AIFunctionFactory.Create(
-                    (Func<CancellationToken, Task<object>>)(async ct =>
+                    handler,
+                    new Microsoft.Extensions.AI.AIFunctionFactoryOptions
                     {
-                        await Task.Delay(10, ct);
-                        return new { waves = 5, kills = 42 };
-                    }),
-                    "get_session_stats",
-                    "Get session statistics.");
+                        Name = "get_session_stats",
+                        Description = "Get session statistics."
+                    });
             }
         }
     }

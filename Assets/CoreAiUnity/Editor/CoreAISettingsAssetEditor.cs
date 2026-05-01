@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEngine;
@@ -862,7 +863,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 req.uploadHandler = new UploadHandlerRaw(bodyRaw);
                 req.downloadHandler = new DownloadHandlerBuffer();
                 req.SetRequestHeader("Content-Type", "application/json");
-                req.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName, OpenAiHttpConstants.HttpRefererUnityUrl);
                 req.SetRequestHeader("X-Title", "CoreAI");
 
                 if (!string.IsNullOrEmpty(settings.ApiKey))
@@ -1182,7 +1183,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         req.uploadHandler = new UploadHandlerRaw(bodyRaw);
                         req.downloadHandler = new DownloadHandlerBuffer();
                         req.SetRequestHeader("Content-Type", "application/json");
-                        req.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                        req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName, OpenAiHttpConstants.HttpRefererUnityUrl);
                         req.SetRequestHeader("X-Title", "CoreAI");
 
                         if (!string.IsNullOrEmpty(settings.ApiKey))

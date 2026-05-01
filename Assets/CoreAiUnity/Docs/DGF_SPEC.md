@@ -66,7 +66,7 @@
 
 ### 3.2 Assembly `CoreAI.Core` (`Assets/CoreAI/Runtime/Core/CoreAI.Core.asmdef`)
 
-- `noEngineReferences: true`; references: **VContainer**, **MoonSharp.Interpreter** (UPM MoonSharp asmdef name).
+- `noEngineReferences: true`; assembly references: **MoonSharp.Interpreter** only (UPM MoonSharp asmdef name). **VContainer** is **not** referenced here — composition stays in **`CoreAI.Source`**.
 - Portable logic: AI contracts, MVP orchestrator, Lua sandbox, session snapshot DTO.
 
 ### 3.3 Assembly `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)

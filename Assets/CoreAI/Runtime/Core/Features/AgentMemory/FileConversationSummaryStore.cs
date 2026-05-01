@@ -1,7 +1,7 @@
 using System;
 using System.IO;
-using System.Text.Json;
 using CoreAI.Logging;
+using Newtonsoft.Json;
 
 namespace CoreAI.Ai
 {
@@ -10,9 +10,9 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class FileConversationSummaryStore : IConversationSummaryStore
     {
-        private static readonly JsonSerializerOptions JsonOptions = new()
+        private static readonly JsonSerializerSettings JsonSettings = new()
         {
-            WriteIndented = true
+            Formatting = Formatting.Indented
         };
 
         private readonly string _dir;
@@ -54,7 +54,7 @@ namespace CoreAI.Ai
                 }
 
                 string json = File.ReadAllText(path);
-                PersistedDto dto = JsonSerializer.Deserialize<PersistedDto>(json, JsonOptions);
+                PersistedDto dto = JsonConvert.DeserializeObject<PersistedDto>(json, JsonSettings);
                 return dto?.Summary?.Trim() ?? "";
             }
             catch (Exception ex)
@@ -76,7 +76,7 @@ namespace CoreAI.Ai
             {
                 EnsureDir();
                 PersistedDto dto = new() { Summary = summary ?? "" };
-                string json = JsonSerializer.Serialize(dto, JsonOptions);
+                string json = JsonConvert.SerializeObject(dto, JsonSettings);
                 File.WriteAllText(GetPath(roleId), json);
             }
             catch (Exception ex)

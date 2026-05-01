@@ -166,7 +166,8 @@ namespace CoreAI.Tests.EditMode
                                        "{\"name\": \"memory\", \"arguments\": {\"action\": \"read\"}}";
             
             var dummyAction = new Action(() => {});
-            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction, "memory");
+            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "memory" });
 
             bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
                 textWithReasoning,
@@ -192,7 +193,8 @@ namespace CoreAI.Tests.EditMode
             string text = "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
             
             var dummyAction = new Action(() => {});
-            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction, "memory");
+            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "memory" });
 
             bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
                 text,

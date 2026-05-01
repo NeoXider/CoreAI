@@ -54,10 +54,14 @@ namespace CoreAI.Chat
                 IAgentMemoryStore memStore = null;
                 IGameLogger logger = null;
 
-                try { policy = (AgentMemoryPolicy)scope.Container.Resolve(typeof(AgentMemoryPolicy)); } catch { }
-                try { settings = (ICoreAISettings)scope.Container.Resolve(typeof(ICoreAISettings)); } catch { }
-                try { memStore = (IAgentMemoryStore)scope.Container.Resolve(typeof(IAgentMemoryStore)); } catch { }
-                try { logger = (IGameLogger)scope.Container.Resolve(typeof(IGameLogger)); } catch { }
+                try { policy = (AgentMemoryPolicy)scope.Container.Resolve(typeof(AgentMemoryPolicy)); }
+                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve AgentMemoryPolicy: {ex.Message}"); }
+                try { settings = (ICoreAISettings)scope.Container.Resolve(typeof(ICoreAISettings)); }
+                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve ICoreAISettings: {ex.Message}"); }
+                try { memStore = (IAgentMemoryStore)scope.Container.Resolve(typeof(IAgentMemoryStore)); }
+                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve IAgentMemoryStore: {ex.Message}"); }
+                try { logger = (IGameLogger)scope.Container.Resolve(typeof(IGameLogger)); }
+                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve IGameLogger: {ex.Message}"); }
 
                 return new CoreAiChatService(orchestrator, policy, settings, memStore, logger);
             }
@@ -238,6 +242,9 @@ namespace CoreAI.Chat
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool uiFallback = true)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return false;
+#endif
             if (!uiFallback)
             {
                 return false;
@@ -268,6 +275,9 @@ namespace CoreAI.Chat
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool? uiOverride = null)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return false;
+#endif
             if (uiOverride == false)
             {
                 return false;

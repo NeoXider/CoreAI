@@ -984,7 +984,8 @@ namespace CoreAI.Chat
             {
                 AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
                 bool uiStreaming = config == null || config.EnableStreaming;
-                bool useStreaming = _chatService.IsStreamingEnabled(roleId, uiStreaming);
+                bool useStreaming = ShouldUseStreamingForRole(roleId, uiStreaming) &&
+                                    _chatService.IsStreamingEnabled(roleId, uiStreaming);
 
                 if (useStreaming)
                 {
@@ -1075,6 +1076,20 @@ namespace CoreAI.Chat
                 Hint = userText,
                 SourceTag = "Chat"
             };
+        }
+
+        /// <summary>
+        /// Override in a subclass to change streaming policy per role. Default disables streaming in WebGL
+        /// player builds (see <c>STREAMING_WEBGL_TODO.md</c>); Editor WebGL targets keep configurable streaming.
+        /// </summary>
+        protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiConfigWantsStreaming)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            _ = roleId;
+            return false;
+#else
+            return uiConfigWantsStreaming;
+#endif
         }
 
         private async Task<string?> SendStreamingAsync(AiTaskRequest request, CancellationToken ct)

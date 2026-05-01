@@ -58,7 +58,7 @@ namespace CoreAI.Logging
     /// </summary>
     public static class Log
     {
-        private static ILog _instance = NullLog.Instance;
+        private static volatile ILog _instance = NullLog.Instance;
 
         /// <summary>Текущий логгер. По умолчанию — no-op (NullLog).</summary>
         public static ILog Instance

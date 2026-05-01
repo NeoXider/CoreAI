@@ -82,6 +82,10 @@ switch (tool)
 }
 ```
 
+### 3.1 IL2CPP / WebGL — `CreateAIFunction` visibility
+
+`MeaiLlmClient` resolves `CreateAIFunction()` via reflection on each `ILlmTool` instance. IL2CPP can strip methods from **game** assemblies that are not preserved. For custom tools shipped outside **`CoreAI.Core`** / **`CoreAI.Source`**, mark `CreateAIFunction` with **`[UnityEngine.Scripting.Preserve]`** or add a project **`link.xml`** entry for your tool types. The CoreAI package **`link.xml`** preserves CoreAI assemblies only.
+
 ### 4. MEAI pipeline
 
 ```

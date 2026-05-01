@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.19",
+  "version": "1.5.21",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.19: LLM compaction docs + Edit/Play tests (main system excluded from summarizer). v1.5.18: OfflineLlmClient.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.21: WebGL no file agent memory; forced non-streaming on WebGL player; STJ removed; OpenAiHttpConstants; MEAI IL2CPP doc. v1.5.20: in-memory conversation summaries on WebGL. v1.5.19: compaction tests.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.19"
+    "com.nexoider.coreai": "1.5.21"
   }
 }

@@ -15,7 +15,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
             if (string.IsNullOrWhiteSpace(raw))
                 return false;
 
-            if (!LlmResponseSanitizer.TryPrepareJsonObject(raw, out var json) ||
+            if (!LlmStructuredPayloadSanitizer.TryPrepareJsonObject(raw, out var json) ||
                 string.IsNullOrWhiteSpace(json))
                 return false;
 

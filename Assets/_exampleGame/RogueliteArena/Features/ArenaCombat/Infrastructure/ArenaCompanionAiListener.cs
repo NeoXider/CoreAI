@@ -73,7 +73,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             stance = CompanionCombatStance.Balanced;
             flavor = null;
 
-            if (!LlmResponseSanitizer.TryPrepareJsonObject(raw ?? "", out var json))
+            if (!LlmStructuredPayloadSanitizer.TryPrepareJsonObject(raw ?? "", out var json))
                 json = null;
             if (!string.IsNullOrEmpty(json))
             {

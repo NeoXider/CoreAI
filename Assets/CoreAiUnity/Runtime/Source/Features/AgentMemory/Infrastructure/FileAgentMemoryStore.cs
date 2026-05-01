@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using CoreAI.Ai;
+using CoreAI.Infrastructure;
 using CoreAI.Logging;
+using Newtonsoft.Json;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.AiMemory
@@ -37,7 +38,8 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <summary>Каталог памяти: CoreAI/AgentMemory под persistentDataPath.</summary>
         public FileAgentMemoryStore(ILog log = null)
         {
-            _dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
+            _dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
+                CoreAiPersistentPaths.AgentMemory);
             _log = log;
         }
 
@@ -180,7 +182,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private readonly HashSet<string> _loadedRoles = new();
 
-        private static readonly JsonSerializerOptions TranscriptJson = new() { WriteIndented = true };
+        private static readonly JsonSerializerSettings TranscriptJson = new() { Formatting = Formatting.Indented };
 
         #region Chat History Methods
 
@@ -238,7 +240,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     try
                     {
                         List<ConversationEntry> loaded =
-                            JsonSerializer.Deserialize<List<ConversationEntry>>(p.transcriptEntriesJson, TranscriptJson);
+                            JsonConvert.DeserializeObject<List<ConversationEntry>>(p.transcriptEntriesJson, TranscriptJson);
                         if (loaded != null && loaded.Count > 0)
                         {
                             _transcripts[roleId].InsertRange(0, loaded);
@@ -304,7 +306,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 List<ConversationEntry> tlist = _transcripts.TryGetValue(roleId, out List<ConversationEntry> tl)
                     ? tl
                     : new List<ConversationEntry>();
-                p.transcriptEntriesJson = JsonSerializer.Serialize(tlist, TranscriptJson);
+                p.transcriptEntriesJson = JsonConvert.SerializeObject(tlist, TranscriptJson);
 
                 File.WriteAllText(path, JsonUtility.ToJson(p, true));
             }

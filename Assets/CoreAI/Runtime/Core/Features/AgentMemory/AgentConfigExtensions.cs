@@ -82,20 +82,28 @@ namespace CoreAI.Ai
         /// // С callback:
         /// merchant.Ask("Покажи мечи", (s) => Debug.Log("Ответ: " + s));
         /// </example>
-        public static async void Ask(
+        public static void Ask(
             this AgentConfig config,
             string message,
             Action<string> onDone = null,
             int priority = 0)
         {
+            _ = RunAskFireAndForgetAsync(config, message, onDone, priority);
+        }
+
+        private static async Task RunAskFireAndForgetAsync(
+            AgentConfig config,
+            string message,
+            Action<string> onDone,
+            int priority)
+        {
             try
             {
-                string result = await AskAsync(config, message, priority);
+                string result = await AskAsync(config, message, priority).ConfigureAwait(false);
                 onDone?.Invoke(result);
             }
             catch (Exception ex)
             {
-                // Fire-and-forget: чтобы ошибки (например, неинициализированный Оркестратор) не съедались молча:
                 Log.Instance.Error($"Ask() failed for agent '{config.RoleId}': {ex.Message}", LogTag.Llm);
             }
         }

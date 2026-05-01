@@ -9,6 +9,7 @@ using CoreAI.Infrastructure.Prompts;
 using CoreAI.Infrastructure.World;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Authority;
+using CoreAI.Infrastructure;
 using System.IO;
 using UnityEngine;
 using VContainer;
@@ -121,26 +122,52 @@ namespace CoreAI.Composition
                     new NetworkedAuthorityHost(c.Resolve<IAiNetworkPeer>(), aiNetworkExecutionPolicy),
                 Lifetime.Singleton);
 
-            builder.Register<IConversationSummaryStore>(_ =>
-                    new FileConversationSummaryStore(
-                        Path.Combine(Application.persistentDataPath, "CoreAI", "ConversationSummaries"),
-                        null),
-                Lifetime.Singleton);
-
-            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: true);
+            RegisterConversationSummaryForCoreAiLifetimeScope(builder);
 
             // Runtime overrides: файловые версии скриптов и агентной памяти
             builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
+#if !UNITY_WEBGL
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
                 .As<IAgentMemoryStore>()
                 .As<IConversationTranscriptStore>();
+#else
+            builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
+            builder.Register<NullConversationTranscriptStore>(Lifetime.Singleton).As<IConversationTranscriptStore>();
+#endif
 
             // ── 8. Entry Points ────────────────────────────────────────────
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
+        }
+
+#if UNITY_WEBGL
+        internal const bool UsesPersistentFileConversationSummaryStore = false;
+#else
+        internal const bool UsesPersistentFileConversationSummaryStore = true;
+#endif
+
+        /// <summary>
+        /// Registers <see cref="IConversationSummaryStore"/> for this lifetime scope.
+        /// Non-WebGL builds persist summaries under <c>Application.persistentDataPath/CoreAI/ConversationSummaries</c>.
+        /// WebGL uses <see cref="InMemoryConversationSummaryStore"/> because synchronous <see cref="File"/> IO maps to IndexedDB and stalls the main loop each turn.
+        /// </summary>
+        internal static void RegisterConversationSummaryForCoreAiLifetimeScope(IContainerBuilder builder)
+        {
+#if !UNITY_WEBGL
+            builder.Register<IConversationSummaryStore>(_ =>
+                    new FileConversationSummaryStore(
+                        Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
+                            CoreAiPersistentPaths.ConversationSummaries),
+                        null),
+                Lifetime.Singleton);
+
+            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: true);
+#else
+            builder.RegisterCorePortable(suppressDefaultConversationSummaryStore: false);
+#endif
         }
     }
 }

@@ -2,6 +2,33 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.21] - 2026-05-01
+
+### WebGL, composition, diagnostics
+
+- **`CoreAILifetimeScope`:** **`UNITY_WEBGL`** registers **`NullAgentMemoryStore`** + **`NullConversationTranscriptStore`** instead of **`FileAgentMemoryStore`** (avoids sync IndexedDB **`File.*`** for agent memory); conversation summaries remain in-memory as in v1.5.20.
+- **`CoreAiChatService.IsStreamingEnabled`:** returns **`false`** when **`UNITY_WEBGL && !UNITY_EDITOR`** so HTTP chat uses the non-streaming path (see **`STREAMING_WEBGL_TODO.md`**).
+- **`CoreAiChatPanel`:** **`ShouldUseStreamingForRole`** (default off on WebGL player).
+- **Diagnostics:** **`CoreAi`**, **`CoreAiChatService`**, **`MessagePipeToolCallEventPublisher`** log resolver/publish failures with **`Debug.LogWarning`** instead of silent **`catch {}`**.
+- **JSON:** **`FileAgentMemoryStore`** transcript JSON uses Newtonsoft; **`System.Text.Json.dll`** removed from **`CoreAI.Source`** and test asmdefs.
+- **Constants:** **`OpenAiHttpConstants`**, **`CoreAiPersistentPaths`**; **`OpenAiHttpLlmSettings`** / **`MeaiOpenAiChatClient`** / **`CoreAISettingsAssetEditor`** use shared defaults.
+- **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`** (Core asmdef vs VContainer), **`MEAI_TOOL_CALLING.md`** (IL2CPP **`CreateAIFunction`**), **`STREAMING_WEBGL_TODO.md`** (Solution C status).
+- **Dependency:** **`com.nexoider.coreai 1.5.21`**.
+
+#### Package **`1.5.21`**.
+
+## [1.5.20] - 2026-05-01
+
+### WebGL — `CoreAILifetimeScope` conversation summaries
+
+- **`CoreAILifetimeScope`:** under **`UNITY_WEBGL`**, skips **`FileConversationSummaryStore`** and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: false)`** so summaries use **`InMemoryConversationSummaryStore`**, avoiding synchronous **`File`** I/O on IndexedDB-backed **`persistentDataPath`** each chat turn.
+- **`RegisterConversationSummaryForCoreAiLifetimeScope`:** internal helper used by **`Configure`** (documented on the type).
+- **Docs:** **`ARCHITECTURE.md`** — Runtime Context (WebGL vs file-backed registration).
+- **Edit Mode:** **`CoreAILifetimeScopeConversationStoreEditModeTests`** — compile-time WebGL contract + non-WebGL resolve of **`FileConversationSummaryStore`**.
+- **Dependency:** **`com.nexoider.coreai 1.5.20`**.
+
+#### Package **`1.5.20`**.
+
 ## [1.5.19] - 2026-05-01
 
 ### Context compaction — main system prompt vs auxiliary summarizer

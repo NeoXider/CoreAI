@@ -117,7 +117,8 @@ namespace CoreAI.Infrastructure.Llm
                 // OpenRouter требует эти заголовки
                 if (url.Contains("openrouter"))
                 {
-                    webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                    webReq.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName,
+                        OpenAiHttpConstants.HttpRefererUnityUrl);
                     webReq.SetRequestHeader("X-Title", "CoreAI");
                     _logger.LogInfo(GameLogFeature.Llm, $"MeaiOpenAiChatClient: Added OpenRouter headers");
                 }
@@ -386,7 +387,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (url.Contains("openrouter"))
                 {
-                    webReq.SetRequestHeader("HTTP-Referer", "https://unity.com");
+                    webReq.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName,
+                        OpenAiHttpConstants.HttpRefererUnityUrl);
                     webReq.SetRequestHeader("X-Title", "CoreAI");
                 }
                 string authorizationHeader = ResolveAuthorizationHeader();

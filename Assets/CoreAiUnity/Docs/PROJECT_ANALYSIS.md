@@ -61,7 +61,7 @@
 - Вызывается синхронно из `BuildChatHistoryAsync` → `AiOrchestrator.RunTaskAsync`.
 - На WebGL `Application.persistentDataPath` маппится в IndexedDB, синхронные записи задерживают main-loop кадр.
 
-**Фикс:** под WebGL регистрировать `InMemoryConversationSummaryStore` (он уже есть в портативном слое), либо асинхронный wrapper. Минимальный патч — `#if !UNITY_WEBGL` вокруг регистрации в `CoreAILifetimeScope.cs:124-128`.
+**Фикс:** под WebGL регистрировать `InMemoryConversationSummaryStore` (он уже есть в портативном слое), либо асинхронный wrapper. **Сделано в v1.5.20:** `CoreAILifetimeScope` вызывает `RegisterCorePortable(suppressDefaultConversationSummaryStore: false)` под `UNITY_WEBGL` вместо `FileConversationSummaryStore` (см. `RegisterConversationSummaryForCoreAiLifetimeScope`, `ARCHITECTURE.md`).
 
 **b) `FileAgentMemoryStore` — то же самое для memory-enabled ролей**
 
@@ -285,23 +285,25 @@ Tool-args в MEAI везде — `Newtonsoft.Json.Linq.JArray/JObject` (см. `C
 
 ---
 
-## 4. План «что чинить первым»
+## 4. План «что чинить первым» — статус (v1.5.21)
 
-Порядок отражает **boom-for-buck** (что ломает прод vs что чинится за коммит):
+**Закрыто в v1.5.20–v1.5.21:**
 
-1. **WebGL persistence на main-thread** — `#if !UNITY_WEBGL` вокруг регистрации `FileConversationSummaryStore` в `CoreAILifetimeScope.cs:124-128` и `FileAgentMemoryStore` (выбрать `PlayerPrefs`-store в композите). Один-два коммита, прямой выигрыш FPS на WebGL.
-2. **Solution C для streaming** — реализовать `protected virtual ShouldUseStreamingForRole(...)` в `CoreAiChatPanel`/`CoreAiChatService` с дефолт-`false` под `#if UNITY_WEBGL && !UNITY_EDITOR`. Закрывает [`STREAMING_WEBGL_TODO.md`](STREAMING_WEBGL_TODO.md).
-3. **Тихие `catch { }`** — добавить Trace/Warning логирование в `CoreAi.cs`, `CoreAiChatService.cs`, `MessagePipeToolCallEventPublisher.cs` (~10 строк всего).
-4. **`async void Ask` → `Task AskFireAndForget`** — `AgentConfigExtensions.cs:85`. Один маленький breaking change в публичном API расширений; зафиксировать в CHANGELOG.
-5. **JSON-канон** — конвертировать `FileConversationSummaryStore` на Newtonsoft.Json, выпилить `System.Text.Json.dll` из обеих asmdef.
-6. **Сократить static-сингтоны Core** — поэтапно: (а) пометить `CoreAIAgent` `[Obsolete]` и перенести в Unity-слой; (б) `CoreAiEvents` заменить на `IAiEventBus`; (в) `Log.Instance` → инъекция в tools.
-7. **Завершить миграцию логирования** — `IGameLogger : ILog` либо общий `UnityLog` адаптер, обновить `MeaiLlmClient`/`OfflineLlmClient`/`OpenAiChatLlmClient` сигнатуры на `ICoreAISettings`/`ILog` (закрывает заодно «утечку SO» из §2.3).
-8. **Reflection в `MeaiLlmClient.cs:933`** — заменить на интерфейсный метод `ILlmTool.CreateAIFunction()` (или задокументировать требование `[Preserve]` в [`MEAI_TOOL_CALLING.md`](../../CoreAI/Docs/MEAI_TOOL_CALLING.md)).
-9. **Namespace-уборка** — `UnityLog`, `SceneLlmTool`, `WorldLlmTool`, `CoreAi.cs`. Ломает `using`'и хостов — собрать в один коммит и зафиксировать в CHANGELOG.
-10. **Backlog Cyrillic в XML** — методически по топу: `CoreAiChatPanel.cs` (137), `CoreAISettings.cs` (51), `AgentBuilder.cs` (46), `AgentMemoryPolicy.cs` (41), `CoreAiChatService.cs` (39), `CompatibilityChecker.cs` (36).
-11. **Дубликат `LlmResponseSanitizer`** — удалить вложенный класс из `ProgrammerLuaResponseParser.cs:63`.
-12. **Magic-strings в const** — `OpenAiHttpLlmSettings`, `MeaiOpenAiChatClient`, paths в `CoreAILifetimeScope`/file-stores.
-13. **Поправить `DGF_SPEC.md:70`** — убрать упоминание VContainer в Core-asmdef.
+| §4 пункт | Результат |
+|---|---|
+| WebGL `FileConversationSummaryStore` | v1.5.20: in-memory под `UNITY_WEBGL`; см. `RegisterConversationSummaryForCoreAiLifetimeScope`. |
+| WebGL `FileAgentMemoryStore` | v1.5.21: `NullAgentMemoryStore` + `NullConversationTranscriptStore` под `UNITY_WEBGL` (без PlayerPrefs-бэкенда — явный компромисс: нет персистентной памяти агента в браузере без кастомного store). |
+| Streaming / Solution C | v1.5.21: `CoreAiChatService.IsStreamingEnabled` → `false` для WebGL player; `CoreAiChatPanel.ShouldUseStreamingForRole`; см. [`STREAMING_WEBGL_TODO.md`](STREAMING_WEBGL_TODO.md). |
+| Тихие `catch { }` (CoreAi / chat / tool publisher) | v1.5.21: `Debug.LogWarning` с контекстом. |
+| `async void Ask` | v1.5.21: обёртка на `Task` (`RunAskFireAndForgetAsync`), публичное имя метода **`Ask`** сохранено. |
+| JSON один канал | v1.5.21: `FileConversationSummaryStore` + transcript в `FileAgentMemoryStore` на Newtonsoft; **`System.Text.Json.dll`** убран из **`CoreAI.Core`**, **`CoreAI.Source`**, тестовых asmdef. |
+| Дубликат санитайзера | v1.5.21: **`LlmStructuredPayloadSanitizer`** (`CoreAI.Ai`) vs **`LlmResponseSanitizer`** (`CoreAI.Infrastructure.Llm`). |
+| Magic strings / пути | v1.5.21: **`OpenAiHttpConstants`**, **`CoreAiPersistentPaths`**. |
+| `DGF_SPEC` / VContainer в Core | v1.5.21: §3.2 исправлен (только MoonSharp в Core asmdef). |
+| Reflection tools / IL2CPP | v1.5.21: §3.1 в [`MEAI_TOOL_CALLING.md`](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) (`[Preserve]` / `link.xml`). |
+| `Log.Instance` видимость | v1.5.21: **`volatile`** на статическом поле (полная замена service-locator §6 не делалась). |
+
+**Остаётся бэклог (крупные или объёмные):** п.6–7 (static-фасады Core, `IGameLogger` vs `ILog`, конструкторы клиентов на `ICoreAISettings`), п.9 (namespace-переносы), п.10 (кириллица в XML ~1346 вхождений), опциональный **PlayerPrefs/WebGL** store для памяти, **Solution A/B** из `STREAMING_WEBGL_TODO` для настоящего SSE на WebGL.
 
 ---
 
@@ -320,4 +322,4 @@ Tool-args в MEAI везде — `Newtonsoft.Json.Linq.JArray/JObject` (см. `C
 
 ---
 
-> Этот файл — снимок на 2026-05-01. После закрытия пунктов из §4 отметить здесь же либо переехать в [`CODE_AUDIT_AND_FOLLOWUPS.md`](CODE_AUDIT_AND_FOLLOWUPS.md).
+> Снимок обновлён под **v1.5.21** (2026-05-01). Детальная история — [`CHANGELOG.md`](../CHANGELOG.md) / portable [`CHANGELOG.md`](../../CoreAI/CHANGELOG.md).

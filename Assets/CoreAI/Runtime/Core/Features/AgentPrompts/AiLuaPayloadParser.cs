@@ -22,7 +22,7 @@ namespace CoreAI.Ai
                 return true;
             }
 
-            if (LlmResponseSanitizer.TryPrepareJsonObject(payload, out string jsonBody) &&
+            if (LlmStructuredPayloadSanitizer.TryPrepareJsonObject(payload, out string jsonBody) &&
                 TryExtractExecuteLuaJson(jsonBody, out luaCode))
             {
                 return true;

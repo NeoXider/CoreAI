@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using CoreAI.Ai;
+using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
 
@@ -18,7 +19,8 @@ namespace CoreAI.Infrastructure.Lua
         public FileDataOverlayVersionStore(IGameLogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "DataOverlayVersions");
+            string dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
+                CoreAiPersistentPaths.DataOverlayVersions);
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "data_overlays.json");
             LoadFromDisk();

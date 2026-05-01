@@ -1,5 +1,21 @@
 # Changelog
 
+## [v1.5.21] — 2026-05-01
+
+### Portable Core — JSON + API hygiene
+
+- **`FileConversationSummaryStore`** — serializes with **Newtonsoft.Json** only; **`System.Text.Json`** removed from **`CoreAI.Core`** asmdef precompiled references.
+- **`LlmStructuredPayloadSanitizer`** — JSON/markdown fence helpers moved out of **`ProgrammerLuaResponseParser`** (renamed from duplicate **`LlmResponseSanitizer`** type in **`CoreAI.Ai`**); **`CoreAI.Infrastructure.Llm.LlmResponseSanitizer`** remains for system-prompt echo stripping.
+- **`Log.Instance`** backing field is **`volatile`** for safer multi-threaded reads after composition.
+- **`AgentConfigExtensions.Ask`** — fire-and-forget uses **`Task`** (`RunAskFireAndForgetAsync`) instead of **`async void`**.
+- **Semver:** lockstep **`1.5.21`** with **`com.nexoider.coreaiunity`** (Unity changelog lists WebGL/chat/composition changes).
+
+## [v1.5.20] — 2026-05-01
+
+### Lockstep packaging (WebGL host composition)
+
+- **Semver:** lockstep **`1.5.20`** with **`com.nexoider.coreaiunity`**. No portable **CoreAI.Core** API or **`FileConversationSummaryStore`** implementation change; **`CoreAILifetimeScope`** WebGL registration lives in the Unity package (**`InMemoryConversationSummaryStore`** instead of file-backed summaries).
+
 ## [v1.5.19] — 2026-05-01
 
 ### Agent memory — LLM compaction contract (documentation)
