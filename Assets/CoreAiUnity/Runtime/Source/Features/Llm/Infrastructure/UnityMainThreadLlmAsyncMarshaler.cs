@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
+using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
@@ -36,7 +37,7 @@ namespace CoreAI.Infrastructure.Llm
                 return await factory().ConfigureAwait(false);
             }
 #endif
-            await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, cancellationToken);
+            await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(cancellationToken);
             return await factory();
         }
 

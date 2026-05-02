@@ -1,5 +1,5 @@
 ---
-description: Unity assets — не создавать .meta вручную; доверять рефрешу редактора
+description: 
 globs: Assets/**/*
 alwaysApply: false
 ---

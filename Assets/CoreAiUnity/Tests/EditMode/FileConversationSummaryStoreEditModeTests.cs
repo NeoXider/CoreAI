@@ -16,7 +16,7 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 FileConversationSummaryStore store = new(root, null);
-                const string role = "PlayerChat";
+                const string role = "SmartChat";
                 store.SaveSummary(role, "line a");
                 Assert.AreEqual("line a", store.LoadSummary(role));
                 store.SaveSummary(role, "line b");

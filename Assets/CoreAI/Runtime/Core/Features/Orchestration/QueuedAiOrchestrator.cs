@@ -161,7 +161,14 @@ namespace CoreAI.Ai
             {
                 CancellationToken token = w.ScopeCancellation?.Token ?? w.OuterCt;
                 token.ThrowIfCancellationRequested();
+                // WebGL player: keep continuation on Unity SynchronizationContext.
+                // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
+                // and never resumes — TrySetResult below would never fire, hanging the chat UI.
+#if UNITY_WEBGL && !UNITY_EDITOR
+                string result = await _inner.RunTaskAsync(w.Task, token);
+#else
                 string result = await _inner.RunTaskAsync(w.Task, token).ConfigureAwait(false);
+#endif
                 w.Tcs.TrySetResult(result);
             }
             catch (OperationCanceledException)

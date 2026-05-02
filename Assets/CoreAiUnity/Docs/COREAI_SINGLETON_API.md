@@ -33,11 +33,11 @@ public class MyNpc : MonoBehaviour
 Streaming “like chat” — one loop line:
 
 ```csharp
-await foreach (string part in CoreAi.StreamAsync("Tell me about the quest", "PlayerChat"))
+await foreach (string part in CoreAi.StreamAsync("Tell me about the quest", "SmartChat"))
     uiLabel.text += part;
 ```
 
-Done. The `"PlayerChat"` role must match `AgentBuilder` / chat config if you configured agents.
+Done. The `"SmartChat"` role must match `AgentBuilder` / chat config if you configured agents.
 
 ### Sending messages: convenient in UI and from code
 
@@ -89,7 +89,7 @@ Ensure the **active** scene has a GameObject with **`CoreAILifetimeScope`**. Aft
 You can from `Start` with `StartCoroutine` + wrapper, but simpler — **`async void` on the Unity main thread** or **UniTask**. Do not use `Task.Run` — LLM calls must stay on the **main thread** (see [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)).
 
 **Where do I get `roleId`?**  
-The same id as in `AgentBuilder("...")` and `CoreAiChatConfig`. Often `"PlayerChat"`.
+The same id as in `AgentBuilder("...")` and `CoreAiChatConfig`. Often `"SmartChat"`.
 
 ---
 
@@ -120,7 +120,7 @@ Debug.Log(answer);
 
 ```csharp
 label.text = "";
-await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "PlayerChat"))
+await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "SmartChat"))
     label.text += chunk;
 ```
 
@@ -129,7 +129,7 @@ await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "PlayerChat"))
 ```csharp
 string full = await CoreAi.SmartAskAsync(
     "Tell a story",
-    roleId: "PlayerChat",
+    roleId: "SmartChat",
     onChunk: c => label.text += c);
 
 SaveToPlayerJournal(full);
@@ -142,7 +142,7 @@ Override streaming: `uiStreamingOverride: false` — force full response in one 
 ```csharp
 if (CoreAi.TryGetChatService(out var chat))
 {
-    string reply = await chat.SendMessageAsync("Hi", "PlayerChat", ct);
+    string reply = await chat.SendMessageAsync("Hi", "SmartChat", ct);
 }
 else
 {
@@ -154,13 +154,13 @@ else
 
 ```csharp
 // Stop generation (e.g. Stop button in UI)
-CoreAi.StopAgent("PlayerChat");
+CoreAi.StopAgent("SmartChat");
 
 // Clear chat history but keep long-term memory (facts, quests)
-CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: false);
+CoreAi.ClearContext("SmartChat", clearChatHistory: true, clearLongTermMemory: false);
 
 // Full hard reset (amnesia)
-CoreAi.ClearContext("PlayerChat", clearChatHistory: true, clearLongTermMemory: true);
+CoreAi.ClearContext("SmartChat", clearChatHistory: true, clearLongTermMemory: true);
 ```
 
 ### 3.5. Orchestrator: command into the game

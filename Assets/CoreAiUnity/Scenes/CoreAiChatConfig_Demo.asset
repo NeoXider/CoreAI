@@ -12,18 +12,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6bf7c4d9f7c7f0849b6928c3defa31b7, type: 3}
   m_Name: CoreAiChatConfig_Demo
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Chat.CoreAiChatConfig
-  _roleId: PlayerChat
-  _headerTitle: AI Chat
+  _roleId: SmartChat
+  _headerTitle: Smart AI Chat
   _welcomeMessage: "\u041F\u0440\u0438\u0432\u0435\u0442! \u0427\u0435\u043C \u043C\u043E\u0433\u0443
     \u043F\u043E\u043C\u043E\u0447\u044C?"
+  _loadPersistedChatOnStartup: 1
+  _maxPersistedMessagesForUi: 0
   _aiAvatarIcon: {fileID: 0}
   _userAvatarIcon: {fileID: 0}
   _enableStreaming: 1
   _typingIndicatorText: 
+  _useFullscreenChat: 1
   _chatWidth: 500
   _chatHeight: 700
   _sendOnShiftEnter: 0
   _maxMessageLength: 2000
+  _enableOpenChatKeyboardShortcut: 1
+  _openChatHotkey: 99
+  _enableEscapeChatShortcuts: 1
   _errorMessagePrefix: "\u26A0\uFE0F \u041E\u0448\u0438\u0431\u043A\u0430: "
   _timeoutMessage: "\u23F3 \u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0435\u0432\u044B\u0441\u0438\u043B
     \u043B\u0438\u043C\u0438\u0442 \u0432\u0440\u0435\u043C\u0435\u043D\u0438."

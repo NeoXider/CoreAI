@@ -1,5 +1,28 @@
 # Changelog
 
+## [v1.5.28] — 2026-05-02
+
+### Remove legacy `PlayerChat` built-in role id
+
+- **`BuiltInAgentRoleIds.PlayerChat`** removed — use **`PlainChat`** (simple chat, no MemoryTool by default) or **`SmartChat`** (chat + MemoryTool + persisted history).
+- **`BuiltInAgentSystemPromptTexts.PlayerChat`** removed; prompts live under **`PlainChat`** / **`SmartChat`** only.
+- **`CompositeRoleStructuredResponsePolicy`** routes **`PlainChat`** and **`SmartChat`** through **`PlayerChatResponsePolicy`** (free-form text).
+- **`InGameLlmChatService`** uses **`SmartChat`** for system prompt + **`AgentRoleId`**.
+- Demo / defaults: **`CoreAiChatConfig`** default **`RoleId`** is **`SmartChat`** (Unity package).
+- **Semver:** lockstep **`1.5.28`** with **`com.nexoider.coreaiunity`**.
+
+## [v1.5.27] — 2026-05-02
+
+### Built-in chat role split: PlainChat + SmartChat
+
+- **`BuiltInAgentRoleIds`** — added **`PlainChat`** and **`SmartChat`** built-in role IDs.
+- **`BuiltInDefaultAgentSystemPromptProvider`** + **`BuiltInAgentSystemPromptTexts`** — new default system prompts for both chat roles.
+- **`AgentMemoryPolicy`** defaults:
+  - **`PlainChat`**: persisted chat history ON, `MemoryTool` OFF.
+  - **`SmartChat`**: persisted chat history ON, `MemoryTool` ON (`append`).
+- **`LlmConversationalRolePolicy`** treats both **`PlainChat`** and **`SmartChat`** as conversational user-facing roles.
+- **Semver:** lockstep **`1.5.27`** with **`com.nexoider.coreaiunity`**.
+
 ## [v1.5.26] — 2026-05-01
 
 ### HTTP SSE (`HttpClient`) — keep client until body is read
@@ -68,7 +91,7 @@
 
 ### Offline / stub UX and chat failures (portable Core)
 
-- **`LlmConversationalRolePolicy`** — classifies roles that should get **short user-facing** replies in **stub/offline** flows (e.g. **`PlayerChat`**, **`AINpc`**, ids containing **`teacher` / mentor / tutor`**, names ending with **`chat`**, excluding **`Merchant`**).
+- **`LlmConversationalRolePolicy`** — classifies roles that should get **short user-facing** replies in **stub/offline** flows (e.g. **`PlainChat`**, **`SmartChat`**, **`AINpc`**, ids containing **`teacher` / mentor / tutor`**, names ending with **`chat`**, excluding **`Merchant`**).
 - **`StubLlmClient`** — conversational roles return **`[stub] Offline — LLM unavailable (stub).`** instead of echoing **`UserPayload`** or emitting JSON **`ApplyWaveModifier`** for custom ids like **`Teacher`**.
 - **`AiOrchestrator.RunTaskAsync`** — when **`AiTaskRequest.SourceTag`** is **`Chat`**, LLM failure / empty result / authority denied returns a **short printable message** (error text or default) instead of **`null`**, so **`CoreAiChatService`** can show text in the bubble. Non-chat callers still get **`null`** on failure.
 - **Semver:** lockstep **`1.5.18`** with **`com.nexoider.coreaiunity`**.
@@ -225,7 +248,7 @@ Full code audit of CoreAI.Core covering orchestration, LLM pipeline, tool callin
 - **`IAsyncConversationContextManager.BuildSnapshotAsync`** — **`AiOrchestrator`** now awaits this path when building chat history (including streaming), passing the orchestration trace id for compaction logs.
 - **`ICoreAISettings.EnableLlmContextCompaction`** (default false) — **`RegisterCorePortable`** wires **`ConversationContextManagerFactories.Create(...)`** so Unity can enable LLM compaction from **`CoreAISettingsAsset`** without moving logic out of Core.
 - **`SelectingConversationContextManager`** — when global compaction is enabled, each request selects LLM vs deterministic rollup using **`ConversationContextBuildArgs.UseLlmContextCompaction`** (from **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**, gated by **`ICoreAISettings`**).
-- **`RoleMemoryConfig.UseLlmContextCompaction`** — defaults true for **`AgentBuilder`** agents and built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlayerChat`**, **`Merchant`**, **`CoreMechanicAI`**; built-in **`Programmer`** defaults false (deterministic truncation/summary only). **`AgentBuilder.WithLlmContextCompaction(bool)`** and **`AgentMemoryPolicy.ConfigureLlmContextCompaction`** override per role.
+- **`RoleMemoryConfig.UseLlmContextCompaction`** — defaults true for **`AgentBuilder`** agents and built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlainChat`**, **`SmartChat`**, **`Merchant`**, **`CoreMechanicAI`**; built-in **`Programmer`** defaults false (deterministic truncation/summary only). **`AgentBuilder.WithLlmContextCompaction(bool)`** and **`AgentMemoryPolicy.ConfigureLlmContextCompaction`** override per role.
 - **`AgentBuilder`** — **`Build()`** logs non-fatal **`Log.Instance`** warnings for common misconfigurations (empty system prompt for custom roles, tool modes without tools, LLM compaction requested while the global gate is off, etc.). Use **`SuppressBuildWarnings`** to silence in tests, or **`ValidateOnBuild()`** / **`AgentBuilderIssue`** for assertions. **`BuiltInAgentRoleIds.IsBuiltIn`** helps skip “missing prompt” noise for stock roles. **`WithSystemPrompt`** XML docs now spell out the three prompt layers and point to **`DEVELOPER_GUIDE.md`**.
 
 #### Package **`1.5.3`**.
@@ -410,7 +433,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Agent memory policy defaults
 
-- 🔧 **`AgentMemoryPolicy.RoleMemoryConfig` constructor** — default `persistChatHistory` is now **`false`**. Built-in agent roles that use only the two-argument form (`MemoryTool` + default action) therefore do **not** imply cross-session chat persistence when `WithChatHistory` is off (matches the role table in docs and `AgentBuilderChatHistoryEditModeTests`). **`PlayerChat`** still sets `persistChatHistory: true` explicitly in the policy constructor.
+- 🔧 **`AgentMemoryPolicy.RoleMemoryConfig` constructor** — default `persistChatHistory` is now **`false`**. Built-in agent roles that use only the two-argument form (`MemoryTool` + default action) therefore do **not** imply cross-session chat persistence when `WithChatHistory` is off (matches the role table in docs and `AgentBuilderChatHistoryEditModeTests`). **`PlainChat`** / **`SmartChat`** still set `persistChatHistory: true` explicitly in the policy constructor.
 - 🔧 Version **`0.25.10`**; `com.nexoider.coreaiunity` aligned to **`0.25.10`**.
 
 ## [v0.25.9] — 2026-04-27
@@ -649,7 +672,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Prompt Optimization
 - 🔧 **Removed duplicate tool-calling rules** from all seven built-in agent prompts (C# constants + `.txt` resources). Saves ~100–150 tokens per request — rules already live in `UniversalSystemPromptPrefix`.
-- 📝 **Prompt wording:** added response length limits for AiNpc (1–3 sentences) and PlayerChat (1–5 sentences).
+- 📝 **Prompt wording:** added response length limits for AiNpc (1–3 sentences) and built-in chat roles (1–5 sentences).
 - 🔧 **Native tool calling:** dropped legacy manual JSON tool-formatting guidance from `Agent.cs` and `AllToolCallsPlayModeTests.cs`; samples and tests use native `MEAI` function calling.
 
 ### Editor UX

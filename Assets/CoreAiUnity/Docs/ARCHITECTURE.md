@@ -35,7 +35,7 @@ For simple projects, choose one global mode on `CoreAISettingsAsset`:
 - `ServerManagedApi` calls a backend-owned proxy through `ServerManagedLlmClient` and keeps provider keys off the client. Games can set a dynamic JWT with `ServerManagedAuthorization.SetProvider(...)`.
 - `Offline` uses deterministic test/demo responses.
 
-For mixed projects, use `LlmRoutingManifest` profiles. Each profile has its own `LlmExecutionMode`, backend settings, context window, and optional ClientLimited limits. Route entries map role ids such as `PlayerChat`, `Analyzer`, or `*` to those profiles.
+For mixed projects, use `LlmRoutingManifest` profiles. Each profile has its own `LlmExecutionMode`, backend settings, context window, and optional ClientLimited limits. Route entries map role ids such as `SmartChat`, `Analyzer`, or `*` to those profiles.
 
 ## MessagePipe Boundary
 

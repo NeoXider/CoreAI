@@ -1,5 +1,9 @@
 {
     "name": "Tests",
+    "references": [
+        "Neo.Save",
+        "Neo.Tools"
+    ],
     "optionalUnityReferences": [
         "TestAssemblies"
     ]

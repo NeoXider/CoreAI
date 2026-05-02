@@ -8,7 +8,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Игровой чат с LLM: склеивает историю реплик, системный промпт для <see cref="BuiltInAgentRoleIds.PlayerChat"/>, вызов <see cref="ILlmClient"/>.
+    /// Игровой чат с LLM: склеивает историю реплик, системный промпт для <see cref="BuiltInAgentRoleIds.SmartChat"/>, вызов <see cref="ILlmClient"/>.
     /// Включает sliding-window rate limiter для защиты от спама.
     /// </summary>
     public sealed class InGameLlmChatService : IInGameLlmChatService
@@ -88,7 +88,7 @@ namespace CoreAI.Ai
                 };
             }
 
-            string system = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.PlayerChat, out string sys) &&
+            string system = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.SmartChat, out string sys) &&
                             !string.IsNullOrWhiteSpace(sys)
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
@@ -113,7 +113,7 @@ namespace CoreAI.Ai
             LlmCompletionResult result = await _llm.CompleteAsync(
                 new LlmCompletionRequest
                 {
-                    AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
+                    AgentRoleId = BuiltInAgentRoleIds.SmartChat,
                     SystemPrompt = system,
                     ChatHistory = history,
                     TraceId = Guid.NewGuid().ToString("N")

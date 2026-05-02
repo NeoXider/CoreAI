@@ -38,7 +38,7 @@ Call the LLM from **any** script without DI boilerplate:
 using CoreAI;
 
 string reply = await CoreAi.AskAsync("Hello!");
-await foreach (var chunk in CoreAi.StreamAsync("Tell a story", "PlayerChat"))
+await foreach (var chunk in CoreAi.StreamAsync("Tell a story", "SmartChat"))
     label.text += chunk;
 if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 ```

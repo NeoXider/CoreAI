@@ -247,7 +247,7 @@ Do NOT use any other functions.
 // By default memory is ON for:
 // Creator, Analyzer, Programmer, CoreMechanicAI
 // OFF for:
-// PlayerChat, AINpc (they use ChatHistory)
+// PlainChat / SmartChat, AINpc (they use ChatHistory)
 
 var policy = container.Resolve<AgentMemoryPolicy>();
 Debug.Log($"Memory enabled for Creator: {policy.IsMemoryToolEnabled("Creator")}");

@@ -83,7 +83,7 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 
 ---
 
-## 2. Five base template roles
+## 2. Base template roles
 
 ### 2.1 Creator
 
@@ -163,6 +163,26 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **Placement** | **Option A:** **HostAuthoritative** only (fair co-op, one outcome). **Option B:** **LocalPerClient** for solo “luck simulator” without affecting others. **Option C:** **Hybrid** — host fixes seed and validates result. Choice is **game config**, not core default. |
 | **Examples** | Armor forging: alloy compatibility, crack chance, unique prefix for build; alchemy: explosion on mismatch; procedural loot with “boredom” from Analyzer. |
 | **Relations** | May receive **recommendations** from Creator; should **not** call Programmer directly without policy (usually data, not code). |
+
+---
+
+### 2.6 Chat roles (player-facing)
+
+| | |
+|--|--|
+| **ID** | `PlainChat` |
+| **Goal** | Lightweight player-facing chat without tool calls by default. |
+| **Defaults** | Chat history enabled + persisted between sessions; `MemoryTool` disabled. |
+| **Placement** | Local or host, depending on your title authority policy. |
+| **Use case** | Minimal assistant UX with predictable short replies. |
+
+| | |
+|--|--|
+| **ID** | `SmartChat` |
+| **Goal** | Player-facing chat with memory-aware assistance. |
+| **Defaults** | Chat history enabled + persisted between sessions; `MemoryTool` enabled (`append`). |
+| **Placement** | Local or host, depending on your title authority policy. |
+| **Use case** | Personalized assistant that can remember durable player preferences/facts. |
 
 ---
 
@@ -284,7 +304,7 @@ Starting with **v0.5.0**, each role has a **specialized validation policy**. Thi
 | **Creator** | `CreatorResponsePolicy` | JSON object (world command) | ✅ Yes |
 | **Analyzer** | `AnalyzerResponsePolicy` | JSON with `metric` / `recommendation` / `analysis` | ✅ Yes |
 | **AINpc** | `AINpcResponsePolicy` | JSON OR non-empty text (soft) | ✅ Yes |
-| **PlayerChat** | `PlayerChatResponsePolicy` | No validation (free text) | ❌ No |
+| **PlainChat** / **SmartChat** | `PlayerChatResponsePolicy` | No validation (free text) | ❌ No |
 | **Merchant** | `NoOpRoleStructuredResponsePolicy` | Tool call `get_inventory` + text | ✅ Tool call retry (3 attempts) |
 
 ### 8.2 How retry works

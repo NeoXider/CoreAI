@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -41,7 +41,7 @@ namespace CoreAI.Tests.PlayMode
         {
             var request = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful assistant. Be very brief.",
                 UserPayload = "Say hello in exactly 3 words."
             };
@@ -84,7 +84,7 @@ namespace CoreAI.Tests.PlayMode
         {
             var request = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful assistant.",
                 UserPayload = "Write a very long essay about the history of computing in detail."
             };
@@ -228,7 +228,7 @@ namespace CoreAI.Tests.PlayMode
             // MeaiLlmClient/ThinkBlockStreamFilter убирают теги; HTTP-клиент не прокидывает reasoning в UI.
             var request = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "Think step by step using <think> tags before responding. Keep your answer brief.",
                 UserPayload = "What is 2+2?"
             };

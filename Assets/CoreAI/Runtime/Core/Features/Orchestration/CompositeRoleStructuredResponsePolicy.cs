@@ -22,7 +22,8 @@ namespace CoreAI.Ai
                 { BuiltInAgentRoleIds.Creator, new CreatorResponsePolicy() },
                 { BuiltInAgentRoleIds.Analyzer, new AnalyzerResponsePolicy() },
                 { BuiltInAgentRoleIds.AiNpc, new AINpcResponsePolicy() },
-                { BuiltInAgentRoleIds.PlayerChat, new PlayerChatResponsePolicy() }
+                { BuiltInAgentRoleIds.PlainChat, new PlayerChatResponsePolicy() },
+                { BuiltInAgentRoleIds.SmartChat, new PlayerChatResponsePolicy() }
             };
             _fallback = new NoOpRoleStructuredResponsePolicy();
         }

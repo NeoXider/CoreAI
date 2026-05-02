@@ -46,7 +46,7 @@ namespace CoreAI.Tests.PlayMode
         {
             var request = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful game assistant. You have tools available. " +
                                "If the user asks a simple question, just answer in text without using tools.",
                 UserPayload = "What is 2 + 2?"
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
         {
             var request = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a verbose assistant. Write as much as possible.",
                 UserPayload = "Write a very detailed essay about the history of computing from the 1940s to today."
             };
@@ -111,7 +111,7 @@ namespace CoreAI.Tests.PlayMode
             // First: streaming request
             var streamRequest = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a test agent. Be very brief.",
                 UserPayload = "Say 'STREAM_OK'."
             };
@@ -129,7 +129,7 @@ namespace CoreAI.Tests.PlayMode
             // Second: non-streaming request
             var nonStreamRequest = new LlmCompletionRequest
             {
-                AgentRoleId = "PlayerChat",
+                AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a test agent. Be very brief.",
                 UserPayload = "Say 'NONSTREAM_OK'."
             };

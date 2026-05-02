@@ -147,7 +147,7 @@ configPolicy.ConfigureRole("AINpc",
     readKeys: new[] { "dialogue" },   // Read only
     writeKeys: Array.Empty<string>()); // No write
 
-configPolicy.RevokeAccess("PlayerChat"); // No access
+configPolicy.RevokeAccess("SmartChat"); // No access
 ```
 
 ---

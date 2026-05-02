@@ -184,7 +184,11 @@ namespace CoreAI.Ai
             {
                 while (true)
                 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    bundle = await BuildRequestAsync(task, contextPass, cancellationToken);
+#else
                     bundle = await BuildRequestAsync(task, contextPass, cancellationToken).ConfigureAwait(false);
+#endif
                     roleId = bundle.RoleId;
                     traceId = bundle.TraceId;
                     system = bundle.SystemPrompt;
@@ -197,11 +201,22 @@ namespace CoreAI.Ai
                     Stopwatch sw = Stopwatch.StartNew();
                     try
                     {
+                        // WebGL player: do not detach from the captured Unity SynchronizationContext.
+                        // Single-threaded IL2CPP has no real thread pool, so ConfigureAwait(false) here
+                        // queues the resumption to TaskScheduler.Default and the awaiter never resumes —
+                        // chat UI stays on typing dots even though the LLM result has arrived.
+#if UNITY_WEBGL && !UNITY_EDITOR
+                        result = await _llm
+                            .CompleteAsync(
+                                BuildCompletionRequest(bundle, task, user, maxOutputTokens),
+                                cancellationToken);
+#else
                         result = await _llm
                             .CompleteAsync(
                                 BuildCompletionRequest(bundle, task, user, maxOutputTokens),
                                 cancellationToken)
                             .ConfigureAwait(false);
+#endif
                     }
                     finally
                     {
@@ -271,9 +286,15 @@ namespace CoreAI.Ai
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
                 Stopwatch sw = Stopwatch.StartNew();
+#if UNITY_WEBGL && !UNITY_EDITOR
+                LlmCompletionResult second = await _llm.CompleteAsync(
+                    BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
+                    cancellationToken);
+#else
                 LlmCompletionResult second = await _llm.CompleteAsync(
                     BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
                     cancellationToken).ConfigureAwait(false);
+#endif
                 sw.Stop();
                 _metrics.RecordLlmCompletion(roleId, traceId, second != null && second.Ok,
                     sw.Elapsed.TotalMilliseconds);
@@ -560,14 +581,19 @@ namespace CoreAI.Ai
             string userPayload,
             LlmCompletionResult result)
         {
-            // Defense-in-depth: strip any leaked tool-call JSON the pipeline missed.
-            string sanitised = LlmToolCallTextExtractor.StripForDisplay(content);
-            if (!string.Equals(sanitised, content, StringComparison.Ordinal))
+            // Defense-in-depth: strip leaked tool-call JSON only when tools are actually configured.
+            // On plain text roles (no tools), parsing very large reasoning payloads for JSON spans
+            // is unnecessary and can stall WebGL UI for a long time.
+            if (bundle.Tools != null && bundle.Tools.Count > 0)
             {
-                Log.Instance.Warn(
-                    $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked; stripped.",
-                    LogTag.Llm);
-                content = sanitised;
+                string sanitised = LlmToolCallTextExtractor.StripForDisplay(content);
+                if (!string.Equals(sanitised, content, StringComparison.Ordinal))
+                {
+                    Log.Instance.Warn(
+                        $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' tool-call JSON leaked; stripped.",
+                        LogTag.Llm);
+                    content = sanitised;
+                }
             }
 
             if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)

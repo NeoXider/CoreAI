@@ -188,10 +188,17 @@ namespace CoreAI.Ai
                     useLlmContextCompaction: smartCompaction);
             }
 
-            // PlayerChat is the drop-in chat panel role. It should restore the visible conversation
-            // after restart by default, while long-term facts still belong to explicit MemoryTool roles.
-            _roleConfigs[BuiltInAgentRoleIds.PlayerChat] = new RoleMemoryConfig(
+            // Built-in chat roles:
+            // - PlainChat: no MemoryTool by default, persistent chat history only.
+            // - SmartChat: MemoryTool + persistent chat history by default.
+            _roleConfigs[BuiltInAgentRoleIds.PlainChat] = new RoleMemoryConfig(
                 useMemoryTool: false,
+                withChatHistory: true,
+                persistChatHistory: true,
+                useLlmContextCompaction: true);
+            _roleConfigs[BuiltInAgentRoleIds.SmartChat] = new RoleMemoryConfig(
+                useMemoryTool: true,
+                defaultAction: MemoryToolAction.Append,
                 withChatHistory: true,
                 persistChatHistory: true,
                 useLlmContextCompaction: true);

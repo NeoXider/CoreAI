@@ -29,7 +29,7 @@ The menu `CoreAI → Setup → Create Chat Demo Scene` creates a ready scene `As
 `Assets → Create → CoreAI → Chat Config`
 
 Configure in the Inspector:
-- **Role ID** — agent role (`PlayerChat`, `Teacher`, your custom one)
+- **Role ID** — agent role (`PlainChat`, `SmartChat`, `Teacher`, your custom one)
 - **Header Title** — chat header
 - **Welcome Message** — welcome message
 - **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
@@ -119,7 +119,7 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 | **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, field `chatHistoryJson`). |
 | **Max Persisted Messages For Ui** | How many **last** messages to show on load; **0** = all saved. |
 
-**Requirements:** for the role, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. The built-in **`PlayerChat`** role has this enabled by default, so the drop-in chat restores its session after app restart. For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk — there is nothing to load (only **Welcome Message** remains).
+**Requirements:** for the role, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. Built-in chat roles support this out of the box: **`PlainChat`** (history + no MemoryTool) and **`SmartChat`** (history + MemoryTool). For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk — there is nothing to load (only **Welcome Message** remains).
 
 **Welcome message:** if after load the scroll area **already has** messages, **Welcome Message** is not added (to avoid duplicating “Hello!” on top of the dialog). If there is no history, the welcome message is shown as before.
 
@@ -317,7 +317,7 @@ new AgentBuilder("JsonParser")
 | **ServerManagedApi** | Backend proxy using an OpenAI-compatible streaming endpoint | ✅ Yes when the backend streams SSE; ⚠️ WebGL caveat still applies |
 | **Offline** | Deterministic local response | Single final chunk |
 
-For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `LlmRoutingManifest`, for example `PlayerChat → ServerManagedApi` and `Analyzer → ClientLimited`.
+For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `LlmRoutingManifest`, for example `SmartChat → ServerManagedApi` and `Analyzer → ClientLimited`.
 
 > ⚠️ **WebGL caveat (0.25.x).** In a built WebGL player the `UnityWebRequest` wrapper
 > (emscripten `XMLHttpRequest`) does not deliver SSE incrementally — all chunks arrive in one block at
@@ -354,7 +354,7 @@ Priority order (highest to lowest):
 
 ```csharp
 // Example: chat agent always streams regardless of global setting
-new AgentBuilder("PlayerChat")
+new AgentBuilder("SmartChat")
     .WithSystemPrompt("You are a friendly assistant.")
     .WithStreaming(true)
     .Build();
@@ -371,7 +371,7 @@ Programmatic check of effective value:
 
 ```csharp
 var chatService = CoreAiChatService.TryCreateFromScene();
-bool useStream = chatService.IsStreamingEnabled("PlayerChat", uiFallback: true);
+bool useStream = chatService.IsStreamingEnabled("SmartChat", uiFallback: true);
 ```
 
 ### Think-block filtering

@@ -9,9 +9,10 @@ namespace CoreAI.Tests.EditMode
     public sealed class LlmConversationalRolePolicyEditModeTests
     {
         [Test]
-        public void PlayerChat_And_AiNpc_AreConversational()
+        public void PlainChat_SmartChat_And_AiNpc_AreConversational()
         {
-            Assert.IsTrue(LlmConversationalRolePolicy.IsConversationalUserFacingRole(BuiltInAgentRoleIds.PlayerChat));
+            Assert.IsTrue(LlmConversationalRolePolicy.IsConversationalUserFacingRole(BuiltInAgentRoleIds.PlainChat));
+            Assert.IsTrue(LlmConversationalRolePolicy.IsConversationalUserFacingRole(BuiltInAgentRoleIds.SmartChat));
             Assert.IsTrue(LlmConversationalRolePolicy.IsConversationalUserFacingRole(BuiltInAgentRoleIds.AiNpc));
         }
 

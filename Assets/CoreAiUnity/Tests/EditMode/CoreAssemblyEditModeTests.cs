@@ -28,12 +28,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void StubLlmClient_PlayerChat_IsConversational()
+        public void StubLlmClient_SmartChat_IsConversational()
         {
             StubLlmClient client = new();
             LlmCompletionResult r = client.CompleteAsync(new LlmCompletionRequest
             {
-                AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
+                AgentRoleId = BuiltInAgentRoleIds.SmartChat,
                 UserPayload = "hello"
             }).GetAwaiter().GetResult();
             Assert.IsTrue(r.Ok);

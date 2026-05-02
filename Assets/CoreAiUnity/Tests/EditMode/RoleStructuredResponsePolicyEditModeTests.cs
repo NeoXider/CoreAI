@@ -176,20 +176,20 @@ end
 
         #endregion
 
-        #region PlayerChatResponsePolicy Tests
+        #region Freeform chat (PlainChat / SmartChat) policy tests
 
         [Test]
-        public void PlayerChat_ShouldNeverValidate_ReturnsFalse()
+        public void SmartChat_ShouldNeverValidate_ReturnsFalse()
         {
-            Assert.IsFalse(_composite.ShouldValidate("PlayerChat"));
+            Assert.IsFalse(_composite.ShouldValidate("SmartChat"));
         }
 
         [Test]
-        public void PlayerChat_AnyContent_ReturnsTrue()
+        public void SmartChat_AnyContent_ReturnsTrue()
         {
-            Assert.IsTrue(_composite.TryValidate("PlayerChat", "anything goes", out _));
-            Assert.IsTrue(_composite.TryValidate("PlayerChat", "", out _));
-            Assert.IsTrue(_composite.TryValidate("PlayerChat", "123", out _));
+            Assert.IsTrue(_composite.TryValidate("SmartChat", "anything goes", out _));
+            Assert.IsTrue(_composite.TryValidate("SmartChat", "", out _));
+            Assert.IsTrue(_composite.TryValidate("SmartChat", "123", out _));
         }
 
         #endregion
@@ -219,7 +219,8 @@ end
         {
             Assert.IsTrue(_composite.GetPolicy("Programmer") is ProgrammerResponsePolicy);
             Assert.IsTrue(_composite.GetPolicy("Creator") is CreatorResponsePolicy);
-            Assert.IsTrue(_composite.GetPolicy("PlayerChat") is PlayerChatResponsePolicy);
+            Assert.IsTrue(_composite.GetPolicy("SmartChat") is PlayerChatResponsePolicy);
+            Assert.IsTrue(_composite.GetPolicy("PlainChat") is PlayerChatResponsePolicy);
         }
 
         #endregion

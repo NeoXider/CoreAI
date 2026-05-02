@@ -82,7 +82,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CompleteAsync_PlayerChat_DoesNotEchoUserPayload()
+        public async Task CompleteAsync_SmartChat_DoesNotEchoUserPayload()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             OfflineLlmClient client = new(settings);
@@ -90,7 +90,7 @@ namespace CoreAI.Tests.EditMode
             string huge = "{\"telemetry\":{},\"hint\":\"hi\",\"blob\":\"" + new string('x', 5000) + "\"}";
             LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
             {
-                AgentRoleId = BuiltInAgentRoleIds.PlayerChat,
+                AgentRoleId = BuiltInAgentRoleIds.SmartChat,
                 UserPayload = huge
             });
 

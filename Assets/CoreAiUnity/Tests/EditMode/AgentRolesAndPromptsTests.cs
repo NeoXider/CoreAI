@@ -19,7 +19,8 @@ namespace CoreAI.Tests.EditMode
                     BuiltInAgentRoleIds.Programmer,
                     BuiltInAgentRoleIds.AiNpc,
                     BuiltInAgentRoleIds.CoreMechanic,
-                    BuiltInAgentRoleIds.PlayerChat,
+                    BuiltInAgentRoleIds.PlainChat,
+                    BuiltInAgentRoleIds.SmartChat,
                     BuiltInAgentRoleIds.Merchant
                 },
                 BuiltInAgentRoleIds.AllBuiltInRoles.ToArray());
@@ -119,7 +120,9 @@ namespace CoreAI.Tests.EditMode
             }).GetAwaiter().GetResult();
             Assert.IsTrue(r.Ok, roleId);
             Assert.IsFalse(string.IsNullOrEmpty(r.Content), roleId);
-            if (roleId == BuiltInAgentRoleIds.PlayerChat || roleId == BuiltInAgentRoleIds.AiNpc)
+            if (roleId == BuiltInAgentRoleIds.PlainChat ||
+                roleId == BuiltInAgentRoleIds.SmartChat ||
+                roleId == BuiltInAgentRoleIds.AiNpc)
             {
                 StringAssert.StartsWith("[stub]", r.Content);
                 StringAssert.Contains("offline", r.Content.ToLowerInvariant());

@@ -75,7 +75,7 @@ namespace CoreAI.Tests.EditMode
             SetList(manifest, "routes", new List<LlmRoleRouteEntry>
             {
                 new() { rolePattern = "Analyzer", profileId = "offline" },
-                new() { rolePattern = "PlayerChat", profileId = "server" }
+                new() { rolePattern = "SmartChat", profileId = "server" }
             });
 
             LlmClientRegistry registry = new(GameLoggerUnscopedFallback.Instance, settings);
@@ -84,8 +84,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("offline", registry.ResolveProfileIdForRole("Analyzer"));
             Assert.AreEqual(LlmExecutionMode.Offline, registry.ResolveExecutionModeForRole("Analyzer"));
-            Assert.AreEqual("server", registry.ResolveProfileIdForRole("PlayerChat"));
-            Assert.AreEqual(LlmExecutionMode.ServerManagedApi, registry.ResolveExecutionModeForRole("PlayerChat"));
+            Assert.AreEqual("server", registry.ResolveProfileIdForRole("SmartChat"));
+            Assert.AreEqual(LlmExecutionMode.ServerManagedApi, registry.ResolveExecutionModeForRole("SmartChat"));
 
             Object.DestroyImmediate(http);
             Object.DestroyImmediate(manifest);

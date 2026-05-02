@@ -95,7 +95,14 @@ namespace CoreAI.Infrastructure.Llm
             // This decorator only handles logging and HTTP 429/5xx retries.
             try
             {
+                // WebGL player: keep continuation on Unity SynchronizationContext. See note in
+                // SmartToolCallingChatClient.GetResponseAsync — ConfigureAwait(false) on the single-threaded
+                // browser stack hangs the await chain after HTTP completes, leaving chat UI stuck.
+#if UNITY_WEBGL && !UNITY_EDITOR
+                result = await _inner.CompleteAsync(request, cancellationToken);
+#else
                 result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+#endif
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -112,6 +119,15 @@ namespace CoreAI.Infrastructure.Llm
                     int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
                     _logger.Warn(
                         $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s", LogTag.Llm);
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
+                    try
+                    {
+                        result = await _inner.CompleteAsync(request, cancellationToken);
+                        exhausted = false;
+                        break;
+                    }
+#else
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
                     try
                     {
@@ -119,6 +135,7 @@ namespace CoreAI.Infrastructure.Llm
                         exhausted = false;
                         break;
                     }
+#endif
                     catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
                     {
                         // will retry again if attempts remain

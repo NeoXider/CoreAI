@@ -40,7 +40,7 @@ LLM Request → FunctionInvokingChatClient → LLMAgent
 **Default configuration:**
 ```csharp
 // AgentMemoryPolicy enables MemoryTool for most built-in roles.
-// PlayerChat is the drop-in chat role: MemoryTool is off, persistent ChatHistory is on.
+// PlainChat / SmartChat are built-in chat roles: PlainChat has MemoryTool off; SmartChat has it on; both persist ChatHistory.
 var policy = new AgentMemoryPolicy();
 
 // Disable for a specific role
@@ -67,7 +67,7 @@ policy.ConfigureRole("Creator", defaultAction: MemoryToolAction.Write);
    - Saves user + assistant messages back to the store
 
 **When to use:**
-- ✅ PlayerChat — conversation context with the player
+- ✅ PlainChat / SmartChat — conversation context with the player
 - ✅ AINpc — sequential NPC lines
 - ✅ When the model “forgets” what was in previous messages
 
@@ -166,9 +166,10 @@ These are **default policy choices**, not hard limits. The key distinction:
 | **Programmer** | ✅ | Append | ❌ | ❌ | Repair context is passed explicitly (`LuaRepairPreviousCode`, errors, version store). Full chat is usually unnecessary and can confuse code generation. |
 | **CoreMechanicAI** | ✅ | Append | ❌ | ❌ | Needs deterministic facts such as craft history/results; compact MemoryTool is better than raw dialogue. |
 | **AINpc** | ✅ | Append | ❌ | ❌ | Defaults stay conservative because NPC roles vary: bark-only NPCs need no chat history; named NPCs can opt in. |
-| **PlayerChat** | ❌ | - | ✅ | ✅ | Drop-in chat is a conversation UI; users expect visible session restore after restart. |
+| **PlainChat** | ❌ | - | ✅ | ✅ | Simple drop-in chat; session restore after restart. |
+| **SmartChat** | ✅ | Append | ✅ | ✅ | Chat + MemoryTool for durable facts; session restore after restart. |
 
-**Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` defaults `WithChatHistory` to **false** and **`PersistChatHistory` to false** unless you pass `true` (for example `PlayerChat` in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). That keeps agent roles on MemoryTool-only defaults without implying disk chat persistence.
+**Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` defaults `WithChatHistory` to **false** and **`PersistChatHistory` to false** unless you pass `true` (for example **`PlainChat`** / **`SmartChat`** entries in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). That keeps agent roles on MemoryTool-only defaults without implying disk chat persistence.
 
 Recommended opt-ins:
 
@@ -218,7 +219,7 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 // On the next request the model SEES this memory in the system prompt
 ```
 
-### Example 2: PlayerChat — dialogue context (ChatHistory)
+### Example 2: PlainChat — dialogue context (ChatHistory)
 
 ```csharp
 // LLMUnity client setup
@@ -233,7 +234,7 @@ var client = new MeaiLlmUnityClient(
 // Dialogue 1
 await orchestrator.RunTaskAsync(new AiTaskRequest
 {
-    RoleId = "PlayerChat",
+    RoleId = "PlainChat",
     Hint = "My name is Alex"
 });
 // Saved: user="My name is Alex", assistant="Nice to meet you, Alex!"
@@ -241,7 +242,7 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 // Dialogue 2 — the model REMEMBERS the name
 await orchestrator.RunTaskAsync(new AiTaskRequest
 {
-    RoleId = "PlayerChat",
+    RoleId = "PlainChat",
     Hint = "What is my name?"
 });
 // Model answers: "Your name is Alex" (sees history from up to 20 messages)
@@ -251,7 +252,7 @@ await orchestrator.RunTaskAsync(new AiTaskRequest
 
 ```csharp
 var policy = new AgentMemoryPolicy();
-policy.DisableMemoryTool("Merchant");    // PlayerChat already has MemoryTool disabled by default
+policy.DisableMemoryTool("Merchant");    // PlainChat already has MemoryTool disabled by default
 policy.SetMemoryToolForAll(false);        // Disable for ALL (ChatHistory only)
 ```
 

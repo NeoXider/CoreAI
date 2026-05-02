@@ -207,7 +207,7 @@ master.Ask("Players say the game is hard. Multiply damage in calculate_damage() 
 
 The agent **does not use tools**. It only replies with text based on the system prompt and chat history.
 
-**When to use:** `PlayerChat`, storyteller, guide NPC
+**When to use:** `PlainChat`, `SmartChat`, storyteller, guide NPC
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")
@@ -326,7 +326,7 @@ var agent = new AgentBuilder("Storyteller")
     .Build();
 
 // Persist custom chat roles across app restarts (Unity: same JSON files as MemoryTool under persistentDataPath).
-// Built-in PlayerChat already has persistent ChatHistory enabled by AgentMemoryPolicy defaults.
+// Built-in PlainChat / SmartChat already have persistent ChatHistory enabled by AgentMemoryPolicy defaults.
 var agentPersistent = new AgentBuilder("Teacher")
     .WithChatHistory(persistBetweenSessions: true)
     .Build();
@@ -358,7 +358,7 @@ var merchant = new AgentBuilder("Merchant")
 | | Memory (MemoryTool) | ChatHistory |
 |--|---------------------|-------------|
 | **Backed by** | `IAgentMemoryStore` — default Unity: `FileAgentMemoryStore` JSON field `memory` | Same store — field `chatHistoryJson` (plus in-process history for LLMUnity) |
-| **Across app restarts** | Yes, when using the default file store (or any persistent `IAgentMemoryStore`) | Yes for built-in **`PlayerChat`** by default; for custom roles use **`WithChatHistory(..., persistBetweenSessions: true)`** (and UI loads history if you use `CoreAiChatPanel`; see README_CHAT) |
+| **Across app restarts** | Yes, when using the default file store (or any persistent `IAgentMemoryStore`) | Yes for built-in **`PlainChat`** / **`SmartChat`** by default; for custom roles use **`WithChatHistory(..., persistBetweenSessions: true)`** (and UI loads history if you use `CoreAiChatPanel`; see README_CHAT) |
 | **Control** | Model via `memory` tool call | Automatic append of user/assistant messages |
 | **Use for** | Facts, purchases, quests | Conversation context |
 
@@ -937,5 +937,5 @@ This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
 ### Chat history does not work
 - Ensure `.WithChatHistory()` is called on the role
 - For **LLMUnity**, history is mirrored into `LLMAgent` during the session — if the list is empty, confirm the client was created with chat history enabled for that role
-- For **persistence after closing the game**, built-in `PlayerChat` is persistent by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false — only in-memory for that process
+- For **persistence after closing the game**, built-in **`PlainChat`** / **`SmartChat`** persist chat by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false — only in-memory for that process
 - UI restore: see **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (`Load Persisted Chat On Startup`, role policy)

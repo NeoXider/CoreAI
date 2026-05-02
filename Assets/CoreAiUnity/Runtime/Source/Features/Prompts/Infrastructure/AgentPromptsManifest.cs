@@ -14,7 +14,7 @@ namespace CoreAI.Infrastructure.Prompts
         public sealed class Entry
         {
             /// <summary>Идентификатор роли (встроенный или свой).</summary>
-            [Tooltip("Id роли: Creator, Programmer, PlayerChat или свой (например MyGame.Economist).")]
+            [Tooltip("Id роли: Creator, Programmer, PlainChat, SmartChat или свой (например MyGame.Economist).")]
             public string roleId;
 
             /// <summary>Системный промпт (текст из TextAsset).</summary>

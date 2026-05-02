@@ -124,7 +124,7 @@ Streaming is enabled when **every** layer agrees. First `false` wins.
 
 ```csharp
 // Always stream this NPC even if the project default is non-streaming
-new AgentBuilder("PlayerChat")
+new AgentBuilder("SmartChat")
     .WithSystemPrompt("You are a friendly guide.")
     .WithStreaming(true)
     .Build();
@@ -137,7 +137,7 @@ new AgentBuilder("JsonParser")
 
 // Resolve effective value
 var service = CoreAiChatService.TryCreateFromScene();
-bool useStream = service.IsStreamingEnabled("PlayerChat", uiFallback: true);
+bool useStream = service.IsStreamingEnabled("SmartChat", uiFallback: true);
 ```
 
 Covered by `CoreAiChatServiceEditModeTests`.
@@ -155,7 +155,7 @@ Covered by `CoreAiChatServiceEditModeTests`.
 Programmatic consumers can bypass the panel entirely:
 
 ```csharp
-await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerChat", ct))
+await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "SmartChat", ct))
 {
     if (!string.IsNullOrEmpty(chunk.Text)) label.text += chunk.Text;
     if (chunk.IsDone) break;
@@ -165,7 +165,7 @@ await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerCh
 Or use the static `CoreAi` singleton (see [`COREAI_SINGLETON_API.md`](COREAI_SINGLETON_API.md)) — no manual service resolution:
 
 ```csharp
-await foreach (string chunk in CoreAi.StreamAsync("Hello", "PlayerChat"))
+await foreach (string chunk in CoreAi.StreamAsync("Hello", "SmartChat"))
     label.text += chunk;
 ```
 

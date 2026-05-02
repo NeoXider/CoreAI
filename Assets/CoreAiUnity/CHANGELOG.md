@@ -2,6 +2,29 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.5.28] - 2026-05-02
+
+### Drop legacy `PlayerChat` role string
+
+- **Dependency:** **`com.nexoider.coreai 1.5.28`** — removes **`BuiltInAgentRoleIds.PlayerChat`**; use **`PlainChat`** or **`SmartChat`**.
+- **Defaults:** **`CoreAiChatConfig`** / **`CoreAiChatPanel`** fall back to **`SmartChat`** when **`RoleId`** is unset.
+- **Docs:** examples and routing tables updated (**`README_CHAT.md`**, **`COREAI_SINGLETON_API.md`**, **`QUICK_START.md`**, etc.).
+- **Edit / Play tests:** assertions and routing manifests use **`SmartChat`** instead of **`PlayerChat`**.
+- **PlayMode:** fixture renamed to **`SmartChatAndAINpcPlayModeTests`**; **`SmartChat_ClearHistory_Works`** validates **`InGameLlmChatService.ClearHistory()`** (replaces a mislabeled duplicate AINpc case).
+
+#### Package **`1.5.28`**.
+
+## [1.5.27] - 2026-05-02
+
+### Two built-in chat agents: PlainChat and SmartChat
+
+- **Dependency:** **`com.nexoider.coreai 1.5.27`** (new built-in chat roles and memory defaults).
+- **Demo chat config:** **`CoreAiChatConfig_Demo.asset`** now uses `RoleId = SmartChat` (memory-enabled chat out of the box).
+- **Docs:** updated chat-role guidance in **`Docs/AI_AGENT_ROLES.md`** and **`Runtime/Source/Features/Chat/README_CHAT.md`**.
+- **Edit Mode tests:** updated built-in role and memory-policy expectations for `PlainChat` / `SmartChat`.
+
+#### Package **`1.5.27`**.
+
 ## [1.5.26] - 2026-05-01
 
 ### Dependency: Core 1.5.26 — SSE HttpClient lifetime
@@ -101,7 +124,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - **`OfflineLlmClient`:** conversational roles use **`OfflineCustomResponse`** only (no **`[Offline] <payload>`** echo); generic offline JSON drops the **`echo`** field. Log level **Info** for offline path.
 - **Docs:** **`COREAI_SETTINGS.md`** (Offline table), **`DEVELOPER_GUIDE.md`**, **`TROUBLESHOOTING.md`** (offline/stub chat symptoms).
-- **Edit Mode tests:** **`LlmConversationalRolePolicyEditModeTests`**, **`OfflineLlmClientEditModeTests`** (PlayerChat / Teacher), **`AiOrchestratorRefactorEditModeTests`** (Chat vs non-chat failure paths, authority denied).
+- **Edit Mode tests:** **`LlmConversationalRolePolicyEditModeTests`**, **`OfflineLlmClientEditModeTests`** (PlainChat / SmartChat / Teacher), **`AiOrchestratorRefactorEditModeTests`** (Chat vs non-chat failure paths, authority denied).
 - **Dependency:** **`com.nexoider.coreai 1.5.18`**.
 
 #### Package **`1.5.18`**.
@@ -290,7 +313,7 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 
 - **`ConversationContextManagerFactories.Create`** — wired into **`RegisterCorePortable`** so **`CoreAILifetimeScope`** honours **`ICoreAISettings.EnableLlmContextCompaction`** without moving logic out of Core.
 - **`SelectingConversationContextManager`** — registered when global compaction is enabled; each request selects LLM vs deterministic rollup via **`ConversationContextBuildArgs.UseLlmContextCompaction`** (from **`AgentMemoryPolicy.RoleMemoryConfig`**).
-- **Per-role defaults:** built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlayerChat`**, **`Merchant`**, **`CoreMechanicAI`** default **on**; **`Programmer`** defaults **off** (deterministic only). Override via **`AgentBuilder.WithLlmContextCompaction(bool)`**.
+- **Per-role defaults:** built-in **`Creator`**, **`Analyzer`**, **`AINpc`**, **`PlainChat`**, **`SmartChat`**, **`Merchant`**, **`CoreMechanicAI`** default **on**; **`Programmer`** defaults **off** (deterministic only). Override via **`AgentBuilder.WithLlmContextCompaction(bool)`**.
 - **EditMode tests:** `ConversationContextCompactionEditModeTests` (factory routing, selecting wrapper, LLM skip/invoke), `LlmCompactionPerRoleEditModeTests` (orchestrator per-role gate with `SplitCountingLlm`, `AgentBuilder` API).
 - **PlayMode tests:** `LlmCompactionPerRolePlayModeTests` (same gates under Unity lifecycle with stub LLM).
 - **`ARCHITECTURE.md`** — updated context manager narrative.

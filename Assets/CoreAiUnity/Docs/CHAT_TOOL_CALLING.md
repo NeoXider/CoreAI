@@ -87,14 +87,15 @@ COREAI_PLAYMODE_LLM_BACKEND=llmunity
 Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
 ```
 
-## PlayerChat vs Merchant
+## PlainChat vs SmartChat vs Merchant
 
 | Agent | Tools | Purpose |
 |-------|-------------|------------|
-| **PlayerChat** | None | Chat helper; answers questions |
+| **PlainChat** | None by default | Simple chat helper; dialogue only |
+| **SmartChat** | memory (built-in) | Chat + durable facts via MemoryTool |
 | **Merchant** | get_inventory, memory | Shopkeeper with inventory and memory |
 
-**PlayerChat** has no tools — dialogue only.  
+**PlainChat** has no MemoryTool by default — dialogue only. **SmartChat** exposes the memory tool for long-term recall.  
 **Merchant** is an NPC with tools for grounded replies.
 
 ## Stream/non-stream parity (since 1.3.0)

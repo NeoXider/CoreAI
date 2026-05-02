@@ -12,7 +12,7 @@ namespace CoreAI.Chat
     {
         [Header("Agent")]
         [Tooltip("ID роли агента (AgentBuilder roleId). Используется для маршрутизации промптов и chat history.")]
-        [SerializeField] private string _roleId = "PlayerChat";
+        [SerializeField] private string _roleId = "SmartChat";
 
         [Header("UI — Заголовок")]
         [SerializeField] private string _headerTitle = "AI Chat";

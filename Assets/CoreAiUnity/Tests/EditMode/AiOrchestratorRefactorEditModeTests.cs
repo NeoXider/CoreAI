@@ -274,7 +274,7 @@ namespace CoreAI.Tests.EditMode
 
             string result = await orch.RunTaskAsync(new AiTaskRequest
             {
-                RoleId = "PlayerChat",
+                RoleId = "SmartChat",
                 Hint = "x",
                 SourceTag = "Chat"
             });

@@ -487,7 +487,8 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | **Analyzer** | ✅ append | ❌ | ❌ | ❌ | ✅ read | ✅ | ✅ | ✅ |
 | **CoreMechanicAI** | ✅ append | ❌ | ❌ | ❌ | ✅ read | ❌ | ❌ | ✅ |
 | **AINpc** | ❌ | ❌ | ❌ | optional | ❌ | ❌ | ❌ | ✅ |
-| **PlayerChat** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **PlainChat** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **SmartChat** | ✅ append | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Merchant** | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | **Custom** | optional | optional | optional | optional | optional | optional | optional | optional |
 

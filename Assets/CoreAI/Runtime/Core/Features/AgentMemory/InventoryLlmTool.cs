@@ -5,7 +5,7 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Обёртка InventoryTool для ILlmTool интерфейса.
-    /// Позволяет PlayerChat агенту вызывать инструмент получения инвентаря.
+    /// Позволяет игровым чат-ролям вызывать инструмент получения инвентаря (если инструмент зарегистрирован для роли).
     /// </summary>
     public sealed class InventoryLlmTool : ILlmTool
     {

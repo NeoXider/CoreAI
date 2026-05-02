@@ -82,9 +82,18 @@ namespace CoreAI.Infrastructure.Llm
                             $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}", LogTag.Llm);
                     }
 
+                    // WebGL player builds: keep the continuation on the captured Unity SynchronizationContext.
+                    // Single-threaded IL2CPP has no real thread pool — ConfigureAwait(false) here queued the
+                    // resumption to TaskScheduler.Default, where it never got pumped, so the chat panel's
+                    // typing dots stayed up forever even though the HTTP response had already arrived.
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    MEAI.ChatResponse response = await _innerClient
+                        .GetResponseAsync(messages, options, cancellationToken);
+#else
                     MEAI.ChatResponse response = await _innerClient
                         .GetResponseAsync(messages, options, cancellationToken)
                         .ConfigureAwait(false);
+#endif
 
                     List<MEAI.AIContent> allContents = FlattenAssistantContents(response);
 
@@ -130,9 +139,14 @@ namespace CoreAI.Infrastructure.Llm
                             $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})", LogTag.Llm);
                     }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    ToolExecutionPolicy.BatchToolCallResult batch =
+                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken);
+#else
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken)
                             .ConfigureAwait(false);
+#endif
 
                     if (policy.IsMaxErrorsReached)
                     {

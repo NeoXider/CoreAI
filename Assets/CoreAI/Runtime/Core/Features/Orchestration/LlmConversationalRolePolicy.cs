@@ -19,7 +19,8 @@ namespace CoreAI.Ai
 
             string trimmed = roleId.Trim();
 
-            if (trimmed.Equals(BuiltInAgentRoleIds.PlayerChat, StringComparison.OrdinalIgnoreCase) ||
+            if (trimmed.Equals(BuiltInAgentRoleIds.PlainChat, StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Equals(BuiltInAgentRoleIds.SmartChat, StringComparison.OrdinalIgnoreCase) ||
                 trimmed.Equals(BuiltInAgentRoleIds.AiNpc, StringComparison.OrdinalIgnoreCase))
             {
                 return true;

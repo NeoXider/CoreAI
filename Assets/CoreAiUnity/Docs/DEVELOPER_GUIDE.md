@@ -179,7 +179,7 @@ The system prompt sent to the model is **not** the literal string you pass to `A
 | Layer | Source | Configured by | Purpose |
 |------|--------|---------------|---------|
 | **1 — Universal Prefix** | `ICoreAISettings.UniversalSystemPromptPrefix` (default: 4 baseline rules) | `CoreAISettingsAsset` Inspector → **General → Universal Prompt Prefix** | Project-wide guard rails that apply to every role (style, safety, output format). |
-| **2 — Role base prompt** | `AgentPromptsManifest` ScriptableObject **OR** `Resources/Prompts/{RoleId}.txt` **OR** built-in fallback string for `BuiltInAgentRoleIds` | `AgentPromptsManifest` asset | Stable per-role instructions (Creator, Programmer, PlayerChat, Merchant, etc.). |
+| **2 — Role base prompt** | `AgentPromptsManifest` ScriptableObject **OR** `Resources/Prompts/{RoleId}.txt` **OR** built-in fallback string for `BuiltInAgentRoleIds` | `AgentPromptsManifest` asset | Stable per-role instructions (Creator, Programmer, PlainChat, SmartChat, Merchant, etc.). |
 | **3 — Builder additional prompt** | `AgentBuilder.WithSystemPrompt(...)` text | Code | Per-instance refinement (this specific NPC, this scene-bound storyteller). |
 
 **Composition order:** `Layer 1 + "\n\n" + Layer 2 + "\n\n" + Layer 3`. Each layer is optional. If Layer 2 is missing for a custom role, only Layers 1 + 3 are used.

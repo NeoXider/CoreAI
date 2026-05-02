@@ -23,8 +23,11 @@ namespace CoreAI.Ai
         /// <summary>Ядро правил тайтла (мета-логика).</summary>
         public const string CoreMechanic = "CoreMechanicAI";
 
-        /// <summary>Игровой чат с игроком (как с ассистентом), без обязательного JSON в ответе.</summary>
-        public const string PlayerChat = "PlayerChat";
+        /// <summary>Простой чат с игроком без MemoryTool по умолчанию (история диалога сохраняется).</summary>
+        public const string PlainChat = "PlainChat";
+
+        /// <summary>Умный чат с игроком: чат + MemoryTool по умолчанию.</summary>
+        public const string SmartChat = "SmartChat";
 
         /// <summary>Торговец/NPC с инвентарём для продажи предметов игроку.</summary>
         public const string Merchant = "Merchant";
@@ -43,7 +46,8 @@ namespace CoreAI.Ai
             Programmer,
             AiNpc,
             CoreMechanic,
-            PlayerChat,
+            PlainChat,
+            SmartChat,
             Merchant
         };
 

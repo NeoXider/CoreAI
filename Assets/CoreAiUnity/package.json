@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.5.26",
+  "version": "1.5.28",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.26: Core 1.5.26 (SSE HttpClient lifetime fix). v1.5.25: UnityWebRequest WebGL transport, guard, docs.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.5.28: PlayerChat removed from API — PlainChat/SmartChat only. v1.5.27: role split + demo SmartChat.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.5.26"
+    "com.nexoider.coreai": "1.5.28"
   }
 }

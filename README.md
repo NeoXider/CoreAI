@@ -107,12 +107,12 @@ This generates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with a pre-wired
 
 ```csharp
 // Same stack as the panel — pick your style:
-await foreach (var chunk in CoreAi.StreamAsync("Hello", "PlayerChat"))
+await foreach (var chunk in CoreAi.StreamAsync("Hello", "SmartChat"))
     Debug.Log(chunk);
 
 // Or explicit service (e.g. from DI in tests):
 var service = CoreAiChatService.TryCreateFromScene();
-await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "PlayerChat"))
+await foreach (var chunk in service.SendMessageStreamingAsync("Hello", "SmartChat"))
     if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
 ```
 
@@ -314,7 +314,7 @@ The repository consists of **two packages**:
 ┌─────────────────────────────────────────────────────────────┐
 │                   AI Agents                                  │
 │  🛒 Merchant  📜 Programmer  🎨 Creator  📊 Analyzer        │
-│  🗡️ CoreMechanic  💬 PlayerChat  + Your custom ones!        │
+│  🗡️ CoreMechanic  💬 SmartChat  + Your custom ones!        │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐

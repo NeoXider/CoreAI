@@ -88,7 +88,7 @@ Then **`ILlmClient` = OpenAiChatLlmClient**; scene `LLMAgent` is **not** used fo
 
 Chain: manifest (if set) → `Resources/AgentPrompts/System` → **built-in** strings in `BuiltInDefaultAgentSystemPromptProvider` / `BuiltInAgentSystemPromptTexts` (already registered in `RegisterAgentPrompts`).
 
-Roles: **Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, PlayerChat** — see `AgentRolesAndPromptsTests`.
+Roles: **Creator, Analyzer, Programmer, AINpc, CoreMechanicAI, PlainChat, SmartChat** — see `AgentRolesAndPromptsTests`.
 
 ---
 

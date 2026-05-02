@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -70,7 +71,6 @@ namespace CoreAI.Chat
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // true после первого видимого текста
-        private bool _streamTerminalChunkReceived;
 
         // === Typing animation ===
         private IVisualElementScheduledItem _typingAnimation;
@@ -601,7 +601,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            string roleId = config.RoleId ?? "PlayerChat";
+            string roleId = config.RoleId ?? "SmartChat";
             int max = config.MaxPersistedMessagesForUi;
             if (!_chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max))
             {
@@ -986,7 +986,7 @@ namespace CoreAI.Chat
                 return null;
             }
 
-            string roleId = config?.RoleId ?? "PlayerChat";
+            string roleId = config?.RoleId ?? "SmartChat";
             if (!_isSending)
             {
                 _isSending = true;
@@ -1014,7 +1014,7 @@ namespace CoreAI.Chat
             }
             catch (OperationCanceledException)
             {
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 FinishStreaming();
                 HideTypingIndicator();
                 if (_stopRequestedByUser)
@@ -1030,7 +1030,7 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 FinishStreaming();
                 Debug.LogError($"[CoreAiChatPanel] Error: {ex.Message}");
                 AddMessage((config?.ErrorMessagePrefix ?? "Error: ") + ex.Message, isUser: false);
@@ -1040,7 +1040,7 @@ namespace CoreAI.Chat
             {
                 try
                 {
-                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -1115,7 +1115,6 @@ namespace CoreAI.Chat
             ShowTypingIndicator();
             ResetThinkFilter();
             _streamingStartedVisible = false;
-            _streamTerminalChunkReceived = false;
 
             // Yield so the UI thread can repaint (stop affordance) before ultra-fast stubs finish the enumerator.
             await Task.Yield();
@@ -1128,13 +1127,8 @@ namespace CoreAI.Chat
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
 #if UNITY_WEBGL
-                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, ct);
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
 #endif
-                    if (chunk.IsDone)
-                    {
-                        _streamTerminalChunkReceived = true;
-                    }
-
                     if (!string.IsNullOrEmpty(chunk.Error))
                     {
                         if (_stopRequestedByUser &&
@@ -1181,7 +1175,7 @@ namespace CoreAI.Chat
                 }
 
 #if UNITY_WEBGL
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, ct);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
 #endif
                 OnResponseReceived(fullResponse);
                 OnAiResponseCompleted?.Invoke(fullResponse);
@@ -1191,7 +1185,7 @@ namespace CoreAI.Chat
             {
                 try
                 {
-                    await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -1200,7 +1194,6 @@ namespace CoreAI.Chat
 
                 FinishStreaming();
                 HideTypingIndicator();
-                _streamTerminalChunkReceived = false;
                 UpdateSendButtonVisualState();
             }
         }
@@ -1212,7 +1205,7 @@ namespace CoreAI.Chat
             try
             {
                 string response = await _chatService.SendMessageAsync(request, ct);
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 HideTypingIndicator();
 
                 if (string.IsNullOrEmpty(response))
@@ -1237,7 +1230,15 @@ namespace CoreAI.Chat
             }
             finally
             {
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                try
+                {
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] SendNonStreamingAsync finally: UI thread hop: {ex.Message}");
+                }
+
                 HideTypingIndicator();
             }
         }
@@ -1360,7 +1361,7 @@ namespace CoreAI.Chat
             try
             {
                 _stopRequestedByUser = true;
-                string roleId = config?.RoleId ?? "PlayerChat";
+                string roleId = config?.RoleId ?? "SmartChat";
 
                 // Cancel orchestrator tasks first
                 try
@@ -1577,7 +1578,7 @@ namespace CoreAI.Chat
 
                 if (MessageScroll != null) MessageScroll.Clear();
 
-                string roleId = config?.RoleId ?? "PlayerChat";
+                string roleId = config?.RoleId ?? "SmartChat";
 
                 // Используем универсальный API для очистки контекста (если scope доступен)
                 try

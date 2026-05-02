@@ -5,6 +5,7 @@ using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
@@ -124,11 +125,9 @@ namespace CoreAI.Chat
                 }
 
                 string result = await _orchestrator.RunTaskAsync(request, effectiveCt);
-                // Orchestrator + LLM stack use ConfigureAwait(false); on WebGL (and some player
-                // builds) continuations can otherwise resume without Unity's player loop context,
-                // so UI Toolkit callers see "LLM OK" logs but no bubble. Always marshal back here
-                // (no-op if already on main thread).
-                await UniTask.SwitchToMainThread(PlayerLoopTiming.Update, CancellationToken.None);
+                // Orchestrator + LLM stack use ConfigureAwait(false); marshal to player loop for UI.
+                // WebGL player: see CoreAiWebGlUiThreadMarshaling (Editor WebGL keeps full switch).
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 return result ?? "";
             }
             finally

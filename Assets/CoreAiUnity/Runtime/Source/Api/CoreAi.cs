@@ -18,14 +18,14 @@ namespace CoreAI
     /// <para><b>Quick start.</b> Add <see cref="CoreAILifetimeScope"/> to a scene, then:</para>
     /// <code>
     /// // Buffered reply (always await; do not use .Result/.Wait on Unity’s main thread):
-    /// string answer = await CoreAi.AskAsync("Hello!", roleId: "PlayerChat");
+    /// string answer = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
     ///
     /// // Streaming string chunks:
-    /// await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "PlayerChat"))
+    /// await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "SmartChat"))
     ///     label.text += chunk;
     ///
     /// // Smart path (streaming if enabled in settings / agent / UI):
-    /// await CoreAi.SmartAskAsync("Question", "PlayerChat", onChunk: c => label.text += c);
+    /// await CoreAi.SmartAskAsync("Question", "SmartChat", onChunk: c => label.text += c);
     ///
     /// // Full orchestrator (memory, authority, metrics, publish):
     /// var task = new AiTaskRequest { RoleId = "Creator", Hint = "Emit a JSON command" };
@@ -70,7 +70,7 @@ namespace CoreAI
         /// <remarks>Use <c>await</c> only; blocking the Unity main thread via <c>.Result</c>/<c>.Wait()</c> risks deadlocks with MEAI marshaling.</remarks>
         public static async Task<string?> AskAsync(
             string userMessage,
-            string roleId = "PlayerChat",
+            string roleId = "SmartChat",
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -82,7 +82,7 @@ namespace CoreAI
         /// </summary>
         public static async IAsyncEnumerable<string> StreamAsync(
             string userMessage,
-            string roleId = "PlayerChat",
+            string roleId = "SmartChat",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -110,7 +110,7 @@ namespace CoreAI
         /// </summary>
         public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
             string userMessage,
-            string roleId = "PlayerChat",
+            string roleId = "SmartChat",
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -138,7 +138,7 @@ namespace CoreAI
         /// </summary>
         public static Task<string?> SmartAskAsync(
             string userMessage,
-            string roleId = "PlayerChat",
+            string roleId = "SmartChat",
             Action<string>? onChunk = null,
             bool? uiStreamingOverride = null,
             CancellationToken cancellationToken = default)

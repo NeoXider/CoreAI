@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -16,9 +16,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode : PlayerChat      InGameLlmChatService.
+    /// PlayMode: <see cref="InGameLlmChatService"/> with built-in <see cref="BuiltInAgentRoleIds.SmartChat"/> role.
     /// </summary>
-    public sealed class PlayerChatPlayModeTests
+    public sealed class SmartChatAndAINpcPlayModeTests
     {
         private sealed class InMemoryStore : IAgentMemoryStore
         {
@@ -99,9 +99,9 @@ namespace CoreAI.Tests.PlayMode
 
         [UnityTest]
         [Timeout(300000)]
-        public IEnumerator PlayerChat_RespondsToGreeting()
+        public IEnumerator SmartChat_RespondsToGreeting()
         {
-            Debug.Log("[PlayerChat] === TEST START ===");
+            Debug.Log("[SmartChat] === TEST START ===");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -117,7 +117,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
 
-                Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
+                Debug.Log($"[SmartChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
@@ -130,20 +130,20 @@ namespace CoreAI.Tests.PlayMode
 
                 InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
-                Debug.Log($"[PlayerChat] Sending: 'Hello, how are you?'");
+                Debug.Log("[SmartChat] Sending: 'Hello, how are you?'");
                 Task<LlmCompletionResult> task = chatService.SendPlayerMessageAsync("Hello, how are you?");
                 yield return PlayModeTestAwait.WaitTask(task, 300f, "Send message 1");
                 LlmCompletionResult result = task.Result;
 
-                Debug.Log("[PlayerChat] ----------------------------------------");
-                Debug.Log($"[PlayerChat] Role: {capturing.LastRoleId}");
+                Debug.Log("[SmartChat] ----------------------------------------");
+                Debug.Log($"[SmartChat] Role: {capturing.LastRoleId}");
                 Debug.Log(
-                    $"[PlayerChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
-                Debug.Log($"[PlayerChat] Response: {result.Content}");
-                Debug.Log("[PlayerChat] ----------------------------------------");
+                    $"[SmartChat] System Prompt: {capturing.LastSystemPrompt?.Substring(0, Math.Min(100, capturing.LastSystemPrompt?.Length ?? 0))}...");
+                Debug.Log($"[SmartChat] Response: {result.Content}");
+                Debug.Log("[SmartChat] ----------------------------------------");
 
                 Assert.IsTrue(result.Ok, $"LLM call failed: {result.Error}");
-                Assert.AreEqual(BuiltInAgentRoleIds.PlayerChat, capturing.LastRoleId);
+                Assert.AreEqual(BuiltInAgentRoleIds.SmartChat, capturing.LastRoleId);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "Response should not be empty");
 
                 //        ( just tool call result)
@@ -151,8 +151,8 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsTrue(hasTextContent, "Response should contain text");
 
                 Debug.Log(
-                    $"[PlayerChat] PlayerChat responded with: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
-                Debug.Log("[PlayerChat] TEST PASSED");
+                    $"[SmartChat] Response preview: {result.Content.Substring(0, Math.Min(50, result.Content.Length))}...");
+                Debug.Log("[SmartChat] TEST PASSED");
             }
             finally
             {
@@ -162,9 +162,9 @@ namespace CoreAI.Tests.PlayMode
 
         [UnityTest]
         [Timeout(300000)]
-        public IEnumerator PlayerChat_MaintainsHistory()
+        public IEnumerator SmartChat_MaintainsHistory()
         {
-            Debug.Log("[PlayerChat] === TEST START ===");
+            Debug.Log("[SmartChat] === TEST START ===");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -179,7 +179,7 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
 
-                Debug.Log($"[PlayerChat] Backend: {handle.ResolvedBackend}");
+                Debug.Log($"[SmartChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
@@ -215,8 +215,8 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(foundAdventurer, "The chat history should contain the string 'Adventurer'");
 
-                Debug.Log($"[PlayerChat] History maintained: {chatService.HistoryPairCount} pairs");
-                Debug.Log("[PlayerChat] TEST PASSED");
+                Debug.Log($"[SmartChat] History maintained: {chatService.HistoryPairCount} pairs");
+                Debug.Log("[SmartChat] TEST PASSED");
             }
             finally
             {
@@ -226,9 +226,9 @@ namespace CoreAI.Tests.PlayMode
 
         [UnityTest]
         [Timeout(300000)]
-        public IEnumerator PlayerChat_ClearHistory_Works()
+        public IEnumerator SmartChat_ClearHistory_Works()
         {
-            Debug.Log("[PlayerChat] === TEST START ===");
+            Debug.Log("[SmartChat] === TEST START (ClearHistory) ===");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.7f, 120,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -243,52 +243,30 @@ namespace CoreAI.Tests.PlayMode
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
 
-                Debug.Log($"[AINpc] Backend: {handle.ResolvedBackend}");
+                Debug.Log($"[SmartChat] Backend: {handle.ResolvedBackend}");
 
                 InMemoryStore store = new();
                 CapturingLlmClient capturing = new(handle.WrapWithMemoryStore(store));
-                ListSink sink = new();
 
                 BuiltInDefaultAgentSystemPromptProvider systemPrompts = new();
-                AiPromptComposer composer = new(
-                    systemPrompts,
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
+                InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
-                AgentMemoryPolicy npcChatPolicy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(npcChatPolicy, BuiltInAgentRoleIds.AiNpc);
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(),
-                    capturing,
-                    sink,
-                    new SessionTelemetryCollector(),
-                    composer,
-                    store,
-                    npcChatPolicy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                Task<LlmCompletionResult> t1 = chatService.SendPlayerMessageAsync("First line");
+                yield return PlayModeTestAwait.WaitTask(t1, 300f, "First message");
+                LlmCompletionResult r1 = t1.Result;
+                Assert.IsTrue(r1.Ok, r1.Error);
+                Assert.AreEqual(1, chatService.HistoryPairCount);
 
-                Debug.Log("[AINpc] Requesting NPC dialogue...");
-                Task t = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.AiNpc,
-                    Hint = "A traveler enters the tavern. Say greeting."
-                });
+                chatService.ClearHistory();
+                Assert.AreEqual(0, chatService.HistoryPairCount);
 
-                yield return PlayModeTestAwait.WaitTask(t, 300f, "AINpc dialogue");
+                Task<LlmCompletionResult> t2 = chatService.SendPlayerMessageAsync("After clear");
+                yield return PlayModeTestAwait.WaitTask(t2, 300f, "After clear");
+                LlmCompletionResult r2 = t2.Result;
+                Assert.IsTrue(r2.Ok, r2.Error);
+                Assert.AreEqual(1, chatService.HistoryPairCount);
 
-                Debug.Log("[AINpc] ----------------------------------------");
-                Debug.Log($"[AINpc] Role: {capturing.LastRoleId}");
-                Debug.Log($"[AINpc] Response: {capturing.LastResult.Content}");
-                Debug.Log("[AINpc] ----------------------------------------");
-
-                Assert.IsTrue(capturing.LastResult.Ok, $"LLM call failed: {capturing.LastResult.Error}");
-                Assert.AreEqual(BuiltInAgentRoleIds.AiNpc, capturing.LastRoleId);
-                Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));
-
-                // AINpcResponsePolicy validates: non-empty text passes
-                Debug.Log("[AINpc] AINpc generated dialogue");
-                Debug.Log("[AINpc] TEST PASSED");
+                Debug.Log("[SmartChat] ClearHistory test PASSED");
             }
             finally
             {

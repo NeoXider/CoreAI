@@ -16,7 +16,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiChatConfig config = ScriptableObject.CreateInstance<CoreAiChatConfig>();
 
-            Assert.AreEqual("PlayerChat", config.RoleId);
+            Assert.AreEqual("SmartChat", config.RoleId);
             Assert.AreEqual("AI Chat", config.HeaderTitle);
             Assert.IsFalse(string.IsNullOrEmpty(config.WelcomeMessage));
             Assert.IsTrue(config.EnableStreaming, "стриминг по умолчанию включён");

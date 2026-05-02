@@ -80,7 +80,7 @@ Choose `ClientLimited` when you need local request or prompt-size limits for pro
 
 Choose `ServerManagedApi` when the Unity client should call your backend proxy and the backend owns provider credentials. This is the recommended production path for WebGL, multiplayer, classrooms, and shared API budgets.
 
-For mixed setups, assign different modes per role in `LlmRoutingManifest`; for example `PlayerChat → ServerManagedApi`, `Analyzer → ClientLimited`, `Creator → LocalModel`.
+For mixed setups, assign different modes per role in `LlmRoutingManifest`; for example `SmartChat → ServerManagedApi`, `Analyzer → ClientLimited`, `Creator → LocalModel`.
 
 ---
 
@@ -124,10 +124,10 @@ If your scene already has `CoreAILifetimeScope` (step 3), you can skip `AgentBui
 
 ```csharp
 // Async ask:
-string reply = await CoreAi.AskAsync("Hello!", roleId: "PlayerChat");
+string reply = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
 
 // Streaming (live UI):
-await foreach (string chunk in CoreAi.StreamAsync("Tell me a joke", "PlayerChat"))
+await foreach (string chunk in CoreAi.StreamAsync("Tell me a joke", "SmartChat"))
     label.text += chunk;
 
 // Full orchestrator pipeline (history + authority + publish command):

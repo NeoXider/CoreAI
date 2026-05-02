@@ -63,7 +63,7 @@ Use `LlmRoutingManifest` when one scene needs multiple modes:
 
 | Role | Example profile |
 |------|-----------------|
-| `PlayerChat` | `ServerManagedApi` for safe production chat |
+| `SmartChat` / `PlainChat` | `ServerManagedApi` (or split per role) for production chat |
 | `Analyzer` | `Offline` or `ClientLimited` for cheaper background checks |
 | `Creator` | `LocalModel` for local prototyping |
 | `*` | fallback profile |
@@ -256,7 +256,7 @@ When **there is no LLM connection** — the system returns a stub response.
 | **Creator** | `{"created": false, "note": "offline"}` |
 | **CoreMechanicAI** | `{"result": "ok", "value": 0, "note": "offline"}` |
 | **Analyzer** | `{"recommendations": [], "status": "offline"}` |
-| **AINpc / PlayerChat / roles with `teacher` / role id ending with `chat` (but not `Merchant`)** | **One line**: **Offline Custom Response** (default: `Offline mode: LLM unavailable`). Does **not** echo the serialized user JSON (telemetry/system-sized payloads). Configure under **Custom response** below. |
+| **AINpc / PlainChat / SmartChat / roles with `teacher` / role id ending with `chat` (but not `Merchant`)** | **One line**: **Offline Custom Response** (default: `Offline mode: LLM unavailable`). Does **not** echo the serialized user JSON (telemetry/system-sized payloads). Configure under **Custom response** below. |
 | **`StubLlmClient`** (Auto fallback without a model) | Same conversational roles get `[stub] Offline — LLM unavailable (stub).` instead of piping huge JSON replies. |
 | **Other roles** | `{"status":"offline","role":"<roleId>"}` (no `echo` field) |
 

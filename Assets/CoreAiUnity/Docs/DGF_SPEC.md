@@ -99,7 +99,7 @@
 | `Source/Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe bridge, see §8 |
 | `Source/Features/Prompts/Infrastructure/` | Manifest and Resources prompt providers |
 | `Source/Features/Dashboard/Presentation/` | IMGUI dashboard, permissions asset |
-| `Source/Features/PlayerChat/Presentation/` | In-game chat panel |
+| `Source/Features/PlayerChat/Presentation/` | In-game chat UI (`CoreAiChatPanel` / legacy folder name; built-in roles **`PlainChat`** / **`SmartChat`**) |
 | `Source/Features/Scheduling/Presentation/` | Scheduled task triggers |
 
 ### 4.1 “Default behavior”

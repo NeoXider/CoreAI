@@ -87,14 +87,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void AgentMemoryPolicy_Default_PlayerChat_PersistsChatHistory()
+        public void AgentMemoryPolicy_Default_PlainChat_PersistsChatHistory_WithoutMemoryTool()
         {
             AgentMemoryPolicy policy = new();
-            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.PlayerChat);
+            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.PlainChat);
 
-            Assert.IsFalse(config.UseMemoryTool, "PlayerChat should not expose MemoryTool by default");
-            Assert.IsTrue(config.WithChatHistory, "Drop-in chat should keep conversation context by default");
-            Assert.IsTrue(config.PersistChatHistory, "Drop-in chat should restore session after app restart by default");
+            Assert.IsFalse(config.UseMemoryTool, "PlainChat should not expose MemoryTool by default");
+            Assert.IsTrue(config.WithChatHistory, "PlainChat should keep conversation context by default");
+            Assert.IsTrue(config.PersistChatHistory, "PlainChat should restore session after app restart by default");
+        }
+
+        [Test]
+        public void AgentMemoryPolicy_Default_SmartChat_UsesMemoryTool_And_PersistsChatHistory()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.SmartChat);
+
+            Assert.IsTrue(config.UseMemoryTool, "SmartChat should expose MemoryTool by default");
+            Assert.AreEqual(MemoryToolAction.Append, config.DefaultAction);
+            Assert.IsTrue(config.WithChatHistory, "SmartChat should keep conversation context by default");
+            Assert.IsTrue(config.PersistChatHistory, "SmartChat should restore session after app restart by default");
         }
 
         [Test]

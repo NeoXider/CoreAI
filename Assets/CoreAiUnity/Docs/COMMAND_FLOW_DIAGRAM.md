@@ -372,7 +372,7 @@ sequenceDiagram
         else Lua success
             Lua-->>Router: LuaExecutionSucceeded
         end
-    else Chat agent (PlayerChat / AINpc)
+    else Chat agent (PlainChat / SmartChat / AINpc)
         Orch-->>Game: Text response
         Game-->>Player: Show in UI
     end

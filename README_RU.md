@@ -110,12 +110,12 @@ CoreAI → Setup → Create Chat Demo Scene
 
 ```csharp
 // Тот же стек, что у панели — выбери удобный API:
-await foreach (var chunk in CoreAi.StreamAsync("Привет", "PlayerChat"))
+await foreach (var chunk in CoreAi.StreamAsync("Привет", "SmartChat"))
     Debug.Log(chunk);
 
 // Или явно через сервис (например в тестах):
 var service = CoreAiChatService.TryCreateFromScene();
-await foreach (var chunk in service.SendMessageStreamingAsync("Привет", "PlayerChat"))
+await foreach (var chunk in service.SendMessageStreamingAsync("Привет", "SmartChat"))
     if (!string.IsNullOrEmpty(chunk.Text)) Debug.Log(chunk.Text);
 ```
 
@@ -528,7 +528,7 @@ Unity → Window → General → Test Runner
 ┌─────────────────────────────────────────────────────────────┐
 │                   AI Agents                                  │
 │  🛒 Merchant  📜 Programmer  🎨 Creator  📊 Analyzer        │
-│  🗡️ CoreMechanic  💬 PlayerChat  + Ваши кастомные!          │
+│  🗡️ CoreMechanic  💬 SmartChat  + Ваши кастомные!          │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
