@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
