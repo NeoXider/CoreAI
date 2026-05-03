@@ -129,7 +129,10 @@ namespace CoreAI.Composition
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
-#if !UNITY_WEBGL
+            // WebGL player: avoid synchronous File.* on persistentDataPath (IndexedDB stalls).
+            // Editor: keep FileAgentMemoryStore even when the active build target is WebGL so Play Mode /
+            // tests match Standalone behaviour (Null store would make chat history + memory appear broken).
+#if !UNITY_WEBGL || UNITY_EDITOR
             builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
                 .As<IAgentMemoryStore>()
                 .As<IConversationTranscriptStore>();

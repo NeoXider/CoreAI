@@ -2,17 +2,26 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.3] - 2026-05-03
+
+### Editor — file-backed agent memory when build target is WebGL
+
+- **`CoreAILifetimeScope`** — register **`FileAgentMemoryStore`** when **`!UNITY_WEBGL || UNITY_EDITOR`**, so **Editor Play Mode** keeps persisted chat / `IAgentMemoryStore` behaviour while the active **Build Target** is **WebGL** (previously **`UNITY_WEBGL`** forced **`NullAgentMemoryStore`**, which broke history and host tests).
+- **WebGL player** unchanged: **`NullAgentMemoryStore`** + **`NullConversationTranscriptStore`** (avoid synchronous `File` on IndexedDB).
+- **Dependency:** **`com.nexoider.coreai` 1.6.3** (lockstep semver; portable assembly unchanged).
+
+#### Package **`1.6.3`**.
+
 ## [1.6.2] - 2026-05-03
 
 ### Reliability, tests, chat session coverage
 
-- **`UnityMainThreadLlmAsyncMarshaler`** — **`RuntimeInitializeOnLoadMethod` (BeforeSceneLoad / AfterSceneLoad)** primes the Editor **`Application.isPlaying` mirror** before the first **`onBeforeRender`** (reduces stale mirror during Play Mode). Worker-thread **inline** when mirror **`!= 1`** is preserved so **Edit Mode** tests using **`Task.Run(...).Wait()`** on the main thread (e.g. **`SmartToolCallingChatClientEditModeTests`**) do not deadlock on **`SwitchToMainThread`**.
+- **`UnityMainThreadLlmAsyncMarshaler`** — **`RuntimeInitializeOnLoadMethod` (BeforeSceneLoad / AfterSceneLoad)** primes the Editor **`Application.isPlaying` mirror**; off the mirrored main thread, **inline** tool execution runs only when the mirror reads **`0`** (confirmed Edit idle), fixing Play Mode tool bodies executing on the CLR thread pool.
 - **Play Mode:** **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** — initial **`yield return null`** so the mirror can refresh before the thread-pool assertion.
 - **CraftingMemory:** **`CraftingMemoryViaLlmUnityPlayModeTests`** — determinism **`Assert`**, craft-4 prompt injects the real weapon name, **`ExtractCraftInfo`** prefers memory-backed craft lines; **`CraftingMemoryItemNameExtractor`** — pattern for **`**Weapon crafted**: …`** prose.
 - **CraftingMemory OpenAI harness:** prompts require a **numeric** `create_item` quality literal; **`AssertExecuteLuaUsesNumericQualityIfPresent`** in **`ExtractCraftInfo`** and the two-craft scenario.
 - **Edit Mode:** **`CoreAiChatServiceEditModeTests`** — **`TryGetPersistedChatHistory`** (empty / tail / no store) and **`PersistedChat_UiFormattingRoundTrip_MatchesCoreAiChatPanelRules`** (same path as **`CoreAiChatPanel.TryAppendPersistedChatHistoryFromStore`** via service + **`FormatPersistedMessageForUi`**).
 - **Edit Mode:** **`ConversationContextCompactionEditModeTests`** — **`DeterministicManager_MaxRolledSummaryTokens_TruncatesBeforeSave`** and **`DeterministicManager_MaxRolledSummaryTokens_TruncatesStoredOnlySnapshot`** assert **`MaxRolledSummaryTokens`** truncation and **`InMemoryConversationSummaryStore`** parity for rolled summaries.
-- **Edit Mode:** **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** — **`FileAgentMemoryStore`** chat lines survive a new store instance after **`RunTaskAsync`** when **`PersistChatHistory`** is on.
 - **Docs:** **`README_CHAT.md`** (session-restore test pointers); **`ARCHITECTURE.md`** (v1.6.2 marshaler note).
 - **Dependency:** **`com.nexoider.coreai 1.6.2`** (lockstep; no portable code changes in this drop).
 

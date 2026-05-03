@@ -1,5 +1,11 @@
 # Changelog
 
+## [v1.6.3] — 2026-05-03
+
+### Lockstep with coreaiunity 1.6.3 (Unity-only)
+
+- **Semver:** **`1.6.3`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity host **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore` in Editor even when the active build target is WebGL** (`#if !UNITY_WEBGL || UNITY_EDITOR`).
+
 ## [v1.6.2] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.2

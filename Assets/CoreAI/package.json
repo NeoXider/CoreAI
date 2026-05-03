@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.6.2: lockstep with coreaiunity; no portable API changes in this drop (see CHANGELOG).",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.6.3: semver lockstep with coreaiunity 1.6.3 (no portable API changes; see CHANGELOG).",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
