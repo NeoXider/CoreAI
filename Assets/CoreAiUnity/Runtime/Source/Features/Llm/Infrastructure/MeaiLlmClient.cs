@@ -41,6 +41,12 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private string _currentRoleId = "";
 
+        /// <summary>
+        /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI and
+        /// <c>LLM ◀ (stream) chunks=</c> reflect incremental delivery (OpenRouter often batches the full reply).
+        /// </summary>
+        private const int LiveUiStreamMaxCharsPerChunk = 48;
+
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings, IAgentMemoryStore? memoryStore = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
@@ -421,10 +427,18 @@ namespace CoreAI.Infrastructure.Llm
                 List<MEAI.FunctionCallContent> nativeToolCalls = new();
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
+                // Live token streaming is safe when no tools are declared, or when AIFunctions are actually bound.
+                // If the policy lists tools but BuildAIFunctions produced zero (e.g. missing memory store), buffer
+                // until TryExtractToolCallsFromText can strip text-shaped tool JSON (see ToolCallExtractionParity tests).
+                bool streamLiveTokens =
+                    (request.Tools == null || request.Tools.Count == 0) ||
+                    ((request.Tools?.Count ?? 0) > 0 && aiTools.Count > 0);
+                bool streamedVisibleToConsumer = false;
 
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
                                    .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (update.Contents != null)
                     {
                         foreach (MEAI.AIContent content in update.Contents)
@@ -440,7 +454,7 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
 
-                    string raw = update.Text;
+                    string raw = GetStreamingUpdateText(update);
                     if (string.IsNullOrEmpty(raw)) continue;
 
                     string visible = thinkFilter.ProcessChunk(raw);
@@ -449,13 +463,35 @@ namespace CoreAI.Infrastructure.Llm
                     chunkCount++;
                     iterationVisible.Append(visible);
                     visibleChunks.Add(visible);
+                    if (streamLiveTokens)
+                    {
+                        foreach (string part in SplitForLiveUiStreaming(visible, LiveUiStreamMaxCharsPerChunk))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return new LlmStreamChunk { Text = part };
+                        }
+
+                        streamedVisibleToConsumer = true;
+                    }
                 }
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 string tail = thinkFilter.Flush();
                 if (!string.IsNullOrEmpty(tail))
                 {
                     iterationVisible.Append(tail);
                     visibleChunks.Add(tail);
+                    if (streamLiveTokens)
+                    {
+                        foreach (string part in SplitForLiveUiStreaming(tail, LiveUiStreamMaxCharsPerChunk))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return new LlmStreamChunk { Text = part };
+                        }
+
+                        streamedVisibleToConsumer = true;
+                    }
                 }
 
                 string visibleText = iterationVisible.ToString();
@@ -469,8 +505,8 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming detected {nativeToolCalls.Count} NATIVE tool call(s), executing...");
                     }
 
-                    // Emit any visible text that preceded the tool calls
-                    if (!string.IsNullOrWhiteSpace(visibleText))
+                    // Emit any visible text that preceded the tool calls (skip if already streamed token-by-token).
+                    if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(visibleText))
                     {
                         yield return new LlmStreamChunk { Text = visibleText };
                     }
@@ -524,7 +560,7 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming saw {toolCalls.Count} text-shaped tool call(s) but no AIFunction is bound for this role. " +
                             "Stripping JSON and emitting cleaned text. Check tool registration / IAgentMemoryStore wiring.");
 
-                        if (!string.IsNullOrWhiteSpace(cleanedText))
+                        if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                         {
                             yield return new LlmStreamChunk { Text = cleanedText };
                         }
@@ -550,7 +586,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     // Важно: текст до JSON tool-call должен быть виден пользователю.
                     // Иначе "префикс" ответа (например, "Working...") теряется в UI.
-                    if (!string.IsNullOrWhiteSpace(cleanedText))
+                    if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                     {
                         yield return new LlmStreamChunk { Text = cleanedText };
                     }
@@ -584,21 +620,26 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // === No tool calls — emit text chunks to consumer ===
-                string sanitizedFull = SanitizeAssistantVisibleText(visibleText, request);
-                if (!string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal))
+                if (!streamedVisibleToConsumer)
                 {
-                    if (!string.IsNullOrEmpty(sanitizedFull))
+                    string sanitizedFull = SanitizeAssistantVisibleText(visibleText, request);
+                    if (!string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal))
                     {
-                        yield return new LlmStreamChunk { Text = sanitizedFull };
+                        if (!string.IsNullOrEmpty(sanitizedFull))
+                        {
+                            yield return new LlmStreamChunk { Text = sanitizedFull };
+                        }
+                    }
+                    else
+                    {
+                        foreach (string chunk in visibleChunks)
+                        {
+                            yield return new LlmStreamChunk { Text = chunk };
+                        }
                     }
                 }
-                else
-                {
-                    foreach (string chunk in visibleChunks)
-                    {
-                        yield return new LlmStreamChunk { Text = chunk };
-                    }
-                }
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 LlmStreamChunk terminal = new LlmStreamChunk
                 {
@@ -608,11 +649,10 @@ namespace CoreAI.Infrastructure.Llm
                 };
                 ApplyStreamingUsageFields(terminal, iterationUsage, streamModel);
                 yield return terminal;
-                int emittedLen = string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal)
-                    ? visibleText.Length
-                    : sanitizedFull.Length;
+                string sanitizedForLog = SanitizeAssistantVisibleText(visibleText, request);
+                int emittedLen = sanitizedForLog.Length;
                 _logger.LogInfo(GameLogFeature.Llm,
-                    $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, raw length={visibleText.Length}, emitted length={emittedLen})");
+                    $"MeaiLlmClient: Streaming completed ({chunkCount} raw deltas, raw length={visibleText.Length}, sanitized length={emittedLen}, streamed live={streamedVisibleToConsumer})");
                 yield break;
             }
         }
@@ -630,6 +670,63 @@ namespace CoreAI.Infrastructure.Llm
             if (!string.IsNullOrEmpty(model))
             {
                 chunk.Model = model;
+            }
+        }
+
+        /// <summary>
+        /// OpenAI-style streaming usually fills <see cref="MEAI.ChatResponseUpdate.Text"/>; some stacks only append
+        /// <see cref="MEAI.TextContent"/> to <see cref="MEAI.ChatResponseUpdate.Contents"/>.
+        /// </summary>
+        private static string GetStreamingUpdateText(MEAI.ChatResponseUpdate update)
+        {
+            if (!string.IsNullOrEmpty(update.Text))
+            {
+                return update.Text;
+            }
+
+            if (update.Contents == null || update.Contents.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            foreach (MEAI.AIContent c in update.Contents)
+            {
+                if (c is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                {
+                    return tc.Text;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Splits a single provider-visible string into smaller outward chunks. Surrogate pairs are not split.
+        /// </summary>
+        private static IEnumerable<string> SplitForLiveUiStreaming(string visible, int maxChars)
+        {
+            if (string.IsNullOrEmpty(visible))
+            {
+                yield break;
+            }
+
+            if (maxChars <= 0 || visible.Length <= maxChars)
+            {
+                yield return visible;
+                yield break;
+            }
+
+            int i = 0;
+            while (i < visible.Length)
+            {
+                int take = Math.Min(maxChars, visible.Length - i);
+                while (take > 1 && char.IsHighSurrogate(visible[i + take - 1]) && i + take < visible.Length)
+                {
+                    take--;
+                }
+
+                yield return visible.Substring(i, take);
+                i += take;
             }
         }
 

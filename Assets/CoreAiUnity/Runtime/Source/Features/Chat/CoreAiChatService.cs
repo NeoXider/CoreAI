@@ -267,6 +267,25 @@ namespace CoreAI.Chat
             CoreAi.StopAgent(roleId);
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        /// <summary>
+        /// WebGL player: incremental SSE needs the native fetch bridge; otherwise UnityWebRequest delivers one chunk.
+        /// Checks DI <see cref="ICoreAISettings"/> when it is a <see cref="CoreAISettingsAsset"/>, then falls back to
+        /// <see cref="CoreAISettingsAsset.Instance"/> so streaming is not accidentally disabled when settings are only
+        /// injected on <c>CoreAILifetimeScope</c> and Resources holds a different asset.
+        /// </summary>
+        private static bool WebGlNativeStreamingBridgeEnabled(ICoreAISettings settings)
+        {
+            if (settings is CoreAISettingsAsset fromDi && fromDi.WebGlNativeStreaming)
+            {
+                return true;
+            }
+
+            CoreAISettingsAsset inst = CoreAISettingsAsset.Instance;
+            return inst != null && inst.WebGlNativeStreaming;
+        }
+#endif
+
         /// <summary>
         /// Вычислить эффективный флаг стриминга для роли с учётом иерархии настроек:
         /// <list type="number">
@@ -279,9 +298,7 @@ namespace CoreAI.Chat
         public bool IsStreamingEnabled(string roleId, bool uiFallback = true)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // Native fetch SSE bridge restores incremental streaming in the WebGL player.
-            // Without it, UnityWebRequest can only deliver one terminal chunk so we keep streaming OFF.
-            if (!(_settings is CoreAISettingsAsset webGlAsset && webGlAsset.WebGlNativeStreaming))
+            if (!WebGlNativeStreamingBridgeEnabled(_settings))
             {
                 return false;
             }
@@ -317,7 +334,7 @@ namespace CoreAI.Chat
         public bool IsStreamingEnabled(string roleId, bool? uiOverride = null)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            if (!(_settings is CoreAISettingsAsset webGlAsset && webGlAsset.WebGlNativeStreaming))
+            if (!WebGlNativeStreamingBridgeEnabled(_settings))
             {
                 return false;
             }

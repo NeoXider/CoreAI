@@ -38,7 +38,17 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 // Ждём, пока тест "откроет ворота" или CancellationToken сработает
-                using var reg = cancellationToken.Register(() => gate.TrySetCanceled());
+                using var reg = cancellationToken.Register(() =>
+                {
+                    try
+                    {
+                        gate.TrySetCanceled(cancellationToken);
+                    }
+                    catch
+                    {
+                        gate.TrySetCanceled();
+                    }
+                });
                 return await gate.Task;
             }
 
@@ -315,10 +325,19 @@ namespace CoreAI.Tests.EditMode
             
             // Act: Отменяем все задачи для NPC1
             queue.CancelTasks("NPC1");
-            await Task.Delay(100);
-            
+            using (var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            {
+                while (!t1.IsCompleted && !wait.IsCancellationRequested)
+                {
+                    await Task.Yield();
+                }
+            }
+
+            Assert.IsTrue(t1.IsCompleted,
+                $"t1 должна завершиться после CancelTasks (status={t1.Status}).");
             // t1 должна быть отменена (IsCanceled)
-            Assert.IsTrue(t1.IsCanceled, "t1 (active) должна быть отменена");
+            Assert.IsTrue(t1.IsCanceled,
+                $"t1 (active) должна быть отменена (status={t1.Status}, fault={(t1.IsFaulted ? t1.Exception?.GetBaseException().Message : null)}).");
             
             // t2 (NPC2) должна была начать выполняться, так как слот освободился.
             Assert.AreEqual(2, inner.Gates.Count, "t2 (NPC2) должна стартовать после отмены NPC1");

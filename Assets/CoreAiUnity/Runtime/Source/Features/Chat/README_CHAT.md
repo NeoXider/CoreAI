@@ -262,10 +262,12 @@ After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming`
 
 ## Clearing context from UI
 
-The **`*`** button in the header (`coreai-chat-clear`) calls `ClearChat()`:
+The **`C`** (Clear) button in the header (`coreai-chat-clear`) calls `ClearChat()`:
 
 - clears messages in the UI;
 - by default clears only chat history (`clearChatHistory: true`, `clearLongTermMemory: false`).
+
+The circular **FAB** also shows **C** as its icon when collapsed — that is the **open-chat** affordance (same letter, different control from the header clear button).
 
 For manual granular control, use the overload:
 
@@ -351,6 +353,7 @@ Priority order (highest to lowest):
 1. **UI flag** — `CoreAiChatConfig.EnableStreaming` (chat panel Inspector). If off → always non-streaming; other layers ignored.
 2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`).
 3. **Global** — `ICoreAISettings.EnableStreaming` (checkbox in `CoreAISettings.asset`).
+4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
 
 ```csharp
 // Example: chat agent always streams regardless of global setting

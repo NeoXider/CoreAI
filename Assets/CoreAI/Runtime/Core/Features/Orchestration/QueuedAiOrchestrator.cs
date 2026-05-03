@@ -171,7 +171,7 @@ namespace CoreAI.Ai
 #endif
                 w.Tcs.TrySetResult(result);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (IsCancellationLike(ex))
             {
                 w.Tcs.TrySetCanceled();
             }
@@ -205,7 +205,7 @@ namespace CoreAI.Ai
 
                 w.Queue.Complete();
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (IsCancellationLike(ex))
             {
                 w.Queue.Write(new LlmStreamChunk { IsDone = true, Error = "cancelled" });
                 w.Queue.Complete();
@@ -501,6 +501,40 @@ namespace CoreAI.Ai
             }
 
             SafeDispose(scopeCancellation);
+        }
+
+        /// <summary>
+        /// Some runtimes / stacks surface cancellation as <see cref="AggregateException"/> or types that do not
+        /// inherit <see cref="OperationCanceledException"/> the way modern .NET does. Map those to a clean cancel
+        /// on the public <see cref="Task"/> from <see cref="RunTaskAsync"/> instead of faulting the work item.
+        /// </summary>
+        private static bool IsCancellationLike(Exception ex)
+        {
+            for (Exception cur = ex; cur != null; cur = cur.InnerException)
+            {
+                if (cur is OperationCanceledException)
+                {
+                    return true;
+                }
+
+                if (cur is TaskCanceledException)
+                {
+                    return true;
+                }
+            }
+
+            if (ex is AggregateException agg)
+            {
+                foreach (Exception inner in agg.InnerExceptions)
+                {
+                    if (IsCancellationLike(inner))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

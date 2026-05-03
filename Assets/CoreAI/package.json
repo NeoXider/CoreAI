@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.6.4",
+  "version": "1.6.8",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.6.4: WebGL player omits CORS-sensitive LLM correlation headers for public gateways (see CHANGELOG).",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.6.8: QueuedAiOrchestrator scope cancel surfaces Task.IsCanceled when inner awaits throw TaskCanceledException. v1.6.4: WebGL player omits CORS-sensitive LLM correlation headers for public gateways (see CHANGELOG).",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

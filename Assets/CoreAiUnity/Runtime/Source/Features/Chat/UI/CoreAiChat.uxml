@@ -7,7 +7,7 @@
         <ui:VisualElement name="coreai-chat-header" class="coreai-chat-header">
             <ui:VisualElement name="coreai-chat-header-icon" class="coreai-chat-header-icon"/>
             <ui:Label name="coreai-chat-header-title" class="coreai-chat-header-title"/>
-            <ui:Button name="coreai-chat-clear" text="*" class="coreai-chat-header-btn" tooltip="Очистить историю"/>
+            <ui:Button name="coreai-chat-clear" text="C" class="coreai-chat-header-btn" tooltip="Очистить контекст (Clear)"/>
             <ui:Button name="coreai-chat-collapse" text="-" class="coreai-chat-header-btn" tooltip="Свернуть чат (Esc)"/>
         </ui:VisualElement>
         <ui:ScrollView name="coreai-chat-scroll" vertical-scroller-visibility="Auto" class="coreai-chat-scroll"/>

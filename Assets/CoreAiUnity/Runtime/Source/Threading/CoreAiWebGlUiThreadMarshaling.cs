@@ -7,6 +7,10 @@ namespace CoreAI.Threading
     /// Brings await continuations back to Unity’s player loop before touching UI Toolkit after LLM/orchestrator
     /// work that used <c>ConfigureAwait(false)</c>.
     /// <para>
+    /// Example: <c>CoreAiChatPanel.SendStreamingAsync</c> awaits this before each <c>LlmStreamChunk</c> so streamed
+    /// text repaints on the main thread in Editor / standalone (not only WebGL).
+    /// </para>
+    /// <para>
     /// <b>Editor</b> and <b>standalone players</b>: delegates to <see cref="UniTask.SwitchToMainThread"/>.
     /// </para>
     /// <para>

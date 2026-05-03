@@ -2,6 +2,53 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.9] - 2026-05-03
+
+### Chat / LLM — visible streaming when the gateway sends one long delta
+
+- **`MeaiLlmClient.CompleteStreamingAsync`** — when live token streaming is enabled, each non-empty visible string from the inner client is **split into outward chunks** (default **48** characters, without splitting UTF-16 surrogate pairs) if it exceeds that size. Some OpenAI-compatible hosts (e.g. **OpenRouter**) often emit the full assistant text in a **single** `delta.content`, which previously produced **`LLM ◀ (stream) … chunks=1`** and no incremental UI repaint even though the transport was SSE. Tool extraction still uses the **full** accumulated text per provider update; only the consumer-facing stream is fanned out.
+- **EditMode:** **`CompleteStreamingAsync_SingleLargeInnerDelta_FansOutToMultipleTextChunks`**.
+
+#### Package **`1.6.9`**.
+
+## [1.6.8] - 2026-05-03
+
+### Portable dependency + EditMode parity
+
+- **`com.nexoider.coreai` `1.6.8`** — **`QueuedAiOrchestrator`** treats **`TaskCanceledException`** from the inner orchestrator as cancellation on the public **`RunTaskAsync` / streaming** tasks (fixes **`CancelTasks_SpecificScope_CancelsActiveTask`** when the stub completes the gate with **`TrySetCanceled()`**).
+- **`ToolCallExtractionParityEditModeTests.Streaming_FailureThenSuccess_ResetsConsecutiveErrorsAndContinues`** — no longer requires that concatenated streamed **`Text`** omit raw tool-call JSON; with live deltas and bound tools, that JSON can appear before tools run; assertions still cover tool invocation count, terminal chunk, **`ExecutedToolCalls`**, and **`All good.`** in the aggregate.
+
+#### Package **`1.6.8`**.
+
+## [1.6.7] - 2026-05-03
+
+### Chat / LLM — real streaming with bound tools (`MeaiLlmClient`)
+
+- **`MeaiLlmClient.CompleteStreamingAsync`** — emit each visible assistant delta **during** `GetStreamingResponseAsync` when tools are **not** requested, or when tools are requested **and** AIFunctions are actually bound (`aiTools.Count > 0`). Previously the client buffered the entire SSE turn and only yielded after the stream closed, so **`LLM ◀ (stream) … chunks=1`** and the chat UI showed one block even when OpenRouter streamed many deltas.
+- **Unchanged buffering** when the policy lists tools but **zero** AIFunctions are bound (e.g. missing memory store) so text-shaped tool JSON can still be stripped before any outward chunk (see **`ToolCallExtractionParityEditModeTests.Streaming_RequestedButNotBound_StripsJsonAndEmitsClean`**).
+- **`GetStreamingUpdateText`** — fall back to **`TextContent`** in **`ChatResponseUpdate.Contents`** when **`Text`** is empty.
+- **EditMode:** **`CompleteStreamingAsync_NoTools_YieldsOneChunkPerInnerUpdateBeforeTerminal`**; relaxed JSON-absence assertions on streaming tool tests where live chunks may briefly include raw tool JSON.
+
+#### Package **`1.6.7`**.
+
+## [1.6.6] - 2026-05-03
+
+### Chat — streaming UI thread + clear button label
+
+- **`CoreAiChatPanel.SendStreamingAsync`** — after each streamed chunk (and before final hooks), **`await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional`** runs on **all** targets, not only `#if UNITY_WEBGL`. The LLM stack resumes on the thread pool via **`ConfigureAwait(false)`**; without this hop, UI Toolkit often did not repaint incrementally so streaming looked “broken” in Editor / standalone.
+- **`CoreAiChat.uxml`** — header clear control: label **`*` → `C`** (Clear); tooltip **«Очистить контекст (Clear)»**.
+
+#### Package **`1.6.6`**.
+
+## [1.6.5] - 2026-05-03
+
+### Chat — WebGL streaming gate (single source of truth)
+
+- **`CoreAiChatPanel.ShouldUseStreamingForRole`** no longer applies a second WebGL / **`WebGlNativeStreaming`** check against **`CoreAISettingsAsset.Instance`** only (that could disagree with DI and force non-streaming even when **`CoreAiChatService.IsStreamingEnabled`** would allow SSE).
+- **`CoreAiChatService`** — WebGL native-SSE prerequisite now uses **`WebGlNativeStreamingBridgeEnabled`**: **`ICoreAISettings`** when it is a **`CoreAISettingsAsset`**, else **`CoreAISettingsAsset.Instance`**, matching the panel’s effective settings more reliably in the player.
+
+#### Package **`1.6.5`**.
+
 ## [1.6.4] - 2026-05-03
 
 ### WebGL player — LLM requests and public API CORS

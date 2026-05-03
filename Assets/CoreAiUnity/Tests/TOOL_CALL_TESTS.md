@@ -19,7 +19,7 @@
 | `TryParseToolCallFromText_LuaTool_ParsesCorrectly` | Парсинг execute_lua tool call | `MeaiToolCallsEditModeTests.cs` |
 | `TryParseToolCallFromText_NoToolCall_ReturnsFalse` | Отсутствует tool call | `MeaiToolCallsEditModeTests.cs` |
 | `CompleteStreamingAsync_ToolJsonInStream_ExecutesToolAndReturnsFinalText` | Streaming tool cycle: tool JSON → execute → continued text | `MeaiLlmClientEditModeTests.cs` |
-| `CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` | В стриме префиксный текст виден, tool JSON скрыт из UI | `MeaiLlmClientEditModeTests.cs` |
+| `CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson` | Префикс + финальный текст; при живом SSE префиксный чанк может временно содержать JSON до извлечения тула | `MeaiLlmClientEditModeTests.cs` |
 | `CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError` | Защита от бесконечного streaming tool-loop | `MeaiLlmClientEditModeTests.cs` |
 
 ### EditMode Tests (v0.24.0 — parser hardening)

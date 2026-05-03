@@ -22,7 +22,8 @@ namespace CoreAI.Tests.PlayMode
     /// <see cref="MeaiLlmClient"/> streaming and non-streaming paths with a scripted
     /// inner client, asserting that:
     /// <list type="bullet">
-    ///   <item>Text-shaped tool-call JSON is executed and stripped from visible chunks.</item>
+    ///   <item>Text-shaped tool calls are executed; memory is updated; terminal chunk carries traces.</item>
+    ///   <item>With live streaming and bound tools, raw tool JSON may appear in intermediate <see cref="LlmStreamChunk.Text"/> before extraction (same as production OpenRouter-style deltas); non-streaming content stays stripped.</item>
     ///   <item>The diagnostic <c>[ToolCall]</c> log line is emitted with status + args.</item>
     ///   <item>The final stream chunk carries <see cref="LlmStreamChunk.ExecutedToolCalls"/>.</item>
     /// </list>
@@ -69,11 +70,11 @@ namespace CoreAI.Tests.PlayMode
                 if (chunk.IsDone) lastChunk = chunk;
             }
 
-            // 1. JSON is gone from the visible stream the user sees.
-            StringAssert.DoesNotContain("\"name\":\"memory\"", concatVisible,
-                "Streaming chunks must never contain raw tool-call JSON.");
+            // 1. Visible stream contains greeting and final text. With live streaming + bound tools,
+            // raw tool-shaped JSON may pass through Text before TryExtractToolCallsFromText runs (parity with EditMode).
             StringAssert.Contains("Hi!", concatVisible);
             StringAssert.Contains("Saved.", concatVisible);
+            Assert.GreaterOrEqual(inner.StreamCalls, 2, "Tool cycle should trigger a second stream iteration.");
 
             // 2. Memory tool actually executed (store has the new content).
             Assert.IsTrue(memStore.States.TryGetValue("Teacher", out AgentMemoryState state),
@@ -147,6 +148,8 @@ namespace CoreAI.Tests.PlayMode
         private sealed class ScriptedStreamClient : MEAI.IChatClient
         {
             private readonly Queue<string[]> _scripts;
+            public int StreamCalls { get; private set; }
+
             public ScriptedStreamClient(params string[][] scripts) { _scripts = new Queue<string[]>(scripts); }
 
             public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions o = null, CancellationToken ct = default)
@@ -156,6 +159,7 @@ namespace CoreAI.Tests.PlayMode
                 IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions o = null,
                 [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
             {
+                StreamCalls++;
                 if (_scripts.Count == 0) yield break;
                 foreach (string s in _scripts.Dequeue())
                 {

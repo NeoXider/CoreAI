@@ -17,7 +17,7 @@ MonoBehaviour:
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
   apiKey: 
-  modelName: qwen3.6-35b-a3b-claude-4.7-opus-reasoning-distilled
+  modelName: qwen3.5-4b
   temperature: 0.1
   maxTokens: 2048
   maxClientLimitedRequestsPerSession: 0
@@ -42,6 +42,9 @@ MonoBehaviour:
   enableStreaming: 1
   webGlNativeStreaming: 0
   sameOriginCredentials: 0
+  enableConversationHistorySummarization: 1
+  conversationHistoryRecentTokenBudgetOverride: 0
+  conversationRolledSummaryMaxTokens: 0
   enableLlmContextCompaction: 0
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'

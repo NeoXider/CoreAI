@@ -2,7 +2,6 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
-using CoreAI.Infrastructure.Llm;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -73,6 +72,12 @@ namespace CoreAI.Chat
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // true после первого видимого текста
+
+        /// <summary>
+        /// During fast streaming (many small chunks), avoid calling <see cref="ScrollToBottom"/> per chunk — each call
+        /// schedules nested <c>schedule.Execute</c> work and can break ScrollView layout / stick the scrollbar.
+        /// </summary>
+        private bool _streamingScrollScheduled;
 
         // === Typing animation ===
         private IVisualElementScheduledItem _typingAnimation;
@@ -1096,24 +1101,15 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Override in a subclass to change streaming policy per role. Default disables streaming in WebGL
-        /// player builds (see <c>STREAMING_WEBGL_TODO.md</c>); Editor WebGL targets keep configurable streaming.
+        /// Override in a subclass to add extra streaming gates per role. Default returns the chat UI flag only;
+        /// WebGL incremental SSE, global settings, and per-role overrides are enforced in
+        /// <see cref="CoreAiChatService.IsStreamingEnabled"/> (single source of truth — avoids mismatches when
+        /// <see cref="CoreAISettingsAsset.Instance"/> differs from the DI-registered <see cref="ICoreAISettings"/> asset).
         /// </summary>
         protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiConfigWantsStreaming)
         {
-#if UNITY_WEBGL && !UNITY_EDITOR
             _ = roleId;
-            // Native fetch SSE bridge restores incremental streaming in the WebGL player.
-            // Without it, UnityWebRequest can only deliver one terminal chunk so we keep streaming OFF.
-            CoreAISettingsAsset asset = CoreAISettingsAsset.Instance;
-            if (asset != null && asset.WebGlNativeStreaming)
-            {
-                return uiConfigWantsStreaming;
-            }
-            return false;
-#else
             return uiConfigWantsStreaming;
-#endif
         }
 
         private async Task<string?> SendStreamingAsync(AiTaskRequest request, CancellationToken ct)
@@ -1132,9 +1128,9 @@ namespace CoreAI.Chat
             {
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
-#if UNITY_WEBGL
+                    // LLM/orchestrator stack uses ConfigureAwait(false); UITK must be touched on the main thread
+                    // so each chunk repaints (not only WebGL — same issue in Editor / standalone).
                     await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
-#endif
                     if (!string.IsNullOrEmpty(chunk.Error))
                     {
                         if (_stopRequestedByUser &&
@@ -1180,9 +1176,7 @@ namespace CoreAI.Chat
                     return null;
                 }
 
-#if UNITY_WEBGL
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
-#endif
                 OnResponseReceived(fullResponse);
                 OnAiResponseCompleted?.Invoke(fullResponse);
                 return fullResponse;
@@ -1201,6 +1195,7 @@ namespace CoreAI.Chat
                 FinishStreaming();
                 HideTypingIndicator();
                 UpdateSendButtonVisualState();
+                ScrollToBottom();
             }
         }
 
@@ -1530,11 +1525,12 @@ namespace CoreAI.Chat
         {
             if (_streamingLabel == null || !_isStreaming) return;
             _streamingLabel.text = (_streamingLabel.text ?? "") + chunk;
-            ScrollToBottom();
+            ScheduleStreamingScrollToBottom();
         }
 
         private void FinishStreaming()
         {
+            _streamingScrollScheduled = false;
             if (_streamingLabel != null)
             {
                 _streamingLabel.RemoveFromClassList("coreai-streaming-active");
@@ -1555,6 +1551,30 @@ namespace CoreAI.Chat
             // и пузыри визуально «падают» при первом ответе.
             MessageScroll.schedule.Execute(() =>
             {
+                SnapScrollToBottom();
+                MessageScroll.schedule.Execute(SnapScrollToBottom);
+            });
+        }
+
+        /// <summary>
+        /// At most one pending scroll pass per streaming burst (see <see cref="AppendToStreaming"/>).
+        /// </summary>
+        private void ScheduleStreamingScrollToBottom()
+        {
+            if (MessageScroll == null)
+            {
+                return;
+            }
+
+            if (_streamingScrollScheduled)
+            {
+                return;
+            }
+
+            _streamingScrollScheduled = true;
+            MessageScroll.schedule.Execute(() =>
+            {
+                _streamingScrollScheduled = false;
                 SnapScrollToBottom();
                 MessageScroll.schedule.Execute(SnapScrollToBottom);
             });

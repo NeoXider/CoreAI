@@ -36,6 +36,9 @@ namespace CoreAI.Tests.PlayMode
     {
         private TestAgentSetup _setup;
 
+        /// <summary>Identity of the last settings used for <see cref="s_liveLlmProbeState"/>; must reset when user switches API URL/backend so a stale 429 does not skip runs against LM Studio.</summary>
+        private static string s_llmProbeSettingsKey;
+
         /// <summary>0 = not probed, 1 = OK, -1 = failed (skip remaining tests quickly).</summary>
         private static int s_liveLlmProbeState;
 
@@ -75,6 +78,14 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         private IEnumerator EnsureLiveLlmReachableOnce()
         {
+            string settingsKey = BuildLlmProbeSettingsKey();
+            if (!string.Equals(s_llmProbeSettingsKey, settingsKey, StringComparison.Ordinal))
+            {
+                s_llmProbeSettingsKey = settingsKey;
+                s_liveLlmProbeState = 0;
+                s_liveLlmProbeFailMessage = "";
+            }
+
             if (s_liveLlmProbeState == -1)
                 Assert.Ignore(s_liveLlmProbeFailMessage);
             if (s_liveLlmProbeState == 1)
@@ -88,19 +99,60 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool>()
             };
 
-            LlmCompletionResult probeResult = null;
-            Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r, CancellationToken.None);
-            yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability");
-
-            if (probeResult == null || !probeResult.Ok || string.IsNullOrWhiteSpace(probeResult.Content))
+            const int maxAttempts = 4;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                s_liveLlmProbeState = -1;
+                LlmCompletionResult probeResult = null;
+                Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r, CancellationToken.None);
+                yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability");
+
+                if (probeResult != null && probeResult.Ok && !string.IsNullOrWhiteSpace(probeResult.Content))
+                {
+                    s_liveLlmProbeState = 1;
+                    yield break;
+                }
+
                 string err = probeResult?.Error ?? "null result";
+                bool canRetry = attempt < maxAttempts && IsRetryableProbeFailure(err);
+                if (canRetry)
+                {
+                    Debug.Log(
+                        $"[FullPipelineResilience] LLM probe attempt {attempt}/{maxAttempts} failed ({err}); retrying after backoff…");
+                    yield return new WaitForSecondsRealtime(5f);
+                    continue;
+                }
+
+                s_liveLlmProbeState = -1;
                 s_liveLlmProbeFailMessage = FormatLiveLlmProbeSkipMessage(err);
                 Assert.Ignore(s_liveLlmProbeFailMessage);
             }
+        }
 
-            s_liveLlmProbeState = 1;
+        private static string BuildLlmProbeSettingsKey()
+        {
+            CoreAISettingsAsset inst = CoreAISettingsAsset.Instance;
+            if (inst == null)
+                return "no-settings";
+
+            return $"{(int)inst.BackendType}|{inst.ApiBaseUrl?.Trim() ?? ""}|{inst.ModelName?.Trim() ?? ""}";
+        }
+
+        private static bool IsRetryableProbeFailure(string err)
+        {
+            if (string.IsNullOrEmpty(err))
+                return false;
+
+            if (err.IndexOf("429", StringComparison.Ordinal) >= 0)
+                return true;
+            if (err.IndexOf("rate limit", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            if (err.IndexOf("too many requests", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            if (err.IndexOf("503", StringComparison.Ordinal) >= 0)
+                return true;
+            if (err.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            return false;
         }
 
         /// <summary>
@@ -115,6 +167,16 @@ namespace CoreAI.Tests.PlayMode
                 return
                     "Live LLM probe skipped: server responded but no model is loaded " +
                     "(LM Studio / llama.cpp: load a model in the Developer UI or via `lms load`, then re-run). " +
+                    $"Probe: {err}";
+            }
+
+            if (err.IndexOf("429", StringComparison.Ordinal) >= 0 ||
+                err.IndexOf("rate limit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                err.IndexOf("free-models-per-min", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return
+                    "Live LLM probe skipped: HTTP 429 / rate limit from the provider (often OpenRouter free tier). " +
+                    "Wait and re-run, point CoreAISettings.ApiBaseUrl at a local LM Studio / llama.cpp URL, or use a paid quota. " +
                     $"Probe: {err}";
             }
 

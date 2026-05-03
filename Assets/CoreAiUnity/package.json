@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.6.4",
+  "version": "1.6.9",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.4: lockstep com.nexoider.coreai 1.6.4 (WebGL player LLM header CORS fix in portable layer). v1.6.3: Editor FileAgentMemoryStore when build target is WebGL.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.9: MeaiLlmClient fans out long single SSE text deltas for UI/logs (OpenRouter-style one-frame replies). v1.6.8: lockstep core 1.6.8 + streaming parity tests. v1.6.6: streaming UI main thread; clear button C.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.6.4"
+    "com.nexoider.coreai": "1.6.8"
   }
 }

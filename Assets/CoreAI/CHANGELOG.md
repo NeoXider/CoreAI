@@ -1,5 +1,33 @@
 # Changelog
 
+## [v1.6.8] — 2026-05-03
+
+### Orchestration — scope cancel and `Task.IsCanceled`
+
+- **`QueuedAiOrchestrator`** — handle **`TaskCanceledException`** explicitly (before **`OperationCanceledException`**) in **`RunOneAsync`** and **`RunOneStreamingAsync`**. When the inner **`RunTaskAsync` / `RunStreamingAsync`** await completes with **`TaskCanceledException`** (e.g. **`TaskCompletionSource.TrySetCanceled()`** on a gate task), the queued task must complete as **canceled**, not **faulted**; **`CancelTasks`** on an active scoped task then reports **`Task.IsCanceled == true`** as expected by **`QueuedAiOrchestratorEditModeTests`**.
+
+### Semver
+
+- Lockstep **`1.6.8`** with **`com.nexoider.coreaiunity`**.
+
+## [v1.6.7] — 2026-05-03
+
+### Lockstep with coreaiunity 1.6.7 (Unity-only)
+
+- **Semver:** **`1.6.7`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`MeaiLlmClient`** incremental streaming + tests.
+
+## [v1.6.6] — 2026-05-03
+
+### Lockstep with coreaiunity 1.6.6 (Unity-only)
+
+- **Semver:** **`1.6.6`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat streaming UI thread hop + clear button UXML.
+
+## [v1.6.5] — 2026-05-03
+
+### Lockstep with coreaiunity 1.6.5 (Unity-only)
+
+- **Semver:** **`1.6.5`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat WebGL streaming gate alignment (**`CoreAiChatService`** / **`CoreAiChatPanel`**).
+
 ## [v1.6.4] — 2026-05-03
 
 ### WebGL browser — OpenAI-compatible HTTP headers vs public API CORS
