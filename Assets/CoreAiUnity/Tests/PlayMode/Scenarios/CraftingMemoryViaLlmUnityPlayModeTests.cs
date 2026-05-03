@@ -226,7 +226,8 @@ namespace CoreAI.Tests.PlayMode
                     string prompt = BuildDeterministicCraftPrompt(4,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
                         "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        store);
+                        store,
+                        craftedNames[1]);
 
                     LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2  DETERMINISM CHECK)", prompt,
                         store);
@@ -297,7 +298,9 @@ namespace CoreAI.Tests.PlayMode
                     $"[CraftingMemory.LLMUnity] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
                     $" {(namesMatch ? " SAME" : " DIFFERENT")} (whitespace-insensitive)");
 
-                //    
+                Assert.IsTrue(namesMatch,
+                    $"Determinism failed: craft #4 must repeat craft #2 name (whitespace-insensitive). Craft2='{craft2Final}' Craft4='{craft4Final}'");
+
                 if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))
                 {
                     Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
@@ -419,7 +422,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
-            InMemoryStore store)
+            InMemoryStore store,
+            string exactWeaponNameFromEarlierCraft)
         {
             string header = $"You are crafting a weapon. This is craft #{craftNumber}.\n\n";
             string ingredients = $"Ingredients:\n- {ingredient1}\n- {ingredient2}\n\n";
@@ -435,17 +439,20 @@ namespace CoreAI.Tests.PlayMode
                 ? "This is your first craft.\n\n"
                 : $"YOUR MEMORY (ALL previous crafts):\n{memoryFromStore}\n\n";
 
+            string luaLiteral = exactWeaponNameFromEarlierCraft.Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("'", "\\'", StringComparison.Ordinal);
+
             string memoryWriteHint = !string.IsNullOrEmpty(memoryFromStore)
-                ? $"{memoryFromStore}, Craft #{craftNumber} - <same weapon name as before>"
-                : $"Previous crafts: Craft #{craftNumber} - <weapon name>";
+                ? $"{memoryFromStore}, Craft #{craftNumber} - {exactWeaponNameFromEarlierCraft}"
+                : $"Previous crafts: Craft #{craftNumber} - {exactWeaponNameFromEarlierCraft}";
 
             string instructions = "You MUST perform these actions IN ORDER using tool calls:\n\n" +
                                   "STEP 1: Call the 'memory' tool with:\n" +
                                   "  - action: \"write\"\n" +
                                   $"  - content: \"{memoryWriteHint}\"\n\n" +
                                   "STEP 2: Call the 'execute_lua' tool with Lua code that ONLY calls the game API, same as crafts 1-3:\n" +
-                                  "  create_item('ExactWeaponName', 'weapon', qualityNumber)\n" +
-                                  "  report('crafted ExactWeaponName')\n" +
+                                  $"  create_item('{luaLiteral}', 'weapon', qualityNumber)\n" +
+                                  $"  report('crafted {luaLiteral}')\n" +
                                   "Do NOT return Lua tables, do NOT simulate crafting in variables only — the host must see create_item and report.\n\n" +
                                   "CRITICAL: You MUST craft the EXACT SAME item as before - same name, same quality.\n" +
                                   "These are the EXACT same ingredients, so the result must be IDENTICAL.\n" +
@@ -530,21 +537,22 @@ namespace CoreAI.Tests.PlayMode
         {
             string payload = sink.Items.Count > 0 ? sink.Items[0].JsonPayload : null;
 
-            //  / function-calling  tools     .
-            //    memory-write  ,      memory.
-            string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+            // Prefer model-written memory (canonical craft line) before prose payload heuristics.
+            string itemName = null;
+            if (TryExtractCraftNameFromMemory(store, craftNumber, out string fromMemoryLine))
+            {
+                itemName = fromMemoryLine;
+            }
+
             if (string.IsNullOrEmpty(itemName))
             {
-                if (TryExtractCraftNameFromMemory(store, craftNumber, out string fromMemory))
-                {
-                    itemName = fromMemory;
-                    Debug.LogWarning($"[{label}] Could not extract item name from payload - recovered from memory: '{itemName}'");
-                }
-                else
-                {
-                    Debug.LogWarning($"[{label}] Could not extract item name from payload or memory");
-                    itemName = $"unknown_{craftedNames.Count + 1}";
-                }
+                itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+            }
+
+            if (string.IsNullOrEmpty(itemName))
+            {
+                Debug.LogWarning($"[{label}] Could not extract item name from payload or memory");
+                itemName = $"unknown_{craftedNames.Count + 1}";
             }
 
             craftedNames.Add(itemName);

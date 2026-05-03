@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.6.0",
+  "version": "1.6.2",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.0: WebGL fetch SSE, server-managed protocol, auth refresh (see CHANGELOG).",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.2: marshaler mirror priming, CraftingMemory harness, persisted-chat EditMode tests (see CHANGELOG).",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.6.0"
+    "com.nexoider.coreai": "1.6.2"
   }
 }

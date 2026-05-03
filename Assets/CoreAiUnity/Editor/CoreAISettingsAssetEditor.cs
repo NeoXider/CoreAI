@@ -27,10 +27,12 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private const string PrefGeneralOpen = "CoreAI.SettingsEditor.GeneralOpen";
         private const string PrefOfflineOpen = "CoreAI.SettingsEditor.OfflineOpen";
         private const string PrefDebugOpen = "CoreAI.SettingsEditor.DebugOpen";
+        private const string PrefSummarizationOpen = "CoreAI.SettingsEditor.SummarizationOpen";
 
         private bool _showAdvanced;
         private bool _showHttpApi;
         private bool _showLlmUnity;
+        private bool _showSummarization;
         private bool _showGeneral;
         private bool _showOffline;
         private bool _showDebug;
@@ -41,6 +43,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _showAdvanced = EditorPrefs.GetBool(PrefAdvancedOpen, false);
             _showHttpApi = EditorPrefs.GetBool(PrefHttpOpen, true);
             _showLlmUnity = EditorPrefs.GetBool(PrefLlmUnityOpen, true);
+            _showSummarization = EditorPrefs.GetBool(PrefSummarizationOpen, true);
             _showGeneral = EditorPrefs.GetBool(PrefGeneralOpen, false);
             _showOffline = EditorPrefs.GetBool(PrefOfflineOpen, false);
             _showDebug = EditorPrefs.GetBool(PrefDebugOpen, false);
@@ -51,6 +54,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             EditorPrefs.SetBool(PrefAdvancedOpen, _showAdvanced);
             EditorPrefs.SetBool(PrefHttpOpen, _showHttpApi);
             EditorPrefs.SetBool(PrefLlmUnityOpen, _showLlmUnity);
+            EditorPrefs.SetBool(PrefSummarizationOpen, _showSummarization);
             EditorPrefs.SetBool(PrefGeneralOpen, _showGeneral);
             EditorPrefs.SetBool(PrefOfflineOpen, _showOffline);
             EditorPrefs.SetBool(PrefDebugOpen, _showDebug);
@@ -268,6 +272,34 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
             EditorGUILayout.EndFoldoutHeaderGroup();
 
+            // Chat history / summarization
+            _showSummarization = EditorGUILayout.BeginFoldoutHeaderGroup(_showSummarization,
+                "Chat history summarization");
+            if (_showSummarization)
+            {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableConversationHistorySummarization"),
+                    new GUIContent(
+                        "Enable history summarization",
+                        "When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("conversationHistoryRecentTokenBudgetOverride"),
+                    new GUIContent(
+                        "Recent history token budget override",
+                        "0 = automatic from context window. When set, caps the verbatim tail to this many estimated tokens; older lines roll into the summary when summarization is on."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("conversationRolledSummaryMaxTokens"),
+                    new GUIContent(
+                        "Max rolled summary (tokens)",
+                        "0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableLlmContextCompaction"),
+                    new GUIContent(
+                        "Enable LLM context compaction (global)",
+                        "When on, roles with UseLlmContextCompaction may call an auxiliary LLM to fold long transcripts. When off, only deterministic bullet rollup runs."));
+                EditorGUILayout.HelpBox(
+                    "Per-role compaction is still controlled by AgentBuilder / AgentMemoryPolicy (UseLlmContextCompaction).",
+                    MessageType.None);
+            }
+
+            EditorGUILayout.EndFoldoutHeaderGroup();
+
             // General секция
             _showGeneral = EditorGUILayout.BeginFoldoutHeaderGroup(_showGeneral, "⚙️ Общие настройки");
             if (_showGeneral)
@@ -306,11 +338,6 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Max Concurrent", "Параллельных задач оркестратора"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmRequestTimeoutSeconds"),
                     new GUIContent("LLM Timeout (sec)", "Таймаут запроса к LLM"));
-
-                EditorGUILayout.Space(4);
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableLlmContextCompaction"),
-                    new GUIContent("Enable LLM Context Compaction (global)",
-                        "When on, roles with AgentBuilder.WithLlmContextCompaction(true) may use an auxiliary LLM call to fold long transcripts. When off, only deterministic compaction runs."));
 
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("Retry лимиты", EditorStyles.miniBoldLabel);

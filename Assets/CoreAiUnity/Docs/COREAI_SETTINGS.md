@@ -218,6 +218,17 @@ The Inspector includes an **LLMUnity status** panel:
 | **Lua Repair Retries** | `3` | Max consecutive failed Lua repair attempts for Programmer (counter resets on success) |
 | **Tool Call Retries** | `3` | Max consecutive failed tool calls before aborting the agent (counter resets on success) |
 
+These fields live in the **Advanced** inspector under **Chat history summarization** (alongside **Enable LLM context compaction**):
+
+| Field | Default | Description |
+|------|-------------|----------|
+| **Enable history summarization** | ✅ | When off, the full loaded chat transcript is kept in the MEAI tail without rolling older turns into `## Conversation Summary` (may exceed the model context). |
+| **Recent history token budget override** | `0` | `0` = automatic from context window minus system/tools/user (via `DefaultContextBudgetPolicy`). When set to a positive value, caps the verbatim tail to that many **estimated** tokens; older lines fold into the rolling summary when summarization is on (minimum applied: 32). |
+| **Max rolled summary (tokens)** | `0` | `0` = no extra cap. When set, truncates the persisted rolling summary to roughly that many estimated tokens after each rollup (deterministic bullet path and LLM-assisted path). |
+| **Enable LLM context compaction (global)** | ❌ | When on, roles with `UseLlmContextCompaction` may use an auxiliary LLM to fold evicted transcript; still requires per-role opt-in (`AgentBuilder.WithLlmContextCompaction`). |
+
+Portable contract: `ICoreAISettings.EnableConversationHistorySummarization`, `ConversationHistoryRecentTokenBudgetOverride`, `ConversationRolledSummaryMaxTokens`, `EnableLlmContextCompaction`. EditMode regression: `ConversationContextCompactionEditModeTests` (`DeterministicManager_MaxRolledSummaryTokens_*`).
+
 > **HTTP vs LLM timeout:** `CoreAISettingsAsset.EffectiveHttpRequestTimeoutSeconds` = `min(HTTP Timeout, ceil(LLM Timeout))` so one HTTP call cannot run longer than the orchestrator/chat cancel window. Details: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (§3).
 
 > 📝 **`Max Output Tokens` priority chain (0.25.9+):** `LlmCompletionRequest.MaxOutputTokens` (per-request, direct client call) → `AiTaskRequest.MaxOutputTokens` (per-call via orchestrator) → `AgentBuilder.WithMaxOutputTokens` / `AgentMemoryPolicy.RoleMemoryConfig.MaxOutputTokens` (per-agent) → `ICoreAISettings.MaxTokens` (global default in this asset) → provider default (LM Studio: usually unbounded; OpenAI: model-specific). Set the asset value to `0` to opt out of the global fallback for both backends.

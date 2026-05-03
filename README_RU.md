@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета синхронизированы (**`1.6.0`**). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета синхронизированы (**`1.6.2`**). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

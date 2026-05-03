@@ -23,7 +23,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** optional **`WebGlNativeStreaming`** + **`FetchSseOpenAiTransport`** (`Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`). Known **`UnityWebRequest`** limitation — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
-**Current stable line:** **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** are released at the **same semver (`1.6.0`)**.
+**Current stable line:** **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** are released at the **same semver (`1.6.2`)**.
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

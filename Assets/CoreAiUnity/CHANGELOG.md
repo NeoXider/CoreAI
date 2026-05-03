@@ -2,6 +2,34 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.2] - 2026-05-03
+
+### Reliability, tests, chat session coverage
+
+- **`UnityMainThreadLlmAsyncMarshaler`** — **`RuntimeInitializeOnLoadMethod` (BeforeSceneLoad / AfterSceneLoad)** primes the Editor **`Application.isPlaying` mirror** before the first **`onBeforeRender`** (reduces stale mirror during Play Mode). Worker-thread **inline** when mirror **`!= 1`** is preserved so **Edit Mode** tests using **`Task.Run(...).Wait()`** on the main thread (e.g. **`SmartToolCallingChatClientEditModeTests`**) do not deadlock on **`SwitchToMainThread`**.
+- **Play Mode:** **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** — initial **`yield return null`** so the mirror can refresh before the thread-pool assertion.
+- **CraftingMemory:** **`CraftingMemoryViaLlmUnityPlayModeTests`** — determinism **`Assert`**, craft-4 prompt injects the real weapon name, **`ExtractCraftInfo`** prefers memory-backed craft lines; **`CraftingMemoryItemNameExtractor`** — pattern for **`**Weapon crafted**: …`** prose.
+- **CraftingMemory OpenAI harness:** prompts require a **numeric** `create_item` quality literal; **`AssertExecuteLuaUsesNumericQualityIfPresent`** in **`ExtractCraftInfo`** and the two-craft scenario.
+- **Edit Mode:** **`CoreAiChatServiceEditModeTests`** — **`TryGetPersistedChatHistory`** (empty / tail / no store) and **`PersistedChat_UiFormattingRoundTrip_MatchesCoreAiChatPanelRules`** (same path as **`CoreAiChatPanel.TryAppendPersistedChatHistoryFromStore`** via service + **`FormatPersistedMessageForUi`**).
+- **Edit Mode:** **`ConversationContextCompactionEditModeTests`** — **`DeterministicManager_MaxRolledSummaryTokens_TruncatesBeforeSave`** and **`DeterministicManager_MaxRolledSummaryTokens_TruncatesStoredOnlySnapshot`** assert **`MaxRolledSummaryTokens`** truncation and **`InMemoryConversationSummaryStore`** parity for rolled summaries.
+- **Edit Mode:** **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** — **`FileAgentMemoryStore`** chat lines survive a new store instance after **`RunTaskAsync`** when **`PersistChatHistory`** is on.
+- **Docs:** **`README_CHAT.md`** (session-restore test pointers); **`ARCHITECTURE.md`** (v1.6.2 marshaler note).
+- **Dependency:** **`com.nexoider.coreai 1.6.2`** (lockstep; no portable code changes in this drop).
+
+#### Package **`1.6.2`**.
+
+## [1.6.1] - 2026-05-03
+
+### CoreAISettings — chat history summarization
+
+- **`CoreAISettingsAsset`** — **`enableConversationHistorySummarization`**, **`conversationHistoryRecentTokenBudgetOverride`**, **`conversationRolledSummaryMaxTokens`**; **`enableLlmContextCompaction`** moved into the same Inspector group (**Advanced → Chat history summarization**).
+- **`CoreAISettingsAssetEditor`** — dedicated foldout + tooltips; LLM compaction toggle removed from the General foldout to avoid burying summarization options.
+- **Dependency:** **`com.nexoider.coreai 1.6.1`** (portable summarization wiring + **`ConversationRolledSummaryLimiter`**).
+- **Edit Mode:** **`AiOrchestratorHistoryEditModeTests`**, **`CoreAISettingsAssetEditModeTests`**, **`ConversationRolledSummaryLimiterEditModeTests`**.
+- **Docs:** **`COREAI_SETTINGS.md`** (table + portable property names).
+
+#### Package **`1.6.1`**.
+
 ## [1.6.0] - 2026-05-03
 
 ### Minor release — WebGL server-managed LLM (fetch SSE, auth refresh, settings)

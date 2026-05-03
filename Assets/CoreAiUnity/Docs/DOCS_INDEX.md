@@ -2,7 +2,7 @@
 
 Pick the track that matches your current goal. Every link lands on a self-contained guide; you don't need to read them in order.
 
-> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.5.26`) · [`com.nexoider.coreaiunity`](../package.json) (`1.5.26`)
+> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.6.2`) · [`com.nexoider.coreaiunity`](../package.json) (`1.6.2`)
 > **Repo README:** [../../../README.md](../../../README.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md)
 
 ---

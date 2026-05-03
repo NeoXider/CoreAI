@@ -18,6 +18,10 @@ namespace CoreAI.Infrastructure.Llm
     /// in ways that propagate as <see cref="AggregateException"/> and bypass typed catches. Record the Unity **script**
     /// main <see cref="Thread.ManagedThreadId"/> beside the **isPlaying** mirror (see <c>Application.onBeforeRender</c>)
     /// and probe <see cref="Application.isPlaying"/> only when <c>ManagedThreadId</c>s match.
+    /// Off the mirrored main thread, inline when the mirror is not <c>1</c> (Edit idle <c>0</c> or unknown <c>-1</c>).
+    /// Unknown must inline so Edit Mode tests that use <c>Task.Run(...).Wait()</c> on the main thread while MEAI
+    /// continues on the pool do not deadlock on <c>SwitchToMainThread</c>. Scene-load priming reduces stale <c>0</c>
+    /// during Play Mode (see <c>EditorIsPlayingMirrorScenePriming</c>).
     /// </summary>
     public sealed class UnityMainThreadLlmAsyncMarshaler : ILlmAsyncMarshaler
     {
@@ -59,6 +63,27 @@ namespace CoreAI.Infrastructure.Llm
             {
                 // Do not probe Application.isPlaying here — SubsystemRegistration may not run on the Unity script thread.
                 EnsureEditorIsPlayingMirrorHook();
+            }
+        }
+
+        /// <summary>
+        /// Primes the mirror on the main thread before <see cref="Application.onBeforeRender"/> so Play Mode
+        /// rarely observes a stale <c>0</c> while <see cref="Application.isPlaying"/> is already true.
+        /// </summary>
+        private static class EditorIsPlayingMirrorScenePriming
+        {
+            [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+            private static void PrimeBeforeSceneLoad()
+            {
+                EnsureEditorIsPlayingMirrorHook();
+                UpdateEditorIsPlayingMirror();
+            }
+
+            [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+            private static void PrimeAfterSceneLoad()
+            {
+                EnsureEditorIsPlayingMirrorHook();
+                UpdateEditorIsPlayingMirror();
             }
         }
 
@@ -106,6 +131,9 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            // Not confirmed Play (mirror != 1): inline on the pool. Treat unknown (-1) like Edit idle so
+            // SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on the main thread) never deadlock.
+            // Stale 0 while Play is mitigated by RuntimeInitialize primers + first-frame mirror updates.
             return Volatile.Read(ref _editorMirrorIsPlaying) != 1;
         }
 

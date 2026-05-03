@@ -1,5 +1,24 @@
 # Changelog
 
+## [v1.6.2] — 2026-05-03
+
+### Lockstep with coreaiunity 1.6.2
+
+- **Semver:** lockstep **`1.6.2`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes in this drop (Unity: marshaler mirror + CraftingMemory / chat persistence tests + **`MaxRolledSummaryTokens`** deterministic compaction EditMode coverage — see Unity changelog).
+
+## [v1.6.1] — 2026-05-03
+
+### Chat history summarization controls (host settings)
+
+- **`ICoreAISettings`** — **`EnableConversationHistorySummarization`** (default true), **`ConversationHistoryRecentTokenBudgetOverride`**, **`ConversationRolledSummaryMaxTokens`** (default interface implementations preserve legacy stubs).
+- **`AiOrchestrator`** — applies the above when building **`ConversationContextBuildArgs`**; **`UnlimitedHistoryTokenBudget`** when summarization is disabled.
+- **`ConversationContextBuildArgs.MaxRolledSummaryTokens`** — forwarded from settings; **`ConversationRolledSummaryLimiter`** truncates rolled summary text by **`ITokenEstimator`**.
+- **`DeterministicConversationContextManager`** / **`LlmAssistedConversationContextManager`** — apply the rolled-summary cap before **`SaveSummary`** and when returning a stored-only snapshot.
+
+### Semver
+
+- Lockstep **`1.6.1`** with **`com.nexoider.coreaiunity`** (Unity: **`CoreAISettingsAsset`** fields + custom inspector foldout **Chat history summarization**; docs **`COREAI_SETTINGS.md`**).
+
 ## [v1.6.0] — 2026-05-03
 
 ### Minor release — server-managed protocol, ambient LLM context, WebGL SSE bridge

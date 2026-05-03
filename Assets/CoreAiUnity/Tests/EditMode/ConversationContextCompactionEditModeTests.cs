@@ -360,6 +360,64 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void DeterministicManager_MaxRolledSummaryTokens_TruncatesBeforeSave()
+        {
+            var store = new InMemoryConversationSummaryStore();
+            var est = new HeuristicTokenEstimator();
+            var mgr = new DeterministicConversationContextManager(store, est);
+            var history = new ChatMessage[10];
+            for (int i = 0; i < 10; i++)
+            {
+                history[i] = new ChatMessage
+                {
+                    Role = "user",
+                    Content = $"m{i}-" + new string('z', 48)
+                };
+            }
+
+            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
+            var buildArgs = new ConversationContextBuildArgs
+            {
+                HistoryTokenBudget = 28,
+                MaxRolledSummaryTokens = 18
+            };
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot("roleA", history, roleConfig, buildArgs);
+
+            Assert.IsTrue(snap.WasCompacted);
+            Assert.IsTrue(snap.Summary.EndsWith("…"), "Summary should be truncated when over MaxRolledSummaryTokens.");
+            string persisted = store.LoadSummary("roleA");
+            Assert.AreEqual(snap.Summary, persisted, "Store should receive the same truncated summary as the snapshot.");
+            Assert.LessOrEqual(est.EstimateText(persisted), 30, "Persisted summary should stay near the token cap.");
+        }
+
+        [Test]
+        public void DeterministicManager_MaxRolledSummaryTokens_TruncatesStoredOnlySnapshot()
+        {
+            var store = new InMemoryConversationSummaryStore();
+            store.SaveSummary("roleB", new string('q', 800));
+            var est = new HeuristicTokenEstimator();
+            var mgr = new DeterministicConversationContextManager(store, est);
+            var history = new[]
+            {
+                new ChatMessage { Role = "user", Content = "tail-only" }
+            };
+
+            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
+            var buildArgs = new ConversationContextBuildArgs
+            {
+                HistoryTokenBudget = 500,
+                MaxRolledSummaryTokens = 25
+            };
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot("roleB", history, roleConfig, buildArgs);
+
+            Assert.IsTrue(snap.Summary.EndsWith("…"));
+            Assert.Less(est.EstimateText(snap.Summary), est.EstimateText(new string('q', 800)));
+            Assert.AreEqual("tail-only", snap.RecentMessages[^1].Content);
+        }
+
+        [Test]
         public async Task LlmAssisted_LongPerMessageContent_TruncatedInPayload()
         {
             var store = new InMemoryConversationSummaryStore();

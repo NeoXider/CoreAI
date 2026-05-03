@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -15,7 +16,8 @@ namespace CoreAI.Tests.EditMode
     /// EditMode-тесты для <see cref="CoreAiChatService"/>:
     /// — иерархия вычисления флага стриминга (UI → per-agent → global);
     /// — SmartSend (автоматический выбор streaming/non-streaming);
-    /// — базовые сценарии Send/Streaming с поддельным <see cref="IAiOrchestrationService"/>.
+    /// — базовые сценарии Send/Streaming с поддельным <see cref="IAiOrchestrationService"/>;
+    /// — восстановление сессии чата: <see cref="CoreAiChatService.TryGetPersistedChatHistory"/> и форматирование строк для UI.
     /// </summary>
     [TestFixture]
     public sealed class CoreAiChatServiceEditModeTests
@@ -32,6 +34,68 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettings.ResetOverrides();
             CoreAISettings.Instance = null;
+        }
+
+        // ===================== Persisted chat (session restore for UI) =====================
+
+        [Test]
+        public void TryGetPersistedChatHistory_NoStore_ReturnsFalse()
+        {
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: null);
+
+            bool ok = service.TryGetPersistedChatHistory("SmartChat", out ChatMessage[] msgs, maxMessages: 0);
+
+            Assert.IsFalse(ok);
+            Assert.IsNotNull(msgs);
+            Assert.AreEqual(0, msgs.Length);
+        }
+
+        [Test]
+        public void TryGetPersistedChatHistory_EmptyHistory_ReturnsFalse()
+        {
+            var store = new ListBackedChatHistoryStore();
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
+
+            Assert.IsFalse(service.TryGetPersistedChatHistory("SmartChat", out ChatMessage[] msgs, 0));
+        }
+
+        [Test]
+        public void TryGetPersistedChatHistory_ReturnsTailWhenMaxMessagesSet()
+        {
+            var store = new ListBackedChatHistoryStore();
+            const string role = "SmartChat";
+            for (int i = 0; i < 5; i++)
+            {
+                store.AppendChatMessage(role, i % 2 == 0 ? "user" : "assistant", $"m{i}", persistToDisk: false);
+            }
+
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
+
+            Assert.IsTrue(service.TryGetPersistedChatHistory(role, out ChatMessage[] msgs, maxMessages: 2));
+            Assert.AreEqual(2, msgs.Length);
+            Assert.AreEqual("m3", msgs[0].Content);
+            Assert.AreEqual("m4", msgs[1].Content);
+        }
+
+        [Test]
+        public void PersistedChat_UiFormattingRoundTrip_MatchesCoreAiChatPanelRules()
+        {
+            var store = new ListBackedChatHistoryStore();
+            const string role = "SmartChat";
+            string userComposer =
+                "{\"telemetry\":{},\"hint\":\"stored user line\",\"ai_task_source\":\"Chat\"}";
+            store.AppendChatMessage(role, "user", userComposer, persistToDisk: false);
+            store.AppendChatMessage(role, "assistant", "visible reply", persistToDisk: false);
+
+            CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
+            Assert.IsTrue(service.TryGetPersistedChatHistory(role, out ChatMessage[] msgs, 0));
+            Assert.AreEqual(2, msgs.Length);
+
+            string userLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[0].Content, isUser: true);
+            string assistantLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[1].Content, isUser: false);
+
+            Assert.AreEqual("stored user line", userLine);
+            Assert.AreEqual("visible reply", assistantLine);
         }
 
         // ===================== IsStreamingEnabled — fallbacks =====================
@@ -348,6 +412,57 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming { get; set; } = true;
+        }
+
+        /// <summary>
+        /// Minimal in-memory <see cref="IAgentMemoryStore"/> for chat history only (mirrors tail semantics of <c>FileAgentMemoryStore.GetChatHistory</c>).
+        /// </summary>
+        private sealed class ListBackedChatHistoryStore : IAgentMemoryStore
+        {
+            private readonly Dictionary<string, List<ChatMessage>> _history = new();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+                _history.Remove(roleId);
+            }
+
+            public void ClearChatHistory(string roleId) => _history.Remove(roleId);
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                if (!_history.TryGetValue(roleId, out List<ChatMessage> list))
+                {
+                    list = new List<ChatMessage>();
+                    _history[roleId] = list;
+                }
+
+                list.Add(new ChatMessage(role, content));
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                if (!_history.TryGetValue(roleId, out List<ChatMessage> list) || list.Count == 0)
+                {
+                    return Array.Empty<ChatMessage>();
+                }
+
+                if (maxMessages > 0 && list.Count > maxMessages)
+                {
+                    return list.Skip(list.Count - maxMessages).ToArray();
+                }
+
+                return list.ToArray();
+            }
         }
 
         private sealed class FakeMemoryStore : IAgentMemoryStore

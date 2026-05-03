@@ -1,16 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Config;
+using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using Microsoft.Extensions.AI;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -97,6 +100,9 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
+            public bool EnableConversationHistorySummarization { get; set; } = true;
+            public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
+            public int ConversationRolledSummaryMaxTokens { get; set; }
         }
 
         private sealed class NullSys : IAgentSystemPromptProvider
@@ -247,6 +253,75 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
+            StringAssert.Contains("## Conversation Summary", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("old-context-0", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_DisableHistorySummarization_KeepsFullChatTail()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+
+            for (int i = 0; i < 10; i++)
+            {
+                string content = $"old-context-{i}-".PadRight(90, 'x');
+                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = content
+                });
+            }
+
+            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+
+            TestSettings settings = new() { EnableConversationHistorySummarization = false };
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
+
+            Assert.IsNotNull(llm.LastRequest);
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Assert.AreEqual(10, llm.LastRequest.ChatHistory.Count);
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_RecentHistoryTokenBudgetOverride_ForcesTighterTail()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+
+            for (int i = 0; i < 10; i++)
+            {
+                string content = $"old-context-{i}-".PadRight(90, 'x');
+                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = content
+                });
+            }
+
+            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+
+            TestSettings settings = new() { ConversationHistoryRecentTokenBudgetOverride = 32 };
+            AiOrchestrator orchestrator = new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
+
+            Assert.IsNotNull(llm.LastRequest?.ChatHistory);
+            Assert.AreEqual(1, llm.LastRequest.ChatHistory.Count);
             StringAssert.Contains("## Conversation Summary", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("old-context-0", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
@@ -482,6 +557,52 @@ namespace CoreAI.Tests.EditMode
             });
 
             Assert.AreEqual(0, llm.LastRequest.Tools.Count);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore()
+        {
+            string roleId = "EditMode_OrchPersist_" + Guid.NewGuid().ToString("N");
+            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
+            string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
+            string filePath = Path.Combine(dir, $"{safeName}.json");
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            try
+            {
+                FileAgentMemoryStore store1 = new();
+                AgentMemoryPolicy policy = new();
+                policy.ConfigureChatHistory(roleId, enabled: true, tokens: 8192, persist: true, maxChatHistoryMessages: 50);
+                policy.DisableMemoryTool(roleId);
+                policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+
+                TestLlmClient llm = new();
+                TestSettings settings = new();
+                AiOrchestrator orchestrator = new AiOrchestrator(
+                    new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                    new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                    store1, policy, null, null, settings);
+
+                await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = roleId, Hint = "persist hint" });
+
+                CoreAI.Ai.ChatMessage[] h1 = store1.GetChatHistory(roleId);
+                Assert.GreaterOrEqual(h1.Length, 2, "After a successful turn the store should contain user + assistant lines.");
+
+                FileAgentMemoryStore store2 = new();
+                CoreAI.Ai.ChatMessage[] h2 = store2.GetChatHistory(roleId);
+                Assert.AreEqual(h1.Length, h2.Length, "A new FileAgentMemoryStore should reload the same persisted chat from disk.");
+                Assert.AreEqual(h1[^1].Content, h2[^1].Content);
+            }
+            finally
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
         }
     }
 }

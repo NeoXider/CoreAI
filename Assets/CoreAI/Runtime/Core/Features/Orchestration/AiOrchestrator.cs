@@ -18,6 +18,9 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class AiOrchestrator : IAiOrchestrationService
     {
+        /// <summary>Used when <see cref="ICoreAISettings.EnableConversationHistorySummarization"/> is false so the full transcript stays in the MEAI tail.</summary>
+        internal const int UnlimitedHistoryTokenBudget = 2_000_000;
+
         private readonly IAuthorityHost _authority;
         private readonly ILlmClient _llm;
         private readonly IAiGameCommandSink _commandSink;
@@ -121,11 +124,23 @@ namespace CoreAI.Ai
                     ContextRetryLevel = contextRetryPass
                 };
                 ContextBudget budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                int historyBudget = budget.HistoryTokenBudget;
+                if (!_settings.EnableConversationHistorySummarization)
+                {
+                    historyBudget = UnlimitedHistoryTokenBudget;
+                }
+                else if (_settings.ConversationHistoryRecentTokenBudgetOverride > 0)
+                {
+                    historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
+                }
+
+                int maxRolled = _settings.ConversationRolledSummaryMaxTokens;
                 ctxBuildArgs = new ConversationContextBuildArgs
                 {
-                    HistoryTokenBudget = budget.HistoryTokenBudget,
+                    HistoryTokenBudget = historyBudget,
                     SourceBudget = budget,
-                    UseLlmContextCompaction = _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction
+                    UseLlmContextCompaction = _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
+                    MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0
                 };
             }
 

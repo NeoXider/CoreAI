@@ -18,6 +18,10 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator AfterSwitchToThreadPool_InvokeAsync_RunsDelegateOnUnityMainManagedThread()
         {
+            // Let Application.onBeforeRender / scene-load primers refresh the Editor isPlaying mirror once
+            // before MEAI-style thread-pool continuations read it (avoids stale 0 vs 1 on the first Play frame).
+            yield return null;
+
             int mainCapturedAtTestStart = Thread.CurrentThread.ManagedThreadId;
             var tcs = new TaskCompletionSource<int>();
 

@@ -85,6 +85,21 @@ namespace CoreAI
         bool EnableLlmContextCompaction => false;
 
         /// <summary>
+        /// When false, the orchestrator does not cap chat history with a rolling summary partition (full loaded transcript stays in the MEAI tail; risk of context overflow).
+        /// </summary>
+        bool EnableConversationHistorySummarization => true;
+
+        /// <summary>
+        /// When greater than zero, overrides the computed recent-history token budget from <see cref="IContextBudgetPolicy"/>.
+        /// </summary>
+        int ConversationHistoryRecentTokenBudgetOverride => 0;
+
+        /// <summary>
+        /// When greater than zero, caps persisted rolling summary text to roughly this many estimated tokens after each rollup.
+        /// </summary>
+        int ConversationRolledSummaryMaxTokens => 0;
+
+        /// <summary>
         /// Marshaler for MEAI <see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/> so tool bodies run on the host’s required thread.
         /// Default portable implementation: <see cref="PassThroughLlmAsyncMarshaler.Instance"/>.
         /// </summary>

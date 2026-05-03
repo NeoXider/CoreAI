@@ -14,5 +14,10 @@ namespace CoreAI.Ai
         /// Set from <see cref="ICoreAISettings.EnableLlmContextCompaction"/> and <see cref="AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction"/>.
         /// </summary>
         public bool UseLlmContextCompaction { get; set; }
+
+        /// <summary>
+        /// When greater than zero, caps rolled summary text to roughly this many estimated tokens before persistence.
+        /// </summary>
+        public int MaxRolledSummaryTokens { get; set; }
     }
 }

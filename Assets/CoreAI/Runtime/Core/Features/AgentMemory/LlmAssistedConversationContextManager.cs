@@ -82,11 +82,12 @@ namespace CoreAI.Ai
             string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             if (splitExclusive <= 0)
             {
+                string summaryOut = LimitSummaryIfNeeded(storedSummary, buildArgs);
                 return new ConversationContextSnapshot
                 {
-                    Summary = storedSummary,
+                    Summary = summaryOut,
                     RecentMessages = recent.ToArray(),
-                    WasCompacted = !string.IsNullOrWhiteSpace(storedSummary)
+                    WasCompacted = !string.IsNullOrWhiteSpace(summaryOut)
                 };
             }
 
@@ -117,6 +118,7 @@ namespace CoreAI.Ai
                 compactedSummary = ConversationBulletSummary.Format(storedSummary, history, splitExclusive);
             }
 
+            compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs);
             _summaryStore.SaveSummary(roleId, compactedSummary);
 
             return new ConversationContextSnapshot
@@ -204,6 +206,17 @@ namespace CoreAI.Ai
             }
 
             return s;
+        }
+
+        private string LimitSummaryIfNeeded(string summary, ConversationContextBuildArgs buildArgs)
+        {
+            int cap = buildArgs?.MaxRolledSummaryTokens ?? 0;
+            if (cap <= 0)
+            {
+                return summary ?? "";
+            }
+
+            return ConversationRolledSummaryLimiter.Apply(summary, _estimator, cap);
         }
     }
 }

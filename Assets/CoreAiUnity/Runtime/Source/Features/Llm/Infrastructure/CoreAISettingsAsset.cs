@@ -199,8 +199,26 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool sameOriginCredentials = false;
 
+        [Header("Chat history summarization")]
         [Tooltip(
-            "Optional auxiliary LLM to fold evicted transcript (costlier than deterministic rollup; off by default).")]
+            "When off, the full loaded chat transcript is sent in the MEAI tail without rolling prefix into ## Conversation Summary (may exceed model context).")]
+        [SerializeField]
+        private bool enableConversationHistorySummarization = true;
+
+        [Tooltip(
+            "When greater than zero, overrides the orchestrator's computed recent-history token budget (heuristic). Zero keeps automatic budgeting from context window minus system/tools.")]
+        [SerializeField]
+        [Min(0)]
+        private int conversationHistoryRecentTokenBudgetOverride;
+
+        [Tooltip(
+            "When greater than zero, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup.")]
+        [SerializeField]
+        [Min(0)]
+        private int conversationRolledSummaryMaxTokens;
+
+        [Tooltip(
+            "Optional auxiliary LLM to fold evicted transcript (costlier than deterministic rollup; off by default). Still requires per-role UseLlmContextCompaction.")]
         [SerializeField]
         private bool enableLlmContextCompaction = false;
 
@@ -470,8 +488,19 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>WebGL-only: send cookies on cross-origin requests (fetch credentials='include').</summary>
         public bool SameOriginCredentials => sameOriginCredentials;
 
-        /// <summary>Optional summarizer-assisted memory compaction flag.</summary>
+        /// <summary>Optional LLM-assisted memory compaction flag.</summary>
         public bool EnableLlmContextCompaction => enableLlmContextCompaction;
+
+        /// <summary>When false, skip rolling history partition into summary + recent tail.</summary>
+        public bool EnableConversationHistorySummarization => enableConversationHistorySummarization;
+
+        /// <summary>Zero = use automatic history budget; positive = override recent tail token budget.</summary>
+        public int ConversationHistoryRecentTokenBudgetOverride =>
+            conversationHistoryRecentTokenBudgetOverride < 0 ? 0 : conversationHistoryRecentTokenBudgetOverride;
+
+        /// <summary>Zero = do not truncate rolled summary; positive = cap estimated tokens.</summary>
+        public int ConversationRolledSummaryMaxTokens =>
+            conversationRolledSummaryMaxTokens < 0 ? 0 : conversationRolledSummaryMaxTokens;
 
         /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
         public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
@@ -693,6 +722,16 @@ namespace CoreAI.Infrastructure.Llm
             if (maxClientLimitedPromptChars < 0)
             {
                 maxClientLimitedPromptChars = 0;
+            }
+
+            if (conversationHistoryRecentTokenBudgetOverride < 0)
+            {
+                conversationHistoryRecentTokenBudgetOverride = 0;
+            }
+
+            if (conversationRolledSummaryMaxTokens < 0)
+            {
+                conversationRolledSummaryMaxTokens = 0;
             }
 
             if (llmRequestTimeoutSeconds < 0f)

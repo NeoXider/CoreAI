@@ -44,6 +44,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("*", settings.OfflineCustomResponseRoles);
             Assert.AreEqual(0, settings.MaxClientLimitedRequestsPerSession);
             Assert.AreEqual(0, settings.MaxClientLimitedPromptChars);
+            Assert.IsTrue(settings.EnableConversationHistorySummarization);
+            Assert.AreEqual(0, settings.ConversationHistoryRecentTokenBudgetOverride);
+            Assert.AreEqual(0, settings.ConversationRolledSummaryMaxTokens);
 
             Object.DestroyImmediate(settings);
         }

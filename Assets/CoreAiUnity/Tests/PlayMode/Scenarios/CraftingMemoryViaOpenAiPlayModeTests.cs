@@ -369,6 +369,7 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 string firstPayload = sink1.Items[0].JsonPayload;
+                AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "craft 1");
                 string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
 
@@ -418,6 +419,7 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 string secondPayload = sink2.Items[0].JsonPayload;
+                AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "craft 2");
                 string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 2 name: '{secondName ?? "unknown"}'");
 
@@ -498,8 +500,9 @@ namespace CoreAI.Tests.PlayMode
                                   "   ```\n\n" +
                                   "2. Then, call the execute_lua tool to create the item:\n" +
                                   "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', quality)\\nreport('crafted YourWeaponName')\"}}\n" +
-                                  "   ```";
+                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', 42)\\nreport('crafted YourWeaponName')\"}}\n" +
+                                  "   ```\n" +
+                                  "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -523,13 +526,41 @@ namespace CoreAI.Tests.PlayMode
                                   "   ```\n\n" +
                                   "2. Call the execute_lua tool:\n" +
                                   "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', quality)\\nreport('crafted SameNameAsBefore')\"}}\n" +
-                                  "   ```";
+                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', 42)\\nreport('crafted SameNameAsBefore')\"}}\n" +
+                                  "   ```\n" +
+                                  "Use the same integer literal for quality as in the matching earlier craft (never the identifier quality).";
 
             return header + ingredients + memorySection + instructions;
         }
 
         #region Logging Helpers
+
+        private static void AssertExecuteLuaUsesNumericQualityIfPresent(string payload, string label)
+        {
+            if (string.IsNullOrEmpty(payload) ||
+                payload.IndexOf("create_item", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return;
+            }
+
+            if (Regex.IsMatch(
+                    payload,
+                    @",\s*['""]weapon['""]\s*,\s*quality\s*\)",
+                    RegexOptions.IgnoreCase))
+            {
+                Assert.Fail(
+                    $"[{label}] create_item must use a numeric quality literal, not the identifier quality. Payload:\n{payload}");
+            }
+
+            if (!Regex.IsMatch(
+                    payload,
+                    @"create_item\s*\([^)]*,\s*['""]weapon['""]\s*,\s*\d+",
+                    RegexOptions.IgnoreCase))
+            {
+                Assert.Fail(
+                    $"[{label}] create_item must pass an integer literal as the third argument. Payload:\n{payload}");
+            }
+        }
 
         private IEnumerator FlushMemoryStorePersistenceFrames()
         {
@@ -612,6 +643,8 @@ namespace CoreAI.Tests.PlayMode
 
             string payload = sink.Items[0].JsonPayload;
 
+            AssertExecuteLuaUsesNumericQualityIfPresent(payload, label);
+
             //   
             string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
             if (string.IsNullOrEmpty(itemName))
@@ -674,6 +707,8 @@ namespace CoreAI.Tests.PlayMode
             // Lua: create_item('Name', ...)
             new("create_item\\s*\\(\\s*'([^']+)'"),
             new("create_item\\s*\\(\\s*\"([^\"]+)\""),
+            // Markdown craft line used by some local models (before generic **Bold** single-token matches).
+            new(@"\*\*Weapon\s+crafted\*\*\s*:\s*([^\r\n*]+?)(?=\s+created\b)", RegexOptions.IgnoreCase),
             // Prose: Created "IronOak Blade" weapon ...
             new("Created\\s+\"([^\"]+)\"\\s+weapon", RegexOptions.IgnoreCase),
             // Prose: memory line in these tests
