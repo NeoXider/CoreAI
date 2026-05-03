@@ -2,6 +2,14 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.4] - 2026-05-03
+
+### WebGL player — LLM requests and public API CORS
+
+- **Portable dependency:** **`com.nexoider.coreai` 1.6.4** — **`MeaiOpenAiChatClient`** no longer attaches correlation / idempotency / tenant headers in the **WebGL player** build, avoiding browser preflight failures against APIs that do not list those headers in **`Access-Control-Allow-Headers`** (typical when calling **OpenRouter** directly from **`http(s):…`** game origins).
+
+#### Package **`1.6.4`**.
+
 ## [1.6.3] - 2026-05-03
 
 ### Editor — file-backed agent memory when build target is WebGL

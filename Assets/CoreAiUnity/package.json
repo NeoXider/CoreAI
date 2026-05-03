@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.3: Editor keeps FileAgentMemoryStore when build target is WebGL (CoreAILifetimeScope); v1.6.2: marshaler mirror priming, CraftingMemory harness, persisted-chat EditMode tests (see CHANGELOG).",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.4: lockstep com.nexoider.coreai 1.6.4 (WebGL player LLM header CORS fix in portable layer). v1.6.3: Editor FileAgentMemoryStore when build target is WebGL.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.6.3"
+    "com.nexoider.coreai": "1.6.4"
   }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [v1.6.4] — 2026-05-03
+
+### WebGL browser — OpenAI-compatible HTTP headers vs public API CORS
+
+- **`MeaiOpenAiChatClient.BuildTransportHeaders`** — when **`UNITY_WEBGL && !UNITY_EDITOR`**, omit **`X-Request-Id`**, **`Idempotency-Key`**, **`X-Coreai-Role`**, **`X-Tenant-Id`**, **`X-User-Id`**, and **`X-Session-Id`** (and skip the same names from **`IRequestHeaderProvider.GetHeaders()`**), so **`fetch`** preflight to gateways with a narrow **`Access-Control-Allow-Headers`** list (e.g. **openrouter.ai**) is not rejected before the POST runs. Trace and idempotency remain visible in **`LoggingLlmClientDecorator`** / **`RoutingLlmClient`** logs on the client; use a **same-origin proxy** or a backend that whitelists these headers when you need them on the wire in WebGL.
+
+### Semver
+
+- Lockstep **`1.6.4`** with **`com.nexoider.coreaiunity`**.
+
 ## [v1.6.3] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.3 (Unity-only)

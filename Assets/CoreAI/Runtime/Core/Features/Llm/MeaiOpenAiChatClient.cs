@@ -397,6 +397,47 @@ namespace CoreAI.Infrastructure.Llm
 
         private List<KeyValuePair<string, string>> BuildTransportHeaders(string url, bool acceptEventStream)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            const bool omitCorsSensitiveCorrelationHeaders = true;
+#else
+            const bool omitCorsSensitiveCorrelationHeaders = false;
+#endif
+            return BuildTransportHeadersCore(
+                url,
+                acceptEventStream,
+                omitCorsSensitiveCorrelationHeaders,
+                ResolveAuthorizationHeader(),
+                _settings,
+                _log);
+        }
+
+        /// <summary>
+        /// EditMode tests: same header list as <see cref="BuildTransportHeaders"/> for an explicit
+        /// <paramref name="omitCorsSensitiveCorrelationHeaders"/> (WebGL player uses <c>true</c>).
+        /// </summary>
+        internal static List<KeyValuePair<string, string>> BuildTransportHeadersForTests(
+            string url,
+            bool acceptEventStream,
+            bool omitCorsSensitiveCorrelationHeaders,
+            string? authorizationHeader,
+            IOpenAiHttpSettings settings,
+            ILog log) =>
+            BuildTransportHeadersCore(
+                url,
+                acceptEventStream,
+                omitCorsSensitiveCorrelationHeaders,
+                authorizationHeader,
+                settings,
+                log);
+
+        private static List<KeyValuePair<string, string>> BuildTransportHeadersCore(
+            string url,
+            bool acceptEventStream,
+            bool omitCorsSensitiveCorrelationHeaders,
+            string? authorizationHeader,
+            IOpenAiHttpSettings settings,
+            ILog log)
+        {
             _ = acceptEventStream;
             List<KeyValuePair<string, string>> list = new();
 
@@ -405,82 +446,108 @@ namespace CoreAI.Infrastructure.Llm
                 list.Add(new KeyValuePair<string, string>(OpenAiHttpConstants.HttpRefererHeaderName,
                     OpenAiHttpConstants.HttpRefererUnityUrl));
                 list.Add(new KeyValuePair<string, string>("X-Title", "CoreAI"));
-                _log.Info("MeaiOpenAiChatClient: Added OpenRouter headers", LogTag.Llm);
+                log.Info("MeaiOpenAiChatClient: Added OpenRouter headers", LogTag.Llm);
             }
 
-            string authorizationHeader = ResolveAuthorizationHeader();
-            if (!string.IsNullOrEmpty(authorizationHeader))
+            if (!string.IsNullOrWhiteSpace(authorizationHeader))
             {
-                list.Add(new KeyValuePair<string, string>("Authorization", authorizationHeader));
-                _log.Info($"MeaiOpenAiChatClient: Authorization header set (len={authorizationHeader.Length})",
+                string trimmedAuth = authorizationHeader.Trim();
+                list.Add(new KeyValuePair<string, string>("Authorization", trimmedAuth));
+                log.Info($"MeaiOpenAiChatClient: Authorization header set (len={trimmedAuth.Length})",
                     LogTag.Llm);
             }
 
-            LlmRequestContextFrame ctx = LlmRequestContext.Current;
-            if (ctx != null)
+            // WebGL in the browser: cross-origin requests trigger CORS preflight for non-safelisted headers.
+            // Public gateways (e.g. openrouter.ai) often omit X-Request-Id / Idempotency-Key / X-Tenant-Id from
+            // Access-Control-Allow-Headers, which blocks the whole POST before it reaches the API.
+
+            if (!omitCorsSensitiveCorrelationHeaders)
             {
-                if (!string.IsNullOrEmpty(ctx.IdempotencyKey))
+                LlmRequestContextFrame ctx = LlmRequestContext.Current;
+                if (ctx != null)
                 {
-                    list.Add(new KeyValuePair<string, string>("Idempotency-Key", ctx.IdempotencyKey));
+                    if (!string.IsNullOrEmpty(ctx.IdempotencyKey))
+                    {
+                        list.Add(new KeyValuePair<string, string>("Idempotency-Key", ctx.IdempotencyKey));
+                    }
+
+                    if (!string.IsNullOrEmpty(ctx.TraceId))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-Request-Id", ctx.TraceId));
+                    }
+
+                    if (!string.IsNullOrEmpty(ctx.AgentRoleId))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-Coreai-Role", ctx.AgentRoleId));
+                    }
                 }
 
-                if (!string.IsNullOrEmpty(ctx.TraceId))
+                ILlmAuthContextProvider auth = LlmAuthContextRegistry.Current;
+                if (auth != null)
                 {
-                    list.Add(new KeyValuePair<string, string>("X-Request-Id", ctx.TraceId));
-                }
+                    if (!string.IsNullOrEmpty(auth.TenantId))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-Tenant-Id", auth.TenantId));
+                    }
 
-                if (!string.IsNullOrEmpty(ctx.AgentRoleId))
-                {
-                    list.Add(new KeyValuePair<string, string>("X-Coreai-Role", ctx.AgentRoleId));
+                    if (!string.IsNullOrEmpty(auth.UserId))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-User-Id", auth.UserId));
+                    }
+
+                    if (!string.IsNullOrEmpty(auth.SessionId))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-Session-Id", auth.SessionId));
+                    }
                 }
             }
 
-            ILlmAuthContextProvider auth = LlmAuthContextRegistry.Current;
-            if (auth != null)
-            {
-                if (!string.IsNullOrEmpty(auth.TenantId))
-                {
-                    list.Add(new KeyValuePair<string, string>("X-Tenant-Id", auth.TenantId));
-                }
-
-                if (!string.IsNullOrEmpty(auth.UserId))
-                {
-                    list.Add(new KeyValuePair<string, string>("X-User-Id", auth.UserId));
-                }
-
-                if (!string.IsNullOrEmpty(auth.SessionId))
-                {
-                    list.Add(new KeyValuePair<string, string>("X-Session-Id", auth.SessionId));
-                }
-            }
-
-            IRequestHeaderProvider hp = _settings.HeaderProvider;
+            IRequestHeaderProvider? hp = settings.HeaderProvider;
             if (hp != null)
             {
-                IReadOnlyList<KeyValuePair<string, string>> extra = hp.GetHeaders();
+                IReadOnlyList<KeyValuePair<string, string>>? extra = hp.GetHeaders();
                 if (extra != null)
                 {
                     foreach (KeyValuePair<string, string> kv in extra)
                     {
                         if (!string.IsNullOrEmpty(kv.Key))
                         {
+                            if (omitCorsSensitiveCorrelationHeaders &&
+                                IsCorsSensitiveCorrelationHeader(kv.Key))
+                            {
+                                continue;
+                            }
+
                             list.Add(kv);
                         }
                     }
                 }
 
-                if (!string.IsNullOrEmpty(hp.IdempotencyKey) && !ContainsHeader(list, "Idempotency-Key"))
+                if (!omitCorsSensitiveCorrelationHeaders)
                 {
-                    list.Add(new KeyValuePair<string, string>("Idempotency-Key", hp.IdempotencyKey));
-                }
+                    if (!string.IsNullOrEmpty(hp.IdempotencyKey) && !ContainsHeader(list, "Idempotency-Key"))
+                    {
+                        list.Add(new KeyValuePair<string, string>("Idempotency-Key", hp.IdempotencyKey));
+                    }
 
-                if (!string.IsNullOrEmpty(hp.RequestId) && !ContainsHeader(list, "X-Request-Id"))
-                {
-                    list.Add(new KeyValuePair<string, string>("X-Request-Id", hp.RequestId));
+                    if (!string.IsNullOrEmpty(hp.RequestId) && !ContainsHeader(list, "X-Request-Id"))
+                    {
+                        list.Add(new KeyValuePair<string, string>("X-Request-Id", hp.RequestId));
+                    }
                 }
             }
 
             return list;
+        }
+
+        private static bool IsCorsSensitiveCorrelationHeader(string headerName)
+        {
+            return string.Equals(headerName, "X-Request-Id", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(headerName, "Idempotency-Key", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(headerName, "X-Coreai-Role", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(headerName, "X-Tenant-Id", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(headerName, "X-User-Id", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(headerName, "X-Session-Id", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ContainsHeader(List<KeyValuePair<string, string>> list, string name)
