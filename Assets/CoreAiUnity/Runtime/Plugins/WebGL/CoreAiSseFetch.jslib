@@ -30,7 +30,7 @@ mergeInto(LibraryManager.library, {
       clearTimeout(timeoutId);
       if (!response.ok) {
         const errText = `HTTP ${response.status} ${response.statusText}`;
-        {{{ MakeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(errText));
+        {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(errText));
         return;
       }
 
@@ -42,9 +42,9 @@ mergeInto(LibraryManager.library, {
         reader.read().then(({ done, value }) => {
           if (done) {
             if (buffer.trim()) {
-              {{{ MakeDynCall('vii', 'onChunkPtr') }}}(callId, stringToNewUTF8(buffer));
+              {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, stringToNewUTF8(buffer));
             }
-            {{{ MakeDynCall('vi', 'onDonePtr') }}}(callId);
+            {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
             return;
           }
 
@@ -60,7 +60,7 @@ mergeInto(LibraryManager.library, {
                 const json = JSON.parse(data);
                 const delta = json?.choices?.[0]?.delta?.content;
                 if (delta) {
-                  {{{ MakeDynCall('vii', 'onChunkPtr') }}}(callId, stringToNewUTF8(delta));
+                  {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, stringToNewUTF8(delta));
                 }
               } catch (e) { /* ignore parse errors */ }
             }
@@ -70,14 +70,14 @@ mergeInto(LibraryManager.library, {
         }).catch(err => {
           clearTimeout(timeoutId);
           const msg = err.name === 'AbortError' ? 'Timeout' : err.message;
-          {{{ MakeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(msg));
+          {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(msg));
         });
       }
 
       read();
     }).catch(err => {
       clearTimeout(timeoutId);
-      {{{ MakeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(err.message));
+      {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, stringToNewUTF8(err.message));
     });
 
     return controller; // Return controller for abort

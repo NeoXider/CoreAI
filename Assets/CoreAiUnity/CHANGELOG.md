@@ -9,6 +9,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **`CoreAILifetimeScope`** — register **`FileAgentMemoryStore`** when **`!UNITY_WEBGL || UNITY_EDITOR`**, so **Editor Play Mode** keeps persisted chat / `IAgentMemoryStore` behaviour while the active **Build Target** is **WebGL** (previously **`UNITY_WEBGL`** forced **`NullAgentMemoryStore`**, which broke history and host tests).
 - **WebGL player** unchanged: **`NullAgentMemoryStore`** + **`NullConversationTranscriptStore`** (avoid synchronous `File` on IndexedDB).
 - **Compile:** **`CoreAiChatService`** / **`CoreAiChatPanel`** — add **`using CoreAI.Infrastructure.Llm`** for **`CoreAISettingsAsset`** / **`WebGlNativeStreaming`** checks under **`UNITY_WEBGL && !UNITY_EDITOR`** (fixes **CS0246** when building WebGL player).
+- **WebGL link:** **`CoreAiSseFetch.jslib`** — use Unity’s documented macro **`makeDynCall`** (lowercase), not **`MakeDynCall`**, so Emscripten **6000.3** no longer throws **`ReferenceError: MakeDynCall is not defined`** during **`build.js`** / **jsify**.
 - **Dependency:** **`com.nexoider.coreai` 1.6.3** (lockstep semver; portable assembly unchanged).
 
 #### Package **`1.6.3`**.
