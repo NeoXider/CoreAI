@@ -21,9 +21,9 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** optional **`WebGlNativeStreaming`** + **`FetchSseOpenAiTransport`** (`Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`). Known **`UnityWebRequest`** limitation — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
+**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** optional **`WebGlNativeStreaming`** + **`FetchSseOpenAiTransport`** (`Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`). Known **`UnityWebRequest`** limitation — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **WebGL IL2CPP / LLVM OOM** — [`WEBGL_BUILD_TROUBLESHOOTING`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
-**Current stable line:** **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** are released at the **same semver (`1.6.2`)**.
+**Current packages:** **`com.nexoider.coreai`** portable core **`1.6.8`** · **`com.nexoider.coreaiunity`** Unity layer **`1.6.10`** (manifest pins the core dependency from the Unity package).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

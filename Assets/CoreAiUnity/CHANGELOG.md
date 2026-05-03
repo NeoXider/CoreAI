@@ -2,6 +2,17 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.10] - 2026-05-04
+
+### Docs / sample — WebGL build hygiene
+
+- **`Docs/WEBGL_BUILD_TROUBLESHOOTING.md`** — LLVM **out of memory** during WebGL IL2CPP (`Il2CppGenericMethodPointerTable.c`), `IOException` under `ProjectSettings/Packages`, and the CoreAI **StreamingAssets** preprocess log; mitigations (stripping, exceptions, RAM, Defender).
+- **`Docs/STREAMING_WEBGL_TODO.md`** — cross-link to the troubleshooting doc.
+- **Sample:** `Assets/_exampleGame/.../ArenaBootstrap/Infrastructure.meta` — fixed **`guid:`** (was 33 hex chars; Unity rejected the folder asset).
+- **EditMode:** **`RogueliteArenaInfrastructureMetaEditModeTests`** — asserts the folder `.meta` keeps a valid 32-char Unity GUID.
+
+#### Package **`1.6.10`**.
+
 ## [1.6.9] - 2026-05-03
 
 ### Chat / LLM — visible streaming when the gateway sends one long delta

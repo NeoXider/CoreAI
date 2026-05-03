@@ -16,6 +16,7 @@ MonoBehaviour:
   executionMode: 0
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
+  apiKey: 
   modelName: qwen/qwen3.6-27b
   temperature: 0.1
   maxTokens: 512
@@ -50,7 +51,7 @@ MonoBehaviour:
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
-  enableMeaiDebugLogging: 0
+  enableMeaiDebugLogging: 1
   enableHttpDebugLogging: 1
   logLlmInput: 1
   logLlmOutput: 1

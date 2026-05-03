@@ -1,5 +1,7 @@
 # TODO — WebGL SSE streaming in `MeaiOpenAiChatClient`
 
+**See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
+
 **Update (v1.6.0):** an optional **`.jslib`** + **`FetchSseOpenAiTransport`** path exists behind **`CoreAISettingsAsset.WebGlNativeStreaming`**. It uses browser **`fetch`** for incremental SSE; the default **`UnityWebRequestOpenAiTransport`** path still does **not** stream incrementally. **Editor / PlayMode** do not exercise the native plugin — verify in a **WebGL player** build.
 
 **Status (historical):** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). When **`WebGlNativeStreaming`** is off, **`UnityWebRequest`** does not deliver SSE incrementally; non-streaming fallback remains the safe default.

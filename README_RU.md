@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета синхронизированы (**`1.6.2`**). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (**`1.6.10`**, Unity-слой) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (**`1.6.8`**, portable core). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
