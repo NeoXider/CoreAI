@@ -58,7 +58,8 @@ mergeInto(LibraryManager.library, {
               if (data === '[DONE]') return;
               try {
                 const json = JSON.parse(data);
-                const delta = json?.choices?.[0]?.delta?.content;
+                var ch = json && json.choices && json.choices[0];
+                var delta = ch && ch.delta ? ch.delta.content : null;
                 if (delta) {
                   {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, stringToNewUTF8(delta));
                 }
