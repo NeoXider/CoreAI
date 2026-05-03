@@ -939,3 +939,12 @@ This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
 - For **LLMUnity**, history is mirrored into `LLMAgent` during the session — if the list is empty, confirm the client was created with chat history enabled for that role
 - For **persistence after closing the game**, built-in **`PlainChat`** / **`SmartChat`** persist chat by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false — only in-memory for that process
 - UI restore: see **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (`Load Persisted Chat On Startup`, role policy)
+
+---
+
+## Related portable documentation
+
+- [`README.md`](README.md) — index of all guides under `Assets/CoreAI/Docs`
+- [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md) — MEAI tool pipeline
+- [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](MEAI_TOKENS_FACT_VS_ESTIMATE.md) — token `usage`, streaming, timeouts
+- [`LLM_ROUTING.md`](LLM_ROUTING.md) — portable routing contracts

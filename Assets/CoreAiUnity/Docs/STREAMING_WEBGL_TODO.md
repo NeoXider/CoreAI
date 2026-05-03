@@ -1,6 +1,8 @@
 # TODO — WebGL SSE streaming in `MeaiOpenAiChatClient`
 
-**Status:** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). SSE incremental delivery (real streaming chunks in WebGL) remains a known limitation; non-streaming fallback is the recommended path for WebGL builds. **UI threading:** from **v1.5.6** (`CoreAiChatPanel`), **`RunAgentTurnAsync`** and **`SendNonStreamingAsync`** marshal typing/streaming cleanup via **`UniTask.SwitchToMainThread`** so UI Toolkit is not updated off the player loop after HTTP (see `CoreAiUnity` [CHANGELOG](../CHANGELOG.md)).
+**Update (v1.6.0):** an optional **`.jslib`** + **`FetchSseOpenAiTransport`** path exists behind **`CoreAISettingsAsset.WebGlNativeStreaming`**. It uses browser **`fetch`** for incremental SSE; the default **`UnityWebRequestOpenAiTransport`** path still does **not** stream incrementally. **Editor / PlayMode** do not exercise the native plugin — verify in a **WebGL player** build.
+
+**Status (historical):** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). When **`WebGlNativeStreaming`** is off, **`UnityWebRequest`** does not deliver SSE incrementally; non-streaming fallback remains the safe default.
 
 **Affected code:** `Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` → `MeaiOpenAiChatClient.CompleteStreamingAsync` (or equivalent streaming entry point in your tree).
 

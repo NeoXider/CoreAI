@@ -1,5 +1,5 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-01 | **Текущая версия:** v1.5.5 (core) / v0.25.8 (unity)
+**Обновлено:** 2026-05-03 | **Текущая версия (UPM):** `com.nexoider.coreai` / `com.nexoider.coreaiunity` **1.6.0** — см. `Assets/CoreAI/package.json` и `Assets/CoreAiUnity/package.json`.
 
 ## 🚧 Open — приоритет на 0.26.x
 
@@ -17,7 +17,7 @@
 ### WebGL streaming SSE (регрессия 0.25.x)
 
 - [ ] **0.26.0** — `protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiFallback)` hook на `CoreAiChatPanel`. Дефолтная реализация: возвращает `false` под `#if UNITY_WEBGL && !UNITY_EDITOR`, во всех остальных случаях — текущая логика `_chatService.IsStreamingEnabled(...)`. Это убирает «бесконечный typing-индикатор + пустой bubble» во всех проектах на CoreAI без правок прикладного кода.
-- [ ] **0.27.0** — настоящий fetch-SSE-bridge через `.jslib`-плагин в `Runtime/Plugins/WebGL/`. Использует `fetch(url).body.getReader()` для инкрементальной доставки SSE-чанков обратно в C# через `[DllImport("__Internal")]`-callback. Включается опциональным флагом `CoreAISettings.WebGlNativeStreaming`. Старая non-streaming-ветка остаётся как fallback.
+- [x] **fetch-SSE / jslib** — **v1.6.0**: `CoreAiSseFetch.jslib`, `FetchSseOpenAiTransport`, флаг **`CoreAISettingsAsset.WebGlNativeStreaming`**; без флага по-прежнему **`UnityWebRequestOpenAiTransport`** (нет инкрементального SSE).
 - Полная диагностика, причина, шаги — [`Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 - Текущий workaround (на стороне приложения, см. RedoSchool) — рефлекторно гасить `CoreAiChatConfig._enableStreaming = false` в `Awake()` под WebGL.
 

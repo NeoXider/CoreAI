@@ -77,6 +77,44 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_ReusesIdempotencyKey_OnSameRequestInstance()
+        {
+            HelloOnceChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi"
+            };
+
+            await client.CompleteAsync(request, CancellationToken.None);
+            string firstKey = request.IdempotencyKey;
+            Assert.IsNotEmpty(firstKey);
+
+            await client.CompleteAsync(request, CancellationToken.None);
+            Assert.AreEqual(firstKey, request.IdempotencyKey);
+        }
+
+        [Test]
+        public async Task CompleteAsync_KeepsCallerProvidedIdempotencyKey()
+        {
+            HelloOnceChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            const string preset = "deadbeefcafebabe1122334455667788";
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                IdempotencyKey = preset
+            };
+
+            await client.CompleteAsync(request, CancellationToken.None);
+            Assert.AreEqual(preset, request.IdempotencyKey);
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_ToolJsonInStream_ExecutesToolAndReturnsFinalText()
         {
             StreamingScriptedChatClient inner = new(
@@ -235,6 +273,31 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
+        }
+
+        /// <summary>Minimal MEAI client for non-streaming completion tests.</summary>
+        private sealed class HelloOnceChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "x");
+                await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+
+            public void Dispose()
+            {
+            }
         }
 
         private sealed class StreamingScriptedChatClient : MEAI.IChatClient

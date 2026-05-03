@@ -43,3 +43,8 @@ This lets projects replace free-form result strings with stable machine-readable
 ## Trace Hooks
 
 `IAgentTurnTraceSink` receives `AgentTurnTrace` records containing prompt preview, user payload, assistant response, model/profile metadata, token usage, and errors. The default sink is no-op; tests can use `InMemoryAgentTurnTraceSink`.
+
+## Related portable documentation
+
+- [`README.md`](README.md) — all guides under `Assets/CoreAI/Docs`
+- [`LLM_ROUTING.md`](LLM_ROUTING.md) — execution modes, `ILlmRouteResolver`, usage sinks, timeouts (overlaps with lesson policy)

@@ -188,6 +188,18 @@ namespace CoreAI.Infrastructure.Llm
         private bool enableStreaming = true;
 
         [Tooltip(
+            "WebGL only: route streaming HTTP through the native fetch + ReadableStream bridge (CoreAiSseFetch.jslib) " +
+            "instead of UnityWebRequest. Requires the .jslib plugin and a CORS-permitted backend that does not buffer SSE.")]
+        [SerializeField]
+        private bool webGlNativeStreaming = false;
+
+        [Tooltip(
+            "WebGL only: include cookies on cross-origin LLM requests (fetch credentials='include'). " +
+            "Same-origin deployments do not need this.")]
+        [SerializeField]
+        private bool sameOriginCredentials = false;
+
+        [Tooltip(
             "Optional auxiliary LLM to fold evicted transcript (costlier than deterministic rollup; off by default).")]
         [SerializeField]
         private bool enableLlmContextCompaction = false;
@@ -383,6 +395,26 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>HTTP adapter timeout backing field.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds <= 0 ? 120 : requestTimeoutSeconds;
 
+        /// <summary>
+        /// Single-request HTTP limit aligned with <see cref="LlmRequestTimeoutSeconds"/> so the transport
+        /// does not outlive the orchestrator/chat <c>CancelAfterSlim</c> window (notably WebGL non-streaming).
+        /// </summary>
+        public int EffectiveHttpRequestTimeoutSeconds
+        {
+            get
+            {
+                int http = RequestTimeoutSeconds;
+                float llm = LlmRequestTimeoutSeconds;
+                if (llm <= 0f)
+                {
+                    return http;
+                }
+
+                int orchestratorCap = System.Math.Max(1, (int)System.Math.Ceiling(llm));
+                return System.Math.Min(http, orchestratorCap);
+            }
+        }
+
         /// <summary>Optional LLMAgent GameObject identifier.</summary>
         public string LlmUnityAgentName => llmUnityAgentName;
 
@@ -431,6 +463,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Global streaming flag.</summary>
         public bool EnableStreaming => enableStreaming;
+
+        /// <summary>WebGL-only: opt in to the native fetch SSE bridge instead of UnityWebRequest.</summary>
+        public bool WebGlNativeStreaming => webGlNativeStreaming;
+
+        /// <summary>WebGL-only: send cookies on cross-origin requests (fetch credentials='include').</summary>
+        public bool SameOriginCredentials => sameOriginCredentials;
 
         /// <summary>Optional summarizer-assisted memory compaction flag.</summary>
         public bool EnableLlmContextCompaction => enableLlmContextCompaction;

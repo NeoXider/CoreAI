@@ -74,6 +74,10 @@ Each profile can set mode, context window, HTTP settings, LLMUnity agent name, a
 
 Use `CoreAI/Validate Production Settings` before WebGL releases. CoreAI warns when a WebGL build uses `ClientOwnedApi` with a non-empty API key, because public WebGL builds expose client assets. Use `ServerManagedApi` for public WebGL.
 
+### WebGL streaming (optional)
+
+- **`WebGlNativeStreaming`** (in **`CoreAISettingsAsset`**) — when **on** in a **WebGL player** build, **`MeaiLlmClient`** can use the **`CoreAiSseFetch.jslib`** bridge so **`fetch`** reads **SSE** incrementally (instead of **`UnityWebRequest`** buffering). Requires backend **`text/event-stream`** without gzip on that route; same-origin relative **`ApiBaseUrl`** is resolved via **`Application.absoluteURL`**. Validate end-to-end in the browser; Edit Mode still uses **`HttpClient`** mocks.
+
 ### Auto priority
 
 In **Auto** mode you can choose which backend to try first:
@@ -173,7 +177,7 @@ var result = await client.CompleteAsync(new LlmCompletionRequest {
 | **API Key** | _(empty)_ | Bearer token. For LM Studio — leave empty |
 | **Model** | `qwen3.5-4b` | Model name on the provider side |
 | **Temperature** | `0.2` | 0.0 = deterministic, 2.0 = creative |
-| **Timeout** | `120` | HTTP request timeout (seconds) |
+| **Timeout** | `120` | HTTP request timeout (seconds). The value passed to the OpenAI-compatible client is capped by `EffectiveHttpRequestTimeoutSeconds` (see General settings note on HTTP vs LLM timeout). |
 
 > 📝 **`Max Output Tokens` moved to General settings (0.25.8)** — this used to live in the HTTP section and was not applied consistently. It now sits under **General settings**, applies to **both** backends (HTTP + LLMUnity), and can be overridden per agent or per call.
 
@@ -213,6 +217,8 @@ The Inspector includes an **LLMUnity status** panel:
 | **LLM Timeout** | `15` | LLM request timeout (seconds). v1.5.1: enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (WebGL-compatible). |
 | **Lua Repair Retries** | `3` | Max consecutive failed Lua repair attempts for Programmer (counter resets on success) |
 | **Tool Call Retries** | `3` | Max consecutive failed tool calls before aborting the agent (counter resets on success) |
+
+> **HTTP vs LLM timeout:** `CoreAISettingsAsset.EffectiveHttpRequestTimeoutSeconds` = `min(HTTP Timeout, ceil(LLM Timeout))` so one HTTP call cannot run longer than the orchestrator/chat cancel window. Details: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (§3).
 
 > 📝 **`Max Output Tokens` priority chain (0.25.9+):** `LlmCompletionRequest.MaxOutputTokens` (per-request, direct client call) → `AiTaskRequest.MaxOutputTokens` (per-call via orchestrator) → `AgentBuilder.WithMaxOutputTokens` / `AgentMemoryPolicy.RoleMemoryConfig.MaxOutputTokens` (per-agent) → `ICoreAISettings.MaxTokens` (global default in this asset) → provider default (LM Studio: usually unbounded; OpenAI: model-specific). Set the asset value to `0` to opt out of the global fallback for both backends.
 

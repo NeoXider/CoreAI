@@ -21,9 +21,9 @@
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** known limitation and workaround — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
+**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** optional **`WebGlNativeStreaming`** + **`FetchSseOpenAiTransport`** (`Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`). Known **`UnityWebRequest`** limitation — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
-**Current stable line:** **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** are released at the **same semver (`1.5.11`)**. **Unity `1.5.11`:** Play Mode tests split into **`FastNoLlm`**, **`LlmVerification`**, and **`Scenarios`** (`Assets/CoreAiUnity/Tests/PlayMode/`). **1.5.10** added responsive **`UniTask.Yield`** HTTP polling, main-thread-safe MEAI awaits, **`CAIU001`** analyzer + UPM **`author`**; broader **1.5.x**: orchestration/async hygiene, chat panel main-thread marshaling, compaction, **1.4.x** HTTP `Retry-After`, tool pipeline. Version source: [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) · [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json).
+**Current stable line:** **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** are released at the **same semver (`1.6.0`)**.
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -430,7 +430,7 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ## 📚 Documentation
 
-**Language:** In-depth Markdown under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) is maintained in **English**. [README_RU.md](README_RU.md) mirrors this page for Russian navigation; follow the linked guides for detail.
+**Language:** In-depth Markdown under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) is maintained in **English**. The portable `CoreAI` package docs are English-only except clearly marked `_RU` redirect/plan stubs. [README_RU.md](README_RU.md) mirrors this page for Russian navigation; follow the linked guides for detail.
 
 Start from the index and pick the level that matches your goal:
 
@@ -452,6 +452,7 @@ Start from the index and pick the level that matches your goal:
 |----------|--------------|
 | 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in `CoreAiChatPanel` + demo scene |
 | 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → filters → UI · orchestrator streaming |
+| 📊 [MEAI_TOKENS_FACT_VS_ESTIMATE.md](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider `usage` vs pre-flight estimates; SSE `include_usage`; HTTP vs orchestrator timeouts |
 
 ### Tools, memory, roles
 
@@ -469,6 +470,8 @@ Start from the index and pick the level that matches your goal:
 | 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, LLM→commands flow, PR checklist |
 | 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Normative spec: DI, threads, authority |
 | 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
+| 🔀 [LLM_ROUTING.md](Assets/CoreAI/Docs/LLM_ROUTING.md) | Portable routing: modes, policy, usage sinks, timeouts |
+| 📑 [CoreAI/Docs/README.md](Assets/CoreAI/Docs/README.md) | Index of all portable CoreAI markdown guides |
 | 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) · [CHANGELOG (Unity)](Assets/CoreAiUnity/CHANGELOG.md) | Version history |
 
 ---

@@ -61,7 +61,9 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Returns a warning when WebGL is configured with a client-owned provider key.
+        /// Returns a warning when WebGL is configured with a provider key in client-side execution modes,
+        /// when ServerManagedApi has a leftover non-empty <c>ApiKey</c>, or when streaming is requested
+        /// without the native fetch bridge enabled.
         /// </summary>
         public static string GetWebGlClientKeyWarning(CoreAISettingsAsset settings, bool webGlBuild)
         {
@@ -70,11 +72,33 @@ namespace CoreAI.Editor
                 return "";
             }
 
-            if (settings.ExecutionMode == LlmExecutionMode.ClientOwnedApi &&
-                !string.IsNullOrWhiteSpace(settings.ApiKey))
+            bool keyPresent = !string.IsNullOrWhiteSpace(settings.ApiKey);
+
+            if (settings.ExecutionMode == LlmExecutionMode.ClientOwnedApi && keyPresent)
             {
                 return "[CoreAI] WebGL build is configured with ClientOwnedApi and a non-empty API key. " +
                        "Public WebGL builds expose client assets; use ServerManagedApi with a backend proxy instead.";
+            }
+
+            if (settings.ExecutionMode == LlmExecutionMode.ClientLimited && keyPresent)
+            {
+                return "[CoreAI] WebGL build is configured with ClientLimited and a non-empty API key. " +
+                       "Local request limits do not protect the key from public WebGL bundles; switch to ServerManagedApi.";
+            }
+
+            if (settings.ExecutionMode == LlmExecutionMode.ServerManagedApi && keyPresent)
+            {
+                return "[CoreAI] WebGL build with ServerManagedApi has a non-empty ApiKey. " +
+                       "ServerManagedApi authorizes via ServerManagedAuthorization (JWT/Bearer at runtime); " +
+                       "remove the static ApiKey to avoid leaking it into the public bundle.";
+            }
+
+            if (settings.ExecutionMode == LlmExecutionMode.ServerManagedApi &&
+                settings.EnableStreaming && !settings.WebGlNativeStreaming)
+            {
+                return "[CoreAI] WebGL build has streaming enabled but WebGlNativeStreaming is OFF. " +
+                       "UnityWebRequest cannot read SSE incrementally — the chat will appear to hang. " +
+                       "Either enable WebGlNativeStreaming (with the CoreAiSseFetch.jslib plugin) or disable streaming for WebGL.";
             }
 
             return "";

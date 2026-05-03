@@ -15,6 +15,8 @@ namespace CoreAI.Composition
 {
     /// <summary>
     /// Регистрация LLM pipeline: клиент, маршрутизация, декоратор логирования, метрики оркестратора.
+    /// MEAI tool-call диагностика публикуется через <see cref="MessagePipeToolCallEventPublisher.Instance"/>
+    /// (см. <see cref="MeaiLlmClient"/>); отдельная регистрация <c>IToolCallEventPublisher</c> в VContainer не требуется.
     /// </summary>
     public static class LlmPipelineInstaller
     {
@@ -188,11 +190,12 @@ namespace CoreAI.Composition
 #else
             if (mode == LlmExecutionMode.ServerManagedApi)
             {
-                return new ServerManagedLlmClient(
+                ILlmClient serverClient = new ServerManagedLlmClient(
                     new ServerManagedCoreSettingsAdapter(settings),
                     settings,
                     GameLoggerUnscopedFallback.Instance,
                     memoryStore);
+                return new RefreshOnUnauthorizedDecorator(serverClient);
             }
 
             ILlmClient client = new OpenAiChatLlmClient(settings, memoryStore);
@@ -269,16 +272,56 @@ namespace CoreAI.Composition
                 _settings = settings;
             }
 
-            public string ApiBaseUrl => _settings.ApiBaseUrl;
+            public string ApiBaseUrl => ResolveSameOriginBaseUrl(_settings.ApiBaseUrl);
             public string ApiKey => _settings.ApiKey;
             public string AuthorizationHeader => "";
             public string Model => _settings.ModelName;
             public float Temperature => _settings.Temperature;
-            public int RequestTimeoutSeconds => _settings.RequestTimeoutSeconds;
+            public int RequestTimeoutSeconds => _settings.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _settings.MaxTokens;
             public bool LogLlmInput => _settings.LogLlmInput;
             public bool LogLlmOutput => _settings.LogLlmOutput;
             public bool EnableHttpDebugLogging => _settings.EnableHttpDebugLogging;
+
+            public IRequestHeaderProvider? HeaderProvider => null;
+
+            /// <summary>
+            /// Expands a relative <c>/api/llm/v1</c>-style base URL against <see cref="UnityEngine.Application.absoluteURL"/>
+            /// when running in the WebGL player. Same-origin deployment (game + LLM proxy on one host) becomes
+            /// transparent: editor/standalone keep absolute URLs unchanged.
+            /// </summary>
+            private static string ResolveSameOriginBaseUrl(string configured)
+            {
+                if (string.IsNullOrWhiteSpace(configured))
+                {
+                    return configured ?? "";
+                }
+
+                string trimmed = configured.Trim();
+                bool isRelative = trimmed.StartsWith("/", System.StringComparison.Ordinal)
+                                  && !trimmed.StartsWith("//", System.StringComparison.Ordinal);
+                if (!isRelative)
+                {
+                    return trimmed;
+                }
+
+                string host = UnityEngine.Application.absoluteURL;
+                if (string.IsNullOrEmpty(host))
+                {
+                    return trimmed;
+                }
+
+                try
+                {
+                    System.Uri baseUri = new System.Uri(host);
+                    System.Uri resolved = new System.Uri(baseUri, trimmed);
+                    return resolved.ToString().TrimEnd('/');
+                }
+                catch
+                {
+                    return trimmed;
+                }
+            }
         }
 #endif
     }

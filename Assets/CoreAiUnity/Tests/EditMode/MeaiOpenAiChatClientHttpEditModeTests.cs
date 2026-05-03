@@ -1,6 +1,7 @@
 #if !COREAI_NO_LLM
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -97,6 +98,47 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("ab", string.Concat(parts));
         }
 
+        [Test]
+        public void ParseSseUpdates_FinalUsageChunk_YieldsUsageContent()
+        {
+            const string sse =
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":7,\"total_tokens\":10}}\n\n";
+            List<MEAI.ChatResponseUpdate> updates = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            Assert.AreEqual(1, updates.Count);
+            MEAI.UsageContent usage = updates[0].Contents?.OfType<MEAI.UsageContent>().FirstOrDefault();
+            Assert.NotNull(usage);
+            Assert.AreEqual(3, usage.Details.InputTokenCount);
+            Assert.AreEqual(7, usage.Details.OutputTokenCount);
+            Assert.AreEqual(10, usage.Details.TotalTokenCount);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_RequestJson_ContainsStreamOptionsIncludeUsage()
+        {
+            string capturedJson = null;
+            string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n";
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkEventStream(new MemoryStream(Encoding.UTF8.GetBytes(sse)));
+                }))
+            {
+                Timeout = System.TimeSpan.FromHours(1)
+            };
+
+            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
+            await foreach (MEAI.ChatResponseUpdate _ in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") }))
+            {
+                break;
+            }
+
+            Assert.NotNull(capturedJson);
+            StringAssert.Contains("stream_options", capturedJson);
+            StringAssert.Contains("include_usage", capturedJson);
+        }
+
         private sealed class TestHttpSettings : IOpenAiHttpSettings
         {
             public static readonly TestHttpSettings Instance = new();
@@ -111,6 +153,7 @@ namespace CoreAI.Tests.EditMode
             public string ApiKey => "";
             public string AuthorizationHeader => "";
             public string Model => "test-model";
+            public IRequestHeaderProvider? HeaderProvider => null;
         }
 
         private sealed class DelegateHttpHandler : HttpMessageHandler

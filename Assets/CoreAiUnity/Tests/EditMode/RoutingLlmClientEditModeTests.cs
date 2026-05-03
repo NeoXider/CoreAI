@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -107,6 +108,68 @@ namespace CoreAI.Tests.EditMode
             {
                 Messages.Add(message);
             }
+        }
+
+        private sealed class ThrowingLlm : ILlmClient
+        {
+            private readonly Exception _ex;
+
+            public ThrowingLlm(Exception ex)
+            {
+                _ex = ex;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromException<LlmCompletionResult>(_ex);
+            }
+        }
+
+        [Test]
+        public async Task CompleteAsync_LlmOperationTimeoutException_PublishesTimeout()
+        {
+            ThrowingLlm inner = new(new LlmOperationTimeoutException());
+            FakeRegistry registry = new(inner);
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            try
+            {
+                await routing.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" });
+                Assert.Fail("expected throw");
+            }
+            catch (LlmOperationTimeoutException)
+            {
+            }
+
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.IsFalse(completed.Messages[0].Success);
+            Assert.AreEqual(LlmErrorCode.Timeout, completed.Messages[0].ErrorCode);
+        }
+
+        [Test]
+        public async Task CompleteAsync_OperationCanceledException_PublishesCancelled()
+        {
+            using CancellationTokenSource cts = new();
+            cts.Cancel();
+            ThrowingLlm inner = new(new OperationCanceledException(cts.Token));
+            FakeRegistry registry = new(inner);
+            CapturingPublisher<LlmRequestCompleted> completed = new();
+            RoutingLlmClient routing = new(registry, null, null, completed, null);
+
+            try
+            {
+                await routing.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "X", UserPayload = "y" });
+                Assert.Fail("expected throw");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            Assert.AreEqual(1, completed.Messages.Count);
+            Assert.AreEqual(LlmErrorCode.Cancelled, completed.Messages[0].ErrorCode);
         }
 
         [Test]

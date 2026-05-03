@@ -227,7 +227,8 @@ namespace CoreAI.Infrastructure.Llm
                 { "model", _settings.Model },
                 { "temperature", options?.Temperature ?? _settings.Temperature },
                 { "messages", messages },
-                { "stream", true }
+                { "stream", true },
+                { "stream_options", new Dictionary<string, object> { { "include_usage", true } } }
             };
             if (options?.MaxOutputTokens.HasValue == true)
             {
@@ -415,7 +416,84 @@ namespace CoreAI.Infrastructure.Llm
                     LogTag.Llm);
             }
 
+            LlmRequestContextFrame ctx = LlmRequestContext.Current;
+            if (ctx != null)
+            {
+                if (!string.IsNullOrEmpty(ctx.IdempotencyKey))
+                {
+                    list.Add(new KeyValuePair<string, string>("Idempotency-Key", ctx.IdempotencyKey));
+                }
+
+                if (!string.IsNullOrEmpty(ctx.TraceId))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-Request-Id", ctx.TraceId));
+                }
+
+                if (!string.IsNullOrEmpty(ctx.AgentRoleId))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-Coreai-Role", ctx.AgentRoleId));
+                }
+            }
+
+            ILlmAuthContextProvider auth = LlmAuthContextRegistry.Current;
+            if (auth != null)
+            {
+                if (!string.IsNullOrEmpty(auth.TenantId))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-Tenant-Id", auth.TenantId));
+                }
+
+                if (!string.IsNullOrEmpty(auth.UserId))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-User-Id", auth.UserId));
+                }
+
+                if (!string.IsNullOrEmpty(auth.SessionId))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-Session-Id", auth.SessionId));
+                }
+            }
+
+            IRequestHeaderProvider hp = _settings.HeaderProvider;
+            if (hp != null)
+            {
+                IReadOnlyList<KeyValuePair<string, string>> extra = hp.GetHeaders();
+                if (extra != null)
+                {
+                    foreach (KeyValuePair<string, string> kv in extra)
+                    {
+                        if (!string.IsNullOrEmpty(kv.Key))
+                        {
+                            list.Add(kv);
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(hp.IdempotencyKey) && !ContainsHeader(list, "Idempotency-Key"))
+                {
+                    list.Add(new KeyValuePair<string, string>("Idempotency-Key", hp.IdempotencyKey));
+                }
+
+                if (!string.IsNullOrEmpty(hp.RequestId) && !ContainsHeader(list, "X-Request-Id"))
+                {
+                    list.Add(new KeyValuePair<string, string>("X-Request-Id", hp.RequestId));
+                }
+            }
+
             return list;
+        }
+
+        private static bool ContainsHeader(List<KeyValuePair<string, string>> list, string name)
+        {
+            foreach (KeyValuePair<string, string> kv in list)
+            {
+                if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string? TryGetHeaderFirstValue(IReadOnlyDictionary<string, IEnumerable<string>> headers,
@@ -841,10 +919,15 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 JObject obj = JObject.Parse(json);
-                JToken choice0 = obj?["choices"]?[0];
+                JToken choice0 = null;
+                if (obj["choices"] is JArray choiceArr && choiceArr.Count > 0)
+                {
+                    choice0 = choiceArr[0];
+                }
+
                 if (choice0 == null || choice0.Type != JTokenType.Object)
                 {
-                    return null;
+                    return TryParseStreamingUsageChunk(obj);
                 }
 
                 JObject choice = (JObject)choice0;
@@ -895,12 +978,60 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                return null;
+                return TryParseStreamingUsageChunk(obj);
             }
             catch
             {
                 return null;
             }
+        }
+
+        /// <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
+        private static MEAI.ChatResponseUpdate TryParseStreamingUsageChunk(JObject obj)
+        {
+            JToken usageTok = obj["usage"];
+            if (usageTok == null || usageTok.Type == JTokenType.Null)
+            {
+                return null;
+            }
+
+            if (usageTok is not JObject uo)
+            {
+                return null;
+            }
+
+            MEAI.UsageDetails details = BuildUsageDetailsFromOpenAiUsageObject(uo);
+            if (details == null)
+            {
+                return null;
+            }
+
+            MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
+            update.Contents = new List<MEAI.AIContent> { new MEAI.UsageContent(details) };
+            return update;
+        }
+
+        private static MEAI.UsageDetails BuildUsageDetailsFromOpenAiUsageObject(JObject usage)
+        {
+            int prompt = usage["prompt_tokens"]?.ToObject<int>() ?? 0;
+            int completion = usage["completion_tokens"]?.ToObject<int>() ?? 0;
+            int total = usage["total_tokens"]?.ToObject<int>() ?? 0;
+            if (prompt == 0 && completion == 0 && total == 0)
+            {
+                return null;
+            }
+
+            if (total == 0)
+            {
+                total = prompt + completion;
+            }
+
+            return new MEAI.UsageDetails
+            {
+                InputTokenCount = prompt,
+                OutputTokenCount = completion,
+                TotalTokenCount = total
+            };
         }
 
         internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson) =>

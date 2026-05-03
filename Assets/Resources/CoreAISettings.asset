@@ -38,8 +38,10 @@ MonoBehaviour:
   maxToolCallRetries: 3
   allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
-  contextWindowTokens: 8192
+  contextWindowTokens: 50000
   enableStreaming: 1
+  webGlNativeStreaming: 0
+  sameOriginCredentials: 0
   enableLlmContextCompaction: 0
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'

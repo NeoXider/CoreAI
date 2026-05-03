@@ -72,6 +72,16 @@ namespace CoreAI.Infrastructure.Llm
             return this;
         }
 
+        /// <summary>
+        /// Transfers ownership of <paramref name="stream"/> only, with no HttpClient/HttpResponseMessage.
+        /// Used by transports that bypass <c>System.Net.Http</c> (browser <c>fetch</c> bridge in WebGL).
+        /// </summary>
+        public OpenAiHttpSseOpenResult WithRawStream(Stream? stream)
+        {
+            _stream = stream;
+            return this;
+        }
+
         public void Dispose()
         {
             try

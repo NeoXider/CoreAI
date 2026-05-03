@@ -72,6 +72,11 @@ namespace CoreAI.Infrastructure.Llm
                 PublishUsage(request, false, result);
                 return result;
             }
+            catch (LlmOperationTimeoutException)
+            {
+                PublishCompleted(request, false, false, "timeout", LlmErrorCode.Timeout);
+                throw;
+            }
             catch (OperationCanceledException)
             {
                 PublishCompleted(request, false, false, "cancelled", LlmErrorCode.Cancelled);
@@ -111,25 +116,58 @@ namespace CoreAI.Infrastructure.Llm
             LlmErrorCode errorCode = LlmErrorCode.None;
             LlmStreamChunk lastUsageChunk = null;
 
-            await foreach (LlmStreamChunk chunk in inner.CompleteStreamingAsync(request, cancellationToken))
+            IAsyncEnumerator<LlmStreamChunk> enumerator =
+                inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            try
             {
-                if (!string.IsNullOrEmpty(chunk.Error))
+                while (true)
                 {
-                    ok = false;
-                    error = chunk.Error;
-                    errorCode = chunk.ErrorCode;
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync();
+                    }
+                    catch (LlmOperationTimeoutException)
+                    {
+                        PublishCompleted(request, true, false, "timeout", LlmErrorCode.Timeout);
+                        PublishUsage(request, true, lastUsageChunk, false);
+                        throw;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        PublishCompleted(request, true, false, "cancelled", LlmErrorCode.Cancelled);
+                        PublishUsage(request, true, lastUsageChunk, false);
+                        throw;
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+
+                    LlmStreamChunk chunk = enumerator.Current;
+                    if (!string.IsNullOrEmpty(chunk.Error))
+                    {
+                        ok = false;
+                        error = chunk.Error;
+                        errorCode = chunk.ErrorCode;
+                    }
+
+                    if (chunk.PromptTokens.HasValue || chunk.CompletionTokens.HasValue || chunk.TotalTokens.HasValue)
+                    {
+                        lastUsageChunk = chunk;
+                    }
+
+                    yield return chunk;
                 }
 
-                if (chunk.PromptTokens.HasValue || chunk.CompletionTokens.HasValue || chunk.TotalTokens.HasValue)
-                {
-                    lastUsageChunk = chunk;
-                }
-
-                yield return chunk;
+                PublishCompleted(request, true, ok, error, errorCode);
+                PublishUsage(request, true, lastUsageChunk, ok);
             }
-
-            PublishCompleted(request, true, ok, error, errorCode);
-            PublishUsage(request, true, lastUsageChunk, ok);
+            finally
+            {
+                await enumerator.DisposeAsync();
+            }
         }
 
         private ILlmClient Prepare(LlmCompletionRequest request, bool streaming)

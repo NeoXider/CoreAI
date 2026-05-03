@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** актуальные номера — [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета в этой линии идут под **одной версией `1.5.11`**. **`1.5.11` (Unity):** Play Mode разбит на **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`** + служебные **`Shared`/`LlmInfra`**. **`1.5.10`:** отзывчивый опрос UWR через **UniTask.Yield**, Roslyn **CAIU001**, поле **author** в UPM. Ранее в **1.5.x**: main-thread для `CoreAiChatPanel`, контекст / свёртка (**1.5.3+**), история **`1.4.x`** (`Retry-After`, tool pipeline).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json). Оба пакета синхронизированы (**`1.6.0`**). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -435,7 +435,7 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 ## 📚 Документация
 
-**Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**. Корневой README_RU — навигатор по-русски; за деталями переходи по ссылкам на англоязычные файлы.
+**Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**; портативный пакет `CoreAI` — тоже. Разбор токенов/таймаутов MEAI: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (EN). Старые ссылки на русский файл ведут на редирект: [`MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md). Корневой README_RU — навигатор по-русски; за деталями — по ссылкам на англоязычные гайды.
 
 Сначала: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.
 
@@ -455,6 +455,7 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 |----------|------------|
 | 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel` + демо |
 | 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → фильтры → UI · стрим в оркестраторе |
+| 📊 [MEAI_TOKENS_FACT_VS_ESTIMATE.md](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | **(EN)** usage из API vs префлайт-оценки; SSE `include_usage`; таймауты HTTP/оркестратора |
 
 ### Инструменты, память, роли
 
@@ -472,6 +473,8 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 |----------|------------|
 | 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Карта кода, PR-чеклист |
 | 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Нормы: DI, потоки, власть |
+| 🔀 [LLM_ROUTING.md](Assets/CoreAI/Docs/LLM_ROUTING.md) | Портативный роутинг: режимы, политика, usage, таймауты |
+| 📑 [CoreAI/Docs/README.md](Assets/CoreAI/Docs/README.md) | Оглавление всех гайдов в `Assets/CoreAI/Docs` |
 | 📋 [CHANGELOG](Assets/CoreAI/CHANGELOG.md) · [Unity](Assets/CoreAiUnity/CHANGELOG.md) | История версий |
 
 ---

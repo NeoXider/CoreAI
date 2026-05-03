@@ -31,7 +31,7 @@ Install → open scene → connect LLM → press Play.
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
-| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | ⚠️ **Known WebGL regression** (0.25.x): `UnityWebRequest` does not deliver SSE incrementally → `chunks=1` + endless typing animation. Workaround + fix plan |
+| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | WebGL: **`UnityWebRequest`** vs optional **`WebGlNativeStreaming`** (`fetch` jslib); history + verification checklist |
 | [HTTP_TRANSPORT_SPEC](HTTP_TRANSPORT_SPEC.md) | **`IOpenAiHttpTransport`** — `HttpClient` vs `UnityWebRequest` (WebGL); simulated streaming |
 
 ---
@@ -63,6 +63,9 @@ DI, threading, spec, pipelines.
 | 10b | [COMMAND_FLOW_DIAGRAM](COMMAND_FLOW_DIAGRAM.md) | 🗺️ Diagram: how a command travels through the system |
 | 11 | [DGF_SPEC](DGF_SPEC.md) | 📐 Normative spec: DI, threads, authority, §9.4 main-thread rules |
 | 12 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | 🛠️ MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
+| 12a | [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md) | 🔀 Portable routing modes, policy hooks, usage sinks, **timeouts vs HTTP** |
+| 12b | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | 📊 Provider `usage` vs pre-request estimates; SSE `stream_options`; HTTP vs orchestrator timeouts; tool diagnostics |
+| 12c | [CoreAI/Docs/README](../../CoreAI/Docs/README.md) | 📑 Index of every guide under `Assets/CoreAI/Docs` |
 | 13 | [MULTIPLAYER_AI](MULTIPLAYER_AI.md) | 🌐 Multiplayer + AI: host authority, replication |
 | 14 | [GameTemplateGuides/INDEX](GameTemplateGuides/INDEX.md) | 📚 Per-title guides: networking, orchestration, roles |
 

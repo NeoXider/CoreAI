@@ -17,7 +17,8 @@ namespace CoreAI.Chat
     ///
     /// Расширение: наследуйтесь и переопределяйте virtual-методы:
     /// <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
-    /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>.
+    /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>,
+    /// <see cref="ResolveTimeoutMessage"/>.
     /// Программный ход без поля ввода: <see cref="SubmitMessageFromExternalAsync"/>.
     /// </summary>
     public class CoreAiChatPanel : MonoBehaviour
@@ -1017,13 +1018,10 @@ namespace CoreAI.Chat
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 FinishStreaming();
                 HideTypingIndicator();
-                if (_stopRequestedByUser)
+                string bubble = ResolveTimeoutMessage(_stopRequestedByUser);
+                if (!string.IsNullOrEmpty(bubble))
                 {
-                    AddMessage(config?.ErrorMessagePrefix + "Генерация остановлена.", isUser: false);
-                }
-                else
-                {
-                    AddMessage(config?.TimeoutMessage ?? "Timeout.", isUser: false);
+                    AddMessage(bubble, isUser: false);
                 }
 
                 return null;
@@ -1104,6 +1102,13 @@ namespace CoreAI.Chat
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
             _ = roleId;
+            // Native fetch SSE bridge restores incremental streaming in the WebGL player.
+            // Without it, UnityWebRequest can only deliver one terminal chunk so we keep streaming OFF.
+            CoreAISettingsAsset asset = CoreAISettingsAsset.Instance;
+            if (asset != null && asset.WebGlNativeStreaming)
+            {
+                return uiConfigWantsStreaming;
+            }
             return false;
 #else
             return uiConfigWantsStreaming;
@@ -1276,6 +1281,22 @@ namespace CoreAI.Chat
         /// Переопределите для пост-обработки (аналитика, логирование, etc).
         /// </summary>
         protected virtual void OnResponseReceived(string fullResponse) { }
+
+        /// <summary>
+        /// Builds assistant bubble text when <see cref="RunAgentTurnAsync"/> ends with
+        /// <see cref="OperationCanceledException"/> (explicit user stop vs timeout / cancel).
+        /// Return <c>null</c> or empty to skip <see cref="AddMessage"/> when the host already posted diagnostics.
+        /// </summary>
+        /// <param name="stopRequestedByUser">True when the user pressed stop.</param>
+        protected virtual string ResolveTimeoutMessage(bool stopRequestedByUser)
+        {
+            if (stopRequestedByUser)
+            {
+                return (config?.ErrorMessagePrefix ?? string.Empty) + "Генерация остановлена.";
+            }
+
+            return config?.TimeoutMessage ?? "Timeout.";
+        }
 
         /// <summary>
         /// Форматирование текста ответа (каждого чанка при стриминге).

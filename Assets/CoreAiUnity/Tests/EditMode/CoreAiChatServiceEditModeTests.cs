@@ -1,9 +1,13 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -282,6 +286,45 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", response, "null result from orchestrator → empty string");
         }
 
+        /// <summary>
+        /// <see cref="CoreAiChatService"/> uses UniTask <c>CancelAfterSlim</c> (player loop). A plain
+        /// <see cref="Test"/> that blocks the main thread on <c>Task.Delay(Infinite, ct)</c> can deadlock
+        /// because the timer never runs — use <see cref="UnityTest"/> and yield frames.
+        /// </summary>
+        [UnityTest]
+        [Timeout(8000)]
+        public IEnumerator SendMessageAsync_TimeoutWhenOrchestratorBlocks_ThrowsLlmOperationTimeoutException()
+        {
+            BlockUntilCancelledOrchestrator orchestrator = new();
+            StubSettings settings = new() { LlmRequestTimeoutSecondsOverride = 0.2f };
+            CoreAiChatService service = new(orchestrator, settings: settings);
+
+            Task task = service.SendMessageAsync("hi", "TestRole");
+
+            float deadline = Time.realtimeSinceStartup + 6f;
+            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.IsTrue(task.IsCompleted, "SendMessageAsync should complete once the timeout token fires.");
+            // LlmOperationTimeoutException inherits OperationCanceledException — async Task reports
+            // TaskStatus.Canceled (not Faulted) and task.Exception is null; unwrap via GetResult().
+            try
+            {
+                task.GetAwaiter().GetResult();
+                Assert.Fail("Expected LlmOperationTimeoutException after timeout.");
+            }
+            catch (LlmOperationTimeoutException ex)
+            {
+                Assert.That(ex.Message, Does.Contain("timed out"));
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"Expected LlmOperationTimeoutException, got {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
         // ===================== Helpers =====================
 
         private sealed class StubSettings : ICoreAISettings
@@ -403,6 +446,27 @@ namespace CoreAI.Tests.EditMode
                 LastCancellationToken = ct;
                 yield return new LlmStreamChunk { Text = "ok", IsDone = true };
                 await Task.CompletedTask;
+            }
+
+            public void CancelTasks(string scopeId) { }
+        }
+
+        /// <summary>Blocks <see cref="RunTaskAsync"/> until <paramref name="ct"/> is cancelled (timeout or user).</summary>
+        private sealed class BlockUntilCancelledOrchestrator : IAiOrchestrationService
+        {
+            public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, ct);
+                return "unreachable";
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, ct);
+                yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
             }
 
             public void CancelTasks(string scopeId) { }

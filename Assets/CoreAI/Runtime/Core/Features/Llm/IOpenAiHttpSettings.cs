@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
@@ -37,5 +39,36 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Логировать сырые HTTP request/response JSON.</summary>
         bool EnableHttpDebugLogging { get; }
+
+        /// <summary>
+        /// Provides additional HTTP headers sent with every request (e.g., tenant-id, request-id, idempotency-key).
+        /// Returning null or empty falls back to no extra headers.
+        /// </summary>
+        IRequestHeaderProvider? HeaderProvider { get; }
+    }
+
+    /// <summary>
+    /// Supplies custom HTTP headers for OpenAI-compatible requests.
+    /// Implementations can be transient (new values per request) or static.
+    /// </summary>
+    public interface IRequestHeaderProvider
+    {
+        /// <summary>
+        /// Returns headers to add to the outgoing request.
+        /// Called once per logical request (retries reuse the same headers via <see cref="IdempotencyKey"/>).
+        /// </summary>
+        IReadOnlyList<KeyValuePair<string, string>> GetHeaders();
+
+        /// <summary>
+        /// A stable idempotency key for this logical request (reused across retries).
+        /// If null/empty, a new key is generated automatically.
+        /// </summary>
+        string IdempotencyKey { get; }
+
+        /// <summary>
+        /// Unique identifier for this logical request (trace/diagnostic).
+        /// Mapped to X-Request-Id.
+        /// </summary>
+        string RequestId { get; }
     }
 }

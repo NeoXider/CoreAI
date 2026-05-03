@@ -57,6 +57,7 @@ namespace CoreAI.Tests.EditMode
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;
             public bool EnableHttpDebugLogging => false;
+            public IRequestHeaderProvider? HeaderProvider => null;
         }
 
         [Test]

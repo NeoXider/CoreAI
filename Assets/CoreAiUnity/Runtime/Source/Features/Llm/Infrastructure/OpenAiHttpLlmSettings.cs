@@ -89,6 +89,8 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Log raw HTTP request and response JSON.</summary>
         public bool EnableHttpDebugLogging => enableHttpDebugLogging;
 
+        public IRequestHeaderProvider? HeaderProvider => null;
+
         /// <summary>
         /// Configures this profile at runtime for tests and dynamic setup.
         /// </summary>

@@ -71,9 +71,8 @@ namespace CoreAI.Tests.PlayMode
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;
             public bool EnableHttpDebugLogging => false;
+            public IRequestHeaderProvider? HeaderProvider => null;
         }
-
-        // =========================================================================
         // Тест 1: wrong casing → repair → tool executed → final answer from real LLM
         // =========================================================================
 

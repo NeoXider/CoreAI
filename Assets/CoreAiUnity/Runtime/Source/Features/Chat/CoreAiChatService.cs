@@ -111,12 +111,13 @@ namespace CoreAI.Chat
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
+            float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
             IDisposable timerHandle = null;
             CancellationToken effectiveCt = ct;
             try
             {
-                float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+                timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -129,6 +130,13 @@ namespace CoreAI.Chat
                 // WebGL player: see CoreAiWebGlUiThreadMarshaling (Editor WebGL keeps full switch).
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 return result ?? "";
+            }
+            catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
+            {
+                // Linked-token / CancelAfterSlim may not set CTS.IsCancellationRequested in the same
+                // order of operations as the awaiter sees the OCE — key off the configured window
+                // and the caller token instead of probing the linked source.
+                throw new LlmOperationTimeoutException();
             }
             finally
             {
@@ -171,12 +179,14 @@ namespace CoreAI.Chat
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
+            float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
             IDisposable timerHandle = null;
             CancellationToken effectiveCt = ct;
+            IAsyncEnumerator<LlmStreamChunk> streamEnumerator = null;
             try
             {
-                float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+                timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
                 if (timeoutSec > 0)
                 {
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -184,9 +194,35 @@ namespace CoreAI.Chat
                     effectiveCt = timeoutCts.Token;
                 }
 
-                await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(request, effectiveCt))
+                streamEnumerator = _orchestrator.RunStreamingAsync(request, effectiveCt).GetAsyncEnumerator(ct);
+                try
                 {
-                    yield return chunk;
+                    while (true)
+                    {
+                        bool hasNext;
+                        try
+                        {
+                            hasNext = await streamEnumerator.MoveNextAsync();
+                        }
+                        catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
+                        {
+                            throw new LlmOperationTimeoutException();
+                        }
+
+                        if (!hasNext)
+                        {
+                            break;
+                        }
+
+                        yield return streamEnumerator.Current;
+                    }
+                }
+                finally
+                {
+                    if (streamEnumerator != null)
+                    {
+                        await streamEnumerator.DisposeAsync();
+                    }
                 }
             }
             finally
@@ -242,7 +278,12 @@ namespace CoreAI.Chat
         public bool IsStreamingEnabled(string roleId, bool uiFallback = true)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return false;
+            // Native fetch SSE bridge restores incremental streaming in the WebGL player.
+            // Without it, UnityWebRequest can only deliver one terminal chunk so we keep streaming OFF.
+            if (!(_settings is CoreAISettingsAsset webGlAsset && webGlAsset.WebGlNativeStreaming))
+            {
+                return false;
+            }
 #endif
             if (!uiFallback)
             {
@@ -275,7 +316,10 @@ namespace CoreAI.Chat
         public bool IsStreamingEnabled(string roleId, bool? uiOverride = null)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return false;
+            if (!(_settings is CoreAISettingsAsset webGlAsset && webGlAsset.WebGlNativeStreaming))
+            {
+                return false;
+            }
 #endif
             if (uiOverride == false)
             {

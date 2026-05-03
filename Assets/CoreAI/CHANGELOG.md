@@ -1,5 +1,26 @@
 # Changelog
 
+## [v1.6.0] — 2026-05-03
+
+### Minor release — server-managed protocol, ambient LLM context, WebGL SSE bridge
+
+- **`LlmCompletionRequest.IdempotencyKey`** — optional; when empty, **`MeaiLlmClient`** assigns one key per request **instance** so decorator retries (e.g. **`RefreshOnUnauthorizedDecorator`**) reuse the same HTTP **`Idempotency-Key`**.
+- **`IOpenAiHttpSettings`** — **`IRequestHeaderProvider? HeaderProvider`** for optional extra headers (defaults **`null`** on adapters until needed).
+- **`LlmRequestContext`** — portable `AsyncLocal` ambient frame carrying `AgentRoleId`/`TraceId`/`IdempotencyKey`. **`MeaiLlmClient`** populates it on every `CompleteAsync`/`CompleteStreamingAsync` from `LlmCompletionRequest`; HTTP transports read it during header assembly without having to plumb the request through MEAI's `IChatClient` seam. Use `LlmRequestContext.Begin(...)` / `Scope` for nested manual frames.
+- **`LlmAuthContextRegistry`** — portable static for `ILlmAuthContextProvider`. **`MeaiOpenAiChatClient`** emits **`X-Tenant-Id`** / **`X-User-Id`** / **`X-Session-Id`** from the registered provider on server-managed requests.
+- **`MeaiOpenAiChatClient.BuildTransportHeaders`** — emits `Idempotency-Key` / `X-Request-Id` / `X-Coreai-Role` from `LlmRequestContext.Current`, then auth headers from `LlmAuthContextRegistry`, then any extra headers from **`IOpenAiHttpSettings.HeaderProvider`**. Earlier sources win; **`HeaderProvider`** idempotency/request-id only fill missing slots.
+- **Documentation** — **`LLM_ROUTING.md`** entitlement contracts; **`SERVER_MANAGED_PROTOCOL.md`** wire contract and CORS/SSE checklist.
+
+### Semver
+
+- Lockstep **`1.6.0`** with **`com.nexoider.coreaiunity`** (Unity: WebGL fetch SSE, **`RefreshOnUnauthorizedDecorator`** hardening, **`LlmClientRegistry`** wrapping, validators — see Unity changelog).
+
+## [v1.5.29] — 2026-05-03
+
+### Lockstep with coreaiunity 1.5.29
+
+- **Semver:** lockstep **`1.5.29`** with **`com.nexoider.coreaiunity`** (no Core-only API change in this drop).
+
 ## [v1.5.28] — 2026-05-02
 
 ### Remove legacy `PlayerChat` built-in role id

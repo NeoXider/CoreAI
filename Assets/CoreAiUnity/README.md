@@ -51,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current release line: **`1.5.11`** for **`com.nexoider.coreaiunity`** and **`com.nexoider.coreai`** — Play Mode assemblies split (**`FastNoLlm`** / **`LlmVerification`** / **`Scenarios`**, plus **`Shared`/`LlmInfra`**); index **[`Tests/PlayMode/README.md`](../Tests/PlayMode/README.md)**. **`1.5.10`:** responsive HTTP poll (**`UniTask.Yield`**), **CAIU001**, UPM **author**. Bump **`version`** in [`package.json`](package.json) when you ship.
+Current release line: **`1.6.0`** — single source of truth is **[`package.json`](package.json)** (lockstep with portable **[`../CoreAI/package.json`](../CoreAI/package.json)**). Play Mode tests live under **`Tests/PlayMode/`** (assemblies **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`**, **`Shared`**, **`LlmInfra`**); index **[`Tests/PlayMode/README.md`](../Tests/PlayMode/README.md)**.
 
 ---
 

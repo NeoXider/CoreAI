@@ -73,11 +73,13 @@ namespace CoreAI.Infrastructure.Llm
             public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
             public float Temperature => _s.Temperature;
-            public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;
+            public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;
             public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
+
+            public IRequestHeaderProvider? HeaderProvider => null;
         }
     }
 }

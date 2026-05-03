@@ -346,6 +346,8 @@ public:
 
 ## 📚 References
 
+- [README.md](README.md) — portable CoreAI documentation index
 - [TOOL_CALL_SPEC.md](../../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) — tool calling specification
-- [MEAI_TOOL_CALLING.md](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) — MEAI pipeline architecture
-- [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md) — building agents with tools
+- [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) — MEAI pipeline architecture
+- [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) — HTTP usage, streaming `include_usage`, timeouts
+- [AGENT_BUILDER.md](AGENT_BUILDER.md) — building agents with tools

@@ -1,6 +1,6 @@
 # 🛠️ MEAI Tool Calling — Architecture
 
-**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends.
+**Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.nexoider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.nexoider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
 
 ---
 
@@ -267,4 +267,7 @@ See `Assets/CoreAiUnity/Tests/EditMode/ForcedToolModeEditModeTests.cs`.
 - [Microsoft.Extensions.AI Docs](https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai)
 - [FunctionInvokingChatClient](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.functioninvokingchatclient)
 - [AIFunctionFactory](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.aifunctionfactory)
+- [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) — provider `usage` vs pre-request estimates; `stream_options` / SSE usage; orchestrator vs HTTP timeouts; streaming timeout vs cancel; `MessagePipeToolCallEventPublisher` (Unity) for tool lifecycle diagnostics
+- [LLM_ROUTING.md](LLM_ROUTING.md) — portable routing modes and policy contracts
+- [README.md](README.md) — index of all files in this `Docs` folder
 - [ChatToolMode](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.chattoolmode)

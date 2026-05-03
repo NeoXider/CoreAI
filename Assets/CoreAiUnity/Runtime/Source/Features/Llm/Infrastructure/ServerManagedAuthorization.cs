@@ -8,6 +8,7 @@ namespace CoreAI.Infrastructure.Llm
     public static class ServerManagedAuthorization
     {
         private static IServerManagedAuthProvider _provider;
+        private static IServerManagedAuthRefresher _refresher;
 
         /// <summary>
         /// Registers a provider used by all new and existing ServerManagedApi HTTP requests.
@@ -16,6 +17,18 @@ namespace CoreAI.Infrastructure.Llm
         {
             _provider = provider;
         }
+
+        /// <summary>
+        /// Registers an optional refresher invoked by <see cref="RefreshOnUnauthorizedDecorator"/>
+        /// when the LLM proxy returns <c>401</c>. Pass <c>null</c> to clear (logout flow).
+        /// </summary>
+        public static void SetRefresher(IServerManagedAuthRefresher refresher)
+        {
+            _refresher = refresher;
+        }
+
+        /// <summary>Currently registered refresher, or <c>null</c> when none is configured.</summary>
+        public static IServerManagedAuthRefresher Refresher => _refresher;
 
         /// <summary>
         /// Registers a delegate that returns the full Authorization header value.
@@ -28,11 +41,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Clears the registered provider. Intended for tests and logout flows.
+        /// Clears the registered provider and refresher. Intended for tests and logout flows.
         /// </summary>
         public static void ClearProvider()
         {
             _provider = null;
+            _refresher = null;
         }
 
         /// <summary>

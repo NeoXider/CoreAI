@@ -2,6 +2,33 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.0] - 2026-05-03
+
+### Minor release — WebGL server-managed LLM (fetch SSE, auth refresh, settings)
+
+- **`CoreAiSseFetch.jslib`** + **`FetchSseOpenAiTransport`** — when **`CoreAISettingsAsset.WebGlNativeStreaming`** is on in the **WebGL player**, **`MeaiLlmClient.CreateHttp`** uses **`fetch`** + **`ReadableStream`** for incremental SSE (Editor keeps **`HttpClient`**).
+- **`SameOriginCredentials`** maps to **`credentials: 'same-origin'`** vs **`'include'`** on the fetch bridge.
+- **`RefreshOnUnauthorizedDecorator`** — publishes **`LlmAuthExpired`** only when refresh fails; non-streaming path catches **`LlmClientException`** / **`AuthExpired`**; streaming uses **`MoveNextAsync`** for mid-stream auth errors; skips unsafe retry after visible text.
+- **`LlmClientRegistry`** — per-profile **`ServerManagedApi`** clients wrapped with **`RefreshOnUnauthorizedDecorator`** (aligned with **`LlmPipelineInstaller`** fallback).
+- **`ServerManagedCoreSettingsAdapter`** — relative **`ApiBaseUrl`** (`/api/...`) resolves against **`Application.absoluteURL`**.
+- **`CoreAISettingsAsset`** — **`WebGlNativeStreaming`**, **`SameOriginCredentials`**; **`CoreAiChatService`** / **`CoreAiChatPanel`** respect native streaming on WebGL when the bridge is enabled.
+- **`CoreAIProductionSettingsValidator`** — extended WebGL warnings (keys, streaming without native bridge, **`ClientLimited`** key leak).
+- Portable **`com.nexoider.coreai`** — **`LlmRequestContext`**, **`LlmAuthContextRegistry`**, **`MeaiOpenAiChatClient`** header layering, **`LlmCompletionRequest.IdempotencyKey`**, **`IOpenAiHttpSettings.HeaderProvider`** (see core changelog).
+- **Edit Mode:** **`MeaiLlmClientEditModeTests`** (idempotency); **`RefreshOnUnauthorizedDecoratorEditModeTests`**.
+- **Dependency:** **`com.nexoider.coreai 1.6.0`**.
+
+#### Package **`1.6.0`**.
+
+## [1.5.29] - 2026-05-03
+
+### `CoreAiChatPanel` — pluggable timeout bubble after cancel
+
+- **`ResolveTimeoutMessage(bool stopRequestedByUser)`** — hosts may return **`null`** / empty to skip **`AddMessage`** when they already posted contextual diagnostics (e.g. watchdog + external stop).
+- **`SendNonStreamingAsync`** — passes **`CancellationToken`** to **`SendMessageAsync`** so HTTP / orchestration timeouts can cancel the turn (WebGL non-streaming audit; no behavioral change beyond **`ResolveTimeoutMessage`** hook).
+- **Dependency:** **`com.nexoider.coreai 1.5.29`** (lockstep).
+
+#### Package **`1.5.29`**.
+
 ## [1.5.28] - 2026-05-02
 
 ### Drop legacy `PlayerChat` role string

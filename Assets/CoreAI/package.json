@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.5.28",
+  "version": "1.6.0",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.5.28: removed legacy PlayerChat id — use PlainChat or SmartChat. v1.5.27: PlainChat/SmartChat split.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.6.0: server-managed WebGL + LlmRequestContext, idempotency, header layering (see CHANGELOG).",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

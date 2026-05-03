@@ -64,7 +64,16 @@ namespace CoreAI.Infrastructure.Llm
 
             IOpenAiHttpTransport transport;
 #if UNITY_WEBGL && !UNITY_EDITOR
-            transport = new UnityWebRequestOpenAiTransport();
+            bool nativeStreaming = false;
+            bool sameOrigin = false;
+            if (settings is CoreAISettingsAsset asset)
+            {
+                nativeStreaming = asset.WebGlNativeStreaming;
+                sameOrigin = asset.SameOriginCredentials;
+            }
+            transport = nativeStreaming
+                ? (IOpenAiHttpTransport)new FetchSseOpenAiTransport(sameOrigin)
+                : new UnityWebRequestOpenAiTransport();
 #else
             transport = new HttpClientOpenAiTransport();
 #endif
@@ -122,6 +131,10 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             _currentRoleId = request.AgentRoleId ?? "Unknown";
+            using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
+                _currentRoleId,
+                request.TraceId,
+                EnsureIdempotencyKey(request));
             List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
 
             if (_settings.LogMeaiToolCallingSteps)
@@ -321,6 +334,10 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             _currentRoleId = request.AgentRoleId ?? "Unknown";
+            using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
+                _currentRoleId,
+                request.TraceId,
+                EnsureIdempotencyKey(request));
 
             List<MEAI.ChatMessage> chatMessages = new()
             {
@@ -375,6 +392,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 toolIteration++;
+                string streamModel = ResolveModelName();
                 if (toolIteration > maxToolIterations + 1)
                 {
                     yield return new LlmStreamChunk
@@ -402,11 +420,11 @@ namespace CoreAI.Infrastructure.Llm
                 System.Text.StringBuilder iterationVisible = new();
                 List<MEAI.FunctionCallContent> nativeToolCalls = new();
                 int chunkCount = 0;
+                MEAI.UsageDetails iterationUsage = null;
 
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
                                    .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
                 {
-                    // Check for native tool calls in the update (from providers that support delta.tool_calls)
                     if (update.Contents != null)
                     {
                         foreach (MEAI.AIContent content in update.Contents)
@@ -414,6 +432,10 @@ namespace CoreAI.Infrastructure.Llm
                             if (content is MEAI.FunctionCallContent fcc)
                             {
                                 nativeToolCalls.Add(fcc);
+                            }
+                            else if (content is MEAI.UsageContent usageContent && usageContent.Details != null)
+                            {
+                                iterationUsage = usageContent.Details;
                             }
                         }
                     }
@@ -467,12 +489,14 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        yield return new LlmStreamChunk
+                        LlmStreamChunk errChunk = new LlmStreamChunk
                         {
                             IsDone = true,
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
+                        ApplyStreamingUsageFields(errChunk, iterationUsage, streamModel);
+                        yield return errChunk;
                         yield break;
                     }
 
@@ -505,12 +529,14 @@ namespace CoreAI.Infrastructure.Llm
                             yield return new LlmStreamChunk { Text = cleanedText };
                         }
 
-                        yield return new LlmStreamChunk
+                        LlmStreamChunk doneStrip = new LlmStreamChunk
                         {
                             IsDone = true,
                             Text = string.Empty,
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
+                        ApplyStreamingUsageFields(doneStrip, iterationUsage, streamModel);
+                        yield return doneStrip;
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming completed (text-only, JSON stripped, length={cleanedText?.Length ?? 0})");
                         yield break;
@@ -543,12 +569,14 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        yield return new LlmStreamChunk
+                        LlmStreamChunk errChunk2 = new LlmStreamChunk
                         {
                             IsDone = true,
                             Error = "max consecutive tool errors reached",
                             ExecutedToolCalls = policy.ExecutedTraces.ToList()
                         };
+                        ApplyStreamingUsageFields(errChunk2, iterationUsage, streamModel);
+                        yield return errChunk2;
                         yield break;
                     }
 
@@ -572,18 +600,36 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                yield return new LlmStreamChunk
+                LlmStreamChunk terminal = new LlmStreamChunk
                 {
                     IsDone = true,
                     Text = string.Empty,
                     ExecutedToolCalls = policy.ExecutedTraces.ToList()
                 };
+                ApplyStreamingUsageFields(terminal, iterationUsage, streamModel);
+                yield return terminal;
                 int emittedLen = string.Equals(visibleText, sanitizedFull, StringComparison.Ordinal)
                     ? visibleText.Length
                     : sanitizedFull.Length;
                 _logger.LogInfo(GameLogFeature.Llm,
                     $"MeaiLlmClient: Streaming completed ({chunkCount} chunks, raw length={visibleText.Length}, emitted length={emittedLen})");
                 yield break;
+            }
+        }
+
+        private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)
+        {
+            if (chunk == null || usage == null)
+            {
+                return;
+            }
+
+            chunk.PromptTokens = (int)(usage.InputTokenCount ?? 0);
+            chunk.CompletionTokens = (int)(usage.OutputTokenCount ?? 0);
+            chunk.TotalTokens = (int)(usage.TotalTokenCount ?? 0);
+            if (!string.IsNullOrEmpty(model))
+            {
+                chunk.Model = model;
             }
         }
 
@@ -973,11 +1019,28 @@ namespace CoreAI.Infrastructure.Llm
             public string AuthorizationHeader => "";
             public string Model => _s.ModelName;
             public float Temperature => _s.Temperature;
-            public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;
+            public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;
             public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
+
+            public IRequestHeaderProvider? HeaderProvider => null;
+        }
+
+        /// <summary>
+        /// One stable idempotency key per <paramref name="request"/> instance so HTTP retries
+        /// (e.g. <see cref="RefreshOnUnauthorizedDecorator"/>) reuse <c>Idempotency-Key</c>.
+        /// </summary>
+        private static string EnsureIdempotencyKey(LlmCompletionRequest request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (string.IsNullOrEmpty(request.IdempotencyKey))
+            {
+                request.IdempotencyKey = Guid.NewGuid().ToString("N");
+            }
+
+            return request.IdempotencyKey;
         }
     }
 }

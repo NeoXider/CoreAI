@@ -203,7 +203,8 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     ILlmClient http = mode == LlmExecutionMode.ServerManagedApi
-                        ? new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore)
+                        ? (ILlmClient)new RefreshOnUnauthorizedDecorator(
+                            new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore))
                         : new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, _memoryStore);
                     if (mode != LlmExecutionMode.ClientLimited)
                     {

@@ -80,6 +80,20 @@ namespace CoreAI.Ai
         public string ProviderErrorBody { get; }
     }
 
+    /// <summary>
+    /// Raised when the chat/orchestrator layer cancels the request due to <see cref="ICoreAISettings.LlmRequestTimeoutSeconds"/>
+    /// while the caller's own <see cref="CancellationToken"/> was not cancelled (library timeout, not user stop).
+    /// Inherits <see cref="OperationCanceledException"/> so existing cancellation handlers still run; use
+    /// <c>is LlmOperationTimeoutException</c> or <see cref="Messaging.LlmRequestCompleted"/> <c>ErrorCode</c> to distinguish.
+    /// </summary>
+    public sealed class LlmOperationTimeoutException : OperationCanceledException
+    {
+        public LlmOperationTimeoutException()
+            : base("LLM request timed out.")
+        {
+        }
+    }
+
     /// <summary>Input for one <see cref="ILlmClient.CompleteAsync"/> call: role, prompts, tracing.</summary>
     public sealed class LlmCompletionRequest
     {
@@ -97,6 +111,12 @@ namespace CoreAI.Ai
 
         /// <summary>End-to-end trace id (orchestrator / LLM decorator / command router).</summary>
         public string TraceId { get; set; } = "";
+
+        /// <summary>
+        /// Stable idempotency token for this logical turn (HTTP <c>Idempotency-Key</c>).
+        /// Leave empty to auto-assign once per request object; preserved across decorator retries.
+        /// </summary>
+        public string IdempotencyKey { get; set; } = "";
 
         /// <summary>Short backend label after role routing (LLM logs).</summary>
         public string RoutingProfileId { get; set; } = "";

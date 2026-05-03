@@ -1,0 +1,62 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc964192a1404b2458c3a69e06450221, type: 3}
+  m_Name: CoreAISettings 35b
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Llm.CoreAISettingsAsset
+  backendType: 2
+  executionMode: 0
+  autoPriority: 0
+  apiBaseUrl: http://192.168.1.154:1234/v1
+  apiKey: 
+  modelName: qwen3.6-35b-a3b-claude-4.7-opus-reasoning-distilled
+  temperature: 0.1
+  maxTokens: 2048
+  maxClientLimitedRequestsPerSession: 0
+  maxClientLimitedPromptChars: 0
+  requestTimeoutSeconds: 120
+  llmUnityAgentName: 
+  ggufModelPath: Qwen3.5-4B-Q4_K_M.gguf
+  llmUnityDontDestroyOnLoad: 1
+  llmUnityStartupTimeoutSeconds: 120
+  llmUnityStartupDelaySeconds: 1
+  llmUnityKeepAlive: 0
+  enableReasoning: 0
+  llmUnityMaxConcurrentChats: 1
+  llmUnityNumGPULayers: 99
+  universalSystemPromptPrefix: Respond concisely and to the point. Avoid unnecessary
+    verbosity.
+  maxLuaRepairRetries: 3
+  maxToolCallRetries: 3
+  allowDuplicateToolCalls: 0
+  maxLlmRequestRetries: 2
+  contextWindowTokens: 50000
+  enableStreaming: 1
+  webGlNativeStreaming: 0
+  sameOriginCredentials: 0
+  enableLlmContextCompaction: 0
+  offlineUseCustomResponse: 0
+  offlineCustomResponse: 'Offline mode: LLM unavailable'
+  offlineCustomResponseRoles: '*'
+  enableMeaiDebugLogging: 1
+  enableHttpDebugLogging: 1
+  logLlmInput: 1
+  logLlmOutput: 1
+  logTokenUsage: 1
+  logLlmLatency: 1
+  logLlmConnectionErrors: 1
+  logToolCalls: 1
+  logToolCallArguments: 1
+  logToolCallResults: 1
+  logMeaiToolCallingSteps: 1
+  llmRequestTimeoutSeconds: 120
+  maxConcurrentOrchestrations: 2
+  logOrchestrationMetrics: 1

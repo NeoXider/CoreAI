@@ -49,6 +49,20 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void EffectiveHttpRequestTimeoutSeconds_IsMinOfHttpAndOrchestratorCeiling()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureHttpApi("https://api.test.com/v1", "sk", "m", 0.1f, 500, 2048);
+            System.Reflection.FieldInfo f = typeof(CoreAISettingsAsset).GetField(
+                "llmRequestTimeoutSeconds",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(f);
+            f.SetValue(settings, 45f);
+            Assert.AreEqual(45, settings.EffectiveHttpRequestTimeoutSeconds);
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
         public void BackendProperties_ShouldReturnCorrectBooleans()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();

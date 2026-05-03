@@ -322,4 +322,4 @@ Tool-args в MEAI везде — `Newtonsoft.Json.Linq.JArray/JObject` (см. `C
 
 ---
 
-> Снимок обновлён под **v1.5.23** (2026-05-01). Детальная история — [`CHANGELOG.md`](../CHANGELOG.md) / portable [`CHANGELOG.md`](../../CoreAI/CHANGELOG.md).
+> Снимок по большей части отражает состояние **v1.5.x–v1.6.0**; актуальная линия и номер версии — только [`package.json`](../package.json) и portable [`CHANGELOG.md`](../../CoreAI/CHANGELOG.md).
