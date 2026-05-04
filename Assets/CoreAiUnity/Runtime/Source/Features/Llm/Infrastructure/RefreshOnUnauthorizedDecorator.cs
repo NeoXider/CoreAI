@@ -84,7 +84,9 @@ namespace CoreAI.Infrastructure.Llm
                     LlmStreamChunk current = null;
                     try
                     {
-                        hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                        // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                        // continuation must come back through UnitySynchronizationContext.
+                        hasNext = await enumerator.MoveNextAsync();
                         current = hasNext ? enumerator.Current : null;
                     }
                     catch (LlmClientException ex) when (ex.ErrorCode == LlmErrorCode.AuthExpired)
@@ -128,7 +130,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                await enumerator.DisposeAsync().ConfigureAwait(false);
+                await enumerator.DisposeAsync();
             }
 
             if (!authExpired)

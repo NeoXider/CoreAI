@@ -2,9 +2,11 @@
 
 **See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
 
+**Update (v1.6.13):** new **`CoreAISettingsAsset`** instances default **`WebGlNativeStreaming`** to **`true`** (Resources presets aligned). When **`false`**, the player still uses **`UnityWebRequestOpenAiTransport`** (no incremental SSE).
+
 **Update (v1.6.0):** an optional **`.jslib`** + **`FetchSseOpenAiTransport`** path exists behind **`CoreAISettingsAsset.WebGlNativeStreaming`**. It uses browser **`fetch`** for incremental SSE; the default **`UnityWebRequestOpenAiTransport`** path still does **not** stream incrementally. **Editor / PlayMode** do not exercise the native plugin — verify in a **WebGL player** build.
 
-**Status (historical):** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). When **`WebGlNativeStreaming`** is off, **`UnityWebRequest`** does not deliver SSE incrementally; non-streaming fallback remains the safe default.
+**Status (historical):** Timeout and retry hangs **fixed in v1.5.1** — `CancelAfter` replaced with UniTask `CancelAfterSlim` (PlayerLoop-based, WebGL-compatible). When **`WebGlNativeStreaming`** is **`false`**, **`UnityWebRequest`** does not deliver SSE incrementally; **`CoreAiChatService`** forces non-streaming HTTP in the WebGL player.
 
 **Affected code:** `Runtime/Source/Features/Llm/Infrastructure/MeaiOpenAiChatClient.cs` → `MeaiOpenAiChatClient.CompleteStreamingAsync` (or equivalent streaming entry point in your tree).
 
@@ -107,20 +109,21 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 `AddMessage` is always reached via `AppendToStreaming` and `HideTypingIndicator`
 (add a sanity check that the bubble is present in `MessageScroll.Children`).
 
-### 3.4. Solution C — UI-level fallback (simplest)
+### 3.4. Solution C — UI-level fallback (historical) + fetch bridge (current)
 
-**Implemented in CoreAI v1.5.21:** `CoreAiChatService.IsStreamingEnabled` returns **`false`** when **`UNITY_WEBGL && !UNITY_EDITOR`** (non-streaming for chat / smart send). `CoreAiChatPanel` exposes **`ShouldUseStreamingForRole`** (default **`false`** on WebGL player). Incremental SSE over UnityWebRequest on WebGL remains unsupported; this avoids the broken streaming UI path.
+**Originally (CoreAI v1.5.21):** `CoreAiChatService.IsStreamingEnabled` could force **non-streaming** on the WebGL player when incremental SSE over **`UnityWebRequest`** was unsupported, avoiding a broken “typing forever” UI when the transport could not deliver chunks.
+
+**Current (v1.6.13+):** enable **`CoreAISettingsAsset.WebGlNativeStreaming`** (default **on** for new settings assets). **`MeaiLlmClient.CreateHttp`** then uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** (`fetch` + **`ReadableStream`**), and **`CoreAiChatService.IsStreamingEnabled`** allows streaming when that flag is **on** (still subject to per-role / UI overrides). When the flag is **off**, **`UnityWebRequestOpenAiTransport`** is used — no real incremental SSE; the client may use **non-streaming** completion and **simulate** stream updates. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) and [`HTTP_TRANSPORT_SPEC.md`](HTTP_TRANSPORT_SPEC.md).
+
+**`CoreAiChatPanel.ShouldUseStreamingForRole`** defaults to the chat config’s streaming preference; WebGL transport gating lives in **`CoreAiChatService.IsStreamingEnabled`** (single source of truth).
 
 ---
 
-## 4. Proposed rollout
+## 4. Rollout status (historical checklist)
 
-1. **Now (0.25.3):** document (this file) + application-side workaround.
-2. **0.26.0 (minor):** Solution C — `ShouldUseStreamingForRole` virtual hook + default
-   implementation returning `false` under `#if UNITY_WEBGL && !UNITY_EDITOR`. Removes the
-   infinite typing animation for all CoreAI consumers on WebGL.
-3. **0.27.0 (minor):** Solution A — real fetch-SSE bridge via `.jslib`. Gate with an optional
-   flag in `CoreAISettings.WebGlNativeStreaming`. Keep the older non-streaming path as fallback.
+1. **Shipped:** document + **`WebGlNativeStreaming`** + **`CoreAiSseFetch.jslib`** / **`FetchSseOpenAiTransport`** (**v1.6.0+**, default **on** for new settings assets since **v1.6.13**).
+2. **Obsolete:** the old plan for **`ShouldUseStreamingForRole`** default **`false`** on WebGL only — transport choice is centralized in **`CoreAiChatService.IsStreamingEnabled`** + **`WebGlNativeStreaming`** instead.
+3. **Still valid:** keep **`UnityWebRequest`** fallback when **`WebGlNativeStreaming`** is **off**; validate CORS / credentials for your LLM host.
 
 ---
 
@@ -130,6 +133,6 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 - `Runtime/Source/Features/Chat/CoreAiChatPanel.cs` — consumer of `IAsyncEnumerable<LlmStreamChunk>`
 - `Runtime/Source/Features/Chat/CoreAiChatService.cs` — `SendMessageStreamingAsync`,
   thin wrapper over `IAiOrchestrationService.RunStreamingAsync`
-- `Docs/STREAMING_ARCHITECTURE.md` — overall streaming architecture; add a **WebGL SSE** subsection when fixed
+- `Docs/STREAMING_ARCHITECTURE.md` — **WebGL SSE** subsection (fetch bridge + when **`UnityWebRequest`** path applies)
 - `Assets/_source/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs` (RedoSchool) —
   example client workaround forcing non-streaming via reflection on `_enableStreaming`

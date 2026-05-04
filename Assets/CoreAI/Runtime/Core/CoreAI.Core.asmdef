@@ -1,23 +1,22 @@
 {
-  "name": "CoreAI.Core",
-  "rootNamespace": "CoreAI",
-  "references": [
-    "MoonSharp.Interpreter"
-  ],
-  "includePlatforms": [],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "Microsoft.Extensions.AI.dll",
-    "Microsoft.Extensions.AI.Abstractions.dll",
-    "Microsoft.Bcl.AsyncInterfaces.dll",
-    "Newtonsoft.Json.dll",
-    "System.Text.Json.dll"
-  ],
-  "autoReferenced": true,
-  "defineConstraints": [],
-  "versionDefines": [],
-  "noEngineReferences": true,
-  "optionalUnityReferences": []
+    "name": "CoreAI.Core",
+    "rootNamespace": "CoreAI",
+    "references": [
+        "MoonSharp.Interpreter"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Microsoft.Extensions.AI.dll",
+        "Microsoft.Extensions.AI.Abstractions.dll",
+        "Microsoft.Bcl.AsyncInterfaces.dll",
+        "Newtonsoft.Json.dll",
+        "System.Text.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
 }

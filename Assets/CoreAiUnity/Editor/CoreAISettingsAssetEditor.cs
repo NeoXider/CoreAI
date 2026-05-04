@@ -28,6 +28,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private const string PrefOfflineOpen = "CoreAI.SettingsEditor.OfflineOpen";
         private const string PrefDebugOpen = "CoreAI.SettingsEditor.DebugOpen";
         private const string PrefSummarizationOpen = "CoreAI.SettingsEditor.SummarizationOpen";
+        private const string PrefWebGlPlayerOpen = "CoreAI.SettingsEditor.WebGlPlayerOpen";
 
         private bool _showAdvanced;
         private bool _showHttpApi;
@@ -36,6 +37,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
         private bool _showGeneral;
         private bool _showOffline;
         private bool _showDebug;
+        private bool _showWebGlPlayer;
 
         private void OnEnable()
         {
@@ -47,6 +49,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _showGeneral = EditorPrefs.GetBool(PrefGeneralOpen, false);
             _showOffline = EditorPrefs.GetBool(PrefOfflineOpen, false);
             _showDebug = EditorPrefs.GetBool(PrefDebugOpen, false);
+            _showWebGlPlayer = EditorPrefs.GetBool(PrefWebGlPlayerOpen, false);
         }
 
         private void OnDisable()
@@ -58,6 +61,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             EditorPrefs.SetBool(PrefGeneralOpen, _showGeneral);
             EditorPrefs.SetBool(PrefOfflineOpen, _showOffline);
             EditorPrefs.SetBool(PrefDebugOpen, _showDebug);
+            EditorPrefs.SetBool(PrefWebGlPlayerOpen, _showWebGlPlayer);
         }
 
         // Test connection state
@@ -152,6 +156,24 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
             DrawProductionWarnings(settings);
 
+            // Global streaming — main toggle for all platforms (WebGL-only transport toggles live under Advanced).
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Streaming", EditorStyles.miniBoldLabel);
+            SerializedProperty enableStreamingProp = serializedObject.FindProperty("enableStreaming");
+            EditorGUILayout.PropertyField(enableStreamingProp,
+                new GUIContent(
+                    "Global streaming",
+                    "Token-by-token replies when backends support it. Overridden if the chat panel turns streaming off (CoreAiChatConfig) or a role sets AgentBuilder.WithStreaming(false). Default: on."));
+
+            SerializedProperty webGlNativePropForHint = serializedObject.FindProperty("webGlNativeStreaming");
+            if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.WebGL &&
+                enableStreamingProp.boolValue && !webGlNativePropForHint.boolValue)
+            {
+                EditorGUILayout.HelpBox(
+                    "WebGL build target: incremental SSE in the player needs «WebGL: native SSE (fetch)» enabled — open Advanced Settings → «WebGL player (browser build)».",
+                    MessageType.Warning);
+            }
+
             // Auto Priority — only if Auto mode
             if (settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto)
             {
@@ -186,7 +208,53 @@ namespace CoreAI.Infrastructure.Llm.Editor
         }
 
         /// <summary>
-        /// All advanced sections (the original five foldouts), collected under the "Advanced" umbrella.
+        /// WebGL-only HTTP transport (fetch SSE + credentials). Kept under Advanced so Essentials stays short.
+        /// </summary>
+        private void DrawWebGlPlayerFoldout()
+        {
+            _showWebGlPlayer = EditorGUILayout.BeginFoldoutHeaderGroup(_showWebGlPlayer,
+                "🌍 WebGL player (browser build)");
+            if (_showWebGlPlayer)
+            {
+                EditorGUILayout.HelpBox(
+                    "Built WebGL player only (Editor / Standalone ignore these). " +
+                    "Problem pattern: global streaming on but native SSE off → one block reply, no live tokens — enable native SSE. " +
+                    "LM Studio and most local OpenAI-compatible hosts: keep «fetch credentials» off.",
+                    MessageType.None);
+
+                SerializedProperty webGlNativeProp = serializedObject.FindProperty("webGlNativeStreaming");
+                EditorGUILayout.PropertyField(webGlNativeProp,
+                    new GUIContent(
+                        "WebGL: native SSE (fetch)",
+                        "Default: on. CoreAiSseFetch.jslib + fetch ReadableStream for incremental SSE. Off = buffered non-streaming HTTP in the player."));
+                SerializedProperty sameOriginProp = serializedObject.FindProperty("sameOriginCredentials");
+                EditorGUILayout.PropertyField(sameOriginProp,
+                    new GUIContent(
+                        "WebGL: fetch credentials (same-origin)",
+                        "Default off → fetch credentials: omit (Bearer still sent; works with CORS ACAO: * e.g. OpenRouter). On → same-origin. Rarely needed for LM Studio / local APIs."));
+
+                SerializedProperty enableStreamingProp = serializedObject.FindProperty("enableStreaming");
+                if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.WebGL &&
+                    enableStreamingProp.boolValue && !webGlNativeProp.boolValue)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Active build target is WebGL and global streaming is on, but native SSE is off — the player will not stream incrementally.",
+                        MessageType.Warning);
+                }
+
+                if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.WebGL && sameOriginProp.boolValue)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Fetch credentials is on — for LM Studio and many setups this is unnecessary and can worsen cross-origin behavior. Turn off unless you know you need same-origin cookie mode.",
+                        MessageType.Info);
+                }
+            }
+
+            EditorGUILayout.EndFoldoutHeaderGroup();
+        }
+
+        /// <summary>
+        /// Advanced foldouts (HTTP, WebGL player, LLMUnity, summarization, general, offline, debug).
         /// </summary>
         private void DrawAdvancedSections(CoreAISettingsAsset settings)
         {
@@ -230,6 +298,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             EditorGUILayout.EndFoldoutHeaderGroup();
+
+            DrawWebGlPlayerFoldout();
 
             // LLMUnity секция
             _showLlmUnity = EditorGUILayout.BeginFoldoutHeaderGroup(_showLlmUnity, "💾 LLMUnity (локальная модель)");

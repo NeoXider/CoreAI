@@ -129,17 +129,9 @@ namespace CoreAI.Composition
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IDataOverlayVersionStore>();
-            // WebGL player: avoid synchronous File.* on persistentDataPath (IndexedDB stalls).
-            // Editor: keep FileAgentMemoryStore even when the active build target is WebGL so Play Mode /
-            // tests match Standalone behaviour (Null store would make chat history + memory appear broken).
-#if !UNITY_WEBGL || UNITY_EDITOR
-            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
-                .As<IAgentMemoryStore>()
-                .As<IConversationTranscriptStore>();
-#else
-            builder.Register<NullAgentMemoryStore>(Lifetime.Singleton).As<IAgentMemoryStore>();
-            builder.Register<NullConversationTranscriptStore>(Lifetime.Singleton).As<IConversationTranscriptStore>();
-#endif
+            // File-backed agent memory on all players. WebGL: IDBFS + CoreAi_PersistFsSync (jslib) after writes
+            // so chat/memory JSON survives reload when Application.Quit does not run (tab close).
+            RegisterAgentMemoryStore(builder);
 
             // ── 8. Entry Points ────────────────────────────────────────────
             builder.RegisterEntryPoint<AiGameCommandRouter>();
@@ -175,6 +167,17 @@ namespace CoreAI.Composition
                 suppressDefaultConversationSummaryStore: false,
                 suppressDefaultAgentMemoryStore: true);
 #endif
+        }
+
+        /// <summary>
+        /// Registers <see cref="FileAgentMemoryStore"/> as <see cref="IAgentMemoryStore"/> and
+        /// <see cref="IConversationTranscriptStore"/>. Called from <see cref="Configure"/>; internal for EditMode DI tests.
+        /// </summary>
+        internal static void RegisterAgentMemoryStore(IContainerBuilder builder)
+        {
+            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
+                .As<IAgentMemoryStore>()
+                .As<IConversationTranscriptStore>();
         }
     }
 }

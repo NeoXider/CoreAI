@@ -2,6 +2,104 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.6.19] - 2026-05-05
+
+### WebGL — persisted chat / agent memory (`FileAgentMemoryStore`)
+
+- **`CoreAILifetimeScope`** — WebGL **player** now registers **`FileAgentMemoryStore`** as **`IAgentMemoryStore`** and **`IConversationTranscriptStore`** (same as desktop). Previously the player used **`NullAgentMemoryStore`**, so **`TryGetPersistedChatHistory`** always saw an empty history and nothing was written for session restore.
+- **`FileAgentMemoryStore`** — unchanged contract; on WebGL it already calls **`CoreAi_PersistFsSync`** after writes (**`CoreAiPersistFs.jslib`** → **`FS.syncfs`**) so IDBFS changes reach IndexedDB when the user reloads or closes the tab without **`Application.Quit`**.
+- **`CoreAiPersistFs.jslib`** — success-path **`console.log`** removed; warnings remain when **`FS.syncfs`** is missing or fails.
+- **`CoreAiSseFetch.jslib`** — verbose **`console.log`** (open / response / done) commented by default to reduce browser console noise; **`console.warn`** remains for read errors and **`fetch.catch`** (CORS / network / timeout).
+- **`CoreAILifetimeScope.RegisterAgentMemoryStore`** — **`internal`** helper used by **`Configure`** and **`CoreAILifetimeScopeConversationStoreEditModeTests`** (`RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`).
+- **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`README_CHAT.md`**, root **`README.md`** / **`README_RU.md`**, **`DOCS_INDEX.md`**, **`QUICK_START.md`**, **`TODO.md`**, **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`TROUBLESHOOTING.md`**, **`MemorySystem.md`**, **`HTTP_TRANSPORT_SPEC.md`**, **`DEVELOPER_GUIDE.md`** (session restore + WebGL + jslib logging).
+- **Dependency:** **`com.nexoider.coreai` `1.6.19`** — lockstep semver.
+
+#### Package **`1.6.19`**.
+
+## [1.6.18] - 2026-05-04
+
+### WebGL `fetch` SSE — single-threaded await + non-blocking stream (fix silent hang after `POST (stream)`)
+
+- **`FetchSseOpenAiTransport.StreamState`** — **`TaskCompletionSource<OpenInfo>`** no longer uses **`RunContinuationsAsynchronously`**. WebGL builds have no real thread pool, so `RunContinuationsAsynchronously` queued the awaiting continuation onto a scheduler that never ran — the await of **`WaitForOpenAsync`** parked forever after `POST (stream)` and the chat UI animated indefinitely with no response. With **synchronous continuations**, the C# **`await`** resumes inside the JS **`onOpen`** callback's call stack, on the same Unity main thread, immediately after **`fetch().then`** delivers the response headers.
+- **`FetchSseStream.ReadAsync`** — true async via **`TaskCompletionSource<int>`**. Previously **`Stream.Read`** blocked the calling thread on **`AutoResetEvent.WaitOne`**, which on WebGL froze the JS event loop and prevented further fetch chunks from ever being delivered (deadlock: read waits for chunks; chunks wait for the event loop; event loop waits for read to return). Now **`ReadAsync`** returns synchronously when bytes are queued and a parked **`Task<int>`** otherwise; **`EnqueueChunk` / `SignalDone` / `SignalError`** call **`PumpPendingRead`** to fulfil the parked task from the JS callback, so the consumer (**`StreamReader.ReadLineAsync`** in **`MeaiOpenAiChatClient`**) gets data without blocking the main thread. **`Read` (sync)** is now non-blocking too — returns 0 instead of waiting — so any caller that bypasses **`ReadAsync`** simply observes EOF instead of hanging.
+- **`CoreAiSseFetch.jslib`** — added optional **`console.log`** lifecycle traces (**`[CoreAiSseFetch] open / response / done`**) for DevTools (**v1.6.18**); **`console.warn`** for read errors / **`fetch.catch`** kept. **v1.6.19:** those **`console.log`** lines are commented out by default (uncomment in the jslib to trace **`fetch`** / SSE); **`console.warn`** unchanged.
+- **Dependency:** **`com.nexoider.coreai` `1.6.18`** — lockstep semver.
+
+#### Package **`1.6.18`**.
+
+## [1.6.17] - 2026-05-04
+
+### WebGL `fetch` SSE — await real HTTP status before returning (fix `HTTP 0`)
+
+- **`FetchSseOpenAiTransport`** — `OpenSseResponseStreamAsync` is now genuinely **`async`**: it waits for the JS bridge to deliver the real **`response.status`** + headers (or a CORS / network error) before constructing the **`OpenAiHttpSseOpenResult`**. Previously the method returned **`Task.FromResult`** synchronously with the default **`StatusCode = 0`**, so **`MeaiOpenAiChatClient`** logged **`stream HTTP 0 FAILED`** and aborted before **`fetch`** had even reached the gateway — masking real CORS errors as transport failures and making WebGL chat appear silently broken even when the server would have answered.
+- **`CoreAiSseFetch.jslib`** — adds an **`onOpen(callId, status, errorBody, headersFlat)`** callback fired right after **`fetch().then(response =>)`**. On **`response.ok`** the JS side starts pumping chunks via **`onChunk`** as before; on a non-2xx the body is read once and forwarded to **`onOpen`** so C# can populate **`OpenAiHttpSseOpenResult.ErrorBodyText`** and surface a proper **`LlmClientException`** with the gateway's actual status. **`fetch.catch`** (CORS / DNS / network) signals **`onOpen(callId, 0, message, "")`** + **`onError`** so the consumer sees a real diagnostic instead of a 120 ms timeout.
+- **`CoreAi_FetchSseAbort`** — now keyed by **`callId`** (was a controller pointer); the JS side keeps a **`controllers[callId]`** map and aborts on demand. Aligned with the **`CancellationToken`** registration in C#.
+- **`FetchSseStream`** — wraps each JS-extracted delta back into a single **`data: {"choices":[{"delta":{"content":"…"}}]}\n\n`** SSE event so the existing **`MeaiOpenAiChatClient`** parser can read it via **`StreamReader.ReadLineAsync`** without a special code path. Includes minimal JSON escaping so chunks containing quotes / control chars don't corrupt the framed event.
+- **Dependency:** **`com.nexoider.coreai` `1.6.17`** — lockstep semver.
+
+#### Package **`1.6.17`**.
+
+## [1.6.16] - 2026-05-04
+
+### WebGL fetch — default `credentials: omit` (OpenRouter / CORS `*`)
+
+- **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** — when **`SameOriginCredentials`** is **off** (default), **`fetch`** now uses **`credentials: 'omit'`** instead of **`'include'`**, so providers that respond with **`Access-Control-Allow-Origin: *`** (e.g. OpenRouter) no longer fail the browser preflight. **`Authorization: Bearer …`** is still sent. **`SameOriginCredentials` on** still maps to **`same-origin`**.
+- **`CoreAISettingsAsset`** tooltips, **`CoreAISettingsAssetEditor`**, **`COREAI_SETTINGS.md`**, **`TROUBLESHOOTING.md`** — document the behaviour.
+- **Dependency:** **`com.nexoider.coreai` `1.6.16`** — lockstep semver.
+
+#### Package **`1.6.16`**.
+
+## [1.6.15] - 2026-05-04
+
+### Inspector — WebGL streaming toggles under Advanced
+
+- **`CoreAISettingsAssetEditor`** — **Essentials → Streaming** keeps only **Global streaming**. **WebGL: native SSE (fetch)** and **WebGL: fetch credentials** moved to **Advanced Settings → WebGL player (browser build)** (foldout state persisted via `EditorPrefs`). When the active build target is **WebGL** and global streaming is on but native SSE is off, **Essentials** still shows a short warning pointing to that foldout.
+- **`COREAI_SETTINGS.md`**, **`README_CHAT.md`** — document the new layout.
+- **Dependency:** **`com.nexoider.coreai` `1.6.15`** — lockstep semver with this package.
+
+#### Package **`1.6.15`**.
+
+## [1.6.14] - 2026-05-04
+
+### Documentation — WebGL streaming defaults and version drift
+
+- Synced **`WebGlNativeStreaming`** default-**on** story and fetch-bridge wording across **`TODO.md`**, **`Docs/WEBGL_SERVER_MANAGED_PLAN_RU.md`** (header + этап 2), **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`HTTP_TRANSPORT_SPEC.md`**, root **`README.md`** / **`README_RU.md`**, **`Assets/CoreAiUnity/README.md`**, and the historical WebGL note in **`CHANGELOG`** (**0.25.2**).
+
+#### Package **`1.6.14`**.
+
+## [1.6.13] - 2026-05-04
+
+### CoreAISettings — streaming defaults + Inspector
+
+- **`CoreAISettingsAsset`** — **`webGlNativeStreaming`** defaults to **`true`** (new instances + clearer WebGL-first streaming). **`sameOriginCredentials`** tooltip corrected (true → fetch `same-origin`, false → `include`).
+- **`CoreAISettingsAssetEditor`** — **WebGL** toggles (**native SSE**, **fetch credentials**) always visible under **Streaming** (not only when the active build target is WebGL), with a short note that they apply in the browser player.
+- **Resources:** **`CoreAISettings.asset`**, **`CoreAISettings 35b.asset`**, **`open.preset`**, **`LocalCoreAi.preset`**, **`CoreAISettingsAssetOpenRouter.preset`** — **`webGlNativeStreaming: 1`** for consistency.
+- **`COREAI_SETTINGS.md`** — defaults and third-toggle explanation.
+- **EditMode:** defaults assert **`WebGlNativeStreaming`** / **`SameOriginCredentials`**.
+
+#### Package **`1.6.13`**.
+
+## [1.6.12] - 2026-05-04
+
+### Inspector — global streaming visible
+
+- **`CoreAISettingsAssetEditor`** — **Essentials** block now draws **`enableStreaming`** (**Global streaming**, default on) and, when the active build target is **WebGL**, **`webGlNativeStreaming`** + **`sameOriginCredentials`**, with a warning if global streaming is on but native SSE is off.
+- **`CoreAISettingsAsset`** — **`[Header(\"Streaming\")]`** on the serialized group for clarity in fallback inspectors.
+- **`COREAI_SETTINGS.md`**, **`README_CHAT.md`** — document where the toggles live and the override hierarchy.
+- **EditMode:** **`CoreAISettingsAssetEditModeTests.SerializedObject_HasEnableStreaming_ForInspectorBinding`**.
+
+#### Package **`1.6.12`**.
+
+## [1.6.11] - 2026-05-04
+
+### WebGL — why chat is not streaming
+
+- **`CoreAiChatService`** — in the **WebGL player**, when **`WebGlNativeStreaming`** is off but the UI still wants streaming, log a **one-time** warning explaining that **`IsStreamingEnabled` is false**, **`LLM ◀`** logs have **no `(stream)`**, and replies arrive in one block; point to **`WebGlNativeStreaming`** + **`CoreAiSseFetch.jslib`**.
+- **`CoreAIProductionSettingsValidator`** — WebGL preprocess warning when **`EnableStreaming`** is on and **`WebGlNativeStreaming`** is off now covers **ClientOwnedApi** and **ClientLimited** (not only **ServerManagedApi**), excluding **Offline** / **LocalModel**.
+- **`README_CHAT.md`** — WebGL section updated (native fetch bridge vs forced non-streaming).
+
+#### Package **`1.6.11`**.
+
 ## [1.6.10] - 2026-05-04
 
 ### Docs / sample — WebGL build hygiene
@@ -73,7 +171,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 ### Editor — file-backed agent memory when build target is WebGL
 
 - **`CoreAILifetimeScope`** — register **`FileAgentMemoryStore`** when **`!UNITY_WEBGL || UNITY_EDITOR`**, so **Editor Play Mode** keeps persisted chat / `IAgentMemoryStore` behaviour while the active **Build Target** is **WebGL** (previously **`UNITY_WEBGL`** forced **`NullAgentMemoryStore`**, which broke history and host tests).
-- **WebGL player** unchanged: **`NullAgentMemoryStore`** + **`NullConversationTranscriptStore`** (avoid synchronous `File` on IndexedDB).
+- **WebGL player** (pre-**v1.6.19**): **`NullAgentMemoryStore`** + **`NullConversationTranscriptStore`** (avoid synchronous `File` on IndexedDB). **v1.6.19** registers **`FileAgentMemoryStore`** for the player too, with **`CoreAi_PersistFsSync`** after writes.
 - **Compile:** **`CoreAiChatService`** / **`CoreAiChatPanel`** — add **`using CoreAI.Infrastructure.Llm`** for **`CoreAISettingsAsset`** / **`WebGlNativeStreaming`** checks under **`UNITY_WEBGL && !UNITY_EDITOR`** (fixes **CS0246** when building WebGL player).
 - **WebGL link:** **`CoreAiSseFetch.jslib`** — use Unity’s documented macro **`makeDynCall`** (lowercase), not **`MakeDynCall`**, so Emscripten **6000.3** no longer throws **`ReferenceError: MakeDynCall is not defined`** during **`build.js`** / **jsify**.
 - **WebGL link:** avoid **`?.` optional chaining** in **`CoreAiSseFetch.jslib`** (Emscripten’s **Node** parser rejects it — **`SyntaxError: Unexpected token '.'`**); use plain **`&&`** property access for OpenAI **`delta.content`** extraction.
@@ -206,7 +304,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 ### VContainer — single `IAgentMemoryStore` registration
 
 - **`RegisterCorePortable`:** optional **`suppressDefaultAgentMemoryStore`** (default **`false`**). When **`true`**, the portable layer does not register **`NullAgentMemoryStore`** as **`IAgentMemoryStore`**.
-- **`RegisterConversationSummaryForCoreAiLifetimeScope`:** passes **`suppressDefaultAgentMemoryStore: true`** for both non-WebGL and WebGL branches so **`CoreAILifetimeScope`** remains the only place that registers **`FileAgentMemoryStore`** or **`NullAgentMemoryStore`**. Fixes **`VContainerException: Conflict implementation type`** when building **`CoreAILifetimeScope`** (regression after **v1.5.21** WebGL memory registration).
+- **`RegisterConversationSummaryForCoreAiLifetimeScope`:** passes **`suppressDefaultAgentMemoryStore: true`** for both non-WebGL and WebGL branches so **`CoreAILifetimeScope`** remains the only place that registers **`IAgentMemoryStore`** for the Unity host (**`FileAgentMemoryStore`** on all players since **v1.6.19**, including WebGL; previously WebGL player used **`NullAgentMemoryStore`**). Fixes **`VContainerException: Conflict implementation type`** when building **`CoreAILifetimeScope`** (regression after **v1.5.21** WebGL memory registration).
 - **Edit Mode:** **`CorePortableAgentMemoryRegistrationEditModeTests`** — suppress path yields a single **`IReadOnlyList<IAgentMemoryStore>`** entry; without suppress, portable Null + host File yields **two** list entries (VContainer does not throw on **Build** for distinct implementation types; duplicate **same** type e.g. WebGL double Null still throws). **`CoreAILifetimeScopeConversationStoreEditModeTests`** also asserts **`IAgentMemoryStore`** type.
 - **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`COREAI_SETTINGS.md`**.
 - **Dependency:** **`com.nexoider.coreai 1.5.22`**.
@@ -926,7 +1024,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🐛 **`Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`** — `coreai-chat-stop` now renders as `■` (Geometric Shapes U+25A0, present in LiberationSans / default TMP fallback) instead of `⏹` (Misc Technical U+23F9, missing from default WebGL fonts and drew as an empty rectangle).
 - **Context:** shipped WebGL players do not load emoji fallbacks (Noto Color Emoji, etc.), so emoji-plane symbols (U+1F300–U+1FAFF, parts of U+2600–U+27BF, U+23F0–U+23FF) render as `□` or disappear inside round buttons. ASCII / Latin-1 / Geometric Shapes (U+2580–U+25FF) are present in the default font asset — hence the move to `■`.
 - **Compatibility:** cosmetic only, no API changes. Projects overriding button text in custom UXML are unaffected. Tooltip unchanged (“Stop agent and generation”), so UX stays clear.
-- **Known TODO (out of scope for 0.25.2):** on WebGL, `UnityWebRequest` does not deliver SSE incrementally, so `OpenAiChatLlmClient.CompleteStreamingAsync` can deliver one terminal chunk instead of a stream — streaming UI appears stuck (“no typed reply + endless typing animation”). Details and fix plan: [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). App workaround: force `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR` (example: `RedoSchool/Features/ChatUI/Presentation/Controllers/ChatPanelController.cs`).
+- **Known TODO (out of scope for 0.25.2):** on WebGL, `UnityWebRequest` does not deliver SSE incrementally, so `OpenAiChatLlmClient.CompleteStreamingAsync` can deliver one terminal chunk instead of a stream — streaming UI appears stuck (“no typed reply + endless typing animation”). Details and fix plan: [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). *Update (v1.6.0+ / v1.6.13):* use **`WebGlNativeStreaming`** + fetch jslib (default **on** for new settings assets). Legacy app workaround (force `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR`, e.g. `RedoSchool/...`) only if you intentionally avoid the fetch bridge.
 
 ## [0.25.1] - 2026-04-26
 

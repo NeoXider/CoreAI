@@ -610,7 +610,8 @@ namespace CoreAI.Chat
 
             string roleId = config.RoleId ?? "SmartChat";
             int max = config.MaxPersistedMessagesForUi;
-            if (!_chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max))
+            bool ok = _chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max);
+            if (!ok)
             {
                 return;
             }

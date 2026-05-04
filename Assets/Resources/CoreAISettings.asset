@@ -15,16 +15,13 @@ MonoBehaviour:
   backendType: 2
   executionMode: 0
   autoPriority: 0
-  apiBaseUrl: http://192.168.1.154:1234/v1
-  apiKey: 
-  modelName: qwen/qwen3.6-27b
   temperature: 0.1
-  maxTokens: 512
+  maxTokens: 2048
   maxClientLimitedRequestsPerSession: 0
   maxClientLimitedPromptChars: 0
-  requestTimeoutSeconds: 240
+  requestTimeoutSeconds: 120
   llmUnityAgentName: 
-  ggufModelPath: Qwen3.5-2B-Q4_K_M.gguf
+  ggufModelPath: Qwen3.5-4B-Q4_K_M.gguf
   llmUnityDontDestroyOnLoad: 1
   llmUnityStartupTimeoutSeconds: 120
   llmUnityStartupDelaySeconds: 1
@@ -32,17 +29,15 @@ MonoBehaviour:
   enableReasoning: 0
   llmUnityMaxConcurrentChats: 1
   llmUnityNumGPULayers: 99
-  universalSystemPromptPrefix: 'Respond concisely and to the point. Avoid unnecessary
+  universalSystemPromptPrefix: Respond concisely and to the point. Avoid unnecessary
     verbosity.
-
-'
   maxLuaRepairRetries: 3
   maxToolCallRetries: 3
   allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
   contextWindowTokens: 50000
   enableStreaming: 1
-  webGlNativeStreaming: 0
+  webGlNativeStreaming: 1
   sameOriginCredentials: 0
   enableConversationHistorySummarization: 1
   conversationHistoryRecentTokenBudgetOverride: 0
@@ -62,6 +57,6 @@ MonoBehaviour:
   logToolCallArguments: 1
   logToolCallResults: 1
   logMeaiToolCallingSteps: 1
-  llmRequestTimeoutSeconds: 15
+  llmRequestTimeoutSeconds: 120
   maxConcurrentOrchestrations: 2
-  logOrchestrationMetrics: 0
+  logOrchestrationMetrics: 1

@@ -51,7 +51,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current release line: **`1.6.0`** — single source of truth is **[`package.json`](package.json)** (lockstep with portable **[`../CoreAI/package.json`](../CoreAI/package.json)**). Play Mode tests live under **`Tests/PlayMode/`** (assemblies **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`**, **`Shared`**, **`LlmInfra`**); index **[`Tests/PlayMode/README.md`](../Tests/PlayMode/README.md)**.
+Current release line: see **[`package.json`](package.json)** (Unity layer) and **[`../CoreAI/package.json`](../CoreAI/package.json)** (portable core) — versions are not duplicated here to avoid drift. Play Mode tests live under **`Tests/PlayMode/`** (assemblies **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`**, **`Shared`**, **`LlmInfra`**); index **[`Tests/PlayMode/README.md`](../Tests/PlayMode/README.md)**.
 
 ---
 

@@ -93,12 +93,13 @@ namespace CoreAI.Editor
                        "remove the static ApiKey to avoid leaking it into the public bundle.";
             }
 
-            if (settings.ExecutionMode == LlmExecutionMode.ServerManagedApi &&
-                settings.EnableStreaming && !settings.WebGlNativeStreaming)
+            if (settings.EnableStreaming && !settings.WebGlNativeStreaming &&
+                settings.ExecutionMode != LlmExecutionMode.Offline &&
+                settings.ExecutionMode != LlmExecutionMode.LocalModel)
             {
-                return "[CoreAI] WebGL build has streaming enabled but WebGlNativeStreaming is OFF. " +
-                       "UnityWebRequest cannot read SSE incrementally — the chat will appear to hang. " +
-                       "Either enable WebGlNativeStreaming (with the CoreAiSseFetch.jslib plugin) or disable streaming for WebGL.";
+                return "[CoreAI] WebGL build: EnableStreaming is ON but WebGlNativeStreaming is OFF. " +
+                       "In the player, CoreAiChatService forces non-streaming HTTP (no token-by-token UI). " +
+                       "Enable WebGlNativeStreaming (CoreAiSseFetch.jslib) on CoreAISettingsAsset, or disable EnableStreaming.";
             }
 
             return "";

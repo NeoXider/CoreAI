@@ -182,20 +182,24 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
 
+        [Header("Streaming")]
         [Tooltip(
-            "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI.")]
+            "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI. " +
+            "Shown at the top of the CoreAI Settings custom inspector (Essentials). Default: on.")]
         [SerializeField]
         private bool enableStreaming = true;
 
+        [Header("WebGL (player)")]
         [Tooltip(
             "WebGL only: route streaming HTTP through the native fetch + ReadableStream bridge (CoreAiSseFetch.jslib) " +
             "instead of UnityWebRequest. Requires the .jslib plugin and a CORS-permitted backend that does not buffer SSE.")]
         [SerializeField]
-        private bool webGlNativeStreaming = false;
+        private bool webGlNativeStreaming = true;
 
         [Tooltip(
-            "WebGL only: include cookies on cross-origin LLM requests (fetch credentials='include'). " +
-            "Same-origin deployments do not need this.")]
+            "WebGL only: fetch credentials mode. When true → credentials: 'same-origin' (cookies on same host). " +
+            "When false → 'omit' (default): Bearer keys still work; required for many APIs that return CORS " +
+            "Access-Control-Allow-Origin: * (e.g. OpenRouter). Turn on only if you need same-origin cookie behavior.")]
         [SerializeField]
         private bool sameOriginCredentials = false;
 

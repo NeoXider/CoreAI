@@ -106,7 +106,7 @@ Create two **`CoreAiChatConfig`** assets (or duplicate one) with **Role ID** = `
 Панель **не привязана** к одной роли: в **`CoreAiChatConfig`** задаётся **Role ID**, тот же, что вы зарегистрировали через **`AgentBuilder`**. Оркестратор и MEAI одинаковы для UI и программных вызовов. **`ToolsOnly`** для чата технически допустим — панель не режет режим агента; на UX рассчитывать на доминирование тулов, не на болтовню. Игровой код может добавлять только своему режиму политику в **`BuildAiTaskRequest`**.
 </details>
 
-**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`** and the same **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
+**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`** and the same **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`** asserts **`CoreAILifetimeScope.RegisterAgentMemoryStore`** binds **`FileAgentMemoryStore`** for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
 
 <a id="persisted-chat-session"></a>
 
@@ -118,6 +118,8 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 |--------------------------|---------|
 | **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`: `persistentDataPath/CoreAI/AgentMemory/<RoleId>.json`, field `chatHistoryJson`). |
 | **Max Persisted Messages For Ui** | How many **last** messages to show on load; **0** = all saved. |
+
+**WebGL:** the same **`FileAgentMemoryStore`** path applies; Unity maps **`persistentDataPath`** to browser storage (IDBFS). After each persist, **`FileAgentMemoryStore`** calls **`CoreAi_PersistFsSync`** (**`CoreAiPersistFs.jslib`**) so writes are pushed to IndexedDB — without this, closing the tab before **`Application.Quit`** can drop data. Conversation **summaries** for compaction stay in-memory on WebGL (see **`CoreAILifetimeScope`**); only agent memory / chat JSON uses the file store.
 
 **Requirements:** for the role, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. Built-in chat roles support this out of the box: **`PlainChat`** (history + no MemoryTool) and **`SmartChat`** (history + MemoryTool). For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk — there is nothing to load (only **Welcome Message** remains).
 
@@ -321,12 +323,12 @@ new AgentBuilder("JsonParser")
 
 For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `LlmRoutingManifest`, for example `SmartChat → ServerManagedApi` and `Analyzer → ClientLimited`.
 
-> ⚠️ **WebGL caveat (0.25.x).** In a built WebGL player the `UnityWebRequest` wrapper
-> (emscripten `XMLHttpRequest`) does not deliver SSE incrementally — all chunks arrive in one block at
-> the end of the request (`chunks=1` in `LLM ◀ (stream)` logs). Because of that the typing indicator may hang
-> and the bubble may not appear. **Workaround:** under `#if UNITY_WEBGL && !UNITY_EDITOR` force
-> `CoreAiChatConfig.EnableStreaming = false` (any non-streaming path works correctly).
-> Full fix plan (including `.jslib` fetch bridge) — [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md).
+> ⚠️ **WebGL player.** `UnityWebRequest` does not deliver SSE incrementally. **`CoreAiChatService.IsStreamingEnabled`**
+> returns **`false`** in the WebGL player unless **`CoreAISettingsAsset.WebGlNativeStreaming`** is **enabled**
+> (native **fetch** + **ReadableStream** via `CoreAiSseFetch.jslib` → `FetchSseOpenAiTransport`). If that flag is off,
+> the chat uses **non-streaming** HTTP even when `CoreAiChatConfig.EnableStreaming` is on — logs show **`LLM ◀`**
+> **without** **`(stream)`**, and the full reply lands at once. **Fix:** ensure **`WebGlNativeStreaming`** is **on** on your CoreAI settings asset (default **on** for new assets since v1.6.13; older assets may still have it off) and satisfy browser **CORS** / same-origin rules for your LLM host. See
+> [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md) and [`WEBGL_BUILD_TROUBLESHOOTING.md`](../../../../Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 ### Streaming + Tool Calling (single-cycle)
 
@@ -352,8 +354,8 @@ Priority order (highest to lowest):
 
 1. **UI flag** — `CoreAiChatConfig.EnableStreaming` (chat panel Inspector). If off → always non-streaming; other layers ignored.
 2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`).
-3. **Global** — `ICoreAISettings.EnableStreaming` (checkbox in `CoreAISettings.asset`).
-4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
+3. **Global** — `ICoreAISettings.EnableStreaming` — **`CoreAISettings` Inspector → Essentials → Global streaming** (default **on**; was easy to miss before because the custom inspector omitted the field).
+4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`; Inspector: **Advanced Settings → WebGL player (browser build)**). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
 
 ```csharp
 // Example: chat agent always streams regardless of global setting

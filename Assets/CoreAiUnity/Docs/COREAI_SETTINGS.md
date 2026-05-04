@@ -70,13 +70,18 @@ Use `LlmRoutingManifest` when one scene needs multiple modes:
 
 Each profile can set mode, context window, HTTP settings, LLMUnity agent name, and ClientLimited caps.
 
+### Global streaming (Inspector)
+
+In the **`CoreAISettings`** custom inspector, the **Essentials** block includes **Global streaming** (`EnableStreaming`, default **on**). Effective streaming is still subject to the hierarchy: **`CoreAiChatConfig.EnableStreaming`** on the chat panel (if off → never streams) → per-role **`AgentBuilder.WithStreaming`** → this global toggle. **WebGL-only transport** lives under **Advanced Settings → WebGL player (browser build)**: **WebGL: native SSE (fetch)** (`WebGlNativeStreaming`, default **on** for new assets — incremental SSE in the browser; ensure **CORS** for your LLM host) and **WebGL: fetch credentials (same-origin)** (`SameOriginCredentials`, default **off** → fetch **`omit`** so Bearer APIs work with CORS `Access-Control-Allow-Origin: *` e.g. OpenRouter; turn **on** only for **`same-origin`** cookie cases). See [WebGL streaming (optional)](#webgl-streaming-optional) below.
+
 ### Production validation
 
 Use `CoreAI/Validate Production Settings` before WebGL releases. CoreAI warns when a WebGL build uses `ClientOwnedApi` with a non-empty API key, because public WebGL builds expose client assets. Use `ServerManagedApi` for public WebGL.
 
 ### WebGL streaming (optional)
 
-- **`WebGlNativeStreaming`** (in **`CoreAISettingsAsset`**) — when **on** in a **WebGL player** build, **`MeaiLlmClient`** can use the **`CoreAiSseFetch.jslib`** bridge so **`fetch`** reads **SSE** incrementally (instead of **`UnityWebRequest`** buffering). Requires backend **`text/event-stream`** without gzip on that route; same-origin relative **`ApiBaseUrl`** is resolved via **`Application.absoluteURL`**. Validate end-to-end in the browser; Edit Mode still uses **`HttpClient`** mocks.
+- **`WebGlNativeStreaming`** (in **`CoreAISettingsAsset`**) — **on by default** for new assets. When **on** in a **WebGL player** build, **`MeaiLlmClient`** uses the **`CoreAiSseFetch.jslib`** bridge so **`fetch`** reads **SSE** incrementally (instead of **`UnityWebRequest`** buffering). Requires backend **`text/event-stream`** without gzip on that route; same-origin relative **`ApiBaseUrl`** is resolved via **`Application.absoluteURL`**. Turn off only if you intentionally want buffered non-streaming HTTP in the browser. Validate end-to-end in the browser; Edit Mode still uses **`HttpClient`** mocks.
+- **`SameOriginCredentials`** — default **off**: **`fetch`** uses **`credentials: 'omit'`** so **`Authorization: Bearer …`** still works while providers may answer CORS with **`Access-Control-Allow-Origin: *`** (OpenRouter, many gateways). **On** → **`same-origin`** for cookie-based same-host setups only.
 
 ### Auto priority
 

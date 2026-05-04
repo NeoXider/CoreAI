@@ -5,9 +5,7 @@ using System.Reflection;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
-#if !UNITY_WEBGL
 using CoreAI.Infrastructure.AiMemory;
-#endif
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using NUnit.Framework;
@@ -17,8 +15,8 @@ using VContainer;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Covers <see cref="CoreAILifetimeScope"/> conversation-summary registration: file-backed persistence
-    /// on desktop/mobile vs in-memory on WebGL (compile-time split).
+    /// Covers <see cref="CoreAILifetimeScope"/> store registration: conversation summaries (file vs in-memory by platform)
+    /// and <see cref="CoreAILifetimeScope.RegisterAgentMemoryStore"/> (<see cref="FileAgentMemoryStore"/> on all targets).
     /// </summary>
     public sealed class CoreAILifetimeScopeConversationStoreEditModeTests
     {
@@ -30,6 +28,29 @@ namespace CoreAI.Tests.EditMode
 #else
             Assert.IsTrue(CoreAILifetimeScope.UsesPersistentFileConversationSummaryStore);
 #endif
+        }
+
+        [Test]
+        public void RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton()
+        {
+            var builder = new ContainerBuilder();
+            CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
+            using IObjectResolver container = builder.Build();
+            try
+            {
+                IAgentMemoryStore mem = container.Resolve<IAgentMemoryStore>();
+                IConversationTranscriptStore transcript = container.Resolve<IConversationTranscriptStore>();
+                Assert.IsInstanceOf<FileAgentMemoryStore>(mem);
+                Assert.IsInstanceOf<FileAgentMemoryStore>(transcript);
+                Assert.AreSame(mem, transcript);
+            }
+            finally
+            {
+                if (container is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
 
 #if !UNITY_WEBGL
@@ -55,9 +76,7 @@ namespace CoreAI.Tests.EditMode
 
             CoreAILifetimeScope.RegisterConversationSummaryForCoreAiLifetimeScope(builder);
 
-            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
-                .As<IAgentMemoryStore>()
-                .As<IConversationTranscriptStore>();
+            CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
 
             using IObjectResolver container = builder.Build();
             try

@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+
 namespace CoreAI.Ai
 {
     /// <summary>
@@ -561,7 +562,9 @@ namespace CoreAI.Ai
         {
             while (true)
             {
-                (bool hasValue, LlmStreamChunk chunk) = await queue.TryTakeAsync(CancellationToken.None).ConfigureAwait(false);
+                // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                // continuation must come back through UnitySynchronizationContext.
+                (bool hasValue, LlmStreamChunk chunk) = await queue.TryTakeAsync(CancellationToken.None);
                 if (!hasValue)
                 {
                     yield break;
@@ -595,26 +598,31 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Портативная async producer/consumer-очередь чанков. Работает без
-        /// <c>System.Threading.Channels</c>. После <see cref="Complete"/> семафор
-        /// освобождается «бесконечно», чтобы все ожидающие читатели получили
-        /// <c>hasValue=false</c> и корректно вышли из цикла.
+        /// <c>System.Threading.Channels</c>.
+        /// <para>
+        /// Сигнализация — на <see cref="TaskCompletionSource{T}"/> с
+        /// <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>: на WebGL
+        /// IL2CPP <c>SemaphoreSlim.WaitAsync</c> ставит continuation на
+        /// <c>TaskScheduler.Default</c> (= ThreadPool, которого в браузере нет),
+        /// и читатель никогда не просыпается, даже когда писатель сделал Release.
+        /// TCS-based сигнал гарантированно использует
+        /// <see cref="SynchronizationContext"/>, захваченный awaiter'ом.
+        /// </para>
         /// </summary>
         private sealed class AsyncChunkQueue
         {
             private readonly ConcurrentQueue<LlmStreamChunk> _queue = new();
-            private readonly SemaphoreSlim _signal = new(0);
+            private readonly object _signalLock = new();
+            private TaskCompletionSource<bool> _signalTcs =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
             private volatile bool _completed;
 
-            /// <summary>
-            /// true после вызова <see cref="Complete"/>. Позволяет caller'у обнаружить
-            /// вытеснение (eviction) до запуска async-reader'а и слить чанки синхронно.
-            /// </summary>
             public bool IsCompleted => _completed;
 
             public void Write(LlmStreamChunk chunk)
             {
                 _queue.Enqueue(chunk);
-                _signal.Release();
+                FireSignal();
             }
 
             public void Complete()
@@ -625,14 +633,9 @@ namespace CoreAI.Ai
                 }
 
                 _completed = true;
-                // Пробуждаем всех возможных ожидающих читателей.
-                _signal.Release();
+                FireSignal();
             }
 
-            /// <summary>
-            /// Синхронно сливает все чанки из очереди. Используется когда очередь
-            /// уже <see cref="IsCompleted"/> до начала async-чтения (eviction path).
-            /// </summary>
             public List<LlmStreamChunk> DrainSync()
             {
                 List<LlmStreamChunk> result = new();
@@ -646,9 +649,6 @@ namespace CoreAI.Ai
 
             public async Task<(bool hasValue, LlmStreamChunk chunk)> TryTakeAsync(CancellationToken ct)
             {
-                // Try dequeue before waiting: producer may Write+Complete on another continuation
-                // before this reader reaches WaitAsync; Semaphore permits must not be consumed
-                // without observing the matching queue item.
                 while (true)
                 {
                     if (_queue.TryDequeue(out LlmStreamChunk chunk))
@@ -661,8 +661,49 @@ namespace CoreAI.Ai
                         return (false, default);
                     }
 
-                    await _signal.WaitAsync(ct).ConfigureAwait(false);
+                    Task waitTask;
+                    lock (_signalLock)
+                    {
+                        // Re-check inside lock to close the race between Write/Complete and the
+                        // capture of the current TCS — otherwise a signal that fires *just* before
+                        // we await would be missed and the reader would park forever.
+                        if (_queue.TryDequeue(out LlmStreamChunk chunk2))
+                        {
+                            return (true, chunk2);
+                        }
+
+                        if (_completed)
+                        {
+                            return (false, default);
+                        }
+
+                        waitTask = _signalTcs.Task;
+                    }
+
+                    if (ct.CanBeCanceled)
+                    {
+                        Task cancelTask = Task.Delay(System.Threading.Timeout.Infinite, ct);
+                        await Task.WhenAny(waitTask, cancelTask);
+                        ct.ThrowIfCancellationRequested();
+                    }
+                    else
+                    {
+                        await waitTask;
+                    }
                 }
+            }
+
+            private void FireSignal()
+            {
+                TaskCompletionSource<bool> toFire;
+                lock (_signalLock)
+                {
+                    toFire = _signalTcs;
+                    _signalTcs = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+
+                toFire.TrySetResult(true);
             }
         }
     }

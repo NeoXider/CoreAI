@@ -20,7 +20,7 @@
 | `X-Request-Id` | Yes | Unique request identifier (UUID, matches `traceId`). Used for logging. |
 | `Idempotency-Key` | Yes | Stable key for the logical request. Reused across HTTP retries. Populated from **`LlmCompletionRequest.IdempotencyKey`** (auto-assigned once per request instance if empty). |
 | `X-Coreai-Role` | No | Agent role ID (e.g., `SmartChat`, `Teacher`). |
-| `X-Coreai-Client` | No | Client version (e.g., `1.6.0`). |
+| `X-Coreai-Client` | No | Client version string (e.g. semver from `com.nexoider.coreaiunity` `package.json`). |
 
 ## 3. Request Body (JSON)
 

@@ -40,7 +40,7 @@ MonoBehaviour:
   maxLlmRequestRetries: 2
   contextWindowTokens: 50000
   enableStreaming: 1
-  webGlNativeStreaming: 0
+  webGlNativeStreaming: 1
   sameOriginCredentials: 0
   enableConversationHistorySummarization: 1
   conversationHistoryRecentTokenBudgetOverride: 0

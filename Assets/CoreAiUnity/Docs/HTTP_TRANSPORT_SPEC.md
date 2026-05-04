@@ -10,10 +10,10 @@ Portable **`CoreAI.Core`** exposes **`IOpenAiHttpTransport`** for OpenAI-compati
 
 **Composition:** **`MeaiLlmClient.CreateHttp`** selects the transport and constructs **`MeaiOpenAiChatClient(settings, transport)`**.
 
-**WebGL player:** without **`WebGlNativeStreaming`**, **`UnityWebRequest`** does not deliver SSE incrementally — use native streaming or disable streaming for chat (see **`STREAMING_WEBGL_TODO.md`**).
+**WebGL player:** without **`WebGlNativeStreaming`** (or when it is **`false`**), **`UnityWebRequest`** does not deliver SSE incrementally — use the fetch bridge (**default `true`** on new **`CoreAISettingsAsset`** since **v1.6.13**) or disable streaming for chat (see **`STREAMING_WEBGL_TODO.md`**).
 
 **Editor tests:** **`MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory`** is honored inside **`HttpClientOpenAiTransport`** only.
 
 **Platform defines:** Convenience ctor **`MeaiOpenAiChatClient(settings, log)`** exists when **`!UNITY_WEBGL || UNITY_EDITOR`** so Edit Mode keeps **`HttpClient`** mocks even if the active build target is WebGL.
 
-**Follow-up:** optional **`.jslib`** **`fetch`** bridge — implemented as **`CoreAiSseFetch.jslib`** / **`FetchSseOpenAiTransport`** behind **`CoreAISettingsAsset.WebGlNativeStreaming`** (see **`STREAMING_ARCHITECTURE.md`**).
+**Follow-up:** **`CoreAiSseFetch.jslib`** **`fetch`** bridge ships behind **`CoreAISettingsAsset.WebGlNativeStreaming`** (see **`STREAMING_ARCHITECTURE.md`**). Optional DevTools **`console.log`** in the jslib is commented by default (**v1.6.19**); **`console.warn`** on read / **`fetch`** errors remains.

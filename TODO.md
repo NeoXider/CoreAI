@@ -1,5 +1,5 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-03 | **Текущая версия (UPM):** `com.nexoider.coreai` / `com.nexoider.coreaiunity` **1.6.0** — см. `Assets/CoreAI/package.json` и `Assets/CoreAiUnity/package.json`.
+**Обновлено:** 2026-05-05 | **Текущая версия (UPM):** см. **`Assets/CoreAI/package.json`** и **`Assets/CoreAiUnity/package.json`** (на момент правки: `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **1.6.19**).
 
 ## 🚧 Open — приоритет на 0.26.x
 
@@ -16,10 +16,10 @@
 
 ### WebGL streaming SSE (регрессия 0.25.x)
 
-- [ ] **0.26.0** — `protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiFallback)` hook на `CoreAiChatPanel`. Дефолтная реализация: возвращает `false` под `#if UNITY_WEBGL && !UNITY_EDITOR`, во всех остальных случаях — текущая логика `_chatService.IsStreamingEnabled(...)`. Это убирает «бесконечный typing-индикатор + пустой bubble» во всех проектах на CoreAI без правок прикладного кода.
-- [x] **fetch-SSE / jslib** — **v1.6.0**: `CoreAiSseFetch.jslib`, `FetchSseOpenAiTransport`, флаг **`CoreAISettingsAsset.WebGlNativeStreaming`**; без флага по-прежнему **`UnityWebRequestOpenAiTransport`** (нет инкрементального SSE).
+- [ ] **0.26.0** — `protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiFallback)` hook на `CoreAiChatPanel`. Дефолтная реализация: возвращает `false` под `#if UNITY_WEBGL && !UNITY_EDITOR`, во всех остальных случаях — текущая логика `_chatService.IsStreamingEnabled(...)`. *(Исторический черновик; после **v1.6.0+** есть нативный fetch и **`WebGlNativeStreaming`** по умолчанию **вкл** у новых ассетов — оценить, нужен ли ещё этот hook.)*
+- [x] **fetch-SSE / jslib** — **v1.6.0**: `CoreAiSseFetch.jslib`, `FetchSseOpenAiTransport`, флаг **`CoreAISettingsAsset.WebGlNativeStreaming`**. Если флаг **выкл**, по-прежнему **`UnityWebRequestOpenAiTransport`** (нет инкрементального SSE). **v1.6.13:** у новых экземпляров ассета флаг по умолчанию **вкл**; старые `.asset` могут остаться с `webGlNativeStreaming: 0`.
 - Полная диагностика, причина, шаги — [`Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md).
-- Текущий workaround (на стороне приложения, см. RedoSchool) — рефлекторно гасить `CoreAiChatConfig._enableStreaming = false` в `Awake()` под WebGL.
+- Устаревший workaround (RedoSchool / рефлексия **`_enableStreaming = false`**) — только если осознанно не используете **`WebGlNativeStreaming`** и не настраиваете CORS.
 
 ---
 

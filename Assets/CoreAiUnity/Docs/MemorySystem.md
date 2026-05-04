@@ -267,7 +267,7 @@ policy.SetMemoryToolForAll(false);        // Disable for ALL (ChatHistory only)
 | `AgentMemoryState.cs` | State: LastSystemPrompt + Memory |
 | `MemoryTool.cs` | Microsoft.Extensions.AI function for the model |
 | `AgentMemoryDirectiveParser.cs` | Parses `{"tool":"memory"...}` from responses |
-| `NullAgentMemoryStore.cs` | Stub (saves nothing) |
+| `NullAgentMemoryStore.cs` | Stub (saves nothing) — portable default when **`RegisterCorePortable`** is used without a host store; not the default for **`CoreAILifetimeScope`** (which registers **`FileAgentMemoryStore`**, WebGL player included since **v1.6.19**) |
 | `FileAgentMemoryStore.cs` | Unity: JSON files under persistentDataPath |
 | `MEMORY_STORE_CUSTOM_BACKENDS.md` | PlayerPrefs / cloud / composite `IAgentMemoryStore` patterns |
 | `AiOrchestrator.cs` | Orchestrator: injects memory into system prompt |

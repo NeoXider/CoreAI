@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (**`1.6.10`**, Unity-слой) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (**`1.6.8`**, portable core). **Стриминг WebGL:** опционально **`WebGlNativeStreaming`** и документ [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); без флага **`UnityWebRequest`** не даёт инкрементальный SSE — см. [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) — оба пакета **`1.6.19`** (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib; для новых ассетов по умолчанию **вкл** с **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); если выкл — **`UnityWebRequest`** — [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Память чата в WebGL (файлы):** с **v1.6.19** в player используется **`FileAgentMemoryStore`** + сброс IDBFS (**`CoreAiPersistFs.jslib`**). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

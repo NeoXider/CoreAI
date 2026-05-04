@@ -1,6 +1,6 @@
 # 📖 CoreAI usage examples
 
-**Document version:** 1.0 | **Date:** April 2026
+**Document version:** 1.0 | **Date:** May 2026
 
 Practical CoreAI examples from simple to advanced scenarios.
 

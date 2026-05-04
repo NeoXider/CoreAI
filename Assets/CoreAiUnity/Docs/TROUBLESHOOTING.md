@@ -1,6 +1,6 @@
 # 🔧 Troubleshooting Guide — CoreAI
 
-**Document version:** 1.0 | **Date:** April 2026
+**Document version:** 1.0 | **Date:** May 2026
 
 A guide to resolving typical issues when working with CoreAI.
 
@@ -305,7 +305,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 |----------|---------|
 | Memory disabled for role | `policy.ConfigureRole("MyRole", useMemoryTool: true)` |
 | Model does not call tool | Add instruction to the prompt |
-| NullAgentMemoryStore | Check DI registration for `IAgentMemoryStore` |
+| NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, resolve **`FileAgentMemoryStore`** on **all** players (WebGL included, **v1.6.19+**). If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
 
@@ -454,13 +454,14 @@ When the real-model tests hit a persistent recall failure they end with **`Asser
 
 ### Cause
 
-Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html)). Cross-origin responses must include **`Access-Control-Allow-Origin`** (and usually **`Access-Control-Allow-Headers`** for `Authorization`, `Content-Type`, etc.). CoreAI’s WebGL path uses **`UnityWebRequestOpenAiTransport`** (non-`System.Net`).
+Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html)). Cross-origin responses must include **`Access-Control-Allow-Origin`** (and usually **`Access-Control-Allow-Headers`** for `Authorization`, `Content-Type`, etc.). When **`WebGlNativeStreaming`** is on (default), streaming uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`**; otherwise **`UnityWebRequestOpenAiTransport`**.
 
 ### Fix
 
 1. Host the LLM API with CORS enabled for your game’s origin, **or** put a **same-origin** reverse proxy in front of the model (e.g. `https://yourgame.com/api/v1` → LM Studio).
 2. For local dev, browser extensions or a tiny proxy that adds CORS headers are common; shipping builds need a real server config.
 3. See **`HTTP_TRANSPORT_SPEC.md`** for transport selection.
+4. **Preflight + wildcard ACAO:** if the console reports *`credentials mode is 'include'` … `Access-Control-Allow-Origin` must not be the wildcard `*`* — keep **`SameOriginCredentials`** **off** on **`CoreAISettingsAsset`** (default **`fetch` `credentials: 'omit'`** since **`com.nexoider.coreaiunity` 1.6.16**; **`Authorization: Bearer …`** is still sent). Turn **`SameOriginCredentials`** **on** only when you intentionally need **`same-origin`** cookie behaviour.
 
 ---
 

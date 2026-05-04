@@ -3,6 +3,7 @@ using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
@@ -39,6 +40,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
             Assert.AreEqual(true, settings.EnableStreaming, "Стриминг включён по умолчанию");
+            Assert.AreEqual(true, settings.WebGlNativeStreaming, "WebGL native SSE включён по умолчанию");
+            Assert.AreEqual(false, settings.SameOriginCredentials);
             Assert.AreEqual(false, settings.OfflineUseCustomResponse);
             Assert.AreEqual("Offline mode: LLM unavailable", settings.OfflineCustomResponse);
             Assert.AreEqual("*", settings.OfflineCustomResponseRoles);
@@ -48,6 +51,17 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, settings.ConversationHistoryRecentTokenBudgetOverride);
             Assert.AreEqual(0, settings.ConversationRolledSummaryMaxTokens);
 
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void SerializedObject_HasEnableStreaming_ForInspectorBinding()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SerializedObject so = new SerializedObject(settings);
+            SerializedProperty prop = so.FindProperty("enableStreaming");
+            Assert.IsNotNull(prop, "CoreAISettingsAssetEditor Essentials binds enableStreaming.");
+            Assert.AreEqual(SerializedPropertyType.Boolean, prop.propertyType);
             Object.DestroyImmediate(settings);
         }
 

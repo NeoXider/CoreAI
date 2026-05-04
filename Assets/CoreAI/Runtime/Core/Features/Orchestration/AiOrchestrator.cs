@@ -405,7 +405,9 @@ namespace CoreAI.Ai
 
                     try
                     {
-                        hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                        // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                        // continuation must come back through UnitySynchronizationContext.
+                        hasNext = await enumerator.MoveNextAsync();
                         current = hasNext ? enumerator.Current : null;
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -457,7 +459,7 @@ namespace CoreAI.Ai
                 sw.Stop();
                 if (enumerator != null)
                 {
-                    try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* swallow */ }
+                    try { await enumerator.DisposeAsync(); } catch { /* swallow */ }
                 }
 
                 _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,

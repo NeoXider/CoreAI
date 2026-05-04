@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.6.10",
+  "version": "1.6.19",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.10: WebGL build troubleshooting doc; fix RogueliteArena Infrastructure.meta GUID; EditMode meta sanity test. v1.6.9: MeaiLlmClient fans out long single SSE text deltas for UI/logs (OpenRouter-style one-frame replies). v1.6.8: lockstep core 1.6.8 + streaming parity tests.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.19: WebGL player uses FileAgentMemoryStore + CoreAiPersistFs (chat/memory JSON survives reload). v1.6.18: WebGL fetch SSE single-threaded await + non-blocking ReadAsync. v1.6.17: WebGL fetch SSE awaits real HTTP status.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.6.8"
+    "com.nexoider.coreai": "1.6.19"
   }
 }

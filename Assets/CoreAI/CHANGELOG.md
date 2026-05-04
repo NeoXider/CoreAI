@@ -1,5 +1,35 @@
 # Changelog
 
+## [v1.6.19] — 2026-05-05
+
+### Lockstep with coreaiunity 1.6.19 (Unity-only)
+
+- **Semver:** **`1.6.19`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore`** on WebGL player so chat history and agent memory JSON persist (with existing **`CoreAi_PersistFsSync`** after writes).
+
+## [v1.6.18] — 2026-05-04
+
+### Lockstep with coreaiunity 1.6.18 (Unity-only)
+
+- **Semver:** **`1.6.18`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** uses synchronous **`TaskCompletionSource`** continuations + true async **`ReadAsync`** so WebGL single-threaded awaits no longer park forever on a non-existent thread pool, and **`Stream.Read`** no longer blocks the JS event loop while waiting for fetch chunks.
+
+## [v1.6.17] — 2026-05-04
+
+### Lockstep with coreaiunity 1.6.17 (Unity-only)
+
+- **Semver:** **`1.6.17`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** now await the real **`fetch`** response status before returning, so **`MeaiOpenAiChatClient`** sees the actual HTTP code instead of the default **`HTTP 0`** that was masking CORS / network errors as transport failures.
+
+## [v1.6.16] — 2026-05-04
+
+### Lockstep with coreaiunity 1.6.16 (Unity-only)
+
+- **Semver:** **`1.6.16`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity WebGL **`fetch`** default **`credentials: 'omit'`** for SSE (OpenRouter + CORS `*`).
+
+## [v1.6.15] — 2026-05-04
+
+### Lockstep with coreaiunity 1.6.15 (Unity-only)
+
+- **Semver:** **`1.6.15`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAISettingsAssetEditor`** moves WebGL streaming toggles under **Advanced**.
+
 ## [v1.6.8] — 2026-05-03
 
 ### Orchestration — scope cancel and `Task.IsCanceled`

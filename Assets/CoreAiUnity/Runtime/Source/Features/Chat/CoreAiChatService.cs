@@ -284,6 +284,34 @@ namespace CoreAI.Chat
             CoreAISettingsAsset inst = CoreAISettingsAsset.Instance;
             return inst != null && inst.WebGlNativeStreaming;
         }
+
+        private static bool s_loggedWebGlNativeStreamingDisabled;
+
+        /// <summary>
+        /// WebGL player: one-time hint when UI/agent would allow streaming but the fetch bridge is off.
+        /// </summary>
+        private void MaybeLogWebGlStreamingRequiresNativeFetch(bool uiAllowsStreaming)
+        {
+            if (!uiAllowsStreaming || s_loggedWebGlNativeStreamingDisabled)
+            {
+                return;
+            }
+
+            s_loggedWebGlNativeStreamingDisabled = true;
+            const string body =
+                "WebGL player: incremental chat streaming needs CoreAISettingsAsset.WebGlNativeStreaming = true " +
+                "(fetch + ReadableStream via CoreAiSseFetch.jslib). While it is off, UnityWebRequest buffers the full " +
+                "response and this service uses non-streaming mode — LLM logs show \"LLM ◀\" without \"(stream)\" and " +
+                "the reply appears all at once.";
+            if (_logger != null)
+            {
+                _logger.LogWarning(GameLogFeature.Core, "[CoreAiChatService] " + body);
+            }
+            else
+            {
+                Debug.LogWarning("[CoreAI] [Chat] " + body);
+            }
+        }
 #endif
 
         /// <summary>
@@ -300,6 +328,7 @@ namespace CoreAI.Chat
 #if UNITY_WEBGL && !UNITY_EDITOR
             if (!WebGlNativeStreamingBridgeEnabled(_settings))
             {
+                MaybeLogWebGlStreamingRequiresNativeFetch(uiFallback);
                 return false;
             }
 #endif
@@ -336,6 +365,7 @@ namespace CoreAI.Chat
 #if UNITY_WEBGL && !UNITY_EDITOR
             if (!WebGlNativeStreamingBridgeEnabled(_settings))
             {
+                MaybeLogWebGlStreamingRequiresNativeFetch(uiOverride != false);
                 return false;
             }
 #endif

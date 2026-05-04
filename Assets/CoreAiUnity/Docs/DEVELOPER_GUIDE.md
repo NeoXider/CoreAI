@@ -342,7 +342,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 
 - **After restarting the game**, when the container starts the store reads JSON again: **current** text (`current`) and **revision history** are restored; orchestrator/Lua use the loaded state.
 - **Android / iOS / Desktop** — normal writes to the app directory; data persists across sessions until the user uninstalls the app or clears “app data”.
-- **WebGL** — `persistentDataPath` in Unity maps to browser storage (IndexedDB, etc.): usually works across sessions, but the user can clear site data; quota limits may apply — check [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
+- **WebGL** — `persistentDataPath` in Unity maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**), with **`CoreAi_PersistFsSync`** after writes so data survives reload when **`Application.Quit`** does not run. Conversation **summaries** for compaction stay **in-memory** on WebGL (see **`CoreAILifetimeScope`**). Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
 - **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
 ---
@@ -553,4 +553,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 1.5 (April 2026) — Portable LLM pipeline decoupling (IToolCallEventPublisher, IToolExecutionNotifier), MessagePipe event test suite, UPM v1.5.0.
+**Version of this guide:** 1.6 (May 2026) — WebGL agent memory / chat JSON via **`FileAgentMemoryStore`** + **`CoreAi_PersistFsSync`** under **`CoreAILifetimeScope`** (**v1.6.19**); fetch SSE jslib logs quiet by default (**v1.6.19**). Earlier: portable LLM pipeline decoupling (**v1.5**), MessagePipe event tests, UPM **v1.5.0**.

@@ -17,7 +17,7 @@ namespace CoreAI.Composition
     /// Pass <paramref name="suppressDefaultConversationSummaryStore"/> when the host registers its own implementation first
     /// (Unity <see cref="CoreAILifetimeScope"/> uses <see cref="FileConversationSummaryStore"/> this way).
     /// Pass <paramref name="suppressDefaultAgentMemoryStore"/> when the host registers <see cref="IAgentMemoryStore"/>
-    /// (e.g. <see cref="CoreAI.Infrastructure.AiMemory.FileAgentMemoryStore"/> or <see cref="NullAgentMemoryStore"/> on WebGL)
+    /// (e.g. <see cref="CoreAI.Infrastructure.AiMemory.FileAgentMemoryStore"/> on all Unity players, including WebGL)
     /// after <c>RegisterCorePortable</c> — otherwise VContainer sees two singletons for the same contract.
     /// </summary>
     public static class CorePortableInstaller

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
 using CoreAI.Logging;
@@ -12,8 +13,9 @@ namespace CoreAI.Infrastructure.AiMemory
 {
     /// <summary>
     /// Персистентная память агентов в <see cref="Application.persistentDataPath"/> (JSON на роль).
-    /// WebGL: тот же API — Unity мапит <c>persistentDataPath</c> на IndexedDB; синхронные <c>File.*</c> допустимы,
-    /// но учитывайте квоту хранилища браузера и режим инкогнито (данные могут не пережить сессию).
+    /// WebGL player: same store under <see cref="CoreAILifetimeScope"/> (<b>v1.6.19+</b>); after writes calls
+    /// <c>CoreAi_PersistFsSync</c> (<c>CoreAiPersistFs.jslib</c>) so IDBFS reaches IndexedDB on reload / tab close.
+    /// Учитывайте квоту хранилища браузера и режим инкогнито (данные могут не пережить сессию).
     /// Поддерживает 2 типа памяти:
     /// 1) MemoryTool — явная память через function call (memory поле)
     /// 2) ChatHistory — полная история диалога (chatHistory поле)
@@ -21,6 +23,22 @@ namespace CoreAI.Infrastructure.AiMemory
     /// </summary>
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void CoreAi_PersistFsSync();
+#endif
+
+        /// <summary>
+        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a reload.
+        /// On other platforms <c>File.WriteAllText</c> already touches real disk — this is a no-op.
+        /// </summary>
+        private static void PersistFsForWebGl()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+#endif
+        }
+
         [Serializable]
         private sealed class Persisted
         {
@@ -96,6 +114,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
                 string newJson = JsonUtility.ToJson(p, true);
                 File.WriteAllText(path, newJson);
+                PersistFsForWebGl();
             }
             catch (Exception ex)
             {
@@ -118,6 +137,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         p.memory = "";
                         p.lastSystemPrompt = ""; // Очищаем промпт
                         File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                        PersistFsForWebGl();
                     }
                 }
             }
@@ -156,6 +176,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         p.chatHistoryJson = "";
                         p.transcriptEntriesJson = "";
                         File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                        PersistFsForWebGl();
                     }
                 }
             }
@@ -308,7 +329,9 @@ namespace CoreAI.Infrastructure.AiMemory
                     : new List<ConversationEntry>();
                 p.transcriptEntriesJson = JsonConvert.SerializeObject(tlist, TranscriptJson);
 
-                File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                string finalJson = JsonUtility.ToJson(p, true);
+                File.WriteAllText(path, finalJson);
+                PersistFsForWebGl();
             }
             catch (Exception ex)
             {

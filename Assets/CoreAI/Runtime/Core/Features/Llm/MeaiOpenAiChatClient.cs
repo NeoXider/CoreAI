@@ -322,76 +322,187 @@ namespace CoreAI.Infrastructure.Llm
                             LlmErrorCode.BackendUnavailable);
                     }
 
-                    using (StreamReader reader = new(stream, Encoding.UTF8, false, 8192, leaveOpen: true))
+                    SseToolCallAccumulator toolAccumulator = new();
+                    DateTime lastProgressUtc = DateTime.UtcNow;
+                    int parsedSseDeltas = 0;
+
+                    // Unified byte-level line reader for all platforms — bypasses StreamReader.ReadLineAsync
+                    // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
+                    // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
+                    await foreach (string line in ReadUtf8LinesFromStreamAsync(stream, cancellationToken))
                     {
-                        SseToolCallAccumulator toolAccumulator = new();
-                        DateTime lastProgressUtc = DateTime.UtcNow;
-                        int parsedSseDeltas = 0;
-
-                        while (true)
+                        if ((DateTime.UtcNow - lastProgressUtc).TotalSeconds > streamTransportTimeoutSec)
                         {
-                            if ((DateTime.UtcNow - lastProgressUtc).TotalSeconds > streamTransportTimeoutSec)
+                            _log.Warn(
+                                $"MeaiOpenAiChatClient: SSE stall timeout after {streamTransportTimeoutSec}s without new lines; aborting.",
+                                LogTag.Llm);
+                            throw new LlmClientException(
+                                $"LLM SSE stalled — no data for {streamTransportTimeoutSec}s.",
+                                LlmErrorCode.Timeout);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            lastProgressUtc = DateTime.UtcNow;
+                        }
+
+                        foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
+                        {
+                            parsedSseDeltas++;
+                            string updateText = update?.Text ?? "";
+                            bool textOnly = !string.IsNullOrEmpty(updateText)
+                                            && (update.Contents == null
+                                                || update.Contents.Count == 0
+                                                || update.Contents.All(c => c is MEAI.TextContent));
+                            // Some upstream providers (e.g. OpenRouter `:free` models from Nvidia/etc.)
+                            // batch many tokens into a single SSE delta, which makes streaming look
+                            // jumpy in the UI. Re-emit large text-only deltas in small word-sized
+                            // pieces with a tiny delay so the UI sees smooth per-word streaming.
+                            // True per-token providers (LM Studio, paid models) already send small
+                            // deltas and skip this path.
+                            if (textOnly && updateText.Length > 24)
                             {
-                                _log.Warn(
-                                    $"MeaiOpenAiChatClient: SSE stall timeout after {streamTransportTimeoutSec}s without new lines; aborting.",
-                                    LogTag.Llm);
-                                throw new LlmClientException(
-                                    $"LLM SSE stalled — no data for {streamTransportTimeoutSec}s.",
-                                    LlmErrorCode.Timeout);
+                                foreach (string piece in SplitForSmoothStreaming(updateText))
+                                {
+                                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
+                                    // No ConfigureAwait(false) — on WebGL the continuation
+                                    // must run via UnitySynchronizationContext to come back at all.
+                                    await Task.Delay(15, cancellationToken);
+                                }
                             }
-
-                            Task<string> lineTask = reader.ReadLineAsync();
-                            Task delayTask = Task.Delay(TimeSpan.FromSeconds(streamTransportTimeoutSec), cancellationToken);
-                            Task finished = await Task.WhenAny(lineTask, delayTask);
-
-                            if (finished != lineTask)
+                            else
                             {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                _log.Warn(
-                                    $"MeaiOpenAiChatClient: SSE read wait exceeded {streamTransportTimeoutSec}s; aborting.",
-                                    LogTag.Llm);
-                                throw new LlmClientException(
-                                    $"LLM SSE read timed out after {streamTransportTimeoutSec}s.",
-                                    LlmErrorCode.Timeout);
-                            }
-
-                            string line = await lineTask;
-                            if (line == null)
-                            {
-                                break;
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(line))
-                            {
-                                lastProgressUtc = DateTime.UtcNow;
-                            }
-
-                            foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
-                            {
-                                parsedSseDeltas++;
                                 yield return update;
                             }
                         }
+                    }
 
-                        MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
-                        if (flushed != null)
-                        {
-                            parsedSseDeltas++;
-                            yield return flushed;
-                        }
+                    MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
+                    if (flushed != null)
+                    {
+                        parsedSseDeltas++;
+                        yield return flushed;
+                    }
 
-                        if (parsedSseDeltas == 0)
+                    if (parsedSseDeltas == 0)
+                    {
+                        bool canRetryEmptyStream = attempt < transientLocalLlmReloadMaxAttempts;
+                        if (canRetryEmptyStream)
                         {
                             _log.Warn(
-                                "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas — empty body, " +
-                                "non-event-stream payload, or chunk shape not matching OpenAI choices[0].delta (check LM Studio / proxy). " +
-                                "If Content-Type is application/json, try non-streaming mode or EnableHttpDebugLogging for raw body.",
+                                $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments — provider/model produced no tokens). " +
+                                $"Retrying (attempt {attempt + 1}/{transientLocalLlmReloadMaxAttempts}) after backoff...",
                                 LogTag.Llm);
+                            await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                            continue;
                         }
+
+                        _log.Warn(
+                            "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas after all retries — " +
+                            "upstream provider produced no tokens. Surface as backend-unavailable.",
+                            LogTag.Llm);
+                        throw new LlmClientException(
+                            "Upstream model returned no tokens (only keep-alive comments) after all retries.",
+                            LlmErrorCode.BackendUnavailable);
                     }
 
                     yield break;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Splits a large text delta into smaller pieces (~6 chars or one word boundary) so the UI
+        /// can render smooth per-word streaming even when an upstream provider batches many tokens
+        /// into one SSE event.
+        /// </summary>
+        private static IEnumerable<string> SplitForSmoothStreaming(string text)
+        {
+            if (string.IsNullOrEmpty(text)) yield break;
+            const int targetChunkSize = 6;
+            int i = 0;
+            while (i < text.Length)
+            {
+                int end = Math.Min(i + targetChunkSize, text.Length);
+                // Extend to the next whitespace to avoid splitting inside a word when possible.
+                while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && (end - i) < targetChunkSize * 2)
+                {
+                    end++;
+                }
+                yield return text.Substring(i, end - i);
+                i = end;
+            }
+        }
+
+        /// <summary>
+        /// Cross-platform line reader for SSE streams. Bypasses <see cref="StreamReader.ReadLineAsync"/>
+        /// because Mono on Windows can hold lines back until a larger buffer fills, collapsing many small
+        /// token-by-token deltas into a single large yield (visible to the user as "no streaming"). WebGL
+        /// uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
+        /// <see cref="StreamReader.ReadLineAsync"/>.
+        /// </summary>
+        private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
+            Stream stream,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            byte[] byteBuffer = new byte[8192];
+            char[] charBuffer = new char[8192];
+            Decoder decoder = Encoding.UTF8.GetDecoder();
+            StringBuilder lineBuilder = new StringBuilder(256);
+
+            while (true)
+            {
+                // No ConfigureAwait(false): on WebGL the continuation must capture
+                // UnitySynchronizationContext, otherwise it gets posted to the (non-existent)
+                // browser ThreadPool and the read pump silently halts after the first await.
+                int read = await stream.ReadAsync(byteBuffer, 0, byteBuffer.Length, cancellationToken);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                int charCount = decoder.GetChars(byteBuffer, 0, read, charBuffer, 0, flush: false);
+                for (int i = 0; i < charCount; i++)
+                {
+                    char c = charBuffer[i];
+                    if (c == '\n')
+                    {
+                        yield return lineBuilder.ToString();
+                        lineBuilder.Clear();
+                    }
+                    else if (c != '\r')
+                    {
+                        lineBuilder.Append(c);
+                    }
+                }
+            }
+
+            while (true)
+            {
+                int flushedChars = decoder.GetChars(byteBuffer, 0, 0, charBuffer, 0, flush: true);
+                if (flushedChars <= 0)
+                {
+                    break;
+                }
+
+                for (int i = 0; i < flushedChars; i++)
+                {
+                    char c = charBuffer[i];
+                    if (c == '\n')
+                    {
+                        yield return lineBuilder.ToString();
+                        lineBuilder.Clear();
+                    }
+                    else if (c != '\r')
+                    {
+                        lineBuilder.Append(c);
+                    }
+                }
+            }
+
+            if (lineBuilder.Length > 0)
+            {
+                yield return lineBuilder.ToString();
             }
         }
 

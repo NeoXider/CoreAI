@@ -170,6 +170,6 @@ Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
 
 ---
 
-**Version:** 0.21.8 — auto `COREAI_HAS_LLMUNITY` define, `CoreAi` singleton API, orchestrator streaming, chat collapse/FAB.
+**Version:** aligned with [`package.json`](../package.json) — **1.6.19** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
 
 **First script from scratch?** Read [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — 3 steps + copy-paste `AskAsync` / `StreamAsync`.
