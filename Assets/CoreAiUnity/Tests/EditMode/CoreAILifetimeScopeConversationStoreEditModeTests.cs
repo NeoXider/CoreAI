@@ -8,6 +8,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Logging;
 using NUnit.Framework;
 using UnityEngine;
 using VContainer;
@@ -34,6 +35,7 @@ namespace CoreAI.Tests.EditMode
         public void RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton()
         {
             var builder = new ContainerBuilder();
+            builder.RegisterInstance<ILog>(NullLog.Instance);
             CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
             using IObjectResolver container = builder.Build();
             try
