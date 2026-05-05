@@ -21,7 +21,7 @@
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) — оба пакета **`1.6.19`** (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib; для новых ассетов по умолчанию **вкл** с **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); если выкл — **`UnityWebRequest`** — [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Память чата в WebGL (файлы):** с **v1.6.19** в player используется **`FileAgentMemoryStore`** + сброс IDBFS (**`CoreAiPersistFs.jslib`**). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) — оба пакета **`1.7.0`** (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib; для новых ассетов по умолчанию **вкл** с **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); если выкл — **`UnityWebRequest`** — [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Память чата в WebGL (файлы):** с **v1.6.19** в player используется **`FileAgentMemoryStore`** + сброс IDBFS (**`CoreAiPersistFs.jslib`**). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -106,7 +106,7 @@ merchant.Ask("Покажи мечи", (response) => Debug.Log(response));
 CoreAI → Setup → Create Chat Demo Scene
 ```
 
-Получаешь `CoreAiChatDemo.unity` с `CoreAiChatPanel` (UI Toolkit, UXML/USS, тёмная тема), `CoreAiChatConfig_Demo` и настроенным `CoreAILifetimeScope` — **Play** и печатаешь.
+Получаешь `CoreAiChatDemo.unity` с `CoreAiChatPanel` (UI Toolkit, UXML/USS, тёмная тема; **окно по умолчанию ~650×910**, **скроллбар вплотную справа**, опциональная **строка «долго ждём»** под индикатором набора), `CoreAiChatConfig_Demo` и настроенным `CoreAILifetimeScope` — **Play** и печатаешь.
 
 ```csharp
 // Тот же стек, что у панели — выбери удобный API:

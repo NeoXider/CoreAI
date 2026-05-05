@@ -416,6 +416,8 @@ The user can interrupt generation:
 In both cases the UI calls `CoreAi.StopAgent(roleId)` and cancels the active request token, which safely stops the current reply and related role tasks in `QueuedAiOrchestrator`.
 Starting with `com.nexoider.coreaiunity` **0.25.6**, the button stays enabled during generation (stop control), busy state is set until the first `await`, and the UI reliably clears streaming/sending state after cancel.
 
+**Stock chat template:** default floating size **~650×910** (see `CoreAiChatConfig` / `CoreAiChat.uss`), **vertical scrollbar flush** to the panel’s inner right edge, and optional **`coreai-long-request-hint`** (status under the typing row on long turns) — details in [README_CHAT.md](../Runtime/Source/Features/Chat/README_CHAT.md).
+
 From **0.25.7**, auto-creation of `CoreAISettings.asset` in the Editor (`CoreAIBuildMenu`) runs via **`EditorApplication.delayCall`**: not in the same frame as domain reload, and with an on-disk file check — a cloned `Assets/Resources/CoreAISettings.asset` is not replaced by an empty asset with defaults.
 
 ### Clearing context
@@ -553,4 +555,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
-**Version of this guide:** 1.6 (May 2026) — WebGL agent memory / chat JSON via **`FileAgentMemoryStore`** + **`CoreAi_PersistFsSync`** under **`CoreAILifetimeScope`** (**v1.6.19**); fetch SSE jslib logs quiet by default (**v1.6.19**). Earlier: portable LLM pipeline decoupling (**v1.5**), MessagePipe event tests, UPM **v1.5.0**.
+**Version of this guide:** 1.7 (May 2026) — UPM **1.7.0** (`LlmStreamChunk.BufferedStreamingNoToolBinding`, **`BufferedStreamingUseToolProgressHint`**, **`CoreAiChatConfig.StreamingToolProgressHint`**). WebGL agent memory / chat JSON via **`FileAgentMemoryStore`** + **`CoreAi_PersistFsSync`** under **`CoreAILifetimeScope`** (**v1.6.19+**); fetch SSE jslib logs quiet by default (**v1.6.19**). Earlier: portable LLM pipeline decoupling (**v1.5**), MessagePipe event tests, UPM **v1.5.0**.

@@ -2,7 +2,7 @@
 
 Pick the track that matches your current goal. Every link lands on a self-contained guide; you don't need to read them in order.
 
-> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.6.19`) · [`com.nexoider.coreaiunity`](../package.json) (`1.6.19`)
+> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.7.0`) · [`com.nexoider.coreaiunity`](../package.json) (`1.7.0`)
 > **Repo README:** [../../../README.md](../../../README.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md)
 
 ---
@@ -29,7 +29,7 @@ Install → open scene → connect LLM → press Play.
 | Document | Topic |
 |----------|-------|
 | [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy; **default window ~650×910**, **flush-right scrollbar**, optional **`coreai-long-request-hint`** (long-turn status) |
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
 | [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | WebGL: **`UnityWebRequest`** vs optional **`WebGlNativeStreaming`** (`fetch` jslib); history + verification checklist |
 | [WEBGL_BUILD_TROUBLESHOOTING](WEBGL_BUILD_TROUBLESHOOTING.md) | WebGL **Player** build: LLVM **OOM** during IL2CPP, `IOException` under `ProjectSettings/Packages`, StreamingAssets preprocess log |

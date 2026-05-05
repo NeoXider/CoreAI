@@ -264,6 +264,20 @@ namespace CoreAI.Ai
         /// decorator can render the same diagnostic across stream and non-stream paths.
         /// </summary>
         public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
+
+        /// <summary>
+        /// When <c>true</c> with <see cref="BufferedStreamingNoToolBinding"/>, host UI should show a short
+        /// static line from chat config (tool invocation, text-shaped execute, hybrid JSON hold).
+        /// </summary>
+        public bool BufferedStreamingUseToolProgressHint { get; set; }
+
+        /// <summary>
+        /// When <c>true</c>, this chunk carries no <see cref="Text"/> but tells host UI to refresh the
+        /// typing row. If <see cref="BufferedStreamingUseToolProgressHint"/> is <c>true</c>, show the
+        /// configured short tool/buffer line; if <c>false</c>, keep the default animated «typing» dots
+        /// (e.g. unbound iteration waiting for the model step).
+        /// </summary>
+        public bool BufferedStreamingNoToolBinding { get; set; }
     }
 
     /// <summary>

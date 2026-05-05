@@ -35,7 +35,7 @@ Configure in the Inspector:
 - **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
 - **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
-- **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**).
+- **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**). **Default window size (package template + new `CoreAiChatConfig` assets):** **650×910** logical px (~**+30%** vs the legacy **500×700**). Existing `.asset` files keep their serialized width/height until you change them in the Inspector.
 - **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
 - **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
 
@@ -139,8 +139,8 @@ On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed*
 - **API from code:**
   - `bool IsCollapsed { get; }`
   - `void SetCollapsed(bool collapsed, bool persist = true)` — expand before a cutscene or collapse after; with `persist: false` the state is not written to `PlayerPrefs`.
-- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`).
-- **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`.
+- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** (`_isSending`: typing indicator, streaming, or non-stream wait), aligned with RedoSchool-style in-flight feedback. **Stop** clears it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `⌛ Ответ формируется… ~{elapsed} с`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
+- **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`. **ScrollView:** default theme uses **no right padding** on `.coreai-chat-scroll` and zero horizontal **margin/padding** on `unity-scroll-view__content-and-vertical-scroll-container` and the vertical scroller so the **scrollbar track sits flush with the panel’s inner right edge** (no “floating” gap inside the bar).
 
 Custom layout: if you **copy** UXML into your project, add the same element names or override bindings in a subclass of `CoreAiChatPanel` (override `BindUI` and call `base.BindUI()` or duplicate the logic).
 
@@ -193,7 +193,7 @@ void OnWorldMapClosed()
 
 **Gameplay integration:** after each `SetCollapsed`, `protected virtual void OnCollapsedStateChanged(bool collapsed)` is called — in a subclass you can hook pause, cursor, etc., without pulling game controllers into CoreAI.
 
-Subclasses that override **`Update()`** must call **`base.Update()` first** (otherwise you lose the WebGL fix and hotkey polling).
+Subclasses that override **`Update()`** must call **`base.Update()` first** (otherwise you lose the WebGL fix, hotkey polling, and the **long-request hint** tick).
 
 <a id="programmatic-chat-submit"></a>
 
@@ -385,6 +385,7 @@ Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI auto
 - **When streaming**: shared stateful filter `CoreAI.Ai.ThinkBlockStreamFilter` removes blocks **even if open/close tags are split across SSE chunks**. While the model “thinks”, the typing indicator is shown.
 - **Non-streaming**: regex strips `<think>` blocks from the final reply.
 - **Tool calls**: not shown in chat (handled inside the MEAI pipeline, including streaming single-cycle).
+- **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots.
 
 > Streaming must be invoked from the **Unity main thread** (from a coroutine, `async void`, `UniTask`, or a normal async method in UI). Wrapping `CompleteStreamingAsync` in `Task.Run` will throw `"Create can only be called from the main thread"` because `UnityWebRequest` is created off the main thread.
 
@@ -523,6 +524,9 @@ All CSS classes use the `coreai-` prefix to avoid clashes:
 | `.coreai-streaming-active` | Active streaming |
 | `.coreai-chat-send-button` | Send button |
 | `.coreai-typing-message` | “Typing…” indicator |
+| `.coreai-long-request-hint` | Optional status line under the typing row (long in-flight turns; see collapse / UXML section) |
+
+**Bubble width:** default **`.coreai-chat-message`** uses **`max-width: 494px`** in the stock USS (scaled with the larger window). Override in a custom `.uss` if your layout needs a different cap.
 
 ## Events
 

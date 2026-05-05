@@ -23,7 +23,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** **`WebGlNativeStreaming`** (fetch + jslib; default **on** for new settings assets since **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **`UnityWebRequest`** path when the flag is off — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **WebGL IL2CPP / LLVM OOM** — [`WEBGL_BUILD_TROUBLESHOOTING`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
-**Current packages:** **`com.nexoider.coreai`** portable core **`1.6.19`** · **`com.nexoider.coreaiunity`** Unity layer **`1.6.19`** (same semver; manifest pins the core dependency from the Unity package). **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** since **v1.6.19** (see Unity changelog).
+**Current packages:** **`com.nexoider.coreai`** portable core **`1.7.0`** · **`com.nexoider.coreaiunity`** Unity layer **`1.7.0`** (same semver; manifest pins the core dependency from the Unity package). **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** since **v1.6.19** (see Unity changelog).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -103,7 +103,7 @@ Add an NPC chat to any scene in minutes — no custom UI code required:
 CoreAI → Setup → Create Chat Demo Scene
 ```
 
-This generates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with a pre-wired `CoreAiChatPanel` (UI Toolkit + UXML/USS, dark theme by default), `CoreAiChatConfig_Demo.asset` and a fully configured `CoreAILifetimeScope` — press **Play** and chat.
+This generates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with a pre-wired `CoreAiChatPanel` (UI Toolkit + UXML/USS, dark theme by default; **default floating size ~650×910**, **flush-right scrollbar**, optional **long-turn hint** under the typing row), `CoreAiChatConfig_Demo.asset` and a fully configured `CoreAILifetimeScope` — press **Play** and chat.
 
 ```csharp
 // Same stack as the panel — pick your style:

@@ -2,6 +2,20 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.7.0] - 2026-05-05
+
+### Portable streaming marker + chat typing hint (buffered tool iteration)
+
+- **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (**`com.nexoider.coreai`**) — marker chunk (no `Text`) so host UI can refresh the typing row during special streaming phases (unbound iteration, tool JSON hold, etc.).
+- **`LlmStreamChunk.BufferedStreamingUseToolProgressHint`** — when set with the marker, chat shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (native / text-shaped tool execution, hybrid hold). When the marker arrives **without** this flag (e.g. unbound iteration waiting for the model step), **`CoreAiChatPanel`** keeps the default animated typing dots.
+- **`MeaiLlmClient`** — yields marker(s) for unbound streaming, hybrid JSON hold, native tool deltas, and text-shaped tool execute; logs optional hold start.
+- **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **«Инструмент…»**; empty falls back to **`CoreAiChatPanel`** default.
+- **`CoreAiChatPanel`** — applies the short hint only when **`BufferedStreamingUseToolProgressHint`** is true.
+- **Tests:** **`CoreAiChatConfigEditModeTests`**, **`StreamingAndPromptsEditModeTests`** (`BufferedStreamingNoToolBinding` / `BufferedStreamingUseToolProgressHint` default **false**).
+- **Dependency:** **`com.nexoider.coreai` `1.7.0`** — lockstep semver.
+
+#### Package **`1.7.0`**.
+
 ## [1.6.19] - 2026-05-05
 
 ### WebGL — persisted chat / agent memory (`FileAgentMemoryStore`)
@@ -10,8 +24,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **`FileAgentMemoryStore`** — unchanged contract; on WebGL it already calls **`CoreAi_PersistFsSync`** after writes (**`CoreAiPersistFs.jslib`** → **`FS.syncfs`**) so IDBFS changes reach IndexedDB when the user reloads or closes the tab without **`Application.Quit`**.
 - **`CoreAiPersistFs.jslib`** — success-path **`console.log`** removed; warnings remain when **`FS.syncfs`** is missing or fails.
 - **`CoreAiSseFetch.jslib`** — verbose **`console.log`** (open / response / done) commented by default to reduce browser console noise; **`console.warn`** remains for read errors and **`fetch.catch`** (CORS / network / timeout).
+- **`CoreAISettingsAsset`** — Editor **`Reset()`** sets **Global streaming** + **WebGL: native SSE (fetch)** to **on**; **`CoreAIBuildMenu.EnsureAsset`** applies the same via **`SerializedObject`** after **`CreateInstance`** (auto-generated **`CoreAISettings`** and any path that skipped **`Reset()`** / legacy YAML without the fields).
 - **`CoreAILifetimeScope.RegisterAgentMemoryStore`** — **`internal`** helper used by **`Configure`** and **`CoreAILifetimeScopeConversationStoreEditModeTests`** (`RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`).
-- **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`README_CHAT.md`**, root **`README.md`** / **`README_RU.md`**, **`DOCS_INDEX.md`**, **`QUICK_START.md`**, **`TODO.md`**, **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`TROUBLESHOOTING.md`**, **`MemorySystem.md`**, **`HTTP_TRANSPORT_SPEC.md`**, **`DEVELOPER_GUIDE.md`** (session restore + WebGL + jslib logging).
+- **Chat UI (default `CoreAiChat.uxml` / `.uss`):** floating panel defaults **650×910** (~**+30%** vs legacy **500×700**); **`CoreAiChatConfig`** default width/height match. **Vertical scrollbar** — strip horizontal inset on **`unity-scroll-view__content-and-vertical-scroll-container`** and scroller/slider parts; **move message inset to `unity-scroll-view__content-container`** (not padding on the `ScrollView` root) and set **`content-viewport` `min-width: 0`** so the track stays **flush to the inner right** (fixes a wide empty strip beside the bar when the old `>` selector missed the real DOM). **`coreai-long-request-hint`** — optional `Label` under **`#coreai-typing-indicator`**; **`TickLongRequestHint`** uses **`LongRequestHintFormat`** with **`{elapsed}`**; arms after **~3 s while the LLM turn is in flight** (`_isSending`, same spirit as RedoSchool activity text); **Stop** clears the hint; empty format disables the line. **`LlmStreamChunk.BufferedStreamingNoToolBinding`** / **`BufferedStreamingUseToolProgressHint`** — **`MeaiLlmClient`** typing markers; **`CoreAiChatPanel`** shows short **`StreamingToolProgressHint`** only when **`BufferedStreamingUseToolProgressHint`** is set, else keeps animated typing dots for unbound step wait.
+- **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`README_CHAT.md`**, root **`README.md`** / **`README_RU.md`**, **`DOCS_INDEX.md`**, **`QUICK_START.md`**, **`TODO.md`**, **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`TROUBLESHOOTING.md`**, **`MemorySystem.md`**, **`HTTP_TRANSPORT_SPEC.md`**, **`DEVELOPER_GUIDE.md`** (session restore + WebGL + jslib logging; chat template sizing + scrollbar + long-hint).
 - **Dependency:** **`com.nexoider.coreai` `1.6.19`** — lockstep semver.
 
 #### Package **`1.6.19`**.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [v1.7.0] — 2026-05-05
+
+### Streaming — `LlmStreamChunk` marker for buffered Meai iterations
+
+- **`LlmStreamChunk`** — **`BufferedStreamingNoToolBinding`** plus optional **`BufferedStreamingUseToolProgressHint`**. **`MeaiLlmClient.CompleteStreamingAsync`** yields marker chunks for unbound iterations, hybrid JSON hold, native tool deltas, and text-shaped tool execute (host chat: short **`StreamingToolProgressHint`** vs animated dots — see **`com.nexoider.coreaiunity` ≥ 1.7.0**).
+
 ## [v1.6.19] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.6.19 (Unity-only)

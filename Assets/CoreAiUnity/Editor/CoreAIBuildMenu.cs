@@ -372,6 +372,33 @@ namespace CoreAI.Editor
             }
         }
 
+        /// <summary>
+        /// <see cref="ScriptableObject.CreateInstance{T}"/> does not always run <c>Reset()</c>; ensure new
+        /// <see cref="CoreAISettingsAsset"/> files get global streaming + WebGL fetch SSE on by default.
+        /// </summary>
+        private static void ApplyCoreAiSettingsStreamingDefaultsIfApplicable(ScriptableObject created)
+        {
+            if (created is not CoreAISettingsAsset)
+            {
+                return;
+            }
+
+            SerializedObject so = new SerializedObject(created);
+            SerializedProperty enable = so.FindProperty("enableStreaming");
+            if (enable != null && enable.propertyType == SerializedPropertyType.Boolean)
+            {
+                enable.boolValue = true;
+            }
+
+            SerializedProperty webGl = so.FindProperty("webGlNativeStreaming");
+            if (webGl != null && webGl.propertyType == SerializedPropertyType.Boolean)
+            {
+                webGl.boolValue = true;
+            }
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+        }
+
         private static T EnsureAsset<T>(string assetPath) where T : ScriptableObject
         {
             T existing = AssetDatabase.LoadAssetAtPath<T>(assetPath);
@@ -381,6 +408,7 @@ namespace CoreAI.Editor
             }
 
             T created = ScriptableObject.CreateInstance<T>();
+            ApplyCoreAiSettingsStreamingDefaultsIfApplicable(created);
             AssetDatabase.CreateAsset(created, assetPath);
             return created;
         }

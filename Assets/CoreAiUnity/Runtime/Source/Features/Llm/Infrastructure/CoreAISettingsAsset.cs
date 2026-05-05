@@ -686,6 +686,16 @@ namespace CoreAI.Infrastructure.Llm
         #region Unity Editor Helpers
 
 #if UNITY_EDITOR
+        /// <summary>
+        /// Unity calls this after <i>Create → Core AI Settings</i> or when the user chooses <i>Reset</i> on the asset.
+        /// Ensures global streaming and the WebGL fetch bridge default to <b>on</b> (matches <see cref="ICoreAISettings"/> contract).
+        /// </summary>
+        private void Reset()
+        {
+            enableStreaming = true;
+            webGlNativeStreaming = true;
+        }
+
         private void OnValidate()
         {
             if (requestTimeoutSeconds < 0)

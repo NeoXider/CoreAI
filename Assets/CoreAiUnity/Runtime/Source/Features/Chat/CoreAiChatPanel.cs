@@ -51,6 +51,10 @@ namespace CoreAI.Chat
         protected Label          TypingLabel;
         protected Label          HeaderTitle;
         protected VisualElement  HeaderIcon;
+        private Label _longRequestHint;
+        private float _longRequestHintArmedSince = -1f;
+        private const float LongRequestHintMinSeconds = 3f;
+        private const string DefaultStreamingToolProgressHint = "Инструмент…";
 
         /// <summary>Whether the chat panel is currently collapsed into the FAB.</summary>
         public bool IsCollapsed { get; private set; }
@@ -72,6 +76,7 @@ namespace CoreAI.Chat
         // === Think-block filter state machine (shared stateful filter) ===
         private readonly ThinkBlockStreamFilter _thinkFilter = new();
         private bool _streamingStartedVisible; // true после первого видимого текста
+        private bool _nonStreamAssistantOutputStarted; // true после первого пузыря ассистента (non-stream)
 
         /// <summary>
         /// During fast streaming (many small chunks), avoid calling <see cref="ScrollToBottom"/> per chunk — each call
@@ -141,6 +146,7 @@ namespace CoreAI.Chat
             }
 #endif
             PollChatToggleShortcuts();
+            TickLongRequestHint();
         }
 
         protected virtual void OnEnable()
@@ -215,6 +221,12 @@ namespace CoreAI.Chat
             TypingLabel      = Root.Q<Label>("coreai-typing-label");
             HeaderTitle      = Root.Q<Label>("coreai-chat-header-title");
             HeaderIcon       = Root.Q<VisualElement>("coreai-chat-header-icon");
+            _longRequestHint  = Root.Q<Label>("coreai-long-request-hint");
+
+            if (_longRequestHint != null)
+            {
+                _longRequestHint.focusable = false;
+            }
 
             if (SendButton != null)
             {
@@ -757,6 +769,81 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// After a few seconds of visible assistant output in this turn, shows the configured hint under the typing row.
+        /// Clears on Stop / idle; does not arm while only «typing» with no assistant text yet.
+        /// </summary>
+        private void TickLongRequestHint()
+        {
+            if (_longRequestHint == null)
+            {
+                return;
+            }
+
+            bool busy = IsLongRequestHintBusy();
+            if (!busy)
+            {
+                ResetLongRequestHint();
+                return;
+            }
+
+            if (_longRequestHintArmedSince < 0f)
+            {
+                _longRequestHintArmedSince = Time.realtimeSinceStartup;
+            }
+
+            float elapsed = Time.realtimeSinceStartup - _longRequestHintArmedSince;
+            if (elapsed < LongRequestHintMinSeconds)
+            {
+                if (_longRequestHint.style.display != DisplayStyle.None)
+                {
+                    _longRequestHint.style.display = DisplayStyle.None;
+                }
+
+                return;
+            }
+
+            string tpl = config?.LongRequestHintFormat;
+            if (string.IsNullOrWhiteSpace(tpl))
+            {
+                ResetLongRequestHint();
+                return;
+            }
+
+            int sec = Mathf.Max((int)LongRequestHintMinSeconds, Mathf.FloorToInt(elapsed));
+            _longRequestHint.text = tpl.Replace("{elapsed}", sec.ToString());
+            if (_longRequestHint.style.display != DisplayStyle.Flex)
+            {
+                _longRequestHint.style.display = DisplayStyle.Flex;
+            }
+        }
+
+        /// <summary>
+        /// Long-hint while the panel is busy on an LLM turn (typing, streaming, or non-stream wait).
+        /// Matches RedoSchool-style «still working» feedback: timer starts from request start, not only
+        /// after the first streamed character (which often never reaches the 5 s threshold on fast replies).
+        /// </summary>
+        private bool IsLongRequestHintBusy()
+        {
+            return _isSending;
+        }
+
+        private void ResetLongRequestHint()
+        {
+            _longRequestHintArmedSince = -1f;
+            if (_longRequestHint == null)
+            {
+                return;
+            }
+
+            if (_longRequestHint.style.display != DisplayStyle.None)
+            {
+                _longRequestHint.style.display = DisplayStyle.None;
+            }
+
+            _longRequestHint.text = string.Empty;
+        }
+
+        /// <summary>
         /// Legacy Input: C / Esc когда фокус не на UITK (например, управление персонажем).
         /// При активном только New Input System вызов тихо пропускается — тогда работают события <see cref="OnRootKeyDown"/>.
         /// </summary>
@@ -977,6 +1064,7 @@ namespace CoreAI.Chat
         {
             if (!string.IsNullOrWhiteSpace(simulatedAssistantReply))
             {
+                ResetLongRequestHint();
                 string raw = simulatedAssistantReply.Trim();
                 string stripped = StripThinkBlocks(raw);
                 string formatted = FormatResponseText(string.IsNullOrEmpty(stripped) ? raw : stripped);
@@ -989,6 +1077,7 @@ namespace CoreAI.Chat
             if (_chatService == null)
             {
                 _isSending = false;
+                ResetLongRequestHint();
                 UpdateSendButtonVisualState();
                 AddMessage(config?.ErrorMessagePrefix + "AI сервис не подключён.", isUser: false);
                 return null;
@@ -1008,6 +1097,9 @@ namespace CoreAI.Chat
 
             try
             {
+                ResetLongRequestHint();
+                _nonStreamAssistantOutputStarted = false;
+                _streamingStartedVisible = false;
                 AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
                 bool uiStreaming = config == null || config.EnableStreaming;
                 bool useStreaming = ShouldUseStreamingForRole(roleId, uiStreaming) &&
@@ -1025,6 +1117,7 @@ namespace CoreAI.Chat
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 FinishStreaming();
                 HideTypingIndicator();
+                ResetLongRequestHint();
                 string bubble = ResolveTimeoutMessage(_stopRequestedByUser);
                 if (!string.IsNullOrEmpty(bubble))
                 {
@@ -1056,6 +1149,7 @@ namespace CoreAI.Chat
                 HideTypingIndicator();
                 _isSending = false;
                 _stopRequestedByUser = false;
+                ResetLongRequestHint();
                 if (ReferenceEquals(_activeRequestCts, requestCts))
                 {
                     _activeRequestCts = null;
@@ -1145,6 +1239,23 @@ namespace CoreAI.Chat
                         return null;
                     }
 
+                    if (chunk.BufferedStreamingNoToolBinding)
+                    {
+                        // Mid-turn: prose may already be streaming (typing row was hidden); show typing again.
+                        if (_streamingStartedVisible)
+                        {
+                            ShowTypingIndicator();
+                        }
+
+                        if (chunk.BufferedStreamingUseToolProgressHint)
+                        {
+                            ApplyStreamingToolProgressTypingHint();
+                        }
+                        // else: ожидание шага (unbound-маркер и т.п.) — оставляем анимацию «...» без статической строки.
+
+                        continue;
+                    }
+
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
                         // Чанки из MeaiLlmClient уже отфильтрованы от <think>-блоков,
@@ -1203,6 +1314,7 @@ namespace CoreAI.Chat
         private async Task<string?> SendNonStreamingAsync(AiTaskRequest request, CancellationToken ct)
         {
             ShowTypingIndicator();
+            _nonStreamAssistantOutputStarted = false;
 
             try
             {
@@ -1225,6 +1337,7 @@ namespace CoreAI.Chat
                     return null;
                 }
 
+                _nonStreamAssistantOutputStarted = true;
                 AddMessage(formatted, isUser: false);
                 OnResponseReceived(formatted);
                 OnAiResponseCompleted?.Invoke(formatted);
@@ -1242,6 +1355,7 @@ namespace CoreAI.Chat
                 }
 
                 HideTypingIndicator();
+                ResetLongRequestHint();
             }
         }
 
@@ -1374,6 +1488,7 @@ namespace CoreAI.Chat
             }
 
             _isStopping = true;
+            ResetLongRequestHint();
             UpdateControlButtonsState();
             UpdateSendButtonVisualState();
             try
@@ -1476,6 +1591,20 @@ namespace CoreAI.Chat
                 string pad = new(' ', 3 - _typingDotCount);
                 TypingLabel.text = baseText + dots + pad;
             }).Every(400);
+        }
+
+        private void ApplyStreamingToolProgressTypingHint()
+        {
+            if (TypingLabel == null)
+            {
+                return;
+            }
+
+            StopTypingAnimation();
+            string fromConfig = config?.StreamingToolProgressHint;
+            TypingLabel.text = string.IsNullOrWhiteSpace(fromConfig)
+                ? DefaultStreamingToolProgressHint
+                : fromConfig.Trim();
         }
 
         public void HideTypingIndicator()

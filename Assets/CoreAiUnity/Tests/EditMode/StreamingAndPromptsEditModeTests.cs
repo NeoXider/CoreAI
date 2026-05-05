@@ -178,6 +178,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("", chunk.Text, "Default Text should be empty string");
             Assert.IsFalse(chunk.IsDone);
             Assert.IsNull(chunk.Error);
+            Assert.IsFalse(chunk.BufferedStreamingNoToolBinding);
+            Assert.IsFalse(chunk.BufferedStreamingUseToolProgressHint);
         }
 
         [Test]

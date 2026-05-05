@@ -1,5 +1,5 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-05 | **Текущая версия (UPM):** см. **`Assets/CoreAI/package.json`** и **`Assets/CoreAiUnity/package.json`** (на момент правки: `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **1.6.19**).
+**Обновлено:** 2026-05-05 | **Текущая версия (UPM):** см. **`Assets/CoreAI/package.json`** и **`Assets/CoreAiUnity/package.json`** (на момент правки: `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **1.7.0**).
 
 ## 🚧 Open — приоритет на 0.26.x
 

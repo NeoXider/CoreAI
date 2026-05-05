@@ -433,12 +433,26 @@ namespace CoreAI.Infrastructure.Llm
                 bool streamLiveTokens =
                     (request.Tools == null || request.Tools.Count == 0) ||
                     ((request.Tools?.Count ?? 0) > 0 && aiTools.Count > 0);
+                bool unboundToolsRequested = (request.Tools?.Count ?? 0) > 0 && aiTools.Count == 0;
+                int hybridRawExclusiveEndEmitted = 0;
+                bool emittedHybridHoldTypingHint = false;
+                bool emittedToolProgressTypingHint = false;
                 bool streamedVisibleToConsumer = false;
+
+                // UI hint: this iteration buffers assistant text until the step ends (see streamLiveTokens).
+                if (!streamLiveTokens && unboundToolsRequested)
+                {
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        "MeaiLlmClient: Unbound-tool streaming — tools are declared but no MEAI AIFunctions are bound for this role. " +
+                        "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
+                    yield return new LlmStreamChunk { BufferedStreamingNoToolBinding = true };
+                }
 
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
                                    .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    int nativeToolCountBeforeUpdate = nativeToolCalls.Count;
                     if (update.Contents != null)
                     {
                         foreach (MEAI.AIContent content in update.Contents)
@@ -452,6 +466,18 @@ namespace CoreAI.Infrastructure.Llm
                                 iterationUsage = usageContent.Details;
                             }
                         }
+                    }
+
+                    if (streamLiveTokens && aiTools.Count > 0 &&
+                        nativeToolCalls.Count > nativeToolCountBeforeUpdate &&
+                        !emittedToolProgressTypingHint)
+                    {
+                        emittedToolProgressTypingHint = true;
+                        yield return new LlmStreamChunk
+                        {
+                            BufferedStreamingNoToolBinding = true,
+                            BufferedStreamingUseToolProgressHint = true
+                        };
                     }
 
                     string raw = GetStreamingUpdateText(update);
@@ -473,6 +499,36 @@ namespace CoreAI.Infrastructure.Llm
 
                         streamedVisibleToConsumer = true;
                     }
+                    else if (unboundToolsRequested)
+                    {
+                        string full = iterationVisible.ToString();
+                        int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
+                        if (safeEnd > hybridRawExclusiveEndEmitted)
+                        {
+                            string delta = full.Substring(hybridRawExclusiveEndEmitted,
+                                safeEnd - hybridRawExclusiveEndEmitted);
+                            hybridRawExclusiveEndEmitted = safeEnd;
+                            foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+
+                            streamedVisibleToConsumer = true;
+                        }
+
+                        if (safeEnd < full.Length && !emittedHybridHoldTypingHint)
+                        {
+                            emittedHybridHoldTypingHint = true;
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                "MeaiLlmClient: Tool-json hold started — emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
+                            yield return new LlmStreamChunk
+                            {
+                                BufferedStreamingNoToolBinding = true,
+                                BufferedStreamingUseToolProgressHint = true
+                            };
+                        }
+                    }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -492,6 +548,36 @@ namespace CoreAI.Infrastructure.Llm
 
                         streamedVisibleToConsumer = true;
                     }
+                    else if (unboundToolsRequested)
+                    {
+                        string full = iterationVisible.ToString();
+                        int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
+                        if (safeEnd > hybridRawExclusiveEndEmitted)
+                        {
+                            string delta = full.Substring(hybridRawExclusiveEndEmitted,
+                                safeEnd - hybridRawExclusiveEndEmitted);
+                            hybridRawExclusiveEndEmitted = safeEnd;
+                            foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+
+                            streamedVisibleToConsumer = true;
+                        }
+
+                        if (safeEnd < full.Length && !emittedHybridHoldTypingHint)
+                        {
+                            emittedHybridHoldTypingHint = true;
+                            _logger.LogInfo(GameLogFeature.Llm,
+                                "MeaiLlmClient: Tool-json hold started — emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
+                            yield return new LlmStreamChunk
+                            {
+                                BufferedStreamingNoToolBinding = true,
+                                BufferedStreamingUseToolProgressHint = true
+                            };
+                        }
+                    }
                 }
 
                 string visibleText = iterationVisible.ToString();
@@ -499,6 +585,16 @@ namespace CoreAI.Infrastructure.Llm
                 // === Path 1: Native tool calls from SSE delta.tool_calls ===
                 if (nativeToolCalls.Count > 0 && aiTools.Count > 0)
                 {
+                    if (!emittedToolProgressTypingHint)
+                    {
+                        emittedToolProgressTypingHint = true;
+                        yield return new LlmStreamChunk
+                        {
+                            BufferedStreamingNoToolBinding = true,
+                            BufferedStreamingUseToolProgressHint = true
+                        };
+                    }
+
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
@@ -560,9 +656,37 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming saw {toolCalls.Count} text-shaped tool call(s) but no AIFunction is bound for this role. " +
                             "Stripping JSON and emitting cleaned text. Check tool registration / IAgentMemoryStore wiring.");
 
-                        if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
+                        if (!string.IsNullOrWhiteSpace(cleanedText))
                         {
-                            yield return new LlmStreamChunk { Text = cleanedText };
+                            if (!streamedVisibleToConsumer)
+                            {
+                                yield return new LlmStreamChunk { Text = cleanedText };
+                            }
+                            else if (unboundToolsRequested && hybridRawExclusiveEndEmitted > 0)
+                            {
+                                string rawPrefix = visibleText.Substring(0,
+                                    Math.Min(hybridRawExclusiveEndEmitted, visibleText.Length));
+                                string rawPrefixTrimEnd = rawPrefix.TrimEnd();
+                                int skipLen = 0;
+                                if (cleanedText.StartsWith(rawPrefix, StringComparison.Ordinal))
+                                {
+                                    skipLen = rawPrefix.Length;
+                                }
+                                else if (rawPrefixTrimEnd.Length > 0 &&
+                                         cleanedText.StartsWith(rawPrefixTrimEnd, StringComparison.Ordinal))
+                                {
+                                    skipLen = rawPrefixTrimEnd.Length;
+                                }
+
+                                if (skipLen > 0 && cleanedText.Length > skipLen)
+                                {
+                                    yield return new LlmStreamChunk { Text = cleanedText.Substring(skipLen) };
+                                }
+                                else if (skipLen == 0)
+                                {
+                                    yield return new LlmStreamChunk { Text = cleanedText };
+                                }
+                            }
                         }
 
                         LlmStreamChunk doneStrip = new LlmStreamChunk
@@ -597,6 +721,16 @@ namespace CoreAI.Infrastructure.Llm
                         assistantContents.Add(new MEAI.TextContent(cleanedText));
                     }
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
+
+                    if (!emittedToolProgressTypingHint)
+                    {
+                        emittedToolProgressTypingHint = true;
+                        yield return new LlmStreamChunk
+                        {
+                            BufferedStreamingNoToolBinding = true,
+                            BufferedStreamingUseToolProgressHint = true
+                        };
+                    }
 
                     // Execute through shared policy (same as non-streaming)
                     ToolExecutionPolicy.BatchToolCallResult batch =
@@ -635,6 +769,22 @@ namespace CoreAI.Infrastructure.Llm
                         foreach (string chunk in visibleChunks)
                         {
                             yield return new LlmStreamChunk { Text = chunk };
+                        }
+                    }
+                }
+                else if (unboundToolsRequested && hybridRawExclusiveEndEmitted < visibleText.Length)
+                {
+                    string rest = visibleText.Substring(hybridRawExclusiveEndEmitted);
+                    if (!string.IsNullOrEmpty(rest))
+                    {
+                        string restSan = SanitizeAssistantVisibleText(rest, request);
+                        if (!string.IsNullOrEmpty(restSan))
+                        {
+                            foreach (string part in SplitForLiveUiStreaming(restSan, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                yield return new LlmStreamChunk { Text = part };
+                            }
                         }
                     }
                 }
@@ -925,6 +1075,103 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return spans;
+        }
+
+        /// <summary>
+        /// For unbound tool streaming: largest <paramref name="text"/> prefix that can be emitted as raw
+        /// without splitting a text-shaped tool JSON (complete <see cref="FindToolCallJsonSpans"/> hits) or
+        /// an incomplete balanced <c>{</c>…<c>EOF</c> object tail (same brace rules as span scan).
+        /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
+        /// </summary>
+        internal static int GetExclusiveEndForSafeUnboundRawStreaming(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return 0;
+            }
+
+            string search = StripCodeBlocks(text);
+            int minHold = search.Length;
+
+            foreach (JsonSpan span in FindToolCallJsonSpans(search))
+            {
+                if (span.Start < minHold)
+                {
+                    minHold = span.Start;
+                }
+            }
+
+            int i = 0;
+            while (i < search.Length)
+            {
+                int braceStart = search.IndexOf('{', i);
+                if (braceStart < 0)
+                {
+                    break;
+                }
+
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                int j = braceStart;
+
+                for (; j < search.Length; j++)
+                {
+                    char c = search[j];
+
+                    if (escaped)
+                    {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (c == '\\' && inString)
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        continue;
+                    }
+
+                    if (c == '{')
+                    {
+                        depth++;
+                    }
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (depth == 0 && j < search.Length)
+                {
+                    i = j + 1;
+                }
+                else if (depth != 0)
+                {
+                    minHold = Math.Min(minHold, braceStart);
+                    i = braceStart + 1;
+                }
+                else
+                {
+                    i = braceStart + 1;
+                }
+            }
+
+            return minHold;
         }
 
         /// <summary>Represents a span of JSON text within a larger string.</summary>

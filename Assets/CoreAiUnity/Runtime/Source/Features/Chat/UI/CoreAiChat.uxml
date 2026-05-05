@@ -15,6 +15,7 @@
             <ui:VisualElement name="coreai-typing-avatar" class="coreai-avatar coreai-ai-avatar"/>
             <ui:Label name="coreai-typing-label" text="..." class="coreai-chat-message coreai-ai-message coreai-typing-message"/>
         </ui:VisualElement>
+        <ui:Label name="coreai-long-request-hint" picking-mode="Ignore" text="" class="coreai-long-request-hint" style="display: none;"/>
         <ui:VisualElement class="coreai-chat-input-container">
             <ui:TextField name="coreai-chat-input" multiline="true" class="coreai-chat-input-field"/>
             <ui:Button name="coreai-chat-send" text=">" class="coreai-chat-send-button"/>

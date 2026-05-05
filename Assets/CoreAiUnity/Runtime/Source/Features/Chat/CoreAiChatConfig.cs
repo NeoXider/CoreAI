@@ -49,6 +49,23 @@ namespace CoreAI.Chat
                  "Оставьте пустым чтобы показывать только анимированные точки \"...\".")]
         [SerializeField] private string _typingIndicatorText = "";
 
+        [Header("UI — Стриминг: инструмент / буфер")]
+        [Tooltip(
+            "Короткая строка в индикаторе набора при вызове инструмента (native или text-shaped) " +
+            "или при удержании tool-json в hybrid-стриме. Пустая строка — встроенный дефолт панели. " +
+            "Ожидание шага без вызова инструмента (маркер без второго флага в потоке) — обычная анимация «...».")]
+        [TextArea(1, 2)]
+        [SerializeField]
+        private string _streamingToolProgressHint = "Инструмент…";
+
+        [Header("UI — Долгий ход (подсказка под набором)")]
+        [Tooltip(
+            "Строка под `#coreai-typing-indicator` после ~3 с с момента **старта запроса** к LLM в этом ходу " +
+            "(индикатор набора, стриминг или ожидание полного ответа). Плейсхолдер: **{elapsed}** — секунды (целое). Пустая строка — не показывать.")]
+        [TextArea(1, 3)]
+        [SerializeField]
+        private string _longRequestHintFormat = "⌛ Ответ формируется… ~{elapsed} с";
+
         [Header("UI — Размеры")]
         [CoreAiChatLayoutOption]
         [Tooltip(
@@ -57,8 +74,10 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _useFullscreenChat;
 
-        [SerializeField] private int _chatWidth = 500;
-        [SerializeField] private int _chatHeight = 700;
+        [Tooltip("Ширина плавающего окна чата (px), когда fullscreen выключен. Дефолт пакета: 650 (≈ +30% к прежним 500; совпадает с `CoreAiChat.uss`).")]
+        [SerializeField] private int _chatWidth = 650;
+        [Tooltip("Высота плавающего окна чата (px), когда fullscreen выключен. Дефолт пакета: 910 (≈ +30% к прежним 700; совпадает с `CoreAiChat.uss`).")]
+        [SerializeField] private int _chatHeight = 910;
 
         [Header("Ввод")]
         [Tooltip("Если true — Shift+Enter отправляет сообщение. Если false — Enter отправляет, а Shift+Enter вставляет перенос строки.")]
@@ -98,6 +117,8 @@ namespace CoreAI.Chat
         public Sprite UserAvatarIcon => _userAvatarIcon;
         public bool EnableStreaming => _enableStreaming;
         public string TypingIndicatorText => _typingIndicatorText;
+        public string StreamingToolProgressHint => _streamingToolProgressHint ?? string.Empty;
+        public string LongRequestHintFormat => _longRequestHintFormat ?? string.Empty;
         public bool UseFullscreenChat => _useFullscreenChat;
         public int ChatWidth => _chatWidth;
         public int ChatHeight => _chatHeight;

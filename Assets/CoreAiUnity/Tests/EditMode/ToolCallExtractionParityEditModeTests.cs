@@ -144,6 +144,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Streaming_RequestedButNotBound_ChunkedStream_EmitsPrefixBeforeJsonCompletes()
+        {
+            // Two prose deltas before JSON: one "Saved! " delta would emit one hybrid chunk then dedupe at strip.
+            var inner = new StreamingScripted(
+                new[] { "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}" });
+
+            var settings = new StubSettings();
+            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
+
+            var request = new LlmCompletionRequest
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "x",
+                UserPayload = "x",
+                Tools = new List<ILlmTool> { new CoreAI.AgentMemory.MemoryLlmTool() }
+            };
+
+            var textChunks = new List<string>();
+            await foreach (var c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    textChunks.Add(c.Text);
+                }
+            }
+
+            Assert.GreaterOrEqual(textChunks.Count, 2, "Multiple inner prose deltas should yield multiple streamed text chunks before JSON.");
+            string visible = string.Concat(textChunks);
+            Assert.AreEqual("Saved! ", visible);
+            Assert.That(visible, Does.Not.Contain("\"name\":\"memory\""));
+        }
+
+        [Test]
         public async Task Streaming_NoToolsRequested_PassesThroughTextWithoutChange()
         {
             // Sanity: when request.Tools is empty/null, extraction must NOT run.

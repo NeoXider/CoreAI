@@ -241,6 +241,37 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteStreamingAsync_UnboundToolsRequested_ChunkedInner_YieldsPrefixThenStripsJson()
+        {
+            // Two prose deltas before the JSON so hybrid streaming yields two Text chunks; a single "Saved! "
+            // delta would already be a full safe prefix and the final strip step dedupes to one chunk.
+            StreamingScriptedChatClient inner = new(
+                new[] { "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}" });
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            };
+
+            List<string> texts = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    texts.Add(chunk.Text);
+                }
+            }
+
+            Assert.GreaterOrEqual(texts.Count, 2, "Multiple inner prose deltas should surface as multiple streamed chunks before JSON.");
+            string full = string.Concat(texts);
+            Assert.AreEqual("Saved! ", full);
+            Assert.That(full, Does.Not.Contain("\"name\":\"memory\""));
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_TooManyToolIterations_ReturnsTerminalError()
         {
             string toolJson = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"loop\"}}";
@@ -502,6 +533,29 @@ namespace CoreAI.Tests.EditMode
             var spans = MeaiLlmClient.FindToolCallJsonSpans(text);
 
             Assert.AreEqual(2, spans.Count);
+        }
+
+        [Test]
+        public void GetExclusiveEndForSafeUnboundRawStreaming_StopsBeforeCompleteToolJson()
+        {
+            string text = "Saved! {\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}} tail";
+            int brace = text.IndexOf('{');
+            Assert.AreEqual(brace, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
+        }
+
+        [Test]
+        public void GetExclusiveEndForSafeUnboundRawStreaming_IncompleteBraceAtEofHoldsFromOpen()
+        {
+            string text = "Saved! {";
+            int brace = text.IndexOf('{');
+            Assert.AreEqual(brace, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
+        }
+
+        [Test]
+        public void GetExclusiveEndForSafeUnboundRawStreaming_NonToolClosedObjectEmitsFullLength()
+        {
+            string text = "Use { \"a\": 1 } ok";
+            Assert.AreEqual(text.Length, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
         }
 
         [Test]

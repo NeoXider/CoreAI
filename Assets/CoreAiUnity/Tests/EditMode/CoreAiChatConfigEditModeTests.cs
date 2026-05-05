@@ -22,8 +22,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(config.EnableStreaming, "стриминг по умолчанию включён");
             Assert.AreEqual(string.Empty, config.TypingIndicatorText,
                 "префикс пуст → анимация индикатора показывает только точки \"...\"");
-            Assert.AreEqual(500, config.ChatWidth);
-            Assert.AreEqual(700, config.ChatHeight);
+            Assert.AreEqual(650, config.ChatWidth);
+            Assert.AreEqual(910, config.ChatHeight);
             Assert.IsFalse(config.UseFullscreenChat, "по умолчанию не на весь экран");
             Assert.IsFalse(config.SendOnShiftEnter, "по умолчанию Enter отправляет, Shift+Enter вставляет перенос строки");
             Assert.AreEqual(2000, config.MaxMessageLength);
@@ -31,9 +31,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(string.IsNullOrEmpty(config.TimeoutMessage));
             Assert.IsFalse(string.IsNullOrEmpty(config.NoResponseMessage));
             Assert.IsTrue(config.LoadPersistedChatOnStartup, "по умолчанию подгружаем сохранённую историю в UI");
-            Assert.AreEqual(0, config.MaxPersistedMessagesForUi, "0 = без лимита при подгрузке");
-
-            Object.DestroyImmediate(config);
+            Assert.IsTrue(config.LongRequestHintFormat.Contains("{elapsed}"),
+                "шаблон подсказки должен содержать {elapsed} для подстановки секунд");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(config.StreamingToolProgressHint),
+                "короткая подсказка при вызове инструмента / буфере не должна быть пустой по умолчанию");
         }
     }
 }

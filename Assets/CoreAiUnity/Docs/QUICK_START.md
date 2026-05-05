@@ -47,7 +47,7 @@ Creates `CoreAILifetimeScope` with every required asset (`CoreAISettings`, `Game
 CoreAI → Setup → Create Chat Demo Scene
 ```
 
-Produces `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeScope`, a `UIDocument` + `CoreAiChatPanel` and a prepared `CoreAiChatConfig_Demo.asset`. Press **Play** and chat.
+Produces `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeScope`, a `UIDocument` + `CoreAiChatPanel` and a prepared `CoreAiChatConfig_Demo.asset`. Press **Play** and chat. The stock chat template uses a **~30% larger** floating window (**650×910**), a **right-flush** vertical scrollbar, and an optional **long-turn status** label after the typing row (see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md)).
 
 ---
 
@@ -170,6 +170,6 @@ Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
 
 ---
 
-**Version:** aligned with [`package.json`](../package.json) — **1.6.19** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
+**Version:** aligned with [`package.json`](../package.json) — **1.7.0** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
 
 **First script from scratch?** Read [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — 3 steps + copy-paste `AskAsync` / `StreamAsync`.

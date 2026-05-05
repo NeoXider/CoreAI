@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.6.19",
+  "version": "1.7.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.6.19: WebGL player uses FileAgentMemoryStore + CoreAiPersistFs (chat/memory JSON survives reload). v1.6.18: WebGL fetch SSE single-threaded await + non-blocking ReadAsync. v1.6.17: WebGL fetch SSE awaits real HTTP status.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.7.0: buffered tool-stream typing hint (LlmStreamChunk.BufferedStreamingNoToolBinding + CoreAiChatConfig). v1.6.19: WebGL FileAgentMemoryStore + CoreAiPersistFs; chat UI scrollbar/long-hint. v1.6.18: WebGL fetch SSE await + non-blocking ReadAsync.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.6.19"
+    "com.nexoider.coreai": "1.7.0"
   }
 }
