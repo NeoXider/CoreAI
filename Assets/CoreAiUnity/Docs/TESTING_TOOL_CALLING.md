@@ -11,11 +11,11 @@ Quick reference: which tests to run after touching `MeaiLlmClient`, `SmartToolCa
 | **Pure parser** | brace counting, code-block exclusion, multi-match | `TryExtractToolCallsFromTextTests` (`MeaiLlmClientEditModeTests.cs`) |
 | **Portable extractor** | `LlmToolCallTextExtractor.TryExtract` / `StripForDisplay` | `ToolCallExtractionParityEditModeTests.PortableExtractor_*` |
 | **Non-streaming** | text-shape JSON executes, gets stripped, traces populated | `ToolCallExtractionParityEditModeTests.NonStreaming_*` |
-| **Streaming** | text-shape JSON executes when bound; stripped when unbound; traces on `IsDone` | `ToolCallExtractionParityEditModeTests.Streaming_*` + `MeaiLlmClientEditModeTests.CompleteStreamingAsync_*` |
+| **Streaming** | text-shape JSON executes when bound; stripped when unbound; traces on `IsDone`; hybrid suffix reconciliation | `ToolCallExtractionParityEditModeTests.Streaming_*` + `MeaiLlmClientEditModeTests.CompleteStreamingAsync_*` + `MeaiLlmClientEditModeTests.GetCleanedTextSuffixAfterHybridPrefix_*` |
 | **Per-call log** | `[ToolCall] traceId=… role=… tool=… status=OK dur=… args=… result=…` | `ToolCallExtractionParityEditModeTests.NonStreaming_PerCallLogLine_*` |
 | **Summary log** | `tools=[name(ok,12ms),…]` tail on `LLM ◀` line | `ToolCallExtractionParityEditModeTests.FormatExecutedTools_*` |
 | **Fast PlayMode (stub inner client)** | `MeaiLlmClient` tool pipeline in a player frame — **no** loaded model in this assembly | `ToolCallStreamingParityPlayModeTests` (**`CoreAI.Tests.PlayMode.FastNoLlm`**) |
-| **Real LLM (opt-in)** | live HTTP / LLMUnity tool execution | **LlmVerification:** `MerchantWithToolCallingPlayModeTests`, `AllToolCallsPlayModeTests` |
+| **Real LLM (opt-in)** | live HTTP / LLMUnity tool execution | **LlmVerification:** `MerchantWithToolCallingPlayModeTests`, `AllToolCallsPlayModeTests`, `MultiToolChainPlayModeTests` (retry second hop if memory marker missing) |
 
 Filter by **assembly** in Test Runner; folder map: **`Tests/PlayMode/README.md`**.
 ---

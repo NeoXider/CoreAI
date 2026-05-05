@@ -65,10 +65,13 @@ namespace CoreAI.Tests.PlayMode
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
                 // 
+                // Persistent chat transcript only — no MemoryTool; otherwise small GGUF models try to
+                // "read" via memory tool (only write/append/clear exist) instead of using loaded history.
                 AgentConfig chatAgent = new AgentBuilder("TestPersistentChatAgent")
-                    .WithSystemPrompt("You are a helpful assistant. Keep your answers brief.")
-                    .WithMemory(MemoryToolAction.Append) //  
-                    .WithChatHistory(8192, true) // : persistent = true
+                    .WithSystemPrompt(
+                        "You are a helpful assistant. Keep answers brief. " +
+                        "When asked about earlier messages in this conversation, answer from the dialogue you already have in context.")
+                    .WithChatHistory(8192, true)
                     .WithMode(AgentMode.ChatOnly)
                     .Build();
 

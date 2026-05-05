@@ -39,6 +39,12 @@ namespace CoreAI
         /// <summary>Universal system prompt prefix applied ahead of every agent system string.</summary>
         string UniversalSystemPromptPrefix { get; }
 
+        /// <summary>
+        /// Optional extra text appended after the standard <c>## Tool Contract</c> block (before conditional lines and the tool list).
+        /// Empty string keeps only built-in orchestrator guidance.
+        /// </summary>
+        string ToolContractAdditionalInstructions => "";
+
         /// <summary>Default sampling temperature (0.0–2.0).</summary>
         float Temperature { get; }
 

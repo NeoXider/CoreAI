@@ -19,6 +19,7 @@ These assets are required for the framework. When the plugin loads in Unity they
   - Reasoning / thinking mode (`Enable Reasoning / Thinking mode`).
   - Fallback behavior (offline mode).
 - **Unity menu:** Quick access via `CoreAI -> Settings`.
+- **Clear runtime saves (Editor):** **CoreAI → Delete All Persistent Saves...** removes **`Application.persistentDataPath/CoreAI`** (memory, chat JSON, summaries, Lua/data-overlay version stores). Disabled during Play Mode; does not delete assets in `Assets/`.
 
 ### 2. `AgentPromptsManifest`
 **Purpose:** Store of initial and system prompts for each agent by `RoleId`.

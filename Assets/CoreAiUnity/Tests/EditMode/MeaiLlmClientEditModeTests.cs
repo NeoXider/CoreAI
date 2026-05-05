@@ -446,6 +446,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void PseudoActionWrite_QwenStyle_ExtractedAsMemory()
+        {
+            string text =
+                "Action=write content=\"Final exam is on June 15th.\" memory_type=\"text\" action=\"write\"";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual("memory", calls[0].Name);
+            Assert.AreEqual("write", calls[0].Arguments["action"]?.ToString());
+            Assert.That(calls[0].Arguments["content"]?.ToString(),
+                Does.Contain("June 15"));
+            Assert.That(cleaned, Does.Not.Contain("Action=write"));
+        }
+
+        [Test]
+        public void PseudoActionWrite_WithProsePrefix_StripsPseudoTailOnly()
+        {
+            string text = "Okay. Action=write content=\"hello\"";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(1, calls.Count);
+            Assert.That(cleaned, Does.Contain("Okay."));
+            Assert.That(cleaned, Does.Not.Contain("Action=write"));
+        }
+
+        [Test]
         public void MultipleToolCalls_AllExtracted()
         {
             string text = "{\"name\":\"tool_a\",\"arguments\":{\"x\":1}} some text {\"name\":\"tool_b\",\"arguments\":{\"y\":2}}";
@@ -556,6 +584,34 @@ namespace CoreAI.Tests.EditMode
         {
             string text = "Use { \"a\": 1 } ok";
             Assert.AreEqual(text.Length, MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming(text));
+        }
+
+        [Test]
+        public void GetCleanedTextSuffixAfterHybridPrefix_SkipsPrefixAlreadyStreamedToConsumer()
+        {
+            string visible = "Hello ";
+            string cleaned = "Hello world";
+            int hybridEnd = visible.Length;
+            string? suffix = MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix(cleaned, visible, hybridEnd);
+            Assert.IsNotNull(suffix);
+            Assert.AreEqual("world", suffix);
+        }
+
+        [Test]
+        public void GetCleanedTextSuffixAfterHybridPrefix_ReturnsNullWhenNothingWasStreamed()
+        {
+            Assert.IsNull(MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix("only cleaned", "visible", 0));
+        }
+
+        [Test]
+        public void GetCleanedTextSuffixAfterHybridPrefix_UsesTrimmedRawPrefixWhenCleanedOmitsTrailingSpaces()
+        {
+            string visible = "OK  ";
+            string cleaned = "OK done";
+            int hybridEnd = visible.Length;
+            string? suffix = MeaiLlmClient.GetCleanedTextSuffixAfterHybridPrefix(cleaned, visible, hybridEnd);
+            Assert.IsNotNull(suffix);
+            Assert.AreEqual(" done", suffix);
         }
 
         [Test]

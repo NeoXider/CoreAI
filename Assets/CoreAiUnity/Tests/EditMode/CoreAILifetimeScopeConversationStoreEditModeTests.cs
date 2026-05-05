@@ -68,7 +68,7 @@ namespace CoreAI.Tests.EditMode
                 "executionMode", BindingFlags.NonPublic | BindingFlags.Instance);
             executionModeField.SetValue(settings, LlmExecutionMode.Offline);
 
-            builder.RegisterInstance<ICoreAISettings>(settings);
+            builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
             builder.RegisterAgentPrompts(null);
             builder.RegisterLlmPipeline(settings, null);
             builder.Register<DefaultSoloNetworkPeer>(Lifetime.Singleton).As<IAiNetworkPeer>();

@@ -208,8 +208,10 @@ namespace CoreAI.Tests.PlayMode
                 AgentRoleId = "Teacher",
                 SystemPrompt =
                     "You are a teacher. You have a 'memory' tool. " +
-                    "When asked to remember something, call memory with action='write' and the content. " +
-                    "After saving, confirm with a short sentence.",
+                    "When asked to remember something, you MUST emit valid tool JSON on its own line before any confirmation: " +
+                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"<facts>\"}} " +
+                    "Do not say you saved anything unless that JSON appears in your reply. " +
+                    "After the JSON line, add one short confirmation sentence.",
                 UserPayload = "Remember that the student's name is Alex and they prefer math.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
@@ -269,9 +271,10 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher. You have a 'memory' tool. " +
-                    "When asked to remember, call memory with action='write' and the provided content. " +
-                    "After saving, say 'Saved successfully' and nothing more.",
+                    "You are a teacher with a memory tool (text-shaped calling on this host). " +
+                    "When asked to remember a fact, your reply MUST include a parseable JSON object with " +
+                    "\"name\":\"memory\" and \"arguments\" with action \"write\" and \"content\" set to the text to store. " +
+                    "Do not claim you saved unless that JSON is present; after the tool runs you may say Saved briefly.",
                 UserPayload = "Remember: The student scored 95 on the math test.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
@@ -433,8 +436,9 @@ namespace CoreAI.Tests.PlayMode
                 AgentRoleId = "Teacher",
                 SystemPrompt =
                     "You are a teacher. You have a 'memory' tool. " +
-                    "Call memory with action='write' and the content the user asks to save. " +
-                    "After saving, say only 'Saved.'",
+                    "To save what the user asks, you MUST output this JSON on its own line (replace CONTENT): " +
+                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"CONTENT\"}} " +
+                    "Do not claim the memory was saved without that JSON. After it, reply with only: Saved.",
                 UserPayload = "Remember this: Final exam is on June 15th.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };

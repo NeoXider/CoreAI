@@ -310,6 +310,10 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
 | WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.nexoider.coreaiunity`**. |
 
+### Clearing all CoreAI file persistence (Editor)
+
+To reset **everything** CoreAI stores under `persistentDataPath` (memory, persisted chat, summaries, Lua/version JSON — see **`CoreAiPersistentPaths`**): stop Play Mode, then **CoreAI → Delete All Persistent Saves...**. This deletes the whole **`persistentDataPath/CoreAI`** folder. **Project ScriptableObjects** under `Assets/` are **not** affected.
+
 ---
 
 ## 🔧 Problem: Tool call does not work

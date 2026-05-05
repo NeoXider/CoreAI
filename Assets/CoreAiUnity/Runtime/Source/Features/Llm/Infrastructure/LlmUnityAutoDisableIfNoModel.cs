@@ -38,6 +38,12 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
+            CoreAISettingsAsset coreSettings = CoreAISettingsAsset.Instance;
+            if (coreSettings != null)
+            {
+                LlmUnityModelBootstrap.TryAssignModelFromGgufHint(llm, log, coreSettings.GgufModelPath);
+            }
+
             LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, log);
 
             if (!string.IsNullOrWhiteSpace(llm.model))

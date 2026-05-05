@@ -44,6 +44,28 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void AiPromptComposer_BuiltInProvider_UniversalPrefixNotDuplicated()
+        {
+            BuiltInDefaultAgentSystemPromptProvider provider = new();
+            TestCoreAISettings settings = new() { UniversalSystemPromptPrefix = "UNIQUE_PREFIX_LINE." };
+            AiPromptComposer composer = new(provider, new NullUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore(), null, null, settings);
+
+            string result = composer.GetSystemPrompt(BuiltInAgentRoleIds.SmartChat);
+
+            int idx = 0;
+            int count = 0;
+            while ((idx = result.IndexOf("UNIQUE_PREFIX_LINE.", idx, System.StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                idx++;
+            }
+
+            Assert.AreEqual(1, count,
+                "Built-in provider must return raw role text; composer adds universal prefix once.");
+        }
+
+        [Test]
         public void AiPromptComposer_GetSystemPrompt_WorksWithoutPolicy()
         {
             // No policy, no settings — should still return base prompt

@@ -18,6 +18,82 @@ namespace CoreAI.Infrastructure.Llm
     public static class LlmUnityModelBootstrap
     {
         /// <summary>
+        /// Возвращает ожидаемое имя .gguf-файла из подсказки (путь или basename). Пустая строка если ввод пустой.
+        /// </summary>
+        public static string NormalizeGgufHintToFileName(string ggufHint)
+        {
+            if (string.IsNullOrWhiteSpace(ggufHint))
+            {
+                return "";
+            }
+
+            return Path.GetFileName(ggufHint.Trim());
+        }
+
+        /// <summary>
+        /// Назначает GGUF из подсказки Core AI (<see cref="CoreAISettingsAsset.GgufModelPath"/>): полный путь к файлу,
+        /// либо имя файла, совпадающее с записью Model Manager (без учёта регистра).
+        /// Вызывать до <see cref="TryAutoAssignResolvableModel"/> чтобы не подставлялась «первая попавшаяся» модель.
+        /// </summary>
+        /// <returns><c>true</c> если <see cref="LLM.model"/> уже был задан или успешно назначен.</returns>
+        public static bool TryAssignModelFromGgufHint(LLM llm, IGameLogger logger, string ggufHint)
+        {
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
+            if (llm == null || string.IsNullOrWhiteSpace(ggufHint))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(llm.model))
+            {
+                return true;
+            }
+
+            string trimmed = ggufHint.Trim();
+            if (File.Exists(trimmed))
+            {
+                try
+                {
+                    llm.SetModel(trimmed);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(GameLogFeature.Llm, "LLMUnity: SetModel по полному пути не удался: " + ex.Message);
+                    return false;
+                }
+
+                return !string.IsNullOrWhiteSpace(llm.model);
+            }
+
+            string wantedFile = NormalizeGgufHintToFileName(trimmed);
+            if (string.IsNullOrWhiteSpace(wantedFile))
+            {
+                return false;
+            }
+
+            List<ModelEntry> candidates = CollectResolvableNonLoraEntries();
+            foreach (ModelEntry e in candidates)
+            {
+                if (e == null || string.IsNullOrWhiteSpace(e.filename))
+                {
+                    continue;
+                }
+
+                string fn = Path.GetFileName(e.filename);
+                if (string.Equals(fn, wantedFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    return TrySetModelFromEntry(llm, e, logger);
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Если <see cref="LLM.model"/> пусто, подставляет первую подходящую модель из Model Manager (файл на диске).
         /// </summary>
         /// <returns><c>true</c>, если модель уже была или успешно назначена; иначе <c>false</c>.</returns>

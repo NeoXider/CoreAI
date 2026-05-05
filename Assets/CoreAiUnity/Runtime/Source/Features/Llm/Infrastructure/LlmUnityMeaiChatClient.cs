@@ -3,15 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using CoreAI.Ai;
-using CoreAI.Config;
+using System.Linq;
 using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 using MEAI = Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Text.RegularExpressions;
-using System.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -30,10 +28,15 @@ namespace CoreAI.Infrastructure.Llm
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<MEAI.ChatResponse> GetResponseAsync(
+        /// <summary>
+        /// Единая сборка system/user для LLMUnity (один вызов <see cref="LLMAgent.Chat"/>).
+        /// Используется и для нестриминга, и для стриминга — паритет с HTTP-путём на уровне MEAI-сообщений.
+        /// </summary>
+        internal static void BuildLlmUnityPrompt(
             IEnumerable<MEAI.ChatMessage> chatMessages,
-            MEAI.ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
+            MEAI.ChatOptions? options,
+            out string systemPrompt,
+            out string userBlob)
         {
             List<MEAI.ChatMessage> msgs = new(chatMessages);
             string userMessage = "";
@@ -43,6 +46,11 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (msg.Role == MEAI.ChatRole.System)
                 {
+                    if (msg.Contents == null)
+                    {
+                        continue;
+                    }
+
                     foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.TextContent tc)
@@ -53,6 +61,11 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (msg.Role == MEAI.ChatRole.User)
                 {
+                    if (msg.Contents == null)
+                    {
+                        continue;
+                    }
+
                     foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.TextContent tc)
@@ -63,6 +76,11 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (msg.Role == MEAI.ChatRole.Assistant)
                 {
+                    if (msg.Contents == null)
+                    {
+                        continue;
+                    }
+
                     foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.TextContent tc)
@@ -71,19 +89,23 @@ namespace CoreAI.Infrastructure.Llm
                         }
                         else if (item is MEAI.FunctionCallContent fcc)
                         {
-                            // Simulate tool call for history context
                             userMessage +=
-                                $"Assistant Tool Call:\n```json\n{{\"name\": \"{fcc.Name}\", \"arguments\": {Newtonsoft.Json.JsonConvert.SerializeObject(fcc.Arguments)}}}\n```\n";
+                                $"Assistant Tool Call:\n```json\n{{\"name\": \"{fcc.Name}\", \"arguments\": {JsonConvert.SerializeObject(fcc.Arguments)}}}\n```\n";
                         }
                     }
                 }
                 else if (msg.Role == MEAI.ChatRole.Tool)
                 {
+                    if (msg.Contents == null)
+                    {
+                        continue;
+                    }
+
                     foreach (MEAI.AIContent item in msg.Contents)
                     {
                         if (item is MEAI.FunctionResultContent frc)
                         {
-                            userMessage += $"\n[SYSTEM ERROR]: Your previous tool call failed: {frc.Result}\nPlease try again heavily verifying the tool name, or answer via normal text.\n";
+                            userMessage += $"Tool output:\n{frc.Result}\n\n";
                         }
                     }
                 }
@@ -91,38 +113,38 @@ namespace CoreAI.Infrastructure.Llm
 
             if (options?.Tools != null && options.Tools.Count > 0)
             {
-                sysMessage += "\n\nCRITICAL SYSTEM RULES FOR TOOLS:\n";
+                // Дополняет orchestrator ## Tool Contract — без противоречия «только JSON навсегда»,
+                // но явно требует объект вызова; иначе малые GGUF часто отвечают прозой («Saved…») без tool.
+                sysMessage += "\n\n## Local inference (LLMUnity)\n";
                 sysMessage +=
-                    "1. You have access to the following tools. You MUST use one if it matches the user request.\n";
+                    "This runtime has no native API tool channel: the host extracts a JSON object with \"name\" and \"arguments\" from your reply text.\n";
                 sysMessage +=
-                    "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n";
+                    "Rules: (1) To run a tool, include that JSON object in this assistant reply — describing the tool in words alone never executes it.\n";
                 sysMessage +=
-                    "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n";
+                    "(2) Put the JSON object before any short closing phrase if you also acknowledge the user.\n";
+                sysMessage +=
+                    "(3) After a later turn receives tool output in context, finish in plain prose as usual.\n\n";
+                sysMessage += "Bound tools (schemas):\n";
 
-                JArray toolNames = new();
                 foreach (MEAI.AITool tool in options.Tools)
                 {
-                    toolNames.Add(tool.Name);
                     sysMessage += $"- name: {tool.Name}\n  description: {tool.Description}\n";
                     if (tool is MEAI.AIFunction fn)
                     {
-                        sysMessage += $"  parameters schema: {fn.JsonSchema.ToString()}\n";
+                        sysMessage += $"  parameters schema: {fn.JsonSchema}\n";
                     }
                 }
-
-                // DO NOT restrict generation strictly to JSON! It prevents the LLM from outputting conversational text
-                // when a tool result is successfully executed, causing infinite loops of hallucinated tool calls.
-                _unityAgent.grammar = "";
-            }
-            else
-            {
-                _unityAgent.grammar = ""; // Clear grammar if no tools
             }
 
-            // Apply a strict system-level instruction to ban Markdown formatting globally in LlmUnity
-            sysMessage += "\n\nCRITICAL INSTRUCTION: NEVER use Markdown formatting (such as **, _, #). Output plain text ONLY.\n";
-            _unityAgent.systemPrompt = sysMessage.TrimStart().TrimEnd();
+            sysMessage +=
+                "\n\nCRITICAL INSTRUCTION: NEVER use Markdown formatting (such as **, _, #). Output plain text ONLY.\n";
 
+            systemPrompt = sysMessage.TrimStart().TrimEnd();
+            userBlob = userMessage.Trim();
+        }
+
+        private void ApplySamplingToAgent(MEAI.ChatOptions? options)
+        {
             if (options?.Temperature.HasValue == true)
             {
                 _unityAgent.temperature = options.Temperature.Value;
@@ -132,8 +154,19 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _unityAgent.numPredict = options.MaxOutputTokens.Value;
             }
+        }
 
-            string result = await _unityAgent.Chat(userMessage.Trim(), addToHistory: false);
+        public async Task<MEAI.ChatResponse> GetResponseAsync(
+            IEnumerable<MEAI.ChatMessage> chatMessages,
+            MEAI.ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            BuildLlmUnityPrompt(chatMessages, options, out string sys, out string userForChat);
+            _unityAgent.grammar = "";
+            _unityAgent.systemPrompt = sys;
+            ApplySamplingToAgent(options);
+
+            string result = await _unityAgent.Chat(userForChat, addToHistory: false);
 
             // Strip <think>...</think> blocks produced by reasoning/thinking mode (Qwen3.5, DeepSeek, etc.)
             if (!string.IsNullOrEmpty(result))
@@ -244,43 +277,10 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            // Подготавливаем промпт так же как в GetResponseAsync
-            List<MEAI.ChatMessage> msgs = new(chatMessages);
-            string userMessage = "";
-            string sysMessage = "";
-
-            foreach (MEAI.ChatMessage msg in msgs)
-            {
-                if (msg.Role == MEAI.ChatRole.System)
-                {
-                    foreach (MEAI.AIContent item in msg.Contents)
-                    {
-                        if (item is MEAI.TextContent tc) sysMessage += tc.Text + "\n";
-                    }
-                }
-                else if (msg.Role == MEAI.ChatRole.User)
-                {
-                    foreach (MEAI.AIContent item in msg.Contents)
-                    {
-                        if (item is MEAI.TextContent tc) userMessage += "User: " + tc.Text + "\n";
-                    }
-                }
-                else if (msg.Role == MEAI.ChatRole.Assistant)
-                {
-                    foreach (MEAI.AIContent item in msg.Contents)
-                    {
-                        if (item is MEAI.TextContent tc) userMessage += "Assistant: " + tc.Text + "\n";
-                    }
-                }
-            }
-
-            sysMessage += "\nCRITICAL INSTRUCTION: NEVER use Markdown formatting (such as **, _, #). Output plain text ONLY.\n";
-            _unityAgent.systemPrompt = sysMessage.TrimStart().TrimEnd();
-
-            if (options?.Temperature.HasValue == true)
-                _unityAgent.temperature = options.Temperature.Value;
-            if (options?.MaxOutputTokens.HasValue == true)
-                _unityAgent.numPredict = options.MaxOutputTokens.Value;
+            BuildLlmUnityPrompt(chatMessages, options, out string sys, out string userForChat);
+            _unityAgent.grammar = "";
+            _unityAgent.systemPrompt = sys;
+            ApplySamplingToAgent(options);
 
             // Настоящий стриминг через LLMAgent.Chat callback.
             // Callback получает полный текст на данный момент — вычисляем дельту.
@@ -292,7 +292,7 @@ namespace CoreAI.Infrastructure.Llm
             string previousText = "";
             var deltaLock = new object();
 
-            _ = _unityAgent.Chat(userMessage.Trim(),
+            _ = _unityAgent.Chat(userForChat,
                 (string fullSoFar) =>
                 {
                     if (string.IsNullOrEmpty(fullSoFar)) return;

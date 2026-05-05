@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using NUnit.Framework;
 using UnityEngine;
@@ -15,6 +16,20 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class InGameLlmChatServiceEditModeTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            // InGameLlmChatService prepends UniversalSystemPromptPrefix (matches AiPromptComposer layer 1).
+            CoreAISettings.ResetOverrides();
+            CoreAISettings.UniversalSystemPromptPrefix = "";
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            CoreAISettings.ResetOverrides();
+        }
+
         #region SendPlayerMessageAsync Tests
 
         [Test]

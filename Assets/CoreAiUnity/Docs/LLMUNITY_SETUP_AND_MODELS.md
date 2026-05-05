@@ -16,15 +16,23 @@ Before the first request in builds with **Download on Start**, the docs recommen
 
 **Model Manager (LLM Inspector):** the model list is copied into the build; the **Build** checkbox excludes a specific model from the build; the **radio** selection writes the path into **`LLM.model`** (save it **in the scene**). If several models have files on disk and `model` is empty, CoreAI may **auto-pick** one (see `LlmUnityModelBootstrap`: priority to entries with **Build** checked).
 
-**CoreAI on top of LLMUnity:** when `LLM.model` is empty, the early guard **`LlmUnityAutoDisableIfNoModel`** disables LLMUnity so the console is not spammed with “No model file provided!”; DI then uses **`StubLlmClient`**.
+**Core AI Settings (recommended since v1.7.4):** set **GGUF Model** (and optional **Manual override**) on **`CoreAISettingsAsset`**. At runtime, **`LlmUnityHostConfigurator`** applies that hint **before** Model Manager fallback, so the loaded server matches the asset even when the scene **`LLM.model`** field was left empty. Enable **Auto-create LLM host** to spawn **`CoreAI_LLMUnity_Runtime`** (`LLM` + `LLMAgent`) when no agent exists in loaded scenes; enable **Autostart local server** to warm up llama.cpp shortly after play (first chat is faster; uses **Startup Timeout**).
+
+**CoreAI on top of LLMUnity:** when `LLM.model` is empty, the early guard **`LlmUnityAutoDisableIfNoModel`** also tries **`CoreAISettingsAsset.GgufModelPath`** before disabling LLMUnity; if still unresolved, it disables LLMUnity so the console is not spammed with “No model file provided!”; DI then uses **`StubLlmClient`**.
 
 ---
 
 ## 1. What should be on the scene (local LLMUnity)
 
+**Option A — minimal (v1.7.4+):** only **`CoreAILifetimeScope`** + **`CoreAISettingsAsset`** with **LLM Backend** = **LLM Unity** or **Auto** (Unity first). Turn on **Auto-create LLM host** and set **GGUF Model**; CoreAI creates **`CoreAI_LLMUnity_Runtime`** at runtime. Optionally add **Autostart local server** to load GGUF at play start.
+
+**Option B — classic manual setup:**
+
 1. GameObject with **`LLM`** (server/inference): a **Qwen3.5 2B** (or other) GGUF model selected; optionally **Num GPU Layers** &gt; 0 on GPU.
 2. Child (or linked) object with **`LLMAgent`**: Inspector references this **`LLM`**, **Remote** off for a purely local setup.
 3. **`CoreAILifetimeScope`** on the composition root: **Open Ai Http Llm Settings** empty **or** the asset has **Use Open Ai Compatible Http** disabled — then `ILlmClient` = **MeaiLlmUnityClient** → your `LLMAgent`.
+
+CoreAI still applies **GGUF Model** from **`CoreAISettingsAsset`** to the resolved **`LLM`** when **`LLM.model`** is empty, so the Inspector asset and the scene stay aligned.
 
 **Check:** Play Mode → console without model load errors; orchestrator/chat call `ILlmClient` (see AI-level logs).
 
@@ -79,6 +87,8 @@ For **OpenAI-compatible** (`/v1/chat/completions`) use section 4.
 6. Drag the asset onto **`CoreAILifetimeScope` → Open Ai Http Llm Settings**.
 
 Then **`ILlmClient` = OpenAiChatLlmClient**; scene `LLMAgent` is **not** used for core calls (you can leave it disabled).
+
+**Wire-level parity with cloud APIs:** GGUF via in-process **`LLMAgent`** goes through **`LlmUnityMeaiChatClient`** (flattened transcript + text-shaped tool JSON, aligned between streaming and non-streaming). For the same HTTP semantics as OpenAI-compatible **`/chat/completions`** (role-separated `messages`, native `tools`, SSE streaming), keep **Use Open Ai Compatible Http** enabled and point the asset at a local server URL such as **`http://127.0.0.1:1234/v1`** (LM Studio, Ollama’s OpenAI shim, llama.cpp server). CoreAI then uses **`MeaiOpenAiChatClient`** instead of the LLMUnity adapter.
 
 **Important:** calls run on Unity’s **main thread** (same as the LLMUnity adapter). Do not store keys in a public repository.
 

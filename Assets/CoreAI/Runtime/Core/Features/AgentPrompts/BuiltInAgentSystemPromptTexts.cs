@@ -3,7 +3,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// Default English system prompts for small instruction-tuned models: short, explicit output rules.
     /// Override via <c>Resources/AgentPrompts/System</c> or a scene <c>ScriptableObject</c> manifest.
-    /// Each prompt may be prefixed via <see cref="WithUniversalPrefix(string)"/>.
+    /// Universal prefix is applied in <see cref="AiPromptComposer"/> (or callers that bypass it, e.g. <see cref="InGameLlmChatService"/>).
     /// </summary>
     internal static class BuiltInAgentSystemPromptTexts
     {

@@ -310,6 +310,18 @@ namespace CoreAI.Infrastructure.Llm.Editor
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
                     new GUIContent("Agent Name", "Имя GameObject с LLMAgent. Пусто = авто"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAutoCreateRuntimeHost"),
+                    new GUIContent(
+                        "Auto-create LLM host",
+                        "Если на загруженных сценах нет LLMAgent, создать скрытый GameObject с LLM+LLMAgent и применить GGUF из этого ассета."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityRuntimeHostObjectName"),
+                    new GUIContent(
+                        "Runtime host name",
+                        "Имя GameObject для автосозданного хоста. Пусто = CoreAI_LLMUnity_Runtime."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAutostartLocalServer"),
+                    new GUIContent(
+                        "Autostart local server",
+                        "После старта игры заранее поднять llama.cpp (первый ответ быстрее; загрузка может занять время). Таймаут — Startup Timeout."));
                 DrawGgufModelDropdown(serializedObject.FindProperty("ggufModelPath"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityDontDestroyOnLoad"),
                     new GUIContent("Dont Destroy On Load", "Не уничтожать при смене сцены"));
@@ -377,6 +389,11 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("universalSystemPromptPrefix"),
                     new GUIContent("Universal Prompt Prefix",
                         "Универсальный промпт — идёт ПЕРЕД промптом каждого агента"));
+
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("toolContractAdditionalInstructions"),
+                    new GUIContent(
+                        "Tool Contract — доп. инструкции",
+                        "Необязательный текст после стандартного блока ## Tool Contract (когда у роли есть инструменты). Пусто = только встроенные правила оркестратора."));
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("overrideTemperature"),
                     new GUIContent("Override temperature",

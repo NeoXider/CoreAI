@@ -12,5 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d3392db4dbf956468e04c2ca3aeaf9f, type: 3}
   m_Name: GameLogSettings
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.Logging.GameLogSettingsAsset
-  enabledFeatures: 31
+  enabledFeatures: 63
   minimumLevel: 0

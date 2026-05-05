@@ -82,7 +82,9 @@ namespace CoreAI.Composition
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);
-                builder.RegisterInstance<ICoreAISettings>(settings);
+                // Один InstanceRegistrationBuilder: и ICoreAISettings, и CoreAISettingsAsset (иначе VContainer ставит guard-ключ
+                // по ImplementationType и второй RegisterInstance<CoreAISettingsAsset> даёт duplicate key).
+                builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
 
                 // Статический прокси делегирует в DI-экземпляр автоматически
                 CoreAISettings.Instance = settings;
@@ -136,6 +138,12 @@ namespace CoreAI.Composition
             // ── 8. Entry Points ────────────────────────────────────────────
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            if (settings != null)
+            {
+                builder.RegisterEntryPoint<LlmUnityAutostartEntryPoint>();
+            }
+#endif
         }
 
 #if UNITY_WEBGL

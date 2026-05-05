@@ -433,24 +433,32 @@ namespace CoreAI.Infrastructure.Llm
                 List<MEAI.FunctionCallContent> nativeToolCalls = new();
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
-                // Live token streaming is safe when no tools are declared, or when AIFunctions are actually bound.
-                // If the policy lists tools but BuildAIFunctions produced zero (e.g. missing memory store), buffer
-                // until TryExtractToolCallsFromText can strip text-shaped tool JSON (see ToolCallExtractionParity tests).
-                bool streamLiveTokens =
-                    (request.Tools == null || request.Tools.Count == 0) ||
-                    ((request.Tools?.Count ?? 0) > 0 && aiTools.Count > 0);
-                bool unboundToolsRequested = (request.Tools?.Count ?? 0) > 0 && aiTools.Count == 0;
+                bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
+                bool fullIterationBuffer =
+                    toolsDeclared && request.BufferFullStreamingIterationWhenToolsDeclared == true;
+                bool hybridToolJsonHold = toolsDeclared && !fullIterationBuffer;
+                bool streamLiveNoTools = !toolsDeclared;
+                bool unboundToolsRequested = toolsDeclared && aiTools.Count == 0;
                 int hybridRawExclusiveEndEmitted = 0;
                 bool emittedHybridHoldTypingHint = false;
                 bool emittedToolProgressTypingHint = false;
                 bool streamedVisibleToConsumer = false;
 
-                // UI hint: this iteration buffers assistant text until the step ends (see streamLiveTokens).
-                if (!streamLiveTokens && unboundToolsRequested)
+                if (hybridToolJsonHold)
                 {
-                    _logger.LogInfo(GameLogFeature.Llm,
-                        "MeaiLlmClient: Unbound-tool streaming — tools are declared but no MEAI AIFunctions are bound for this role. " +
-                        "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
+                    if (unboundToolsRequested)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Unbound-tool streaming — tools are declared but no MEAI AIFunctions are bound for this role. " +
+                            "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
+                    }
+                    else
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Hybrid tool-json hold (bound tools) — assistant text streams only through the safe prefix; " +
+                            "from the opening `{` of a text-shaped tool call, output is held until the JSON object completes or the turn ends, then stripped before user-visible emission.");
+                    }
+
                     yield return new LlmStreamChunk { BufferedStreamingNoToolBinding = true };
                 }
 
@@ -474,7 +482,7 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
 
-                    if (streamLiveTokens && aiTools.Count > 0 &&
+                    if (aiTools.Count > 0 &&
                         nativeToolCalls.Count > nativeToolCountBeforeUpdate &&
                         !emittedToolProgressTypingHint)
                     {
@@ -495,7 +503,7 @@ namespace CoreAI.Infrastructure.Llm
                     chunkCount++;
                     iterationVisible.Append(visible);
                     visibleChunks.Add(visible);
-                    if (streamLiveTokens)
+                    if (streamLiveNoTools)
                     {
                         foreach (string part in SplitForLiveUiStreaming(visible, LiveUiStreamMaxCharsPerChunk))
                         {
@@ -505,7 +513,7 @@ namespace CoreAI.Infrastructure.Llm
 
                         streamedVisibleToConsumer = true;
                     }
-                    else if (unboundToolsRequested)
+                    else if (hybridToolJsonHold)
                     {
                         string full = iterationVisible.ToString();
                         int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
@@ -544,7 +552,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     iterationVisible.Append(tail);
                     visibleChunks.Add(tail);
-                    if (streamLiveTokens)
+                    if (streamLiveNoTools)
                     {
                         foreach (string part in SplitForLiveUiStreaming(tail, LiveUiStreamMaxCharsPerChunk))
                         {
@@ -554,7 +562,7 @@ namespace CoreAI.Infrastructure.Llm
 
                         streamedVisibleToConsumer = true;
                     }
-                    else if (unboundToolsRequested)
+                    else if (hybridToolJsonHold)
                     {
                         string full = iterationVisible.ToString();
                         int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
@@ -668,29 +676,17 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 yield return new LlmStreamChunk { Text = cleanedText };
                             }
-                            else if (unboundToolsRequested && hybridRawExclusiveEndEmitted > 0)
+                            else if (hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0)
                             {
-                                string rawPrefix = visibleText.Substring(0,
-                                    Math.Min(hybridRawExclusiveEndEmitted, visibleText.Length));
-                                string rawPrefixTrimEnd = rawPrefix.TrimEnd();
-                                int skipLen = 0;
-                                if (cleanedText.StartsWith(rawPrefix, StringComparison.Ordinal))
+                                string suffix = GetCleanedTextSuffixAfterHybridPrefix(
+                                    cleanedText, visibleText, hybridRawExclusiveEndEmitted);
+                                if (!string.IsNullOrEmpty(suffix))
                                 {
-                                    skipLen = rawPrefix.Length;
-                                }
-                                else if (rawPrefixTrimEnd.Length > 0 &&
-                                         cleanedText.StartsWith(rawPrefixTrimEnd, StringComparison.Ordinal))
-                                {
-                                    skipLen = rawPrefixTrimEnd.Length;
-                                }
-
-                                if (skipLen > 0 && cleanedText.Length > skipLen)
-                                {
-                                    yield return new LlmStreamChunk { Text = cleanedText.Substring(skipLen) };
-                                }
-                                else if (skipLen == 0)
-                                {
-                                    yield return new LlmStreamChunk { Text = cleanedText };
+                                    foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
+                                    {
+                                        cancellationToken.ThrowIfCancellationRequested();
+                                        yield return new LlmStreamChunk { Text = part };
+                                    }
                                 }
                             }
                         }
@@ -719,6 +715,20 @@ namespace CoreAI.Infrastructure.Llm
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                     {
                         yield return new LlmStreamChunk { Text = cleanedText };
+                    }
+                    else if (streamedVisibleToConsumer && hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0 &&
+                             !string.IsNullOrWhiteSpace(cleanedText))
+                    {
+                        string suffix = GetCleanedTextSuffixAfterHybridPrefix(
+                            cleanedText, visibleText, hybridRawExclusiveEndEmitted);
+                        if (!string.IsNullOrEmpty(suffix))
+                        {
+                            foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+                        }
                     }
 
                     List<MEAI.AIContent> assistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();
@@ -778,7 +788,7 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
                 }
-                else if (unboundToolsRequested && hybridRawExclusiveEndEmitted < visibleText.Length)
+                else if (hybridToolJsonHold && hybridRawExclusiveEndEmitted < visibleText.Length)
                 {
                     string rest = visibleText.Substring(hybridRawExclusiveEndEmitted);
                     if (!string.IsNullOrEmpty(rest))
@@ -905,9 +915,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Pattern-aware tool call extraction from text.
-        /// Only matches JSON objects that contain both "name" and "arguments" keys.
-        /// Supports multiple tool calls in a single text. Ignores JSON inside
-        /// fenced code blocks (```...```) to avoid false positives.
+        /// Matches JSON objects that contain both "name" and "arguments" keys (outside fenced ``` blocks),
+        /// then falls back to <see cref="LlmToolCallTextExtractor"/> for pseudo-syntax memory writes
+        /// (e.g. Qwen: <c>Action=write content="..."</c>).
         /// </summary>
         internal static bool TryExtractToolCallsFromText(
             string text,
@@ -930,7 +940,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (candidates.Count == 0)
             {
-                return false;
+                return TryPortableToolExtract(text, out toolCalls, out cleanedText);
             }
 
             // Build cleaned text by removing all found tool-call JSON spans (from original text)
@@ -972,7 +982,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (toolCalls.Count == 0)
             {
-                return false;
+                return TryPortableToolExtract(text, out toolCalls, out cleanedText);
             }
 
             // Append remaining text after last tool call
@@ -983,6 +993,42 @@ namespace CoreAI.Infrastructure.Llm
 
             cleanedText = cleanBuilder.ToString().Trim();
             return true;
+        }
+
+        /// <summary>
+        /// Delegates to <see cref="LlmToolCallTextExtractor"/> for parity with <see cref="SmartToolCallingChatClient"/>
+        /// and picks up pseudo-syntax memory writes (Qwen / llama.cpp) when brace-count JSON extraction finds nothing.
+        /// </summary>
+        private static bool TryPortableToolExtract(
+            string text,
+            out List<MEAI.FunctionCallContent> toolCalls,
+            out string cleanedText)
+        {
+            toolCalls = new List<MEAI.FunctionCallContent>();
+            cleanedText = text ?? string.Empty;
+            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches, out cleanedText))
+            {
+                return false;
+            }
+
+            foreach (LlmToolCallTextExtractor.Match m in matches)
+            {
+                try
+                {
+                    Dictionary<string, object?> arguments =
+                        JsonConvert.DeserializeObject<Dictionary<string, object?>>(m.ArgumentsJson)
+                        ?? new Dictionary<string, object?>();
+
+                    string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
+                    toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
+                }
+                catch
+                {
+                    // malformed arguments JSON — skip
+                }
+            }
+
+            return toolCalls.Count > 0;
         }
 
         /// <summary>
@@ -1084,7 +1130,49 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// For unbound tool streaming: largest <paramref name="text"/> prefix that can be emitted as raw
+        /// For hybrid tool-json streaming (bound or unbound): after <see cref="TryExtractToolCallsFromText"/> yields
+        /// <paramref name="cleanedText"/>, emit only the suffix not already streamed as the safe raw prefix
+        /// (<paramref name="hybridRawExclusiveEndEmitted"/> bytes of <paramref name="visibleText"/>).
+        /// </summary>
+        internal static string? GetCleanedTextSuffixAfterHybridPrefix(
+            string cleanedText,
+            string visibleText,
+            int hybridRawExclusiveEndEmitted)
+        {
+            if (string.IsNullOrWhiteSpace(cleanedText) || hybridRawExclusiveEndEmitted <= 0)
+            {
+                return null;
+            }
+
+            string rawPrefix = visibleText.Substring(0,
+                Math.Min(hybridRawExclusiveEndEmitted, visibleText.Length));
+            string rawPrefixTrimEnd = rawPrefix.TrimEnd();
+            int skipLen = 0;
+            if (cleanedText.StartsWith(rawPrefix, StringComparison.Ordinal))
+            {
+                skipLen = rawPrefix.Length;
+            }
+            else if (rawPrefixTrimEnd.Length > 0 &&
+                     cleanedText.StartsWith(rawPrefixTrimEnd, StringComparison.Ordinal))
+            {
+                skipLen = rawPrefixTrimEnd.Length;
+            }
+
+            if (skipLen > 0 && cleanedText.Length > skipLen)
+            {
+                return cleanedText.Substring(skipLen);
+            }
+
+            if (skipLen == 0)
+            {
+                return cleanedText;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// For hybrid tool-json streaming (bound or unbound): largest <paramref name="text"/> prefix that can be emitted as raw
         /// without splitting a text-shaped tool JSON (complete <see cref="FindToolCallJsonSpans"/> hits) or
         /// an incomplete balanced <c>{</c>…<c>EOF</c> object tail (same brace rules as span scan).
         /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.

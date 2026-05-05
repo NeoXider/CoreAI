@@ -17,6 +17,10 @@ namespace CoreAI.Ai
     /// keys. JSON inside fenced code blocks (<c>```...```</c>) is excluded by default to avoid
     /// stripping example snippets shown by the model.
     /// </para>
+    /// <para>
+    /// Fallback: local GGUF models sometimes emit pseudo key=value lines such as
+    /// <c>Action=write content="..."</c> instead of JSON — those are mapped to the <c>memory</c> tool when detected.
+    /// </para>
     /// </summary>
     public static class LlmToolCallTextExtractor
     {
@@ -61,7 +65,7 @@ namespace CoreAI.Ai
             List<(int Start, int Length)> spans = FindBalancedToolCallSpans(searchText);
             if (spans.Count == 0)
             {
-                return false;
+                return TryExtractMemoryPseudoWriteSyntax(text, out matches, out cleanedText);
             }
 
             StringBuilder cleanBuilder = new(text.Length);
@@ -94,7 +98,7 @@ namespace CoreAI.Ai
 
             if (matches.Count == 0)
             {
-                return false;
+                return TryExtractMemoryPseudoWriteSyntax(text, out matches, out cleanedText);
             }
 
             if (lastEnd < text.Length)
@@ -103,6 +107,75 @@ namespace CoreAI.Ai
             }
 
             cleanedText = cleanBuilder.ToString().Trim();
+            return true;
+        }
+
+        /// <summary>
+        /// GGUF / llama.cpp stacks (e.g. Qwen via LLMUnity) sometimes emit pseudo key=value “tool” lines
+        /// instead of JSON tool calls, e.g. <c>Action=write content="exam on June 15"</c>. Map to the
+        /// <c>memory</c> tool so the pipeline can persist and strip the noise.
+        /// </summary>
+        private static bool TryExtractMemoryPseudoWriteSyntax(string text, out List<Match> matches, out string cleanedText)
+        {
+            matches = new List<Match>();
+            cleanedText = text ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            System.Text.RegularExpressions.Match actionWrite =
+                Regex.Match(text, @"\b[Aa]ction\s*=\s*write\b");
+            if (!actionWrite.Success)
+            {
+                return false;
+            }
+
+            int aw = actionWrite.Index;
+            string tailFromAction = text.Substring(aw);
+            System.Text.RegularExpressions.Match contentMatch = Regex.Match(
+                tailFromAction,
+                @"\bcontent\s*=\s*(?<q>[""'])(?<v>(?:\\.|(?!\k<q>).)*)\k<q>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            if (!contentMatch.Success)
+            {
+                return false;
+            }
+
+            string content = contentMatch.Groups["v"].Value;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return false;
+            }
+
+            int spanEnd = aw + contentMatch.Index + contentMatch.Length;
+            string tail = text.Substring(spanEnd);
+            System.Text.RegularExpressions.Match noise =
+                Regex.Match(tail, @"^\s*(?:\w+\s*=\s*[""'][^""']*[""']\s*)+");
+            if (noise.Success)
+            {
+                spanEnd += noise.Length;
+            }
+
+            while (spanEnd > aw && spanEnd <= text.Length && char.IsWhiteSpace(text[spanEnd - 1]))
+            {
+                spanEnd--;
+            }
+
+            string argsJson = JsonConvert.SerializeObject(new Dictionary<string, object>
+            {
+                ["action"] = "write",
+                ["content"] = content
+            });
+
+            matches.Add(new Match("memory", argsJson, aw, spanEnd - aw));
+
+            string cleaned = spanEnd <= text.Length
+                ? text.Substring(0, aw) + text.Substring(spanEnd)
+                : text.Substring(0, aw);
+
+            cleanedText = cleaned.Trim();
             return true;
         }
 

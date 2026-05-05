@@ -272,3 +272,7 @@ policy.SetMemoryToolForAll(false);        // Disable for ALL (ChatHistory only)
 | `MEMORY_STORE_CUSTOM_BACKENDS.md` | PlayerPrefs / cloud / composite `IAgentMemoryStore` patterns |
 | `AiOrchestrator.cs` | Orchestrator: injects memory into system prompt |
 | `MeaiLlmUnityClient.cs` | LLMUnity with MEAI: MemoryTool (Type 1) and ChatHistory (Type 2) |
+
+### Clearing saves in the Editor
+
+**CoreAI → Delete All Persistent Saves...** (only when **not** in Play Mode) deletes the entire **`Application.persistentDataPath/CoreAI`** tree — **AgentMemory** (memory + persisted chat JSON), **ConversationSummaries**, **LuaScriptVersions**, **DataOverlayVersions**. Use for a clean persistence baseline while testing.

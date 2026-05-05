@@ -1,6 +1,6 @@
 # Custom memory backends (PlayerPrefs, cloud, composite)
 
-CoreAI treats **MemoryTool** (long-term `memory` string) and **ChatHistory** (session dialogue) through one contract: [`IAgentMemoryStore`](../../CoreAI/Runtime/Core/Features/AgentMemory/IAgentMemoryStore.cs). The default Unity implementation is [`FileAgentMemoryStore`](../Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs) (JSON under `Application.persistentDataPath/CoreAI/AgentMemory/`). **WebGL:** this store is supported — `persistentDataPath` is backed by the browser (IndexedDB / Unity virtual FS); respect storage quotas and expect weaker guarantees in private browsing mode.
+CoreAI treats **MemoryTool** (long-term `memory` string) and **ChatHistory** (session dialogue) through one contract: [`IAgentMemoryStore`](../../CoreAI/Runtime/Core/Features/AgentMemory/IAgentMemoryStore.cs). The default Unity implementation is [`FileAgentMemoryStore`](../Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs) (JSON under `Application.persistentDataPath/CoreAI/AgentMemory/`). **Editor:** to wipe **all** CoreAI persistence under `persistentDataPath/CoreAI` at once (memory, summaries, version stores), use **CoreAI → Delete All Persistent Saves...** (not during Play Mode). **WebGL:** this store is supported — `persistentDataPath` is backed by the browser (IndexedDB / Unity virtual FS); respect storage quotas and expect weaker guarantees in private browsing mode.
 
 You **can** replace it with:
 

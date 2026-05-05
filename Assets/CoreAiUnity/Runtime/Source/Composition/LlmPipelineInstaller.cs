@@ -31,8 +31,12 @@ namespace CoreAI.Composition
         {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
 
-            // Lazy provider вместо FindFirstObjectByType в composition root
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+            // Lazy provider: сцена, либо автосозданный LLM+LLMAgent по Core AI Settings (см. ConfigurableLlmAgentProvider).
+            builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
+#else
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
+#endif
 
             builder.Register(c =>
             {
@@ -232,15 +236,10 @@ namespace CoreAI.Composition
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);
             if (agent == null) return null;
 
-            LLM llm = agent.GetComponent<LLM>();
-            if (llm != null && settings != null && settings.LlmUnityDontDestroyOnLoad)
+            LLM llm = agent.llm != null ? agent.llm : agent.GetComponent<LLM>();
+            if (llm != null && settings != null)
             {
-                llm.dontDestroyOnLoad = true;
-            }
-
-            if (llm != null)
-            {
-                LlmUnityModelBootstrap.TryAutoAssignResolvableModel(llm, logger);
+                LlmUnityHostConfigurator.ApplyFromSettings(llm, agent, settings, logger);
             }
 
             if (llm != null && string.IsNullOrWhiteSpace(llm.model))

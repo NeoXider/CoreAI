@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "1.7.2",
+  "version": "1.7.4",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.7.2: WebGL **`CoreAiPersistFs`** — single-flight **`FS.syncfs`** (fixes concurrent sync warning / stalls after several chat turns). v1.7.1: chat typing after tool-hint marker. v1.7.0: buffered streaming + temperature override + HTTP retries.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v1.7.4: LLMUnity runtime auto-host + GGUF from Core AI Settings + autostart; `LlmUnityModelBootstrap.TryAssignModelFromGgufHint`. v1.7.3: streaming hybrid JSON-hold for bound tools + cleaned suffix after Path 2; PlayMode MultiToolChain retry. v1.7.2: WebGL **`CoreAiPersistFs`** single-flight **`FS.syncfs`**. v1.7.1: chat typing after tool-hint marker. v1.7.0: buffered streaming + temperature override + HTTP retries.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "1.7.2"
+    "com.nexoider.coreai": "1.7.4"
   }
 }

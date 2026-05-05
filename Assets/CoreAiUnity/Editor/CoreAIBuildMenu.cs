@@ -1,8 +1,10 @@
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using CoreAI.Composition;
+using CoreAI.Infrastructure;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -46,6 +48,58 @@ namespace CoreAI.Editor
         public static void SetRogueliteArenaFirstInBuild()
         {
             MoveSceneFirstInBuild(RogueliteArenaScene, "RogueliteArena");
+        }
+
+        /// <summary>
+        /// Удаляет <c>Application.persistentDataPath/CoreAI</c> — память агентов, чат, сводки, версии Lua/оверлеев.
+        /// Не трогает ассеты проекта (только рантайм-сейвы редактора/билда).
+        /// </summary>
+        [MenuItem("CoreAI/Delete All Persistent Saves...", false, 60)]
+        public static void DeleteAllPersistentSaves()
+        {
+            if (EditorApplication.isPlaying)
+            {
+                EditorUtility.DisplayDialog(
+                    "CoreAI",
+                    "Удаление сохранений недоступно во время Play Mode. Остановите воспроизведение и повторите.",
+                    "OK");
+                return;
+            }
+
+            string root = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName);
+            if (!EditorUtility.DisplayDialog(
+                    "CoreAI — удаление сохранений",
+                    "Удалить все файлы CoreAI в persistentDataPath?\n\n" +
+                    "• AgentMemory — память агентов и история чата\n" +
+                    "• ConversationSummaries — сводки для компакции\n" +
+                    "• LuaScriptVersions — версии Lua Programmer\n" +
+                    "• DataOverlayVersions — оверлеи данных\n\n" +
+                    root,
+                    "Удалить",
+                    "Отмена"))
+            {
+                return;
+            }
+
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                    CoreAIEditorLog.Log($"Persistent saves deleted: {root}");
+                    EditorUtility.DisplayDialog("CoreAI", "Каталог удалён:\n" + root, "OK");
+                }
+                else
+                {
+                    CoreAIEditorLog.Log($"CoreAI persistent folder not found (nothing to delete): {root}");
+                    EditorUtility.DisplayDialog("CoreAI", "Каталог не найден (удалять нечего):\n" + root, "OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                CoreAIEditorLog.LogError($"Failed to delete persistent saves: {ex.Message}");
+                EditorUtility.DisplayDialog("CoreAI", "Не удалось удалить каталог:\n" + ex.Message, "OK");
+            }
         }
 
         [MenuItem("CoreAI/Settings", priority = 1)]
@@ -135,7 +189,7 @@ namespace CoreAI.Editor
         [MenuItem("CoreAI/Setup/Validate Scene", priority = 3)]
         public static void ValidateScene()
         {
-            CoreAILifetimeScope scope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
+            CoreAILifetimeScope scope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (scope == null)
             {
                 CoreAIEditorLog.LogError("Validate Scene: CoreAILifetimeScope is missing in scene.");
@@ -183,7 +237,7 @@ namespace CoreAI.Editor
         public static void CreateSceneSetup()
         {
             // 1. Проверка: не дублировать CoreAILifetimeScope
-            CoreAILifetimeScope existingScope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
+            CoreAILifetimeScope existingScope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (existingScope != null)
             {
                 if (!EditorUtility.DisplayDialog(
@@ -251,7 +305,7 @@ namespace CoreAI.Editor
                 (needsLlmUnity ? " + LLM + LLMAgent." : "."));
         }
 
-        private static void SetPropertyIfExists(SerializedObject so, string propertyName, Object value)
+        private static void SetPropertyIfExists(SerializedObject so, string propertyName, UnityEngine.Object value)
         {
             SerializedProperty prop = so.FindProperty(propertyName);
             if (prop != null)
@@ -416,7 +470,7 @@ namespace CoreAI.Editor
         /// <summary>Optional LLMUnity integration: no compile-time reference to the package.</summary>
         private static MonoBehaviour TryFindMonoBehaviourByTypeName(string typeName)
         {
-            foreach (MonoBehaviour mb in Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include,
+            foreach (MonoBehaviour mb in UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include,
                          FindObjectsSortMode.None))
             {
                 if (mb != null && mb.GetType().Name == typeName)
@@ -434,7 +488,7 @@ namespace CoreAI.Editor
             AgentPromptsManifest prompts,
             CoreAiPrefabRegistryAsset prefabs)
         {
-            CoreAILifetimeScope scope = Object.FindFirstObjectByType<CoreAILifetimeScope>();
+            CoreAILifetimeScope scope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (scope == null)
             {
                 return;

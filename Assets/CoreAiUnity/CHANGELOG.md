@@ -2,6 +2,32 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.7.4] - 2026-05-05
+
+### LLMUnity — runtime host, GGUF from Core AI Settings, autostart
+
+- **`ConfigurableLlmAgentProvider`** — replaces scene-only **`SceneLlmAgentProvider`** on desktop: if no **`LLMAgent`** is found and **`LlmUnityAutoCreateRuntimeHost`** is on (default), creates **`CoreAI_LLMUnity_Runtime`** (`LLM` + **`LLMAgent`**, **`remote`** off) and applies **`CoreAISettingsAsset`** (GPU layers, **DontDestroyOnLoad**, GGUF).
+- **`LlmUnityHostConfigurator`** + **`TryAssignModelFromGgufHint`** — assigns **`LLM.model`** from **`GgufModelPath`** (exact filename vs Model Manager, or full disk path) **before** Model Manager fallback (fixes wrong **0.8B** pick when **9B** is set only on the Core AI asset).
+- **`LlmUnityAutostartEntryPoint`** — optional warm-up of the local server after DI (**`LlmUnityAutostartLocalServer`**, default on); timeout uses **`LlmUnityStartupTimeoutSeconds`**.
+- **`LlmUnityAutoDisableIfNoModel`** — tries **`CoreAISettingsAsset.GgufModelPath`** before disabling empty **`LLM.model`**.
+- **Tests:** **`LlmUnityGgufHintNormalizationEditModeTests`** (`NormalizeGgufHintToFileName`).
+- **Docs:** **`LLMUNITY_SETUP_AND_MODELS.md`**.
+- **Dependency:** **`com.nexoider.coreai` `1.7.4`** — lockstep semver.
+
+#### Package **`1.7.4`**.
+
+## [1.7.3] - 2026-05-05
+
+### Streaming — hybrid JSON hold for bound tools + suffix after Path 2
+
+- **`MeaiLlmClient.CompleteStreamingAsync`** — when **`Tools`** is non-empty and **`BufferFullStreamingIterationWhenToolsDeclared`** is not **`true`**, uses the same **hybrid JSON hold** previously applied mainly to unbound iterations: avoids leaking incomplete tool JSON into live UI tokens while still streaming safe prefixes. After native **`delta.tool_calls`** (Path 2) or text extraction, any assistant text not yet forwarded is reconciled via **`GetCleanedTextSuffixAfterHybridPrefix`** and emitted as trailing **`Text`** chunks.
+- **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** — portable flag (**`com.nexoider.coreai` `1.7.3`**): full-iteration buffer vs hybrid (default).
+- **Tests:** **`MeaiLlmClientEditModeTests.GetCleanedTextSuffixAfterHybridPrefix_*`**; **`MultiToolChainPlayModeTests`** — second **`AiTaskRequest`** if the memory marker is missing after the first hop (flaky LLMUnity timing).
+- **Docs:** **`STREAMING_ARCHITECTURE.md`**, **`DEVELOPER_GUIDE.md`**, **`TESTING_TOOL_CALLING.md`**.
+- **Dependency:** **`com.nexoider.coreai` `1.7.3`** — lockstep semver.
+
+#### Package **`1.7.3`**.
+
 ## [1.7.2] - 2026-05-05
 
 ### WebGL — IDBFS `FS.syncfs` single-flight (`CoreAiPersistFs`)

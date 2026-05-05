@@ -18,9 +18,11 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator AfterSwitchToThreadPool_InvokeAsync_RunsDelegateOnUnityMainManagedThread()
         {
-            // Let Application.onBeforeRender / scene-load primers refresh the Editor isPlaying mirror once
-            // before MEAI-style thread-pool continuations read it (avoids stale 0 vs 1 on the first Play frame).
+            // Let Application.onBeforeRender update the Editor isPlaying mirror before any pool continuation
+            // reads Volatile state. One yield is not always enough: worker code can run earlier in the same frame
+            // than onBeforeRender, so the mirror still looks like Edit idle (0) and the inline path breaks the test.
             yield return null;
+            yield return new WaitForEndOfFrame();
 
             int mainCapturedAtTestStart = Thread.CurrentThread.ManagedThreadId;
             var tcs = new TaskCompletionSource<int>();

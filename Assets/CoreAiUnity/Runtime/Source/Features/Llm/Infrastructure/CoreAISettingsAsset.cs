@@ -126,6 +126,22 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string llmUnityAgentName = "";
 
+        [Tooltip(
+            "When no LLMAgent exists in loaded scenes, spawn a hidden LLM+LLMAgent host (see Runtime host name). " +
+            "Disable if you always place LLMAgent in the scene manually.")]
+        [SerializeField]
+        private bool llmUnityAutoCreateRuntimeHost = true;
+
+        [Tooltip("GameObject name for the auto-created LLMUnity host. Empty = CoreAI_LLMUnity_Runtime.")]
+        [SerializeField]
+        private string llmUnityRuntimeHostObjectName = "";
+
+        [Tooltip(
+            "After play starts, warm up the local llama.cpp server so the first chat request is faster. " +
+            "Uses Startup Timeout from this asset. Disable to defer load until the first LLM call.")]
+        [SerializeField]
+        private bool llmUnityAutostartLocalServer = true;
+
         [Tooltip("Relative GGUF path; falls back to LLMUnity model manager hints when empty.")]
         [SerializeField]
         private string ggufModelPath = "Qwen3.5-2B-Q4_K_M.gguf";
@@ -163,6 +179,12 @@ namespace CoreAI.Infrastructure.Llm
         [TextArea(3, 6)]
         [SerializeField]
         private string universalSystemPromptPrefix = "Respond concisely and to the point. Avoid unnecessary verbosity.";
+
+        [Tooltip(
+            "Optional lines appended after the built-in ## Tool Contract block when a role has tools (before the tool list). Leave empty to use only default guidance.")]
+        [TextArea(2, 8)]
+        [SerializeField]
+        private string toolContractAdditionalInstructions = "";
 
         [Tooltip(
             "Max Programmer Lua auto-repair attempts before aborting the repair loop (resets after success).")]
@@ -449,6 +471,15 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Optional LLMAgent GameObject identifier.</summary>
         public string LlmUnityAgentName => llmUnityAgentName;
 
+        /// <summary>Spawn LLM+LLMAgent at runtime when none exists in scenes.</summary>
+        public bool LlmUnityAutoCreateRuntimeHost => llmUnityAutoCreateRuntimeHost;
+
+        /// <summary>Custom name for auto-created host GameObject.</summary>
+        public string LlmUnityRuntimeHostObjectName => llmUnityRuntimeHostObjectName ?? "";
+
+        /// <summary>Warm up local GGUF server shortly after game start.</summary>
+        public bool LlmUnityAutostartLocalServer => llmUnityAutostartLocalServer;
+
         /// <summary>Relative GGUF location for LLMUnity.</summary>
         public string GgufModelPath => ggufModelPath ?? "";
 
@@ -476,6 +507,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Universal system preamble.</summary>
         public string UniversalSystemPromptPrefix => universalSystemPromptPrefix ?? "";
+
+        /// <inheritdoc cref="ICoreAISettings.ToolContractAdditionalInstructions"/>
+        public string ToolContractAdditionalInstructions => toolContractAdditionalInstructions ?? "";
 
         /// <summary>Clamp for Programmer Lua retries.</summary>
         public int MaxLuaRepairRetries => maxLuaRepairRetries < 1 ? 3 : maxLuaRepairRetries;

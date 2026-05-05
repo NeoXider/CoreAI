@@ -23,7 +23,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** **`WebGlNativeStreaming`** (fetch + jslib; default **on** for new settings assets since **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **`UnityWebRequest`** path when the flag is off — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **WebGL IL2CPP / LLVM OOM** — [`WEBGL_BUILD_TROUBLESHOOTING`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
-**Current packages:** **`com.nexoider.coreai`** portable core **`1.7.2`** · **`com.nexoider.coreaiunity`** Unity layer **`1.7.2`** (same semver; manifest pins the core dependency from the Unity package). **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** since **v1.6.19** (see Unity changelog).
+**Current packages:** **`com.nexoider.coreai`** portable core **`1.7.4`** · **`com.nexoider.coreaiunity`** Unity layer **`1.7.4`** (same semver; manifest pins the core dependency from the Unity package). **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** since **v1.6.19** (see Unity changelog).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -435,6 +435,8 @@ var storyteller = new AgentBuilder("Storyteller")
 Start from the index and pick the level that matches your goal:
 
 > 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — full documentation map (Beginner → Intermediate → Architecture).
+
+**Reset CoreAI file persistence (Editor):** **CoreAI → Delete All Persistent Saves...** (exit Play Mode first) deletes **`persistentDataPath/CoreAI`** — agent memory, persisted chat JSON, summaries (desktop), Lua/data-overlay version files. Project assets under `Assets/` are untouched. See [TROUBLESHOOTING.md](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).
 
 ### Getting started
 

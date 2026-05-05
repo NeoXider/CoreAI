@@ -62,7 +62,9 @@ namespace CoreAI.Ai
                 _ =>
                     $"You are agent \"{roleId}\" in CoreAI. Follow the user message and any session hints; prefer structured output when the game requests it."
             };
-            systemPrompt = BuiltInAgentSystemPromptTexts.WithUniversalPrefix(basePrompt);
+            // Universal prefix is Layer 1 in <see cref="AiPromptComposer.GetSystemPrompt"/> only — do not prepend here
+            // or every orchestrator request duplicates it (built-in strings are raw role prompts).
+            systemPrompt = basePrompt;
             return true;
         }
     }

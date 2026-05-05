@@ -161,6 +161,15 @@ namespace CoreAI.Ai
         /// in <see cref="Tools"/>. Ignored for other modes.
         /// </summary>
         public string RequiredToolName { get; set; } = "";
+
+        /// <summary>
+        /// When <see cref="Tools"/> is non-empty, streaming can either buffer the entire assistant
+        /// iteration before emitting any <see cref="LlmStreamChunk.Text"/> (<c>true</c>), or use the default
+        /// hybrid hold (<c>null</c>/<c>false</c>): stream only the prefix that cannot be part of an
+        /// incomplete text-shaped tool JSON, then hold until balanced <c>{...}</c> closes. Full buffer is a
+        /// compatibility escape hatch for exotic delta fragmentation.
+        /// </summary>
+        public bool? BufferFullStreamingIterationWhenToolsDeclared { get; set; }
     }
 
     /// <summary>

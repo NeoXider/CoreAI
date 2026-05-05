@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
@@ -88,10 +89,16 @@ namespace CoreAI.Ai
                 };
             }
 
-            string system = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.SmartChat, out string sys) &&
-                            !string.IsNullOrWhiteSpace(sys)
+            string baseSystem = _systemPrompts.TryGetSystemPrompt(BuiltInAgentRoleIds.SmartChat, out string sys) &&
+                                !string.IsNullOrWhiteSpace(sys)
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
+
+            // Match <see cref="AiPromptComposer"/> Layer 1 — this service does not use the composer.
+            string prefix = CoreAISettings.UniversalSystemPromptPrefix;
+            string system = string.IsNullOrWhiteSpace(prefix)
+                ? baseSystem
+                : prefix.TrimEnd() + "\n" + baseSystem;
 
             // BUG-4 fix: snapshot history under lock, release during LLM call,
             // then re-acquire to append the response atomically.

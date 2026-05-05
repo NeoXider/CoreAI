@@ -1,5 +1,18 @@
 # Changelog
 
+## [v1.7.4] — 2026-05-05
+
+### Lockstep with coreaiunity 1.7.4 (Unity-only)
+
+- **Semver:** **`1.7.4`** with **`com.nexoider.coreaiunity` `1.7.4`**. No portable **`CoreAI.Core`** API changes — Unity release documents LLMUnity runtime host defaults (see Unity changelog).
+
+## [v1.7.3] — 2026-05-05
+
+### Streaming request option (lockstep with coreaiunity 1.7.3)
+
+- **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** — optional **`bool?`**. When **`Tools`** is non-empty: **`true`** buffers the full assistant iteration before emitting any **`LlmStreamChunk.Text`**; **`null`**/**`false`** (default) keeps the **hybrid JSON hold** (stream only the prefix that cannot be part of incomplete text-shaped tool JSON, then hold until balanced **`{...}`** closes). Intended as an escape hatch for exotic delta fragmentation; Unity **`MeaiLlmClient`** implements both modes.
+- **Semver:** **`1.7.3`** with **`com.nexoider.coreaiunity` `1.7.3`**.
+
 ## [v1.7.2] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.7.2 (WebGL)

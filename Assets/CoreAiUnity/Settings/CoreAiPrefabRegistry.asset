@@ -12,4 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 77a1b546f6ae4f2428a4b0c3f3fa1414, type: 3}
   m_Name: CoreAiPrefabRegistry
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Infrastructure.World.CoreAiPrefabRegistryAsset
-  entries: []
+  entries:
+  - Key: 
+    Name: 
+    Prefab: {fileID: 0}

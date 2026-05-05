@@ -2,7 +2,7 @@
 
 Pick the track that matches your current goal. Every link lands on a self-contained guide; you don't need to read them in order.
 
-> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.7.2`) · [`com.nexoider.coreaiunity`](../package.json) (`1.7.2`)
+> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.7.4`) · [`com.nexoider.coreaiunity`](../package.json) (`1.7.4`)
 > **Repo README:** [../../../README.md](../../../README.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md)
 
 ---
@@ -48,7 +48,7 @@ Install → open scene → connect LLM → press Play.
 | 7 | [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | 🤖 5 built-in roles, model selection strategy |
 | 8 | [WORLD_COMMANDS](WORLD_COMMANDS.md) | 🌍 Spawn/move/scene control from sandboxed Lua |
 | 9 | [LLMUNITY_SETUP_AND_MODELS](LLMUNITY_SETUP_AND_MODELS.md) | 📦 LLMUnity, GGUF, OpenAI HTTP, Lua pipeline |
-| 9b | [TROUBLESHOOTING](TROUBLESHOOTING.md) | 🔧 Model silent, Lua crashed, memory not written, **PlayMode HTTP 500 / LM Studio (0.25.7+)** |
+| 9b | [TROUBLESHOOTING](TROUBLESHOOTING.md) | 🔧 Model silent, Lua crashed, memory not written, **PlayMode HTTP 500 / LM Studio (0.25.7+)**; **CoreAI → Delete All Persistent Saves...** clears `persistentDataPath/CoreAI` |
 
 ---
 

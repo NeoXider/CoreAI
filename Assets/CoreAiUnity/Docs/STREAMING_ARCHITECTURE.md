@@ -218,6 +218,10 @@ For cloud providers (OpenAI, Anthropic via OpenRouter) that emit `delta.tool_cal
 
 If the SSE stream contains `FunctionCallContent`, `MeaiLlmClient` uses native detection instead of text extraction.
 
+### Hybrid hold when tools are declared (v1.7.3+)
+
+When **`Tools`** is non-empty, **`MeaiLlmClient.CompleteStreamingAsync`** applies the **hybrid JSON hold** to **bound** and **unbound** tool registrations alike — unless **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** is **`true`**, which buffers the entire assistant iteration before any **`LlmStreamChunk.Text`** (escape hatch for exotic delta fragmentation). Live tokens stop before a suspected text-shaped tool JSON object; after Path 1 extraction or Path 2 **`delta.tool_calls`**, any assistant prefix that was not yet forwarded is reconciled against the cleaned, JSON-stripped text and emitted as trailing **`Text`** chunks so short prefixes (for example “Working…”) are not lost.
+
 ### Shared execution policy
 
 Both streaming and non-streaming paths use `ToolExecutionPolicy` for:

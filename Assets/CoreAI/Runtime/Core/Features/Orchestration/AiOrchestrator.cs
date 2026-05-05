@@ -717,7 +717,7 @@ namespace CoreAI.Ai
             return filtered;
         }
 
-        private static string AppendToolContract(
+        private string AppendToolContract(
             string system,
             IReadOnlyList<ILlmTool> tools,
             AiTaskRequest task)
@@ -731,10 +731,30 @@ namespace CoreAI.Ai
             sb.Append(string.IsNullOrWhiteSpace(system) ? "" : system.Trim());
             sb.AppendLine();
             sb.AppendLine();
-            sb.AppendLine("## Tool Contract");
-            sb.AppendLine("You have native tool-calling available for this role. When the user/task asks to use or call a tool, call the matching tool through the tool interface; do not claim that the tool is unavailable, and do not simulate successful execution in prose.");
-            sb.AppendLine("Pass arguments as structured tool arguments matching the schema. Required values mentioned in the task (for example targetName, itemName, quantity, action) must be passed as tool arguments, not only described in text.");
-            sb.AppendLine("After a tool succeeds, summarize the real tool result briefly for the user.");
+            AiOrchestratorToolContractDefaults.AppendStandardSection(sb);
+
+            string extra = _settings.ToolContractAdditionalInstructions?.Trim();
+            if (!string.IsNullOrEmpty(extra))
+            {
+                sb.AppendLine(extra);
+            }
+
+            bool hasMemoryTool = false;
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool != null &&
+                    string.Equals(tool.Name?.Trim(), "memory", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasMemoryTool = true;
+                    break;
+                }
+            }
+
+            if (hasMemoryTool)
+            {
+                sb.AppendLine(
+                    "Example memory tool call for text-shaped backends: {\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"fact to remember\"}}");
+            }
 
             if (task != null && task.ForcedToolMode == LlmToolChoiceMode.RequireSpecific &&
                 !string.IsNullOrWhiteSpace(task.RequiredToolName))
