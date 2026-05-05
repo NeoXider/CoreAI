@@ -1,10 +1,24 @@
 # Changelog
 
+## [v1.7.2] — 2026-05-05
+
+### Lockstep with coreaiunity 1.7.2 (WebGL)
+
+- **Semver:** **`1.7.2`** with **`com.nexoider.coreaiunity` `1.7.2`**. No portable **`CoreAI.Core`** API changes — Unity **`CoreAiPersistFs.jslib`** now runs **`FS.syncfs`** single-flight (queues coalesced follow-up) so concurrent **`CoreAi_PersistFsSync`** calls from **`FileAgentMemoryStore`** no longer trigger Emscripten’s *“2 FS.syncfs operations in flight”* warning or related WebGL stalls.
+
+## [v1.7.1] — 2026-05-05
+
+### Lockstep & tests
+
+- **Semver:** **`1.7.1`** with **`com.nexoider.coreaiunity` `1.7.1`**. No portable API changes — Unity EditMode adds **`FailedCompletion_BackendUnavailable_RetriesAndSucceeds`** for **`LoggingLlmClientDecorator`** (result-based **`BackendUnavailable`** retry, same as **`RateLimited`** in v1.7.0).
+
 ## [v1.7.0] — 2026-05-05
 
 ### Streaming — `LlmStreamChunk` marker for buffered Meai iterations
 
 - **`LlmStreamChunk`** — **`BufferedStreamingNoToolBinding`** plus optional **`BufferedStreamingUseToolProgressHint`**. **`MeaiLlmClient.CompleteStreamingAsync`** yields marker chunks for unbound iterations, hybrid JSON hold, native tool deltas, and text-shaped tool execute (host chat: short **`StreamingToolProgressHint`** vs animated dots — see **`com.nexoider.coreaiunity` ≥ 1.7.0**).
+- **Sampling temperature:** **`ICoreAISettings.OverrideTemperature`** (default **off**). When off, **`MeaiOpenAiChatClient`** omits the JSON **`temperature`** field and **`MeaiLlmClient`** does not set MEAI **`ChatOptions.Temperature`** (HTTP + LLMUnity use backend defaults). When on, **`AiOrchestrator`** sets **`LlmCompletionRequest.SendTemperature`** and sends **`ICoreAISettings.Temperature`**. **`LlmCompletionRequest.SendTemperature`** is also set for LLM-assisted compaction. **`ConfigureHttpApi`** enables the override flag so programmatic HTTP setup still sends temperature.
+- **HTTP retries:** **`LoggingLlmClientDecorator`** now retries **`LlmCompletionResult`** with **`RateLimited`** / **`BackendUnavailable`** (same backoff as for **`LlmClientException`**). Previously only thrown exceptions retried; **`MeaiLlmClient`** converts HTTP errors to failed results, so 429 produced no **`LLM ↺`** lines and no second attempt. Default **`ICoreAISettings.MaxLlmRequestRetries`** / asset field is **1** retry (minimum clamp **1**).
 
 ## [v1.6.19] — 2026-05-05
 

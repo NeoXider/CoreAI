@@ -62,6 +62,102 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class RateLimitThenOkMock : ILlmClient
+        {
+            public int CompleteCallCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                if (CompleteCallCount == 1)
+                {
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "HTTP 429",
+                        ErrorCode = LlmErrorCode.RateLimited,
+                        HttpStatus = 429,
+                        RetryAfterSeconds = 1
+                    });
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "recovered" });
+            }
+        }
+
+        private sealed class BackendUnavailableThenOkMock : ILlmClient
+        {
+            public int CompleteCallCount;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                CompleteCallCount++;
+                if (CompleteCallCount == 1)
+                {
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = "HTTP 503",
+                        ErrorCode = LlmErrorCode.BackendUnavailable,
+                        HttpStatus = 503,
+                        RetryAfterSeconds = 1
+                    });
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "up" });
+            }
+        }
+
+        [Test]
+        [Timeout(20_000)]
+        public async Task FailedCompletion_RateLimited_RetriesAndSucceeds()
+        {
+            SpyLogger spy = new();
+            RateLimitThenOkMock inner = new();
+            LoggingLlmClientDecorator dec = new(inner, spy, requestTimeoutSeconds: 0f, maxHttpRetryAttempts: 1);
+            LlmCompletionRequest req = new()
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                TraceId = "retry-result",
+                UserPayload = "x"
+            };
+
+            LlmCompletionResult r = await dec.CompleteAsync(req);
+            Assert.IsTrue(r.Ok);
+            Assert.AreEqual("recovered", r.Content);
+            Assert.AreEqual(2, inner.CompleteCallCount);
+            string joined = string.Join("\n", spy.Lines);
+            StringAssert.Contains("LLM ↺", joined);
+            StringAssert.Contains("failed completion", joined);
+        }
+
+        [Test]
+        [Timeout(20_000)]
+        public async Task FailedCompletion_BackendUnavailable_RetriesAndSucceeds()
+        {
+            SpyLogger spy = new();
+            BackendUnavailableThenOkMock inner = new();
+            LoggingLlmClientDecorator dec = new(inner, spy, requestTimeoutSeconds: 0f, maxHttpRetryAttempts: 1);
+            LlmCompletionRequest req = new()
+            {
+                AgentRoleId = BuiltInAgentRoleIds.Creator,
+                TraceId = "retry-503",
+                UserPayload = "x"
+            };
+
+            LlmCompletionResult r = await dec.CompleteAsync(req);
+            Assert.IsTrue(r.Ok);
+            Assert.AreEqual("up", r.Content);
+            Assert.AreEqual(2, inner.CompleteCallCount);
+            string joined = string.Join("\n", spy.Lines);
+            StringAssert.Contains("LLM ↺", joined);
+            StringAssert.Contains("failed completion", joined);
+        }
+
         [Test]
         public async Task Success_LogsTraceIdAndRole()
         {

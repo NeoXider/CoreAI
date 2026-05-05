@@ -378,9 +378,15 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("Universal Prompt Prefix",
                         "Универсальный промпт — идёт ПЕРЕД промптом каждого агента"));
 
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("overrideTemperature"),
+                    new GUIContent("Override temperature",
+                        "Включите, чтобы отправлять значение Temperature в HTTP API и LLMUnity. Выключите — используется дефолт сэмплинга бэкенда (поле Temperature только для справки в Inspector)."));
+
+                EditorGUI.BeginDisabledGroup(!settings.OverrideTemperature);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("temperature"),
                     new GUIContent("Temperature",
-                        "Общая температура генерации (0.0 = детерминировано, 2.0 = креативно). Default: 0.1"));
+                        "Температура генерации (0.0 = детерминировано, 2.0 = креативно). Учитывается только при включённом Override temperature."));
+                EditorGUI.EndDisabledGroup();
 
                 EditorGUILayout.Space();
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableReasoning"),

@@ -151,6 +151,100 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            // HTTP adapters (e.g. MeaiLlmClient) often return LlmCompletionResult with ErrorCode instead of throwing —
+            // apply the same retry policy as for LlmClientException above.
+            if (result != null &&
+                !result.Ok &&
+                IsRetryableFailureResult(result, out int httpWaitFromResult) &&
+                _maxHttpRetryAttempts > 0)
+            {
+                int httpWait = httpWaitFromResult;
+                bool exhausted = true;
+                for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
+                {
+                    int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
+                    _logger.Warn(
+                        $"LLM ↺ traceId={trace} role={role} | {result.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)", LogTag.Llm);
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
+                    try
+                    {
+                        result = await _inner.CompleteAsync(request, cancellationToken);
+                        if (result != null && result.Ok)
+                        {
+                            exhausted = false;
+                            break;
+                        }
+
+                        if (!IsRetryableFailureResult(result, out httpWait))
+                        {
+                            exhausted = false;
+                            break;
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
+                    {
+                        // continue loop
+                    }
+                    catch (Exception)
+                    {
+                        exhausted = false;
+                        break;
+                    }
+#else
+                    await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                        if (result != null && result.Ok)
+                        {
+                            exhausted = false;
+                            break;
+                        }
+
+                        if (!IsRetryableFailureResult(result, out httpWait))
+                        {
+                            exhausted = false;
+                            break;
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
+                    {
+                    }
+                    catch (Exception)
+                    {
+                        exhausted = false;
+                        break;
+                    }
+#endif
+                }
+
+                if (exhausted && result != null && !result.Ok)
+                {
+                    sw.Stop();
+                    string msg = $"{result.ErrorCode} after {_maxHttpRetryAttempts} retries: {result.Error}";
+                    _logger.Warn(
+                        $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
+                    return new LlmCompletionResult
+                    {
+                        Ok = false,
+                        Error = msg,
+                        ErrorCode = result.ErrorCode,
+                        HttpStatus = result.HttpStatus,
+                        RetryAfterSeconds = result.RetryAfterSeconds,
+                        ProviderErrorBody = result.ProviderErrorBody
+                    };
+                }
+            }
+
             sw.Stop();
             double wallMs = sw.Elapsed.TotalMilliseconds;
 
@@ -197,6 +291,27 @@ namespace CoreAI.Infrastructure.Llm
                 return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Same policy as <see cref="IsRetryableHttpError"/> for adapters that surface HTTP 429/5xx as
+        /// <see cref="LlmCompletionResult"/> (e.g. MeaiLlmClient wraps exceptions into <c>Ok=false</c>).
+        /// </summary>
+        private static bool IsRetryableFailureResult(LlmCompletionResult r, out int retryAfterSeconds)
+        {
+            retryAfterSeconds = 0;
+            if (r == null || r.Ok)
+            {
+                return false;
+            }
+
+            if (r.ErrorCode != LlmErrorCode.RateLimited && r.ErrorCode != LlmErrorCode.BackendUnavailable)
+            {
+                return false;
+            }
+
+            retryAfterSeconds = r.RetryAfterSeconds ?? 0;
+            return true;
         }
 
         /// <summary>

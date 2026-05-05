@@ -100,13 +100,9 @@ namespace CoreAI.Tests.PlayMode
             Object.DontDestroyOnLoad(_rootGo);
 
             //    tool calling
-            if (settings != null && settings.Temperature > 0f)
+            if (settings != null && settings.OverrideTemperature)
             {
                 _agent.temperature = settings.Temperature;
-            }
-            else
-            {
-                _agent.temperature = 0.2f;
             }
 
             Debug.Log($"[SharedLlmUnity] Waiting for model: {_llm.model}");

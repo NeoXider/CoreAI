@@ -43,6 +43,7 @@ namespace CoreAI.Tests.EditMode
             type.GetField("contextWindowTokens", bf).SetValue(settings, 12345);
             type.GetField("universalSystemPromptPrefix", bf).SetValue(settings, "TEST PREFIX");
             type.GetField("temperature", bf).SetValue(settings, 0.99f);
+            type.GetField("overrideTemperature", bf).SetValue(settings, true);
             type.GetField("logToolCalls", bf).SetValue(settings, false);
             type.GetField("logToolCallArguments", bf).SetValue(settings, false);
             type.GetField("logToolCallResults", bf).SetValue(settings, false);
@@ -58,6 +59,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(12345, CoreAISettings.ContextWindowTokens);
             Assert.AreEqual("TEST PREFIX", CoreAISettings.UniversalSystemPromptPrefix);
             Assert.AreEqual(0.99f, CoreAISettings.Temperature);
+            Assert.IsTrue(CoreAISettings.OverrideTemperature);
             Assert.AreEqual(false, CoreAISettings.LogToolCalls);
             Assert.AreEqual(false, CoreAISettings.LogToolCallArguments);
             Assert.AreEqual(false, CoreAISettings.LogToolCallResults);
@@ -113,6 +115,7 @@ namespace CoreAI.Tests.EditMode
             // Без Instance — значения по умолчанию
             Assert.AreEqual(3, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
+            Assert.IsFalse(CoreAISettings.OverrideTemperature);
             Assert.AreEqual(false, CoreAISettings.EnableMeaiDebugLogging);
             Assert.AreEqual(8192, CoreAISettings.ContextWindowTokens);
         }

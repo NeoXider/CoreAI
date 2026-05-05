@@ -51,12 +51,12 @@ namespace CoreAI.Chat
 
         [Header("UI — Стриминг: инструмент / буфер")]
         [Tooltip(
-            "Короткая строка в индикаторе набора при вызове инструмента (native или text-shaped) " +
+            "Короткая строка в индикаторе набора при действии агента (вызов инструмента: native или text-shaped) " +
             "или при удержании tool-json в hybrid-стриме. Пустая строка — встроенный дефолт панели. " +
             "Ожидание шага без вызова инструмента (маркер без второго флага в потоке) — обычная анимация «...».")]
         [TextArea(1, 2)]
         [SerializeField]
-        private string _streamingToolProgressHint = "Инструмент…";
+        private string _streamingToolProgressHint = "Действие…";
 
         [Header("UI — Долгий ход (подсказка под набором)")]
         [Tooltip(

@@ -832,7 +832,9 @@ namespace CoreAI.Ai
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
                 MaxOutputTokens = maxOutputTokens,
-                ContextWindowTokens = bundle.ContextWindowTokens
+                ContextWindowTokens = bundle.ContextWindowTokens,
+                SendTemperature = _settings.OverrideTemperature,
+                Temperature = _settings.Temperature
             };
         }
 

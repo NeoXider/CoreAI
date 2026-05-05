@@ -43,6 +43,54 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task GetResponseAsync_WithoutOptionsTemperature_OmitsTemperatureInJson()
+        {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                }))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options: null);
+
+            Assert.NotNull(capturedJson);
+            Assert.That(capturedJson, Does.Not.Contain("\"temperature\""));
+        }
+
+        [Test]
+        public async Task GetResponseAsync_WithOptionsTemperature_IncludesTemperatureInJson()
+        {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                }))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
+            var options = new MEAI.ChatOptions { Temperature = 0.42f };
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options);
+
+            Assert.NotNull(capturedJson);
+            StringAssert.Contains("\"temperature\"", capturedJson);
+            StringAssert.Contains("0.42", capturedJson);
+        }
+
+        [Test]
         public async Task GetResponseAsync_429_MapsRetryAfterSeconds()
         {
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(

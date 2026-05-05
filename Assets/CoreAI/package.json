@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "1.7.0",
+  "version": "1.7.2",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.7.0: LlmStreamChunk.BufferedStreamingNoToolBinding; MeaiLlmClient emits marker when tools are declared but no AIFunction bindings (buffered streaming iteration). v1.6.19: lockstep with coreaiunity WebGL FileAgentMemoryStore. v1.6.8: QueuedAiOrchestrator scope cancel.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. Unity integration ships in com.nexoider.coreaiunity. Monorepo folder: Assets/CoreAI. v1.7.2: lockstep semver with coreaiunity 1.7.2 (WebGL IDBFS persist jslib). v1.7.1: lockstep with coreaiunity 1.7.1. v1.7.0: buffered streaming markers; sampling override + HTTP result retries.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

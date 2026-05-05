@@ -14,7 +14,11 @@ namespace CoreAI
         /// <summary>LLM request timeout in seconds.</summary>
         float LlmRequestTimeoutSeconds { get; }
 
-        /// <summary>Retry count for transient LLM network failures.</summary>
+        /// <summary>
+        /// Max **additional** HTTP completion attempts after a retryable failure (<c>429</c> / <c>5xx</c> surfaced as
+        /// <see cref="LlmClientException"/> or <see cref="LlmCompletionResult"/> with <see cref="LlmErrorCode.RateLimited"/> /
+        /// <see cref="LlmErrorCode.BackendUnavailable"/>). Implemented in <see cref="LoggingLlmClientDecorator"/>.
+        /// </summary>
         int MaxLlmRequestRetries { get; }
 
         /// <summary>Low-level HTTP request/response logging.</summary>
@@ -37,6 +41,12 @@ namespace CoreAI
 
         /// <summary>Default sampling temperature (0.0–2.0).</summary>
         float Temperature { get; }
+
+        /// <summary>
+        /// When <c>true</c>, <see cref="Temperature"/> is sent on LLM requests (HTTP body and LLMUnity via MEAI).
+        /// When <c>false</c>, sampling temperature is omitted so each backend uses its own default.
+        /// </summary>
+        bool OverrideTemperature => false;
 
         /// <summary>Max consecutive tool-call failures before aborting the agent turn.</summary>
         int MaxToolCallRetries { get; }

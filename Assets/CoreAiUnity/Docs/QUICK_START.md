@@ -170,6 +170,6 @@ Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
 
 ---
 
-**Version:** aligned with [`package.json`](../package.json) — **1.7.0** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
+**Version:** aligned with [`package.json`](../package.json) — **1.7.2** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
 
 **First script from scratch?** Read [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — 3 steps + copy-paste `AskAsync` / `StreamAsync`.

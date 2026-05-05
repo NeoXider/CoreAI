@@ -2,6 +2,27 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [1.7.2] - 2026-05-05
+
+### WebGL — IDBFS `FS.syncfs` single-flight (`CoreAiPersistFs`)
+
+- **`CoreAiPersistFs.jslib`** — **`CoreAi_PersistFsSync`** no longer calls **`FS.syncfs`** while a previous sync is still in flight. Overlapping calls (e.g. **`FileAgentMemoryStore`** persisting chat JSON and memory in quick succession) set a **queued** flag and run **at most one** follow-up sync after the current callback — avoids Emscripten’s *“2 FS.syncfs operations in flight”* warning and reduces risk of the main thread / IDBFS getting into a bad state after several turns.
+- **Docs:** [`TROUBLESHOOTING.md`](Docs/TROUBLESHOOTING.md) (WebGL row in agent-memory table).
+- **Dependency:** **`com.nexoider.coreai` `1.7.2`** — lockstep semver.
+
+#### Package **`1.7.2`**.
+
+## [1.7.1] - 2026-05-05
+
+### Chat typing + EditMode coverage
+
+- **`CoreAiChatPanel`** — when a buffered marker uses **`BufferedStreamingUseToolProgressHint`** (static **`StreamingToolProgressHint`**) and later a marker **without** that flag arrives **before** any visible assistant text, **`ShowTypingIndicator()`** runs unconditionally so the default animated dots return (hint path had stopped the animation).
+- **Tests:** **`LoggingLlmClientDecoratorEditModeTests.FailedCompletion_BackendUnavailable_RetriesAndSucceeds`** — mirrors the v1.7.0 **`RateLimited`** result-retry test for **`LlmErrorCode.BackendUnavailable`**.
+- **Docs:** settings guide (**override temperature**, **max LLM request retries**), index / quick start / developer guide / agent roles — UPM **`1.7.1`**.
+- **Dependency:** **`com.nexoider.coreai` `1.7.1`** — lockstep semver.
+
+#### Package **`1.7.1`**.
+
 ## [1.7.0] - 2026-05-05
 
 ### Portable streaming marker + chat typing hint (buffered tool iteration)
@@ -9,9 +30,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (**`com.nexoider.coreai`**) — marker chunk (no `Text`) so host UI can refresh the typing row during special streaming phases (unbound iteration, tool JSON hold, etc.).
 - **`LlmStreamChunk.BufferedStreamingUseToolProgressHint`** — when set with the marker, chat shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (native / text-shaped tool execution, hybrid hold). When the marker arrives **without** this flag (e.g. unbound iteration waiting for the model step), **`CoreAiChatPanel`** keeps the default animated typing dots.
 - **`MeaiLlmClient`** — yields marker(s) for unbound streaming, hybrid JSON hold, native tool deltas, and text-shaped tool execute; logs optional hold start.
-- **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **«Инструмент…»**; empty falls back to **`CoreAiChatPanel`** default.
+- **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **«Действие…»**; empty falls back to **`CoreAiChatPanel`** default.
 - **`CoreAiChatPanel`** — applies the short hint only when **`BufferedStreamingUseToolProgressHint`** is true.
 - **Tests:** **`CoreAiChatConfigEditModeTests`**, **`StreamingAndPromptsEditModeTests`** (`BufferedStreamingNoToolBinding` / `BufferedStreamingUseToolProgressHint` default **false**).
+- **Sampling temperature:** **`CoreAISettingsAsset`** — **`overrideTemperature`** (Inspector **Override temperature**, default **off**); when on, **`temperature`** is sent via orchestrator (**`LlmCompletionRequest.SendTemperature`**) to HTTP and LLMUnity. **`ConfigureHttpApi`** turns the override on. **`MeaiLlmClient`** only assigns MEAI **`ChatOptions.Temperature`** when **`SendTemperature`** is true.
+- **HTTP retries:** **`LoggingLlmClientDecorator`** retries failed completions with **`RateLimited`** / **`BackendUnavailable`** (not only thrown **`LlmClientException`**), matching **`MeaiLlmClient`**’s result-based HTTP errors. Default **`maxLlmRequestRetries`** on **`CoreAISettingsAsset`** is **1** (inspector minimum **1**).
 - **Dependency:** **`com.nexoider.coreai` `1.7.0`** — lockstep semver.
 
 #### Package **`1.7.0`**.

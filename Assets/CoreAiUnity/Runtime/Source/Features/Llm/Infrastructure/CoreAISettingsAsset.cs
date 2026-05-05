@@ -98,7 +98,13 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private string modelName = "gpt-4o-mini";
 
-        [Tooltip("Sampling temperature applied when callers do not override (0 deterministic … 2 creative).")]
+        [Tooltip(
+            "When enabled, the Temperature value below is sent to OpenAI-compatible HTTP APIs and LLMUnity (MEAI). " +
+            "When disabled, sampling temperature is omitted so each backend uses its own default.")]
+        [SerializeField]
+        private bool overrideTemperature;
+
+        [Tooltip("Sampling temperature (0.0 = deterministic … 2.0 = creative). Used only when Override temperature is on.")]
         [SerializeField]
         [Range(0f, 2f)]
         private float temperature = 0.1f;
@@ -173,10 +179,10 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool allowDuplicateToolCalls = false;
 
-        [Tooltip("Transport-level retries for transient HTTP failures / timeouts.")]
+        [Tooltip("Transport-level retries after HTTP 429 / 5xx (and equivalent failed completions). Each retry waits Retry-After or 2s, 4s, … (capped).")]
         [SerializeField]
         [Min(1)]
-        private int maxLlmRequestRetries = 2;
+        private int maxLlmRequestRetries = 1;
 
         [Tooltip("Default context-window hint in tokens.")]
         [SerializeField] [Min(256)]
@@ -400,8 +406,11 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        /// <summary>Serialized temperature fallback.</summary>
+        /// <summary>Serialized temperature (used when <see cref="OverrideTemperature"/> is true).</summary>
         public float Temperature => temperature;
+
+        /// <summary>When true, <see cref="Temperature"/> is sent on LLM requests; when false, backends use default sampling temperature.</summary>
+        public bool OverrideTemperature => overrideTemperature;
 
         /// <summary>Global max-output cap (tokens).</summary>
         public int MaxTokens => maxTokens;
@@ -478,7 +487,7 @@ namespace CoreAI.Infrastructure.Llm
         public bool AllowDuplicateToolCalls => allowDuplicateToolCalls;
 
         /// <summary>Clamp for decorator-level HTTP retries.</summary>
-        public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 2 : maxLlmRequestRetries;
+        public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 1 : maxLlmRequestRetries;
 
         /// <summary>Estimated context-window tokens exposed to budgeting.</summary>
         public int ContextWindowTokens => contextWindowTokens < 256 ? 8192 : contextWindowTokens;
@@ -570,6 +579,7 @@ namespace CoreAI.Infrastructure.Llm
             apiKey = key ?? "";
             modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
+            overrideTemperature = true;
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
             this.maxTokens = maxTokens <= 0 ? 2048 : maxTokens;
         }
@@ -715,7 +725,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (maxLlmRequestRetries < 1)
             {
-                maxLlmRequestRetries = 2;
+                maxLlmRequestRetries = 1;
             }
 
             if (contextWindowTokens < 256)

@@ -95,9 +95,12 @@ namespace CoreAI.Infrastructure.Llm
             Dictionary<string, object> reqBody = new()
             {
                 { "model", _settings.Model },
-                { "temperature", options?.Temperature ?? _settings.Temperature },
                 { "messages", messages }
             };
+            if (options?.Temperature.HasValue == true)
+            {
+                reqBody["temperature"] = options.Temperature.Value;
+            }
             if (options?.MaxOutputTokens.HasValue == true)
             {
                 reqBody["max_tokens"] = options.MaxOutputTokens.Value;
@@ -225,11 +228,14 @@ namespace CoreAI.Infrastructure.Llm
             Dictionary<string, object> reqBody = new()
             {
                 { "model", _settings.Model },
-                { "temperature", options?.Temperature ?? _settings.Temperature },
                 { "messages", messages },
                 { "stream", true },
                 { "stream_options", new Dictionary<string, object> { { "include_usage", true } } }
             };
+            if (options?.Temperature.HasValue == true)
+            {
+                reqBody["temperature"] = options.Temperature.Value;
+            }
             if (options?.MaxOutputTokens.HasValue == true)
             {
                 reqBody["max_tokens"] = options.MaxOutputTokens.Value;

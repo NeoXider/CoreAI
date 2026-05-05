@@ -186,9 +186,12 @@ namespace CoreAI.Infrastructure.Llm
 
             MEAI.ChatOptions chatOptions = new()
             {
-                Temperature = request.Temperature,
                 MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
             };
+            if (request.SendTemperature)
+            {
+                chatOptions.Temperature = request.Temperature;
+            }
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
@@ -366,9 +369,12 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
             MEAI.ChatOptions chatOptions = new()
             {
-                Temperature = request.Temperature,
                 MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
             };
+            if (request.SendTemperature)
+            {
+                chatOptions.Temperature = request.Temperature;
+            }
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();

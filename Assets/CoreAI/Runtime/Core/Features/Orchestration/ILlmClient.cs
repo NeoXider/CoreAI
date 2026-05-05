@@ -127,8 +127,16 @@ namespace CoreAI.Ai
         /// <summary>Optional max completion tokens for the model.</summary>
         public int? MaxOutputTokens { get; set; }
 
-        /// <summary>Sampling temperature (default 0.1; agent policy may override).</summary>
+        /// <summary>
+        /// Sampling temperature (0.0–2.0). Used only when <see cref="SendTemperature"/> is <c>true</c>.
+        /// </summary>
         public float Temperature { get; set; } = 0.1f;
+
+        /// <summary>
+        /// When <c>true</c>, <see cref="Temperature"/> is passed to backends (MEAI / HTTP). When <c>false</c>,
+        /// temperature is omitted so providers and LLMUnity use their defaults.
+        /// </summary>
+        public bool SendTemperature { get; set; }
 
         /// <summary>Tools exposed to the model for this request.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }

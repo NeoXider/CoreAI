@@ -2,7 +2,7 @@
 
 **Purpose:** a single vocabulary of **agent types** (AI behaviors), their goals, typical inputs/outputs, and **placement** rules (host / local / hybrid). A game on the template **enables only the roles it needs**; the orchestrator is not required to spin up all of them. Recommendations on **model size/type** (local vs API) — §6.
 
-**Document version:** 1.7 | **Date:** May 2026 — doc sync with UPM **1.7.0** (WebGL **`FileAgentMemoryStore`**, jslib logging, chat **`StreamingToolProgressHint`** / typing markers).
+**Document version:** 1.8 | **Date:** May 2026 — doc sync with UPM **1.7.1** (chat typing after tool-hint marker; **`LoggingLlmClientDecorator`** **`BackendUnavailable`** EditMode test). **1.7.0:** WebGL **`FileAgentMemoryStore`**, jslib logging, chat **`StreamingToolProgressHint`** / **`LlmStreamChunk`** typing markers.
 
 **Related docs:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (networking, authority, NGO by default), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (code map, Lua, tests, **traceId** / **Llm** logs), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, request timeout), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (demo scene setup).
 
@@ -360,3 +360,4 @@ All policies are covered by **20 EditMode tests**:
 | 1.4 | §8 per-role LLM validation, retry flow, custom roles |
 | 1.5 | §1.3.5 Universal System Prompt Prefix — shared opening prompt for all agents |
 | 1.7 | Doc sync: UPM **1.7.0**, WebGL **`FileAgentMemoryStore`** + **`CoreAiPersistFs`**, **`CoreAiSseFetch`** console noise, chat **`StreamingToolProgressHint`** + **`LlmStreamChunk`** typing markers |
+| 1.8 | Doc sync: UPM **1.7.1** — chat typing dots after hint-only buffered marker; EditMode **`BackendUnavailable`** retry test; settings doc **override temperature** / **max LLM request retries** |

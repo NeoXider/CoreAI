@@ -54,7 +54,7 @@ namespace CoreAI.Chat
         private Label _longRequestHint;
         private float _longRequestHintArmedSince = -1f;
         private const float LongRequestHintMinSeconds = 3f;
-        private const string DefaultStreamingToolProgressHint = "Инструмент…";
+        private const string DefaultStreamingToolProgressHint = "Действие…";
 
         /// <summary>Whether the chat panel is currently collapsed into the FAB.</summary>
         public bool IsCollapsed { get; private set; }
@@ -1241,17 +1241,22 @@ namespace CoreAI.Chat
 
                     if (chunk.BufferedStreamingNoToolBinding)
                     {
-                        // Mid-turn: prose may already be streaming (typing row was hidden); show typing again.
-                        if (_streamingStartedVisible)
-                        {
-                            ShowTypingIndicator();
-                        }
-
                         if (chunk.BufferedStreamingUseToolProgressHint)
                         {
+                            // Mid-turn: prose may already be streaming (typing row was hidden); show typing again.
+                            if (_streamingStartedVisible)
+                            {
+                                ShowTypingIndicator();
+                            }
+
                             ApplyStreamingToolProgressTypingHint();
                         }
-                        // else: ожидание шага (unbound-маркер и т.п.) — оставляем анимацию «...» без статической строки.
+                        else
+                        {
+                            // Unbound / step wait: must restart dots — a prior hint chunk called
+                            // ApplyStreamingToolProgressTypingHint (StopTypingAnimation) even before any prose.
+                            ShowTypingIndicator();
+                        }
 
                         continue;
                     }

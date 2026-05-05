@@ -15,6 +15,7 @@ namespace CoreAI.Infrastructure.AiMemory
     /// Персистентная память агентов в <see cref="Application.persistentDataPath"/> (JSON на роль).
     /// WebGL player: same store under <see cref="CoreAILifetimeScope"/> (<b>v1.6.19+</b>); after writes calls
     /// <c>CoreAi_PersistFsSync</c> (<c>CoreAiPersistFs.jslib</c>) so IDBFS reaches IndexedDB on reload / tab close.
+    /// The jslib runs <c>FS.syncfs</c> single-flight (<b>v1.7.2+</b>) so rapid successive writes do not overlap syncs.
     /// Учитывайте квоту хранилища браузера и режим инкогнито (данные могут не пережить сессию).
     /// Поддерживает 2 типа памяти:
     /// 1) MemoryTool — явная память через function call (memory поле)

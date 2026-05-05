@@ -150,6 +150,7 @@ namespace CoreAI.Ai
                     TraceId = compactTrace,
                     Tools = Array.Empty<ILlmTool>(),
                     ForcedToolMode = LlmToolChoiceMode.None,
+                    SendTemperature = true,
                     Temperature = _options.Temperature,
                     MaxOutputTokens = _options.MaxSummaryOutputTokens > 0 ? _options.MaxSummaryOutputTokens : null,
                     ContextWindowTokens = 8192

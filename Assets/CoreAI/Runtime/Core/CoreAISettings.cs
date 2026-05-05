@@ -39,6 +39,7 @@ namespace CoreAI
         private static string _universalSystemPromptPrefix;
         private static bool _universalSystemPromptPrefixSet;
         private static float? _temperature;
+        private static bool? _overrideTemperature;
         private static int? _maxToolCallRetries;
         private static bool? _logToolCalls;
         private static bool? _logToolCallArguments;
@@ -55,13 +56,14 @@ namespace CoreAI
         private const int DefaultMaxLuaRepairRetries = 3;
         private const bool DefaultEnableMeaiDebugLogging = false;
         private const int DefaultLlmRequestTimeoutSeconds = 300;
-        private const int DefaultMaxLlmRequestRetries = 2;
+        private const int DefaultMaxLlmRequestRetries = 1;
         private const bool DefaultEnableHttpDebugLogging = false;
         private const bool DefaultLogTokenUsage = true;
         private const bool DefaultLogLlmLatency = true;
         private const bool DefaultLogLlmConnectionErrors = true;
         private const int DefaultContextWindowTokens = 8192;
         private const float DefaultTemperature = 0.1f;
+        private const bool DefaultOverrideTemperature = false;
         private const int DefaultMaxToolCallRetries = 3;
         private const bool DefaultLogToolCalls = true;
         private const bool DefaultLogToolCallArguments = true;
@@ -205,6 +207,18 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// When <c>true</c>, <see cref="Temperature"/> is sent to LLM backends; when <c>false</c>, backends use their default sampling temperature.
+        /// </summary>
+        public static bool OverrideTemperature
+        {
+            get =>
+                _overrideTemperature ??
+                Instance?.OverrideTemperature ??
+                DefaultOverrideTemperature;
+            set => _overrideTemperature = value;
+        }
+
+        /// <summary>
         /// Максимум подряд неудачных tool call до прерывания агента.
         /// Счётчик сбрасывается при каждом успешном вызове инструмента. По умолчанию: 3.
         /// </summary>
@@ -312,6 +326,7 @@ namespace CoreAI
                 _universalSystemPromptPrefix = null;
                 _universalSystemPromptPrefixSet = false;
                 _temperature = null;
+                _overrideTemperature = null;
                 _maxToolCallRetries = null;
                 _logToolCalls = null;
                 _logToolCallArguments = null;

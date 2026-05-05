@@ -416,7 +416,7 @@ MonoBehaviour:
     TypeName: 
   autoRun: 1
   autoInjectGameObjects: []
-  coreAiSettings: {fileID: 11400000, guid: 6668d56b353f2d74889a4d595a256951, type: 2}
+  coreAiSettings: {fileID: 11400000, guid: e1c585edfe6e87e479215fbb83539e2d, type: 2}
   gameLogSettings: {fileID: 11400000, guid: a5ec9172eaa0cec4188a764046d7b73c, type: 2}
   agentPromptsManifest: {fileID: 11400000, guid: 76ac5bc3577a387409a9559c4de4a341, type: 2}
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}

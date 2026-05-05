@@ -308,6 +308,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, resolve **`FileAgentMemoryStore`** on **all** players (WebGL included, **v1.6.19+**). If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
+| WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.nexoider.coreaiunity`**. |
 
 ---
 
