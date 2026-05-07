@@ -17,11 +17,12 @@
 - 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
 - ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
 - 🧭 **LLM-режимы под разные production-сценарии** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
-- 🗜️ **Длинный чат без «переполнения»** — бюджет токенов на историю, блок **`## Conversation Summary`», опциональная LLM-свёртка (в духе Kilocode)** и переключатели **по ролям**: `AgentBuilder.WithLlmContextCompaction(...)` и глобальный флаг на **`CoreAISettings`**.
+- 🗜️ **Длинный чат без «переполнения»** — бюджет токенов на историю, блок **`## Conversation Summary`**, опциональная LLM-свёртка (в духе Kilocode) и переключатели **по ролям**: `AgentBuilder.WithLlmContextCompaction(...)` и глобальный флаг на **`CoreAISettings`**.
+- 🎯 **Self-Service Skills** — группируй инструменты по доменам (крафт, бой, торговля). Модель видит только 2 мета-инструмента (`read_skill` + `call_skill_tool`), а не сотни тулов. Экономия токенов ~91%.
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) — оба пакета **`1.7.4`** (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib; для новых ассетов по умолчанию **вкл** с **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md); если выкл — **`UnityWebRequest`** — [`STREAMING_WEBGL_TODO.md`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **Память чата в WebGL (файлы):** с **v1.6.19** в player используется **`FileAgentMemoryStore`** + сброс IDBFS (**`CoreAiPersistFs.jslib`**). **Сборка WebGL (LLVM OOM и т.д.):** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
+**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **Сборка WebGL:** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -33,9 +34,8 @@
 
 | | Раздел |
 |---|--------|
-| [Что нового (0.22 → 0.24)](#-что-нового-022--024) | Последние изменения |
 | [Три входа](#-три-входа-ui--coreai--агенты) | UI · `CoreAi` · агенты |
-| [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, чат, инструменты, память · длинный диалог и умная свёртка (`v1.5+`) |
+| [Что умеет CoreAI](#-что-умеет-coreai) | Агенты, скиллы, чат, инструменты, память, свёртка |
 | [Архитектура](#%EF%B8%8F-архитектура) | Два пакета, схема |
 | [Установка](#-установка) | NuGet, `manifest`, Git URL, сцена |
 | [Быстрый старт](#-быстрый-старт) | Первый агент |
@@ -44,16 +44,7 @@
 
 ---
 
-## 🆕 Что нового (0.22 → 0.24)
-
-- 🗜️ **`1.5.x` (core + Unity)** — контекстный **бюджет** для истории, **`## Conversation Summary`**, сохранение сводок (**`FileConversationSummaryStore`**), опциональная **LLM-свёртка** (роль `__CoreAI_ContextCompaction`), переключатели **глобально и по роли** (`AgentBuilder.WithLlmContextCompaction`, у **Programmer** по умолчанию выкл.). См. [Core CHANGELOG](Assets/CoreAI/CHANGELOG.md) **`v1.5.2–1.5.3`**.
-- 🔧 **0.24.2** — HTTP-ошибки теперь показывают тело ответа API (не только `400 Bad Request`); `ToolExecutionPolicy.maxConsecutiveErrors` нормализуется до ≥ 1; обновление документации.
-- 🧩 **0.24.0–0.24.1** — `SseToolCallAccumulator` для облачного SSE (OpenAI, Anthropic), `ToolExecutionPolicy` единая для streaming/non-streaming, защита JSON-извлечения от code-блоков, дедупликация UI stop.
-- 🎮 **0.22** — Agent Control API: `StopAgent`, `ClearContext`, `OnToolExecuted`, кнопка очистки чата 🗑, Escape-to-stop.
-- 🎯 **0.21** — Статический фасад `CoreAi` (`AskAsync`/`StreamAsync`), стриминг оркестратора, сворачивание в FAB.
-- 💬 **0.20** — Универсальная панель чата, стриминг HTTP+LLMUnity, `ThinkBlockStreamFilter`, трёхслойные флаги.
-
-Полные заметки: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
+Полные заметки по версиям: [Assets/CoreAiUnity/CHANGELOG.md](Assets/CoreAiUnity/CHANGELOG.md) · [CoreAI CHANGELOG](Assets/CoreAI/CHANGELOG.md).
 
 ---
 
@@ -93,10 +84,39 @@ merchant.Ask("Покажи мечи", (response) => Debug.Log(response));
 - **`ApplyToPolicy(CoreAIAgent.Policy)`** — регистрирует роль в живой `AgentMemoryPolicy`, чтобы **`RunTask`/маршрутизация тулов** видела твой `InventoryLlmTool` и слитый промпт для `"Blacksmith"`. Без этого роль — просто строка без стека.
 - **`Ask` / `AskAsync`** — обёртка над **`CoreAIAgent.Orchestrator`** (`AiTaskRequest` с `RoleId` из конфига). То же, что взять **`IAiOrchestrationService`** из DI — см. [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 
-**3 режима агентов:**
-- 🛒 **ToolsAndChat** — вызывает инструменты И отвечает текстом (Merchant, Crafter, Advisor)
-- 🤖 **ToolsOnly** — только инструменты, без текста (Background Analyzer)
-- 💬 **ChatOnly** — только текст, без инструментов (Storyteller, Guide)
+**3 режима агентов:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
+
+### 🎯 Self-Service Skills — агент подгружает инструменты по требованию
+
+Когда у агента десятки инструментов из разных доменов (крафт, бой, торговля, квесты), слать их все каждый запрос — тратить токены. **Skills** решают это:
+
+```csharp
+// Группируй инструменты в скиллы
+var crafting = new SkillSet("Crafting",
+    "Ковка оружия и брони из материалов",
+    "1. Вызови get_recipes.\n2. Вызови craft_item.",
+    new DelegateLlmTool("get_recipes", "Список рецептов", (string type) => ...),
+    new DelegateLlmTool("craft_item", "Создать предмет", (string id) => ...));
+
+// Модель видит только 2 мета-инструмента, не все тулы скиллов
+var gm = new AgentBuilder("GameMaster")
+    .WithSkill(crafting)
+    .WithSkill(combat)
+    .WithSkill(trading)
+    .Build();
+```
+
+**Как работает:**
+1. Модель видит лёгкий **каталог** (имя + описание скилла) в system prompt
+2. Вызывает `read_skill("Crafting")` → получает инструкции + схемы инструментов
+3. Вызывает `call_skill_tool("get_recipes", "{}")` → прокси маршрутизирует к реальному тулу
+4. **Токен-оверхед: константный** (2 мета-тула) независимо от общего числа скиллов/тулов
+
+> 💡 **50 инструментов в 10 скиллах?** Без скиллов: ~4,000 токенов. Со скиллами: ~360 токенов. **Экономия 91%.**
+
+Совмещай прямые тулы и скиллы: `WithTool(memory)` (всегда виден) + `WithSkill(crafting)` (по требованию).
+
+Документация: [AGENT_BUILDER.md §Skills](Assets/CoreAI/Docs/AGENT_BUILDER.md)
 
 ### 💬 Готовый чат без своего UI
 
@@ -534,6 +554,13 @@ Unity → Window → General → Test Runner
 │                   AI Agents                                  │
 │  🛒 Merchant  📜 Programmer  🎨 Creator  📊 Analyzer        │
 │  🗡️ CoreMechanic  💬 SmartChat  + Ваши кастомные!          │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│              SkillSet (Self-Service Skills)                   │
+│  read_skill → инструкции + схемы                             │
+│  call_skill_tool → прокси к реальным тулам                   │
+│  Модель видит 2 мета-тула, остальные — по требованию         │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐
