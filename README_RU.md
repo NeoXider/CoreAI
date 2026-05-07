@@ -19,6 +19,7 @@
 - 🧭 **LLM-режимы под разные production-сценарии** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
 - 🗜️ **Длинный чат без «переполнения»** — бюджет токенов на историю, блок **`## Conversation Summary`**, опциональная LLM-свёртка (в духе Kilocode) и переключатели **по ролям**: `AgentBuilder.WithLlmContextCompaction(...)` и глобальный флаг на **`CoreAISettings`**.
 - 🎯 **Self-Service Skills** — группируй инструменты по доменам (крафт, бой, торговля). Модель видит только 2 мета-инструмента (`read_skill` + `call_skill_tool`), а не сотни тулов. Экономия токенов ~91%.
+- 🛡️ **Production-устойчивость** — `MaxToolResultChars` (обрезка больших результатов), `DefaultToolTimeoutMs` (таймаут на тул), `MaxResponseChars` (лимит ответа), `MaxToolCallRoundtrips` (защита от зацикливания). Всё в Inspector.
 
 > 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
 

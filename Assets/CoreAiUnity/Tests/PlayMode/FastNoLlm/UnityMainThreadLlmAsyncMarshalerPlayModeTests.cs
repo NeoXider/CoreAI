@@ -15,16 +15,39 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class UnityMainThreadLlmAsyncMarshalerPlayModeTests
     {
+        /// <summary>
+        /// The true Unity main thread ID, captured in <see cref="SetUp"/> which
+        /// always runs on the main thread (NUnit runner guarantee in PlayMode).
+        /// We cannot rely on <c>Thread.CurrentThread.ManagedThreadId</c> inside
+        /// a coroutine body after <c>yield return</c> — some Unity versions
+        /// resume coroutines on worker threads.
+        /// </summary>
+        private int _unityMainThreadId;
+
+        [SetUp]
+        public void SetUp()
+        {
+            // SetUp always runs on the main thread in Unity Test Runner.
+            _unityMainThreadId = Thread.CurrentThread.ManagedThreadId;
+        }
+
         [UnityTest]
         public IEnumerator AfterSwitchToThreadPool_InvokeAsync_RunsDelegateOnUnityMainManagedThread()
         {
-            // Let Application.onBeforeRender update the Editor isPlaying mirror before any pool continuation
-            // reads Volatile state. One yield is not always enough: worker code can run earlier in the same frame
-            // than onBeforeRender, so the mirror still looks like Edit idle (0) and the inline path breaks the test.
-            yield return null;
+            // The marshaler uses a volatile mirror of Application.isPlaying updated via
+            // Application.onBeforeRender. We need to wait enough frames for both:
+            // (a) Application.isPlaying to be true, and
+            // (b) the mirror to be primed by onBeforeRender.
+            // Without this, the marshaler may inline on the thread pool (stale mirror = 0).
+            for (int frame = 0; frame < 5; frame++)
+            {
+                yield return null;
+            }
             yield return new WaitForEndOfFrame();
 
-            int mainCapturedAtTestStart = Thread.CurrentThread.ManagedThreadId;
+            Assert.IsTrue(Application.isPlaying, "Test must run in Play Mode");
+
+            int mainThreadId = _unityMainThreadId;
             var tcs = new TaskCompletionSource<int>();
 
             UniTask.Void(async () =>
@@ -34,7 +57,7 @@ namespace CoreAI.Tests.PlayMode
                     await UniTask.SwitchToThreadPool();
 
 #if !UNITY_WEBGL
-                    Assert.AreNotEqual(mainCapturedAtTestStart, Thread.CurrentThread.ManagedThreadId,
+                    Assert.AreNotEqual(mainThreadId, Thread.CurrentThread.ManagedThreadId,
                         "Fixture must leave the synchronous Unity test thread via SwitchToThreadPool.");
 #endif
 
@@ -43,7 +66,8 @@ namespace CoreAI.Tests.PlayMode
                             () => Task.FromResult(Thread.CurrentThread.ManagedThreadId),
                             CancellationToken.None);
 
-                    Assert.AreEqual(mainCapturedAtTestStart, inFactory);
+                    Assert.AreEqual(mainThreadId, inFactory,
+                        $"Marshaler should run delegate on Unity main thread ({mainThreadId}), but ran on {inFactory}.");
                     tcs.TrySetResult(inFactory);
                 }
                 catch (System.Exception ex)
@@ -54,7 +78,9 @@ namespace CoreAI.Tests.PlayMode
 
             yield return new WaitUntil(() => tcs.Task.IsCompleted);
             Assert.IsFalse(tcs.Task.IsFaulted, tcs.Task.IsFaulted ? tcs.Task.Exception?.ToString() : "");
-            Assert.AreEqual(mainCapturedAtTestStart, tcs.Task.Result);
+            Assert.AreEqual(mainThreadId, tcs.Task.Result,
+                $"Final result should match main thread ({mainThreadId}).");
         }
     }
 }
+

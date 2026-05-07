@@ -212,6 +212,31 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
 
+        [Header("🛡️ Resilience & Safety")]
+        [Tooltip(
+            "Max chars per tool result before soft-truncation with ellipsis. Prevents a single tool from overflowing the context. " +
+            "0 = no truncation. Default 8000 (~2000 tokens).")]
+        [SerializeField] [Min(0)]
+        private int maxToolResultChars = 8000;
+
+        [Tooltip(
+            "Per-tool execution timeout in milliseconds. If a tool body hangs (e.g. HTTP to a dead server), " +
+            "it is cancelled after this duration. 0 = no per-tool timeout (relies on outer orchestrator timeout). Default 30000 (30s).")]
+        [SerializeField] [Min(0)]
+        private int defaultToolTimeoutMs = 30000;
+
+        [Tooltip(
+            "Max total response characters from the model before soft-truncation. Prevents runaway generation. " +
+            "0 = disabled (no limit). Default 0.")]
+        [SerializeField] [Min(0)]
+        private int maxResponseChars;
+
+        [Tooltip(
+            "Max tool-call roundtrips per single request. Each roundtrip = one LLM call + tool execution. " +
+            "Prevents infinite tool-calling loops. Default 10.")]
+        [SerializeField] [Min(1)]
+        private int maxToolCallRoundtrips = 10;
+
         [Header("Streaming")]
         [Tooltip(
             "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI. " +
@@ -551,6 +576,18 @@ namespace CoreAI.Infrastructure.Llm
         public int ConversationRolledSummaryMaxTokens =>
             conversationRolledSummaryMaxTokens < 0 ? 0 : conversationRolledSummaryMaxTokens;
 
+        /// <summary>Max chars per tool result before truncation. 0 = no truncation.</summary>
+        public int MaxToolResultChars => maxToolResultChars < 0 ? 0 : maxToolResultChars;
+
+        /// <summary>Per-tool execution timeout (ms). 0 = no per-tool timeout.</summary>
+        public int DefaultToolTimeoutMs => defaultToolTimeoutMs < 0 ? 0 : defaultToolTimeoutMs;
+
+        /// <summary>Max response chars from the model. 0 = disabled.</summary>
+        public int MaxResponseChars => maxResponseChars < 0 ? 0 : maxResponseChars;
+
+        /// <summary>Max tool-call roundtrips per request.</summary>
+        public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 1 ? 10 : maxToolCallRoundtrips;
+
         /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
         public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
 
@@ -817,6 +854,26 @@ namespace CoreAI.Infrastructure.Llm
             if (llmUnityNumGPULayers < 0)
             {
                 llmUnityNumGPULayers = 0;
+            }
+
+            if (maxToolResultChars < 0)
+            {
+                maxToolResultChars = 0;
+            }
+
+            if (defaultToolTimeoutMs < 0)
+            {
+                defaultToolTimeoutMs = 0;
+            }
+
+            if (maxResponseChars < 0)
+            {
+                maxResponseChars = 0;
+            }
+
+            if (maxToolCallRoundtrips < 1)
+            {
+                maxToolCallRoundtrips = 10;
             }
         }
 #endif

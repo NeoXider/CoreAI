@@ -218,14 +218,63 @@ namespace CoreAI.Infrastructure.Llm
                     ? new MEAI.AIFunctionArguments(fc.Arguments)
                     : null;
                 ILlmAsyncMarshaler marshaler = _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
-                object result = await marshaler
-                    .InvokeAsync<object>(
-                        async () =>
-                            await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false),
-                        cancellationToken)
-                    .ConfigureAwait(false);
+
+                // === Per-tool timeout: wrap cancellation token ===
+                int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
+                object result;
+                if (toolTimeoutMs > 0)
+                {
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    cts.CancelAfter(toolTimeoutMs);
+                    try
+                    {
+                        result = await marshaler
+                            .InvokeAsync<object>(
+                                async () =>
+                                    await aiFunc.InvokeAsync(args, cts.Token).ConfigureAwait(false),
+                                cts.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        // Tool-level timeout fired, not outer cancellation
+                        sw.Stop();
+                        string timeoutMsg = $"Error: Tool '{fc.Name}' timed out after {toolTimeoutMs}ms";
+                        _logger.Warn($"[ToolPolicy] ⏱ {timeoutMsg}", LogTag.Llm);
+                        _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
+                        _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds, "timeout"));
+                        LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, timeoutMsg);
+                        return new ToolCallResult
+                        {
+                            Result = new MEAI.FunctionResultContent(fc.CallId, timeoutMsg),
+                            Succeeded = false
+                        };
+                    }
+                }
+                else
+                {
+                    result = await marshaler
+                        .InvokeAsync<object>(
+                            async () =>
+                                await aiFunc.InvokeAsync(args, cancellationToken).ConfigureAwait(false),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 sw.Stop();
                 string resultText = result?.ToString() ?? "";
+
+                // === Tool result truncation ===
+                int maxResultChars = _settings.MaxToolResultChars;
+                if (maxResultChars > 0 && resultText.Length > maxResultChars)
+                {
+                    int originalLen = resultText.Length;
+                    resultText = resultText.Substring(0, maxResultChars) +
+                        $"\n…[truncated: {originalLen} chars total → {maxResultChars} shown]";
+                    _logger.Info(
+                        $"[ToolPolicy] ✂ Tool '{fc.Name}' result truncated: {originalLen} → {maxResultChars} chars", LogTag.Llm);
+                }
+
                 bool succeeded = IsToolResultSuccess(resultText);
 
                 if (_settings.LogMeaiToolCallingSteps)

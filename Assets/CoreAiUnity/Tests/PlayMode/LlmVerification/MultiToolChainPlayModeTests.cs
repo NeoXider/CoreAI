@@ -55,7 +55,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Do ALL of the following in order using your tools:\n" +
+                    "Respond ONLY with tool calls, no explanations. Do ALL of the following in order using your tools:\n" +
                     "1) Call world_command to spawn prefabKey='TestPrefab', targetName='chain_obj', position x=1 y=2 z=3.\n" +
                     "2) Call memory with action=write and content exactly: '" + marker + ": spawned chain_obj at (1,2,3)'.\n" +
                     "3) Answer the user in plain language only (no JSON): one short sentence confirming spawn + saved note."

@@ -1,4 +1,4 @@
-﻿#if !COREAI_NO_LLM && !UNITY_WEBGL
+#if !COREAI_NO_LLM && !UNITY_WEBGL
 using System;
 using System.Collections;
 using System.Reflection;
@@ -45,6 +45,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = Role,
                 Hint =
+                    "Respond ONLY with the tool call, no explanations. " +
                     "Use the 'memory' tool to write new info. Call it with action='write' and content='qwen4b works great'."
             };
             LogHintToConsole(request);
@@ -85,6 +86,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = Role,
                 Hint =
+                    "Respond ONLY with the tool call, no explanations. " +
                     "Use the 'memory' tool to append info. Call it with action='append' and content='appended value'."
             };
             LogHintToConsole(appendRequest);
@@ -153,6 +155,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = Role,
                 Hint =
+                    "Respond ONLY with the tool call, no explanations. " +
                     "Use the 'memory' tool to clear all info. Call it with action='clear'."
             };
             LogHintToConsole(clearRequest);

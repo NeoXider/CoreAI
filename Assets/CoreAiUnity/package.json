@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, etc. v2.0.0: lockstep with com.nexoider.coreai 2.0.0 — SkillSet support (named tool+instruction groups with per-request activation).",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience (tool truncation, timeout, roundtrip limits). v2.1.0: lockstep with com.nexoider.coreai 2.1.0.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "2.0.0"
+    "com.nexoider.coreai": "2.1.0"
   }
 }

@@ -120,5 +120,32 @@ namespace CoreAI
         /// Default portable implementation: <see cref="PassThroughLlmAsyncMarshaler.Instance"/>.
         /// </summary>
         ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;
+
+        /// <summary>
+        /// When greater than zero, tool result strings longer than this are soft-truncated with an ellipsis
+        /// before being sent back to the model. Prevents a single tool from overflowing the context window.
+        /// Default 8000 chars (~2000 tokens). 0 = no truncation.
+        /// </summary>
+        int MaxToolResultChars => 8000;
+
+        /// <summary>
+        /// Default per-tool execution timeout in milliseconds. If a tool body does not complete
+        /// within this window, the invocation is cancelled and an error result is returned to the model.
+        /// Default 30000 ms (30 seconds). 0 = no per-tool timeout (relies on outer orchestrator timeout only).
+        /// </summary>
+        int DefaultToolTimeoutMs => 30000;
+
+        /// <summary>
+        /// When greater than zero, the total accumulated response text is soft-truncated at this character count.
+        /// Prevents runaway generation. Default 0 = disabled. Users opt in via Inspector.
+        /// </summary>
+        int MaxResponseChars => 0;
+
+        /// <summary>
+        /// Maximum tool-call roundtrips (iterations) within a single request.
+        /// Each iteration = one LLM call + tool execution batch. Prevents infinite tool-calling loops.
+        /// Default 10. Must be at least 1.
+        /// </summary>
+        int MaxToolCallRoundtrips => 10;
     }
 }

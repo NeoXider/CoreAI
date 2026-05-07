@@ -18,12 +18,12 @@
 - ⚡ **One-liner from any script** — `await CoreAi.AskAsync("…")` — no DI boilerplate for your first feature.
 - 🧭 **LLM modes for production choices** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, or mixed per-role routing profiles.
 - 🗜️ **Smart long-chat context** — token budget-aware history, rolling **`## Conversation Summary`**, optional **auxiliary LLM compaction** (Kilocode-style), and **per-role** toggles: `AgentBuilder.WithLlmContextCompaction(...)` plus a global kill switch on **`CoreAISettings`**.
+- 🎯 **Self-Service Skills** — group tools by domain (crafting, combat, trading). The model sees only 2 meta-tools (`read_skill` + `call_skill_tool`), not hundreds. ~91% token savings.
+- 🛡️ **Production resilience** — `MaxToolResultChars` (soft-truncation), `DefaultToolTimeoutMs` (per-tool timeout), `MaxResponseChars` (runaway cap), `MaxToolCallRoundtrips` (loop guard). All configurable in Inspector.
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 
-**Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** **`WebGlNativeStreaming`** (fetch + jslib; default **on** for new settings assets since **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **`UnityWebRequest`** path when the flag is off — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **WebGL IL2CPP / LLVM OOM** — [`WEBGL_BUILD_TROUBLESHOOTING`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
-
-**Current packages:** see `version` in [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (core) and [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) — same semver, manifest pins the core dependency from the Unity package. **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** (see Unity changelog).
+**Releases:** see `version` in [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (core) and [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) — same semver. **Notes:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **WebGL build issues:** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)

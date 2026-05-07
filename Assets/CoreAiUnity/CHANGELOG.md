@@ -2,6 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.1.0] - 2026-05-08
+
+### Production Resilience — Lockstep with CoreAI 2.1.0
+
+- **Dependency:** **`com.nexoider.coreai` `2.1.0`** — four runtime guardrails: `MaxToolResultChars`, `DefaultToolTimeoutMs`, `MaxResponseChars`, `MaxToolCallRoundtrips`.
+- **Inspector:** **`CoreAISettingsAsset`** — new **🛡️ Resilience & Safety** foldout with four fields, tooltips, and min-value constraints.
+- **Tests:** **`ResilienceFeaturesEditModeTests`** — 8 tests covering truncation, timeout, and roundtrip limits without LLM backends.
+- **PlayMode prompts:** Anti-thinking instructions added to `CraftingMemoryViaOpenAiPlayModeTests`, `MultiToolChainPlayModeTests`, `AgentMemoryOpenAiApiPlayModeTests` for Qwen3.5 compatibility.
+- **Docs:** `README.md` resilience row; `AGENT_BUILDER.md` Resilience & Safety section.
+
+#### Package **`2.1.0`** — dependency **`com.nexoider.coreai` `2.1.0`**.
+
 ## [2.0.0] - 2026-05-08
 
 ### Major — Lockstep with CoreAI 2.0.0 (SkillSet)

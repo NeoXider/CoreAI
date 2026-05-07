@@ -48,6 +48,10 @@ namespace CoreAI
         private static bool? _allowDuplicateToolCalls;
         private static bool? _enableStreaming;
         private static bool? _enableLlmContextCompaction;
+        private static int? _maxToolResultChars;
+        private static int? _defaultToolTimeoutMs;
+        private static int? _maxResponseChars;
+        private static int? _maxToolCallRoundtrips;
 
         #endregion
 
@@ -72,6 +76,10 @@ namespace CoreAI
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
         private const bool DefaultEnableLlmContextCompaction = false;
+        private const int DefaultMaxToolResultChars = 8000;
+        private const int DefaultDefaultToolTimeoutMs = 30000;
+        private const int DefaultMaxResponseChars = 0;
+        private const int DefaultMaxToolCallRoundtrips = 10;
 
         internal const string DefaultUniversalSystemPromptPrefix =
             "CRITICAL RULES FOR ALL AGENTS:\n" +
@@ -303,6 +311,45 @@ namespace CoreAI
             set => _enableLlmContextCompaction = value;
         }
 
+        /// <summary>
+        /// Max chars per tool result sent to the model. 0 = no truncation.
+        /// Default: 8000 (~2000 tokens).
+        /// </summary>
+        public static int MaxToolResultChars
+        {
+            get => _maxToolResultChars ?? Instance?.MaxToolResultChars ?? DefaultMaxToolResultChars;
+            set => _maxToolResultChars = value;
+        }
+
+        /// <summary>
+        /// Per-tool execution timeout (ms). 0 = no per-tool timeout.
+        /// Default: 30000 (30 seconds).
+        /// </summary>
+        public static int DefaultToolTimeoutMs
+        {
+            get => _defaultToolTimeoutMs ?? Instance?.DefaultToolTimeoutMs ?? DefaultDefaultToolTimeoutMs;
+            set => _defaultToolTimeoutMs = value;
+        }
+
+        /// <summary>
+        /// Max response chars from the model before soft-truncation. 0 = disabled.
+        /// </summary>
+        public static int MaxResponseChars
+        {
+            get => _maxResponseChars ?? Instance?.MaxResponseChars ?? DefaultMaxResponseChars;
+            set => _maxResponseChars = value;
+        }
+
+        /// <summary>
+        /// Max tool-call roundtrips per request. Prevents infinite loops.
+        /// Default: 10.
+        /// </summary>
+        public static int MaxToolCallRoundtrips
+        {
+            get => _maxToolCallRoundtrips ?? Instance?.MaxToolCallRoundtrips ?? DefaultMaxToolCallRoundtrips;
+            set => _maxToolCallRoundtrips = value;
+        }
+
         #endregion
 
         /// <summary>
@@ -335,6 +382,10 @@ namespace CoreAI
                 _allowDuplicateToolCalls = null;
                 _enableStreaming = null;
                 _enableLlmContextCompaction = null;
+                _maxToolResultChars = null;
+                _defaultToolTimeoutMs = null;
+                _maxResponseChars = null;
+                _maxToolCallRoundtrips = null;
             }
         }
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -493,7 +493,8 @@ namespace CoreAI.Tests.PlayMode
                   "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
-            string instructions = "OUTPUT FORMAT:\n" +
+            string instructions = "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
+                                  "OUTPUT FORMAT:\n" +
                                   "1. First, call the memory tool to save this craft:\n" +
                                   "   ```json\n" +
                                   "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
@@ -502,7 +503,8 @@ namespace CoreAI.Tests.PlayMode
                                   "   ```json\n" +
                                   "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', 42)\\nreport('crafted YourWeaponName')\"}}\n" +
                                   "   ```\n" +
-                                  "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).";
+                                  "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).\n" +
+                                  "The code field must contain ONLY the Lua code, nothing else.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -516,19 +518,22 @@ namespace CoreAI.Tests.PlayMode
                 ? "This is your first craft.\n\n"
                 : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
 
-            string instructions = "IMPORTANT: These EXACT ingredients were used before (see memory above).\n" +
-                                  "You MUST craft the EXACT SAME item as before  use the SAME name and properties.\n" +
+            string instructions = "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
+                                  "These EXACT ingredients were used before (see memory above).\n" +
+                                  "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
                                   "This tests deterministic behavior: same input = same output.\n\n" +
                                   "OUTPUT FORMAT:\n" +
                                   "1. Call the memory tool:\n" +
                                   "   ```json\n" +
                                   "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
                                   "   ```\n\n" +
-                                  "2. Call the execute_lua tool:\n" +
+                                  "2. Call the execute_lua tool with the EXACT weapon name from your earlier craft with these same ingredients:\n" +
                                   "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('SameNameAsBefore', 'weapon', 42)\\nreport('crafted SameNameAsBefore')\"}}\n" +
+                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('<EXACT_NAME_FROM_MEMORY>', 'weapon', <SAME_QUALITY>)\\nreport('crafted <EXACT_NAME_FROM_MEMORY>')\"}}\n" +
                                   "   ```\n" +
-                                  "Use the same integer literal for quality as in the matching earlier craft (never the identifier quality).";
+                                  "Replace <EXACT_NAME_FROM_MEMORY> with the weapon name you used before for these ingredients. " +
+                                  "Replace <SAME_QUALITY> with the same integer you used before. Do NOT use placeholder text.\n" +
+                                  "The code field must contain ONLY the Lua code, nothing else.";
 
             return header + ingredients + memorySection + instructions;
         }

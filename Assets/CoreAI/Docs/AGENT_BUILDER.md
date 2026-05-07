@@ -1058,6 +1058,50 @@ CoreAISettings.MaxLuaRepairRetries = 5;        // Max consecutive failed Lua rep
 CoreAISettings.MaxToolCallRetries = 5;      // Max consecutive failed tool calls (default 3)
 CoreAISettings.EnableMeaiDebugLogging = true; // MEAI debug logging
 CoreAISettings.LlmRequestTimeoutSeconds = 600; // LLM timeout (default 300)
+
+// Resilience settings:
+CoreAISettings.MaxToolResultChars = 4000;     // Truncate large tool results (default 8000)
+CoreAISettings.DefaultToolTimeoutMs = 15000;  // Per-tool timeout in ms (default 30000)
+CoreAISettings.MaxResponseChars = 50000;      // Max response chars (default 0 = disabled)
+CoreAISettings.MaxToolCallRoundtrips = 15;    // Max tool-call iterations (default 10)
+```
+
+### 🛡️ Resilience & Safety
+
+Production agents face three classes of risk: tool result overflow, tool hangs, and model runaway. CoreAI has built-in protections for all three:
+
+| Setting | Default | What it does |
+|---------|---------|-------------|
+| `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `…[truncated: N chars → M shown]`. Prevents a single tool from overflowing the context window. |
+| `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. |
+| `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
+| `MaxToolCallRoundtrips` | **10** | Maximum tool-call loop iterations per request. Prevents infinite tool-calling loops (model calls tools → gets results → calls again → …). |
+
+**All four** are configurable via:
+- `CoreAISettings.X = value` (static C# override)
+- `CoreAISettingsAsset` in Unity Inspector (under 🛡️ **Resilience & Safety**)
+- `ICoreAISettings` interface (DI / custom settings)
+
+**Examples:**
+
+```csharp
+// High-volume game: tools may return huge inventories
+CoreAISettings.MaxToolResultChars = 4000; // ~1000 tokens max per tool result
+
+// Aggressive timeout for realtime NPCs
+CoreAISettings.DefaultToolTimeoutMs = 5000; // 5 seconds
+
+// Cap model output for chat bubbles
+CoreAISettings.MaxResponseChars = 2000;
+```
+
+**What happens on truncation/timeout:**
+
+```
+[ToolPolicy] ✂ Tool 'get_inventory' result truncated: 45230 → 4000 chars
+[ToolPolicy] ⏱ Error: Tool 'fetch_weather' timed out after 5000ms
+[SmartToolCall] ⚠ Max tool-call roundtrips (10) reached. Stopping.
+[SmartToolCall] ✂ Response truncated at 2000 chars
 ```
 
 ### Tool call retry

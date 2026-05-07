@@ -72,6 +72,20 @@ namespace CoreAI.Infrastructure.Llm
                 while (true)
                 {
                     iteration++;
+
+                    // === Max roundtrip safety valve ===
+                    int maxRoundtrips = _settings.MaxToolCallRoundtrips;
+                    if (maxRoundtrips > 0 && iteration > maxRoundtrips)
+                    {
+                        _logger.Warn(
+                            $"[SmartToolCall] ⚠ Max tool-call roundtrips ({maxRoundtrips}) reached. Stopping.", LogTag.Llm);
+                        return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                            $"Agent stopped: exceeded maximum of {maxRoundtrips} tool-call roundtrips."))
+                        {
+                            FinishReason = MEAI.ChatFinishReason.Stop
+                        };
+                    }
+
                     // WebGL/Unity: avoid Task.Yield() per iteration — it posts to SynchronizationContext and
                     // can stall continuation chains on the single-threaded player loop. Inner awaits use
                     // ConfigureAwait(false) so continuations do not depend on capturing the sync context.
@@ -128,6 +142,13 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             _logger.Info(
                                 $"[SmartToolCall] Iteration {iteration}: Text response, stopping.", LogTag.Llm);
+                        }
+
+                        // === Max response chars truncation ===
+                        int maxResponseChars = _settings.MaxResponseChars;
+                        if (maxResponseChars > 0)
+                        {
+                            TruncateResponseText(response, maxResponseChars);
                         }
 
                         return response;
@@ -267,6 +288,40 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Truncates all <see cref="MEAI.TextContent"/> in assistant messages to stay within
+        /// <paramref name="maxChars"/> total characters. Mutates in-place.
+        /// </summary>
+        private void TruncateResponseText(MEAI.ChatResponse response, int maxChars)
+        {
+            if (response?.Messages == null || maxChars <= 0) return;
+            int remaining = maxChars;
+            foreach (MEAI.ChatMessage m in response.Messages)
+            {
+                if (m?.Contents == null || m.Role != MEAI.ChatRole.Assistant) continue;
+                for (int i = 0; i < m.Contents.Count; i++)
+                {
+                    if (m.Contents[i] is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    {
+                        if (tc.Text.Length <= remaining)
+                        {
+                            remaining -= tc.Text.Length;
+                        }
+                        else
+                        {
+                            string truncated = remaining > 0
+                                ? tc.Text.Substring(0, remaining) + "\n…[response truncated at " + maxChars + " chars]"
+                                : "…[response truncated]";
+                            m.Contents[i] = new MEAI.TextContent(truncated);
+                            remaining = 0;
+                            _logger.Info(
+                                $"[SmartToolCall] ✂ Response truncated at {maxChars} chars", LogTag.Llm);
+                        }
+                    }
+                }
+            }
         }
 
         /// <summary>

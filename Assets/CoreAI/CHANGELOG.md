@@ -1,5 +1,35 @@
 # Changelog
 
+## [v2.1.0] — 2026-05-08
+
+### Production Resilience — Runtime Safety Guardrails
+
+Four runtime guardrails to prevent context overflow, infinite hang-loops, and runaway model generation.
+
+#### New settings (`ICoreAISettings` / `CoreAISettings` / Inspector)
+
+| Setting | Default | Location |
+|---------|---------|----------|
+| **`MaxToolResultChars`** | `8000` | `ToolExecutionPolicy` — soft-truncates tool result strings before they re-enter the LLM context window. |
+| **`DefaultToolTimeoutMs`** | `30000` | `ToolExecutionPolicy` — wraps each tool invocation in a linked `CancellationTokenSource`; if the tool (e.g. HTTP call) hangs, the timeout fires and returns an error result instead of blocking forever. |
+| **`MaxResponseChars`** | `0` (disabled) | `SmartToolCallingChatClient` — when > 0, truncates final assistant text to prevent runaway generation. |
+| **`MaxToolCallRoundtrips`** | `10` | `SmartToolCallingChatClient` — hard cap on tool-calling loop iterations; prevents infinite recursive tool calling. |
+
+#### Design
+
+- **Centralized enforcement.** Timeout + truncation live in `ToolExecutionPolicy` (covers native + text-extracted calls); roundtrip + response limits live in `SmartToolCallingChatClient`.
+- **Zero breaking changes.** All features are additive with safe defaults; existing agents behave identically unless settings are overridden.
+- **Inspector integration.** All four settings exposed in **CoreAISettingsAsset** under **🛡️ Resilience & Safety** foldout with tooltips and min-value constraints.
+
+#### Tests
+
+- **`ResilienceFeaturesEditModeTests`** — 8 tests validating truncation, timeout, and roundtrip limits independently of LLM backends.
+
+#### Documentation
+
+- **`README.md`**, **`README_RU.md`**, **`CoreAiUnity/README.md`** — resilience bullet points.
+- **`AGENT_BUILDER.md`** — Resilience & Safety section with usage examples.
+
 ## [v2.0.0] — 2026-05-08
 
 ### Major — Skill-Based Tool Orchestration

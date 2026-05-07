@@ -25,6 +25,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |
 | **Skills** | On-demand tool loading via `read_skill` + `call_skill_tool` proxy — **constant 2 meta-tools** regardless of total tool count |
+| **Resilience** | `MaxToolResultChars`, `DefaultToolTimeoutMs`, `MaxResponseChars`, `MaxToolCallRoundtrips` — all in Inspector under 🛡️ **Resilience & Safety** |
 | **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG](CHANGELOG.md) |
 | **LLM modes** | `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, mixed routing |
 | **Docs · Tests · Install** | End of this file |
