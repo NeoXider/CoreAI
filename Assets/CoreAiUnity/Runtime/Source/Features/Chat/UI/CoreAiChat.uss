@@ -246,6 +246,23 @@
     border-bottom-right-radius: 4px;
 }
 
+/* Optional in-chat tool-call diagnostics (CoreAiChatConfig.ShowToolCallsInChat) */
+.coreai-tool-call-row {
+    flex-direction: row;
+    justify-content: flex-start;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+
+.coreai-tool-call-message {
+    background-color: rgba(40, 40, 48, 0.92);
+    border-color: rgba(160, 160, 180, 0.35);
+    border-bottom-left-radius: 4px;
+    font-size: 12px;
+    color: rgb(180, 188, 200);
+    max-width: 420px;
+}
+
 /* Streaming active indicator */
 .coreai-streaming-active {
     border-color: rgba(77, 208, 225, 0.5);
@@ -321,7 +338,7 @@
 .coreai-chat-send-button {
     width: 40px;
     height: 40px;
-    background-color: rgba(17, 160, 181, 0.6);
+    background-color: rgba(77, 208, 225, 0.85);
     color: white;
     border-radius: 20px;
     border-width: 0;
@@ -353,16 +370,18 @@
 
 /* Scrollbar */
 .coreai-chat-scroll .unity-scroller--vertical {
-    width: 4px;
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 7px;
     opacity: 0;
     transition: opacity 0.2s;
-    background-color: transparent;
+    background-color: rgba(6, 14, 30, 0.85);
     margin-left: 0;
     margin-right: 0;
     padding-left: 0;
     padding-right: 0;
-    align-self: stretch;
-    height: 100%;
 }
 
 .coreai-chat-scroll:hover .unity-scroller--vertical {
@@ -370,7 +389,7 @@
 }
 
 .coreai-chat-scroll .unity-scroller--vertical .unity-base-slider__track {
-    background-color: rgba(0, 0, 0, 0.22);
+    background-color: rgba(10, 22, 45, 0.8);
     border-radius: 999px;
 }
 
@@ -394,18 +413,18 @@
 
 /* Unity 6+ renamed scroll view scroller classes (keep design consistent) */
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller {
-    width: 4px;
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 7px;
     opacity: 0;
     transition: opacity 0.2s;
-    background-color: transparent;
+    background-color: rgba(6, 14, 30, 0.85);
     margin-left: 0;
     margin-right: 0;
     padding-left: 0;
     padding-right: 0;
-    align-self: stretch;
-    height: 100%;
-    flex-grow: 1;
-    flex-shrink: 0;
 }
 
 .coreai-chat-scroll:hover .unity-scroll-view__vertical-scroller {
@@ -413,7 +432,7 @@
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-base-slider__track {
-    background-color: rgba(0, 0, 0, 0.22);
+    background-color: rgba(10, 22, 45, 0.8);
     border-radius: 999px;
 }
 
@@ -425,12 +444,12 @@
 
 /* Prefer scroller's own parts when available */
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker {
-    background-color: rgba(77, 208, 225, 0.06);
+    background-color: rgba(10, 22, 45, 0.8);
     border-radius: 6px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__dragger {
-    background-color: rgba(77, 208, 225, 0.22);
+    background-color: rgba(77, 208, 225, 0.85);
     border-radius: 6px;
     border-width: 1px;
     border-color: rgba(77, 208, 225, 0.35);
@@ -451,11 +470,11 @@
 
 /* Official Scroller USS (Unity docs): style the scroller's slider parts explicitly */
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller.unity-scroller {
-    background-color: transparent;
+    background-color: rgba(6, 14, 30, 0.85);
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider {
-    background-color: transparent;
+    background-color: rgba(6, 14, 30, 0.85);
     flex-grow: 1;
     align-self: stretch;
     margin: 0;
@@ -463,12 +482,12 @@
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
-    background-color: rgba(77, 208, 225, 0.06);
+    background-color: rgba(10, 22, 45, 0.8);
     border-radius: 6px;
 }
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__dragger {
-    background-color: rgba(77, 208, 225, 0.22);
+    background-color: rgba(77, 208, 225, 0.85);
     border-radius: 6px;
     border-width: 1px;
     border-color: rgba(77, 208, 225, 0.35);
@@ -487,6 +506,7 @@
 
 /* Row: viewport grows, vertical scroller stays at the far right (no mystery gap / bar in the middle). */
 .coreai-chat-scroll .unity-scroll-view__content-and-vertical-scroll-container {
+    position: relative;
     flex-direction: row;
     flex-grow: 1;
     width: 100%;
@@ -508,7 +528,7 @@
 
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__tracker,
 .coreai-chat-scroll .unity-scroll-view__vertical-scroller .unity-scroller__slider .unity-base-slider__track {
-    background-color: rgba(0, 0, 0, 0.22);
+    background-color: rgba(10, 22, 45, 0.8);
     border-radius: 999px;
 }
 

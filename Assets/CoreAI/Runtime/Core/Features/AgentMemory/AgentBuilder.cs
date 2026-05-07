@@ -41,6 +41,7 @@ namespace CoreAI.Ai
     {
         private readonly string _roleId;
         private readonly List<ILlmTool> _tools = new();
+        private readonly List<SkillSet> _skills = new();
         private string _systemPrompt;
         private AgentMode _mode = AgentMode.ToolsAndChat;
         private bool _withChatHistory;
@@ -116,6 +117,64 @@ namespace CoreAI.Ai
                 foreach (ILlmTool tool in tools)
                 {
                     _tools.Add(tool);
+                }
+            }
+
+            return this;
+        }
+
+        /// <summary>
+        /// Register a <see cref="SkillSet"/> with this agent (self-service pattern).
+        /// <para>
+        /// The skill's tools are registered for the agent. A lightweight catalog
+        /// (name + description) is injected into the system prompt, and a
+        /// <c>read_skill</c> meta-tool is auto-registered so the model can load
+        /// full instructions on demand — like Cursor's <c>read_file</c> pattern.
+        /// </para>
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// var craftingSkill = new SkillSet("Crafting",
+        ///     "Forge weapons and armor",
+        ///     "1. Call get_recipes...\n2. Call craft_item...",
+        ///     new DelegateLlmTool("get_recipes", "...", ...));
+        ///
+        /// var agent = new AgentBuilder("GameMaster")
+        ///     .WithSkill(craftingSkill)
+        ///     .WithSkill(combatSkill)
+        ///     .Build();
+        ///
+        /// // Model sees catalog → calls read_skill("Crafting") → uses crafting tools
+        /// await orch.RunTaskAsync(new AiTaskRequest { RoleId = "GameMaster", Hint = "craft sword" });
+        /// </code>
+        /// </example>
+        public AgentBuilder WithSkill(SkillSet skill)
+        {
+            if (skill == null)
+            {
+                throw new ArgumentNullException(nameof(skill));
+            }
+
+            // Only store the skill reference — tools are NOT added to the main tool list.
+            // They are routed through the call_skill_tool proxy to keep token count minimal.
+            _skills.Add(skill);
+
+            return this;
+        }
+
+        /// <summary>
+        /// Register tools from multiple <see cref="SkillSet"/> instances.
+        /// </summary>
+        public AgentBuilder WithSkills(params SkillSet[] skills)
+        {
+            if (skills != null)
+            {
+                foreach (SkillSet skill in skills)
+                {
+                    if (skill != null)
+                    {
+                        WithSkill(skill);
+                    }
                 }
             }
 
@@ -307,9 +366,6 @@ namespace CoreAI.Ai
             // Context size: 0 → minimal, null → fall back to CoreAISettings, explicit → use as-is.
             int ctxTokens = _contextWindowTokens ?? _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // Temperature: null → fall back to ICoreAISettings → CoreAISettings, explicit → use as-is.
-            float temp = _temperature ?? _settings?.Temperature ?? CoreAISettings.Temperature;
-
             // Prompt does NOT include universalPrefix — it is appended by AiPromptComposer at
             // final composition time (three-layer architecture):
             //   Layer 1: universalSystemPromptPrefix (project-wide rules)
@@ -326,12 +382,13 @@ namespace CoreAI.Ai
                 RoleId = _roleId,
                 SystemPrompt = _systemPrompt,
                 Tools = new List<ILlmTool>(_tools),
+                Skills = _skills.Count > 0 ? new List<SkillSet>(_skills) : null,
                 Mode = _mode,
                 WithChatHistory = _withChatHistory,
                 ContextWindowTokens = ctxTokens,
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
-                Temperature = temp,
+                Temperature = _temperature,
                 MaxOutputTokens = _maxOutputTokens,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 EnableStreaming = _enableStreaming,
@@ -450,7 +507,7 @@ namespace CoreAI.Ai
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
         public int MaxChatHistoryMessages { get; internal set; }
-        public float Temperature { get; internal set; }
+        public float? Temperature { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
 
@@ -462,6 +519,12 @@ namespace CoreAI.Ai
 
         /// <summary>LLM-assisted transcript compaction for this agent (global gate still applies).</summary>
         public bool UseLlmContextCompaction { get; internal set; }
+
+        /// <summary>
+        /// Skills registered via <see cref="AgentBuilder.WithSkill"/>. Null when no skills.
+        /// Each skill carries its own <see cref="SkillSet.Instructions"/> and <see cref="SkillSet.ToolNames"/>.
+        /// </summary>
+        public IReadOnlyList<SkillSet> Skills { get; internal set; }
 
         /// <summary>
         /// Применить конфигурацию к политике.
@@ -483,6 +546,7 @@ namespace CoreAI.Ai
                 PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
             policy.ConfigureLlmContextCompaction(RoleId, UseLlmContextCompaction);
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
+            policy.SetTemperature(RoleId, Temperature);
 
             // Регистрируем дополнительный системный промпт (слой 3)
             if (!string.IsNullOrWhiteSpace(SystemPrompt))
@@ -508,6 +572,23 @@ namespace CoreAI.Ai
                 streamingOverride = true;
             }
             policy.SetStreamingEnabled(RoleId, streamingOverride);
+
+            // Self-service skills: register catalog context provider + meta-tools.
+            // The catalog (name + description per skill) goes into the system prompt.
+            // The model calls read_skill(name) to load instructions + tool schemas,
+            // then call_skill_tool(tool_name, args_json) to execute them.
+            // This keeps the model's visible tool count at exactly 2 regardless of skill count.
+            if (Skills != null && Skills.Count > 0)
+            {
+                // Inject lightweight catalog into system prompt
+                policy.SetRuntimeContextProvider(RoleId, new SkillRuntimeContextProvider(Skills));
+
+                // Register read_skill meta-tool (loads instructions + tool schemas)
+                policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(Skills));
+
+                // Register call_skill_tool proxy (routes to real skill tools)
+                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(Skills));
+            }
         }
 
         private bool HasMemoryTool()

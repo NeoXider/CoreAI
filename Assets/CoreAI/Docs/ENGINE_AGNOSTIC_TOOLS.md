@@ -1,6 +1,8 @@
 # 🏗️ Tool architecture: engine-agnostic pattern
 
-**Version:** v0.10.0 | **Date:** 2026-04-06
+**Version:** v2.0.0 | **Date:** 2026-05-08
+
+> 💡 **v2.0+ — SkillSet:** Tools can now be grouped into named **skills** with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills-v20) for the higher-level orchestration pattern built on top of this tool architecture.
 
 ## 📋 Overview
 

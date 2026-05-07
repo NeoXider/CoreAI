@@ -17,7 +17,7 @@ MonoBehaviour:
   autoPriority: 0
   apiBaseUrl: http://192.168.1.154:1234/v1
   modelName: qwen3.5-4b
-  overrideTemperature: 0
+  enableTemperatureOverriding: 0
   temperature: 0.1
   maxTokens: 512
   maxClientLimitedRequestsPerSession: 0

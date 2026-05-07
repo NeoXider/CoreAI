@@ -2,6 +2,34 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.0.0] - 2026-05-08
+
+### Major — Lockstep with CoreAI 2.0.0 (SkillSet)
+
+- **Dependency:** **`com.nexoider.coreai` `2.0.0`** — **SkillSet** (named tool+instruction groups with per-request activation). No Unity-layer API changes; all new types (`SkillSet`, `SkillRuntimeContextProvider`, `AgentConfig.Skills`, `AgentBuilder.WithSkill/WithSkills`) live in the portable **`CoreAI.Core`** assembly.
+- **Tests:** **`SkillSetEditModeTests`** — 16 tests covering construction, instruction injection, per-request filtering, `MergeToolNames`, `AgentBuilder.WithSkill` integration, `SkillRuntimeContextProvider` activation via `ApplyToPolicy`.
+
+#### Package **`2.0.0`** — dependency **`com.nexoider.coreai` `2.0.0`**.
+
+## [1.7.5] - 2026-05-05
+
+### Chat — optional in-chat tool-call rows
+
+- **`CoreAiChatConfig.ShowToolCallsInChat`** (default **off**) — when enabled, **`CoreAiChatPanel`** subscribes to **`CoreAi.OnToolExecuted`**, marshals to the main thread, and appends a muted diagnostic row for **`roleId`** matching the panel **`RoleId`**. Not persisted to **`IAgentMemoryStore`**. Override **`FormatToolExecutedForChat`** or reuse **`CoreAiToolCallChatFormatter.BuildDisplayText`**.
+- **`CoreAiChat.uss`** — **`.coreai-tool-call-row`** / **`.coreai-tool-call-message`** styles.
+
+### Core AI Settings — temperature flag YAML
+
+- **`CoreAISettingsAsset`** — serialized field **`overrideTemperature`** renamed to **`enableTemperatureOverriding`** with **`[FormerlySerializedAs("overrideTemperature")]`** (default still **off**). Inspector label **Enable temperature overriding**. Public API remains **`OverrideTemperature`** ( **`ICoreAISettings`** ).
+- **Resources** sample assets and **`CoreAISettingsAssetEditor`** updated.
+
+### Tests / docs
+
+- **EditMode:** **`CoreAiToolCallChatFormatterEditModeTests`**; **`CoreAiChatConfigEditModeTests`** asserts **`ShowToolCallsInChat`** default **false**.
+- **`README_CHAT.md`**, **`DEVELOPER_GUIDE.md`**, **`COREAI_SETTINGS.md`**.
+
+#### Package **`1.7.5`** — dependency **`com.nexoider.coreai` `1.7.5`** (lockstep).
+
 ## [1.7.4] - 2026-05-05
 
 ### LLMUnity — runtime host, GGUF from Core AI Settings, autostart

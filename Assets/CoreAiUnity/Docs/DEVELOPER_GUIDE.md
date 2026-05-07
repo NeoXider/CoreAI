@@ -452,7 +452,7 @@ private void OnDisable()
     CoreAi.OnToolExecuted -= HandleToolExecuted;
 }
 
-private void HandleToolExecuted(string roleId, string toolName, IDictionary<string, object> args, object result)
+private void HandleToolExecuted(string roleId, string toolName, IDictionary<string, object?>? args, object? result)
 {
     Debug.Log($"Agent {roleId} used tool {toolName}!");
     
@@ -463,6 +463,8 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
     }
 }
 ```
+
+The built-in **`CoreAiChatPanel`** can append one diagnostic row per tool call when **`CoreAiChatConfig.ShowToolCallsInChat`** is enabled (default **off**). Override **`CoreAiChatPanel.FormatToolExecutedForChat`** for custom text.
 
 ### Clearing chat from UI (`CoreAiChatPanel`)
 

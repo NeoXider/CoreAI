@@ -21,16 +21,17 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 | | |
 |---|--|
 | **CoreAi** | Static `Ask` / `Stream` / orchestration — section below |
-| **Agent** | `AgentBuilder`, tools, memory |
+| **Agent** | `AgentBuilder`, tools, memory, **self-service skills** |
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |
-| **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG `1.5.3`+](CHANGELOG.md) |
+| **Skills** | On-demand tool loading via `read_skill` + `call_skill_tool` proxy — **constant 2 meta-tools** regardless of total tool count |
+| **Long chat context** | Token budget summaries, **`## Conversation Summary`**, optional LLM rollup, per-role compaction toggles · [MemorySystem](Docs/MemorySystem.md) · [CHANGELOG](CHANGELOG.md) |
 | **LLM modes** | `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, mixed routing |
 | **Docs · Tests · Install** | End of this file |
 
 ---
 
-## 🎯 `CoreAi` — one static entry point (new in 0.21)
+## 🎯 `CoreAi` — one static entry point
 
 Call the LLM from **any** script without DI boilerplate:
 
@@ -51,7 +52,7 @@ if (CoreAi.TryGetChatService(out var chat)) { /* optional AI */ }
 
 Release notes and **version bumps** live in **[CHANGELOG.md](CHANGELOG.md)** only (this file does not duplicate them). Bump **`version`** in [`package.json`](package.json) when you ship.
 
-Current release line: see **[`package.json`](package.json)** (Unity layer) and **[`../CoreAI/package.json`](../CoreAI/package.json)** (portable core) — versions are not duplicated here to avoid drift. Play Mode tests live under **`Tests/PlayMode/`** (assemblies **`FastNoLlm`**, **`LlmVerification`**, **`Scenarios`**, **`Shared`**, **`LlmInfra`**); index **[`Tests/PlayMode/README.md`](../Tests/PlayMode/README.md)**.
+Current release line: see **[`package.json`](package.json)** (Unity layer) and **[`../CoreAI/package.json`](../CoreAI/package.json)** (portable core) — versions are not duplicated here to avoid drift.
 
 ---
 
@@ -63,16 +64,48 @@ var blacksmith = new AgentBuilder("Blacksmith")
     .WithTool(new InventoryLlmTool(myInventory))
     .WithMemory()
     .WithMode(AgentMode.ToolsAndChat)
-    .WithStreaming(true)          // per-agent override (0.20+)
+    .WithStreaming(true)          // per-agent override
     .Build();
 
 blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
 await blacksmith.Ask("Show me your swords");
 ```
 
-**Long chats (1.5+):** turn on **`WithChatHistory()`** — older turns collapse into **`## Conversation Summary`** under a **`HistoryTokenBudget`**. Optionally enable **`Enable LLM Context Compaction`** on [**`CoreAISettings`**](Docs/COREAI_SETTINGS.md) for auxiliary summarizer calls (`__CoreAI_ContextCompaction` role); use **`AgentBuilder.WithLlmContextCompaction(false)`** for tool-heavy coding agents (**`Programmer`** defaults off in built-in roles).
+**Long chats:** turn on **`WithChatHistory()`** — older turns collapse into **`## Conversation Summary`** under a **`HistoryTokenBudget`**. Optionally enable **`Enable LLM Context Compaction`** on [**`CoreAISettings`**](Docs/COREAI_SETTINGS.md) for auxiliary summarizer calls; use **`AgentBuilder.WithLlmContextCompaction(false)`** for tool-heavy coding agents.
 
 Docs: [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [TOOL_CALL_SPEC](Docs/TOOL_CALL_SPEC.md) · [MemorySystem](Docs/MemorySystem.md)
+
+---
+
+## 🎯 Self-Service Skills — on-demand tool loading
+
+When your agent has many tools across different domains, **skills** keep the token footprint minimal:
+
+```csharp
+// Group related tools into a skill with instructions
+var crafting = new SkillSet("Crafting",
+    "Forge weapons and armor from raw materials",
+    "1. Call get_recipes to list recipes.\n2. Call craft_item to craft.",
+    new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
+    new DelegateLlmTool("craft_item", "Craft item", (string id) => ...));
+
+// Agent sees only 2 meta-tools, not all skill tools
+var gm = new AgentBuilder("GameMaster")
+    .WithSkill(crafting)
+    .WithSkill(combatSkill)
+    .WithSkill(tradingSkill)
+    .Build();
+```
+
+**Flow:** `read_skill("Crafting")` → instructions + tool schemas → `call_skill_tool("get_recipes", "{}")` → proxy routes to real tool.
+
+**Token savings:** 50 tools → ~4,000 tokens without skills, ~360 tokens with skills (**91% reduction**).
+
+**Mix both:** `WithTool(memory)` (always visible) + `WithSkill(crafting)` (on-demand) — best of both worlds.
+
+> 💡 **Best practice:** use skills for domain-specific tools the agent doesn't always need. Use direct `WithTool()` for 1–3 tools the agent uses on every request.
+
+Full guide: [AGENT_BUILDER §Skills](../CoreAI/Docs/AGENT_BUILDER.md)
 
 ---
 
@@ -118,7 +151,7 @@ Deep dive: [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md).
 ## 📖 Documentation
 
 | Level | Documents |
-|-------|-----------|
+|-------|-----------| 
 | 🟢 Beginner | [QUICK_START](Docs/QUICK_START.md) · [QUICK_START_FULL](Docs/QUICK_START_FULL.md) · [COREAI_SINGLETON_API](Docs/COREAI_SINGLETON_API.md) · [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SETTINGS](Docs/COREAI_SETTINGS.md) · [EXAMPLES](Docs/EXAMPLES.md) |
 | 💬 Chat & streaming | [README_CHAT](Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md) · [ARCHITECTURE](Docs/ARCHITECTURE.md) (context budget / compaction) |
 | 🟡 Intermediate | [TOOL_CALL_SPEC](Docs/TOOL_CALL_SPEC.md) · [MemorySystem](Docs/MemorySystem.md) · [AI_AGENT_ROLES](Docs/AI_AGENT_ROLES.md) · [WORLD_COMMANDS](Docs/WORLD_COMMANDS.md) · [TROUBLESHOOTING](Docs/TROUBLESHOOTING.md) |
@@ -148,6 +181,8 @@ Full map: [DOCS_INDEX](Docs/DOCS_INDEX.md).
 Unity → Window → General → Test Runner
   ├── EditMode — large fast suite (no real LLM): streaming, Lua, tools, rate limit, CoreAi facade, orchestrator streaming, …
   └── PlayMode — integration tests; needs HTTP (env vars) or local GGUF
+       ├── FastNoLlm/ — skill set pipeline, catalog injection, meta-tool registration
+       └── LlmVerification/ — real LLM: tool discovery, secret protocol, benchmark
 ```
 
 Details: [LLMUNITY_SETUP_AND_MODELS](Docs/LLMUNITY_SETUP_AND_MODELS.md) §7 (`COREAI_OPENAI_TEST_*` for HTTP).

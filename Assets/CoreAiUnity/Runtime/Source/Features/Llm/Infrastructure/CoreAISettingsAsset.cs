@@ -1,6 +1,7 @@
 using CoreAI;
 using CoreAI.Ai;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -102,9 +103,10 @@ namespace CoreAI.Infrastructure.Llm
             "When enabled, the Temperature value below is sent to OpenAI-compatible HTTP APIs and LLMUnity (MEAI). " +
             "When disabled, sampling temperature is omitted so each backend uses its own default.")]
         [SerializeField]
-        private bool overrideTemperature;
+        [FormerlySerializedAs("overrideTemperature")]
+        private bool enableTemperatureOverriding;
 
-        [Tooltip("Sampling temperature (0.0 = deterministic … 2.0 = creative). Used only when Override temperature is on.")]
+        [Tooltip("Sampling temperature (0.0 = deterministic … 2.0 = creative). Used only when temperature override is on.")]
         [SerializeField]
         [Range(0f, 2f)]
         private float temperature = 0.1f;
@@ -432,7 +434,7 @@ namespace CoreAI.Infrastructure.Llm
         public float Temperature => temperature;
 
         /// <summary>When true, <see cref="Temperature"/> is sent on LLM requests; when false, backends use default sampling temperature.</summary>
-        public bool OverrideTemperature => overrideTemperature;
+        public bool OverrideTemperature => enableTemperatureOverriding;
 
         /// <summary>Global max-output cap (tokens).</summary>
         public int MaxTokens => maxTokens;
@@ -613,7 +615,7 @@ namespace CoreAI.Infrastructure.Llm
             apiKey = key ?? "";
             modelName = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = Mathf.Clamp(temperature, 0f, 2f);
-            overrideTemperature = true;
+            enableTemperatureOverriding = true;
             requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
             this.maxTokens = maxTokens <= 0 ? 2048 : maxTokens;
         }

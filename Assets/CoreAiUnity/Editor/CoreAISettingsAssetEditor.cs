@@ -395,14 +395,14 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         "Tool Contract — доп. инструкции",
                         "Необязательный текст после стандартного блока ## Tool Contract (когда у роли есть инструменты). Пусто = только встроенные правила оркестратора."));
 
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("overrideTemperature"),
-                    new GUIContent("Override temperature",
-                        "Включите, чтобы отправлять значение Temperature в HTTP API и LLMUnity. Выключите — используется дефолт сэмплинга бэкенда (поле Temperature только для справки в Inspector)."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTemperatureOverriding"),
+                    new GUIContent("Enable temperature overriding",
+                        "Включите, чтобы отправлять значение Temperature в HTTP API и LLMUnity. Выключите — используется дефолт сэмплинга бэкенда (поле Temperature только для справки в Inspector). В YAML сериализуется как enableTemperatureOverriding."));
 
                 EditorGUI.BeginDisabledGroup(!settings.OverrideTemperature);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("temperature"),
                     new GUIContent("Temperature",
-                        "Температура генерации (0.0 = детерминировано, 2.0 = креативно). Учитывается только при включённом Override temperature."));
+                        "Температура генерации (0.0 = детерминировано, 2.0 = креативно). Учитывается только при включённом Enable temperature overriding."));
                 EditorGUI.EndDisabledGroup();
 
                 EditorGUILayout.Space();

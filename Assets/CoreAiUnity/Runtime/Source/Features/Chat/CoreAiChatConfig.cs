@@ -44,6 +44,13 @@ namespace CoreAI.Chat
         [Tooltip("Если true, ответ AI показывается по мере генерации (streaming). Если false — ждёт полный ответ.")]
         [SerializeField] private bool _enableStreaming = true;
 
+        [Header("UI — Диагностика")]
+        [Tooltip(
+            "Показывать в ленте чата строки о вызовах инструментов (native tool), когда модель их выполняет. " +
+            "Только для текущей сессии UI — не сохраняется в IAgentMemoryStore. Фильтр по RoleId панели.")]
+        [SerializeField]
+        private bool _showToolCallsInChat;
+
         [Header("UI — Индикатор набора")]
         [Tooltip("Префикс перед анимированными точками (например, \"Печатает\" → \"Печатает...\"). " +
                  "Оставьте пустым чтобы показывать только анимированные точки \"...\".")]
@@ -116,6 +123,7 @@ namespace CoreAI.Chat
         public Sprite AiAvatarIcon => _aiAvatarIcon;
         public Sprite UserAvatarIcon => _userAvatarIcon;
         public bool EnableStreaming => _enableStreaming;
+        public bool ShowToolCallsInChat => _showToolCallsInChat;
         public string TypingIndicatorText => _typingIndicatorText;
         public string StreamingToolProgressHint => _streamingToolProgressHint ?? string.Empty;
         public string LongRequestHintFormat => _longRequestHintFormat ?? string.Empty;

@@ -341,7 +341,14 @@ If in a streaming response the model first emits tool-call JSON, CoreAI runs a s
 3. appends the tool result to dialog history;
 4. continues generation with the next streaming step.
 
-Tool JSON is not rendered in UI: the player only sees the final readable assistant reply.
+Tool JSON is not rendered in assistant bubbles: the player only sees the final readable assistant reply.
+
+#### Optional in-chat tool diagnostics (`CoreAiChatConfig.ShowToolCallsInChat`)
+
+- **Default:** `ShowToolCallsInChat` is **off** (Inspector: **UI — Диагностика** on the chat config asset).
+- When **on**, `CoreAiChatPanel` subscribes to **`CoreAi.OnToolExecuted`** and appends a separate muted row for calls whose **`roleId`** matches the panel’s **`RoleId`** (same rule as other chat routing).
+- Rows are **not** written to `IAgentMemoryStore` / persisted chat history — session UI only.
+- Customize text via **`CoreAiChatPanel.FormatToolExecutedForChat`** in a subclass, or keep the default formatter **`CoreAiToolCallChatFormatter.BuildDisplayText`** (truncated JSON for args/result).
 
 This behavior is on by default for roles with tools:
 

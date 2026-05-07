@@ -38,6 +38,29 @@ namespace CoreAI.Ai
             }
         }
 
+        /// <summary>
+        /// Append a single tool to an existing role's tool list (e.g. the <c>read_skill</c> meta-tool).
+        /// If no tools exist for the role yet, a new list is created.
+        /// </summary>
+        public void AddToolForRole(string roleId, ILlmTool tool)
+        {
+            if (string.IsNullOrWhiteSpace(roleId) || tool == null)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                if (!_customTools.TryGetValue(roleId, out List<ILlmTool> list))
+                {
+                    list = new List<ILlmTool>();
+                    _customTools[roleId] = list;
+                }
+
+                list.Add(tool);
+            }
+        }
+
         /// <summary>Registers a runtime context provider for a single role.</summary>
         public void SetRuntimeContextProvider(string roleId, IAgentRuntimeContextProvider provider)
         {
@@ -114,6 +137,12 @@ namespace CoreAI.Ai
             public int? MaxOutputTokens;
 
             /// <summary>
+            /// Per-role sampling temperature override; null = use global <see cref="ICoreAISettings.Temperature"/>.
+            /// Set via <see cref="AgentBuilder.WithTemperature"/>.
+            /// </summary>
+            public float? Temperature;
+
+            /// <summary>
             /// When true, long chat history may be folded with an auxiliary LLM request (requires global <see cref="ICoreAISettings.EnableLlmContextCompaction"/>).
             /// When false, only deterministic truncation/summary applies. Built-in <see cref="BuiltInAgentRoleIds.Programmer"/> defaults to false.
             /// </summary>
@@ -122,7 +151,7 @@ namespace CoreAI.Ai
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
                 bool withChatHistory = false, bool persistChatHistory = false, int contextTokens = 8192,
                 bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
-                bool useLlmContextCompaction = true)
+                bool useLlmContextCompaction = true, float? temperature = null)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -133,6 +162,7 @@ namespace CoreAI.Ai
                 MaxChatHistoryMessages = maxChatHistoryMessages;
                 MaxOutputTokens = maxOutputTokens;
                 UseLlmContextCompaction = useLlmContextCompaction;
+                Temperature = temperature;
             }
         }
 
@@ -288,6 +318,7 @@ namespace CoreAI.Ai
                     ContextTokens = existing.ContextTokens,
                     MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
                     MaxOutputTokens = existing.MaxOutputTokens,
+                    Temperature = existing.Temperature,
                     UseLlmContextCompaction = existing.UseLlmContextCompaction
                 };
             }
@@ -310,6 +341,25 @@ namespace CoreAI.Ai
                 existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
                     ? maxOutputTokens.Value
                     : null;
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        /// <summary>
+        /// Set a per-role sampling temperature override. Null clears the override (falls back to global).
+        /// </summary>
+        public void SetTemperature(string roleId, float? temperature)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.Temperature = temperature;
                 _roleConfigs[roleId] = existing;
             }
         }

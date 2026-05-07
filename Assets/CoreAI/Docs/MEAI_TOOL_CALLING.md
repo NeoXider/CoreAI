@@ -2,6 +2,8 @@
 
 **Microsoft.Extensions.AI (MEAI)** is a unified pipeline for tool calling across all backends. The **OpenAI-compatible HTTP** `IChatClient` (`MeaiOpenAiChatClient`) lives in the portable **`com.nexoider.coreai`** assembly; Unity wires **`MeaiLlmClient`**, decorators, and **`MessagePipeToolCallEventPublisher`** in **`com.nexoider.coreaiunity`**. See [`README.md`](README.md) for the full portable-doc map.
 
+> 💡 **v2.0+:** Tools can be organized into **SkillSets** — named groups with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills-v20). The MEAI pipeline handles skill tools identically — `DelegateLlmTool` and `AIFunctionFactory` work the same way regardless of whether the tool was registered directly or through a `SkillSet`.
+
 ---
 
 ## 📐 Architecture

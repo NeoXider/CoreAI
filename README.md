@@ -23,7 +23,7 @@
 
 **Releases:** the shipped version is **`version`** in [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) and [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (portable core). **Notes per release:** [**Unity changelog**](Assets/CoreAiUnity/CHANGELOG.md) · [**Core changelog**](Assets/CoreAI/CHANGELOG.md). **WebGL streaming:** **`WebGlNativeStreaming`** (fetch + jslib; default **on** for new settings assets since **v1.6.13**) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **`UnityWebRequest`** path when the flag is off — [`STREAMING_WEBGL_TODO`](Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md). **WebGL IL2CPP / LLVM OOM** — [`WEBGL_BUILD_TROUBLESHOOTING`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
-**Current packages:** **`com.nexoider.coreai`** portable core **`1.7.4`** · **`com.nexoider.coreaiunity`** Unity layer **`1.7.4`** (same semver; manifest pins the core dependency from the Unity package). **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** since **v1.6.19** (see Unity changelog).
+**Current packages:** see `version` in [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (core) and [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) (Unity layer) — same semver, manifest pins the core dependency from the Unity package. **WebGL:** chat / agent JSON persists under **`FileAgentMemoryStore`** + **`CoreAiPersistFsSync`** (see Unity changelog).
 
 [![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -90,10 +90,46 @@ merchant.Ask("Show me your swords", (response) => Debug.Log(response));
 ```
 
 - **`Build()`** — returns `AgentConfig` (role id, tools, prompts, mode). Still unknown to the runtime until registered.
-- **`ApplyToPolicy(CoreAIAgent.Policy)`** — writes into the live `AgentMemoryPolicy` so **`RunTask` / tool routing** can find this role’s tools and merged prompts. Without it, `"Blacksmith"` is just a string the model never gets the right stack for.
+- **`ApplyToPolicy(CoreAIAgent.Policy)`** — writes into the live `AgentMemoryPolicy` so **`RunTask` / tool routing** can find this role's tools and merged prompts. Without it, `"Blacksmith"` is just a string the model never gets the right stack for.
 - **`Ask` / `AskAsync`** — thin wrappers over **`CoreAIAgent.Orchestrator`** → `AiTaskRequest` with `RoleId` from the config. Same idea as resolving `IAiOrchestrationService` from DI — see [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
+
+### 🎯 Self-Service Skills — Agents Load Tools On Demand
+
+When your agent has dozens of tools across different domains (crafting, combat, trading, quests), sending all of them every request wastes tokens. **Skills** solve this:
+
+```csharp
+// Define skills — each is a group of tools + instructions
+var crafting = new SkillSet("Crafting",
+    "Forge weapons and armor from raw materials",
+    "1. Call get_recipes to list recipes.\n2. Call craft_item to craft.",
+    new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
+    new DelegateLlmTool("craft_item", "Craft item", (string id) => ...));
+
+var combat = new SkillSet("Combat", "Fight enemies", "Call attack with target.",
+    new DelegateLlmTool("attack", "Attack target", (string target) => ...));
+
+// Register skills — model sees only 2 meta-tools, not all skill tools
+var gm = new AgentBuilder("GameMaster")
+    .WithSystemPrompt("You are a Game Master in a fantasy RPG.")
+    .WithSkill(crafting)
+    .WithSkill(combat)
+    .Build();
+gm.ApplyToPolicy(policy);
+```
+
+**How it works:**
+1. Model sees a lightweight **catalog** (skill names + descriptions) in the system prompt
+2. Model calls `read_skill("Crafting")` → gets full instructions + tool schemas
+3. Model calls `call_skill_tool("get_recipes", "{}")` → proxy routes to real tool
+4. **Token overhead: constant** (2 meta-tools) regardless of total skill/tool count
+
+> 💡 **50 tools across 10 skills?** Without skills: ~4,000 tokens. With skills: ~360 tokens. **91% savings.**
+
+Mix direct tools and skills freely: `WithTool(memory)` + `WithSkill(crafting)` — memory is always visible, crafting loads on demand.
+
+Docs: [AGENT_BUILDER.md §Skills](Assets/CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md)
 
 ### 💬 Drop-in Chat UI
 
@@ -320,6 +356,7 @@ The repository consists of **two packages**:
 ┌─────────────────────────────────────────────────────────────┐
 │                   Tools (ILlmTool)                           │
 │  🧠 Memory  📜 Lua  🎒 Inventory  ⚙️ GameConfig  + Yours!   │
+│  🎯 SkillSet → read_skill + call_skill_tool (on-demand)     │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────────────┐

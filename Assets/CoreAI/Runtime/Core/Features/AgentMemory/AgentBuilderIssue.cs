@@ -35,6 +35,6 @@ namespace CoreAI.Ai
         }
 
         public AgentBuilderIssueCode Code { get; }
-        public string Message { get; }
+        public string Message { get; } 
     }
 }

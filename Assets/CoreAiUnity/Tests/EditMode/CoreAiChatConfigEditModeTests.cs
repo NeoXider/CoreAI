@@ -35,6 +35,9 @@ namespace CoreAI.Tests.EditMode
                 "шаблон подсказки должен содержать {elapsed} для подстановки секунд");
             Assert.IsFalse(string.IsNullOrWhiteSpace(config.StreamingToolProgressHint),
                 "короткая подсказка при вызове инструмента / буфере не должна быть пустой по умолчанию");
+            Assert.IsFalse(config.ShowToolCallsInChat, "по умолчанию tool-call строки в чате не показываем");
+
+            Object.DestroyImmediate(config);
         }
     }
 }

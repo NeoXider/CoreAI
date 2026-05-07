@@ -1,5 +1,74 @@
 # Changelog
 
+## [v2.0.0] — 2026-05-08
+
+### Major — Skill-Based Tool Orchestration
+
+Introduces **`SkillSet`** — named groups of tools with dedicated prompt instructions, inspired by the **Microsoft Semantic Kernel `KernelPlugin`** pattern. Skills reduce context bloat by injecting only the active skill's instructions into the system prompt at request time.
+
+#### New public API
+
+- **`SkillSet`** (`CoreAI.Ai`) — immutable container: `Name`, `Instructions` (prompt text), `Tools` (`IReadOnlyList<ILlmTool>`), `ToolNames` (cached `string[]` for `AllowedToolNames`).
+  - Constructor: `new SkillSet(name, instructions, params ILlmTool[] tools)`.
+  - `FromFile(name, filePath, tools)` — load instructions from a `.txt` / `.md` file on disk.
+  - `FromTextContent(name, text, tools)` — load instructions from pre-loaded text (e.g. Unity `TextAsset.text`).
+  - `MergeToolNames(params SkillSet[])` — combine multiple skills into one allowlist.
+  - `BuildActiveInstructions(params SkillSet[])` — compose `## Skill: {Name}` prompt sections from active skills.
+- **`AgentBuilder.WithSkill(SkillSet)`** / **`WithSkills(params SkillSet[])`** — register skill tools and instructions in the fluent builder. Tools are added to the agent's tool list; skills are stored on `AgentConfig.Skills`.
+- **`AgentConfig.Skills`** (`IReadOnlyList<SkillSet>`) — skills registered via `WithSkill`. Null when no skills.
+- **`SkillRuntimeContextProvider`** (internal) — `IAgentRuntimeContextProvider` that reads `AiTaskRequest.AllowedToolNames` and injects only the matching skills' `Instructions` into the system prompt. Registered automatically by `AgentConfig.ApplyToPolicy()` when skills have non-empty instructions.
+
+#### Design
+
+- **Zero orchestrator changes.** Uses existing `AllowedToolNames` + `FilterToolsForRequest()` for tool filtering and existing `IAgentRuntimeContextProvider` + `AiPromptComposer.AppendRuntimeContext()` for instruction injection.
+- **Zero new dependencies.** Pattern inspired by Semantic Kernel's `KernelPlugin`, implemented purely on CoreAI's existing abstractions.
+- **Backwards compatible.** Agents without skills behave identically to v1.x.
+
+#### Usage example
+
+```csharp
+var quizSkill = new SkillSet("Quiz",
+    instructions: "When quiz is active, generate questions using spawn_quiz. " +
+                  "Wait for the answer, then verify with check_answer.",
+    new DelegateLlmTool("spawn_quiz", "Create quiz", (string q) => ...),
+    new DelegateLlmTool("check_answer", "Check answer", (int idx) => ...)
+);
+
+var lessonSkill = new SkillSet("Lesson",
+    instructions: "Explain concepts step by step. Use advance_lesson to proceed.",
+    new DelegateLlmTool("advance_lesson", "Move to next topic", () => ...)
+);
+
+var teacher = new AgentBuilder("Teacher")
+    .WithSystemPrompt("You are a teacher.")
+    .WithSkill(quizSkill)
+    .WithSkill(lessonSkill)
+    .WithMemory()
+    .Build();
+
+teacher.ApplyToPolicy(policy);
+
+// Activate only quiz tools + instructions for this turn:
+await orch.RunTaskAsync(new AiTaskRequest {
+    RoleId = "Teacher",
+    AllowedToolNames = quizSkill.ToolNames
+});
+```
+
+#### Tests
+
+- **`SkillSetEditModeTests`** — 16 tests covering: SkillSet construction, instruction injection, per-request filtering, MergeToolNames, AgentBuilder.WithSkill integration, SkillRuntimeContextProvider activation.
+
+### Semver
+
+- **`2.0.0`** with **`com.nexoider.coreaiunity` `2.0.0`**. Major bump — new public API surface (`SkillSet`, `AgentConfig.Skills`, `AgentBuilder.WithSkill/WithSkills`).
+
+## [v1.7.5] — 2026-05-05
+
+### Lockstep with coreaiunity 1.7.5 (Unity-only)
+
+- **Semver:** **`1.7.5`** with **`com.nexoider.coreaiunity` `1.7.5`**. No portable **`CoreAI.Core`** API changes — Unity release adds optional chat tool-call UI and renames **`CoreAISettingsAsset`** temperature override field to **`enableTemperatureOverriding`** (see Unity changelog).
+
 ## [v1.7.4] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.7.4 (Unity-only)

@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
@@ -18,6 +20,7 @@ namespace CoreAI.Chat
     /// Расширение: наследуйтесь и переопределяйте virtual-методы:
     /// <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
     /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>,
+    /// <see cref="FormatToolExecutedForChat"/>,
     /// <see cref="ResolveTimeoutMessage"/>.
     /// Программный ход без поля ввода: <see cref="SubmitMessageFromExternalAsync"/>.
     /// </summary>
@@ -99,6 +102,7 @@ namespace CoreAI.Chat
                 if (isActiveAndEnabled && Root != null)
                 {
                     HydrateStartupMessagesFromStore();
+                    TryRegisterToolCallChatDisplay();
                 }
             }
         }
@@ -110,6 +114,8 @@ namespace CoreAI.Chat
 
         /// <summary>Событие: AI ответил (полный текст после стриминга).</summary>
         public event Action<string> OnAiResponseCompleted;
+
+        private CoreAi.ToolExecutedHandler? _toolExecutedChatHandler;
 
         // ===================== Lifecycle =====================
 
@@ -168,6 +174,7 @@ namespace CoreAI.Chat
             InitService();
             ApplyConfig();
             HydrateStartupMessagesFromStore();
+            TryRegisterToolCallChatDisplay();
         }
 
         protected virtual void Start()
@@ -185,6 +192,7 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            TryUnregisterToolCallChatDisplay();
             if (SendButton != null) SendButton.UnregisterCallback<ClickEvent>(OnSendClicked);
             if (ClearButton != null) ClearButton.UnregisterCallback<ClickEvent>(OnClearClicked);
             if (InputField != null)
@@ -1420,6 +1428,19 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual string FormatResponseText(string rawText) => rawText;
 
+        /// <summary>
+        /// Текст пузыря «tool call» при включённом <see cref="CoreAiChatConfig.ShowToolCallsInChat"/>.
+        /// </summary>
+        protected virtual string FormatToolExecutedForChat(
+            string roleId,
+            string toolName,
+            IDictionary<string, object?>? arguments,
+            object? result)
+        {
+            _ = roleId;
+            return CoreAiToolCallChatFormatter.BuildDisplayText(toolName, arguments, result);
+        }
+
         internal static string NormalizeAssistantDisplayText(string text)
         {
             return string.IsNullOrEmpty(text) ? text : text.TrimStart();
@@ -1476,6 +1497,96 @@ namespace CoreAI.Chat
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
             MessageScroll.Add(bubble);
+            ScrollToBottom();
+        }
+
+        private void TryRegisterToolCallChatDisplay()
+        {
+            TryUnregisterToolCallChatDisplay();
+            if (config == null || !config.ShowToolCallsInChat)
+            {
+                return;
+            }
+
+            _toolExecutedChatHandler = OnToolExecutedChatDisplay;
+            CoreAi.OnToolExecuted += _toolExecutedChatHandler;
+        }
+
+        private void TryUnregisterToolCallChatDisplay()
+        {
+            if (_toolExecutedChatHandler == null)
+            {
+                return;
+            }
+
+            CoreAi.OnToolExecuted -= _toolExecutedChatHandler;
+            _toolExecutedChatHandler = null;
+        }
+
+        private void OnToolExecutedChatDisplay(
+            string roleId,
+            string toolName,
+            IDictionary<string, object?>? arguments,
+            object? result)
+        {
+            CoreAiChatConfig? cfg = config;
+            if (cfg == null || !cfg.ShowToolCallsInChat)
+            {
+                return;
+            }
+
+            string panelRole = string.IsNullOrEmpty(cfg.RoleId) ? "SmartChat" : cfg.RoleId;
+            if (!string.Equals(roleId, panelRole, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            UniTask.Void(async () =>
+            {
+                try
+                {
+                    await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(_cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (this == null || !isActiveAndEnabled || MessageScroll == null)
+                {
+                    return;
+                }
+
+                string line = FormatToolExecutedForChat(roleId, toolName, arguments, result);
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    return;
+                }
+
+                AppendToolCallBubble(line);
+            });
+        }
+
+        private void AppendToolCallBubble(string text)
+        {
+            if (MessageScroll == null)
+            {
+                return;
+            }
+
+            HideTypingIndicator();
+
+            var row = new VisualElement();
+            row.AddToClassList("coreai-message-row");
+            row.AddToClassList("coreai-tool-call-row");
+
+            var label = new Label(text.Trim());
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.AddToClassList("coreai-chat-message");
+            label.AddToClassList("coreai-tool-call-message");
+
+            row.Add(label);
+            MessageScroll.Add(row);
             ScrollToBottom();
         }
 

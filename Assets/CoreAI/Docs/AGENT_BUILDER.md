@@ -7,12 +7,187 @@
 ### Capabilities
 
 - ✅ **Unique tools** — any `ILlmTool` for a specific agent
+- ✅ **Skills** — named tool+instruction groups with per-request activation (**v2.0+**)
 - ✅ **Three response modes** — `ChatOnly`, `ToolsAndChat`, `ToolsOnly`
 - ✅ **Memory** — persistent agent memory (write/append/clear)
 - ✅ **Chat history** — automatic saving of conversation context
 - ✅ **Per-agent output budget** — `WithMaxOutputTokens(...)` for roles that should stay short or verbose
 - ✅ **Minimal code** — 3–5 lines per agent
 - ✅ **Single MEAI pipeline** — the same tool calling for HTTP API and LLMUnity
+
+---
+
+## Skills (v2.1)
+
+`SkillSet` — a group of tools + instructions that the model loads **on demand** via two meta-tools:
+- `read_skill(skill_name)` — load instructions + tool schemas
+- `call_skill_tool(tool_name, arguments_json)` — execute a skill's tool
+
+The model always sees exactly **2 meta-tools** regardless of how many skills/tools exist. This keeps the token count constant even with hundreds of tools across dozens of skills.
+
+### Creating skills
+
+```csharp
+// name, description (catalog), instructions (loaded via read_skill), tools
+var crafting = new SkillSet("Crafting",
+    "Forge weapons and armor from raw materials",
+    "1. Call get_recipes to see available recipes.\n" +
+    "2. Check inventory via check_inventory.\n" +
+    "3. Craft via craft_item with recipe_id and quality.",
+    new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
+    new DelegateLlmTool("craft_item", "Craft an item", (string id, float q) => ...));
+
+// Without instructions — model relies on tool descriptions
+var combat = new SkillSet("Combat", "Fight enemies",
+    new DelegateLlmTool("attack", "Attack target", (string target) => ...));
+```
+
+### From file
+
+```csharp
+// Instructions from a .txt file
+var quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
+    "Assets/Skills/quiz.txt", tool1, tool2);
+
+// From TextAsset (Resources, WebGL)
+var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
+```
+
+### SkillSetAsset — via Inspector
+
+`Create → CoreAI → Skill Set Asset` — ScriptableObject for designers.
+
+| Field | Purpose |
+|-------|---------|
+| **Skill Name** | Name shown in the catalog |
+| **Description** | Short one-liner |
+| **Instructions Asset** | `.txt` / `.md` TextAsset with full instructions |
+| **Inline Instructions** | Or type directly in Inspector (used if TextAsset is null) |
+
+```csharp
+[SerializeField] SkillSetAsset craftingAsset;
+
+void Start()
+{
+    SkillSet skill = craftingAsset.BuildSkillSet(
+        new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
+        new DelegateLlmTool("craft_item", "Craft item", (string id) => ...));
+
+    new AgentBuilder("GameMaster")
+        .WithSkill(skill)
+        .Build()
+        .ApplyToPolicy(policy);
+}
+```
+
+### Registering skills
+
+```csharp
+var gm = new AgentBuilder("GameMaster")
+    .WithSystemPrompt("You are a Game Master. Read the relevant skill before using its tools.")
+    .WithSkill(crafting)
+    .WithSkill(combat)
+    .WithMode(AgentMode.ToolsAndChat)
+    .Build();
+gm.ApplyToPolicy(policy);
+
+// Or in bulk:
+new AgentBuilder("RPG").WithSkills(crafting, combat, lore).Build();
+```
+
+### Invoking
+
+```csharp
+await orch.RunTaskAsync(new AiTaskRequest {
+    RoleId = "GameMaster",
+    Hint = "Craft me an iron sword"
+});
+// Model: sees catalog → read_skill("Crafting") → call_skill_tool("get_recipes", "{}") → response
+```
+
+### How it works
+
+1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list
+2. `ApplyToPolicy()` registers `SkillRuntimeContextProvider` (catalog in prompt) + `read_skill` + `call_skill_tool`
+3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
+4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
+5. Token overhead: **constant** (2 meta-tools) regardless of skill/tool count
+
+### API
+
+| Member | Description |
+|--------|-------------|
+| `Name` | Skill name |
+| `Description` | Short description (catalog) |
+| `Instructions` | Full instructions (on-demand) |
+| `Tools` | Tools in this skill |
+| `ToolNames` | `string[]` of tool names |
+| `MergeToolNames(params SkillSet[])` | Merge names from multiple skills |
+| `FromFile(name, desc, path, tools)` | Create from file |
+| `FromTextContent(name, desc, text, tools)` | Create from text |
+
+### Best practices — when to use skills vs direct tools
+
+**Use `WithSkill()` when:**
+- The agent has **many tools** it doesn't always need (e.g. 5 skills × 4 tools = 20 tools, but any single request uses 2–4)
+- Tools require **detailed instructions** (complex protocols, multi-step workflows, secret parameters)
+- You want to **reduce context window usage** — only 2 meta-tools are sent regardless of total tool count
+- Different game scenarios activate **different tool subsets** (crafting vs combat vs trading)
+
+**Use `WithTool()` directly when:**
+- The agent has **few tools** (1–3) that it always needs
+- The tool is simple enough that its description is self-sufficient
+- You need **minimum latency** — direct tools skip the read_skill → call_skill_tool round-trip
+
+**Mixing both:**
+```csharp
+var agent = new AgentBuilder("GameMaster")
+    .WithTool(memoryTool)            // always needed → direct
+    .WithSkill(craftingSkill)        // used sometimes → on-demand
+    .WithSkill(combatSkill)          // used sometimes → on-demand
+    .Build();
+// Model sees: memory (direct) + read_skill + call_skill_tool = 3 tools total
+```
+
+### Context optimization tips
+
+| Technique | Savings | How |
+|-----------|---------|-----|
+| **Skills for rarely-used tools** | ~50-100 tokens per hidden tool | Move tools into skills, model loads only what it needs |
+| **Short tool descriptions** | ~10-20 tokens per tool | Use concise descriptions: "List recipes" not "Returns a list of all available crafting recipes in JSON format" |
+| **File-based instructions** | 0 tokens until read | `SkillSet.FromFile()` — instructions load only when `read_skill` is called |
+| **Skill grouping** | Fewer read_skill calls | Group related tools into one skill (e.g. all crafting tools together) |
+
+**Token math example:**
+- 10 skills × 5 tools = 50 tools
+- Without skills: ~50 tools × ~80 tokens/tool = **~4,000 tokens** per request
+- With skills: 2 meta-tools × ~80 tokens + catalog ~200 tokens = **~360 tokens** per request
+- **Saving: ~91%** of tool-related context
+
+### How the proxy works (for advanced users)
+
+```
+User: "Craft me an iron sword"
+  ↓
+Model sees system prompt with catalog:
+  - Crafting — Forge weapons and armor
+  - Combat — Fight enemies
+  ↓
+Model calls: read_skill("Crafting")
+  → Returns: instructions + tool schemas:
+    { tool_name: "get_recipes", parameters: [{name: "type", type: "string"}] }
+    { tool_name: "craft_item", parameters: [{name: "recipe_id", type: "string"}] }
+  ↓
+Model calls: call_skill_tool("get_recipes", "{\"type\": \"sword\"}")
+  → Proxy finds get_recipes delegate, parses JSON, invokes it
+  → Returns: [{recipe_id: "iron_sword_01", materials: [...]}]
+  ↓
+Model calls: call_skill_tool("craft_item", "{\"recipe_id\": \"iron_sword_01\"}")
+  → Proxy routes to craft_item
+  → Returns: {success: true, item: "Iron Sword"}
+  ↓
+Model: "Your Iron Sword has been forged! ⚔️"
+```
 
 ---
 

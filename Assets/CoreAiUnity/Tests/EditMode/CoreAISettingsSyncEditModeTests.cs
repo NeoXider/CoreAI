@@ -43,7 +43,7 @@ namespace CoreAI.Tests.EditMode
             type.GetField("contextWindowTokens", bf).SetValue(settings, 12345);
             type.GetField("universalSystemPromptPrefix", bf).SetValue(settings, "TEST PREFIX");
             type.GetField("temperature", bf).SetValue(settings, 0.99f);
-            type.GetField("overrideTemperature", bf).SetValue(settings, true);
+            type.GetField("enableTemperatureOverriding", bf).SetValue(settings, true);
             type.GetField("logToolCalls", bf).SetValue(settings, false);
             type.GetField("logToolCallArguments", bf).SetValue(settings, false);
             type.GetField("logToolCallResults", bf).SetValue(settings, false);
