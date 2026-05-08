@@ -1,5 +1,30 @@
 # Changelog
 
+## [v2.3.1] — 2026-05-08
+
+### LLMUnity Text-Mode Tool Calling
+
+Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) output tool calls as plain text instead of native `FunctionCallContent`. This release ensures the full SkillSet pipeline works end-to-end on text-only backends.
+
+#### `LlmToolCallTextExtractor`
+
+- **Function-call syntax fallback** — `read_skill("Alchemy")`, `read_skill(Crafting)`, `call_skill_tool("tool", '{"args":"..."}')` are now parsed into `Match` objects. Matches only when the entire trimmed response looks like a function call (prose with parentheses is ignored).
+- **`arguments_json` key** — `LooksLikeToolCallJson` and `TryExtract` now accept `"arguments_json"` as an alternative to `"arguments"` (Qwen3.5 emits this non-standard key).
+- **String-value args re-parsing** — when `"arguments_json"` contains a serialized JSON string (e.g. `"{\"skill_name\":\"Alchemy\"}"`), the value is re-parsed into a proper JSON object before extraction.
+
+#### `ToolExecutionPolicy`
+
+- **JObject → string normalization** — `ExecuteSingleAsync` now normalizes `Newtonsoft.Json.Linq.JObject` and `JArray` values in `FunctionCallContent.Arguments` to JSON strings before calling `AIFunction.InvokeAsync`. This is the **single chokepoint** for all tool calls (native, text-extracted, function-call syntax), ensuring MEAI delegates with `string` parameters never receive raw Newtonsoft tokens.
+
+#### `CallSkillToolLlmTool`
+
+- **`InvokeDelegateWithJson`** — when a delegate parameter expects `System.String` but the JSON token is `JObject`/`JArray`, serialize to `Formatting.None` string instead of throwing `InvalidCastException`.
+
+#### `SmartToolCallingChatClient` / `MeaiLlmClient`
+
+- **`NormalizeJTokenValues`** helper — converts `JObject`/`JArray` values in argument dictionaries to JSON strings, applied in both streaming and non-streaming text extraction paths.
+- **`IsValidToolCallJson`** (streaming) — now accepts `"arguments_json"` key.
+
 ## [v2.3.0] — 2026-05-08
 
 ### Dual-Backend with Auto-Fallback

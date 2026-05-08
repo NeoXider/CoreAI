@@ -140,7 +140,17 @@ namespace CoreAI.Ai
 
                 if (token != null && token.Type != JTokenType.Null)
                 {
-                    invokeArgs[i] = token.ToObject(param.ParameterType);
+                    // When the delegate expects a string but the model passes a JSON object/array
+                    // (e.g. call_skill_tool's arguments_json parameter), serialize to string.
+                    if (param.ParameterType == typeof(string) &&
+                        (token.Type == JTokenType.Object || token.Type == JTokenType.Array))
+                    {
+                        invokeArgs[i] = token.ToString(Formatting.None);
+                    }
+                    else
+                    {
+                        invokeArgs[i] = token.ToObject(param.ParameterType);
+                    }
                 }
                 else if (param.HasDefaultValue)
                 {

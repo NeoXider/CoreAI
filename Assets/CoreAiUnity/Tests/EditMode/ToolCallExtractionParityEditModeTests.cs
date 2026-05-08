@@ -503,6 +503,138 @@ namespace CoreAI.Tests.EditMode
             Assert.That(cleaned, Does.Not.Contain("\"name\""));
         }
 
+        // ------------ LLMUnity Qwen3.5: arguments_json key (instead of arguments) --------
+
+        [Test]
+        public void PortableExtractor_ArgumentsJsonKey_ExtractedAsToolCall()
+        {
+            // Qwen3.5 via LLMUnity emits "arguments_json" instead of "arguments".
+            string input = "{\"name\": \"read_skill\", \"arguments_json\": \"{\\\"skill_name\\\": \\\"Enchanting\\\"}\"}";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "arguments_json key should be recognized as a tool call.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("read_skill", matches[0].Name);
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("skill_name"));
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("Enchanting"));
+        }
+
+        [Test]
+        public void PortableExtractor_LooksLikeToolCallJson_AcceptsArgumentsJson()
+        {
+            string json = "{\"name\":\"read_skill\",\"arguments_json\":\"{}\"}";
+            Assert.IsTrue(LlmToolCallTextExtractor.LooksLikeToolCallJson(json),
+                "LooksLikeToolCallJson must accept 'arguments_json' as alternative key.");
+        }
+
+        [Test]
+        public void PortableExtractor_LooksLikeToolCallJson_RejectsWithoutEitherKey()
+        {
+            // Neither "arguments" nor "arguments_json" — not a tool call.
+            string json = "{\"name\":\"foo\",\"params\":{}}";
+            Assert.IsFalse(LlmToolCallTextExtractor.LooksLikeToolCallJson(json));
+        }
+
+        // ------------ LLMUnity Qwen3.5: function-call syntax --------
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_ReadSkillQuoted()
+        {
+            // Qwen3.5 via LLMUnity: read_skill("Alchemy")
+            string input = "read_skill(\"Alchemy\")";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Function-call syntax should be extracted.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("read_skill", matches[0].Name);
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("skill_name"));
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("Alchemy"));
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_ReadSkillUnquoted()
+        {
+            // Qwen3.5 via LLMUnity: read_skill(Crafting)
+            string input = "read_skill(Crafting)";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Unquoted function-call syntax should be extracted.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("read_skill", matches[0].Name);
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("Crafting"));
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_CallSkillTool()
+        {
+            // call_skill_tool("get_recipes", '{"item":"sword"}')
+            string input = "call_skill_tool(\"get_recipes\", '{\"item\":\"sword\"}')";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Multi-arg function-call syntax should be extracted.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("call_skill_tool", matches[0].Name);
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("tool_name"));
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("get_recipes"));
+        }
+
+        [Test]
+        public void PortableExtractor_FunctionCallSyntax_DoesNotMatchProseWithParens()
+        {
+            // Prose with parentheses should NOT be extracted as a function call.
+            string input = "The player crafted a sword (iron + oak) and it was successful.";
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsFalse(ok, "Prose with parentheses should NOT trigger function-call extraction.");
+        }
+
+        // ------------ Non-streaming: arguments_json key through SmartToolCallingChatClient --------
+
+        [Test]
+        public void NonStreaming_ArgumentsJsonKey_ExecutedAndStripped()
+        {
+            int iter = 0;
+            int readSkillInvocations = 0;
+
+            var inner = new ScriptedChatClient(_ =>
+            {
+                iter++;
+                return iter == 1
+                    ? MakeTextResponse(
+                        "{\"name\":\"read_skill\",\"arguments_json\":\"{\\\"skill_name\\\":\\\"Crafting\\\"}\"}")
+                    : MakeTextResponse("Skill loaded.");
+            });
+
+            MEAI.AIFunction readSkillTool = MakeAIFunction("read_skill", _ =>
+            {
+                readSkillInvocations++;
+                return Task.FromResult<object>("{\"instructions\":\"craft stuff\"}");
+            });
+
+            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
+                allowDuplicateToolCalls: true,
+                tools: new List<ILlmTool> { new TestTool("read_skill") },
+                roleId: "Test", maxConsecutiveErrors: 3);
+
+            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { readSkillTool } };
+            MEAI.ChatResponse response = Task.Run(() =>
+                client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
+
+            Assert.AreEqual(1, readSkillInvocations,
+                "read_skill with arguments_json key must execute exactly once.");
+            Assert.AreEqual(2, iter,
+                "Loop should terminate after the model returns plain text.");
+            Assert.AreEqual(1, client.LastExecutedToolCalls.Count);
+            Assert.AreEqual("read_skill", client.LastExecutedToolCalls[0].Name);
+            Assert.IsTrue(client.LastExecutedToolCalls[0].Success);
+        }
+
         // ------------ Helpers ------------
 
         private static MEAI.ChatResponse MakeTextResponse(string text)

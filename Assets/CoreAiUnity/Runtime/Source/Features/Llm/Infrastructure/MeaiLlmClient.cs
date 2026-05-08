@@ -961,12 +961,21 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     JObject json = JObject.Parse(originalFragment);
                     string functionName = json["name"]?.ToString()?.Trim();
-                    JToken argsToken = json["arguments"];
+                    // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
+                    JToken argsToken = json["arguments"] ?? json["arguments_json"];
                     if (string.IsNullOrWhiteSpace(functionName) || argsToken == null) continue;
 
+                    // If args is a string (e.g. "arguments_json": "{...}"), parse it as JSON.
+                    string argsStr = argsToken.Type == JTokenType.String
+                        ? argsToken.ToString()
+                        : argsToken.ToString(Formatting.None);
+
                     Dictionary<string, object?> arguments =
-                        JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsToken.ToString())
+                        JsonConvert.DeserializeObject<Dictionary<string, object?>>(argsStr)
                         ?? new Dictionary<string, object?>();
+
+                    // Normalize JObject/JArray values to strings for MEAI compatibility.
+                    NormalizeJTokenValues(arguments);
 
                     string callId = $"stream_call_{functionName}_{Guid.NewGuid():N}";
                     toolCalls.Add(new MEAI.FunctionCallContent(callId, functionName, arguments));
@@ -1054,12 +1063,32 @@ namespace CoreAI.Infrastructure.Llm
             return Regex.Replace(text, @"```[\s\S]*?```", m => new string(' ', m.Length));
         }
 
-        /// <summary>Checks if a JSON string looks like a tool call (has "name" and "arguments").</summary>
+        /// <summary>Checks if a JSON string looks like a tool call (has "name" and "arguments" or "arguments_json").</summary>
         internal static bool IsValidToolCallJson(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return false;
             // Quick heuristic before parsing: must contain both key patterns
-            return json.Contains("\"name\"") && json.Contains("\"arguments\"");
+            return json.Contains("\"name\"") &&
+                   (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
+        }
+
+        /// <summary>
+        /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
+        /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
+        /// Newtonsoft tokens to CLR types (e.g. <c>JObject → string</c>).
+        /// </summary>
+        private static void NormalizeJTokenValues<T>(Dictionary<string, T> arguments)
+        {
+            if (arguments == null) return;
+            List<string> keys = new(arguments.Keys);
+            foreach (string key in keys)
+            {
+                object val = arguments[key];
+                if (val is JObject jo)
+                    arguments[key] = (T)(object)jo.ToString(Formatting.None);
+                else if (val is JArray ja)
+                    arguments[key] = (T)(object)ja.ToString(Formatting.None);
+            }
         }
 
         /// <summary>

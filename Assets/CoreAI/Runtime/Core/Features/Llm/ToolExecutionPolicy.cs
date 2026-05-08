@@ -214,9 +214,22 @@ namespace CoreAI.Infrastructure.Llm
                 LlmToolCallInfo info = BuildInfo(fc);
                 _eventPublisher.PublishStarted(info);
                 Stopwatch sw = Stopwatch.StartNew();
-                MEAI.AIFunctionArguments args = fc.Arguments != null
-                    ? new MEAI.AIFunctionArguments(fc.Arguments)
-                    : null;
+                MEAI.AIFunctionArguments args = null;
+                if (fc.Arguments != null)
+                {
+                    // MEAI's AIFunctionFactory cannot convert Newtonsoft JObject/JArray to CLR
+                    // types (e.g. string). Normalize before invocation — this is the single
+                    // chokepoint for ALL tool calls (native, text-extracted, function-call syntax).
+                    var normalized = new Dictionary<string, object?>(fc.Arguments);
+                    foreach (string key in new List<string>(normalized.Keys))
+                    {
+                        if (normalized[key] is Newtonsoft.Json.Linq.JObject jo)
+                            normalized[key] = jo.ToString(Newtonsoft.Json.Formatting.None);
+                        else if (normalized[key] is Newtonsoft.Json.Linq.JArray ja)
+                            normalized[key] = ja.ToString(Newtonsoft.Json.Formatting.None);
+                    }
+                    args = new MEAI.AIFunctionArguments(normalized);
+                }
                 ILlmAsyncMarshaler marshaler = _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
 
                 // === Per-tool timeout: wrap cancellation token ===

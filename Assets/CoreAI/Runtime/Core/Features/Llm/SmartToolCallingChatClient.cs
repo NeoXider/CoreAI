@@ -9,6 +9,7 @@ using CoreAI.Ai;
 using CoreAI.Logging;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -263,6 +264,12 @@ namespace CoreAI.Infrastructure.Llm
                         JsonConvert.DeserializeObject<Dictionary<string, object>>(m.ArgumentsJson)
                         ?? new Dictionary<string, object>();
 
+                    // MEAI's AIFunctionFactory cannot convert JObject/JArray to string parameters.
+                    // Normalize: serialize any nested JSON tokens to strings so the delegate
+                    // (e.g. call_skill_tool(string tool_name, string arguments_json)) receives
+                    // proper string values instead of raw Newtonsoft tokens.
+                    NormalizeJTokenValues(arguments);
+
                     string callId = $"stream_call_{m.Name}_{Guid.NewGuid():N}";
                     toolCalls.Add(new MEAI.FunctionCallContent(callId, m.Name, arguments));
                 }
@@ -273,6 +280,29 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return toolCalls.Count > 0;
+        }
+
+        /// <summary>
+        /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
+        /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
+        /// Newtonsoft tokens to CLR types (e.g. <c>JObject → string</c>); this normalization
+        /// ensures text-mode extracted arguments work with delegates that expect string parameters.
+        /// </summary>
+        private static void NormalizeJTokenValues(Dictionary<string, object> arguments)
+        {
+            if (arguments == null) return;
+            List<string> keys = new(arguments.Keys);
+            foreach (string key in keys)
+            {
+                if (arguments[key] is JObject jo)
+                {
+                    arguments[key] = jo.ToString(Formatting.None);
+                }
+                else if (arguments[key] is JArray ja)
+                {
+                    arguments[key] = ja.ToString(Formatting.None);
+                }
+            }
         }
 
         /// <summary>

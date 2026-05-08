@@ -65,6 +65,12 @@ namespace CoreAI.Ai
             List<(int Start, int Length)> spans = FindBalancedToolCallSpans(searchText);
             if (spans.Count == 0)
             {
+                // Try function-call syntax before memory pseudo-write.
+                if (TryExtractFunctionCallSyntax(text, out matches, out cleanedText))
+                {
+                    return true;
+                }
+
                 return TryExtractMemoryPseudoWriteSyntax(text, out matches, out cleanedText);
             }
 
@@ -82,8 +88,16 @@ namespace CoreAI.Ai
                 {
                     JObject json = JObject.Parse(original);
                     name = json["name"]?.ToString()?.Trim();
-                    JToken args = json["arguments"];
+                    // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
+                    JToken args = json["arguments"] ?? json["arguments_json"];
                     if (string.IsNullOrWhiteSpace(name) || args == null) continue;
+                    // If args is a string ("arguments_json": "{...}"), parse it as JSON.
+                    if (args.Type == JTokenType.String)
+                    {
+                        string argsStr = args.ToString();
+                        try { args = JToken.Parse(argsStr); }
+                        catch { /* keep as-is */ }
+                    }
                     argsJson = args.ToString(Formatting.None);
                 }
                 catch
@@ -213,7 +227,9 @@ namespace CoreAI.Ai
         public static bool LooksLikeToolCallJson(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return false;
-            return json.Contains("\"name\"") && json.Contains("\"arguments\"");
+            // Accept both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity emits the latter).
+            return json.Contains("\"name\"") &&
+                   (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
         }
 
         /// <summary>
@@ -264,6 +280,134 @@ namespace CoreAI.Ai
             }
 
             return spans;
+        }
+        /// <summary>
+        /// Fallback for local GGUF models (Qwen3.5 via LLMUnity) that output tool calls as
+        /// function-call syntax instead of JSON, e.g.:
+        /// <c>read_skill("Alchemy")</c> or <c>read_skill(Crafting)</c> or
+        /// <c>call_skill_tool("get_recipes", "{\"item\":\"sword\"}")</c>
+        /// </summary>
+        private static readonly Regex FunctionCallSyntaxRegex = new(
+            @"\b([a-z_][a-z0-9_]*)\s*\(\s*(.*?)\s*\)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        private static bool TryExtractFunctionCallSyntax(string text, out List<Match> matches, out string cleanedText)
+        {
+            matches = new List<Match>();
+            cleanedText = text ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            // Only match if the ENTIRE trimmed text looks like a function call (not embedded in prose).
+            string trimmed = text.Trim();
+            System.Text.RegularExpressions.Match m = FunctionCallSyntaxRegex.Match(trimmed);
+            if (!m.Success || m.Index != 0 || m.Length < trimmed.Length * 0.8)
+            {
+                return false;
+            }
+
+            string funcName = m.Groups[1].Value;
+            string rawArgs = m.Groups[2].Value.Trim();
+
+            // Build arguments JSON from the raw args string.
+            // Handle: read_skill("Alchemy"), read_skill(Crafting),
+            //         call_skill_tool("get_recipes", '{"item":"sword"}')
+            Dictionary<string, object> argsDict = new();
+            if (!string.IsNullOrEmpty(rawArgs))
+            {
+                // Try to parse as JSON first (e.g. {"skill_name": "Alchemy"})
+                if (rawArgs.StartsWith("{"))
+                {
+                    try
+                    {
+                        argsDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(rawArgs)
+                                   ?? new Dictionary<string, object>();
+                    }
+                    catch
+                    {
+                        argsDict["input"] = rawArgs;
+                    }
+                }
+                else
+                {
+                    // Split by comma for multi-arg: call_skill_tool("get_recipes", '{"item":"sword"}')
+                    string[] parts = SplitFunctionArgs(rawArgs);
+                    if (funcName == "call_skill_tool" && parts.Length >= 2)
+                    {
+                        argsDict["tool_name"] = StripQuotes(parts[0]);
+                        argsDict["arguments_json"] = StripQuotes(parts[1]);
+                    }
+                    else if (funcName == "read_skill" && parts.Length >= 1)
+                    {
+                        argsDict["skill_name"] = StripQuotes(parts[0]);
+                    }
+                    else
+                    {
+                        // Generic: first arg as "input"
+                        argsDict["input"] = StripQuotes(parts[0]);
+                    }
+                }
+            }
+
+            string argsJson = JsonConvert.SerializeObject(argsDict);
+            matches.Add(new Match(funcName, argsJson, 0, text.Length));
+            cleanedText = string.Empty;
+            return true;
+        }
+
+        private static string StripQuotes(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            s = s.Trim();
+            if (s.Length >= 2 &&
+                ((s[0] == '"' && s[s.Length - 1] == '"') ||
+                 (s[0] == '\'' && s[s.Length - 1] == '\'')))
+            {
+                return s.Substring(1, s.Length - 2);
+            }
+            return s;
+        }
+
+        private static string[] SplitFunctionArgs(string argsStr)
+        {
+            // Simple split respecting quotes and braces.
+            List<string> parts = new();
+            int depth = 0;
+            bool inQuote = false;
+            char quoteChar = '"';
+            StringBuilder current = new();
+
+            for (int i = 0; i < argsStr.Length; i++)
+            {
+                char c = argsStr[i];
+                if (inQuote)
+                {
+                    current.Append(c);
+                    if (c == quoteChar && (i == 0 || argsStr[i - 1] != '\\'))
+                        inQuote = false;
+                }
+                else if (c == '"' || c == '\'')
+                {
+                    inQuote = true;
+                    quoteChar = c;
+                    current.Append(c);
+                }
+                else if (c == '{') { depth++; current.Append(c); }
+                else if (c == '}') { depth--; current.Append(c); }
+                else if (c == ',' && depth == 0)
+                {
+                    parts.Add(current.ToString().Trim());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            if (current.Length > 0) parts.Add(current.ToString().Trim());
+            return parts.ToArray();
         }
     }
 }

@@ -2,6 +2,30 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.3.1] - 2026-05-08
+
+### LLMUnity Text-Mode Tool Calling — Lockstep with CoreAI 2.3.1
+
+Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native function calls — they output tool calls as plain text. This release adds three extraction layers so the full SkillSet pipeline (read_skill → call_skill_tool → execute) works end-to-end on local backends.
+
+#### Text-Mode Extraction
+
+- **Function-call syntax** — `read_skill("Alchemy")`, `read_skill(Crafting)`, `call_skill_tool("brew_potion", '{"secret_code":"ARCANUM-7"}')` are now parsed into `FunctionCallContent` and executed by the pipeline.
+- **`arguments_json` key** — Qwen3.5 emits `{"name":"read_skill","arguments_json":"{...}"}` instead of `"arguments"`. Both keys are now accepted in `LlmToolCallTextExtractor`, `SmartToolCallingChatClient`, and `MeaiLlmClient` (streaming path).
+- **JObject → string normalization** in `ToolExecutionPolicy.ExecuteSingleAsync` — the single chokepoint where all tool calls pass. MEAI's `AIFunctionFactory` cannot convert `Newtonsoft.Json.Linq.JObject` to `System.String`; nested JSON objects are now serialized to strings before `AIFunction.InvokeAsync`.
+
+#### Fixes
+
+- **`CallSkillToolLlmTool.InvokeDelegateWithJson`** — when a delegate expects `string` but receives `JObject`/`JArray`, serialize to JSON string instead of throwing `InvalidCastException`.
+- **`IsValidToolCallJson` / `LooksLikeToolCallJson`** — heuristic checks now accept `"arguments_json"` alongside `"arguments"`.
+
+#### Tests
+
+- **8 new EditMode tests** in `ToolCallExtractionParityEditModeTests`: `arguments_json` key extraction, function-call syntax (quoted/unquoted/multi-arg), prose-with-parens safety, and end-to-end `SmartToolCallingChatClient` integration.
+- **3 PlayMode LLM verification tests** now pass on LLMUnity: `SelfService_ModelMustReadSkill`, `SelfService_ModelCallsReadSkill`, `Model_ReadsSkill_ThenCallsSkillToolViaProxy` — all with text-mode tolerance fallback.
+
+#### Package **`2.3.1`** — dependency **`com.nexoider.coreai` `2.3.1`**.
+
 ## [2.3.0] - 2026-05-08
 
 ### Dual-Backend — Lockstep with CoreAI 2.3.0

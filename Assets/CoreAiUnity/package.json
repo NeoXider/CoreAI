@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience (tool truncation, timeout, roundtrip limits, history truncation). RateLimiterMetrics. v2.2.0: lockstep with com.nexoider.coreai 2.2.0.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience (tool truncation, timeout, roundtrip limits, history truncation). RateLimiterMetrics. v2.3.1: LLMUnity text-mode tool calling support.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "2.3.0"
+    "com.nexoider.coreai": "2.3.1"
   }
 }
