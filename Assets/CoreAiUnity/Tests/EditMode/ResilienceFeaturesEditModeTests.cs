@@ -55,6 +55,9 @@ namespace CoreAI.Tests.EditMode
 
             public int MaxToolCallRoundtripsOverride { get; set; } = 10;
             public int MaxToolCallRoundtrips => MaxToolCallRoundtripsOverride;
+
+            public int MaxToolCallHistoryMessagesOverride { get; set; } = 20;
+            public int MaxToolCallHistoryMessages => MaxToolCallHistoryMessagesOverride;
         }
 
         private static MEAI.FunctionCallContent MakeToolCall(string name)
@@ -240,6 +243,235 @@ namespace CoreAI.Tests.EditMode
             {
                 CoreAISettings.Instance = original;
                 CoreAISettings.ResetOverrides();
+            }
+        }
+        // ==================== Tool Call History Truncation (v2.2.0) ====================
+
+        [Test]
+        public void CoreAISettings_MaxToolCallHistoryMessages_DefaultIs20()
+        {
+            CoreAISettings.ResetOverrides();
+            var original = CoreAISettings.Instance;
+            CoreAISettings.Instance = null;
+
+            try
+            {
+                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages,
+                    "Default MaxToolCallHistoryMessages should be 20");
+            }
+            finally
+            {
+                CoreAISettings.Instance = original;
+            }
+        }
+
+        [Test]
+        public void CoreAISettings_MaxToolCallHistoryMessages_OverrideWorks()
+        {
+            CoreAISettings.ResetOverrides();
+            var original = CoreAISettings.Instance;
+            CoreAISettings.Instance = null;
+
+            try
+            {
+                CoreAISettings.MaxToolCallHistoryMessages = 6;
+                Assert.AreEqual(6, CoreAISettings.MaxToolCallHistoryMessages);
+
+                CoreAISettings.ResetOverrides();
+                Assert.AreEqual(20, CoreAISettings.MaxToolCallHistoryMessages, "Should reset to default");
+            }
+            finally
+            {
+                CoreAISettings.Instance = original;
+                CoreAISettings.ResetOverrides();
+            }
+        }
+
+        // ==================== Rate Limiter Metrics (v2.2.0) ====================
+
+        [Test]
+        public void RateLimiterMetrics_Struct_HoldsValues()
+        {
+            var m = new RateLimiterMetrics(10, 60, 3, 7);
+            Assert.AreEqual(10, m.MaxRequestsPerWindow);
+            Assert.AreEqual(60, m.WindowSeconds);
+            Assert.AreEqual(3, m.AcceptedInWindow);
+            Assert.AreEqual(7, m.TotalRejected);
+        }
+
+        [Test]
+        public async Task RateLimiterMetrics_InGameLlmChatService_TracksRejections()
+        {
+            // Create a service with max 2 requests per 60s window
+            var stubLlm = new StubLlmClient("pong");
+            var stubPrompts = new StubSystemPromptProvider();
+            var service = new InGameLlmChatService(stubLlm, stubPrompts, maxMessages: 24,
+                maxRequestsPerWindow: 2, rateLimitWindowSeconds: 60);
+
+            // First two should succeed (rate limiter accepts)
+            var r1 = await service.SendPlayerMessageAsync("msg1");
+            var r2 = await service.SendPlayerMessageAsync("msg2");
+
+            // Third should be rate-limited
+            var r3 = await service.SendPlayerMessageAsync("msg3");
+            Assert.IsFalse(r3.Ok, "Third request should be rate-limited");
+            Assert.That(r3.Error, Does.Contain("rate_limited"));
+
+            // Check metrics
+            var metrics = service.GetRateLimiterMetrics();
+            Assert.AreEqual(2, metrics.MaxRequestsPerWindow);
+            Assert.AreEqual(60, metrics.WindowSeconds);
+            Assert.AreEqual(2, metrics.AcceptedInWindow);
+            Assert.AreEqual(1, metrics.TotalRejected, "Should have 1 rejection");
+        }
+
+        // ==================== Helpers for rate limiter tests ====================
+
+        private sealed class StubLlmClient : ILlmClient
+        {
+            private readonly string _response;
+            public StubLlmClient(string response) { _response = response; }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _response });
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        private sealed class StubSystemPromptProvider : IAgentSystemPromptProvider
+        {
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = "Test system prompt";
+                return true;
+            }
+        }
+
+        // ==================== FallbackLlmClientDecorator (v2.3.0) ====================
+
+        [Test]
+        public async Task Fallback_PrimarySucceeds_SecondaryNotCalled()
+        {
+            var primary = new StubLlmClient("primary-ok");
+            var secondary = new CountingLlmClient("secondary-ok");
+            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+
+            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("primary-ok", result.Content);
+            Assert.AreEqual(0, secondary.CallCount, "Secondary should not be called when primary succeeds");
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryFails_SecondaryIsCalled()
+        {
+            var primary = new FailingLlmClient();
+            var secondary = new StubLlmClient("secondary-ok");
+            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+
+            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("secondary-ok", result.Content);
+            Assert.AreEqual(1, fallback.FallbackCount);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryReturnsRetryableError_SecondaryIsCalled()
+        {
+            var primary = new ErrorResultLlmClient(LlmErrorCode.BackendUnavailable);
+            var secondary = new StubLlmClient("fallback-success");
+            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+
+            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual("fallback-success", result.Content);
+            Assert.AreEqual(1, fallback.FallbackCount);
+        }
+
+        [Test]
+        public void Fallback_Cancellation_DoesNotFallback()
+        {
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            // FailingLlmClient checks ct.ThrowIfCancellationRequested() first
+            var primary = new FailingLlmClient();
+            var secondary = new CountingLlmClient("secondary");
+            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token));
+            Assert.AreEqual(0, secondary.CallCount, "Secondary should not be called on cancellation");
+            Assert.AreEqual(0, fallback.FallbackCount);
+        }
+
+        [Test]
+        public async Task Fallback_MultipleFails_CounterIncrements()
+        {
+            var primary = new FailingLlmClient();
+            var secondary = new StubLlmClient("ok");
+            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+
+            await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "a" });
+            await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "b" });
+            await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "c" });
+
+            Assert.AreEqual(3, fallback.FallbackCount);
+        }
+
+        // Helpers for fallback tests
+
+        private sealed class CountingLlmClient : ILlmClient
+        {
+            private readonly string _response;
+            public int CallCount { get; private set; }
+            public CountingLlmClient(string response) { _response = response; }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                CallCount++;
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _response });
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        private sealed class FailingLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                ct.ThrowIfCancellationRequested();
+                throw new LlmClientException("primary down", LlmErrorCode.ProviderError);
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                throw new LlmClientException("primary down", LlmErrorCode.ProviderError);
+            }
+        }
+
+        private sealed class ErrorResultLlmClient : ILlmClient
+        {
+            private readonly LlmErrorCode _code;
+            public ErrorResultLlmClient(LlmErrorCode code) { _code = code; }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "backend error", ErrorCode = _code });
+            }
+
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                throw new NotImplementedException();
             }
         }
     }

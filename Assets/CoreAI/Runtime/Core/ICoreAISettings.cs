@@ -1,6 +1,32 @@
 namespace CoreAI
 {
     /// <summary>
+    /// Snapshot of rate-limiter state for diagnostics and UI.
+    /// </summary>
+    public readonly struct RateLimiterMetrics
+    {
+        /// <summary>Max requests allowed within the window.</summary>
+        public int MaxRequestsPerWindow { get; }
+
+        /// <summary>Window size in seconds.</summary>
+        public int WindowSeconds { get; }
+
+        /// <summary>Requests accepted (not rejected) within the current window.</summary>
+        public int AcceptedInWindow { get; }
+
+        /// <summary>Total requests rejected since the service was created.</summary>
+        public long TotalRejected { get; }
+
+        public RateLimiterMetrics(int maxRequestsPerWindow, int windowSeconds, int acceptedInWindow, long totalRejected)
+        {
+            MaxRequestsPerWindow = maxRequestsPerWindow;
+            WindowSeconds = windowSeconds;
+            AcceptedInWindow = acceptedInWindow;
+            TotalRejected = totalRejected;
+        }
+    }
+
+    /// <summary>
     /// Host-wide CoreAI settings: infrastructure switches, logging, and agent limits.
     /// </summary>
     public interface ICoreAISettings
@@ -147,5 +173,13 @@ namespace CoreAI
         /// Default 10. Must be at least 1.
         /// </summary>
         int MaxToolCallRoundtrips => 10;
+
+        /// <summary>
+        /// Maximum number of tool call message pairs (assistant + tool result) to keep in the
+        /// MEAI message list during a single request's tool-calling loop in <see cref="SmartToolCallingChatClient"/>.
+        /// When the count exceeds this limit, the oldest tool call pair is removed to prevent unbounded growth.
+        /// <para>0 = no limit (retain all). Default 20 (10 roundtrips × 2 messages each).</para>
+        /// </summary>
+        int MaxToolCallHistoryMessages => 20;
     }
 }

@@ -1076,8 +1076,9 @@ Production agents face three classes of risk: tool result overflow, tool hangs, 
 | `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. |
 | `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
 | `MaxToolCallRoundtrips` | **10** | Maximum tool-call loop iterations per request. Prevents infinite tool-calling loops (model calls tools → gets results → calls again → …). |
+| `MaxToolCallHistoryMessages` | **20** | Max tool call messages retained in the MEAI list during a single request's tool-calling loop. Prevents unbounded context growth. 0 = no limit. |
 
-**All four** are configurable via:
+**All five** are configurable via:
 - `CoreAISettings.X = value` (static C# override)
 - `CoreAISettingsAsset` in Unity Inspector (under 🛡️ **Resilience & Safety**)
 - `ICoreAISettings` interface (DI / custom settings)
@@ -1102,6 +1103,7 @@ CoreAISettings.MaxResponseChars = 2000;
 [ToolPolicy] ⏱ Error: Tool 'fetch_weather' timed out after 5000ms
 [SmartToolCall] ⚠ Max tool-call roundtrips (10) reached. Stopping.
 [SmartToolCall] ✂ Response truncated at 2000 chars
+[SmartToolCall] Trimmed 4 old tool call message(s), keeping 12 total.
 ```
 
 ### Tool call retry
@@ -1123,6 +1125,40 @@ Attempt 3: Final attempt
 ```
 
 This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
+
+### 🔄 Dual-Backend with Auto-Fallback
+
+Configure a secondary HTTP backend in Inspector (**🔄 Fallback Backend** section). When the primary backend fails, requests are automatically retried on the secondary:
+
+```
+Primary: http://192.168.1.154:1234/v1 (local Qwen3.5-4B)
+Secondary: https://api.openai.com/v1 (GPT-4o)
+
+Request → Primary fails (timeout/503) → Retry on Secondary → Success
+```
+
+**Setup in Inspector:**
+
+1. Open `CoreAISettings` asset
+2. Toggle **Enable Fallback Backend** ✓
+3. Fill **Secondary API Base URL**, **Secondary API Key**, **Secondary Model Name**
+
+**Setup via code:**
+
+```csharp
+// In CoreAISettingsAsset Inspector:
+// enableFallbackBackend = true
+// secondaryApiBaseUrl = "https://api.openai.com/v1"
+// secondaryApiKey = "sk-..."
+// secondaryModelName = "gpt-4o-mini"
+
+// The pipeline auto-wraps: primary → FallbackLlmClientDecorator(primary, secondary)
+```
+
+**Use cases:**
+- Local model for fast/free, cloud for complex queries when local fails
+- Free tier + paid fallback
+- A/B model testing
 
 ---
 

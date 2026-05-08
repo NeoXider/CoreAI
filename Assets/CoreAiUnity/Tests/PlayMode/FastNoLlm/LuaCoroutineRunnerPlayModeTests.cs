@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
 using NUnit.Framework;
@@ -44,11 +44,11 @@ namespace CoreAI.Tests.PlayMode
             int iterations = 0;
             reg.Register("mark_iteration", new System.Action(() => iterations++));
 
-            //  :   time_now()  
-            //      (, wait_seconds)
+            //  :   time_now()  0.3
+            //      (0.1    FPS  )
             string luaCode = @"
                 local start_time = time_now()
-                while time_now() - start_time < 0.1 do
+                while time_now() - start_time < 0.3 do
                     mark_iteration()
                     coroutine.yield()
                 end
@@ -62,8 +62,8 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(handle.IsAlive);
             Assert.AreEqual(1, _runner.ActiveCount);
 
-            //  Unity  ~0.15 
-            yield return new WaitForSeconds(0.15f);
+            //  Unity  ~0.6 (  0.3)
+            yield return new WaitForSeconds(0.6f);
 
             //     ,  time_now() 
             Assert.IsFalse(handle.IsAlive);

@@ -41,9 +41,17 @@ namespace CoreAI.Composition
             builder.Register(c =>
             {
                 LlmClientRegistry reg = new(c.Resolve<IGameLogger>(), settings);
-                reg.SetLegacyFallback(
-                    ResolveLlmClient(settings, c.Resolve<IGameLogger>(), c.Resolve<IAgentMemoryStore>(),
-                        c.Resolve<ILlmAgentProvider>()));
+                ILlmClient primaryClient = ResolveLlmClient(settings, c.Resolve<IGameLogger>(),
+                    c.Resolve<IAgentMemoryStore>(), c.Resolve<ILlmAgentProvider>());
+
+                // Dual-backend: wrap primary in FallbackLlmClientDecorator when secondary is configured
+                if (settings != null && settings.HasValidFallbackBackend)
+                {
+                    ILlmClient secondaryClient = BuildSecondaryHttpClient(settings);
+                    primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, c.Resolve<ILog>());
+                }
+
+                reg.SetLegacyFallback(primaryClient);
                 reg.ApplyManifest(routingManifest);
                 return reg;
             }, Lifetime.Singleton).As<ILlmClientRegistry>().As<ILlmRoutingController>();
@@ -211,6 +219,43 @@ namespace CoreAI.Composition
                 : client;
 #endif
         }
+
+        /// <summary>
+        /// Builds an <see cref="ILlmClient"/> for the secondary (fallback) backend from <see cref="CoreAISettingsAsset"/>.
+        /// </summary>
+        private static ILlmClient BuildSecondaryHttpClient(CoreAISettingsAsset settings)
+        {
+#if COREAI_NO_LLM
+            return new StubLlmClient();
+#else
+            return new OpenAiChatLlmClient(
+                new SecondarySettingsAdapter(settings),
+                settings,
+                GameLoggerUnscopedFallback.Instance,
+                memoryStore: null);
+#endif
+        }
+
+#if !COREAI_NO_LLM
+        /// <summary>Adapts secondary backend fields to <see cref="IOpenAiHttpSettings"/>.</summary>
+        private sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
+        {
+            private readonly CoreAISettingsAsset _s;
+            public SecondarySettingsAdapter(CoreAISettingsAsset s) { _s = s; }
+
+            public string ApiBaseUrl => _s.SecondaryApiBaseUrl;
+            public string ApiKey => _s.SecondaryApiKey;
+            public string AuthorizationHeader => "";
+            public string Model => _s.SecondaryModelName;
+            public float Temperature => _s.Temperature;
+            public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
+            public int MaxTokens => _s.MaxTokens;
+            public bool LogLlmInput => _s.LogLlmInput;
+            public bool LogLlmOutput => _s.LogLlmOutput;
+            public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
+            public IRequestHeaderProvider? HeaderProvider => null;
+        }
+#endif
 
         internal static bool IsHttpMode(LlmExecutionMode mode)
         {

@@ -2,6 +2,28 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.3.0] - 2026-05-08
+
+### Dual-Backend — Lockstep with CoreAI 2.3.0
+
+- **Dependency:** **`com.nexoider.coreai` `2.3.0`**.
+- **Inspector:** New **🔄 Fallback Backend** section in `CoreAISettingsAsset` — `enableFallbackBackend`, `secondaryApiBaseUrl`, `secondaryApiKey`, `secondaryModelName`.
+- **`FallbackLlmClientDecorator`** — auto-fallback primary → secondary on failure.
+- **`LlmPipelineInstaller`** — DI wiring wraps primary client in fallback decorator when secondary is configured.
+- **5 EditMode tests** for fallback decorator behavior.
+
+#### Package **`2.3.0`** — dependency **`com.nexoider.coreai` `2.3.0`**.
+
+## [2.2.0] - 2026-05-08
+
+### Lockstep with CoreAI 2.2.0
+
+- **Dependency:** **`com.nexoider.coreai` `2.2.0`**.
+- **Inspector:** `MaxToolCallHistoryMessages` field added to **🛡️ Resilience & Safety** foldout (default 20, 0 = no limit).
+- **`RateLimiterMetrics`** exposed via `IInGameLlmChatService.GetRateLimiterMetrics()`.
+
+#### Package **`2.2.0`** — dependency **`com.nexoider.coreai` `2.2.0`**.
+
 ## [2.1.0] - 2026-05-08
 
 ### Production Resilience — Lockstep with CoreAI 2.1.0

@@ -52,6 +52,7 @@ namespace CoreAI
         private static int? _defaultToolTimeoutMs;
         private static int? _maxResponseChars;
         private static int? _maxToolCallRoundtrips;
+        private static int? _maxToolCallHistoryMessages;
 
         #endregion
 
@@ -80,6 +81,7 @@ namespace CoreAI
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
         private const int DefaultMaxToolCallRoundtrips = 10;
+        private const int DefaultMaxToolCallHistoryMessages = 20;
 
         internal const string DefaultUniversalSystemPromptPrefix =
             "CRITICAL RULES FOR ALL AGENTS:\n" +
@@ -350,6 +352,16 @@ namespace CoreAI
             set => _maxToolCallRoundtrips = value;
         }
 
+        /// <summary>
+        /// Max tool call history messages in the MEAI message list during tool-calling loop.
+        /// 0 = no limit. Default: 20.
+        /// </summary>
+        public static int MaxToolCallHistoryMessages
+        {
+            get => _maxToolCallHistoryMessages ?? Instance?.MaxToolCallHistoryMessages ?? DefaultMaxToolCallHistoryMessages;
+            set => _maxToolCallHistoryMessages = value;
+        }
+
         #endregion
 
         /// <summary>
@@ -386,6 +398,7 @@ namespace CoreAI
                 _defaultToolTimeoutMs = null;
                 _maxResponseChars = null;
                 _maxToolCallRoundtrips = null;
+                _maxToolCallHistoryMessages = null;
             }
         }
     }

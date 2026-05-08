@@ -1,5 +1,45 @@
 # Changelog
 
+## [v2.3.0] — 2026-05-08
+
+### Dual-Backend with Auto-Fallback
+
+- **`FallbackLlmClientDecorator`** — new decorator wrapping primary + secondary `ILlmClient`. When the primary backend fails (exception, `BackendUnavailable`, `RateLimited`, `Timeout`, `ProviderError`, `ContextLengthExceeded`), the request is automatically retried on the secondary. User cancellation (`OperationCanceledException`) is never retried.
+- **Streaming fallback** — if the primary streaming enumerator throws on the first chunk, the decorator falls back to secondary streaming transparently.
+- **`FallbackCount`** property — tracks how many times the secondary was invoked.
+
+### Inspector: Fallback Backend
+
+- **`CoreAISettingsAsset`** — new **🔄 Fallback Backend (secondary)** section:
+  - `enableFallbackBackend` — master toggle.
+  - `secondaryApiBaseUrl` — secondary HTTP endpoint.
+  - `secondaryApiKey` — secondary API key.
+  - `secondaryModelName` — secondary model identifier.
+- **`HasValidFallbackBackend`** computed property — true when toggle is on AND URL + model are set.
+- **`LlmPipelineInstaller`** — when `HasValidFallbackBackend` is true, the primary `ILlmClient` is wrapped in `FallbackLlmClientDecorator` with a secondary `OpenAiChatLlmClient` built from `SecondarySettingsAdapter`.
+
+### Tests
+
+- 5 new EditMode tests: `Fallback_PrimarySucceeds_SecondaryNotCalled`, `Fallback_PrimaryFails_SecondaryIsCalled`, `Fallback_PrimaryReturnsRetryableError_SecondaryIsCalled`, `Fallback_Cancellation_DoesNotFallback`, `Fallback_MultipleFails_CounterIncrements`.
+
+## [v2.2.0] — 2026-05-08
+
+### Tool Call History Truncation
+
+- **`MaxToolCallHistoryMessages`** (default 20) — `SmartToolCallingChatClient` now trims the oldest tool call message pairs (Assistant + Tool result) from the MEAI message list during long tool-calling loops. Prevents unbounded context growth within a single request.
+- When the count exceeds the limit, the oldest pairs are removed while preserving system and user messages.
+- Setting exposed in `ICoreAISettings`, `CoreAISettings` static proxy, and `CoreAISettingsAsset` Inspector (🛡️ Resilience & Safety). `0` = no limit.
+
+### Rate Limiter Metrics
+
+- **`RateLimiterMetrics`** struct — snapshot of rate limiter state: `MaxRequestsPerWindow`, `WindowSeconds`, `AcceptedInWindow`, `TotalRejected`.
+- **`IInGameLlmChatService.GetRateLimiterMetrics()`** — exposes sliding-window rate limiter diagnostics for dashboard / UI display.
+- `InGameLlmChatService` now tracks `TotalRejected` count.
+
+### Tool-Level Retry (clarification)
+
+- `maxConsecutiveErrors` already works globally across all tools in `ToolExecutionPolicy`. Per-tool granularity is unnecessary for the current architecture — the global counter resets on any successful execution, which handles mixed-tool scenarios correctly.
+
 ## [v2.1.0] — 2026-05-08
 
 ### Production Resilience — Runtime Safety Guardrails

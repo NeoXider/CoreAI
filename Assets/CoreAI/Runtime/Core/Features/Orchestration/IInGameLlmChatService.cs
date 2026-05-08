@@ -16,5 +16,8 @@ namespace CoreAI.Ai
 
         /// <summary>Число пар user/assistant в истории (для UI).</summary>
         int HistoryPairCount { get; }
+
+        /// <summary>Snapshot of the sliding-window rate limiter state for diagnostics / dashboard.</summary>
+        CoreAI.RateLimiterMetrics GetRateLimiterMetrics() => default;
     }
 }

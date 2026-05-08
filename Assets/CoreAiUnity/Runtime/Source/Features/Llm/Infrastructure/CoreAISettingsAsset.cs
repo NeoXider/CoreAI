@@ -123,6 +123,25 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("HTTP layer timeout seconds (fallback 120 when unset).")] [SerializeField] [Min(0)]
         private int requestTimeoutSeconds = 120;
 
+        [Header("🔄 Fallback Backend (secondary)")]
+        [Tooltip(
+            "When enabled and secondary URL/model are set, requests that fail on the primary backend " +
+            "are automatically retried on the secondary. Useful for local model + cloud fallback.")]
+        [SerializeField]
+        private bool enableFallbackBackend;
+
+        [Tooltip("Secondary backend base URL (e.g., https://api.openai.com/v1).")]
+        [SerializeField]
+        private string secondaryApiBaseUrl = "";
+
+        [Tooltip("Secondary backend API key.")]
+        [SerializeField]
+        private string secondaryApiKey = "";
+
+        [Tooltip("Secondary backend model name (e.g., gpt-4o-mini).")]
+        [SerializeField]
+        private string secondaryModelName = "";
+
         [Header("💾 LLMUnity (local model)")]
         [Tooltip("GameObject hosting LLMAgent; empty auto-detects.")]
         [SerializeField]
@@ -236,6 +255,12 @@ namespace CoreAI.Infrastructure.Llm
             "Prevents infinite tool-calling loops. Default 10.")]
         [SerializeField] [Min(1)]
         private int maxToolCallRoundtrips = 10;
+
+        [Tooltip(
+            "Max tool call history messages retained in the MEAI message list during a single request's tool-calling loop. " +
+            "Prevents unbounded context growth in long multi-tool sessions. 0 = no limit. Default 20.")]
+        [SerializeField] [Min(0)]
+        private int maxToolCallHistoryMessages = 20;
 
         [Header("Streaming")]
         [Tooltip(
@@ -433,6 +458,27 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Bearer-style API credential.</summary>
         public string ApiKey => apiKey ?? "";
 
+        // ── Secondary (fallback) backend ──
+
+        /// <summary>Whether fallback to secondary backend is enabled.</summary>
+        public bool EnableFallbackBackend => enableFallbackBackend;
+
+        /// <summary>Secondary backend base URL.</summary>
+        public string SecondaryApiBaseUrl =>
+            string.IsNullOrWhiteSpace(secondaryApiBaseUrl) ? "" : secondaryApiBaseUrl.TrimEnd('/');
+
+        /// <summary>Secondary backend API key.</summary>
+        public string SecondaryApiKey => secondaryApiKey ?? "";
+
+        /// <summary>Secondary backend model name.</summary>
+        public string SecondaryModelName => secondaryModelName ?? "";
+
+        /// <summary>True when fallback is enabled and secondary URL + model are both configured.</summary>
+        public bool HasValidFallbackBackend =>
+            enableFallbackBackend &&
+            !string.IsNullOrWhiteSpace(secondaryApiBaseUrl) &&
+            !string.IsNullOrWhiteSpace(secondaryModelName);
+
         /// <summary>Provider model identifier (HTTP) or GGUF hint (LLMUnity fallback).</summary>
         public string ModelName
         {
@@ -587,6 +633,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Max tool-call roundtrips per request.</summary>
         public int MaxToolCallRoundtrips => maxToolCallRoundtrips < 1 ? 10 : maxToolCallRoundtrips;
+
+        /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit.</summary>
+        public int MaxToolCallHistoryMessages => maxToolCallHistoryMessages < 0 ? 20 : maxToolCallHistoryMessages;
 
         /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
         public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
@@ -874,6 +923,11 @@ namespace CoreAI.Infrastructure.Llm
             if (maxToolCallRoundtrips < 1)
             {
                 maxToolCallRoundtrips = 10;
+            }
+
+            if (maxToolCallHistoryMessages < 0)
+            {
+                maxToolCallHistoryMessages = 20;
             }
         }
 #endif

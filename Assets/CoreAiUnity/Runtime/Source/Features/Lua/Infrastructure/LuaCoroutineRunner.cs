@@ -86,6 +86,12 @@ namespace CoreAI.Infrastructure.Lua
                 try
                 {
                     h.Resume();
+
+                    // Coroutine may have finished during Resume — mark for removal immediately
+                    if (!h.IsAlive)
+                    {
+                        _toRemove.Add(h);
+                    }
                 }
                 catch (MoonSharp.Interpreter.ScriptRuntimeException ex)
                 {

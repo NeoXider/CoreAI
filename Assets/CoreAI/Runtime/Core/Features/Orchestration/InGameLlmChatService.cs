@@ -25,6 +25,7 @@ namespace CoreAI.Ai
         private readonly int _maxRequestsPerWindow;
         private readonly TimeSpan _rateLimitWindow;
         private readonly Queue<DateTime> _requestTimestamps = new();
+        private long _totalRejected;
 
         /// <summary>
         /// Создать чат-сервис с опциональным rate limiting.
@@ -148,6 +149,29 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Returns a snapshot of the rate limiter state for diagnostics / UI.
+        /// </summary>
+        public RateLimiterMetrics GetRateLimiterMetrics()
+        {
+            lock (_rateLock)
+            {
+                // Purge expired timestamps so AcceptedInWindow is accurate.
+                DateTime now = DateTime.UtcNow;
+                DateTime cutoff = now - _rateLimitWindow;
+                while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoff)
+                {
+                    _requestTimestamps.Dequeue();
+                }
+
+                return new RateLimiterMetrics(
+                    _maxRequestsPerWindow,
+                    (int)_rateLimitWindow.TotalSeconds,
+                    _requestTimestamps.Count,
+                    _totalRejected);
+            }
+        }
+
+        /// <summary>
         /// Sliding-window rate limiter: отклоняет запрос если превышен лимит.
         /// </summary>
         private bool TryAcquireRateSlot()
@@ -167,6 +191,7 @@ namespace CoreAI.Ai
 
                 if (_requestTimestamps.Count >= _maxRequestsPerWindow)
                 {
+                    _totalRejected++;
                     return false;
                 }
 

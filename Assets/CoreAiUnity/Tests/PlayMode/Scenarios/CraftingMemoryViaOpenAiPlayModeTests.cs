@@ -724,12 +724,18 @@ namespace CoreAI.Tests.PlayMode
             new("(?:[Tt]he )?weapon\\s+\"([^\"]+)\""),
             // " with Craft #4 - SteelHardwood Blade (identical to "
             new("Craft #\\d+\\s*-\\s*([A-Za-z0-9][A-Za-z0-9_ ]*?)\\s*\\("),
+            // Qwen3.5 thinking: "Craft #2: SteelHardwoodAxe" or "Craft #2 - SteelHardwoodAxe" (no parens after)
+            new("Craft #\\d+\\s*[-:]+\\s*\"?([A-Z][A-Za-z0-9]+(?:[A-Z][a-z]+)+)\"?", RegexOptions.IgnoreCase),
+            // Qwen3.5 thinking: 'should be "SteelHardwoodAxe"' or 'use "SteelHardwoodAxe"'
+            new("(?:should be|exact name|use|same as)\\s+\"([A-Z][A-Za-z0-9_ ]+)\"", RegexOptions.IgnoreCase),
             // Lua table field inside generated code (before generic JSON "name": tool keys)
             new(@"\bname\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
             new(@"\bname\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
             // JSON: "name": "..." (may match tool envelope; junk-filter execute_lua / memory above)
             new("\"name\"\\s*:\\s*\"([^\"]+)\""),
             new("Name\\s*=\\s*\"([^\"]+)\""),
+            // Qwen3.5 thinking: quoted PascalCase compound names like "SteelHardwoodAxe"
+            new("\"([A-Z][a-z]+(?:[A-Z][a-z]+){1,})\""),
             // " crafted with quality" must NOT match "with" as the name  (?!with\b)
             new("\\bcrafted\\s+(?!with\\b)\\s*\\*{0,2}([A-Za-z][A-Za-z0-9_']*(?:\\s+[A-Za-z][A-Za-z0-9_']*)*)\\*{0,2}", RegexOptions.IgnoreCase),
             // Freeform: "X created" (PascalCase multi-part)

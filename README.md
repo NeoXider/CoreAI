@@ -19,7 +19,8 @@
 - 🧭 **LLM modes for production choices** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, or mixed per-role routing profiles.
 - 🗜️ **Smart long-chat context** — token budget-aware history, rolling **`## Conversation Summary`**, optional **auxiliary LLM compaction** (Kilocode-style), and **per-role** toggles: `AgentBuilder.WithLlmContextCompaction(...)` plus a global kill switch on **`CoreAISettings`**.
 - 🎯 **Self-Service Skills** — group tools by domain (crafting, combat, trading). The model sees only 2 meta-tools (`read_skill` + `call_skill_tool`), not hundreds. ~91% token savings.
-- 🛡️ **Production resilience** — `MaxToolResultChars` (soft-truncation), `DefaultToolTimeoutMs` (per-tool timeout), `MaxResponseChars` (runaway cap), `MaxToolCallRoundtrips` (loop guard). All configurable in Inspector.
+- 🛡️ **Production resilience** — `MaxToolResultChars` (soft-truncation), `DefaultToolTimeoutMs` (per-tool timeout), `MaxResponseChars` (runaway cap), `MaxToolCallRoundtrips` (loop guard), `MaxToolCallHistoryMessages` (context trim). `RateLimiterMetrics` diagnostics. All configurable in Inspector.
+- 🔄 **Dual-backend with auto-fallback** — configure a secondary HTTP backend in Inspector. If the primary fails, requests are retried on the secondary automatically (`FallbackLlmClientDecorator`). Perfect for local model + cloud fallback.
 
 > 🚀 **Proven on small models:** the full PlayMode suite passes on a local **Qwen3.5-4B** GGUF. You are not forced into expensive cloud APIs to ship something that feels smart.
 

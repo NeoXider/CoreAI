@@ -185,6 +185,15 @@ namespace CoreAI.Infrastructure.Llm
 
                     messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
                     messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+
+                    // === Tool call history truncation ===
+                    // Prevent unbounded message growth during long tool-calling loops.
+                    // Only count tool-related messages (Assistant with FunctionCallContent + Tool result).
+                    int maxHistoryMsgs = _settings.MaxToolCallHistoryMessages;
+                    if (maxHistoryMsgs > 0)
+                    {
+                        TrimToolCallHistory(messages, maxHistoryMsgs);
+                    }
                 }
             }
             finally
@@ -370,6 +379,69 @@ namespace CoreAI.Infrastructure.Llm
         public void Dispose()
         {
             _innerClient.Dispose();
+        }
+
+        /// <summary>
+        /// Removes the oldest tool call message pairs (Assistant + Tool) from the middle of the list
+        /// to keep total tool-related messages within <paramref name="maxToolMessages"/>.
+        /// System and original user messages at the start are preserved.
+        /// </summary>
+        private void TrimToolCallHistory(List<MEAI.ChatMessage> messages, int maxToolMessages)
+        {
+            // Count tool-related messages: any with role Tool, or Assistant with FunctionCallContent.
+            int toolMessageCount = 0;
+            for (int i = 0; i < messages.Count; i++)
+            {
+                if (messages[i].Role == MEAI.ChatRole.Tool)
+                {
+                    toolMessageCount++;
+                }
+                else if (messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]))
+                {
+                    toolMessageCount++;
+                }
+            }
+
+            if (toolMessageCount <= maxToolMessages)
+            {
+                return;
+            }
+
+            int toRemove = toolMessageCount - maxToolMessages;
+            int removed = 0;
+
+            // Remove oldest tool call pairs from the list (skip system/user at the beginning).
+            for (int i = 0; i < messages.Count && removed < toRemove; )
+            {
+                bool isToolMsg = messages[i].Role == MEAI.ChatRole.Tool;
+                bool isToolAssistant = messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]);
+
+                if (isToolMsg || isToolAssistant)
+                {
+                    messages.RemoveAt(i);
+                    removed++;
+                }
+                else
+                {
+                    i++;
+                }
+            }
+
+            if (removed > 0 && _settings.LogMeaiToolCallingSteps)
+            {
+                _logger.Info(
+                    $"[SmartToolCall] Trimmed {removed} old tool call message(s), keeping {messages.Count} total.", LogTag.Llm);
+            }
+        }
+
+        private static bool HasFunctionCallContent(MEAI.ChatMessage message)
+        {
+            if (message.Contents == null) return false;
+            foreach (object item in message.Contents)
+            {
+                if (item is MEAI.FunctionCallContent) return true;
+            }
+            return false;
         }
     }
 }

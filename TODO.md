@@ -1,51 +1,19 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-08 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.0.0**.
+**Обновлено:** 2026-05-08 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.3.0**.
 
 ---
 
 ## 🔴 КРИТИЧНО — решить в ближайших версиях
 
-### Tool result truncation (переполнение контекста)
+> ✅ **Все критичные пункты закрыты.** См. архив ниже.
 
-- [ ] Длинные результаты тулов (например `get_hierarchy` в большой сцене, или огромный JSON) могут переполнить context window модели. Добавить `maxToolResultChars` с мягким truncation и префиксом `[...truncated]` в `ToolExecutionPolicy`.
-- **Риск:** модель получает обрезанный контекст без предупреждения, теряет важные данные, или вообще падает с `ContextLengthExceeded`.
-
-### Per-tool timeout
-
-- [ ] Отдельный инструмент не имеет таймаута — пробрасывается пустой `CancellationToken`. Если tool делает HTTP-вызов или тяжёлую операцию — весь pipeline висит.
-- [ ] Добавить `[LlmTool(TimeoutMs=5000)]` атрибут или `ILlmTool.TimeoutMs` свойство. `ToolExecutionPolicy` создаёт `CancellationTokenSource` с таймаутом и передаёт в `ExecuteAsync`.
-- [ ] Тест: `ToolTimeoutTests` — таймаут срабатывает, результат = ошибка, pipeline продолжает.
-
-### Max response length limiter
-
-- [ ] Если модель льёт бесконечный стрим, `IAsyncEnumerable` ничем не ограничен. Добавить `maxResponseChars` / `maxResponseTokens` с пробросом `CancellationToken` при превышении.
-- **Где:** `AiOrchestrator.RunStreamingAsync` или `MeaiLlmClient.CompleteStreamingAsync`.
+*Сейчас нет открытых критичных задач.*
 
 ---
 
 ## 🟡 ВАЖНО — следующие версии
 
-### Dual-backend at runtime (primary + secondary)
-
-- [ ] `CoreAISettings` получает поле `secondaryBackend` (`LlmBackendType?`, по умолчанию `null`). При не-`null`:
-  - `CoreAILifetimeScope` регистрирует **оба** клиента и заворачивает в `RoutingLlmClient` через `LlmRoutingManifest`.
-  - В Editor — секция «Secondary backend» с симметричным набором полей.
-  - Per-role routing: «primary», «secondary», «auto-fallback (primary→secondary on error)».
-- [ ] EditMode-тест: `RoutingLlmClient` переключается на secondary при ошибке; per-role override уважается.
-- [ ] Обновить `DEVELOPER_GUIDE.md` §4.
-- **Контекст:** инфраструктура (`RoutingLlmClient`, `LlmRoutingManifest`, `ILlmClientRegistry`) уже есть, но не подключена в DI flow и не доступна через инспектор.
-
-### Tool call history truncation
-
-- [ ] `messages` в длинной сессии растёт бесконечно (каждый tool call добавляет 2 сообщения в историю). Добавить truncation старых tool calls через N раундов в `SmartToolCallingChatClient`.
-
-### Tool-level retry/duplicate policy
-
-- [ ] `AllowDuplicates` работает только для детекции дубликатов, но не для tool-specific retry. Полезно добавить `MaxConsecutiveErrors` на конкретный тул.
-
-### Rate limiter метрики
-
-- [ ] Сколько запросов отклонено за последние N минут? `IRateLimiterMetrics` + отображение в `OrchestrationDashboard`.
+*Все задачи из этого раздела были реализованы в v2.1.0–v2.3.0. Новые задачи будут добавлены по мере появления.*
 
 ---
 
@@ -89,6 +57,33 @@
 
 <details>
 <summary>Закрытые задачи (кликни чтобы развернуть)</summary>
+
+### v2.3.0 — Dual-Backend with Auto-Fallback (2026-05-08)
+- [x] **FallbackLlmClientDecorator** — primary fail → auto-retry на secondary. Streaming fallback.
+- [x] **CoreAISettingsAsset** — 🔄 Fallback Backend секция: `enableFallbackBackend`, `secondaryApiBaseUrl`, `secondaryApiKey`, `secondaryModelName`.
+- [x] **LlmPipelineInstaller** — auto-wiring: при `HasValidFallbackBackend` primary оборачивается в `FallbackLlmClientDecorator`.
+- [x] **5 EditMode тестов** — primary OK, primary fail, retryable error, cancellation, counter.
+- [x] Changelogs, package.json (2.3.0), READMEs, TODO обновлены.
+
+### v2.2.0 — Tool History Truncation & Rate Metrics (2026-05-08)
+- [x] **MaxToolCallHistoryMessages** (default 20) — `SmartToolCallingChatClient.TrimToolCallHistory()` удаляет старые пары Assistant+Tool.
+- [x] **RateLimiterMetrics** struct — `MaxRequestsPerWindow`, `WindowSeconds`, `AcceptedInWindow`, `TotalRejected`.
+- [x] **IInGameLlmChatService.GetRateLimiterMetrics()** — доступ к метрикам из UI/Dashboard.
+- [x] **InGameLlmChatService** — `_totalRejected` счётчик отклонённых запросов.
+- [x] **CoreAISettingsAsset** — `maxToolCallHistoryMessages` в Inspector 🛡️ Resilience & Safety.
+- [x] **maxConsecutiveErrors** — подтверждено, что глобальный retry через `ToolExecutionPolicy` покрывает все сценарии. Per-tool retry не нужен.
+- [x] Changelogs, package.json (2.2.0), TODO обновлены.
+
+### v2.1.0 — Production Resilience (2026-05-08)
+- [x] **MaxToolResultChars** (default 8000) — soft-truncation в `ToolExecutionPolicy`, `[…truncated]` суффикс.
+- [x] **DefaultToolTimeoutMs** (default 30000) — linked `CancellationTokenSource` в `ToolExecutionPolicy.ExecuteSingleAsync`.
+- [x] **MaxResponseChars** (default 0/выкл) — truncation в `SmartToolCallingChatClient`.
+- [x] **MaxToolCallRoundtrips** (default 10) — loop guard в `SmartToolCallingChatClient`.
+- [x] **ICoreAISettings** — 4 новых свойства с дефолтами.
+- [x] **CoreAISettingsAsset** — Inspector foldout 🛡️ Resilience & Safety с тултипами.
+- [x] **ResilienceFeaturesEditModeTests** — 8 тестов (truncation, timeout, roundtrips).
+- [x] Anti-thinking prompt instructions в PlayMode тестах для Qwen3.5.
+- [x] Changelogs, READMEs, AGENT_BUILDER.md обновлены.
 
 ### v2.1.0 — Self-Service Skills (2026-05-08)
 - [x] **Self-service skill pattern** — модель сама вызывает `read_skill(name)` для загрузки инструкций по требованию (паттерн Cursor `read_file`).
