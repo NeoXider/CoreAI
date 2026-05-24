@@ -111,11 +111,15 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
                 Assert.IsTrue(inventory.CallLog.Any(c => c.StartsWith("get_inventory", StringComparison.Ordinal)),
                     "Merchant should inspect inventory.");
-                Assert.IsTrue(economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal)),
+                Assert.IsTrue(
+                    economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal)),
                     "Scenario should attempt expensive purchase first.");
-                Assert.IsTrue(economy.CallLog.Any(c => c.StartsWith("apply_discount:Health Potion:20", StringComparison.Ordinal)),
+                Assert.IsTrue(
+                    economy.CallLog.Any(c => c.StartsWith("apply_discount:Health Potion:20", StringComparison.Ordinal)),
                     "Scenario should negotiate discount.");
-                Assert.IsTrue(economy.CallLog.Any(c => c.StartsWith("buy_item:Health Potion:1:success", StringComparison.Ordinal)),
+                Assert.IsTrue(
+                    economy.CallLog.Any(c =>
+                        c.StartsWith("buy_item:Health Potion:1:success", StringComparison.Ordinal)),
                     "Scenario should finish with successful purchase.");
                 Assert.AreEqual(1, economy.PlayerInventory.Count(i => i == "Health Potion"));
                 Assert.Less(economy.PlayerGold, 40, "Gold should decrease after successful purchase.");
@@ -163,9 +167,11 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
             Debug.Log($"[MerchantScenario] Inventory tool calls: {string.Join(" | ", inventory.CallLog)}");
             Debug.Log($"[MerchantScenario] Economy tool calls: {string.Join(" | ", economy.CallLog)}");
-            Debug.Log($"[MerchantScenario] Player gold: {economy.PlayerGold}; Player items: {string.Join(",", economy.PlayerInventory)}");
+            Debug.Log(
+                $"[MerchantScenario] Player gold: {economy.PlayerGold}; Player items: {string.Join(",", economy.PlayerInventory)}");
 
-            if (store.TryLoad(BuiltInAgentRoleIds.Merchant, out AgentMemoryState mem) && !string.IsNullOrWhiteSpace(mem.Memory))
+            if (store.TryLoad(BuiltInAgentRoleIds.Merchant, out AgentMemoryState mem) &&
+                !string.IsNullOrWhiteSpace(mem.Memory))
             {
                 Debug.Log($"[MerchantScenario] Memory snapshot: {mem.Memory}");
             }
@@ -176,9 +182,11 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
             public readonly List<InventoryTool.InventoryItem> Items = new()
             {
                 new InventoryTool.InventoryItem { Name = "Iron Sword", Type = "weapon", Quantity = 2, Price = 60 },
-                new InventoryTool.InventoryItem { Name = "Health Potion", Type = "consumable", Quantity = 8, Price = 30 },
+                new InventoryTool.InventoryItem
+                    { Name = "Health Potion", Type = "consumable", Quantity = 8, Price = 30 },
                 new InventoryTool.InventoryItem { Name = "Leather Armor", Type = "armor", Quantity = 1, Price = 100 }
             };
+
             public readonly List<string> CallLog = new();
 
             public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(CancellationToken cancellationToken)
@@ -227,13 +235,15 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                 if (item == null)
                 {
                     CallLog.Add($"buy_item:{itemName}:{quantity}:not_found");
-                    return Task.FromResult(JsonConvert.SerializeObject(new { success = false, error = "item_not_found" }));
+                    return Task.FromResult(
+                        JsonConvert.SerializeObject(new { success = false, error = "item_not_found" }));
                 }
 
                 if (quantity <= 0 || item.Quantity < quantity)
                 {
                     CallLog.Add($"buy_item:{itemName}:{quantity}:invalid_qty");
-                    return Task.FromResult(JsonConvert.SerializeObject(new { success = false, error = "not_enough_stock" }));
+                    return Task.FromResult(JsonConvert.SerializeObject(new
+                        { success = false, error = "not_enough_stock" }));
                 }
 
                 int discount = _discounts.TryGetValue(item.Name, out int p) ? p : 0;
@@ -253,7 +263,11 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
                 PlayerGold -= total;
                 item.Quantity -= quantity;
-                for (int i = 0; i < quantity; i++) PlayerInventory.Add(item.Name);
+                for (int i = 0; i < quantity; i++)
+                {
+                    PlayerInventory.Add(item.Name);
+                }
+
                 CallLog.Add($"buy_item:{itemName}:{quantity}:success:{total}");
                 return Task.FromResult(JsonConvert.SerializeObject(new
                 {
@@ -269,18 +283,44 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
-            public bool TryLoad(string roleId, out AgentMemoryState state) => States.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => States[roleId] = state;
-            public void Clear(string roleId) => States.Remove(roleId);
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<ChatMessage>();
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return States.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                States[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                States.Remove(roleId);
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
     }
 }

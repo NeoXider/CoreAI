@@ -86,19 +86,20 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var completedEvents = new List<LlmToolCallCompleted>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallCompleted> completedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
                 .Subscribe(e => completedEvents.Add(e));
 
             ToolExecutionPolicy policy = CreatePolicy("Teacher", "trace-1");
             MEAI.ChatOptions options = MakeChatOptions(("memory", "{\"Success\":true}"));
-            var fc = MakeToolCall("memory");
+            MEAI.FunctionCallContent fc = MakeToolCall("memory");
 
-            var result = await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
             Assert.AreEqual(1, startedEvents.Count, "Should publish LlmToolCallStarted");
@@ -114,19 +115,20 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var failedEvents = new List<LlmToolCallFailed>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallFailed> failedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
                 .Subscribe(e => failedEvents.Add(e));
 
             ToolExecutionPolicy policy = CreatePolicy("Teacher", "trace-2");
             MEAI.ChatOptions options = MakeChatOptions(("memory", "{\"Success\":false,\"Error\":\"oops\"}"));
-            var fc = MakeToolCall("memory");
+            MEAI.FunctionCallContent fc = MakeToolCall("memory");
 
-            var result = await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
 
             Assert.IsFalse(result.Succeeded);
             Assert.AreEqual(1, startedEvents.Count);
@@ -140,20 +142,21 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var failedEvents = new List<LlmToolCallFailed>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallFailed> failedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
                 .Subscribe(e => failedEvents.Add(e));
 
             ToolExecutionPolicy policy = CreatePolicyForTools("Teacher", "trace-3",
                 new StubTool("boom_tool"));
             MEAI.ChatOptions options = MakeChatOptionsWithThrow("boom_tool");
-            var fc = MakeToolCall("boom_tool");
+            MEAI.FunctionCallContent fc = MakeToolCall("boom_tool");
 
-            var result = await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
 
             Assert.IsFalse(result.Succeeded);
             Assert.AreEqual(1, startedEvents.Count, "Should publish Started");
@@ -166,18 +169,18 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var failedEvents = new List<LlmToolCallFailed>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallFailed> failedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallFailed>()
                 .Subscribe(e => failedEvents.Add(e));
 
             ToolExecutionPolicy policy = CreatePolicy("Teacher", "trace-4");
             // No tools in ChatOptions → "not found"
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool>() };
-            var fc = MakeToolCall("memory");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool>() };
+            MEAI.FunctionCallContent fc = MakeToolCall("memory");
 
             await policy.ExecuteSingleAsync(fc, options, CancellationToken.None);
 
@@ -191,12 +194,12 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var completedEvents = new List<LlmToolCallCompleted>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallCompleted> completedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
                 .Subscribe(e => completedEvents.Add(e));
 
             ToolExecutionPolicy policy = CreatePolicyForTools("Batch", "trace-5",
@@ -205,13 +208,14 @@ namespace CoreAI.Tests.EditMode
                 ("tool_a", "{\"Success\":true}"),
                 ("tool_b", "{\"Success\":true}"));
 
-            var calls = new List<MEAI.FunctionCallContent>
+            List<MEAI.FunctionCallContent> calls = new()
             {
                 MakeToolCall("tool_a"),
                 MakeToolCall("tool_b")
             };
 
-            var batch = await policy.ExecuteBatchAsync(calls, options, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, options, CancellationToken.None);
 
             Assert.IsFalse(batch.AnyFailed);
             Assert.AreEqual(2, startedEvents.Count, "Should fire Started for each tool");
@@ -227,16 +231,16 @@ namespace CoreAI.Tests.EditMode
         {
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
-            var startedEvents = new List<LlmToolCallStarted>();
-            var completedEvents = new List<LlmToolCallCompleted>();
+            List<LlmToolCallStarted> startedEvents = new();
+            List<LlmToolCallCompleted> completedEvents = new();
 
-            using var s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
+            using IDisposable s1 = GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                 .Subscribe(e => startedEvents.Add(e));
-            using var s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
+            using IDisposable s2 = GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
                 .Subscribe(e => completedEvents.Add(e));
 
             int iter = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return iter == 1
@@ -245,20 +249,20 @@ namespace CoreAI.Tests.EditMode
             });
 
             ICoreAISettings settings = new StubSettings();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: true,
-                tools: new List<ILlmTool> { new StubTool("memory") },
-                roleId: "Teacher", maxConsecutiveErrors: 3, traceId: "e2e-1",
-                eventPublisher: MessagePipeToolCallEventPublisher.Instance,
-                notifier: NullToolExecutionNotifier.Instance);
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true,
+                new List<ILlmTool> { new StubTool("memory") },
+                "Teacher", 3, "e2e-1",
+                MessagePipeToolCallEventPublisher.Instance,
+                NullToolExecutionNotifier.Instance);
 
             MEAI.AIFunction memFunc = MEAI.AIFunctionFactory.Create(
                 (Func<string>)(() => "{\"Success\":true}"),
                 new MEAI.AIFunctionFactoryOptions { Name = "memory" });
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { memFunc } };
-            var messages = new List<MEAI.ChatMessage>
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memFunc } };
+            List<MEAI.ChatMessage> messages = new()
             {
-                new(MEAI.ChatRole.User, "test")
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "test")
             };
 
             await client.GetResponseAsync(messages, options);
@@ -277,29 +281,29 @@ namespace CoreAI.Tests.EditMode
             GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
 
             // Non-streaming
-            var nsStarted = new List<LlmToolCallStarted>();
-            var nsCompleted = new List<LlmToolCallCompleted>();
+            List<LlmToolCallStarted> nsStarted = new();
+            List<LlmToolCallCompleted> nsCompleted = new();
             using (GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                        .Subscribe(e => nsStarted.Add(e)))
             using (GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
                        .Subscribe(e => nsCompleted.Add(e)))
             {
-                var policy = CreatePolicy("Role", "ns");
+                ToolExecutionPolicy policy = CreatePolicy("Role", "ns");
                 await policy.ExecuteSingleAsync(MakeToolCall("memory"),
                     MakeChatOptions(("memory", "{\"Success\":true}")),
                     CancellationToken.None);
             }
 
             // Streaming path (same ToolExecutionPolicy + MessagePipeToolCallEventPublisher)
-            var sStarted = new List<LlmToolCallStarted>();
-            var sCompleted = new List<LlmToolCallCompleted>();
+            List<LlmToolCallStarted> sStarted = new();
+            List<LlmToolCallCompleted> sCompleted = new();
             using (GlobalMessagePipe.GetSubscriber<LlmToolCallStarted>()
                        .Subscribe(e => sStarted.Add(e)))
             using (GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()
                        .Subscribe(e => sCompleted.Add(e)))
             {
-                var policy = CreatePolicy("Role", "s");
-                var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("memory") };
+                ToolExecutionPolicy policy = CreatePolicy("Role", "s");
+                List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("memory") };
                 await policy.ExecuteBatchAsync(calls,
                     MakeChatOptions(("memory", "{\"Success\":true}")),
                     CancellationToken.None);
@@ -318,7 +322,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ChildScope_CanSubscribeToParentBrokerEvents()
         {
-            var parentBuilder = new ContainerBuilder();
+            ContainerBuilder parentBuilder = new();
             MessagePipeOptions opts = parentBuilder.RegisterMessagePipe();
             parentBuilder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
             parentBuilder.RegisterMessageBroker<LlmToolCallStarted>(opts);
@@ -327,8 +331,8 @@ namespace CoreAI.Tests.EditMode
             using IObjectResolver parent = parentBuilder.Build();
             using IObjectResolver child = parent.CreateScope(_ => { });
 
-            var received = new List<LlmToolCallCompleted>();
-            using var d = child.Resolve<ISubscriber<LlmToolCallCompleted>>()
+            List<LlmToolCallCompleted> received = new();
+            using IDisposable d = child.Resolve<ISubscriber<LlmToolCallCompleted>>()
                 .Subscribe(e => received.Add(e));
 
             parent.Resolve<IPublisher<LlmToolCallCompleted>>().Publish(
@@ -342,7 +346,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ChildScope_ReceivesAllEightEventTypes()
         {
-            var parentBuilder = new ContainerBuilder();
+            ContainerBuilder parentBuilder = new();
             MessagePipeOptions opts = parentBuilder.RegisterMessagePipe();
             parentBuilder.RegisterMessageBroker<LlmToolCallStarted>(opts);
             parentBuilder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
@@ -357,14 +361,14 @@ namespace CoreAI.Tests.EditMode
             using IObjectResolver child = parent.CreateScope(_ => { });
 
             int total = 0;
-            using var d1 = child.Resolve<ISubscriber<LlmToolCallStarted>>().Subscribe(_ => total++);
-            using var d2 = child.Resolve<ISubscriber<LlmToolCallCompleted>>().Subscribe(_ => total++);
-            using var d3 = child.Resolve<ISubscriber<LlmToolCallFailed>>().Subscribe(_ => total++);
-            using var d4 = child.Resolve<ISubscriber<LlmBackendSelected>>().Subscribe(_ => total++);
-            using var d5 = child.Resolve<ISubscriber<LlmRequestStarted>>().Subscribe(_ => total++);
-            using var d6 = child.Resolve<ISubscriber<LlmRequestCompleted>>().Subscribe(_ => total++);
-            using var d7 = child.Resolve<ISubscriber<LlmUsageReported>>().Subscribe(_ => total++);
-            using var d8 = child.Resolve<ISubscriber<ApplyAiGameCommand>>().Subscribe(_ => total++);
+            using IDisposable d1 = child.Resolve<ISubscriber<LlmToolCallStarted>>().Subscribe(_ => total++);
+            using IDisposable d2 = child.Resolve<ISubscriber<LlmToolCallCompleted>>().Subscribe(_ => total++);
+            using IDisposable d3 = child.Resolve<ISubscriber<LlmToolCallFailed>>().Subscribe(_ => total++);
+            using IDisposable d4 = child.Resolve<ISubscriber<LlmBackendSelected>>().Subscribe(_ => total++);
+            using IDisposable d5 = child.Resolve<ISubscriber<LlmRequestStarted>>().Subscribe(_ => total++);
+            using IDisposable d6 = child.Resolve<ISubscriber<LlmRequestCompleted>>().Subscribe(_ => total++);
+            using IDisposable d7 = child.Resolve<ISubscriber<LlmUsageReported>>().Subscribe(_ => total++);
+            using IDisposable d8 = child.Resolve<ISubscriber<ApplyAiGameCommand>>().Subscribe(_ => total++);
 
             parent.Resolve<IPublisher<LlmToolCallStarted>>()
                 .Publish(new LlmToolCallStarted("", "", "", ""));
@@ -391,13 +395,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ApplyAiGameCommand_PublishAndSubscribe_ViaVContainer()
         {
-            var builder = new ContainerBuilder();
+            ContainerBuilder builder = new();
             MessagePipeOptions opts = builder.RegisterMessagePipe();
             builder.RegisterMessageBroker<ApplyAiGameCommand>(opts);
             using IObjectResolver resolver = builder.Build();
 
             ApplyAiGameCommand received = null;
-            using var d = resolver.Resolve<ISubscriber<ApplyAiGameCommand>>()
+            using IDisposable d = resolver.Resolve<ISubscriber<ApplyAiGameCommand>>()
                 .Subscribe(e => received = e);
 
             resolver.Resolve<IPublisher<ApplyAiGameCommand>>().Publish(new ApplyAiGameCommand
@@ -418,7 +422,11 @@ namespace CoreAI.Tests.EditMode
         {
             int count = 0;
             T last = default;
-            using (GlobalMessagePipe.GetSubscriber<T>().Subscribe(e => { count++; last = e; }))
+            using (GlobalMessagePipe.GetSubscriber<T>().Subscribe(e =>
+                   {
+                       count++;
+                       last = e;
+                   }))
             {
                 GlobalMessagePipe.GetPublisher<T>().Publish(evt);
             }
@@ -432,7 +440,7 @@ namespace CoreAI.Tests.EditMode
             return new ToolExecutionPolicy(
                 NullLog.Instance, new StubSettings(),
                 new List<ILlmTool> { new StubTool("memory") },
-                allowDuplicateToolCalls: true, roleId, 3, traceId,
+                true, roleId, 3, traceId,
                 MessagePipeToolCallEventPublisher.Instance,
                 NullToolExecutionNotifier.Instance);
         }
@@ -442,7 +450,7 @@ namespace CoreAI.Tests.EditMode
         {
             return new ToolExecutionPolicy(
                 NullLog.Instance, new StubSettings(), tools.ToList(),
-                allowDuplicateToolCalls: true, roleId, 3, traceId,
+                true, roleId, 3, traceId,
                 MessagePipeToolCallEventPublisher.Instance,
                 NullToolExecutionNotifier.Instance);
         }
@@ -458,7 +466,7 @@ namespace CoreAI.Tests.EditMode
         private static MEAI.ChatOptions MakeChatOptions(params (string name, string result)[] tools)
         {
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
-            foreach (var (name, result) in tools)
+            foreach ((string name, string result) in tools)
             {
                 opts.Tools.Add(MEAI.AIFunctionFactory.Create(
                     (Func<string>)(() => result),
@@ -468,6 +476,7 @@ namespace CoreAI.Tests.EditMode
                         Description = $"Test tool {name}"
                     }));
             }
+
             return opts;
         }
 
@@ -480,12 +489,14 @@ namespace CoreAI.Tests.EditMode
             return opts;
         }
 
-        private static MEAI.ChatResponse MakeTextResponse(string text) =>
-            new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text));
+        private static MEAI.ChatResponse MakeTextResponse(string text)
+        {
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, text));
+        }
 
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName)
         {
-            var fc = new MEAI.FunctionCallContent(
+            MEAI.FunctionCallContent fc = new(
                 "call_" + Guid.NewGuid().ToString("N"), toolName,
                 new Dictionary<string, object?> { { "action", "write" } });
             return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
@@ -496,7 +507,11 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class StubTool : ILlmTool
         {
-            public StubTool(string name) => Name = name;
+            public StubTool(string name)
+            {
+                Name = name;
+            }
+
             public string Name { get; }
             public string Description => "";
             public string ParametersSchema => "{}";
@@ -529,20 +544,34 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly Func<int, MEAI.ChatResponse> _fn;
             private int _i;
-            public ScriptedChatClient(Func<int, MEAI.ChatResponse> fn) => _fn = fn;
+
+            public ScriptedChatClient(Func<int, MEAI.ChatResponse> fn)
+            {
+                _fn = fn;
+            }
 
             public Task<MEAI.ChatResponse> GetResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null,
-                CancellationToken ct = default) =>
-                Task.FromResult(_fn(++_i));
+                CancellationToken ct = default)
+            {
+                return Task.FromResult(_fn(++_i));
+            }
 
             public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null,
-                CancellationToken ct = default) =>
+                CancellationToken ct = default)
+            {
                 throw new NotSupportedException();
+            }
 
-            public object GetService(Type t, object key = null) => null;
-            public void Dispose() { }
+            public object GetService(Type t, object key = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов CoreMechanicAI: требует JSON с числовыми параметрами.
+    /// Structured-response policy for core mechanic roles.
     /// </summary>
     public sealed class CoreMechanicResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -22,10 +22,10 @@ namespace CoreAI.Ai
 
             string trimmed = rawContent.Trim();
 
-            // Должен содержать JSON объект
+            /* Implementation note in English. */
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
-                // Пробуем извлечь JSON из markdown
+                /* Implementation note in English. */
                 int jsonStart = trimmed.IndexOf('{');
                 int jsonEnd = trimmed.LastIndexOf('}');
 
@@ -40,8 +40,8 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Проверяем что JSON содержит хотя бы одно числовое поле
-            // Простая проверка: ищем "key": number pattern
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             bool hasNumeric = System.Text.RegularExpressions.Regex.IsMatch(
                 trimmed,
                 @"""[^""]+""\s*:\s*\d+\.?\d*");

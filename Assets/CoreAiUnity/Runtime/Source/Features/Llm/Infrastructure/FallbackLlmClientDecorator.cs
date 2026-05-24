@@ -77,7 +77,7 @@ namespace CoreAI.Infrastructure.Llm
                 enumerator = _primary.CompleteStreamingAsync(request, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
 
-                // Try to get the first chunk — this is where most connection errors surface
+                // Resolve and cache required local values.
                 bool hasFirst;
                 try
                 {
@@ -98,7 +98,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!primaryFailed && hasFirst)
                 {
-                    // First chunk from primary — check if it's an error
+                    // No-op guard before a conditional operation.
                     LlmStreamChunk first = enumerator.Current;
                     if (!string.IsNullOrEmpty(first.Error) && IsRetryableError(first.ErrorCode))
                     {

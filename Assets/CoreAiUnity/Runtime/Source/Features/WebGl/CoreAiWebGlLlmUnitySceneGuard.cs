@@ -1,12 +1,11 @@
-#if COREAI_HAS_LLMUNITY && UNITY_WEBGL && !UNITY_EDITOR
+﻿#if COREAI_HAS_LLMUNITY && UNITY_WEBGL && !UNITY_EDITOR
 using LLMUnity;
 using UnityEngine;
 
 namespace CoreAI.WebGl
 {
     /// <summary>
-    /// Turns off all <see cref="LLM"/> hosts so Undream LlamaLib never calls <c>GetPlatform()</c> on WebGL
-    /// (browser reports an unsupported OS string → <c>ArgumentException: Unknown platform …</c>).
+    /// Disables native LLMUnity startup in WebGL player builds.
     /// </summary>
     internal static class CoreAiWebGlLlmUnityNativeDisable
     {
@@ -25,7 +24,7 @@ namespace CoreAI.WebGl
     }
 
     /// <summary>
-    /// Runs even if the scene has no <see cref="CoreAiWebGlLlmUnitySceneGuard"/> component — before any <c>Awake</c>.
+    /// Initializes WebGL-specific LLMUnity player behavior.
     /// </summary>
     internal static class CoreAiWebGlLlmUnityPlayerInit
     {

@@ -1,11 +1,7 @@
-namespace CoreAI
+﻿namespace CoreAI
 {
     /// <summary>
-    /// Статический прокси к <see cref="ICoreAISettings"/>: делегирует чтение в DI-зарегистрированный
-    /// экземпляр (<see cref="Instance"/>), но позволяет переопределить любое свойство напрямую
-    /// через статические сеттеры (полезно для тестов и legacy-кода).
-    /// <para/>
-    /// <b>Приоритет:</b> локальный override (если был вызван set) → <see cref="Instance"/> → значение по умолчанию.
+    /// Provides process-wide CoreAI runtime settings with optional in-memory overrides.
     /// </summary>
     public static class CoreAISettings
     {
@@ -14,18 +10,28 @@ namespace CoreAI
         private static readonly object _lock = new();
 
         /// <summary>
-        /// DI-зарегистрированный экземпляр настроек.
-        /// Устанавливается из <c>CoreAILifetimeScope</c> при старте, либо вручную из теста.
-        /// Если null — используются значения по умолчанию.
-        /// </summary>
+        /// Global settings instance for CoreAI. /// /// ///.</summary>
         public static ICoreAISettings Instance
         {
-            get { lock (_lock) return _instance; }
-            set { lock (_lock) _instance = value; }
+            get
+            {
+                lock (_lock)
+                {
+                    return _instance;
+                }
+            }
+            set
+            {
+                lock (_lock)
+                {
+                    _instance = value;
+                }
+            }
         }
+
         private static ICoreAISettings _instance;
 
-        #region Override storage (nullable — null means "use Instance")
+        #region Override storage (nullable; null means "use Instance")
 
         private static int? _maxLuaRepairRetries;
         private static bool? _enableMeaiDebugLogging;
@@ -92,13 +98,10 @@ namespace CoreAI
 
         #endregion
 
-        #region Properties — delegate to Instance, allow override
+        #region Properties - delegate to Instance, allow override
 
         /// <summary>
-        /// Максимум подряд неудачных Lua repair до прерывания повторов Programmer.
-        /// Счётчик увеличивается при каждой ошибке Lua, сбрасывается при успешном выполнении.
-        /// По умолчанию: 3.
-        /// </summary>
+        /// How many Lua repair attempts are allowed after execution failures. ///.</summary>
         public static int MaxLuaRepairRetries
         {
             get => _maxLuaRepairRetries ?? Instance?.MaxLuaRepairRetries ?? DefaultMaxLuaRepairRetries;
@@ -106,9 +109,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Включить подробное логирование MEAI pipeline.
-        /// По умолчанию: false (только ошибки).
-        /// </summary>
+        /// Whether MEAI integration diagnostics are written to the log. ///.</summary>
         public static bool EnableMeaiDebugLogging
         {
             get => _enableMeaiDebugLogging ?? Instance?.EnableMeaiDebugLogging ?? DefaultEnableMeaiDebugLogging;
@@ -116,19 +117,16 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Таймаут LLM запросов в секундах. 0 = без таймаута.
-        /// По умолчанию: 300 (5 минут).
-        /// </summary>
+        /// Timeout, in seconds, applied to LLM requests. ///.</summary>
         public static int LlmRequestTimeoutSeconds
         {
-            get => _llmRequestTimeoutSeconds ?? (int?)(Instance?.LlmRequestTimeoutSeconds) ?? DefaultLlmRequestTimeoutSeconds;
+            get => _llmRequestTimeoutSeconds ??
+                   (int?)Instance?.LlmRequestTimeoutSeconds ?? DefaultLlmRequestTimeoutSeconds;
             set => _llmRequestTimeoutSeconds = value;
         }
 
         /// <summary>
-        /// Максимальное количество попыток запроса к LLM при таймаутах или сетевых ошибках.
-        /// По умолчанию: 2.
-        /// </summary>
+        /// How many times failed LLM requests may be retried. ///.</summary>
         public static int MaxLlmRequestRetries
         {
             get => _maxLlmRequestRetries ?? Instance?.MaxLlmRequestRetries ?? DefaultMaxLlmRequestRetries;
@@ -136,9 +134,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать сырые HTTP request/response (заголовки, тело, код ответа).
-        /// По умолчанию: false.
-        /// </summary>
+        /// Whether HTTP request and response diagnostics are logged. ///.</summary>
         public static bool EnableHttpDebugLogging
         {
             get => _enableHttpDebugLogging ?? Instance?.EnableHttpDebugLogging ?? DefaultEnableHttpDebugLogging;
@@ -146,9 +142,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать количество токенов (input, output, total) в каждом ответе.
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether LLM token usage metrics are logged when available. ///.</summary>
         public static bool LogTokenUsage
         {
             get => _logTokenUsage ?? Instance?.LogTokenUsage ?? DefaultLogTokenUsage;
@@ -156,9 +150,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать время отклика LLM (latency в миллисекундах).
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether LLM request latency is logged. ///.</summary>
         public static bool LogLlmLatency
         {
             get => _logLlmLatency ?? Instance?.LogLlmLatency ?? DefaultLogLlmLatency;
@@ -166,9 +158,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать ошибки подключения к LLM (timeout, network error).
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether LLM connection failures are logged. ///.</summary>
         public static bool LogLlmConnectionErrors
         {
             get => _logLlmConnectionErrors ?? Instance?.LogLlmConnectionErrors ?? DefaultLogLlmConnectionErrors;
@@ -176,9 +166,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Размер контекстного окна по умолчанию (токены).
-        /// По умолчанию: 8192. Синхронизируется из CoreAISettingsAsset при старте.
-        /// </summary>
+        /// Approximate context window size used for prompt budgeting. ///.</summary>
         public static int ContextWindowTokens
         {
             get => _contextWindowTokens ?? Instance?.ContextWindowTokens ?? DefaultContextWindowTokens;
@@ -186,9 +174,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Универсальный стартовый системный промпт — идёт ПЕРЕД промптом каждого агента.
-        /// Задаёт общие правила для всех моделей: формат вывода, ограничения, стиль.
-        /// </summary>
+        /// Universal system prompt prefix prepended to all agent prompts. ///.</summary>
         /// <example>
         /// CoreAISettings.UniversalSystemPromptPrefix =
         ///     "You are an AI agent in a Unity game. Always respond in the expected format. " +
@@ -207,9 +193,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Общая температура генерации для всех агентов.
-        /// 0.0 = детерминировано, 2.0 = максимально случайно. По умолчанию: 0.1.
-        /// </summary>
+        /// Sampling temperature value supplied to LLM backends when enabled. ///.</summary>
         public static float Temperature
         {
             get => _temperature ?? Instance?.Temperature ?? DefaultTemperature;
@@ -229,9 +213,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Максимум подряд неудачных tool call до прерывания агента.
-        /// Счётчик сбрасывается при каждом успешном вызове инструмента. По умолчанию: 3.
-        /// </summary>
+        /// How many tool-call failures may be retried during one model request. ///.</summary>
         public static int MaxToolCallRetries
         {
             get => _maxToolCallRetries ?? Instance?.MaxToolCallRetries ?? DefaultMaxToolCallRetries;
@@ -239,9 +221,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать вызовы инструментов (название, успех/неудача).
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether tool-call lifecycle events are logged. ///.</summary>
         public static bool LogToolCalls
         {
             get => _logToolCalls ?? Instance?.LogToolCalls ?? DefaultLogToolCalls;
@@ -249,9 +229,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать аргументы tool call.
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether tool-call arguments are included in logs. ///.</summary>
         public static bool LogToolCallArguments
         {
             get => _logToolCallArguments ?? Instance?.LogToolCallArguments ?? DefaultLogToolCallArguments;
@@ -259,9 +237,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать результаты tool call.
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether tool-call results are included in logs. ///.</summary>
         public static bool LogToolCallResults
         {
             get => _logToolCallResults ?? Instance?.LogToolCallResults ?? DefaultLogToolCallResults;
@@ -269,9 +245,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Логировать шаги MEAI FunctionInvokingChatClient.
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether detailed MEAI tool-calling steps are logged. ///.</summary>
         public static bool LogMeaiToolCallingSteps
         {
             get => _logMeaiToolCallingSteps ?? Instance?.LogMeaiToolCallingSteps ?? DefaultLogMeaiToolCallingSteps;
@@ -279,9 +253,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Разрешить агенту вызывать один и тот же инструмент с теми же аргументами за одну сессию.
-        /// По умолчанию: false (чтобы защитить маленькие модели от зацикливания).
-        /// </summary>
+        /// Whether identical tool calls may run more than once in a request. ///.</summary>
         public static bool AllowDuplicateToolCalls
         {
             get => _allowDuplicateToolCalls ?? Instance?.AllowDuplicateToolCalls ?? DefaultAllowDuplicateToolCalls;
@@ -289,11 +261,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Глобальное включение стриминга ответов LLM. Может быть переопределено
-        /// на уровне роли через <see cref="AgentMemoryPolicy"/> или на уровне UI
-        /// через <c>CoreAiChatConfig.EnableStreaming</c>.
-        /// По умолчанию: true.
-        /// </summary>
+        /// Whether streaming LLM responses are enabled when supported. ///.</summary>
         public static bool EnableStreaming
         {
             get => _enableStreaming ?? Instance?.EnableStreaming ?? DefaultEnableStreaming;
@@ -301,9 +269,7 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// LLM-assisted свёртка истории при нехватке бюджета токенов (иначе детерминированный bullet rollup).
-        /// По умолчанию: выключено.
-        /// </summary>
+        /// Whether long LLM histories may be compacted before requests. ///.</summary>
         public static bool EnableLlmContextCompaction
         {
             get =>
@@ -358,16 +324,17 @@ namespace CoreAI
         /// </summary>
         public static int MaxToolCallHistoryMessages
         {
-            get => _maxToolCallHistoryMessages ?? Instance?.MaxToolCallHistoryMessages ?? DefaultMaxToolCallHistoryMessages;
+            get => _maxToolCallHistoryMessages ??
+                   Instance?.MaxToolCallHistoryMessages ?? DefaultMaxToolCallHistoryMessages;
             set => _maxToolCallHistoryMessages = value;
         }
 
         #endregion
 
         /// <summary>
-        /// Сбросить все локальные переопределения. После вызова все свойства будут
-        /// делегироваться в <see cref="Instance"/> (или использовать значения по умолчанию).
-        /// Полезно для очистки состояния между тестами.
+/// Executes ResetOverrides API operation.
+        ///
+        ///
         /// </summary>
         public static void ResetOverrides()
         {

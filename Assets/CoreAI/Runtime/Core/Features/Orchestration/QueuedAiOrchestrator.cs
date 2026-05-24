@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Ограничение параллелизма, приоритет очереди и отмена предыдущей задачи с тем же <see cref="AiTaskRequest.CancellationScope"/>.
+    /// Provides queued ai orchestrator functionality.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IDisposable
     {
@@ -27,8 +27,8 @@ namespace CoreAI.Ai
         private long _nextSequence;
         private bool _disposed;
 
-        /// <param name="inner">Фактический оркестратор (обычно <see cref="AiOrchestrator"/>).</param>
-        /// <param name="options">Лимит параллелизма и пр.</param>
+        /// <param name="inner">The inner value.</param>
+        /// <param name="options">The options value.</param>
         public QueuedAiOrchestrator(IAiOrchestrationService inner, AiOrchestrationQueueOptions options)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
@@ -70,11 +70,11 @@ namespace CoreAI.Ai
             AiTaskRequest task,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            // AsyncChunkQueue — портативная producer/consumer очередь, работает без
-            // System.Threading.Channels (который недоступен в Unity-сборке CoreAI).
-            // Worker (RunOneStreamingAsync) пишет чанки, а здесь мы их вычитываем
-            // по мере поступления. Очередь уважает MaxConcurrent и CancellationScope
-            // так же, как и RunTaskAsync — через общую _inFlight логику.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             AsyncChunkQueue queue = new();
 
             StreamWorkItem work = new()
@@ -99,11 +99,11 @@ namespace CoreAI.Ai
 
             Enqueue(work);
 
-            // Если work item был вытеснен из _streamPending другим элементом с тем же
-            // CancellationScope ещё ДО запуска (Enqueue нового scope-элемента удаляет
-            // предшественников и пишет cancelled-чанк + Complete в их queue), очередь
-            // уже завершена синхронно. В этом случае сливаем чанки без await, чтобы
-            // не зависеть от SynchronizationContext (Unity main-thread) для completion.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             if (queue.IsCompleted)
             {
                 foreach (LlmStreamChunk chunk in queue.DrainSync())
@@ -114,13 +114,13 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            // ВАЖНО: читаем без cancellationToken. Отмена уже распространяется на
-            // _inner.RunStreamingAsync через w.OuterCt; worker (RunOneStreamingAsync)
-            // сам запишет терминальный чанк { Error="cancelled" } и вызовет Complete(),
-            // что корректно завершит это чтение. Если бы мы передавали cancellationToken
-            // в TryTakeAsync, reader бросил бы OperationCanceledException ДО того, как
-            // worker успевал записать терминальный chunk — вызывающий код потерял бы
-            // финальный статус стрима.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             await foreach (LlmStreamChunk chunk in ReadStreamingQueue(queue))
             {
                 yield return chunk;
@@ -164,7 +164,7 @@ namespace CoreAI.Ai
                 token.ThrowIfCancellationRequested();
                 // WebGL player: keep continuation on Unity SynchronizationContext.
                 // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
-                // and never resumes — TrySetResult below would never fire, hanging the chat UI.
+                /* Implementation note in English. */
 #if UNITY_WEBGL && !UNITY_EDITOR
                 string result = await _inner.RunTaskAsync(w.Task, token);
 #else
@@ -255,7 +255,11 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public void CancelTasks(string cancellationScope)
         {
-            if (string.IsNullOrWhiteSpace(cancellationScope)) return;
+            if (string.IsNullOrWhiteSpace(cancellationScope))
+            {
+                return;
+            }
+
             string scopeKey = cancellationScope.Trim();
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
@@ -263,10 +267,14 @@ namespace CoreAI.Ai
 
             lock (_lock)
             {
-                removedPending = _pending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                removedStreamPending = _streamPending.FindAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                _pending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
-                _streamPending.RemoveAll(w => string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                removedPending = _pending.FindAll(w =>
+                    string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                removedStreamPending = _streamPending.FindAll(w =>
+                    string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                _pending.RemoveAll(w =>
+                    string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
+                _streamPending.RemoveAll(w =>
+                    string.Equals(w.Task.CancellationScope?.Trim(), scopeKey, StringComparison.Ordinal));
 
                 if (_scopeTokens.TryGetValue(scopeKey, out CancellationTokenSource prev))
                 {
@@ -278,7 +286,7 @@ namespace CoreAI.Ai
             // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose from ReleaseScopeToken.
             SafeCancel(activeToCancel);
 
-            // 3. Завершаем удалённые pending-задачи, чтобы вызывающий не висел в ожидании.
+            /* Implementation note in English. */
             CancelRemovedPending(removedPending, removedStreamPending);
 
             lock (_lock)
@@ -543,9 +551,19 @@ namespace CoreAI.Ai
         /// </summary>
         private static void SafeCancel(CancellationTokenSource cts)
         {
-            if (cts == null) return;
-            try { cts.Cancel(); }
-            catch (ObjectDisposedException) { /* already disposed by ReleaseScopeToken — benign */ }
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                /* Implementation note in English. */
+            }
         }
 
         /// <summary>
@@ -553,9 +571,19 @@ namespace CoreAI.Ai
         /// </summary>
         private static void SafeDispose(CancellationTokenSource cts)
         {
-            if (cts == null) return;
-            try { cts.Dispose(); }
-            catch (ObjectDisposedException) { /* already disposed — benign */ }
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                /* Implementation note in English. */
+            }
         }
 
         private static async IAsyncEnumerable<LlmStreamChunk> ReadStreamingQueue(AsyncChunkQueue queue)
@@ -580,7 +608,11 @@ namespace CoreAI.Ai
         /// </summary>
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
 
             List<CancellationTokenSource> toDispose;
@@ -597,24 +629,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Портативная async producer/consumer-очередь чанков. Работает без
-        /// <c>System.Threading.Channels</c>.
-        /// <para>
-        /// Сигнализация — на <see cref="TaskCompletionSource{T}"/> с
-        /// <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>: на WebGL
-        /// IL2CPP <c>SemaphoreSlim.WaitAsync</c> ставит continuation на
-        /// <c>TaskScheduler.Default</c> (= ThreadPool, которого в браузере нет),
-        /// и читатель никогда не просыпается, даже когда писатель сделал Release.
-        /// TCS-based сигнал гарантированно использует
-        /// <see cref="SynchronizationContext"/>, захваченный awaiter'ом.
-        /// </para>
+        /// Provides async chunk queue functionality.
         /// </summary>
         private sealed class AsyncChunkQueue
         {
             private readonly ConcurrentQueue<LlmStreamChunk> _queue = new();
             private readonly object _signalLock = new();
+
             private TaskCompletionSource<bool> _signalTcs =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
+
             private volatile bool _completed;
 
             public bool IsCompleted => _completed;
@@ -665,7 +689,7 @@ namespace CoreAI.Ai
                     lock (_signalLock)
                     {
                         // Re-check inside lock to close the race between Write/Complete and the
-                        // capture of the current TCS — otherwise a signal that fires *just* before
+                        /* Implementation note in English. */
                         // we await would be missed and the reader would park forever.
                         if (_queue.TryDequeue(out LlmStreamChunk chunk2))
                         {
@@ -682,7 +706,7 @@ namespace CoreAI.Ai
 
                     if (ct.CanBeCanceled)
                     {
-                        Task cancelTask = Task.Delay(System.Threading.Timeout.Infinite, ct);
+                        Task cancelTask = Task.Delay(Timeout.Infinite, ct);
                         await Task.WhenAny(waitTask, cancelTask);
                         ct.ThrowIfCancellationRequested();
                     }

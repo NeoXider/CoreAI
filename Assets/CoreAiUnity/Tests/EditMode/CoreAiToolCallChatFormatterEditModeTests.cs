@@ -17,7 +17,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildDisplayText_IncludesArgsAndResult()
         {
-            var args = new Dictionary<string, object?> { ["action"] = "write", ["content"] = "hello" };
+            Dictionary<string, object> args = new() { ["action"] = "write", ["content"] = "hello" };
             string s = CoreAiToolCallChatFormatter.BuildDisplayText("memory", args, "{\"ok\":true}", 200);
             StringAssert.Contains("memory", s);
             StringAssert.Contains("args:", s);
@@ -29,8 +29,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildDisplayText_TruncatesLongResult()
         {
-            string longText = new string('x', 500);
-            string s = CoreAiToolCallChatFormatter.BuildDisplayText("t", null, longText, maxCharsPerSection: 80);
+            string longText = new('x', 500);
+            string s = CoreAiToolCallChatFormatter.BuildDisplayText("t", null, longText, 80);
             StringAssert.Contains("…", s);
             Assert.LessOrEqual(s.Length, 200);
         }

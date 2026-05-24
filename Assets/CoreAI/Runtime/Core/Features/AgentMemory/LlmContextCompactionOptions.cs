@@ -11,8 +11,7 @@ namespace CoreAI.Ai
         public string CompactorAgentRoleId { get; set; } = BuiltInAgentRoleIds.ContextCompactionAux;
 
         /// <summary>
-        /// System prompt for the compaction-only completion request (<b>not</b> the main agent role system prompt —
-        /// that prompt is assembled by the orchestrator and must never appear in compaction input).
+        /// System prompt text associated with this entry.
         /// </summary>
         public string SystemPrompt { get; set; } = DefaultSystemPrompt;
 
@@ -23,20 +22,17 @@ namespace CoreAI.Ai
         public float Temperature { get; set; } = 0.15f;
 
         /// <summary>
-        /// Maximum total chars in the compaction user payload. Messages exceeding this are truncated.
-        /// Default 12 000 (~3 000 tokens) — optimized for fast processing on small models (4B–8B).
+        /// Maximum payload chars.
         /// </summary>
         public int MaxPayloadChars { get; set; } = 12000;
 
         /// <summary>
-        /// Per-message character limit inside the compaction payload. Longer messages are trimmed with an ellipsis.
-        /// Default 800 — game/lesson messages are typically short; tool outputs can be heavily truncated for summaries.
+        /// Maximum per message chars.
         /// </summary>
         public int MaxPerMessageChars { get; set; } = 800;
 
         /// <summary>
-        /// Maximum chars for the normalized summary output. Longer summaries are truncated with an ellipsis.
-        /// Default 4 000 (~1 000 tokens) — keeps the rolling summary compact so it does not bloat the main model's system prompt.
+        /// Maximum summary chars.
         /// </summary>
         public int MaxSummaryChars { get; set; } = 4000;
 
@@ -49,6 +45,9 @@ namespace CoreAI.Ai
             "- Fold the \\\"prior summary\\\" plus new messages into ONE updated summary.\n" +
             "- Respond with plain prose only — no preamble or markdown headings.";
 
-        public static LlmContextCompactionOptions Default() => new();
+        public static LlmContextCompactionOptions Default()
+        {
+            return new LlmContextCompactionOptions();
+        }
     }
 }

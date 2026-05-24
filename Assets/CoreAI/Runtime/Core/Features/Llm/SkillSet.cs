@@ -1,22 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Named group of tools with on-demand instructions — self-service skill pattern.
-    /// <para>
-    /// The model receives a lightweight <b>catalog</b> (skill names + short descriptions)
-    /// in the system prompt and a <c>read_skill</c> meta-tool. When the model determines
-    /// it needs a skill, it calls <c>read_skill("Crafting")</c> to load the full
-    /// <see cref="Instructions"/> on demand — like Cursor's <c>read_file</c> pattern.
-    /// </para>
-    /// <para>
-    /// This keeps the system prompt lean (only ~20 tokens per skill in the catalog)
-    /// while giving the model access to rich, detailed instructions when it needs them.
-    /// All skill tools are registered and available — the model just needs to read
-    /// the skill instructions to understand the protocol for using them.
-    /// </para>
+    /// Represents a named skill with instructions and tool bindings available to the LLM.
     /// </summary>
     /// <example>
     /// <code>
@@ -47,20 +35,13 @@ namespace CoreAI.Ai
         public string Name { get; }
 
         /// <summary>
-        /// Short one-line description shown in the skill catalog.
-        /// The model sees this in the system prompt to understand what each skill does.
-        /// Keep it concise — one sentence max.
+        /// Description.
         /// </summary>
         /// <example>"Forge weapons, armor, and items from raw materials"</example>
         public string Description { get; }
 
         /// <summary>
-        /// Full instructions loaded on demand when the model calls <c>read_skill(name)</c>.
-        /// Contains detailed protocol, step-by-step guides, formulas, rules, etc.
-        /// <para>
-        /// These are <b>NOT</b> injected into the system prompt — they are returned
-        /// by the <see cref="ReadSkillLlmTool"/> when the model requests them.
-        /// </para>
+        /// Instructions.
         /// </summary>
         public string Instructions { get; }
 
@@ -68,8 +49,7 @@ namespace CoreAI.Ai
         public IReadOnlyList<ILlmTool> Tools { get; }
 
         /// <summary>
-        /// Cached tool name array — used internally for catalog generation
-        /// and for backward-compatible <see cref="AiTaskRequest.AllowedToolNames"/> filtering.
+        /// Tool names.
         /// </summary>
         public string[] ToolNames { get; }
 
@@ -91,10 +71,7 @@ namespace CoreAI.Ai
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = string.IsNullOrWhiteSpace(description) ? name : description;
             Instructions = instructions ?? "";
-            if (tools == null || tools.Length == 0)
-            {
-                throw new ArgumentException("A SkillSet must contain at least one tool.", nameof(tools));
-            }
+            tools ??= Array.Empty<ILlmTool>();
 
             List<ILlmTool> toolList = new(tools.Length);
             List<string> names = new(tools.Length);
@@ -166,7 +143,7 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Builds a lightweight skill catalog for the system prompt.
-        /// Contains skill names, short descriptions, and tool names — NOT full instructions.
+/// Executes BuildCatalog API operation.
         /// The model uses <c>read_skill(name)</c> to load full instructions on demand.
         /// </summary>
         public static string BuildCatalog(IReadOnlyList<SkillSet> skills)
@@ -189,7 +166,7 @@ namespace CoreAI.Ai
                     continue;
                 }
 
-                sb.Append("- **").Append(skill.Name).Append("** — ").Append(skill.Description);
+                sb.Append("- **").Append(skill.Name).Append("** - ").Append(skill.Description);
                 sb.AppendLine();
             }
 

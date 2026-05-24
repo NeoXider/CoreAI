@@ -4,11 +4,11 @@ using System.Text;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Достаёт исполняемый Lua из ответа LLM: сначала MEAI tool call, затем markdown fenced lua, затем JSON ExecuteLua.
+    /// Extracts executable Lua payloads from AI responses.
     /// </summary>
     public static class AiLuaPayloadParser
     {
-        /// <summary>Вернуть исполняемый Lua из текста конверта (fenced или JSON <c>ExecuteLua</c>).</summary>
+        /// <summary>Attempts to extract executable Lua code from an AI payload.</summary>
         public static bool TryGetExecutableLua(string payload, out string luaCode)
         {
             luaCode = null;

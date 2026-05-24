@@ -381,7 +381,9 @@ namespace CoreAI.Tests.EditMode.Lua
                 return System.Threading.Tasks.Task.FromResult<string>(null);
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         #endregion

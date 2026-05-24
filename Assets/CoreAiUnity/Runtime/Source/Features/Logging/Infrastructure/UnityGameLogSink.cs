@@ -1,16 +1,15 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Низкоуровневый вывод в Unity Console без фильтрации по фичам.
-    /// Единственный класс рантайма CoreAI, который вызывает <see cref="UnityEngine.Debug"/> напрямую.
+    /// Writes game log events to the Unity console.
     /// </summary>
     public sealed class UnityGameLogSink
     {
         private const string Prefix = "[CoreAI] ";
 
-        /// <summary>Прямой вывод в Unity Console с префиксом проекта.</summary>
+        /// <summary>Replaces an existing memory value with the supplied content.</summary>
         public void Write(GameLogLevel level, string message, Object context = null)
         {
             switch (level)

@@ -9,14 +9,7 @@ using VContainer;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// В демо-сцене LLMUnity часто оставляют без назначенного GGUF (поле модели пустое).
-    /// LLMUnity при этом пишет в консоль ошибку "No model file provided!" и может ломать smoke-check.
-    ///
-    /// Этот guard отключает компонент <see cref="LLM"/> (и сам <see cref="LLMAgent"/>), если <see cref="LLM.model"/> пустой.
-    /// Соответствует рекомендациям LLMUnity: модель задаётся через Model Manager (Download / Load) и выбор радиокнопкой,
-    /// иначе при старте будет ошибка «No model file provided!» — см. официальный Quick start и раздел «LLM model management»
-    /// в репозитории пакета и на <see href="https://undream.ai/LLMUnity"/>.
-    /// За счёт <see cref="DefaultExecutionOrderAttribute"/> выполняется раньше большинства Awake.
+    /// Disables LLMUnity components when no local model is configured.
     /// </summary>
     [DefaultExecutionOrder(-1000)]
     [DisallowMultipleComponent]
@@ -30,7 +23,7 @@ namespace CoreAI.Infrastructure.Llm
             // This guard is only relevant when LLMUnity package is present.
             return;
 #else
-            // Сначала LLM, привязанный к LLMAgent на сцене (избегаем «первого попавшегося» пустого LLM).
+            // No-op guard before a conditional operation.
             LLMAgent agent = FindFirstObjectByType<LLMAgent>();
             LLM llm = agent != null ? agent.GetComponent<LLM>() : FindFirstObjectByType<LLM>();
             if (llm == null)
@@ -51,7 +44,7 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            // Отключаем сервер и агент до того, как он начнёт стартовать.
+            // No-op guard before a conditional operation.
             llm.enabled = false;
 
             if (agent != null)
@@ -61,9 +54,7 @@ namespace CoreAI.Infrastructure.Llm
 
             log.LogWarning(
                 GameLogFeature.Llm,
-                "LLMUnity: поле LLM.model пусто в сохранённой сцене. В инспекторе нажмите радиокнопку у нужной модели " +
-                "(или «Load model») и сохраните сцену. Если в Model Manager несколько моделей — оставьте одну с реальным .gguf " +
-                "или явно выберите модель. Отключаем LLMUnity → StubLlmClient.");
+                "LLMUnity: LLM.model is empty in the saved scene. Select or load a GGUF model and save the scene. Disabling LLMUnity so CoreAI can fall back safely.");
 #endif
         }
 

@@ -8,7 +8,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Apply_WhenUnderCap_ReturnsTrimmedInputUnchanged()
         {
-            var est = new HeuristicTokenEstimator();
+            HeuristicTokenEstimator est = new();
             string text = "hello";
             Assert.AreEqual("hello", ConversationRolledSummaryLimiter.Apply(text, est, 100));
         }
@@ -16,8 +16,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Apply_WhenOverCap_TruncatesWithEllipsis()
         {
-            var est = new HeuristicTokenEstimator();
-            string text = new string('a', 400);
+            HeuristicTokenEstimator est = new();
+            string text = new('a', 400);
             string cut = ConversationRolledSummaryLimiter.Apply(text, est, 20);
             Assert.IsTrue(cut.EndsWith("…"));
             Assert.Less(cut.Length, text.Length);
@@ -27,8 +27,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Apply_ZeroOrNegativeCap_ReturnsOriginal()
         {
-            var est = new HeuristicTokenEstimator();
-            string text = new string('b', 500);
+            HeuristicTokenEstimator est = new();
+            string text = new('b', 500);
             Assert.AreEqual(text, ConversationRolledSummaryLimiter.Apply(text, est, 0));
             Assert.AreEqual(text, ConversationRolledSummaryLimiter.Apply(text, est, -1));
         }

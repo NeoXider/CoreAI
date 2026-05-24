@@ -1,4 +1,4 @@
-using CoreAI;
+﻿using CoreAI;
 using CoreAI.Ai;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -14,26 +14,25 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>On-device GGUF via LLMUnity.</summary>
         LlmUnity = 1,
 
-        /// <summary>OpenAI-compatible HTTP (LM Studio, OpenRouter, Qwen, …).</summary>
+        /// <summary>Uses the built-in OpenAI-compatible HTTP transport as the primary LLM backend.</summary>
         OpenAiHttp = 2,
 
-        /// <summary>No network LLM — deterministic stubs for CI/offline flows.</summary>
+        /// <summary>Uses the offline fallback backend instead of a remote LLM provider.</summary>
         Offline = 3
     }
 
     /// <summary>Preference order inside <see cref="LlmBackendType.Auto"/>.</summary>
     public enum LlmAutoPriority
     {
-        /// <summary>LLMUnity → HTTP → Offline.</summary>
+        /// <summary>Prefers LLMUnity and falls back to HTTP when configured.</summary>
         LlmUnityFirst = 0,
 
-        /// <summary>HTTP → LLMUnity → Offline.</summary>
+        /// <summary>Prefers HTTP and falls back to LLMUnity when configured.</summary>
         HttpFirst = 1
     }
 
     /// <summary>
-    /// Central CoreAI tuning asset (<c>Create → CoreAI → Core AI Settings</c>).
-    /// Loaded lazily via <see cref="Instance"/> unless <see cref="SetInstance"/> injects another reference.
+    /// ScriptableObject implementation of CoreAI runtime and LLM settings.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/CoreAI Settings", fileName = "CoreAISettings")]
     public sealed class CoreAISettingsAsset : ScriptableObject, ICoreAISettings
@@ -72,31 +71,27 @@ namespace CoreAI.Infrastructure.Llm
 
         #region LLM settings
 
-        [Header("🤖 LLM Backend")]
+        [Header("LLM Backend")]
         [Tooltip("Runtime backend preset: Auto, LLMUnity, HTTP API, or Offline.")]
         [SerializeField]
         private LlmBackendType backendType = LlmBackendType.Auto;
 
-        [Tooltip("Product-facing LLM mode. Auto preserves legacy backend selection.")]
-        [SerializeField]
+        [Tooltip("Product-facing LLM mode. Auto preserves legacy backend selection.")] [SerializeField]
         private LlmExecutionMode executionMode = LlmExecutionMode.Auto;
 
-        [Tooltip("When backend is Auto, prefer LLMUnity or HTTP API first.")]
-        [SerializeField]
+        [Tooltip("When backend is Auto, prefer LLMUnity or HTTP API first.")] [SerializeField]
         private LlmAutoPriority autoPriority = LlmAutoPriority.LlmUnityFirst;
 
-        [Header("🌐 HTTP API (OpenAI-compatible)")]
+        [Header("HTTP API (OpenAI-compatible)")]
         [Tooltip(
             "Base URL without trailing slash (e.g., https://api.openai.com/v1 or http://localhost:1234/v1 for LM Studio).")]
         [SerializeField]
         private string apiBaseUrl = "http://localhost:1234/v1";
 
-        [Tooltip("Bearer/API key — required for hosted providers; empty for many local gateways.")]
-        [SerializeField]
+        [Tooltip("Bearer/API key - required for hosted providers; empty for many local gateways.")] [SerializeField]
         private string apiKey = "";
 
-        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, …).")]
-        [SerializeField]
+        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.).")] [SerializeField]
         private string modelName = "gpt-4o-mini";
 
         [Tooltip(
@@ -106,7 +101,8 @@ namespace CoreAI.Infrastructure.Llm
         [FormerlySerializedAs("overrideTemperature")]
         private bool enableTemperatureOverriding;
 
-        [Tooltip("Sampling temperature (0.0 = deterministic … 2.0 = creative). Used only when temperature override is on.")]
+        [Tooltip(
+            "Sampling temperature (0.0 = deterministic, 2.0 = creative). Used only when temperature override is on.")]
         [SerializeField]
         [Range(0f, 2f)]
         private float temperature = 0.1f;
@@ -115,34 +111,31 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private int maxTokens = 2048;
 
-        [Header("Client limits")]
-        [SerializeField] [Min(0)] private int maxClientLimitedRequestsPerSession;
+        [Header("Client limits")] [SerializeField] [Min(0)]
+        private int maxClientLimitedRequestsPerSession;
 
         [SerializeField] [Min(0)] private int maxClientLimitedPromptChars;
 
         [Tooltip("HTTP layer timeout seconds (fallback 120 when unset).")] [SerializeField] [Min(0)]
         private int requestTimeoutSeconds = 120;
 
-        [Header("🔄 Fallback Backend (secondary)")]
+        [Header("Fallback Backend (secondary)")]
         [Tooltip(
             "When enabled and secondary URL/model are set, requests that fail on the primary backend " +
             "are automatically retried on the secondary. Useful for local model + cloud fallback.")]
         [SerializeField]
         private bool enableFallbackBackend;
 
-        [Tooltip("Secondary backend base URL (e.g., https://api.openai.com/v1).")]
-        [SerializeField]
+        [Tooltip("Secondary backend base URL (e.g., https://api.openai.com/v1).")] [SerializeField]
         private string secondaryApiBaseUrl = "";
 
-        [Tooltip("Secondary backend API key.")]
-        [SerializeField]
+        [Tooltip("Secondary backend API key.")] [SerializeField]
         private string secondaryApiKey = "";
 
-        [Tooltip("Secondary backend model name (e.g., gpt-4o-mini).")]
-        [SerializeField]
+        [Tooltip("Secondary backend model name (e.g., gpt-4o-mini).")] [SerializeField]
         private string secondaryModelName = "";
 
-        [Header("💾 LLMUnity (local model)")]
+        [Header("LLMUnity (local model)")]
         [Tooltip("GameObject hosting LLMAgent; empty auto-detects.")]
         [SerializeField]
         private string llmUnityAgentName = "";
@@ -163,38 +156,33 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool llmUnityAutostartLocalServer = true;
 
-        [Tooltip("Relative GGUF path; falls back to LLMUnity model manager hints when empty.")]
-        [SerializeField]
+        [Tooltip("Relative GGUF path; falls back to LLMUnity model manager hints when empty.")] [SerializeField]
         private string ggufModelPath = "Qwen3.5-2B-Q4_K_M.gguf";
 
         [Tooltip("Keep LLMAgent alive across loads (persist service).")] [SerializeField]
         private bool llmUnityDontDestroyOnLoad = true;
 
-        [Tooltip("Seconds to wait for LLMUnity service startup.")]
-        [SerializeField] [Min(5f)]
+        [Tooltip("Seconds to wait for LLMUnity service startup.")] [SerializeField] [Min(5f)]
         private float llmUnityStartupTimeoutSeconds = 120f;
 
-        [Tooltip("Delay after local model server reports ready.")]
-        [SerializeField] [Min(0f)]
+        [Tooltip("Delay after local model server reports ready.")] [SerializeField] [Min(0f)]
         private float llmUnityStartupDelaySeconds = 1f;
 
         [Tooltip("Keep LLMUnity server warm between turns (faster tests).")] [SerializeField]
         private bool llmUnityKeepAlive = false;
 
         [Tooltip(
-            "Strip/enable reasoning tags for models that emit <think> blocks (Qwen3.5, DeepSeek, …). Works for HTTP + LLMUnity.")]
+            "Strip/enable reasoning tags for models that emit <think> blocks (Qwen3.5, DeepSeek, ...). Works for HTTP + LLMUnity.")]
         [SerializeField]
         private bool enableReasoning = false;
 
         [Tooltip("Concurrent LLMUnity chat sessions (1 = strictly serial).")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
 
-        [Tooltip("GPU offload depth (0 = CPU only, 99 = all layers — LM Studio style).")]
-        [SerializeField]
-        [Min(0)]
+        [Tooltip("GPU offload depth (0 = CPU only, 99 = all layers, LM Studio style).")] [SerializeField] [Min(0)]
         private int llmUnityNumGPULayers = 99;
 
-        [Header("⚙️ Shared agent defaults")]
+        [Header("Shared agent defaults")]
         [Tooltip(
             "Universal system prefix prepended before every agent-specific system prompt.")]
         [TextArea(3, 6)]
@@ -222,44 +210,49 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool allowDuplicateToolCalls = false;
 
-        [Tooltip("Transport-level retries after HTTP 429 / 5xx (and equivalent failed completions). Each retry waits Retry-After or 2s, 4s, … (capped).")]
+        [Tooltip(
+            "Transport-level retries after HTTP 429 / 5xx (and equivalent failed completions). Each retry waits Retry-After or 2s, 4s, etc. (capped).")]
         [SerializeField]
         [Min(1)]
         private int maxLlmRequestRetries = 1;
 
-        [Tooltip("Default context-window hint in tokens.")]
-        [SerializeField] [Min(256)]
+        [Tooltip("Default context-window hint in tokens.")] [SerializeField] [Min(256)]
         private int contextWindowTokens = 8192;
 
-        [Header("🛡️ Resilience & Safety")]
+        [Header("Resilience & Safety")]
         [Tooltip(
             "Max chars per tool result before soft-truncation with ellipsis. Prevents a single tool from overflowing the context. " +
             "0 = no truncation. Default 8000 (~2000 tokens).")]
-        [SerializeField] [Min(0)]
+        [SerializeField]
+        [Min(0)]
         private int maxToolResultChars = 8000;
 
         [Tooltip(
             "Per-tool execution timeout in milliseconds. If a tool body hangs (e.g. HTTP to a dead server), " +
             "it is cancelled after this duration. 0 = no per-tool timeout (relies on outer orchestrator timeout). Default 30000 (30s).")]
-        [SerializeField] [Min(0)]
+        [SerializeField]
+        [Min(0)]
         private int defaultToolTimeoutMs = 30000;
 
         [Tooltip(
             "Max total response characters from the model before soft-truncation. Prevents runaway generation. " +
             "0 = disabled (no limit). Default 0.")]
-        [SerializeField] [Min(0)]
+        [SerializeField]
+        [Min(0)]
         private int maxResponseChars;
 
         [Tooltip(
             "Max tool-call roundtrips per single request. Each roundtrip = one LLM call + tool execution. " +
             "Prevents infinite tool-calling loops. Default 10.")]
-        [SerializeField] [Min(1)]
+        [SerializeField]
+        [Min(1)]
         private int maxToolCallRoundtrips = 10;
 
         [Tooltip(
             "Max tool call history messages retained in the MEAI message list during a single request's tool-calling loop. " +
             "Prevents unbounded context growth in long multi-tool sessions. 0 = no limit. Default 20.")]
-        [SerializeField] [Min(0)]
+        [SerializeField]
+        [Min(0)]
         private int maxToolCallHistoryMessages = 20;
 
         [Header("Streaming")]
@@ -277,8 +270,8 @@ namespace CoreAI.Infrastructure.Llm
         private bool webGlNativeStreaming = true;
 
         [Tooltip(
-            "WebGL only: fetch credentials mode. When true → credentials: 'same-origin' (cookies on same host). " +
-            "When false → 'omit' (default): Bearer keys still work; required for many APIs that return CORS " +
+            "WebGL only: fetch credentials mode. When true -> credentials: 'same-origin' (cookies on same host). " +
+            "When false -> 'omit' (default): Bearer keys still work; required for many APIs that return CORS " +
             "Access-Control-Allow-Origin: * (e.g. OpenRouter). Turn on only if you need same-origin cookie behavior.")]
         [SerializeField]
         private bool sameOriginCredentials = false;
@@ -306,72 +299,59 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool enableLlmContextCompaction = false;
 
-        [Header("🔌 Offline mode")]
+        [Header("Offline mode")]
         [Tooltip("Serve a fixed string instead of per-role stubs when Offline mode is active.")]
         [SerializeField]
         private bool offlineUseCustomResponse = false;
 
-        [Tooltip("Replacement assistant text returned for matched offline roles.")]
-        [SerializeField] [TextArea(3, 8)]
+        [Tooltip("Replacement assistant text returned for matched offline roles.")] [SerializeField] [TextArea(3, 8)]
         private string offlineCustomResponse = "Offline mode: LLM unavailable";
 
-        [Tooltip("Comma-separated role ids (or * for everyone) that receive OfflineCustomResponse.")]
-        [SerializeField]
+        [Tooltip("Comma-separated role ids (or * for everyone) that receive OfflineCustomResponse.")] [SerializeField]
         private string offlineCustomResponseRoles = "*";
 
-        [Header("🔧 Debug")]
-        [Tooltip("Verbose MEAI diagnostics (requests/responses).")]
-        [SerializeField]
+        [Header("Debug")] [Tooltip("Verbose MEAI diagnostics (requests/responses).")] [SerializeField]
         private bool enableMeaiDebugLogging = false;
 
-        [Tooltip("Dump raw HTTP bodies (noisy — dev only).")] [SerializeField]
+        [Tooltip("Dump raw HTTP bodies (noisy; dev only).")] [SerializeField]
         private bool enableHttpDebugLogging = false;
 
-        [Tooltip("Log composed prompts / tool definitions before dispatch.")]
-        [SerializeField]
+        [Tooltip("Log composed prompts / tool definitions before dispatch.")] [SerializeField]
         private bool logLlmInput = true;
 
-        [Tooltip("Log assistant completions and aggregated tool summaries.")]
-        [SerializeField]
+        [Tooltip("Log assistant completions and aggregated tool summaries.")] [SerializeField]
         private bool logLlmOutput = true;
 
-        [Tooltip("Emit usage.prompt / usage.completion totals when backends provide them.")]
-        [SerializeField]
+        [Tooltip("Emit usage.prompt / usage.completion totals when backends provide them.")] [SerializeField]
         private bool logTokenUsage = true;
 
-        [Tooltip("Log measured LLM latency in milliseconds.")]
-        [SerializeField]
+        [Tooltip("Log measured LLM latency in milliseconds.")] [SerializeField]
         private bool logLlmLatency = true;
 
         [Tooltip("Log transport failures (timeouts, unreachable hosts).")] [SerializeField]
         private bool logLlmConnectionErrors = true;
 
-        [Header("🔨 Tool Call Logging")]
-        [Tooltip("Emit a line whenever a native tool executes.")]
-        [SerializeField]
+        [Header("Tool Call Logging")] [Tooltip("Emit a line whenever a native tool executes.")] [SerializeField]
         private bool logToolCalls = true;
 
-        [Tooltip("Serialize tool arguments into logs.")]
-        [SerializeField]
+        [Tooltip("Serialize tool arguments into logs.")] [SerializeField]
         private bool logToolCallArguments = true;
 
-        [Tooltip("Serialize tool outputs into logs.")]
-        [SerializeField]
+        [Tooltip("Serialize tool outputs into logs.")] [SerializeField]
         private bool logToolCallResults = true;
 
-        [Tooltip("Trace MEAI function-calling iterations / inner retries.")]
-        [SerializeField]
+        [Tooltip("Trace MEAI function-calling iterations / inner retries.")] [SerializeField]
         private bool logMeaiToolCallingSteps = true;
 
-        [Tooltip("Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need ≥60–180).")]
-        [SerializeField] [Min(0f)]
+        [Tooltip("Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need 60-180 seconds)..")]
+        [SerializeField]
+        [Min(0f)]
         private float llmRequestTimeoutSeconds = 120f;
 
         [Tooltip("Concurrent orchestrator runs allowed by CoreAILifetimeScope.")] [SerializeField] [Min(1)]
         private int maxConcurrentOrchestrations = 2;
 
-        [Tooltip("Emit orchestrator timing / counters to the Unity log.")]
-        [SerializeField]
+        [Tooltip("Emit orchestrator timing / counters to the Unity log.")] [SerializeField]
         private bool logOrchestrationMetrics = false;
 
         #endregion
@@ -392,7 +372,8 @@ namespace CoreAI.Infrastructure.Llm
             backendType == LlmBackendType.OpenAiHttp;
 
         /// <summary>True when Auto/LocalModel may bind LLMUnity.</summary>
-        public bool UseLlmUnity => ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto;
+        public bool UseLlmUnity =>
+            ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto;
 
         /// <summary>True when execution mode is Offline.</summary>
         public bool UseOffline => ExecutionMode == LlmExecutionMode.Offline;
@@ -458,7 +439,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Bearer-style API credential.</summary>
         public string ApiKey => apiKey ?? "";
 
-        // ── Secondary (fallback) backend ──
+        // No-op guard before a conditional operation.
 
         /// <summary>Whether fallback to secondary backend is enabled.</summary>
         public bool EnableFallbackBackend => enableFallbackBackend;
@@ -684,6 +665,66 @@ namespace CoreAI.Infrastructure.Llm
 
         #endregion
 
+        #region Runtime Options
+
+        /// <summary>
+        /// Builds a Unity-free settings snapshot for runtime consumers and tests.
+        /// </summary>
+        public CoreAISettingsOptions ToOptions()
+        {
+            return CoreAISettingsOptions.From(this);
+        }
+
+        /// <summary>
+        /// Copies portable settings values into this Unity authoring asset.
+        /// Unity-only backend discovery and resource lifecycle fields are intentionally unchanged.
+        /// </summary>
+        public void ApplyOptions(ICoreAISettings options)
+        {
+            if (options == null)
+            {
+                return;
+            }
+
+            maxLuaRepairRetries = options.MaxLuaRepairRetries < 1 ? 3 : options.MaxLuaRepairRetries;
+            enableMeaiDebugLogging = options.EnableMeaiDebugLogging;
+            llmRequestTimeoutSeconds = options.LlmRequestTimeoutSeconds < 0f ? 120f : options.LlmRequestTimeoutSeconds;
+            maxLlmRequestRetries = options.MaxLlmRequestRetries < 1 ? 1 : options.MaxLlmRequestRetries;
+            enableHttpDebugLogging = options.EnableHttpDebugLogging;
+            logTokenUsage = options.LogTokenUsage;
+            logLlmLatency = options.LogLlmLatency;
+            logLlmConnectionErrors = options.LogLlmConnectionErrors;
+            contextWindowTokens = options.ContextWindowTokens < 256 ? 8192 : options.ContextWindowTokens;
+            universalSystemPromptPrefix = options.UniversalSystemPromptPrefix ?? "";
+            toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
+            temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
+            enableTemperatureOverriding = options.OverrideTemperature;
+            maxToolCallRetries = options.MaxToolCallRetries < 1 ? 3 : options.MaxToolCallRetries;
+            logToolCalls = options.LogToolCalls;
+            logToolCallArguments = options.LogToolCallArguments;
+            logToolCallResults = options.LogToolCallResults;
+            logMeaiToolCallingSteps = options.LogMeaiToolCallingSteps;
+            allowDuplicateToolCalls = options.AllowDuplicateToolCalls;
+            enableStreaming = options.EnableStreaming;
+            maxTokens = options.MaxTokens <= 0 ? 2048 : options.MaxTokens;
+            enableLlmContextCompaction = options.EnableLlmContextCompaction;
+            enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
+            conversationHistoryRecentTokenBudgetOverride =
+                options.ConversationHistoryRecentTokenBudgetOverride < 0
+                    ? 0
+                    : options.ConversationHistoryRecentTokenBudgetOverride;
+            conversationRolledSummaryMaxTokens =
+                options.ConversationRolledSummaryMaxTokens < 0 ? 0 : options.ConversationRolledSummaryMaxTokens;
+            maxToolResultChars = options.MaxToolResultChars < 0 ? 0 : options.MaxToolResultChars;
+            defaultToolTimeoutMs = options.DefaultToolTimeoutMs < 0 ? 0 : options.DefaultToolTimeoutMs;
+            maxResponseChars = options.MaxResponseChars < 0 ? 0 : options.MaxResponseChars;
+            maxToolCallRoundtrips = options.MaxToolCallRoundtrips < 1 ? 10 : options.MaxToolCallRoundtrips;
+            maxToolCallHistoryMessages =
+                options.MaxToolCallHistoryMessages < 0 ? 20 : options.MaxToolCallHistoryMessages;
+        }
+
+        #endregion
+
         #region Runtime Configuration
 
         /// <summary>Programmatic HTTP preset (tests / runtime bootstrap).</summary>
@@ -819,7 +860,7 @@ namespace CoreAI.Infrastructure.Llm
 
 #if UNITY_EDITOR
         /// <summary>
-        /// Unity calls this after <i>Create → Core AI Settings</i> or when the user chooses <i>Reset</i> on the asset.
+/// Executes reset.
         /// Ensures global streaming and the WebGL fetch bridge default to <b>on</b> (matches <see cref="ICoreAISettings"/> contract).
         /// </summary>
         private void Reset()

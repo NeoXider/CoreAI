@@ -23,7 +23,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_AuthExpiredThenRefresh_OK_SecondAttemptSucceeds()
         {
             ServerManagedAuthorization.SetRefresher(new AlwaysOkRefresher());
-            var inner = new AuthExpiredThenOkClient();
+            AuthExpiredThenOkClient inner = new();
             ILlmClient sut = new RefreshOnUnauthorizedDecorator(inner);
 
             LlmCompletionRequest request = new()
@@ -42,8 +42,10 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class AlwaysOkRefresher : IServerManagedAuthRefresher
         {
-            public Task<bool> RefreshAsync(CancellationToken cancellationToken = default) =>
-                Task.FromResult(true);
+            public Task<bool> RefreshAsync(CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(true);
+            }
         }
 
         private sealed class AuthExpiredThenOkClient : ILlmClient

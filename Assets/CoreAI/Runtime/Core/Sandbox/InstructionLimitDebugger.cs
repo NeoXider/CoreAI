@@ -8,8 +8,7 @@ using MoonSharp.Interpreter.Tree.Expressions;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Минимальный debugger для MoonSharp, который лимитирует количество шагов (best-effort) и wall-clock.
-    /// Нужен, чтобы <c>while true do end</c> не мог зависнуть навсегда.
+    /// MoonSharp debugger used to stop scripts that exceed instruction limits.
     /// </summary>
     internal sealed class InstructionLimitDebugger : IDebugger
     {

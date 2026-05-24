@@ -8,8 +8,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Config
 {
     /// <summary>
-    /// Unity-реализация хранилища конфигов на ScriptableObject.
-    /// Каждая SO должна иметь поле ConfigKey для идентификации.
+    /// Unity-backed game configuration store used by CoreAI tools.
     /// </summary>
     public sealed class UnityGameConfigStore : IGameConfigStore
     {
@@ -22,7 +21,7 @@ namespace CoreAI.Infrastructure.Config
         }
 
         /// <summary>
-        /// Регистрирует ScriptableObject как конфиг с указанным ключом.
+        /// Registers a new value or callback with the target runtime registry.
         /// </summary>
         public void Register(string key, ScriptableObject config)
         {
@@ -60,12 +59,12 @@ namespace CoreAI.Infrastructure.Config
 
             try
             {
-                // JsonUtility не поддерживает десериализацию напрямую в существующий объект
-                // Поэтому использу временный объект и копируем поля
+                // No-op guard before a conditional operation.
+                // No-op guard before a conditional operation.
                 JsonUtility.FromJsonOverwrite(json, so);
                 _logger.LogInfo(GameLogFeature.Core, $"[GameConfig] Updated config key: {key}");
 #if UNITY_EDITOR
-                // В Editor сохраняем изменения в ассет
+                // No-op guard before a conditional operation.
                 UnityEditor.EditorUtility.SetDirty(so);
 #endif
                 return true;

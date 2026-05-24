@@ -1,4 +1,4 @@
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using System.IO;
 using CoreAI.Infrastructure.Logging;
@@ -8,13 +8,12 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Применяет поля <see cref="CoreAISettingsAsset"/> к паре <see cref="LLM"/> + <see cref="LLMAgent"/> и
-    /// назначает GGUF из настроек CoreAI до fallback на Model Manager (см. <see cref="LlmUnityModelBootstrap"/>).
+    /// Creates and configures runtime LLMUnity host objects.
     /// </summary>
     public static class LlmUnityHostConfigurator
     {
         /// <summary>
-        /// Синхронизирует локальный хост с Core AI Settings: remote, GPU-слои, flash attention, DontDestroyOnLoad, модель.
+/// Executes apply from settings.
         /// </summary>
         public static void ApplyFromSettings(LLM llm, LLMAgent agent, CoreAISettingsAsset settings, IGameLogger logger)
         {
@@ -41,12 +40,11 @@ namespace CoreAI.Infrastructure.Llm
     }
 
     /// <summary>
-    /// Создаёт скрытый <see cref="GameObject"/> с <see cref="LLM"/> + <see cref="LLMAgent"/>, если в сцене нет хоста.
-    /// Имя объекта берётся из настроек или <c>CoreAI_LLMUnity_Runtime</c>.
+    /// Runtime holder for LLMUnity objects created by CoreAI.
     /// </summary>
     public static class LlmUnityRuntimeHost
     {
-        /// <summary>Создаёт и активирует новый хост; не вызывать если агент уже есть на сцене.</summary>
+        /// <summary>Creates and configures an LLMAgent from CoreAI settings.</summary>
         public static LLMAgent Create(CoreAISettingsAsset settings, IGameLogger logger)
         {
             if (settings == null || logger == null)
@@ -59,8 +57,8 @@ namespace CoreAI.Infrastructure.Llm
                 : settings.LlmUnityRuntimeHostObjectName.Trim();
 
             GameObject go = new(goName);
-            // LLM.Awake запускает загрузку модели; без модели — «No model file provided!» и сервер остаётся в broken state.
-            // Пока объект неактивен, Awake/OnEnable у добавленных компонентов откладываются — успеваем выставить model через ApplyFromSettings.
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
             go.SetActive(false);
             LLM llm = go.AddComponent<LLM>();
             LLMAgent agent = go.AddComponent<LLMAgent>();

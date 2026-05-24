@@ -1,6 +1,70 @@
-# Changelog — `com.nexoider.coreaiunity`
+# Changelog - `com.nexoider.coreaiunity`
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
+
+## [2.5.0] - 2026-05-24
+
+### Options + ScriptableObject Wrapper Rule
+
+All framework ScriptableObjects now follow the accepted rule: assets are Unity authoring wrappers, while runtime code should consume options, interfaces or snapshots.
+
+- `CoreAiChatConfig` implements `ICoreAiChatOptions` and exposes `ToOptions()` / `ApplyOptions(...)`.
+- `CoreAiChatPanel` accepts `SetRuntimeOptions(...)`, so tests and hosts can configure chat behavior without mutating private serialized fields.
+- `CoreAISettingsAsset`, `OpenAiHttpLlmSettings`, `GameLogSettingsAsset`, and `AiPermissionsAsset` expose `ToOptions()` / `ApplyOptions(...)` wrappers.
+- `AgentPromptsManifest` builds `AgentPromptsDefinition` from `TextAsset.text`; prompt providers consume the definition snapshot.
+- `SkillSetAsset` builds `SkillSetDefinition`; `BuildSkillSet(...)` uses that portable definition plus code-supplied tools.
+- `LlmRoutingManifest` exposes `ToOptions()` as an alias for the portable `LlmRouteTable` snapshot.
+- `CoreAiPrefabRegistryAsset` implements `ICoreAiPrefabRegistry`; consumers depend on the registry interface, not the concrete asset type.
+
+### Tests and Migration
+
+- `CoreAiChatPanelBusyApiEditModeTests` no longer writes `_roleId` / `_showToolCallsInChat` via reflection; mutable chat setup uses `CoreAiChatOptions`.
+- Added targeted wrapper/snapshot EditMode coverage for chat, settings, HTTP, logging, permissions, routing, prompts, skills and prefab registry contracts.
+- Asset-specific tests remain for Inspector defaults and serialization behavior.
+
+### Documentation
+
+- Added `DOCS_INDEX_RU.md`, `RELEASE_CHECKLIST_RU.md`, and `KNOWN_ISSUES_RU.md`.
+- Updated `SCRIPTABLE_OBJECTS.md` with the `Options + ScriptableObject wrapper` rule.
+- Updated chat README with runtime options vs config asset guidance.
+
+#### Package **`2.5.0`** - dependency **`com.nexoider.coreai` `2.5.0`**.
+## [2.4.0] - 2026-05-08
+
+### ChatPanel — public busy API + tool-round event + scroll/diagnostic fixes
+
+Previously external code (RedoSchool's `ChatExternalSubmitUnlock` gate, similar host gates) had to read private `_isSending` / `_isStreaming` / `_isStopping` / `_isClearing` flags on `CoreAiChatPanel` via reflection. This release exposes a stable contract — and fixes a long-standing scroll glitch at the end of streamed turns.
+
+#### New public API on `CoreAiChatPanel`
+
+- **`bool IsBusy`** — `_isSending || _isStreaming || _isStopping || _isClearing`.
+- **`event Action<bool> BusyStateChanged`** — fires on the UI thread on every transition. Funnelled through `UpdateSendButtonVisualState()`, which every state-flag mutation already calls, so the contract holds even when subclasses change flags directly.
+- **`int CurrentTurnGeneration`** — monotonic counter, incremented at the start of each `RunAgentTurnAsync`. External code can compare values across awaits to detect "a newer turn is already in flight".
+- **`void ResetBusyStateWithoutCancellation()`** — clears all four busy flags without cancelling the active HTTP/streaming request (in contrast to `StopActiveGeneration`). For hosts that know the turn is logically closed and just want to unlock input.
+- **`event Action<int, string> ToolRoundStarted`** — fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). Lets hosts show "tool X (k/N)" badges without reflection.
+
+#### Scroll fix at end of streaming
+
+`FinishStreaming()` removes the `coreai-streaming-active` USS class from the active bubble, which changes `padding` / `border` and therefore the content height of `ScrollView`. The previous two-pass `schedule.Execute` snap finished before that style invalidation settled, leaving the tail of the last AI message clipped below the visible area. `ScrollToBottom()` now schedules a third snap with `StartingIn(80)`ms.
+
+#### Stream-gap diagnostics
+
+`SendStreamingAsync` measures inter-chunk latency and emits a single `Debug.Log` line whenever a gap exceeds 5s, with `BufferedNoToolBinding` / `ToolHint` / `TextLen` / `IsDone` flags. Helps tell "model is slow on a tool-roundtrip" from "UI lost a chunk".
+
+#### Tool-name tracking always on
+
+`OnToolExecutedChatDisplay` now subscribes to `CoreAi.OnToolExecuted` regardless of `ShowToolCallsInChat`, because `ToolRoundStarted` listeners want the tool name even when the tool-call bubble is suppressed. Bubble rendering itself is still gated by config.
+
+#### Migration
+
+- **No breaking changes.** Reflection-based busy gates continue to work; switch to `BusyStateChanged` / `IsBusy` to drop the `BindingFlags.NonPublic` reflection.
+- New event handlers can be added safely: `ChatPanel.BusyStateChanged += isBusy => …;` / `ChatPanel.ToolRoundStarted += (iter, name) => …;`.
+
+#### Tests
+
+- New `EditMode/CoreAiChatPanelBusyApiEditModeTests`: `IsBusy` reflects each flag, `BusyStateChanged` fires on transitions only (not on every mutation), `ResetBusyStateWithoutCancellation` clears all flags, `ToolRoundStarted` delivers iteration index and tool name.
+
+#### Package **`2.4.0`** — dependency **`com.nexoider.coreai` `2.3.1`** (no Core changes).
 
 ## [2.3.1] - 2026-05-08
 

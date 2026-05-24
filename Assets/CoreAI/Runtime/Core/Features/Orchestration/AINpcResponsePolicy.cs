@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов AINpc: мягкая проверка (JSON или непустой текст).
+    /// Structured-response policy for AI NPC roles.
     /// </summary>
     public sealed class AINpcResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -20,7 +20,7 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            // NPC может отвечать либо JSON, либо просто текстом (реплика)
+            /* Implementation note in English. */
             string trimmed = rawContent.Trim();
             if (trimmed.Length < 2)
             {

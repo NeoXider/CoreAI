@@ -5,19 +5,26 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.World
 {
     /// <summary>
-    /// Реестр префабов, доступных для безопасного спавна из Lua через CoreAI.
-    /// Ключи: GUID-строка (желательно) и удобное имя (опционально).
+    /// Unity-side prefab lookup contract. Implementations may wrap ScriptableObject assets or runtime maps.
+    /// </summary>
+    public interface ICoreAiPrefabRegistry
+    {
+        bool TryResolve(string keyOrName, out GameObject prefab);
+    }
+
+    /// <summary>
+    /// Stores prefab lookup entries used by CoreAI world command execution.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/World/Prefab Registry", fileName = "CoreAiPrefabRegistry")]
-    public sealed class CoreAiPrefabRegistryAsset : ScriptableObject
+    public sealed class CoreAiPrefabRegistryAsset : ScriptableObject, ICoreAiPrefabRegistry
     {
         [Serializable]
         public sealed class Entry
         {
-            [Tooltip("Стабильный ключ. Рекомендуется GUID (строка).")]
+            [Tooltip("Stable key. A GUID string is recommended.")]
             public string Key = "";
 
-            [Tooltip("Альтернативный ключ по имени (для удобства).")]
+            [Tooltip("Optional human-readable key.")]
             public string Name = "";
 
             public GameObject Prefab;

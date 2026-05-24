@@ -60,7 +60,7 @@ namespace CoreAI.Tests.EditMode
         public void SerializedObject_HasEnableStreaming_ForInspectorBinding()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            SerializedObject so = new SerializedObject(settings);
+            SerializedObject so = new(settings);
             SerializedProperty prop = so.FindProperty("enableStreaming");
             Assert.IsNotNull(prop, "CoreAISettingsAssetEditor Essentials binds enableStreaming.");
             Assert.AreEqual(SerializedPropertyType.Boolean, prop.propertyType);

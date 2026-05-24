@@ -93,14 +93,17 @@ namespace CoreAI.Tests.EditMode
 
             int chunks = 0;
             await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
-            {
-                AgentRoleId = "Test",
-                SystemPrompt = "sys",
-                UserPayload = "hi"
-            }, CancellationToken.None))
+                           {
+                               AgentRoleId = "Test",
+                               SystemPrompt = "sys",
+                               UserPayload = "hi"
+                           }, CancellationToken.None))
             {
                 chunks++;
-                if (chunks > 16) break;
+                if (chunks > 16)
+                {
+                    break;
+                }
             }
 
             Assert.AreEqual(777, capturing.LastStreamingOptions?.MaxOutputTokens,
@@ -160,8 +163,14 @@ namespace CoreAI.Tests.EditMode
                 await Task.CompletedTask;
             }
 
-            public object GetService(Type serviceType, object serviceKey = null) => null;
-            public void Dispose() { }
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
     }
 #endif

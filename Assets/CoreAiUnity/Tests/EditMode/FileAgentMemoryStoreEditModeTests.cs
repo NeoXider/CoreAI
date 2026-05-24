@@ -48,8 +48,8 @@ namespace CoreAI.Tests.EditMode
                 Memory = "PLAYER_QUEST:rescue_dog",
                 LastSystemPrompt = "npc"
             });
-            store.AppendChatMessage(_roleId, "user", "Hello merchant", persistToDisk: true);
-            store.AppendChatMessage(_roleId, "assistant", "Welcome.", persistToDisk: true);
+            store.AppendChatMessage(_roleId, "user", "Hello merchant", true);
+            store.AppendChatMessage(_roleId, "assistant", "Welcome.", true);
 
             store.ClearChatHistory(_roleId);
 
@@ -70,11 +70,12 @@ namespace CoreAI.Tests.EditMode
         public void ClearChatHistory_SameStoreInstance_GetChatHistory_IsSafe()
         {
             FileAgentMemoryStore store = new();
-            store.AppendChatMessage(_roleId, "user", "one", persistToDisk: true);
+            store.AppendChatMessage(_roleId, "user", "one", true);
             store.ClearChatHistory(_roleId);
 
             ChatMessage[] history = store.GetChatHistory(_roleId);
-            Assert.AreEqual(0, history.Length, "After ClearChatHistory, same store must reload empty history without throwing");
+            Assert.AreEqual(0, history.Length,
+                "After ClearChatHistory, same store must reload empty history without throwing");
         }
 
         [Test]
@@ -82,7 +83,7 @@ namespace CoreAI.Tests.EditMode
         {
             FileAgentMemoryStore store = new();
             store.Save(_roleId, new AgentMemoryState { Memory = "will_clear", LastSystemPrompt = "s" });
-            store.AppendChatMessage(_roleId, "user", "line1", persistToDisk: true);
+            store.AppendChatMessage(_roleId, "user", "line1", true);
 
             store.Clear(_roleId);
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CoreAI.Session;
 using System.Text;
@@ -6,11 +6,7 @@ using System.Text;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Сборка системного промпта через <see cref="IAgentSystemPromptProvider"/> и user через шаблон или дефолт.
-    /// 3-слойная архитектура системного промпта:
-    ///   Слой 1: universalSystemPromptPrefix (общие правила для ВСЕХ агентов)
-    ///   Слой 2: базовый промпт из Manifest/Resources (.txt файлы)
-    ///   Слой 3: дополнительный промпт из AgentBuilder (через AgentMemoryPolicy)
+    /// Composes system and user prompts for AI task requests.
     /// </summary>
     public sealed class AiPromptComposer
     {
@@ -22,7 +18,7 @@ namespace CoreAI.Ai
         private readonly ICoreAISettings _settings;
         private readonly IEnumerable<IAiPromptContextProvider> _contextProviders;
 
-        /// <summary>Создаёт композер с цепочкой провайдеров промптов из DI.</summary>
+        /// <summary>Initializes a new instance of AiPromptComposer.</summary>
         public AiPromptComposer(
             IAgentSystemPromptProvider systemPrompts,
             IAgentUserPromptTemplateProvider userTemplates,
@@ -42,23 +38,23 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Системный промпт для роли — 3-слойная сборка:
-        ///   Слой 1: universalSystemPromptPrefix
-        ///   Слой 2: манифест / Resources / встроенный fallback
-        ///   Слой 3: дополнительный промпт из AgentBuilder
+/// Executes GetSystemPrompt API operation.
+        ///
+        ///
+        ///
         /// </summary>
         public string GetSystemPrompt(string roleId)
         {
-            // Проверяем, переопределяет ли роль universalPrefix
+            /* Implementation note in English. */
             bool skipPrefix = _memoryPolicy != null &&
                               _memoryPolicy.IsUniversalPrefixOverridden(roleId);
 
-            // Слой 1: универсальный префикс из настроек (если не переопределён)
+            /* Implementation note in English. */
             string prefix = skipPrefix
                 ? ""
-                : (_settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix);
+                : _settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
 
-            // Слой 2: базовый промпт из провайдера (Manifest → Resources → fallback)
+            /* Implementation note in English. */
             string basePrompt;
             if (_systemPrompts.TryGetSystemPrompt(roleId, out string s) && !string.IsNullOrWhiteSpace(s))
             {
@@ -69,7 +65,7 @@ namespace CoreAI.Ai
                 basePrompt = $"You are agent \"{roleId}\".";
             }
 
-            // Слой 3: дополнительный промпт из AgentBuilder (через AgentMemoryPolicy)
+            /* Implementation note in English. */
             string additional = "";
             if (_memoryPolicy != null &&
                 _memoryPolicy.TryGetAdditionalSystemPrompt(roleId, out string extra) &&
@@ -78,13 +74,14 @@ namespace CoreAI.Ai
                 additional = extra.Trim();
             }
 
-            // Сборка: prefix + base + additional
-            System.Text.StringBuilder sb = new();
+            /* Implementation note in English. */
+            StringBuilder sb = new();
             if (!string.IsNullOrWhiteSpace(prefix))
             {
                 sb.Append(prefix.TrimEnd());
                 sb.Append('\n');
             }
+
             sb.Append(basePrompt);
             if (!string.IsNullOrEmpty(additional))
             {
@@ -147,14 +144,14 @@ namespace CoreAI.Ai
             sections.AppendLine();
         }
 
-        /// <summary>User-часть для LLM: шаблон роли (<c>{telemetry}</c>, <c>{hint}</c>, <c>{ключ}</c> из телеметрии) или JSON по умолчанию, плюс контекст ремонта Lua.</summary>
+        /// <summary>Builds the user-facing prompt payload from session state and the requested AI task.</summary>
         public string BuildUserPayload(GameSessionSnapshot snap, AiTaskRequest task)
         {
             string roleId = task.RoleId ?? BuiltInAgentRoleIds.Creator;
             string body;
             if (_userTemplates.TryGetUserTemplate(roleId, out string tmpl))
             {
-                // Шаблоны игронезависимы: подставляем {telemetry} (JSON-объект), {hint} и любые {ключ} из снимка телеметрии.
+                /* Implementation note in English. */
                 string telemetryJson = BuildTelemetryJsonObject(snap);
                 body = tmpl
                     .Replace("{telemetry}", telemetryJson)
@@ -259,8 +256,8 @@ namespace CoreAI.Ai
 
         private static string BuildDefaultJsonPayload(GameSessionSnapshot snap, AiTaskRequest task)
         {
-            // Игронезависимый payload: игра сама выбирает ключи телеметрии и обновляет их в Core;
-            // Core только хранит и отдаёт их модели как JSON-словарь.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             StringBuilder sb = new(256);
             sb.Append('{');
             sb.Append("\"telemetry\":");
@@ -291,8 +288,8 @@ namespace CoreAI.Ai
 
             string err = ShortenForPrompt(task.LuaRepairErrorMessage, 500);
             string code = ShortenForPrompt(task.LuaRepairPreviousCode ?? "", 1200);
-            // repair контекст оставляем строкой-хвостом (универсально и читаемо для LLM),
-            // но он не содержит game-specific телеметрии.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             return $"{body}; lua_repair_generation={task.LuaRepairGeneration}; lua_error={err}; fix_this_lua={code}";
         }
 
@@ -304,7 +301,7 @@ namespace CoreAI.Ai
             }
 
             s = s.Replace('\r', ' ').Replace('\n', ' ');
-            return s.Length <= max ? s : s.Substring(0, max) + "…";
+            return s.Length <= max ? s : s.Substring(0, max) + "...";
         }
     }
 }

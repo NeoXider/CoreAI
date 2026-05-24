@@ -1,4 +1,4 @@
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
@@ -10,8 +10,7 @@ using VContainer.Unity;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Опционально поднимает локальный LLMUnity-сервер сразу после сборки DI, чтобы первый запрос не ждал загрузки GGUF.
-    /// Управляется <see cref="CoreAISettingsAsset.LlmUnityAutostartLocalServer"/>.
+    /// Starts LLMUnity models during application startup when configured.
     /// </summary>
     public sealed class LlmUnityAutostartEntryPoint : IStartable
     {
@@ -58,7 +57,7 @@ namespace CoreAI.Composition
 
             if (llm.started)
             {
-                _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: автостарт — сервер уже в состоянии started.");
+                _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
                 return;
             }
 
@@ -69,7 +68,7 @@ namespace CoreAI.Composition
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    "LLMUnity: автостарт — вызов agent.Start() не удался: " + ex.Message);
+                    "LLMUnity: autostart status changed." + ex.Message);
             }
 
             WarmupAsync(llm).Forget();
@@ -84,7 +83,7 @@ namespace CoreAI.Composition
                 if (Time.realtimeSinceStartup - start > timeout)
                 {
                     _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLMUnity: автостарт — таймаут {timeout:F0}s (started={llm.started}, failed={llm.failed}).");
+                        $"LLMUnity: autostart status changed.");
                     return;
                 }
 
@@ -93,11 +92,11 @@ namespace CoreAI.Composition
 
             if (llm.failed)
             {
-                _logger.LogWarning(GameLogFeature.Llm, "LLMUnity: автостарт — загрузка модели завершилась с ошибкой.");
+                _logger.LogWarning(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
                 return;
             }
 
-            _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: автостарт — локальный сервер готов.");
+            _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
         }
     }
 }

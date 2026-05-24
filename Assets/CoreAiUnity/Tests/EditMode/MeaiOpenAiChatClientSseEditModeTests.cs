@@ -1,4 +1,5 @@
 #if !COREAI_NO_LLM
+using System.Collections.Generic;
 using System.Linq;
 using CoreAI.Infrastructure.Llm;
 using MEAI = Microsoft.Extensions.AI;
@@ -13,7 +14,7 @@ namespace CoreAI.Tests.EditMode
         {
             const string sse =
                 "data:{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"chunk\"}}]}\n";
-            var list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            List<MEAI.ChatResponseUpdate> list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
             Assert.AreEqual(1, list.Count);
             Assert.AreEqual("chunk", list[0].Text);
         }
@@ -22,7 +23,7 @@ namespace CoreAI.Tests.EditMode
         public void ParseSseUpdates_DataPrefixWithSpace_ParsesDelta()
         {
             const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n";
-            var list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            List<MEAI.ChatResponseUpdate> list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
             Assert.AreEqual(1, list.Count);
             Assert.AreEqual("hi", list[0].Text);
         }
@@ -31,7 +32,7 @@ namespace CoreAI.Tests.EditMode
         public void ParseSseUpdates_DataPrefixWithoutSpace_ParsesDelta()
         {
             const string sse = "data:{\"choices\":[{\"delta\":{\"content\":\"local\"}}]}\n";
-            var list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
+            List<MEAI.ChatResponseUpdate> list = MeaiOpenAiChatClient.ParseSseUpdatesForTests(sse).ToList();
             Assert.AreEqual(1, list.Count);
             Assert.AreEqual("local", list[0].Text);
         }

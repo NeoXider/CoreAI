@@ -1,25 +1,23 @@
-namespace CoreAI.Ai
+﻿namespace CoreAI.Ai
 {
     /// <summary>
-    /// Статическая точка входа — синглтон-доступ к оркестратору и политике.
-    /// Автоматически заполняется при инициализации <c>CoreAILifetimeScope</c>.
-    /// <para>Для продвинутого DI и тестов — используйте <see cref="IAiOrchestrationService"/> напрямую из VContainer.</para>
+    /// Exposes the global CoreAI agent facade used by host applications and Unity composition.
     /// </summary>
     /// <example>
-    /// // Создай агента
+    /// Usage example:
     /// var merchant = new AgentBuilder("Blacksmith")
     ///     .WithSystemPrompt("You are a blacksmith.")
     ///     .WithMemory()
     ///     .Build();
     /// merchant.ApplyToPolicy(CoreAIAgent.Policy);
-    /// 
-    /// // Вызови (самый простой способ)
+    ///
+    ///
     /// merchant.Ask("Show me your swords");
-    /// 
+    ///
     /// // Async:
     /// await merchant.AskAsync("Show me your swords");
-    /// 
-    /// // С callback:
+    ///
+    ///
     /// merchant.Ask("Show me your swords", onDone: () => Debug.Log("Done!"));
     /// </example>
     public static class CoreAIAgent
@@ -32,9 +30,7 @@ namespace CoreAI.Ai
         private static volatile IAgentMemoryStore _memoryStore;
 
         /// <summary>
-        /// Глобальный оркестратор. Устанавливается при инициализации CoreAILifetimeScope.
-        /// <para>Если null — CoreAI ещё не инициализован (не был Play или нет CoreAILifetimeScope на сцене).</para>
-        /// </summary>
+        /// Orchestration service currently registered for the global CoreAI agent facade. ///.</summary>
         public static IAiOrchestrationService Orchestrator
         {
             get => _orchestrator;
@@ -42,8 +38,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Глобальная политика памяти/инструментов. Устанавливается при инициализации CoreAILifetimeScope.
-        /// </summary>
+        /// Agent memory policy currently registered for the global CoreAI agent facade. ///.</summary>
         public static AgentMemoryPolicy Policy
         {
             get => _policy;
@@ -51,23 +46,23 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Глобальное хранилище памяти. Устанавливается при инициализации CoreAILifetimeScope.
-        /// </summary>
+        /// Memory store currently registered for the global CoreAI agent facade. ///.</summary>
         public static IAgentMemoryStore MemoryStore
         {
             get => _memoryStore;
             private set => _memoryStore = value;
         }
 
-        /// <summary>Инициализация (вызывается из CoreAILifetimeScope / CoreAIGameEntryPoint).</summary>
-        public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)
+        /// <summary>Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade.</summary>
+        public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
+            IAgentMemoryStore memoryStore)
         {
             Orchestrator = orchestrator;
             Policy = policy;
             MemoryStore = memoryStore;
         }
 
-        /// <summary>Очистка при выходе из Play Mode.</summary>
+        /// <summary>Clears the global CoreAI facade registrations.</summary>
         public static void Reset()
         {
             Orchestrator = null;

@@ -1,37 +1,31 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Правило совместимости для произвольного набора элементов/групп.
-    /// Поддерживает пары (2 элемента), тройки, четвёрки — любое количество.
-    /// 
-    /// Пример пара: Elements = {"Fire", "Water"}, Score = 0 → несовместимо
-    /// Пример тройка: Elements = {"Fire", "Earth", "Air"}, Score = 1.5 → бонусная синергия
-    /// Пример четвёрка: Elements = {"Iron", "Carbon", "Fire", "Water"}, Score = 2.0 → мастер-рецепт
+    /// One crafting compatibility rule.
     /// </summary>
     public sealed class CompatibilityRule
     {
         /// <summary>
-        /// Набор элементов (имена или группы), к которым относится правило.
-        /// Порядок не важен. Минимум 2 элемента.
+        /// Elements.
         /// </summary>
         public List<string> Elements { get; set; } = new();
 
-        /// <summary>Совместимость: 1.0 = нейтрально, 0.0 = несовместимо, >1.0 = бонус синергии.</summary>
+        /// <summary>Compatibility score produced by the rule.</summary>
         public float Score { get; set; } = 1.0f;
 
-        /// <summary>Причина (для логирования и LLM).</summary>
+        /// <summary>Explanation for the compatibility result.</summary>
         public string Reason { get; set; }
 
-        /// <summary>Является ли это правило блокирующим (completely incompatible).</summary>
+        /// <summary>Is blocking.</summary>
         public bool IsBlocking => Score <= 0f;
 
-        /// <summary>Количество элементов в правиле.</summary>
+        /// <summary>Size.</summary>
         public int Size => Elements.Count;
 
         /// <summary>
-        /// Создаёт правило из двух элементов (shortcut для парных правил).
+/// Executes Pair API operation.
         /// </summary>
         public static CompatibilityRule Pair(string a, string b, float score, string reason = null)
         {
@@ -44,7 +38,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Создаёт правило из нескольких элементов.
+/// Executes Group API operation.
         /// </summary>
         public static CompatibilityRule Group(float score, string reason, params string[] elements)
         {

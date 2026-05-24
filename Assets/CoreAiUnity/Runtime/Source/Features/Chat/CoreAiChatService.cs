@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -13,9 +13,7 @@ using UnityEngine;
 namespace CoreAI.Chat
 {
     /// <summary>
-    /// Сервис чата CoreAI: streaming и non-streaming отправка сообщений,
-    /// автоматическая работа с chat history и prompt composition.
-    /// Не зависит от UI — можно использовать программно.
+    /// Application service that sends chat requests through the AI orchestrator.
     /// </summary>
     public class CoreAiChatService
     {
@@ -40,30 +38,61 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Попытка создать сервис из CoreAILifetimeScope (авто-резолв из DI).
-        /// Возвращает null если скоуп не найден.
+        /// Attempts to create a chat service from the active CoreAI lifetime scope in the scene.
         /// </summary>
         public static CoreAiChatService TryCreateFromScene()
         {
-            var scope = UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
-            if (scope?.Container == null) return null;
+            CoreAILifetimeScope scope =
+                UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
+            if (scope?.Container == null)
+            {
+                return null;
+            }
 
             try
             {
-                var orchestrator = (IAiOrchestrationService)scope.Container.Resolve(typeof(IAiOrchestrationService));
+                IAiOrchestrationService orchestrator =
+                    (IAiOrchestrationService)scope.Container.Resolve(typeof(IAiOrchestrationService));
                 AgentMemoryPolicy policy = null;
                 ICoreAISettings settings = null;
                 IAgentMemoryStore memStore = null;
                 IGameLogger logger = null;
 
-                try { policy = (AgentMemoryPolicy)scope.Container.Resolve(typeof(AgentMemoryPolicy)); }
-                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve AgentMemoryPolicy: {ex.Message}"); }
-                try { settings = (ICoreAISettings)scope.Container.Resolve(typeof(ICoreAISettings)); }
-                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve ICoreAISettings: {ex.Message}"); }
-                try { memStore = (IAgentMemoryStore)scope.Container.Resolve(typeof(IAgentMemoryStore)); }
-                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve IAgentMemoryStore: {ex.Message}"); }
-                try { logger = (IGameLogger)scope.Container.Resolve(typeof(IGameLogger)); }
-                catch (Exception ex) { Debug.LogWarning($"[CoreAiChatService] Resolve IGameLogger: {ex.Message}"); }
+                try
+                {
+                    policy = (AgentMemoryPolicy)scope.Container.Resolve(typeof(AgentMemoryPolicy));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatService] Resolve AgentMemoryPolicy: {ex.Message}");
+                }
+
+                try
+                {
+                    settings = (ICoreAISettings)scope.Container.Resolve(typeof(ICoreAISettings));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatService] Resolve ICoreAISettings: {ex.Message}");
+                }
+
+                try
+                {
+                    memStore = (IAgentMemoryStore)scope.Container.Resolve(typeof(IAgentMemoryStore));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatService] Resolve IAgentMemoryStore: {ex.Message}");
+                }
+
+                try
+                {
+                    logger = (IGameLogger)scope.Container.Resolve(typeof(IGameLogger));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAiChatService] Resolve IGameLogger: {ex.Message}");
+                }
 
                 return new CoreAiChatService(orchestrator, policy, settings, memStore, logger);
             }
@@ -75,16 +104,14 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Отправить сообщение и получить полный ответ (без стриминга).
-        /// Свёрнутая обёртка над <see cref="SendMessageAsync(AiTaskRequest, CancellationToken)"/>
-        /// для типичного chat-сценария (RoleId + текст пользователя).
+        /// Sends a chat message through the AI orchestrator and returns the final response text.
         /// </summary>
         public System.Threading.Tasks.Task<string> SendMessageAsync(
             string userText,
             string roleId,
             CancellationToken ct = default)
         {
-            AiTaskRequest request = new AiTaskRequest
+            AiTaskRequest request = new()
             {
                 RoleId = roleId,
                 Hint = userText,
@@ -95,14 +122,11 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Отправить сообщение, заданное полным <see cref="AiTaskRequest"/>.
-        /// Используется UI-панелью или прикладным слоем, когда нужно прокинуть тонкие
-        /// настройки запроса (например <see cref="AiTaskRequest.ForcedToolMode"/> для
-        /// детерминированного tool-calling) без потери остальной chat-механики.
+        /// Sends a chat message through the AI orchestrator and returns the final response text.
         /// </summary>
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
-        /// — fully compatible with WebGL's single-threaded execution model.
+        ///
         /// Exceptions are NOT swallowed; callers (e.g. <c>CoreAiChatPanel</c>) are responsible
         /// for catching and displaying errors to the user.
         /// </remarks>
@@ -110,7 +134,10 @@ namespace CoreAI.Chat
             AiTaskRequest request,
             CancellationToken ct = default)
         {
-            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
@@ -135,7 +162,7 @@ namespace CoreAI.Chat
             catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
             {
                 // Linked-token / CancelAfterSlim may not set CTS.IsCancellationRequested in the same
-                // order of operations as the awaiter sees the OCE — key off the configured window
+                // No-op guard before a conditional operation.
                 // and the caller token instead of probing the linked source.
                 throw new LlmOperationTimeoutException();
             }
@@ -147,15 +174,14 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Стриминг ответа — возвращает чанки текста по мере генерации.
-        /// Тонкая обёртка над <see cref="SendMessageStreamingAsync(AiTaskRequest, CancellationToken)"/>.
+        /// Sends a chat message through the AI orchestrator and streams response chunks.
         /// </summary>
         public IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             string userText,
             string roleId,
             CancellationToken ct = default)
         {
-            AiTaskRequest request = new AiTaskRequest
+            AiTaskRequest request = new()
             {
                 RoleId = roleId,
                 Hint = userText,
@@ -166,19 +192,21 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Стриминг ответа на полный <see cref="AiTaskRequest"/>. См.
-        /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken)"/> о применении.
+        /// Sends a chat message through the AI orchestrator and streams response chunks.
         /// </summary>
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
-        /// — fully compatible with WebGL's single-threaded execution model.
+        ///
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             AiTaskRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken ct = default)
         {
-            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
 
             float timeoutSec = 0f;
             CancellationTokenSource timeoutCts = null;
@@ -233,15 +261,14 @@ namespace CoreAI.Chat
             }
         }
 
-        /// <summary>Очистить историю чата для роли.</summary>
+        /// <summary>Clears the stored chat history for the selected agent role.</summary>
         public void ClearHistory(string roleId)
         {
             _memoryStore?.ClearChatHistory(roleId);
         }
 
         /// <summary>
-        /// Прочитать сохранённую историю чата (тип 2: ChatHistory в <see cref="IAgentMemoryStore"/>).
-        /// Удобно для UI при старте сцену. <paramref name="maxMessages"/>: 0 = без лимита (как в store).
+        /// Attempts to get persisted chat history and returns whether the operation succeeded.
         /// </summary>
         public bool TryGetPersistedChatHistory(string roleId, out ChatMessage[] messages, int maxMessages = 0)
         {
@@ -261,7 +288,7 @@ namespace CoreAI.Chat
             return true;
         }
 
-        /// <summary>Остановить все текущие и ожидающие задачи для роли.</summary>
+        /// <summary>Requests cancellation of active work for the selected agent role.</summary>
         public void StopAgent(string roleId)
         {
             CoreAi.StopAgent(roleId);
@@ -301,7 +328,7 @@ namespace CoreAI.Chat
             const string body =
                 "WebGL player: incremental chat streaming needs CoreAISettingsAsset.WebGlNativeStreaming = true " +
                 "(fetch + ReadableStream via CoreAiSseFetch.jslib). While it is off, UnityWebRequest buffers the full " +
-                "response and this service uses non-streaming mode — LLM logs show \"LLM ◀\" without \"(stream)\" and " +
+                "response and this service uses non-streaming mode; streaming markers are absent and " +
                 "the reply appears all at once.";
             if (_logger != null)
             {
@@ -315,13 +342,13 @@ namespace CoreAI.Chat
 #endif
 
         /// <summary>
-        /// Вычислить эффективный флаг стриминга для роли с учётом иерархии настроек:
+        ///
         /// <list type="number">
-        /// <item>per-role override из <see cref="AgentMemoryPolicy"/> (через <c>AgentBuilder.WithStreaming()</c>)</item>
-        /// <item>глобальный <see cref="ICoreAISettings.EnableStreaming"/></item>
-        /// <item>fallback-параметр <paramref name="uiFallback"/> (например, из <c>CoreAiChatConfig.EnableStreaming</c>)</item>
+        ///
+        ///
+        ///
         /// </list>
-        /// Если UI-флаг выключен — стриминг принудительно выключается независимо от остальных слоёв.
+        ///
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool uiFallback = true)
         {
@@ -351,13 +378,13 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Вычислить эффективный флаг стриминга для роли с учётом настроек
-        /// агента (per-role override в <see cref="AgentMemoryPolicy"/>) и глобального
+        ///
+        ///
         /// <see cref="ICoreAISettings.EnableStreaming"/>.
         /// <para>
-        /// Если передан <paramref name="uiOverride"/> (например, <c>CoreAiChatConfig.EnableStreaming</c>)
-        /// и он <c>false</c> — стриминг выключается независимо от остальных настроек;
-        /// если <c>true</c> — наследуется из агента/глобала.
+        ///
+        ///
+        ///
         /// </para>
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool? uiOverride = null)
@@ -388,22 +415,18 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// «Умная» отправка сообщения: сам решает, использовать ли стриминг,
-        /// исходя из <see cref="IsStreamingEnabled"/>. Если стриминг включён —
-        /// делегирует в <see cref="SendMessageStreamingAsync"/> и аккумулирует
-        /// чанки в итоговую строку; иначе — вызывает <see cref="SendMessageAsync"/>.
-        /// Удобно для программных интеграций, которым нужна единая точка вызова.
+        /// Executes send message smart async.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             string userText,
             string roleId,
-            System.Action<LlmStreamChunk> onChunk = null,
+            Action<LlmStreamChunk> onChunk = null,
             bool? uiStreamingOverride = null,
             CancellationToken ct = default)
         {
             if (IsStreamingEnabled(roleId, uiStreamingOverride))
             {
-                var sb = new StringBuilder();
+                StringBuilder sb = new();
                 await foreach (LlmStreamChunk chunk in SendMessageStreamingAsync(userText, roleId, ct))
                 {
                     onChunk?.Invoke(chunk);
@@ -427,22 +450,22 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// «Умная» отправка для произвольного <see cref="AiTaskRequest"/>: автоматически
-        /// выбирает streaming/non-streaming по политике для роли. Этот overload используется,
-        /// когда вызывающий код хочет явно прокинуть <see cref="AiTaskRequest.ForcedToolMode"/>
-        /// или другие тонкие поля запроса.
+        /// Executes send message smart async.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             AiTaskRequest request,
-            System.Action<LlmStreamChunk> onChunk = null,
+            Action<LlmStreamChunk> onChunk = null,
             bool? uiStreamingOverride = null,
             CancellationToken ct = default)
         {
-            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
 
             if (IsStreamingEnabled(request.RoleId, uiStreamingOverride))
             {
-                var sb = new StringBuilder();
+                StringBuilder sb = new();
                 await foreach (LlmStreamChunk chunk in SendMessageStreamingAsync(request, ct))
                 {
                     onChunk?.Invoke(chunk);
@@ -464,6 +487,5 @@ namespace CoreAI.Chat
 
             return full;
         }
-
     }
 }

@@ -1,11 +1,11 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Sandbox;
 
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Демо-API ядра + опциональные биндинги из <see cref="GameLuaBindingsExtensibility"/>.
+    /// Aggregating Game Lua Runtime Bindings component used by CoreAI.
     /// </summary>
     public sealed class AggregatingGameLuaRuntimeBindings : IGameLuaRuntimeBindings
     {

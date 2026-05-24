@@ -199,6 +199,33 @@ Subclasses that override **`Update()`** must call **`base.Update()` first** (oth
 
 <a id="programmatic-chat-submit"></a>
 
+
+## Runtime options vs config asset (since 2.5.0)
+
+`CoreAiChatConfig` is a Unity authoring asset, not the mutable runtime contract.
+It keeps private `[SerializeField]` fields, Inspector labels, avatar `Sprite`, hotkey `KeyCode`, layout and UI copy.
+Portable chat behavior is represented by `ICoreAiChatOptions` / `CoreAiChatOptions` in `Assets/CoreAI`.
+
+Use the asset when designers configure the panel in the Inspector:
+
+```csharp
+CoreAiChatOptions snapshot = chatConfig.ToOptions();
+```
+
+Use runtime options when tests, bootstrap code or a host app needs to change role/routing/history/streaming/tool diagnostics/input limits without creating or mutating a `ScriptableObject`:
+
+```csharp
+chatPanel.SetRuntimeOptions(new CoreAiChatOptions
+{
+    RoleId = "SmartChat",
+    ShowToolCallsInChat = false,
+    EnableStreaming = true
+});
+
+chatPanel.ClearRuntimeOptions(); // fall back to assigned CoreAiChatConfig or built-in defaults
+```
+
+Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `ScriptableObject.CreateInstance<CoreAiChatConfig>()` only for asset defaults, Inspector serialization or `ToOptions()` / `ApplyOptions(...)` mapping tests. Do not write private config fields via reflection.
 ## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
 
 Get a reference to the panel (`GetComponent<CoreAiChatPanel>()`, scene singleton, etc.) and call:
@@ -543,5 +570,25 @@ All CSS classes use the `coreai-` prefix to avoid clashes:
 var chatPanel = GetComponent<CoreAiChatPanel>();
 chatPanel.OnUserMessageSent += (text) => Analytics.Track("chat_message", text);
 chatPanel.OnAiResponseCompleted += (response) => Analytics.Track("ai_response", response);
+
+// Since 2.4.0 — public busy contract (replaces reflection on _isSending/_isStreaming/_isStopping/_isClearing).
+chatPanel.BusyStateChanged += isBusy => sendQueueGate.SetBusy(isBusy);
+chatPanel.ToolRoundStarted += (iter, lastTool) =>
+    Debug.Log($"⌛ tool round #{iter}, last tool: {lastTool}");
+
+bool busyNow = chatPanel.IsBusy;
+int turn = chatPanel.CurrentTurnGeneration;
+
+// Force-unlock input without cancelling the active HTTP request:
+chatPanel.ResetBusyStateWithoutCancellation();
 ```
 
+### Public busy API — quick reference (since 2.4.0)
+
+| Member | Type | Purpose |
+| --- | --- | --- |
+| `IsBusy` | `bool` (get) | `true` while sending / streaming / stopping / clearing. |
+| `BusyStateChanged` | `event Action<bool>` | Fires on the UI thread on every `IsBusy` transition (not on every flag mutation). |
+| `CurrentTurnGeneration` | `int` (get) | Monotonic counter, incremented at the start of each agent turn. Compare across awaits to detect "a newer turn started". |
+| `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
+| `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request (in contrast to `StopActiveGeneration()` / `StopAgent()`). |

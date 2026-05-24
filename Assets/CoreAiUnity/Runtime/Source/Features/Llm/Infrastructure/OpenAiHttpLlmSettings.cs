@@ -30,14 +30,12 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField] [Min(64)] private int maxTokens = 2048;
 
-        [Header("Client limits")]
-        [SerializeField] [Min(0)] private int maxRequestsPerSession;
+        [Header("Client limits")] [SerializeField] [Min(0)]
+        private int maxRequestsPerSession;
 
         [SerializeField] [Min(0)] private int maxPromptChars;
 
-        [Header("🔧 Debug")]
-        [Tooltip("Log outbound prompts/tool definitions.")]
-        [SerializeField]
+        [Header("🔧 Debug")] [Tooltip("Log outbound prompts/tool definitions.")] [SerializeField]
         private bool logLlmInput = true;
 
         [Tooltip("Log assistant payloads and aggregated tool summaries.")] [SerializeField]
@@ -92,6 +90,58 @@ namespace CoreAI.Infrastructure.Llm
         public IRequestHeaderProvider? HeaderProvider => null;
 
         /// <summary>
+        /// Builds a Unity-free HTTP settings snapshot for runtime clients and tests.
+        /// </summary>
+        public OpenAiHttpOptions ToOptions()
+        {
+            return new OpenAiHttpOptions
+            {
+                UseOpenAiCompatibleHttp = UseOpenAiCompatibleHttp,
+                ExecutionMode = ExecutionMode,
+                ApiBaseUrl = ApiBaseUrl,
+                ApiKey = ApiKey,
+                AuthorizationHeader = AuthorizationHeader,
+                Model = Model,
+                Temperature = Temperature,
+                RequestTimeoutSeconds = RequestTimeoutSeconds,
+                MaxTokens = MaxTokens,
+                MaxRequestsPerSession = MaxRequestsPerSession,
+                MaxPromptChars = MaxPromptChars,
+                LogLlmInput = LogLlmInput,
+                LogLlmOutput = LogLlmOutput,
+                EnableHttpDebugLogging = EnableHttpDebugLogging,
+                HeaderProvider = HeaderProvider
+            };
+        }
+
+        /// <summary>
+        /// Copies portable HTTP settings into this Unity authoring asset.
+        /// </summary>
+        public void ApplyOptions(OpenAiHttpOptions options)
+        {
+            if (options == null)
+            {
+                return;
+            }
+
+            useOpenAiCompatibleHttp = options.UseOpenAiCompatibleHttp;
+            executionMode = NormalizeHttpMode(options.ExecutionMode);
+            apiBaseUrl = string.IsNullOrWhiteSpace(options.ApiBaseUrl)
+                ? OpenAiHttpConstants.DefaultApiBaseUrl
+                : options.ApiBaseUrl;
+            apiKey = options.ApiKey ?? "";
+            model = string.IsNullOrWhiteSpace(options.Model) ? "gpt-4o-mini" : options.Model;
+            temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
+            requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
+            maxTokens = options.MaxTokens < 64 ? 2048 : options.MaxTokens;
+            maxRequestsPerSession = options.MaxRequestsPerSession < 0 ? 0 : options.MaxRequestsPerSession;
+            maxPromptChars = options.MaxPromptChars < 0 ? 0 : options.MaxPromptChars;
+            logLlmInput = options.LogLlmInput;
+            logLlmOutput = options.LogLlmOutput;
+            enableHttpDebugLogging = options.EnableHttpDebugLogging;
+        }
+
+        /// <summary>
         /// Configures this profile at runtime for tests and dynamic setup.
         /// </summary>
         public void SetRuntimeConfiguration(
@@ -108,7 +158,9 @@ namespace CoreAI.Infrastructure.Llm
         {
             this.useOpenAiCompatibleHttp = useOpenAiCompatibleHttp;
             this.executionMode = NormalizeHttpMode(executionMode);
-            this.apiBaseUrl = string.IsNullOrWhiteSpace(apiBaseUrl) ? OpenAiHttpConstants.DefaultApiBaseUrl : apiBaseUrl;
+            this.apiBaseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
+                ? OpenAiHttpConstants.DefaultApiBaseUrl
+                : apiBaseUrl;
             this.apiKey = apiKey ?? "";
             this.model = string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model;
             this.temperature = temperature;

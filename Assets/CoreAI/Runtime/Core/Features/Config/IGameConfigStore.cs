@@ -1,26 +1,25 @@
-namespace CoreAI.Config
+﻿namespace CoreAI.Config
 {
     /// <summary>
-    /// Абстрактное хранилище игровых конфигов (JSON по ключу).
-    /// Реализуется игрой: файлы, ScriptableObject, база данных и т.д.
+    /// Defines persistence operations for game configuration payloads.
     /// </summary>
     public interface IGameConfigStore
     {
         /// <summary>
-        /// Загружает конфиг по ключу как JSON строку.
+/// Executes TryLoad API operation.
         /// </summary>
-        /// <param name="key">Ключ конфига (например "session", "crafting", "balance").</param>
-        /// <param name="json">JSON строка конфига или null если не найден.</param>
-        /// <returns>true если конфиг найден.</returns>
+        /// <param name="key">The key value.</param>
+        /// <param name="json">The json value.</param>
+        /// <returns>The operation result.</returns>
         bool TryLoad(string key, out string json);
 
         /// <summary>
-        /// Сохраняет конфиг по ключу из JSON строки.
+/// Executes TrySave API operation.
         /// </summary>
         bool TrySave(string key, string json);
 
         /// <summary>
-        /// Возвращает список доступных ключей конфигов.
+/// Executes GetKnownKeys API operation.
         /// </summary>
         string[] GetKnownKeys();
     }

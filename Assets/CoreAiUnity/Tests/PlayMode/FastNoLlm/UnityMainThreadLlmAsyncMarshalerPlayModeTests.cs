@@ -43,12 +43,13 @@ namespace CoreAI.Tests.PlayMode
             {
                 yield return null;
             }
+
             yield return new WaitForEndOfFrame();
 
             Assert.IsTrue(Application.isPlaying, "Test must run in Play Mode");
 
             int mainThreadId = _unityMainThreadId;
-            var tcs = new TaskCompletionSource<int>();
+            TaskCompletionSource<int> tcs = new();
 
             UniTask.Void(async () =>
             {
@@ -83,4 +84,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-

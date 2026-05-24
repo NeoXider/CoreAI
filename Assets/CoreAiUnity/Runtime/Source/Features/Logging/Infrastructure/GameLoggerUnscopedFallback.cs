@@ -1,4 +1,4 @@
-using CoreAI.Logging;
+﻿using CoreAI.Logging;
 using CoreAI.Unity.Logging;
 
 #if UNITY_EDITOR
@@ -9,9 +9,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Когда компонент ещё не может взять <see cref="ILog"/> из VContainer (ранний Awake и т.д.):
-    /// тот же путь, что и в DI: <see cref="FilteringGameLogger"/> → <see cref="UnityGameLogSink"/>.
-    /// Автоматически устанавливает <see cref="Log.Instance"/> при первом обращении.
+    /// Provides a process-wide fallback game logger when no scoped logger has been registered.
     /// </summary>
 #if UNITY_EDITOR
     [InitializeOnLoad]
@@ -26,11 +24,12 @@ namespace CoreAI.Infrastructure.Logging
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Initialize()
         {
-            var _ = Instance;
+            IGameLogger _ = Instance;
         }
+
         private static IGameLogger _instance;
 
-        /// <summary>Синглтон с <see cref="DefaultGameLogSettings"/> (все категории).</summary>
+        /// <summary>Shared fallback game logger instance.</summary>
         public static IGameLogger Instance
         {
             get
@@ -42,7 +41,7 @@ namespace CoreAI.Infrastructure.Logging
 
                 _instance = new FilteringGameLogger(new UnityGameLogSink(), new DefaultGameLogSettings());
 
-                // Если ILog ещё не установлен DI — предоставляем fallback
+                // Skip processing when the checked condition is already satisfied.
                 if (Log.Instance is NullLog)
                 {
                     Log.Instance = new UnityLog(_instance);

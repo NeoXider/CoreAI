@@ -12,6 +12,6 @@ namespace CoreAI.Infrastructure.Llm
         /// Annotate the request with routing or context metadata before logging/executing.
         /// Called once before the first attempt.
         /// </summary>
-        void PreflightAnnotate(CoreAI.Ai.LlmCompletionRequest request);
+        void PreflightAnnotate(Ai.LlmCompletionRequest request);
     }
 }

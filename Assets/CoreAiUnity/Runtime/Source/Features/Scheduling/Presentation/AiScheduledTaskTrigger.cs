@@ -1,4 +1,4 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
@@ -7,13 +7,12 @@ using VContainer;
 namespace CoreAI.Presentation
 {
     /// <summary>
-    /// Обертка над <see cref="IAiOrchestrationService.RunTaskAsync"/>: опциональный таймер и ручной вызов.
-    /// Разместите на объекте с <see cref="CoreAILifetimeScope"/> или укажите scope в инспекторе.
-    /// Несколько ролей — несколько компонентов на одном GameObject.
+    /// Unity component that triggers scheduled AI tasks.
     /// </summary>
     public sealed class AiScheduledTaskTrigger : MonoBehaviour
     {
-        [Tooltip("Пусто — ищется GetComponentInParent или FindAnyObjectByType.")] [SerializeField]
+        [Tooltip("Empty value resolves through GetComponentInParent or FindAnyObjectByType.")]
+        [SerializeField]
         private CoreAILifetimeScope lifetimeScope;
 
         [SerializeField] private string agentRoleId = BuiltInAgentRoleIds.Creator;
@@ -24,14 +23,15 @@ namespace CoreAI.Presentation
 
         [SerializeField] private string cancellationScope = "";
 
-        [Tooltip("Метка источника для логов/дашборда (например scheduled_timer:my_id).")] [SerializeField]
+        [Tooltip("Source tag for logs and dashboard entries, for example scheduled_timer:my_id.")]
+        [SerializeField]
         private string sourceTag = "scheduled_timer";
 
-        [Header("Таймер")] [SerializeField] private bool timerEnabled = true;
+        [Header("Timer")] [SerializeField] private bool timerEnabled = true;
 
         [Min(0.1f)] [SerializeField] private float intervalSeconds = 30f;
 
-        [Tooltip("Если таймер включён — начинать отсчёт при OnEnable.")] [SerializeField]
+        [Tooltip("When enabled, the timer starts counting from OnEnable.")] [SerializeField]
         private bool startTimerOnEnable = true;
 
         private float _accum;
@@ -65,7 +65,7 @@ namespace CoreAI.Presentation
             FireNowInternal();
         }
 
-        /// <summary>Очередь задачу сразу (независимо от таймера и паузы таймера).</summary>
+        /// <summary>Immediately triggers the scheduled AI task regardless of timer state.</summary>
         public void FireNow()
         {
             FireNowInternal();
@@ -88,7 +88,7 @@ namespace CoreAI.Presentation
 
             if (scope == null)
             {
-                log.LogWarning(GameLogFeature.Composition, "AiScheduledTaskTrigger: CoreAILifetimeScope не найден.");
+                log.LogWarning(GameLogFeature.Composition, "AiScheduledTaskTrigger: IAiOrchestrationService is not registered.");
                 return;
             }
 
@@ -96,7 +96,7 @@ namespace CoreAI.Presentation
             {
                 log.LogWarning(
                     GameLogFeature.Composition,
-                    "AiScheduledTaskTrigger: IAiOrchestrationService не зарегистрирован.");
+                    "AiScheduledTaskTrigger: IAiOrchestrationService is not registered.");
                 return;
             }
 
@@ -110,7 +110,7 @@ namespace CoreAI.Presentation
             });
         }
 
-        /// <summary>Пауза таймера; <see cref="FireNow"/> по-прежнему работает.</summary>
+        /// <summary>Pauses the scheduled task countdown without clearing elapsed state.</summary>
         public void PauseTimer()
         {
             _timerPaused = true;
@@ -121,14 +121,14 @@ namespace CoreAI.Presentation
             _timerPaused = false;
         }
 
-        /// <summary>Остановить таймер до следующего <see cref="StartTimer"/>.</summary>
+        /// <summary>Stops the scheduled task countdown and clears active timer state.</summary>
         public void StopTimer()
         {
             _timerStopped = true;
             _accum = 0f;
         }
 
-        /// <summary>Включить таймер и снять паузу.</summary>
+        /// <summary>Starts the scheduled task countdown if the trigger is enabled.</summary>
         public void StartTimer()
         {
             _timerStopped = false;
@@ -136,7 +136,7 @@ namespace CoreAI.Presentation
             _accum = 0f;
         }
 
-        /// <summary>Сбросить накопленное время до следующего тика.</summary>
+        /// <summary>Restarts the scheduled task countdown from its initial delay.</summary>
         public void RestartTimerCountdown()
         {
             _accum = 0f;

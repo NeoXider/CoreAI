@@ -44,7 +44,7 @@ namespace CoreAI.Tests.PlayMode
             return new MeaiLlmClient(
                 new LlmUnityMeaiChatClient(_agent, GameLoggerUnscopedFallback.Instance),
                 GameLoggerUnscopedFallback.Instance,
-                UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 store);
         }
 

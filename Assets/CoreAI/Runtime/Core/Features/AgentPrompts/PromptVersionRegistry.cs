@@ -4,50 +4,50 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Версионирование системных промптов: трекинг версий, A/B тесты, откаты.
+    /// Defines the contract for prompt version registry implementations.
     /// </summary>
     public interface IPromptVersionRegistry
     {
-        /// <summary>Зарегистрировать промпт для роли (создаёт новую версию).</summary>
+        /// <summary>Registers a new value or callback with the target runtime registry.</summary>
         string Register(string roleId, string promptText, string label = null);
 
-        /// <summary>Получить текущий активный промпт для роли.</summary>
+        /// <summary>Active prompt version for the requested role.</summary>
         string GetActive(string roleId);
 
-        /// <summary>Откатиться к предыдущей версии.</summary>
+        /// <summary>Rolls the requested role back to its previous prompt version when available.</summary>
         bool Rollback(string roleId);
 
-        /// <summary>Получить историю версий для роли.</summary>
+        /// <summary>Recorded prompt version history for the requested role.</summary>
         IReadOnlyList<PromptVersion> GetHistory(string roleId);
 
-        /// <summary>Выбрать вариант A/B (по весу или имени). Null = текущий активный.</summary>
+        /// <summary>Resolves the requested prompt variant, falling back to the active prompt when needed.</summary>
         string ResolveVariant(string roleId, string variantName = null);
 
-        /// <summary>Добавить A/B вариант для роли (активируется через ResolveVariant).</summary>
+        /// <summary>Adds or replaces a named prompt variant for the requested role.</summary>
         void AddVariant(string roleId, string variantName, string promptText);
     }
 
-    /// <summary>Одна версия промпта.</summary>
+    /// <summary>Snapshot of one prompt version stored for a role.</summary>
     public sealed class PromptVersion
     {
-        /// <summary>Уникальный id версии (hash).</summary>
+        /// <summary>Unique identifier for this prompt version.</summary>
         public string VersionId { get; set; }
 
-        /// <summary>Текст промпта.</summary>
+        /// <summary>Prompt text stored in this version.</summary>
         public string Text { get; set; }
 
-        /// <summary>Метка версии (например "v2.1-concise").</summary>
+        /// <summary>An optional label that describes this prompt version.</summary>
         public string Label { get; set; }
 
-        /// <summary>Время создания.</summary>
+        /// <summary>UTC timestamp when this prompt version was created.</summary>
         public DateTime CreatedUtc { get; set; }
 
-        /// <summary>Является ли текущей активной версией.</summary>
+        /// <summary>Whether this prompt version is the active version.</summary>
         public bool IsActive { get; set; }
     }
 
     /// <summary>
-    /// In-memory реализация <see cref="IPromptVersionRegistry"/>.
+    /// In-memory registry for prompt versions and named prompt variants.
     /// </summary>
     public sealed class InMemoryPromptVersionRegistry : IPromptVersionRegistry
     {
@@ -59,8 +59,15 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public string Register(string roleId, string promptText, string label = null)
         {
-            if (string.IsNullOrEmpty(roleId)) throw new ArgumentException("roleId required", nameof(roleId));
-            if (string.IsNullOrEmpty(promptText)) throw new ArgumentException("promptText required", nameof(promptText));
+            if (string.IsNullOrEmpty(roleId))
+            {
+                throw new ArgumentException("roleId required", nameof(roleId));
+            }
+
+            if (string.IsNullOrEmpty(promptText))
+            {
+                throw new ArgumentException("promptText required", nameof(promptText));
+            }
 
             lock (_lock)
             {
@@ -70,7 +77,7 @@ namespace CoreAI.Ai
                     _history[roleId] = list;
                 }
 
-                // Деактивируем предыдущую
+                /* Implementation note in English. */
                 foreach (PromptVersion pv in list)
                 {
                     pv.IsActive = false;
@@ -165,9 +172,15 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public void AddVariant(string roleId, string variantName, string promptText)
         {
-            if (string.IsNullOrEmpty(roleId)) throw new ArgumentException("roleId required", nameof(roleId));
+            if (string.IsNullOrEmpty(roleId))
+            {
+                throw new ArgumentException("roleId required", nameof(roleId));
+            }
+
             if (string.IsNullOrEmpty(variantName))
+            {
                 throw new ArgumentException("variantName required", nameof(variantName));
+            }
 
             lock (_lock)
             {

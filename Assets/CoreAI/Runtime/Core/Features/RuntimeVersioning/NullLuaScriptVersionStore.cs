@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Заглушка: версионирование выключено (по умолчанию в портативном инсталлере до override в Unity).</summary>
+    /// <summary>No-op Lua script version store.</summary>
     public sealed class NullLuaScriptVersionStore : ILuaScriptVersionStore
     {
         public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)

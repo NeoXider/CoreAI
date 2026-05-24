@@ -1,14 +1,14 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Проверка сырого ответа LLM для роли; при неудаче оркестратор делает один повтор с подсказкой в hint.
+    /// Validates role-specific structured LLM responses.
     /// </summary>
     public interface IRoleStructuredResponsePolicy
     {
-        /// <summary>Нужно ли проверять <paramref name="rawContent"/> для данной роли.</summary>
+        /// <summary>Returns whether structured-response validation should run for the given role.</summary>
         bool ShouldValidate(string roleId);
 
-        /// <summary>Проверка формата ответа; при <c>false</c> заполняется <paramref name="failureReason"/> для повторного запроса.</summary>
+        /// <summary>Validates raw LLM content for the given role and returns a failure reason when invalid.</summary>
         bool TryValidate(string roleId, string rawContent, out string failureReason);
     }
 }

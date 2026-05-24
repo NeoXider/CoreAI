@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Docs/Images/coreai_banner.png" alt="CoreAI Banner" width="100%">
+  <img src="Images/header_concept_2.png" alt="CoreAI Banner" width="100%">
 </p>
 
 # <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — AI Agents for Dynamic Games
@@ -309,6 +309,18 @@ All CoreAI PlayMode tests have been verified on real LLM backends. Results:
 > 🏆 **Qwen3.5-4B passes ALL tests.** This is the recommended minimum for production use.  
 > 📊 **Qwen3.5-0.8B passes most tests** — impressive for its size! Struggles only with complex multi-step tool calling chains.  
 > 📈 **2B is a solid middle ground** — occasional mistakes in multi-step scenarios, but mostly reliable.
+
+---
+
+## 💡 Integration Examples & Ideas
+
+How can you use CoreAI in your game? Here are some "Brainrot-free" ideas:
+
+1.  **The "Alive" Merchant**: Instead of a static list, the blacksmith remembers that you sold him a legendary dragon scale yesterday. He might offer you a "special deal" on a Dragon-slaying sword today.
+2.  **Autonomous Game Master**: Let the AI monitor the player's health and resources. If the player is struggling, the GM might "whisper" a hint or "accidentally" spawn a health potion nearby via `WorldCommandTool`.
+3.  **Real-time Lore Narrator**: As the player enters a new biome, the AI generates unique lore based on the current weather, time of day, and the player's equipped items.
+4.  **AI-Driven Procedural Quests**: Quests are no longer `Kill X Wolves`. An AI King asks you to `Investigate why the wolves are glowing`, and you can actually *interview* the wolves (who might be under a Lua-driven spell).
+5.  **Voice/Chat-to-Action**: "Make it rain fire!" -> The AI parses the intent, checks the `WeatherTool`, and executes the corresponding Lua script to trigger a firestorm.
 
 ---
 

@@ -1,15 +1,15 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Версионирование данных, которые Programmer меняет из Lua (JSON и т.п.): baseline, текущее значение, история, сброс по ключу или целиком.
+    /// Tracks original and current data overlay payloads.
     /// </summary>
     public interface IDataOverlayVersionStore
     {
         bool TryGetSnapshot(string overlayKey, out DataOverlayVersionRecord snapshot);
 
-        /// <summary>Зафиксировать успешно применённый payload (после валидации игрой или ядром).</summary>
+        /// <summary>Records the payload that was successfully applied for a data overlay.</summary>
         void RecordSuccessfulApply(string overlayKey, string jsonOrTextPayload);
 
         void SeedOriginal(string overlayKey, string originalPayload, bool overwriteExistingOriginal = false);
@@ -17,15 +17,15 @@ namespace CoreAI.Ai
         void ResetToOriginal(string overlayKey);
 
         /// <summary>
-        /// Откатить current на указанную ревизию (по <see cref="LuaScriptRevision.Index"/>).
-        /// Если ревизия не найдена — no-op.
+/// Executes ResetToRevision API operation.
+        ///
         /// </summary>
         void ResetToRevision(string overlayKey, int revisionIndex);
 
-        /// <summary>Сбросить все известные ключи к их baseline (или удалить слоты без baseline — см. реализацию).</summary>
+        /// <summary>Restores all tracked versioned values to their original payloads.</summary>
         void ResetAllToOriginal();
 
-        /// <summary>Текущее значение для чтения игрой/Lua; <c>false</c> если ключа нет.</summary>
+        /// <summary>Attempts to read the current payload for a data overlay.</summary>
         bool TryGetCurrentPayload(string overlayKey, out string currentPayload);
 
         IReadOnlyList<string> GetKnownKeys();

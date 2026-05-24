@@ -3,15 +3,15 @@ using System;
 namespace CoreAI.Authority
 {
     /// <summary>
-    /// <see cref="IAuthorityHost"/> на основе <see cref="IAiNetworkPeer"/> и политики выполнения.
+    /// Routes AI command execution through the configured network authority policy.
     /// </summary>
     public sealed class NetworkedAuthorityHost : IAuthorityHost
     {
         private readonly IAiNetworkPeer _peer;
         private readonly AiNetworkExecutionPolicy _policy;
 
-        /// <param name="peer">Роль узла в сети.</param>
-        /// <param name="policy">Кто может вызывать ИИ.</param>
+        /// <param name="peer">The peer value.</param>
+        /// <param name="policy">The policy value.</param>
         public NetworkedAuthorityHost(IAiNetworkPeer peer, AiNetworkExecutionPolicy policy)
         {
             _peer = peer ?? throw new ArgumentNullException(nameof(peer));

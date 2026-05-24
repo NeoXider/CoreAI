@@ -20,7 +20,10 @@ namespace CoreAI.Tests.EditMode
                 _perMessage = Math.Max(1, perMessage);
             }
 
-            public int EstimateText(string text) => _perMessage;
+            public int EstimateText(string text)
+            {
+                return _perMessage;
+            }
         }
 
         private sealed class RecordingLlmClient : ILlmClient
@@ -28,7 +31,9 @@ namespace CoreAI.Tests.EditMode
             public LlmCompletionRequest LastRequest { get; private set; }
             public int CompleteCallCount { get; private set; }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -43,7 +48,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConversationContextManagerFactories_DisableOrNullLlm_UsesDeterministic()
         {
-            var store = new InMemoryConversationSummaryStore();
+            InMemoryConversationSummaryStore store = new();
             ITokenEstimator est = new HeuristicTokenEstimator();
             IConversationContextManager a = ConversationContextManagerFactories.Create(false, store, est, null, null);
             IConversationContextManager b = ConversationContextManagerFactories.Create(true, store, est, null, null);
@@ -54,9 +59,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ConversationContextManagerFactories_EnableWithLlm_UsesSelectingWrapper()
         {
-            var store = new InMemoryConversationSummaryStore();
+            InMemoryConversationSummaryStore store = new();
             ITokenEstimator est = new HeuristicTokenEstimator();
-            var llm = new RecordingLlmClient();
+            RecordingLlmClient llm = new();
             IConversationContextManager m = ConversationContextManagerFactories.Create(true, store, est, llm, null);
             Assert.IsInstanceOf<SelectingConversationContextManager>(m);
         }
@@ -64,10 +69,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task SelectingManager_BuildSnapshotAsync_SkipsLlm_WhenArgsDisableCompaction()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
             ITokenEstimator est = new FlatTokenEstimator(10);
-            var mgr = new SelectingConversationContextManager(store, est, llm, LlmContextCompactionOptions.Default());
+            SelectingConversationContextManager mgr = new(store, est, llm, LlmContextCompactionOptions.Default());
 
             ChatMessage[] history =
             {
@@ -78,8 +83,8 @@ namespace CoreAI.Tests.EditMode
                 new() { Role = "user", Content = "e" }
             };
 
-            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
-            var buildArgs = new ConversationContextBuildArgs
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = new() { ContextTokens = 8192 };
+            ConversationContextBuildArgs buildArgs = new()
             {
                 HistoryTokenBudget = 25,
                 UseLlmContextCompaction = false
@@ -100,10 +105,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task LlmAssisted_BuildSnapshotAsync_InvokesCompactionLlm_WhenPrefixEvicted()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
             ITokenEstimator est = new FlatTokenEstimator(10);
-            var mgr = new LlmAssistedConversationContextManager(store, est, llm, LlmContextCompactionOptions.Default());
+            LlmAssistedConversationContextManager mgr = new(store, est, llm, LlmContextCompactionOptions.Default());
 
             ChatMessage[] history =
             {
@@ -114,8 +119,8 @@ namespace CoreAI.Tests.EditMode
                 new() { Role = "user", Content = "e" }
             };
 
-            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
-            var buildArgs = new ConversationContextBuildArgs
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = new() { ContextTokens = 8192 };
+            ConversationContextBuildArgs buildArgs = new()
             {
                 HistoryTokenBudget = 25,
                 UseLlmContextCompaction = true
@@ -138,7 +143,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(snap.WasCompacted);
             Assert.AreEqual("rolled_up_summary", snap.Summary);
             Assert.AreEqual(2, snap.RecentMessages.Length);
-            Assert.IsNull(llm.LastRequest.ChatHistory, "Compaction must not replay tail as ChatHistory on auxiliary request.");
+            Assert.IsNull(llm.LastRequest.ChatHistory,
+                "Compaction must not replay tail as ChatHistory on auxiliary request.");
             Assert.AreEqual(
                 LlmContextCompactionOptions.DefaultSystemPrompt,
                 llm.LastRequest.SystemPrompt,
@@ -156,10 +162,10 @@ namespace CoreAI.Tests.EditMode
             const string forbiddenOrchestratorSystemSubstring =
                 "Teacher agent REDOSCHOOL_ORCHESTRATOR_EXCLUSIVE_SYSTEM_MARKER_XQ9_NO_COMPACT";
 
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
             ITokenEstimator est = new FlatTokenEstimator(10);
-            var mgr = new LlmAssistedConversationContextManager(store, est, llm);
+            LlmAssistedConversationContextManager mgr = new(store, est, llm);
 
             ChatMessage[] history =
             {
@@ -201,11 +207,11 @@ namespace CoreAI.Tests.EditMode
         public async Task Compaction_Request_CustomOptionSystem_OverridesTemplate()
         {
             const string compactOnly = "You only summarize transcripts. MAIN_ROLE_FORBIDDEN";
-            var options = new LlmContextCompactionOptions { SystemPrompt = compactOnly };
+            LlmContextCompactionOptions options = new() { SystemPrompt = compactOnly };
 
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
-            var mgr = new LlmAssistedConversationContextManager(
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(
                 store, new FlatTokenEstimator(10), llm, options);
 
             ChatMessage[] history =
@@ -234,9 +240,14 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly Exception _ex;
 
-            public ThrowingLlmClient(Exception ex) => _ex = ex;
+            public ThrowingLlmClient(Exception ex)
+            {
+                _ex = ex;
+            }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -248,7 +259,9 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class WhitespaceResultLlmClient : ILlmClient
         {
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -258,20 +271,22 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private static ChatMessage[] MakeHistory(int count) =>
-            Enumerable.Range(0, count).Select(i => new ChatMessage
+        private static ChatMessage[] MakeHistory(int count)
+        {
+            return Enumerable.Range(0, count).Select(i => new ChatMessage
             {
                 Role = i % 2 == 0 ? "user" : "assistant",
                 Content = $"msg{i}"
             }).ToArray();
+        }
 
         [Test]
         public void LlmAssisted_CancellationToken_Rethrows()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
-            var mgr = new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(10), llm);
-            var cts = new CancellationTokenSource();
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
+            CancellationTokenSource cts = new();
             cts.Cancel();
 
             // TaskCanceledException inherits from OperationCanceledException.
@@ -290,9 +305,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task LlmAssisted_LlmFailure_FallsBackToBulletSummary()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new ThrowingLlmClient(new InvalidOperationException("LLM down"));
-            var mgr = new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(10), llm);
+            InMemoryConversationSummaryStore store = new();
+            ThrowingLlmClient llm = new(new InvalidOperationException("LLM down"));
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
 
             ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
                 "r", MakeHistory(6),
@@ -308,9 +323,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task LlmAssisted_EmptyLlmResult_FallsBackToBulletSummary()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new WhitespaceResultLlmClient();
-            var mgr = new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(10), llm);
+            InMemoryConversationSummaryStore store = new();
+            WhitespaceResultLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
 
             ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
                 "r", MakeHistory(6),
@@ -327,10 +342,10 @@ namespace CoreAI.Tests.EditMode
         public async Task LlmAssisted_LongSummary_TruncatedToMaxSummaryChars()
         {
             // Default MaxSummaryChars is 4000; generate content exceeding that.
-            string longContent = new string('A', 6000);
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new LongResultLlmClient(longContent);
-            var mgr = new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(10), llm);
+            string longContent = new('A', 6000);
+            InMemoryConversationSummaryStore store = new();
+            LongResultLlmClient llm = new(longContent);
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
 
             ConversationContextSnapshot snap = await mgr.BuildSnapshotAsync(
                 "r", MakeHistory(6),
@@ -347,9 +362,14 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly string _content;
 
-            public LongResultLlmClient(string content) => _content = content;
+            public LongResultLlmClient(string content)
+            {
+                _content = content;
+            }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -362,10 +382,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void DeterministicManager_MaxRolledSummaryTokens_TruncatesBeforeSave()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var est = new HeuristicTokenEstimator();
-            var mgr = new DeterministicConversationContextManager(store, est);
-            var history = new ChatMessage[10];
+            InMemoryConversationSummaryStore store = new();
+            HeuristicTokenEstimator est = new();
+            DeterministicConversationContextManager mgr = new(store, est);
+            ChatMessage[] history = new ChatMessage[10];
             for (int i = 0; i < 10; i++)
             {
                 history[i] = new ChatMessage
@@ -375,8 +395,8 @@ namespace CoreAI.Tests.EditMode
                 };
             }
 
-            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
-            var buildArgs = new ConversationContextBuildArgs
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = new() { ContextTokens = 8192 };
+            ConversationContextBuildArgs buildArgs = new()
             {
                 HistoryTokenBudget = 28,
                 MaxRolledSummaryTokens = 18
@@ -387,24 +407,25 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(snap.WasCompacted);
             Assert.IsTrue(snap.Summary.EndsWith("…"), "Summary should be truncated when over MaxRolledSummaryTokens.");
             string persisted = store.LoadSummary("roleA");
-            Assert.AreEqual(snap.Summary, persisted, "Store should receive the same truncated summary as the snapshot.");
+            Assert.AreEqual(snap.Summary, persisted,
+                "Store should receive the same truncated summary as the snapshot.");
             Assert.LessOrEqual(est.EstimateText(persisted), 30, "Persisted summary should stay near the token cap.");
         }
 
         [Test]
         public void DeterministicManager_MaxRolledSummaryTokens_TruncatesStoredOnlySnapshot()
         {
-            var store = new InMemoryConversationSummaryStore();
+            InMemoryConversationSummaryStore store = new();
             store.SaveSummary("roleB", new string('q', 800));
-            var est = new HeuristicTokenEstimator();
-            var mgr = new DeterministicConversationContextManager(store, est);
-            var history = new[]
+            HeuristicTokenEstimator est = new();
+            DeterministicConversationContextManager mgr = new(store, est);
+            ChatMessage[] history = new[]
             {
                 new ChatMessage { Role = "user", Content = "tail-only" }
             };
 
-            var roleConfig = new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 };
-            var buildArgs = new ConversationContextBuildArgs
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = new() { ContextTokens = 8192 };
+            ConversationContextBuildArgs buildArgs = new()
             {
                 HistoryTokenBudget = 500,
                 MaxRolledSummaryTokens = 25
@@ -420,9 +441,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task LlmAssisted_LongPerMessageContent_TruncatedInPayload()
         {
-            var store = new InMemoryConversationSummaryStore();
-            var llm = new RecordingLlmClient();
-            var mgr = new LlmAssistedConversationContextManager(store, new FlatTokenEstimator(10), llm);
+            InMemoryConversationSummaryStore store = new();
+            RecordingLlmClient llm = new();
+            LlmAssistedConversationContextManager mgr = new(store, new FlatTokenEstimator(10), llm);
 
             // Create history with one very long message
             ChatMessage[] history =

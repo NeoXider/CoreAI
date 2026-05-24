@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Ai;
 using CoreAI.Messaging;
 using CoreAI.Sandbox;
@@ -8,8 +8,7 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Infrastructure.World
 {
     /// <summary>
-    /// Lua API для управления миром в рантайме через безопасные команды в шину (MessagePipe).
-    /// Важно: фактическое применение выполняется в Unity-слое на main thread.
+    /// Registers world-command Lua APIs for CoreAI scripts.
     /// </summary>
     public sealed class CoreAiWorldLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
@@ -95,17 +94,18 @@ namespace CoreAI.Infrastructure.World
                 Publish(CoreAiWorldCommandEnvelope.PlayAnimation(name, anim));
             }));
 
-            registry.Register("coreai_world_play_sound", new Action<string, string, double>((targetName, clipName, volume) =>
-            {
-                string name = (targetName ?? "").Trim();
-                string clip = (clipName ?? "").Trim();
-                if (string.IsNullOrEmpty(name))
+            registry.Register("coreai_world_play_sound",
+                new Action<string, string, double>((targetName, clipName, volume) =>
                 {
-                    return;
-                }
+                    string name = (targetName ?? "").Trim();
+                    string clip = (clipName ?? "").Trim();
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        return;
+                    }
 
-                Publish(CoreAiWorldCommandEnvelope.PlaySound(name, clip, (float)volume));
-            }));
+                    Publish(CoreAiWorldCommandEnvelope.PlaySound(name, clip, (float)volume));
+                }));
         }
 
         private void Publish(CoreAiWorldCommandEnvelope env)

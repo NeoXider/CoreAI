@@ -33,7 +33,11 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing spawn...");
 
             //  WorldTool   Creator
-            List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
+            List<ILlmTool> tools = new()
+            {
+                new WorldLlmTool(setup.WorldExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    GameLoggerUnscopedFallback.Instance)
+            };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
@@ -54,7 +58,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! World command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("spawn")), 
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("spawn")),
                 $"Command spawn not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
@@ -72,7 +76,11 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing move...");
 
             //  WorldTool   Creator
-            List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
+            List<ILlmTool> tools = new()
+            {
+                new WorldLlmTool(setup.WorldExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    GameLoggerUnscopedFallback.Instance)
+            };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
@@ -91,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! Move command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("move")), 
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("move")),
                 $"Command move not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
@@ -109,7 +117,11 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_objects...");
 
             //  WorldTool   Creator
-            List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
+            List<ILlmTool> tools = new()
+            {
+                new WorldLlmTool(setup.WorldExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    GameLoggerUnscopedFallback.Instance)
+            };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
@@ -128,7 +140,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! List objects command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("list_objects")), 
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("list_objects")),
                 $"Command list_objects not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
@@ -146,7 +158,11 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing play_animation...");
 
             //  WorldTool   Creator
-            List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
+            List<ILlmTool> tools = new()
+            {
+                new WorldLlmTool(setup.WorldExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    GameLoggerUnscopedFallback.Instance)
+            };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
@@ -165,7 +181,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Debug.Log($"[WorldTest] SUCCESS! Play animation command executed!");
-            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("play_animation")), 
+            Assert.IsTrue(setup.WorldExecutor.AllCommandsJson.Exists(j => j.Contains("play_animation")),
                 $"Command play_animation not found. Last was: {setup.WorldExecutor.LastCommandJson}");
         }
 
@@ -183,7 +199,11 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[WorldTest] Backend: {setup.BackendName}, testing list_animations...");
 
             //  WorldTool   Creator
-            List<ILlmTool> tools = new() { new WorldLlmTool(setup.WorldExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), GameLoggerUnscopedFallback.Instance) };
+            List<ILlmTool> tools = new()
+            {
+                new WorldLlmTool(setup.WorldExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    GameLoggerUnscopedFallback.Instance)
+            };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
             Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
@@ -229,30 +249,34 @@ namespace CoreAI.Tests.PlayMode
         {
             public volatile bool LastCommandWasCalled;
             public string LastCommandJson;
-            public System.Collections.Generic.List<string> AllCommandsJson = new();
+            public List<string> AllCommandsJson = new();
 
             public string[] LastListedAnimations { get; private set; } = System.Array.Empty<string>();
-            public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects { get; private set; } = new();
+            public List<Dictionary<string, object>> LastListedObjects { get; private set; } = new();
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
                 LastCommandWasCalled = true;
                 LastCommandJson = cmd.JsonPayload;
                 AllCommandsJson.Add(cmd.JsonPayload);
-                
+
                 //    
                 if (cmd.JsonPayload != null)
                 {
                     if (cmd.JsonPayload.Contains("list_animations"))
+                    {
                         LastListedAnimations = new[] { "attack", "idle" };
+                    }
+
                     if (cmd.JsonPayload.Contains("list_objects"))
-                        LastListedObjects = new() { new() { { "name", "Enemy" } } };
+                    {
+                        LastListedObjects = new List<Dictionary<string, object>> { new() { { "name", "Enemy" } } };
+                    }
                 }
-                
+
                 return true;
             }
         }
     }
 }
 #endif
-

@@ -102,7 +102,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Exclude tools that explicitly allow duplicates
-            var toolsToCheck = toolCalls.Where(fc =>
+            List<MEAI.FunctionCallContent> toolsToCheck = toolCalls.Where(fc =>
             {
                 ILlmTool match = _originalTools.FirstOrDefault(t =>
                     string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
@@ -119,8 +119,15 @@ namespace CoreAI.Infrastructure.Llm
                 .Select(fc =>
                 {
                     string argsSig = "";
-                    try { argsSig = fc.Arguments != null ? JsonConvert.SerializeObject(fc.Arguments) : ""; }
-                    catch { /* swallow */ }
+                    try
+                    {
+                        argsSig = fc.Arguments != null ? JsonConvert.SerializeObject(fc.Arguments) : "";
+                    }
+                    catch
+                    {
+                        /* swallow */
+                    }
+
                     return $"{fc.Name}({argsSig})";
                 }));
 
@@ -146,16 +153,25 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public MEAI.FunctionCallContent TryRepairToolName(MEAI.FunctionCallContent fc)
         {
-            if (fc == null) return null;
-            if (_originalTools == null || _originalTools.Count == 0) return fc;
+            if (fc == null)
+            {
+                return null;
+            }
 
-            // Exact match — no repair needed
-            if (_originalTools.Any(t => string.Equals(t.Name, fc.Name, StringComparison.Ordinal)))
+            if (_originalTools == null || _originalTools.Count == 0)
+            {
                 return fc;
+            }
+
+            /* Implementation note in English. */
+            if (_originalTools.Any(t => string.Equals(t.Name, fc.Name, StringComparison.Ordinal)))
+            {
+                return fc;
+            }
 
             // Case-insensitive fallback
-            ILlmTool match = _originalTools.FirstOrDefault(
-                t => string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
+            ILlmTool match =
+                _originalTools.FirstOrDefault(t => string.Equals(t.Name, fc.Name, StringComparison.OrdinalIgnoreCase));
 
             if (match != null)
             {
@@ -165,7 +181,8 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             _logger.Warn(
-                $"[ToolPolicy] ✖ Unknown tool name: '{fc.Name}' — no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]", LogTag.Llm);
+                $"[ToolPolicy] ✖ Unknown tool name: '{fc.Name}' — no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
+                LogTag.Llm);
             return null;
         }
 
@@ -192,6 +209,7 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = false
                 };
             }
+
             fc = repairedFc;
 
             MEAI.AIFunction aiFunc = chatOptions?.Tools?.OfType<MEAI.AIFunction>()
@@ -218,26 +236,34 @@ namespace CoreAI.Infrastructure.Llm
                 if (fc.Arguments != null)
                 {
                     // MEAI's AIFunctionFactory cannot convert Newtonsoft JObject/JArray to CLR
-                    // types (e.g. string). Normalize before invocation — this is the single
+                    /* Implementation note in English. */
                     // chokepoint for ALL tool calls (native, text-extracted, function-call syntax).
-                    var normalized = new Dictionary<string, object?>(fc.Arguments);
+                    Dictionary<string, object> normalized = new(fc.Arguments);
                     foreach (string key in new List<string>(normalized.Keys))
                     {
                         if (normalized[key] is Newtonsoft.Json.Linq.JObject jo)
-                            normalized[key] = jo.ToString(Newtonsoft.Json.Formatting.None);
+                        {
+                            normalized[key] = jo.ToString(Formatting.None);
+                        }
                         else if (normalized[key] is Newtonsoft.Json.Linq.JArray ja)
-                            normalized[key] = ja.ToString(Newtonsoft.Json.Formatting.None);
+                        {
+                            normalized[key] = ja.ToString(Formatting.None);
+                        }
                     }
+
                     args = new MEAI.AIFunctionArguments(normalized);
                 }
-                ILlmAsyncMarshaler marshaler = _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+
+                ILlmAsyncMarshaler marshaler =
+                    _settings.ToolInvocationMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
 
                 // === Per-tool timeout: wrap cancellation token ===
                 int toolTimeoutMs = _settings.DefaultToolTimeoutMs;
                 object result;
                 if (toolTimeoutMs > 0)
                 {
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    using CancellationTokenSource cts =
+                        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     cts.CancelAfter(toolTimeoutMs);
                     try
                     {
@@ -255,7 +281,8 @@ namespace CoreAI.Infrastructure.Llm
                         string timeoutMsg = $"Error: Tool '{fc.Name}' timed out after {toolTimeoutMs}ms";
                         _logger.Warn($"[ToolPolicy] ⏱ {timeoutMsg}", LogTag.Llm);
                         _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
-                        _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds, "timeout"));
+                        _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
+                            "timeout"));
                         LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, timeoutMsg);
                         return new ToolCallResult
                         {
@@ -283,9 +310,10 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     int originalLen = resultText.Length;
                     resultText = resultText.Substring(0, maxResultChars) +
-                        $"\n…[truncated: {originalLen} chars total → {maxResultChars} shown]";
+                                 $"\n…[truncated: {originalLen} chars total → {maxResultChars} shown]";
                     _logger.Info(
-                        $"[ToolPolicy] ✂ Tool '{fc.Name}' result truncated: {originalLen} → {maxResultChars} chars", LogTag.Llm);
+                        $"[ToolPolicy] ✂ Tool '{fc.Name}' result truncated: {originalLen} → {maxResultChars} chars",
+                        LogTag.Llm);
                 }
 
                 bool succeeded = IsToolResultSuccess(resultText);
@@ -357,7 +385,14 @@ namespace CoreAI.Infrastructure.Llm
             string args = "";
             if (_settings.LogToolCallArguments && fc?.Arguments != null && fc.Arguments.Count > 0)
             {
-                try { args = " args=" + JsonConvert.SerializeObject(fc.Arguments); } catch { args = ""; }
+                try
+                {
+                    args = " args=" + JsonConvert.SerializeObject(fc.Arguments);
+                }
+                catch
+                {
+                    args = "";
+                }
             }
 
             string preview = "";
@@ -370,7 +405,8 @@ namespace CoreAI.Infrastructure.Llm
 
             string traceTag = string.IsNullOrEmpty(_traceId) ? "" : $"traceId={_traceId} ";
             _logger.Info(
-                $"[ToolCall] {traceTag}role={_roleId} tool={fc?.Name ?? "?"} status={status} dur={durationMs:F0}ms{args}{preview}", LogTag.Llm);
+                $"[ToolCall] {traceTag}role={_roleId} tool={fc?.Name ?? "?"} status={status} dur={durationMs:F0}ms{args}{preview}",
+                LogTag.Llm);
         }
 
         private LlmToolCallInfo BuildInfo(MEAI.FunctionCallContent fc)
@@ -439,7 +475,10 @@ namespace CoreAI.Infrastructure.Llm
             {
                 ToolCallResult r = await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
                 results.Add(r.Result);
-                if (!r.Succeeded) anyFailed = true;
+                if (!r.Succeeded)
+                {
+                    anyFailed = true;
+                }
             }
 
             // 3. Update error counter
@@ -473,7 +512,8 @@ namespace CoreAI.Infrastructure.Llm
             if (_settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(
-                    $"[ToolPolicy] ✗ Some failed, error counter={_consecutiveErrors}/{_maxConsecutiveErrors}", LogTag.Llm);
+                    $"[ToolPolicy] ✗ Some failed, error counter={_consecutiveErrors}/{_maxConsecutiveErrors}",
+                    LogTag.Llm);
             }
         }
 
@@ -503,6 +543,7 @@ namespace CoreAI.Infrastructure.Llm
             public List<MEAI.AIContent> Results;
             public bool AnyFailed;
         }
+
         /// <summary>
         /// Determines whether a tool result indicates success. Uses proper JSON parsing
         /// to check for a top-level "Success" or "success" property set to false.
@@ -532,12 +573,12 @@ namespace CoreAI.Infrastructure.Llm
                     return (bool)token;
                 }
 
-                // Property exists but is not boolean — treat as success (no explicit failure signal).
+                /* Implementation note in English. */
                 return true;
             }
             catch
             {
-                // Not valid JSON — fall back to string heuristic on the raw text.
+                /* Implementation note in English. */
                 // This preserves backward compatibility for tools that return plain text.
                 return !resultText.Contains("\"Success\":false") &&
                        !resultText.Contains("\"success\":false");

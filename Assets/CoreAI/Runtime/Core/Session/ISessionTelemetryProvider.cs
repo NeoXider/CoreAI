@@ -2,21 +2,21 @@ using System.Collections.Generic;
 
 namespace CoreAI.Session
 {
-    /// <summary>Источник снимка сессии для <see cref="CoreAI.Ai.AiPromptComposer"/>.</summary>
+    /// <summary>ISessionTelemetryProvider interface.</summary>
     public interface ISessionTelemetryProvider
     {
-        /// <summary>Непустой снимок с актуальной телеметрией для user-prompt.</summary>
+        /// <summary>Builds a snapshot of the current session telemetry for prompt composition.</summary>
         GameSessionSnapshot BuildSnapshot();
     }
 
     /// <summary>
-    /// MVP-сборщик: позже подключается к игровым сервисам.
+    /// Collects lightweight session telemetry values for prompt composition.
     /// </summary>
     public sealed class SessionTelemetryCollector : ISessionTelemetryProvider
     {
         private readonly GameSessionSnapshot _snapshot = new();
 
-        /// <summary>Записать строковое значение телеметрии (перезапись по ключу).</summary>
+        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
         public void SetTelemetry(string key, string value)
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -27,19 +27,19 @@ namespace CoreAI.Session
             _snapshot.Telemetry[key.Trim()] = value ?? "";
         }
 
-        /// <summary>Перегрузка для целых (сериализация в строку).</summary>
+        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
         public void SetTelemetry(string key, int value)
         {
             SetTelemetry(key, value.ToString());
         }
 
-        /// <summary>Перегрузка для чисел с плавающей точкой (invariant culture).</summary>
+        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
         public void SetTelemetry(string key, float value)
         {
             SetTelemetry(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        /// <summary>Перегрузка для логических значений (<c>true</c>/<c>false</c>).</summary>
+        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
         public void SetTelemetry(string key, bool value)
         {
             SetTelemetry(key, value ? "true" : "false");

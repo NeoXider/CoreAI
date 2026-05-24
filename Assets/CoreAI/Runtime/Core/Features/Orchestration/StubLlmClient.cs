@@ -4,10 +4,10 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Deterministic LLM stub for model-off builds (DGF_SPEC §5.2).
+    /// Deterministic fallback LLM client used when no real backend is configured.
     /// </summary>
     /// <remarks>
-    /// <see cref="BuiltInAgentRoleIds.Programmer"/> returns a fenced Lua block so demo scenes can exercise orchestration → tool → Lua without a model.
+    /// Provides API usage information.
     /// </remarks>
     public sealed class StubLlmClient : ILlmClient
     {

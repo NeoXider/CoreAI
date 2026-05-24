@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -16,6 +17,7 @@ using CoreAI.Session;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using Debug = UnityEngine.Debug;
 
 namespace CoreAI.Tests.PlayMode
 {
@@ -64,8 +66,16 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[E2E] 🔨 get_recipes({itemType})");
             return new[]
             {
-                new { recipe_id = "fire_sword_01", name = "Flame Sword", materials = new[] { "iron_ingot x2", "fire_gem x1" }, quality = "rare" },
-                new { recipe_id = "iron_shield_01", name = "Iron Shield", materials = new[] { "iron_ingot x3", "leather x2" }, quality = "normal" }
+                new
+                {
+                    recipe_id = "fire_sword_01", name = "Flame Sword",
+                    materials = new[] { "iron_ingot x2", "fire_gem x1" }, quality = "rare"
+                },
+                new
+                {
+                    recipe_id = "iron_shield_01", name = "Iron Shield",
+                    materials = new[] { "iron_ingot x3", "leather x2" }, quality = "normal"
+                }
             };
         }
 
@@ -107,7 +117,11 @@ namespace CoreAI.Tests.PlayMode
         {
             _calledTools.Add("attack_enemy");
             Debug.Log($"[E2E] ⚔️ attack_enemy({enemyId}, {weaponId})");
-            return new { hit = true, damage_dealt = 60, enemy_hp_remaining = 140, critical = true, message = "Critical hit with Flame Sword!" };
+            return new
+            {
+                hit = true, damage_dealt = 60, enemy_hp_remaining = 140, critical = true,
+                message = "Critical hit with Flame Sword!"
+            };
         }
 
         // ─── Lore tools ─────────────────────────────────────────────────────
@@ -116,7 +130,13 @@ namespace CoreAI.Tests.PlayMode
         {
             _calledTools.Add("search_lore");
             Debug.Log($"[E2E] 📜 search_lore({query})");
-            return new { title = "Fire Drakes of the Ashen Peaks", text = "Fire Drakes are vulnerable to ice magic. Their scales can be harvested for fire-resistant armor.", source = "bestiary_vol3" };
+            return new
+            {
+                title = "Fire Drakes of the Ashen Peaks",
+                text =
+                    "Fire Drakes are vulnerable to ice magic. Their scales can be harvested for fire-resistant armor.",
+                source = "bestiary_vol3"
+            };
         }
 
         // ─── Memory tool (manual tracking) ───────────────────────────────────
@@ -141,7 +161,11 @@ namespace CoreAI.Tests.PlayMode
         private sealed class Sink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand c) => Items.Add(c);
+
+            public void Publish(ApplyAiGameCommand c)
+            {
+                Items.Add(c);
+            }
         }
 
         private sealed class CaptureLlm : ILlmClient
@@ -153,12 +177,16 @@ namespace CoreAI.Tests.PlayMode
             public bool LastOk;
             public readonly List<string> AllResponses = new();
 
-            public CaptureLlm(ILlmClient inner) => _inner = inner;
+            public CaptureLlm(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
-            public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 CallCount++;
-                var sw = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
                 LlmCompletionResult result = await _inner.CompleteAsync(request, ct);
                 sw.Stop();
                 TotalMs += sw.ElapsedMilliseconds;
@@ -168,7 +196,8 @@ namespace CoreAI.Tests.PlayMode
                 return result;
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 return _inner.CompleteStreamingAsync(request, ct);
             }
@@ -270,7 +299,7 @@ namespace CoreAI.Tests.PlayMode
 
                 CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
                 CoreAISettingsAsset settings = CoreAISettingsAsset.Instance
-                    ?? ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+                                               ?? ScriptableObject.CreateInstance<CoreAISettingsAsset>();
                 Sink sink = new();
 
                 AiOrchestrator orch = new(
@@ -351,9 +380,9 @@ namespace CoreAI.Tests.PlayMode
                 // Phase 2: model should have called memory_read OR mentioned crafted item from context
                 bool hasMemoryRead = _calledTools.Skip(toolsBefore).Contains("memory_read");
                 bool mentionsSword = cap.LastContent != null &&
-                    (cap.LastContent.IndexOf("sword", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                     cap.LastContent.IndexOf("flame", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                     cap.LastContent.IndexOf("craft", StringComparison.OrdinalIgnoreCase) >= 0);
+                                     (cap.LastContent.IndexOf("sword", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      cap.LastContent.IndexOf("flame", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      cap.LastContent.IndexOf("craft", StringComparison.OrdinalIgnoreCase) >= 0);
 
                 Assert.IsTrue(hasMemoryRead || mentionsSword,
                     $"Phase 2: model should recall via memory_read or mention the crafted item. " +
@@ -415,8 +444,9 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[E2E] Phases passed:      3/3");
 
                 // Final: must have used tools from at least 2 different skills
-                var uniqueTools = _calledTools.Distinct().ToList();
-                bool hasCraftingTools = uniqueTools.Any(t => t == "get_recipes" || t == "check_inventory" || t == "craft_item");
+                List<string> uniqueTools = _calledTools.Distinct().ToList();
+                bool hasCraftingTools =
+                    uniqueTools.Any(t => t == "get_recipes" || t == "check_inventory" || t == "craft_item");
                 bool hasCombatTools = uniqueTools.Any(t => t == "get_enemy_info" || t == "attack_enemy");
 
                 Assert.IsTrue(hasCraftingTools && hasCombatTools,

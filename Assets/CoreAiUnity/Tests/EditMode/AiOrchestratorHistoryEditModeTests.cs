@@ -31,9 +31,12 @@ namespace CoreAI.Tests.EditMode
         {
             public LlmCompletionRequest LastRequest { get; private set; }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
-            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
             {
                 LastRequest = request;
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "Hello" });
@@ -42,7 +45,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
-            public List<CoreAI.Ai.ChatMessage> FakeHistory { get; set; } = new();
+            public List<Ai.ChatMessage> FakeHistory { get; set; } = new();
             public List<(string Role, string Content)> Appended { get; } = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
@@ -51,33 +54,48 @@ namespace CoreAI.Tests.EditMode
                 return false;
             }
 
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
                 Appended.Add((role, content));
             }
 
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
                 if (maxMessages > 0 && FakeHistory.Count > maxMessages)
                 {
                     int skip = FakeHistory.Count - maxMessages;
                     return FakeHistory.ToArray()[skip..];
                 }
+
                 return FakeHistory.ToArray();
             }
         }
 
         private sealed class TestSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command) { }
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
         }
 
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class TestSettings : ICoreAISettings
@@ -107,12 +125,20 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class NullSys : IAgentSystemPromptProvider
         {
-            public bool TryGetSystemPrompt(string roleId, out string prompt) { prompt = null; return false; }
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = null;
+                return false;
+            }
         }
-        
+
         private sealed class NullUsr : IAgentUserPromptTemplateProvider
         {
-            public bool TryGetUserTemplate(string roleId, out string template) { template = null; return false; }
+            public bool TryGetUserTemplate(string roleId, out string template)
+            {
+                template = null;
+                return false;
+            }
         }
 
         private sealed class StaticContextProvider : IAiPromptContextProvider
@@ -151,18 +177,18 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llm = new();
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
-            
+
             // Generate 50 fake messages
             for (int i = 0; i < 50; i++)
             {
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage { Role = "user", Content = $"Short msg {i}" });
+                memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = $"Short msg {i}" });
             }
 
             // Настраиваем агента с лимитом в 15 сообщений
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 8192, persist: false, maxChatHistoryMessages: 15);
+            policy.ConfigureChatHistory("test_role", true, 8192, false, 15);
 
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings);
@@ -173,11 +199,14 @@ namespace CoreAI.Tests.EditMode
             // Assert
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            Assert.AreEqual(15, llm.LastRequest.ChatHistory.Count, "History should be truncated to exactly MaxChatHistoryMessages");
-            
+            Assert.AreEqual(15, llm.LastRequest.ChatHistory.Count,
+                "History should be truncated to exactly MaxChatHistoryMessages");
+
             // Check that we got the *most recent* 15
-            Assert.IsTrue(llm.LastRequest.ChatHistory[14].Text.Contains("Short msg 49"), "Last message should match the latest");
-            Assert.IsTrue(llm.LastRequest.ChatHistory[0].Text.Contains("Short msg 35"), "First message in truncated history should match sequence");
+            Assert.IsTrue(llm.LastRequest.ChatHistory[14].Text.Contains("Short msg 49"),
+                "Last message should match the latest");
+            Assert.IsTrue(llm.LastRequest.ChatHistory[0].Text.Contains("Short msg 35"),
+                "First message in truncated history should match sequence");
         }
 
         [Test]
@@ -187,21 +216,21 @@ namespace CoreAI.Tests.EditMode
             TestLlmClient llm = new();
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
-            
+
             // ContextTokens = 300. Composer must receive TestSettings: otherwise CoreAISettings'
             // default universal prefix balloons system prompt size and eats the whole budget.
             // DefaultContextBudgetPolicy reserves completion headroom; disable memory/tools for a slim fixed prompt.
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 300, persist: false, maxChatHistoryMessages: 50);
+            policy.ConfigureChatHistory("test_role", true, 300, false, 50);
             policy.DisableMemoryTool("test_role");
-            policy.SetToolsForRole("test_role", System.Array.Empty<ILlmTool>());
+            policy.SetToolsForRole("test_role", Array.Empty<ILlmTool>());
             for (int i = 0; i < 20; i++)
             {
                 string content = "A".PadRight(100, 'A') + i; // 100 chars + number
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage { Role = "user", Content = content });
+                memory.FakeHistory.Add(new Ai.ChatMessage { Role = "user", Content = content });
             }
 
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings);
@@ -212,12 +241,12 @@ namespace CoreAI.Tests.EditMode
             // Assert
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
-            
+
             // Expected: several recent lines (not full 20); count depends on heuristic estimator + budget policy.
             int expectedCount = llm.LastRequest.ChatHistory.Count;
             Assert.Less(expectedCount, 20, "History should be significantly truncated due to token budget");
             Assert.GreaterOrEqual(expectedCount, 3, "At least a few messages should be kept within budget");
-            
+
             // Verify most recent messages were kept
             Assert.IsTrue(llm.LastRequest.ChatHistory[^1].Text.Contains("19"), "Should keep the most recent message");
         }
@@ -232,17 +261,17 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < 10; i++)
             {
                 string content = $"old-context-{i}-".PadRight(90, 'x');
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
                     Content = content
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
 
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings,
@@ -268,17 +297,17 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < 10; i++)
             {
                 string content = $"old-context-{i}-".PadRight(90, 'x');
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
                     Content = content
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
 
             TestSettings settings = new() { EnableConversationHistorySummarization = false };
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings,
@@ -302,17 +331,17 @@ namespace CoreAI.Tests.EditMode
             for (int i = 0; i < 10; i++)
             {
                 string content = $"old-context-{i}-".PadRight(90, 'x');
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
                     Content = content
                 });
             }
 
-            policy.ConfigureChatHistory("test_role", enabled: true, tokens: 60, persist: false, maxChatHistoryMessages: 50);
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
 
             TestSettings settings = new() { ConversationHistoryRecentTokenBudgetOverride = 32 };
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings,
@@ -341,7 +370,7 @@ namespace CoreAI.Tests.EditMode
                 policy,
                 settings,
                 new IAiPromptContextProvider[] { new StaticContextProvider() });
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 composer, new TestMemoryStore(), policy, null, null, settings);
 
@@ -366,7 +395,7 @@ namespace CoreAI.Tests.EditMode
             policy.SetRuntimeContextProvider("Teacher", new StaticRoleContextProvider());
             TestSettings settings = new();
             AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 composer, new TestMemoryStore(), policy, null, null, settings);
 
@@ -392,7 +421,7 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_drag_and_drop")
             });
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 new TestMemoryStore(), policy, null, null, settings);
@@ -418,7 +447,7 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_quiz"),
                 new StubTool("spawn_drag_and_drop")
             });
-            AiTaskRequest task = new AiTaskRequest
+            AiTaskRequest task = new()
             {
                 RoleId = "Teacher",
                 Hint = "hi",
@@ -428,7 +457,7 @@ namespace CoreAI.Tests.EditMode
 
             TestSettings settings = new();
             AiPromptComposer composer = new(new NullSys(), new NullUsr(), null, null, policy, settings);
-            AiOrchestrator orchestratorSync = new AiOrchestrator(
+            AiOrchestrator orchestratorSync = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 composer, new TestMemoryStore(), policy, null, null, settings);
             await orchestratorSync.RunTaskAsync(task);
@@ -439,7 +468,7 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
 
             TestLlmClient llmStream = new();
-            AiOrchestrator orchestratorStream = new AiOrchestrator(
+            AiOrchestrator orchestratorStream = new(
                 new TestAuthority(), llmStream, new TestSink(), new TestTelemetry(),
                 composer, new TestMemoryStore(), policy, null, null, settings);
 
@@ -447,8 +476,10 @@ namespace CoreAI.Tests.EditMode
             {
             }
 
-            Assert.AreEqual(syncToolCount, llmStream.LastRequest.Tools.Count, "Streaming path must attach the same tool count as non-streaming.");
-            Assert.AreEqual(syncFirstTool, llmStream.LastRequest.Tools.Count > 0 ? llmStream.LastRequest.Tools[0].Name : "");
+            Assert.AreEqual(syncToolCount, llmStream.LastRequest.Tools.Count,
+                "Streaming path must attach the same tool count as non-streaming.");
+            Assert.AreEqual(syncFirstTool,
+                llmStream.LastRequest.Tools.Count > 0 ? llmStream.LastRequest.Tools[0].Name : "");
             Assert.AreEqual(syncMode, llmStream.LastRequest.ForcedToolMode);
             CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llmStream.LastRequest.AllowedToolNames);
         }
@@ -465,7 +496,7 @@ namespace CoreAI.Tests.EditMode
                 new StubTool("spawn_drag_and_drop")
             });
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 new TestMemoryStore(), policy, null, null, settings);
@@ -515,17 +546,17 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             for (int i = 0; i < 24; i++)
             {
-                memory.FakeHistory.Add(new CoreAI.Ai.ChatMessage
+                memory.FakeHistory.Add(new Ai.ChatMessage
                 {
                     Role = i % 2 == 0 ? "user" : "assistant",
                     Content = new string('w', 80) + i
                 });
             }
 
-            policy.ConfigureChatHistory("role_ctx", enabled: true, tokens: 2048, persist: false,
-                maxChatHistoryMessages: 50);
+            policy.ConfigureChatHistory("role_ctx", true, 2048, false,
+                50);
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings,
@@ -545,7 +576,7 @@ namespace CoreAI.Tests.EditMode
             policy.DisableMemoryTool("Teacher");
             policy.SetToolsForRole("Teacher", new ILlmTool[] { new StubTool("spawn_quiz") });
             TestSettings settings = new();
-            AiOrchestrator orchestrator = new AiOrchestrator(
+            AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 new TestMemoryStore(), policy, null, null, settings);
@@ -575,25 +606,27 @@ namespace CoreAI.Tests.EditMode
             {
                 FileAgentMemoryStore store1 = new();
                 AgentMemoryPolicy policy = new();
-                policy.ConfigureChatHistory(roleId, enabled: true, tokens: 8192, persist: true, maxChatHistoryMessages: 50);
+                policy.ConfigureChatHistory(roleId, true, 8192, true, 50);
                 policy.DisableMemoryTool(roleId);
                 policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
 
                 TestLlmClient llm = new();
                 TestSettings settings = new();
-                AiOrchestrator orchestrator = new AiOrchestrator(
+                AiOrchestrator orchestrator = new(
                     new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                     new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                     store1, policy, null, null, settings);
 
                 await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = roleId, Hint = "persist hint" });
 
-                CoreAI.Ai.ChatMessage[] h1 = store1.GetChatHistory(roleId);
-                Assert.GreaterOrEqual(h1.Length, 2, "After a successful turn the store should contain user + assistant lines.");
+                Ai.ChatMessage[] h1 = store1.GetChatHistory(roleId);
+                Assert.GreaterOrEqual(h1.Length, 2,
+                    "After a successful turn the store should contain user + assistant lines.");
 
                 FileAgentMemoryStore store2 = new();
-                CoreAI.Ai.ChatMessage[] h2 = store2.GetChatHistory(roleId);
-                Assert.AreEqual(h1.Length, h2.Length, "A new FileAgentMemoryStore should reload the same persisted chat from disk.");
+                Ai.ChatMessage[] h2 = store2.GetChatHistory(roleId);
+                Assert.AreEqual(h1.Length, h2.Length,
+                    "A new FileAgentMemoryStore should reload the same persisted chat from disk.");
                 Assert.AreEqual(h1[^1].Content, h2[^1].Content);
             }
             finally

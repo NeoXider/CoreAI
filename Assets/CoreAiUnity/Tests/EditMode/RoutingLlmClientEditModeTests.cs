@@ -91,13 +91,20 @@ namespace CoreAI.Tests.EditMode
                 return _byRole.TryGetValue(roleId, out ILlmClient c) ? c : _fallback;
             }
 
-            public int ResolveContextWindowForRole(string roleId) => 4096;
+            public int ResolveContextWindowForRole(string roleId)
+            {
+                return 4096;
+            }
 
-            public LlmExecutionMode ResolveExecutionModeForRole(string roleId) =>
-                _modeByRole.TryGetValue(roleId, out LlmExecutionMode mode) ? mode : LlmExecutionMode.Auto;
+            public LlmExecutionMode ResolveExecutionModeForRole(string roleId)
+            {
+                return _modeByRole.TryGetValue(roleId, out LlmExecutionMode mode) ? mode : LlmExecutionMode.Auto;
+            }
 
-            public string ResolveProfileIdForRole(string roleId) =>
-                _profileByRole.TryGetValue(roleId, out string profileId) ? profileId : "fallback";
+            public string ResolveProfileIdForRole(string roleId)
+            {
+                return _profileByRole.TryGetValue(roleId, out string profileId) ? profileId : "fallback";
+            }
         }
 
         private sealed class CapturingPublisher<T> : IPublisher<T>
@@ -189,7 +196,7 @@ namespace CoreAI.Tests.EditMode
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
-                new LlmCompletionRequest { AgentRoleId = "FastRole", UserPayload = "hi" }))
+                               new LlmCompletionRequest { AgentRoleId = "FastRole", UserPayload = "hi" }))
             {
                 chunks.Add(chunk);
             }
@@ -215,7 +222,7 @@ namespace CoreAI.Tests.EditMode
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in routing.CompleteStreamingAsync(
-                new LlmCompletionRequest { AgentRoleId = "UnknownRole", UserPayload = "hi" }))
+                               new LlmCompletionRequest { AgentRoleId = "UnknownRole", UserPayload = "hi" }))
             {
                 chunks.Add(chunk);
             }

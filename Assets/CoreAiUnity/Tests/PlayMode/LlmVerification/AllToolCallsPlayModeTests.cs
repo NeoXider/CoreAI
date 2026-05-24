@@ -201,7 +201,8 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     //    native tool calling
-                    string prompt = "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'. CALL the memory tool now.";
+                    string prompt =
+                        "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
@@ -238,7 +239,7 @@ namespace CoreAI.Tests.PlayMode
                     if (!memorySaved)
                     {
                         Debug.LogWarning($"[AllToolCalls]  WRITE FAILED: Memory NOT saved by tool call. " +
-                                       $"Model responded with text instead of calling the memory tool.");
+                                         $"Model responded with text instead of calling the memory tool.");
                     }
                     else
                     {
@@ -257,7 +258,8 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     //    native tool calling
-                    string prompt = "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'. CALL the memory tool now.";
+                    string prompt =
+                        "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'. CALL the memory tool now.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
@@ -289,7 +291,7 @@ namespace CoreAI.Tests.PlayMode
                             ? s.Memory
                             : "(none)";
                         Debug.LogWarning($"[AllToolCalls]  APPEND FAILED: Memory not appended by tool call. " +
-                                       $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                                         $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
@@ -336,7 +338,7 @@ namespace CoreAI.Tests.PlayMode
                             ? s.Memory
                             : "(none)";
                         Debug.LogWarning($"[AllToolCalls]  CLEAR FAILED: Memory NOT cleared by tool call. " +
-                                       $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                                         $"Current memory: '{currentMemory}'. Model responded with text instead.");
                     }
                     else
                     {
@@ -403,13 +405,13 @@ namespace CoreAI.Tests.PlayMode
 
                     //  
                     CoreAISettingsAsset tempSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                    
+
                     //  execute_lua tool  Programmer
                     AgentMemoryPolicy policyWithLua = new();
                     new AgentBuilder(BuiltInAgentRoleIds.Programmer)
                         .WithMode(AgentMode.ToolsAndChat)
                         .WithMemory(MemoryToolAction.Append)
-                        .WithTool(new LuaLlmTool(new TestLuaExecutor(sink), tempSettings, CoreAI.Logging.NullLog.Instance))
+                        .WithTool(new LuaLlmTool(new TestLuaExecutor(sink), tempSettings, Logging.NullLog.Instance))
                         .Build()
                         .ApplyToPolicy(policyWithLua);
 
@@ -417,7 +419,8 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(capturingLlm, store, policyWithLua, telemetry, composer, sink);
 
                     //    native tool calling
-                    string prompt = "Create a simple item called 'TestDagger' with quality 50. You MUST use the execute_lua tool call.";
+                    string prompt =
+                        "Create a simple item called 'TestDagger' with quality 50. You MUST use the execute_lua tool call.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");
@@ -442,8 +445,8 @@ namespace CoreAI.Tests.PlayMode
                     if (sink.Items.Count == 0)
                     {
                         Debug.LogWarning($"[AllToolCalls]  EXECUTE LUA FAILED: " +
-                                       $"No commands produced. Model responded with text instead of calling execute_lua tool. " +
-                                       $"Response: {capturingLlm.LastContent}");
+                                         $"No commands produced. Model responded with text instead of calling execute_lua tool. " +
+                                         $"Response: {capturingLlm.LastContent}");
                     }
                     else
                     {
@@ -484,7 +487,7 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
         }
 
         private static async Task<TestResult> RunAgentTestAsync(
@@ -552,4 +555,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-

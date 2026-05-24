@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -10,7 +10,7 @@ using MessagePipe;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Делегирует <see cref="CompleteAsync"/> в <see cref="ILlmClientRegistry"/> по <see cref="LlmCompletionRequest.AgentRoleId"/>.
+    /// Routes LLM requests to profile-specific clients.
     /// </summary>
     public sealed class RoutingLlmClient : ILlmClient, ILlmPreflightAnnotator
     {
@@ -20,7 +20,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IPublisher<LlmRequestCompleted> _requestCompletedPublisher;
         private readonly IPublisher<LlmUsageReported> _usageReportedPublisher;
 
-        /// <param name="registry">Реестр профилей и маршрутов ролей.</param>
+        /// <param name="registry">The registry value.</param>
         public RoutingLlmClient(
             ILlmClientRegistry registry,
             IPublisher<LlmBackendSelected> backendSelectedPublisher = null,
@@ -35,7 +35,7 @@ namespace CoreAI.Infrastructure.Llm
             _usageReportedPublisher = usageReportedPublisher;
         }
 
-        /// <summary>Выставляет <see cref="LlmCompletionRequest.RoutingProfileId"/> до логирования внешним декоратором.</summary>
+        /// <summary>Annotates an LLM request with routing metadata before it is sent.</summary>
         public void PreflightAnnotate(LlmCompletionRequest request)
         {
             if (request == null)
@@ -82,7 +82,7 @@ namespace CoreAI.Infrastructure.Llm
                 PublishCompleted(request, false, false, "cancelled", LlmErrorCode.Cancelled);
                 throw;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 PublishCompleted(request, false, false, ex.Message, LlmErrorCode.ProviderError);
                 throw;
@@ -90,10 +90,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Маршрутизируемый стриминг: выбирает клиент по <see cref="LlmCompletionRequest.AgentRoleId"/>
-        /// и делегирует <see cref="ILlmClient.CompleteStreamingAsync"/>. Без этого override'а
-        /// default-реализация интерфейса вызывала бы <see cref="CompleteAsync"/> и отдавала бы
-        /// весь ответ одним чанком — стриминг в UI был бы не виден.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// </summary>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

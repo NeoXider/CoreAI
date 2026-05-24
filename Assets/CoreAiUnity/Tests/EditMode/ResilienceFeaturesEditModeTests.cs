@@ -68,11 +68,12 @@ namespace CoreAI.Tests.EditMode
         private static MEAI.ChatOptions MakeChatOptions(params (string name, Delegate func)[] tools)
         {
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
-            foreach (var (name, func) in tools)
+            foreach ((string name, Delegate func) in tools)
             {
                 opts.Tools.Add(MEAI.AIFunctionFactory.Create(func,
                     new MEAI.AIFunctionFactoryOptions { Name = name, Description = $"Tool {name}" }));
             }
+
             return opts;
         }
 
@@ -81,15 +82,16 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolResultTruncation_LargeResult_IsSoftTruncated()
         {
-            var settings = new ResilienceSettings { MaxToolResultCharsOverride = 100 };
-            string bigResult = new string('A', 500);
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ResilienceSettings settings = new() { MaxToolResultCharsOverride = 100 };
+            string bigResult = new('A', 500);
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<string> func = () => bigResult;
-            var opts = MakeChatOptions(("big_tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("big_tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("big_tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("big_tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
             string text = result.Result.Result?.ToString() ?? "";
@@ -101,15 +103,16 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolResultTruncation_SmallResult_Untouched()
         {
-            var settings = new ResilienceSettings { MaxToolResultCharsOverride = 8000 };
+            ResilienceSettings settings = new() { MaxToolResultCharsOverride = 8000 };
             string smallResult = "OK, crafted Iron Sword.";
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<string> func = () => smallResult;
-            var opts = MakeChatOptions(("small_tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("small_tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("small_tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("small_tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
             Assert.AreEqual(smallResult, result.Result.Result?.ToString(),
@@ -119,15 +122,16 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolResultTruncation_DisabledWhenZero()
         {
-            var settings = new ResilienceSettings { MaxToolResultCharsOverride = 0 };
-            string bigResult = new string('X', 50_000);
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ResilienceSettings settings = new() { MaxToolResultCharsOverride = 0 };
+            string bigResult = new('X', 50_000);
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<string> func = () => bigResult;
-            var opts = MakeChatOptions(("huge_tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("huge_tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("huge_tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("huge_tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
             Assert.AreEqual(bigResult, result.Result.Result?.ToString(),
@@ -139,8 +143,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolTimeout_SlowTool_ReturnsTimeoutError()
         {
-            var settings = new ResilienceSettings { DefaultToolTimeoutMsOverride = 200 }; // 200ms
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 200 }; // 200ms
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<CancellationToken, Task<string>> func = async ct =>
@@ -148,9 +152,10 @@ namespace CoreAI.Tests.EditMode
                 await Task.Delay(10_000, ct); // 10 seconds — should be cancelled
                 return "done";
             };
-            var opts = MakeChatOptions(("slow_tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("slow_tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("slow_tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("slow_tool"), opts, CancellationToken.None);
 
             Assert.IsFalse(result.Succeeded, "Slow tool should fail");
             string text = result.Result.Result?.ToString() ?? "";
@@ -160,14 +165,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolTimeout_FastTool_Succeeds()
         {
-            var settings = new ResilienceSettings { DefaultToolTimeoutMsOverride = 5000 }; // 5s
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 5000 }; // 5s
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<string> func = () => "fast-result";
-            var opts = MakeChatOptions(("fast_tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("fast_tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("fast_tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("fast_tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
             Assert.AreEqual("fast-result", result.Result.Result?.ToString());
@@ -176,14 +182,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ToolTimeout_DisabledWhenZero_NoTimeout()
         {
-            var settings = new ResilienceSettings { DefaultToolTimeoutMsOverride = 0 };
-            var policy = new ToolExecutionPolicy(NullLog.Instance, settings,
+            ResilienceSettings settings = new() { DefaultToolTimeoutMsOverride = 0 };
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
                 new List<ILlmTool>(), true, "test", 3);
 
             Func<string> func = () => "no-timeout-ok";
-            var opts = MakeChatOptions(("tool", func));
+            MEAI.ChatOptions opts = MakeChatOptions(("tool", func));
 
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("tool"), opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("tool"), opts, CancellationToken.None);
 
             Assert.IsTrue(result.Succeeded);
         }
@@ -195,7 +202,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Store original and reset
             CoreAISettings.ResetOverrides();
-            var original = CoreAISettings.Instance;
+            ICoreAISettings original = CoreAISettings.Instance;
             CoreAISettings.Instance = null;
 
             try
@@ -219,7 +226,7 @@ namespace CoreAI.Tests.EditMode
         public void CoreAISettings_OverridesWork()
         {
             CoreAISettings.ResetOverrides();
-            var original = CoreAISettings.Instance;
+            ICoreAISettings original = CoreAISettings.Instance;
             CoreAISettings.Instance = null;
 
             try
@@ -251,7 +258,7 @@ namespace CoreAI.Tests.EditMode
         public void CoreAISettings_MaxToolCallHistoryMessages_DefaultIs20()
         {
             CoreAISettings.ResetOverrides();
-            var original = CoreAISettings.Instance;
+            ICoreAISettings original = CoreAISettings.Instance;
             CoreAISettings.Instance = null;
 
             try
@@ -269,7 +276,7 @@ namespace CoreAI.Tests.EditMode
         public void CoreAISettings_MaxToolCallHistoryMessages_OverrideWorks()
         {
             CoreAISettings.ResetOverrides();
-            var original = CoreAISettings.Instance;
+            ICoreAISettings original = CoreAISettings.Instance;
             CoreAISettings.Instance = null;
 
             try
@@ -292,7 +299,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RateLimiterMetrics_Struct_HoldsValues()
         {
-            var m = new RateLimiterMetrics(10, 60, 3, 7);
+            RateLimiterMetrics m = new(10, 60, 3, 7);
             Assert.AreEqual(10, m.MaxRequestsPerWindow);
             Assert.AreEqual(60, m.WindowSeconds);
             Assert.AreEqual(3, m.AcceptedInWindow);
@@ -303,22 +310,22 @@ namespace CoreAI.Tests.EditMode
         public async Task RateLimiterMetrics_InGameLlmChatService_TracksRejections()
         {
             // Create a service with max 2 requests per 60s window
-            var stubLlm = new StubLlmClient("pong");
-            var stubPrompts = new StubSystemPromptProvider();
-            var service = new InGameLlmChatService(stubLlm, stubPrompts, maxMessages: 24,
-                maxRequestsPerWindow: 2, rateLimitWindowSeconds: 60);
+            StubLlmClient stubLlm = new("pong");
+            StubSystemPromptProvider stubPrompts = new();
+            InGameLlmChatService service = new(stubLlm, stubPrompts, 24,
+                2, 60);
 
             // First two should succeed (rate limiter accepts)
-            var r1 = await service.SendPlayerMessageAsync("msg1");
-            var r2 = await service.SendPlayerMessageAsync("msg2");
+            LlmCompletionResult r1 = await service.SendPlayerMessageAsync("msg1");
+            LlmCompletionResult r2 = await service.SendPlayerMessageAsync("msg2");
 
             // Third should be rate-limited
-            var r3 = await service.SendPlayerMessageAsync("msg3");
+            LlmCompletionResult r3 = await service.SendPlayerMessageAsync("msg3");
             Assert.IsFalse(r3.Ok, "Third request should be rate-limited");
             Assert.That(r3.Error, Does.Contain("rate_limited"));
 
             // Check metrics
-            var metrics = service.GetRateLimiterMetrics();
+            RateLimiterMetrics metrics = service.GetRateLimiterMetrics();
             Assert.AreEqual(2, metrics.MaxRequestsPerWindow);
             Assert.AreEqual(60, metrics.WindowSeconds);
             Assert.AreEqual(2, metrics.AcceptedInWindow);
@@ -330,14 +337,19 @@ namespace CoreAI.Tests.EditMode
         private sealed class StubLlmClient : ILlmClient
         {
             private readonly string _response;
-            public StubLlmClient(string response) { _response = response; }
+
+            public StubLlmClient(string response)
+            {
+                _response = response;
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
             {
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _response });
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 throw new NotImplementedException();
             }
@@ -357,11 +369,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Fallback_PrimarySucceeds_SecondaryNotCalled()
         {
-            var primary = new StubLlmClient("primary-ok");
-            var secondary = new CountingLlmClient("secondary-ok");
-            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+            StubLlmClient primary = new("primary-ok");
+            CountingLlmClient secondary = new("secondary-ok");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
 
-            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
             Assert.IsTrue(result.Ok);
             Assert.AreEqual("primary-ok", result.Content);
             Assert.AreEqual(0, secondary.CallCount, "Secondary should not be called when primary succeeds");
@@ -371,11 +384,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Fallback_PrimaryFails_SecondaryIsCalled()
         {
-            var primary = new FailingLlmClient();
-            var secondary = new StubLlmClient("secondary-ok");
-            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+            FailingLlmClient primary = new();
+            StubLlmClient secondary = new("secondary-ok");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
 
-            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
             Assert.IsTrue(result.Ok);
             Assert.AreEqual("secondary-ok", result.Content);
             Assert.AreEqual(1, fallback.FallbackCount);
@@ -384,11 +398,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Fallback_PrimaryReturnsRetryableError_SecondaryIsCalled()
         {
-            var primary = new ErrorResultLlmClient(LlmErrorCode.BackendUnavailable);
-            var secondary = new StubLlmClient("fallback-success");
-            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+            ErrorResultLlmClient primary = new(LlmErrorCode.BackendUnavailable);
+            StubLlmClient secondary = new("fallback-success");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
 
-            var result = await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
             Assert.IsTrue(result.Ok);
             Assert.AreEqual("fallback-success", result.Content);
             Assert.AreEqual(1, fallback.FallbackCount);
@@ -397,13 +412,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Fallback_Cancellation_DoesNotFallback()
         {
-            var cts = new CancellationTokenSource();
+            CancellationTokenSource cts = new();
             cts.Cancel();
 
             // FailingLlmClient checks ct.ThrowIfCancellationRequested() first
-            var primary = new FailingLlmClient();
-            var secondary = new CountingLlmClient("secondary");
-            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+            FailingLlmClient primary = new();
+            CountingLlmClient secondary = new("secondary");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
 
             Assert.CatchAsync<OperationCanceledException>(async () =>
                 await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" }, cts.Token));
@@ -414,9 +429,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task Fallback_MultipleFails_CounterIncrements()
         {
-            var primary = new FailingLlmClient();
-            var secondary = new StubLlmClient("ok");
-            var fallback = new FallbackLlmClientDecorator(primary, secondary);
+            FailingLlmClient primary = new();
+            StubLlmClient secondary = new("ok");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
 
             await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "a" });
             await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "b" });
@@ -431,7 +446,11 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly string _response;
             public int CallCount { get; private set; }
-            public CountingLlmClient(string response) { _response = response; }
+
+            public CountingLlmClient(string response)
+            {
+                _response = response;
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
             {
@@ -439,7 +458,8 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _response });
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 throw new NotImplementedException();
             }
@@ -453,7 +473,8 @@ namespace CoreAI.Tests.EditMode
                 throw new LlmClientException("primary down", LlmErrorCode.ProviderError);
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 throw new LlmClientException("primary down", LlmErrorCode.ProviderError);
             }
@@ -462,14 +483,20 @@ namespace CoreAI.Tests.EditMode
         private sealed class ErrorResultLlmClient : ILlmClient
         {
             private readonly LlmErrorCode _code;
-            public ErrorResultLlmClient(LlmErrorCode code) { _code = code; }
+
+            public ErrorResultLlmClient(LlmErrorCode code)
+            {
+                _code = code;
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
             {
-                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "backend error", ErrorCode = _code });
+                return Task.FromResult(new LlmCompletionResult
+                    { Ok = false, Error = "backend error", ErrorCode = _code });
             }
 
-            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
             {
                 throw new NotImplementedException();
             }

@@ -1,4 +1,4 @@
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -12,7 +12,7 @@ using LLMUnity;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// LLMUnity клиент. Делегирует в <see cref="MeaiLlmClient"/>.
+    /// MEAI adapter for LLMUnity chat completion.
     /// </summary>
     public sealed class MeaiLlmUnityClient : ILlmClient
     {
@@ -61,9 +61,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Делегирует стриминг в <see cref="MeaiLlmClient.CompleteStreamingAsync"/>, который
-        /// использует LLMUnity callback для дельт. Без этого override'а default-реализация
-        /// интерфейса выдавала бы весь ответ одним чанком только после завершения генерации.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// </summary>
         public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

@@ -28,7 +28,7 @@ namespace CoreAI.Chat
             }
 
             string name = string.IsNullOrWhiteSpace(toolName) ? "(tool)" : toolName.Trim();
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             sb.Append("[Tool] ").Append(name);
 
             string argsText = SerializeForDisplay(arguments, maxCharsPerSection);

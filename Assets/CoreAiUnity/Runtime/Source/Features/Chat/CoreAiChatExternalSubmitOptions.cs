@@ -1,18 +1,17 @@
-namespace CoreAI.Chat
+﻿namespace CoreAI.Chat
 {
     /// <summary>
-    /// Параметры программной отправки <see cref="CoreAiChatPanel.SubmitMessageFromExternalAsync"/>.
+    /// Options that control externally submitted chat messages.
     /// </summary>
     public sealed class CoreAiChatExternalSubmitOptions
     {
         /// <summary>
-        /// Показать текст запроса пузырём пользователя в ленте (по умолчанию <c>true</c>).
+        /// Append user message to chat.
         /// </summary>
         public bool AppendUserMessageToChat { get; set; } = true;
 
         /// <summary>
-        /// Если не null и не пустая строка — LLM не вызывается; текст показывается как ответ ассистента
-        /// (после strip think-блоков и <see cref="CoreAiChatPanel.FormatResponseText"/>).
+        /// Simulated assistant reply.
         /// </summary>
         public string SimulatedAssistantReply { get; set; }
     }

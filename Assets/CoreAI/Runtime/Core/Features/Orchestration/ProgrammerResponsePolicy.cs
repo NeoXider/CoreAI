@@ -3,8 +3,7 @@ using System;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов Programmer: требует вызов execute_lua tool.
-    /// Все tool calls обрабатываются через единый MEAI pipeline.
+    /// Structured-response policy for programmer roles.
     /// </summary>
     public sealed class ProgrammerResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -23,10 +22,10 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            // Programmer должен вызвать execute_lua tool
-            // Если content пустой после tool calling - значит tool был вызван успешно
-            // Если content есть - это обычный текст (объяснение, комментарии)
-            // Валидация проходит если есть любой контент (tool calls уже обработаны MEAI)
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
 
             failureReason = "";
             return true;

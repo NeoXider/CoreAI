@@ -5,25 +5,25 @@ using MoonSharp.Interpreter;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Whitelist вызываемых из Lua делегатов (DGF_SPEC §8).
+    /// Registry of host callbacks exposed to secured Lua scripts.
     /// </summary>
     public sealed class LuaApiRegistry
     {
         private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
 
-        /// <summary>Зарегистрировать глобальную функцию Lua с именем <paramref name="name"/>.</summary>
+        /// <summary>Registers a new value or callback with the target runtime registry.</summary>
         public void Register(string name, Delegate callback)
         {
             _apis[name] = callback;
         }
 
-        /// <summary>Проверить наличие API (для тестов и расширений).</summary>
+        /// <summary>Attempts to resolve a registered Lua API callback by name.</summary>
         public bool TryGet(string name, out Delegate callback)
         {
             return _apis.TryGetValue(name, out callback);
         }
 
-        /// <summary>Пробросить все зарегистрированные делегаты в таблицу глобалов MoonSharp.</summary>
+        /// <summary>Exposes all registered Lua API callbacks on the script global table.</summary>
         public void ApplyToGlobals(Table globals)
         {
             foreach (KeyValuePair<string, Delegate> kv in _apis)

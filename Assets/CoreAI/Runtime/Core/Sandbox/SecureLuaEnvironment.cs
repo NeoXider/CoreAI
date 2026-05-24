@@ -1,34 +1,27 @@
-using System;
+﻿using System;
 using MoonSharp.Interpreter;
 
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Фабрика песочницы MoonSharp: минимальные модули, без load/io/os (DGF_SPEC §8).
-    /// <para>
-    /// Поддерживает два режима:
-    /// <list type="bullet">
-    ///   <item><see cref="CreateScript"/> + <see cref="RunChunk"/> — one-shot команды с жёстким лимитом инструкций.</item>
-    ///   <item><see cref="CreateCoroutine"/> — долгоживущие скрипты с ресетируемым бюджетом на каждый кадр.</item>
-    /// </list>
-    /// </para>
+    /// Provides secure lua environment functionality.
     /// </summary>
     public sealed class SecureLuaEnvironment
     {
         private static readonly CoreModules SandboxModules =
             CoreModules.Preset_HardSandbox | CoreModules.Coroutine;
 
-        /// <summary>Жёсткий лимит инструкций для one-shot скриптов (500K).</summary>
+        /// <summary>One shot hard limit steps.</summary>
         public const int OneShotHardLimitSteps = 500_000;
 
-        /// <summary>Создать MoonSharp-скрипт с whitelist API из <paramref name="registry"/> и безопасными модулями.
-        /// Для one-shot выполнения через <see cref="RunChunk"/>.</summary>
+        /// <summary>Creates a secured MoonSharp script and registers the allowed Lua APIs.</summary>
+        /// Provides API usage information.
         public Script CreateScript(LuaApiRegistry registry)
         {
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
 
-            // Назначаем отладчик для отслеживания шагов
+            /* Implementation note in English. */
             InstructionLimitDebugger debugger = new(OneShotHardLimitSteps, 2000);
             script.AttachDebugger(debugger);
 
@@ -36,7 +29,7 @@ namespace CoreAI.Sandbox
             return script;
         }
 
-        /// <summary>Скомпилировать строку в чанк и выполнить под <paramref name="guard"/> (лимит времени).</summary>
+        /// <summary>Runs Lua code inside a secured script with the optional execution guard.</summary>
         public DynValue RunChunk(Script script, string luaCode, LuaExecutionGuard guard = null)
         {
             DynValue fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_chunk");
@@ -45,7 +38,7 @@ namespace CoreAI.Sandbox
         }
 
         /// <summary>
-        /// Создать долгоживущую корутину из Lua-кода с ресетируемым бюджетом на каждый resume.
+/// Executes CreateCoroutine API operation.
         /// </summary>
         public LuaCoroutineHandle CreateCoroutine(
             LuaApiRegistry registry,

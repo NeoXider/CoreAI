@@ -1,9 +1,9 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Параметры <see cref="QueuedAiOrchestrator"/> (регистрируется из сцены).</summary>
+    /// <summary>Options that control AI orchestration queue concurrency and ordering.</summary>
     public sealed class AiOrchestrationQueueOptions
     {
-        /// <summary>Сколько задач оркестратора может выполняться параллельно (остальные ждут в очереди).</summary>
+        /// <summary>Maximum number of AI tasks that may run concurrently.</summary>
         public int MaxConcurrent { get; set; } = 2;
     }
 }

@@ -3,13 +3,13 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.World
 {
-    /// <summary>JSON envelope для <c>AiGameCommandTypeIds.WorldCommand</c>.</summary>
+    /// <summary>Serializable envelope for world commands emitted by AI tools.</summary>
     [Serializable]
     public sealed class CoreAiWorldCommandEnvelope
     {
         public string action = "";
 
-        // Общие поля
+        // No-op guard before a conditional operation.
         public string targetName = "";
         public int boolValue;
         public float floatValue;

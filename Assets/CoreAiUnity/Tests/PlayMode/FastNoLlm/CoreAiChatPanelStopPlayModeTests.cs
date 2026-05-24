@@ -32,25 +32,29 @@ namespace CoreAI.Tests.PlayMode
 
             yield return null;
 
-            Assert.IsTrue(activeRequestCts.IsCancellationRequested, "Active streaming/request CTS should be cancelled.");
+            Assert.IsTrue(activeRequestCts.IsCancellationRequested,
+                "Active streaming/request CTS should be cancelled.");
             Assert.IsTrue(rootCts.IsCancellationRequested, "Root CTS should be cancelled and replaced by StopAgent().");
             Assert.IsFalse(GetPrivateField<bool>(panel, "_isSending"), "Chat panel should no longer be sending.");
             Assert.IsFalse(GetPrivateField<bool>(panel, "_isStreaming"), "Chat panel should no longer be streaming.");
-            Assert.IsNotNull(GetPrivateField<CancellationTokenSource>(panel, "_cts"), "Root CTS should be recreated for future sends.");
+            Assert.IsNotNull(GetPrivateField<CancellationTokenSource>(panel, "_cts"),
+                "Root CTS should be recreated for future sends.");
 
             Object.DestroyImmediate(go);
         }
 
         private static void SetPrivateField<T>(CoreAiChatPanel panel, string fieldName, T value)
         {
-            FieldInfo field = typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo field =
+                typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(field, $"Private field not found: {fieldName}");
             field.SetValue(panel, value);
         }
 
         private static T GetPrivateField<T>(CoreAiChatPanel panel, string fieldName)
         {
-            FieldInfo field = typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo field =
+                typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(field, $"Private field not found: {fieldName}");
             return (T)field.GetValue(panel);
         }

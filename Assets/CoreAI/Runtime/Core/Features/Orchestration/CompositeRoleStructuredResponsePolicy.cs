@@ -1,9 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Композитная политика: маршрутизирует валидацию к специализированной политике по roleId.
+    /// Delegates structured-response validation to role-specific policies.
     /// </summary>
     public sealed class CompositeRoleStructuredResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -11,7 +11,7 @@ namespace CoreAI.Ai
         private readonly IRoleStructuredResponsePolicy _fallback;
 
         /// <summary>
-        /// Создаёт композитную политику со всеми встроенными правилами.
+        /// Initializes a new instance of CompositeRoleStructuredResponsePolicy.
         /// </summary>
         public CompositeRoleStructuredResponsePolicy()
         {
@@ -58,7 +58,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Получает специализированную политику для роли.
+/// Executes GetPolicy API operation.
         /// </summary>
         public IRoleStructuredResponsePolicy GetPolicy(string roleId)
         {
@@ -66,7 +66,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Регистрирует кастомную политику для роли.
+/// Executes RegisterPolicy API operation.
         /// </summary>
         public void RegisterPolicy(string roleId, IRoleStructuredResponsePolicy policy)
         {

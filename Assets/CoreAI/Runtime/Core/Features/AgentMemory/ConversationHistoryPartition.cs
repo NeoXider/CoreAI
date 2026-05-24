@@ -67,7 +67,7 @@ namespace CoreAI.Ai
                 return "";
             }
 
-            System.Text.StringBuilder sb = new();
+            StringBuilder sb = new();
             if (!string.IsNullOrWhiteSpace(existingSummary))
             {
                 sb.AppendLine(existingSummary.Trim());

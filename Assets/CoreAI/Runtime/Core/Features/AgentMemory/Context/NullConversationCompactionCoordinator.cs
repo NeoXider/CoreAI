@@ -4,7 +4,9 @@ namespace CoreAI.Ai
     public sealed class NullConversationCompactionCoordinator : IConversationCompactionCoordinator
     {
         /// <inheritdoc />
-        public bool ShouldRetryOnceAfterContextOverflow(LlmCompletionResult failure, bool compactionAlreadyApplied) =>
-            false;
+        public bool ShouldRetryOnceAfterContextOverflow(LlmCompletionResult failure, bool compactionAlreadyApplied)
+        {
+            return false;
+        }
     }
 }

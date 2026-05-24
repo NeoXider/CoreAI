@@ -1,12 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Глобальная шина событий ИИ.
-    /// Позволяет новичкам подписываться на события из любого MonoBehaviour,
-    /// а агентам — вызывать эти события через EventTriggerLlmTool (.WithEventTool).
+    /// Central event hub for CoreAI tool and runtime notifications.
     /// </summary>
     public static class CoreAiEvents
     {
@@ -14,7 +12,7 @@ namespace CoreAI.Ai
         private static readonly Dictionary<string, Action<string>> _payloadSubscribers = new();
 
         /// <summary>
-        /// Подписаться на событие без параметров.
+/// Executes Subscribe API operation.
         /// </summary>
         public static void Subscribe(string eventName, Action handler)
         {
@@ -34,7 +32,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Подписаться на событие со строковым Payload.
+/// Executes Subscribe API operation.
         /// </summary>
         public static void Subscribe(string eventName, Action<string> payloadHandler)
         {
@@ -54,7 +52,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отписаться от события без параметров.
+/// Executes Unsubscribe API operation.
         /// </summary>
         public static void Unsubscribe(string eventName, Action handler)
         {
@@ -74,7 +72,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отписаться от события со строковым Payload.
+/// Executes Unsubscribe API operation.
         /// </summary>
         public static void Unsubscribe(string eventName, Action<string> payloadHandler)
         {
@@ -94,7 +92,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Опубликовать (вызвать) событие. Используется внутренним EventTriggerLlmTool.
+/// Executes Publish API operation.
         /// </summary>
         public static void Publish(string eventName, string payload = "")
         {
@@ -115,7 +113,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Очистить все подписки (полезно при перезапуске игровых сцен).
+/// Executes ClearAll API operation.
         /// </summary>
         public static void ClearAll()
         {

@@ -38,7 +38,7 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 // Ждём, пока тест "откроет ворота" или CancellationToken сработает
-                using var reg = cancellationToken.Register(() =>
+                using CancellationTokenRegistration reg = cancellationToken.Register(() =>
                 {
                     try
                     {
@@ -52,7 +52,9 @@ namespace CoreAI.Tests.EditMode
                 return await gate.Task;
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         /// <summary>
@@ -77,10 +79,13 @@ namespace CoreAI.Tests.EditMode
                 {
                     ExecutionLog.Add(task?.Hint ?? "");
                 }
+
                 return null;
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         #endregion
@@ -219,7 +224,8 @@ namespace CoreAI.Tests.EditMode
             await Task.Delay(50);
 
             Assert.AreEqual(1, inner.Gates.Count, "Only blocker should be active.");
-            Assert.IsTrue(oldPending.IsCanceled, "Older pending task with the same CancellationScope should be cancelled immediately.");
+            Assert.IsTrue(oldPending.IsCanceled,
+                "Older pending task with the same CancellationScope should be cancelled immediately.");
 
             inner.Gates[0].TrySetResult(null);
             await Task.Delay(50);
@@ -245,7 +251,8 @@ namespace CoreAI.Tests.EditMode
             cts.Cancel();
             await Task.Delay(50);
 
-            Assert.IsTrue(pending.IsCanceled, "Pending task should observe external cancellation without waiting for a free slot.");
+            Assert.IsTrue(pending.IsCanceled,
+                "Pending task should observe external cancellation without waiting for a free slot.");
 
             inner.Gates[0].TrySetResult(null);
             await Task.Delay(50);
@@ -314,18 +321,18 @@ namespace CoreAI.Tests.EditMode
 
             // Задача 1 (active)
             Task t1 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t1", CancellationScope = "NPC1" });
-            
+
             // Задача 2 (pending, другой scope)
             Task t2 = queue.RunTaskAsync(new AiTaskRequest { Hint = "t2", CancellationScope = "NPC2" });
 
             await Task.Delay(100);
-            
+
             // Assert: только t1 стартовала
             Assert.AreEqual(1, inner.Gates.Count);
-            
+
             // Act: Отменяем все задачи для NPC1
             queue.CancelTasks("NPC1");
-            using (var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            using (CancellationTokenSource wait = new(TimeSpan.FromSeconds(10)))
             {
                 while (!t1.IsCompleted && !wait.IsCancellationRequested)
                 {
@@ -338,11 +345,11 @@ namespace CoreAI.Tests.EditMode
             // t1 должна быть отменена (IsCanceled)
             Assert.IsTrue(t1.IsCanceled,
                 $"t1 (active) должна быть отменена (status={t1.Status}, fault={(t1.IsFaulted ? t1.Exception?.GetBaseException().Message : null)}).");
-            
+
             // t2 (NPC2) должна была начать выполняться, так как слот освободился.
             Assert.AreEqual(2, inner.Gates.Count, "t2 (NPC2) должна стартовать после отмены NPC1");
             Assert.AreEqual("t2", inner.ExecutionLog[1]);
-            
+
             // Cleanup
             inner.Gates[1].TrySetResult(null);
             await Task.WhenAll(t2);
@@ -418,8 +425,19 @@ namespace CoreAI.Tests.EditMode
                 "CancelTasks after Dispose must not throw ObjectDisposedException.");
 
             // Cleanup
-            if (inner.Gates.Count > 0) inner.Gates[0].TrySetResult(null);
-            try { await t; } catch { /* expected cancellation */ }
+            if (inner.Gates.Count > 0)
+            {
+                inner.Gates[0].TrySetResult(null);
+            }
+
+            try
+            {
+                await t;
+            }
+            catch
+            {
+                /* expected cancellation */
+            }
         }
     }
 }

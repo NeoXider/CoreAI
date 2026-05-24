@@ -1,47 +1,47 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Prompts
 {
     /// <summary>
-    /// Переопределения промптов и кастомные агенты. Создание: Assets → Create → CoreAI → Agent Prompts Manifest.
+    /// Agent Prompts Manifest component used by CoreAI.
     /// </summary>
     [CreateAssetMenu(fileName = "AgentPromptsManifest", menuName = "CoreAI/Agent Prompts Manifest")]
     public sealed class AgentPromptsManifest : ScriptableObject
     {
-        /// <summary>Одна запись манифеста: роль и текстовые ассеты промптов.</summary>
+        /// <summary>Provides entry functionality.</summary>
         [System.Serializable]
         public sealed class Entry
         {
-            /// <summary>Идентификатор роли (встроенный или свой).</summary>
-            [Tooltip("Id роли: Creator, Programmer, PlainChat, SmartChat или свой (например MyGame.Economist).")]
+            /// <summary>Role id.</summary>
+            [Tooltip("Role id, for example Creator, Programmer, PlainChat, SmartChat, or a game-specific role.")]
             public string roleId;
 
-            /// <summary>Системный промпт (текст из TextAsset).</summary>
-            [Tooltip("Системный промпт для модели.")]
+            /// <summary>System prompt.</summary>
+            [Tooltip("System prompt text for the model.")]
             public TextAsset systemPrompt;
 
-            /// <summary>Шаблон пользовательского сообщения; плейсхолдеры: wave, mode, party, hint.</summary>
-            [Tooltip("Шаблон user-сообщения для оркестратора; плейсхолдеры: {wave},{mode},{party},{hint}")]
+            /// <summary>User prompt template.</summary>
+            [Tooltip("User prompt template for the orchestrator. Supported placeholders: {wave}, {mode}, {party}, {hint}.")]
             public TextAsset userPromptTemplate;
 
             /// <summary>
-            /// Если true — universalSystemPromptPrefix из CoreAISettings НЕ применяется к этой роли.
-            /// Полезно когда роли нужен полностью кастомный промпт без общих правил.
+/// Executes new.
+/// Executes new.
             /// </summary>
-            [Tooltip("Отключить universalSystemPromptPrefix для этой роли (полностью кастомный промпт).")]
+            [Tooltip("Disable universalSystemPromptPrefix for this role when the prompt must be fully custom.")]
             public bool overrideUniversalPrefix;
         }
 
-        /// <summary>Переопределения встроенных ролей CoreAI.</summary>
-        [Header("Переопределения встроенных ролей (опционально)")]
+        /// <summary>Role overrides.</summary>
+        [Header("Built-in Role Overrides")]
         public List<Entry> roleOverrides = new();
 
-        /// <summary>Дополнительные роли игры (не заменяют встроенные по умолчанию).</summary>
-        [Header("Кастомные агенты (ваша игра)")]
+        /// <summary>Custom agents.</summary>
+        [Header("Custom Agents")]
         public List<Entry> customAgents = new();
 
-        /// <summary>Все записи: сначала переопределения ролей, затем кастомные агенты.</summary>
+        /// <summary>Enumerates all prompt manifest entries configured in this asset.</summary>
         public IEnumerable<Entry> EnumerateEntries()
         {
             if (roleOverrides != null)
@@ -58,6 +58,42 @@ namespace CoreAI.Infrastructure.Prompts
                 {
                     yield return e;
                 }
+            }
+        }
+        /// <summary>
+        /// Builds a Unity-free prompt snapshot by reading TextAsset contents.
+        /// </summary>
+        public AgentPromptsDefinition ToDefinition()
+        {
+            AgentPromptsDefinition definition = new();
+            AddEntries(roleOverrides, definition.RoleOverrides);
+            AddEntries(customAgents, definition.CustomAgents);
+            return definition;
+        }
+
+        private static void AddEntries(
+            IEnumerable<Entry> source,
+            ICollection<AgentPromptEntryDefinition> destination)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            foreach (Entry entry in source)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                destination.Add(new AgentPromptEntryDefinition
+                {
+                    RoleId = entry.roleId ?? "",
+                    SystemPrompt = entry.systemPrompt != null ? entry.systemPrompt.text : "",
+                    UserPromptTemplate = entry.userPromptTemplate != null ? entry.userPromptTemplate.text : "",
+                    OverrideUniversalPrefix = entry.overrideUniversalPrefix
+                });
             }
         }
     }

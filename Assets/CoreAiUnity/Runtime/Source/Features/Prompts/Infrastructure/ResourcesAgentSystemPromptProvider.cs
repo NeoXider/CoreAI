@@ -4,13 +4,13 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Prompts
 {
     /// <summary>
-    /// Загрузка <c>Resources/{root}/&lt;roleId&gt;</c> как TextAsset (без .txt в пути).
+    /// Loads agent system prompts from Unity Resources.
     /// </summary>
     public sealed class ResourcesAgentSystemPromptProvider : IAgentSystemPromptProvider
     {
         private readonly string _resourcePathPrefix;
 
-        /// <param name="resourcePathPrefix">Корень в Resources, по умолчанию <c>AgentPrompts/System</c>.</param>
+        /// <param name="resourcePathPrefix">The resource path prefix value.</param>
         public ResourcesAgentSystemPromptProvider(string resourcePathPrefix)
         {
             _resourcePathPrefix = resourcePathPrefix?.Trim().TrimEnd('/') ?? "AgentPrompts/System";

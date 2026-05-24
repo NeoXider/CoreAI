@@ -25,7 +25,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(650, config.ChatWidth);
             Assert.AreEqual(910, config.ChatHeight);
             Assert.IsFalse(config.UseFullscreenChat, "по умолчанию не на весь экран");
-            Assert.IsFalse(config.SendOnShiftEnter, "по умолчанию Enter отправляет, Shift+Enter вставляет перенос строки");
+            Assert.IsFalse(config.SendOnShiftEnter,
+                "по умолчанию Enter отправляет, Shift+Enter вставляет перенос строки");
             Assert.AreEqual(2000, config.MaxMessageLength);
             Assert.IsFalse(string.IsNullOrEmpty(config.ErrorMessagePrefix));
             Assert.IsFalse(string.IsNullOrEmpty(config.TimeoutMessage));

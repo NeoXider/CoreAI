@@ -1,10 +1,10 @@
-using CoreAI.Authority;
+﻿using CoreAI.Authority;
 using UnityEngine;
 
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Базовый компонент для описания роли текущего узла в сети. Реализуйте в игре (Unity Netcode: IsServer / IsHost / IsClient).
+    /// Unity component that exposes local network authority flags to CoreAI.
     /// </summary>
     public abstract class CoreAiNetworkPeerBehaviour : MonoBehaviour, IAiNetworkPeer
     {

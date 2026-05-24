@@ -37,12 +37,17 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class Sink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand c) { }
+            public void Publish(ApplyAiGameCommand c)
+            {
+            }
         }
 
         private sealed class Telemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class PromptSys : IAgentSystemPromptProvider
@@ -65,12 +70,32 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class StubMem : IAgentMemoryStore
         {
-            public bool TryLoad(string roleId, out AgentMemoryState s) { s = null; return false; }
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persist = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int max = 0) => Array.Empty<ChatMessage>();
+            public bool TryLoad(string roleId, out AgentMemoryState s)
+            {
+                s = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persist = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int max = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class StubSettings : ICoreAISettings
@@ -96,8 +121,10 @@ namespace CoreAI.Tests.PlayMode
             public bool EnableStreaming => false;
         }
 
-        private static DelegateLlmTool MakeTool(string name) =>
-            new(name, $"Test tool: {name}", new Action(() => { }));
+        private static DelegateLlmTool MakeTool(string name)
+        {
+            return new DelegateLlmTool(name, $"Test tool: {name}", new Action(() => { }));
+        }
 
         private AiOrchestrator BuildOrch(string roleId, CaptureLlmClient llm,
             AgentMemoryPolicy policy, StubSettings settings, StubMem mem)
@@ -138,9 +165,9 @@ namespace CoreAI.Tests.PlayMode
 
             const string roleId = "pm_selfservice_catalog";
             AgentConfig config = new AgentBuilder(roleId)
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSystemPrompt("You are a teacher.")
                 .WithSkill(quizSkill)
                 .WithSkill(lessonSkill)
@@ -198,9 +225,9 @@ namespace CoreAI.Tests.PlayMode
 
             const string roleId = "pm_selfservice_tools";
             AgentConfig config = new AgentBuilder(roleId)
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkills(a, b)
                 .WithMode(AgentMode.ToolsAndChat)
                 .Build();
@@ -247,9 +274,9 @@ namespace CoreAI.Tests.PlayMode
 
             const string roleId = "pm_selfservice_callref";
             AgentConfig config = new AgentBuilder(roleId)
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkill(quiz)
                 .WithMode(AgentMode.ToolsAndChat)
                 .Build();

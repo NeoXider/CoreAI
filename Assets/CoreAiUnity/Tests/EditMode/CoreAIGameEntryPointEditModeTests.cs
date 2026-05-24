@@ -79,26 +79,45 @@ namespace CoreAI.Tests.EditMode
         {
             public int DebugCount { get; private set; }
             public int WarnCount { get; private set; }
-            public void Debug(string message, string tag = null) => DebugCount++;
-            public void Info(string message, string tag = null) { }
-            public void Warn(string message, string tag = null) => WarnCount++;
-            public void Error(string message, string tag = null) { }
+
+            public void Debug(string message, string tag = null)
+            {
+                DebugCount++;
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                WarnCount++;
+            }
+
+            public void Error(string message, string tag = null)
+            {
+            }
         }
 
         private sealed class StubOrchestrator : IAiOrchestrationService
         {
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
-                => Task.FromResult(string.Empty);
+            {
+                return Task.FromResult(string.Empty);
+            }
 
             public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
                 AiTaskRequest task,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 yield return new LlmStreamChunk { IsDone = true };
                 await Task.CompletedTask;
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         private sealed class StubMemoryStore : IAgentMemoryStore
@@ -109,11 +128,26 @@ namespace CoreAI.Tests.EditMode
                 return false;
             }
 
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<ChatMessage>();
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return System.Array.Empty<ChatMessage>();
+            }
         }
     }
 }

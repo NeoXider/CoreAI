@@ -26,20 +26,30 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly int _n;
 
-            public FlatTokenEstimator(int n) => _n = Math.Max(1, n);
+            public FlatTokenEstimator(int n)
+            {
+                _n = Math.Max(1, n);
+            }
 
-            public int EstimateText(string text) => _n;
+            public int EstimateText(string text)
+            {
+                return _n;
+            }
         }
 
         private sealed class FixedHistoryBudgetPolicy : IContextBudgetPolicy
         {
             private readonly int _historyBudget;
 
-            public FixedHistoryBudgetPolicy(int historyBudget) =>
+            public FixedHistoryBudgetPolicy(int historyBudget)
+            {
                 _historyBudget = Math.Max(1, historyBudget);
+            }
 
-            public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator) =>
-                new(8192, 256, 50, _historyBudget, 0);
+            public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator)
+            {
+                return new ContextBudget(8192, 256, 50, _historyBudget, 0);
+            }
         }
 
         /// <summary>Counts compaction-role calls separately from orchestrator/main LLM calls.</summary>
@@ -48,9 +58,15 @@ namespace CoreAI.Tests.EditMode
             private readonly ILlmClient _inner;
             public int CompactionCompletes { get; private set; }
 
-            public SplitCountingLlm(ILlmClient inner) => _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            public SplitCountingLlm(ILlmClient inner)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -79,11 +95,21 @@ namespace CoreAI.Tests.EditMode
                 return false;
             }
 
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
 
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
@@ -99,12 +125,17 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command) { }
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
         }
 
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class NullSys : IAgentSystemPromptProvider
@@ -214,9 +245,9 @@ namespace CoreAI.Tests.EditMode
             SeedHistory(memProg, 8);
 
             StubLlmClient stub = new();
-            SplitCountingLlm counting = new SplitCountingLlm(stub);
+            SplitCountingLlm counting = new(stub);
 
-            var summaryStore = new InMemoryConversationSummaryStore();
+            InMemoryConversationSummaryStore summaryStore = new();
             ITokenEstimator compactEstimator = new FlatTokenEstimator(10);
             IConversationContextManager ctxMgr = ConversationContextManagerFactories.Create(
                 true,
@@ -225,7 +256,7 @@ namespace CoreAI.Tests.EditMode
                 counting,
                 null);
 
-            StubCoreSettingsWithCompaction settings = new StubCoreSettingsWithCompaction();
+            StubCoreSettingsWithCompaction settings = new();
 
             AgentMemoryPolicy policySmart = MakePolicyForRole(smartRole);
             AiOrchestrator orchSmart = new(
@@ -247,7 +278,7 @@ namespace CoreAI.Tests.EditMode
             Assert.GreaterOrEqual(counting.CompactionCompletes, 1, "Smart role should trigger auxiliary compaction.");
 
             StubLlmClient stub2 = new();
-            SplitCountingLlm counting2 = new SplitCountingLlm(stub2);
+            SplitCountingLlm counting2 = new(stub2);
             IConversationContextManager ctxMgr2 = ConversationContextManagerFactories.Create(
                 true,
                 new InMemoryConversationSummaryStore(),

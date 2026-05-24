@@ -14,9 +14,9 @@ namespace CoreAI.Ai
     {
         private readonly ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
-        private readonly CoreAI.Logging.ILog _logger;
+        private readonly ILog _logger;
 
-        public LuaTool(ILuaExecutor executor, ICoreAISettings settings, CoreAI.Logging.ILog logger)
+        public LuaTool(ILuaExecutor executor, ICoreAISettings settings, ILog logger)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -49,13 +49,13 @@ namespace CoreAI.Ai
 
             if (_settings.LogToolCalls)
             {
-                _logger.Info( $"[Tool Call] execute_lua: code length={code.Length}");
+                _logger.Info($"[Tool Call] execute_lua: code length={code.Length}");
             }
 
             if (_settings.LogToolCallArguments)
             {
                 string preview = code.Length > 150 ? code.Substring(0, 150) : code;
-                _logger.Info( $"  code preview: {preview}");
+                _logger.Info($"  code preview: {preview}");
             }
 
             try
@@ -66,7 +66,7 @@ namespace CoreAI.Ai
                 {
                     string outputPreview =
                         result.Output?.Length > 100 ? result.Output.Substring(0, 100) : result.Output;
-                    _logger.Info( 
+                    _logger.Info(
                         $"[Tool Call] execute_lua: {(result.Success ? "SUCCESS" : "FAILED")} - output={outputPreview}");
                 }
 
@@ -76,7 +76,7 @@ namespace CoreAI.Ai
             {
                 if (_settings.LogToolCallResults)
                 {
-                    _logger.Error( $"[Tool Call] execute_lua: FAILED - {ex.Message}");
+                    _logger.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}");
                 }
 
                 return SerializeResult(new LuaResult

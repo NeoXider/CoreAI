@@ -6,16 +6,7 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Factory for the <c>call_skill_tool</c> proxy meta-tool.
-    /// <para>
-    /// Routes tool calls to skill tools without registering them in the model's tool list.
-    /// The model calls: <c>call_skill_tool(tool_name, arguments_json)</c>
-    /// and the proxy finds the real tool by name and executes it.
-    /// </para>
-    /// <para>
-    /// This keeps the model's tool count at exactly 2 (read_skill + call_skill_tool)
-    /// regardless of how many skill tools exist — critical for token efficiency.
-    /// </para>
+    /// LLM tool that invokes a named runtime skill.
     /// </summary>
     internal static class CallSkillToolLlmTool
     {
@@ -25,13 +16,19 @@ namespace CoreAI.Ai
         public static DelegateLlmTool Create(IReadOnlyList<SkillSet> skills)
         {
             if (skills == null)
+            {
                 throw new ArgumentNullException(nameof(skills));
+            }
 
-            // Build a flat lookup: tool_name → (SkillSet, ILlmTool)
+            /* Implementation note in English. */
             Dictionary<string, ToolEntry> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (SkillSet skill in skills)
             {
-                if (skill?.Tools == null) continue;
+                if (skill?.Tools == null)
+                {
+                    continue;
+                }
+
                 foreach (ILlmTool tool in skill.Tools)
                 {
                     if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
@@ -41,8 +38,10 @@ namespace CoreAI.Ai
                 }
             }
 
-            object CallSkillToolFn(string tool_name, string arguments_json) =>
-                Execute(tool_name, arguments_json, toolsByName);
+            object CallSkillToolFn(string tool_name, string arguments_json)
+            {
+                return Execute(tool_name, arguments_json, toolsByName);
+            }
 
             DelegateLlmTool proxy = new(
                 "call_skill_tool",
@@ -119,6 +118,7 @@ namespace CoreAI.Ai
                 {
                     return action.DynamicInvoke(json);
                 }
+
                 return new { error = $"Invalid JSON: {json}" };
             }
 
@@ -129,7 +129,7 @@ namespace CoreAI.Ai
                 JToken token = null;
 
                 // Try exact name match, then case-insensitive
-                foreach (var prop in args)
+                foreach (KeyValuePair<string, JToken> prop in args)
                 {
                     if (string.Equals(prop.Key, param.Name, StringComparison.OrdinalIgnoreCase))
                     {

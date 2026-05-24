@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace CoreAI.Infrastructure.Llm
@@ -17,7 +17,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Attempts to refresh the backend authorization. Returns <c>true</c> when the
         /// caller should retry the original request exactly once. Implementations must be
-        /// safe under concurrent invocation — single-flight via <see cref="SemaphoreSlim"/>
+/// Executes refresh async.
         /// or equivalent is recommended.
         /// </summary>
         Task<bool> RefreshAsync(CancellationToken cancellationToken);

@@ -2,7 +2,6 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Categorises validation issues surfaced by <see cref="AgentBuilder.ValidateOnBuild"/>.
-    /// Codes are stable strings — safe to switch on or surface in editor tooling.
     /// </summary>
     public enum AgentBuilderIssueCode
     {
@@ -18,7 +17,7 @@ namespace CoreAI.Ai
         /// <summary><c>WithChatHistory(...)</c> was enabled with a non-positive message cap.</summary>
         InvalidChatHistorySize,
 
-        /// <summary><c>WithTemperature(...)</c> set outside the typical 0.0–2.0 range.</summary>
+        /// <summary><c>WithTemperature(...)</c> was configured outside the supported sampling range.</summary>
         TemperatureOutOfRange
     }
 
@@ -35,6 +34,6 @@ namespace CoreAI.Ai
         }
 
         public AgentBuilderIssueCode Code { get; }
-        public string Message { get; } 
+        public string Message { get; }
     }
 }

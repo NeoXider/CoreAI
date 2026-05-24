@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -45,11 +46,22 @@ namespace CoreAI.Tests.PlayMode
         {
             meaiClient = null;
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
-            if (settings == null) return false;
+            if (settings == null)
+            {
+                return false;
+            }
+
             if (settings.BackendType != LlmBackendType.OpenAiHttp &&
-                settings.BackendType != LlmBackendType.Auto) return false;
+                settings.BackendType != LlmBackendType.Auto)
+            {
+                return false;
+            }
+
             if (string.IsNullOrEmpty(settings.ApiBaseUrl) ||
-                string.IsNullOrEmpty(settings.ModelName)) return false;
+                string.IsNullOrEmpty(settings.ModelName))
+            {
+                return false;
+            }
 
             _ = GameLoggerUnscopedFallback.Instance;
             meaiClient = new MeaiOpenAiChatClient(new SettingsHttpAdapter(settings));
@@ -60,7 +72,12 @@ namespace CoreAI.Tests.PlayMode
         private sealed class SettingsHttpAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
-            public SettingsHttpAdapter(CoreAISettingsAsset s) => _s = s;
+
+            public SettingsHttpAdapter(CoreAISettingsAsset s)
+            {
+                _s = s;
+            }
+
             public string ApiBaseUrl => _s.ApiBaseUrl;
             public string ApiKey => _s.ApiKey;
             public string AuthorizationHeader => "";
@@ -81,17 +98,19 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator WrongCasing_Repair_ToolExecuted_RealLlmContinues()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
+            {
                 Assert.Ignore("HTTP backend not configured");
+            }
 
             // First call: scripted "MEMORY" (wrong case). Subsequent calls: real LLM.
-            var hybrid = new SingleShotScriptedMeaiClient(realMeai,
+            SingleShotScriptedMeaiClient hybrid = new(realMeai,
                 "{\"name\":\"MEMORY\",\"arguments\":{\"action\":\"write\",\"content\":\"Wrong casing repaired by TryRepairToolName\"}}");
 
-            var memoryStore = new StatefulMemoryStore();
-            var client = new MeaiLlmClient(hybrid, GameLoggerUnscopedFallback.Instance,
+            StatefulMemoryStore memoryStore = new();
+            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
                 new StubSettings(), memoryStore);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -101,7 +120,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var box = new ResultBox();
+            ResultBox box = new();
             Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
             yield return WaitTask(task, 120f, "WrongCasing_Repair");
 
@@ -130,17 +149,19 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator UnknownTool_ErrorFedBack_RealLlmSelfCorrects()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
+            {
                 Assert.Ignore("HTTP backend not configured");
+            }
 
             // First call: scripted unknown tool. Subsequent calls: real LLM.
-            var hybrid = new SingleShotScriptedMeaiClient(realMeai,
+            SingleShotScriptedMeaiClient hybrid = new(realMeai,
                 "{\"name\":\"nonexistent_tool\",\"arguments\":{\"data\":\"important info\"}}");
 
-            var memoryStore = new StatefulMemoryStore();
-            var client = new MeaiLlmClient(hybrid, GameLoggerUnscopedFallback.Instance,
+            StatefulMemoryStore memoryStore = new();
+            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
                 new StubSettings(), memoryStore);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -151,7 +172,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var box = new ResultBox();
+            ResultBox box = new();
             Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
             yield return WaitTask(task, 180f, "UnknownTool_SelfCorrection");
 
@@ -174,7 +195,8 @@ namespace CoreAI.Tests.PlayMode
             }
 
             // Aggregated stream Text may still include the scripted unknown-tool JSON before the model self-corrects.
-            Assert.GreaterOrEqual(hybrid.StreamCalls, 2, "Expected scripted first turn then at least one real LLM stream.");
+            Assert.GreaterOrEqual(hybrid.StreamCalls, 2,
+                "Expected scripted first turn then at least one real LLM stream.");
         }
 
         // =========================================================================
@@ -186,17 +208,19 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator MixedCaseWithTextPrefix_ToolRepaired_TextPreserved()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
+            {
                 Assert.Ignore("HTTP backend not configured");
+            }
 
             // First call: scripted text + wrong case tool JSON
-            var hybrid = new SingleShotScriptedMeaiClient(realMeai,
+            SingleShotScriptedMeaiClient hybrid = new(realMeai,
                 "Working on it... {\"name\":\"Memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Mixed case repair test\"}}");
 
-            var memoryStore = new StatefulMemoryStore();
-            var client = new MeaiLlmClient(hybrid, GameLoggerUnscopedFallback.Instance,
+            StatefulMemoryStore memoryStore = new();
+            MeaiLlmClient client = new(hybrid, GameLoggerUnscopedFallback.Instance,
                 new StubSettings(), memoryStore);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt = "After saving, say 'Done.'",
@@ -204,7 +228,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var box = new ResultBox();
+            ResultBox box = new();
             Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
             yield return WaitTask(task, 120f, "MixedCase_Repair");
 
@@ -232,12 +256,15 @@ namespace CoreAI.Tests.PlayMode
             ILlmClient client, LlmCompletionRequest request,
             ResultBox box, CancellationToken ct)
         {
-            var sb = new System.Text.StringBuilder();
+            StringBuilder sb = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Text))
+                {
                     sb.Append(chunk.Text);
+                }
             }
+
             box.FullText = sb.ToString();
         }
 
@@ -246,7 +273,10 @@ namespace CoreAI.Tests.PlayMode
             return PlayModeTestAwait.WaitTask(task, timeoutSec, label);
         }
 
-        private sealed class ResultBox { public string FullText = ""; }
+        private sealed class ResultBox
+        {
+            public string FullText = "";
+        }
 
         /// <summary>
         /// MEAI-level scripted client: first streaming call returns a scripted response,
@@ -271,7 +301,9 @@ namespace CoreAI.Tests.PlayMode
             public Task<MEAI.ChatResponse> GetResponseAsync(
                 IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
                 CancellationToken ct = default)
-                => _real.GetResponseAsync(messages, options, ct);
+            {
+                return _real.GetResponseAsync(messages, options, ct);
+            }
 
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
@@ -287,7 +319,7 @@ namespace CoreAI.Tests.PlayMode
                 else
                 {
                     // Real LLM for all subsequent turns
-                    await foreach (var u in _real.GetStreamingResponseAsync(messages, options, ct))
+                    await foreach (MEAI.ChatResponseUpdate u in _real.GetStreamingResponseAsync(messages, options, ct))
                     {
                         yield return u;
                     }
@@ -295,19 +327,47 @@ namespace CoreAI.Tests.PlayMode
             }
 
             public object GetService(Type serviceType, object serviceKey = null)
-                => _real.GetService(serviceType, serviceKey);
-            public void Dispose() => _real.Dispose();
+            {
+                return _real.GetService(serviceType, serviceKey);
+            }
+
+            public void Dispose()
+            {
+                _real.Dispose();
+            }
         }
 
         private sealed class StatefulMemoryStore : IAgentMemoryStore
         {
             private readonly Dictionary<string, AgentMemoryState> _s = new();
-            public bool TryLoad(string r, out AgentMemoryState s) => _s.TryGetValue(r, out s);
-            public void Save(string r, AgentMemoryState s) => _s[r] = s;
-            public void Clear(string r) => _s.Remove(r);
-            public void ClearChatHistory(string r) { }
-            public void AppendChatMessage(string r, string role, string c, bool p = true) { }
-            public ChatMessage[] GetChatHistory(string r, int m = 0) => Array.Empty<ChatMessage>();
+
+            public bool TryLoad(string r, out AgentMemoryState s)
+            {
+                return _s.TryGetValue(r, out s);
+            }
+
+            public void Save(string r, AgentMemoryState s)
+            {
+                _s[r] = s;
+            }
+
+            public void Clear(string r)
+            {
+                _s.Remove(r);
+            }
+
+            public void ClearChatHistory(string r)
+            {
+            }
+
+            public void AppendChatMessage(string r, string role, string c, bool p = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string r, int m = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class StubSettings : ICoreAISettings

@@ -4,15 +4,15 @@ using CoreAI.Sandbox;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Регистрация игровых/отладочных API для Lua (report, add, …).
+    /// Defines the contract for game lua runtime bindings implementations.
     /// </summary>
     public interface IGameLuaRuntimeBindings
     {
-        /// <summary>Зарегистрировать делегаты, доступные из Lua (имена → C# callback).</summary>
+        /// <summary>Registers gameplay-facing Lua APIs in the provided registry.</summary>
         void RegisterGameplayApis(LuaApiRegistry registry);
     }
 
-    /// <summary>Без логгера Unity — для юнит-тестов ядра.</summary>
+    /// <summary>Registers the default CoreAI Lua runtime APIs.</summary>
     public sealed class CoreDefaultLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
         /// <inheritdoc />

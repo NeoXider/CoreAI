@@ -10,6 +10,7 @@ namespace CoreAI.Ai
     public sealed class InMemoryConversationSummaryStore : IConversationSummaryStore
     {
         private readonly object _lock = new();
+
         private readonly Dictionary<string, string> _byRole =
             new(StringComparer.Ordinal);
 

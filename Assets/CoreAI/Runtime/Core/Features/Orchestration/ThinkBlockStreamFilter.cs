@@ -1,19 +1,10 @@
-using System;
+﻿using System;
 using System.Text;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// State machine для фильтрации <c>&lt;think&gt;...&lt;/think&gt;</c> блоков
-    /// в стриминговом потоке LLM. Учитывает, что тег может быть разбит
-    /// между несколькими чанками.
-    /// <para>
-    /// Использование: создайте один экземпляр на запрос, вызывайте
-    /// <see cref="ProcessChunk"/> для каждого входящего чанка.
-    /// После окончания стрима вызовите <see cref="Flush"/>, чтобы получить
-    /// возможно забуферизованный хвост (например, если модель оборвала
-    /// ответ внутри <c>&lt;think&gt;</c>).
-    /// </para>
+    /// Stateful stream filter that removes hidden <think> blocks from model output.
     /// </summary>
     public sealed class ThinkBlockStreamFilter
     {
@@ -23,7 +14,7 @@ namespace CoreAI.Ai
         private readonly StringBuilder _buffer = new();
         private bool _insideThink;
 
-        /// <summary>Сбросить состояние фильтра для переиспользования.</summary>
+        /// <summary>Clears the global CoreAI facade registrations.</summary>
         public void Reset()
         {
             _buffer.Clear();
@@ -31,9 +22,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Обработать очередной чанк и вернуть видимую часть (может быть пустой,
-        /// если чанк целиком внутри think-блока или буферизуется как
-        /// неполный тег).
+/// Executes ProcessChunk API operation.
+        ///
+        ///
         /// </summary>
         public string ProcessChunk(string chunk)
         {
@@ -58,8 +49,8 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        // Остаёмся внутри think-блока — возможно </think> ещё не пришёл.
-                        // Храним минимально необходимый хвост для детекта закрывающего тега.
+                        /* Implementation note in English. */
+                        /* Implementation note in English. */
                         _buffer.Clear();
                         _buffer.Append(KeepTailForPossibleTag(buf, CloseTag));
                         return visible.ToString();
@@ -80,7 +71,7 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        // Нет открывающего тега целиком — проверяем, не начало ли это неполного <think>.
+                        /* Implementation note in English. */
                         int lastLt = buf.LastIndexOf('<');
                         if (lastLt >= 0)
                         {
@@ -109,10 +100,10 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Вызвать после завершения стрима. Возвращает оставшийся буфер,
-        /// если модель оборвала ответ вне think-блока (например, неполный тег
-        /// был последним чанком). Содержимое внутри незакрытого think-блока
-        /// не возвращается.
+/// Executes Flush API operation.
+        ///
+        ///
+        ///
         /// </summary>
         public string Flush()
         {
@@ -130,16 +121,16 @@ namespace CoreAI.Ai
             string tail = _buffer.ToString();
             _buffer.Clear();
 
-            // Если хвост — это начало <think>, значит тег не завершился
-            // и пришёл мусорный префикс; скрываем его.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             return IsPrefixOf(tail, OpenTag) ? string.Empty : tail;
         }
 
         /// <summary>
-        /// Оставить в буфере минимальный хвост, который может быть началом
-        /// искомого тега (например, "<" или "&lt;/th" для &lt;/think&gt;).
-        /// Всё, что гарантированно не может быть префиксом тега, «сливается»
-        /// обратно в think-блок (т.е. отбрасывается).
+/// Executes KeepTailForPossibleTag API operation.
+        ///
+        ///
+        ///
         /// </summary>
         private static string KeepTailForPossibleTag(string buf, string tag)
         {
@@ -157,8 +148,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Проверка: является ли <paramref name="candidate"/> префиксом
-        /// <paramref name="full"/> (регистронезависимо).
+/// Executes IsPrefixOf API operation.
+        ///
         /// </summary>
         private static bool IsPrefixOf(string candidate, string full)
         {

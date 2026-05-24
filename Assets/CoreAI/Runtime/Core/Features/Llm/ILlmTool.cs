@@ -3,26 +3,25 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Инструмент (функция), который может вызвать LLM.
-    /// Используется для tool calling - модель может запросить выполнение инструмента.
+    /// Defines the contract for llm tool implementations.
     /// </summary>
     public interface ILlmTool
     {
-        /// <summary>Уникальное имя инструмента.</summary>
+        /// <summary>Public name.</summary>
         string Name { get; }
 
-        /// <summary>Описание что делает инструмент.</summary>
+        /// <summary>Human-readable description.</summary>
         string Description { get; }
 
-        /// <summary>JSON schema параметров инструмента.</summary>
+        /// <summary>JSON schema describing tool parameters.</summary>
         string ParametersSchema { get; }
 
-        /// <summary>Разрешить модели вызывать этот инструмент с теми же параметрами несколько раз подряд.</summary>
+        /// <summary>Gets whether duplicate calls to this tool are allowed.</summary>
         bool AllowDuplicates { get; }
     }
 
     /// <summary>
-    /// Базовый класс для простых инструментов с JSON параметрами.
+    /// Base class for strongly typed LLM tools.
     /// </summary>
     public abstract class LlmToolBase : ILlmTool
     {

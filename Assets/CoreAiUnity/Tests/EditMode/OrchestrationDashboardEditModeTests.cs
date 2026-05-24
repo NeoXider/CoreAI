@@ -1,3 +1,4 @@
+using System.Reflection;
 using CoreAI.Diagnostics;
 using NUnit.Framework;
 using UnityEngine;
@@ -48,9 +49,9 @@ namespace CoreAI.Tests.EditMode
             // InvalidOperationException, когда legacy Input Manager отключён в проекте,
             // и Update крашил каждый кадр. Smoke-тест ловит регресс: метод вызывается
             // безопасно при любом значении ENABLE_LEGACY_INPUT_MANAGER / ENABLE_INPUT_SYSTEM.
-            var update = typeof(OrchestrationDashboard).GetMethod(
+            MethodInfo update = typeof(OrchestrationDashboard).GetMethod(
                 "Update",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.IsNotNull(update, "OrchestrationDashboard must declare a private Update method.");
 

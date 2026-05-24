@@ -3,9 +3,7 @@ using System;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Инструмент, оборачивающий произвольный C# Delegate.
-    /// Позволяет передавать лямбда-выражения и методы с параметрами напрямую в модель,
-    /// а MEAI (Microsoft.Extensions.AI) автоматически генерирует для них JSON схему.
+    /// LLM tool implemented by a delegate callback.
     /// </summary>
     public sealed class DelegateLlmTool : ILlmTool
     {
@@ -13,11 +11,10 @@ namespace CoreAI.Ai
         public string Description { get; }
 
         /// <summary>
-        /// Всегда возвращает "{}" т.к. реальная схема генерируется в MeaiLlmClient 
-        /// через AIFunctionFactory на основе Delegate.
+        /// JSON schema that describes tool parameters.
         /// </summary>
         public string ParametersSchema => "{}";
-        
+
         public bool AllowDuplicates { get; set; }
 
         public Delegate ActionDelegate { get; }

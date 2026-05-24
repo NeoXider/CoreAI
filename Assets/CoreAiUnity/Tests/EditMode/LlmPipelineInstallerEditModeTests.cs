@@ -18,12 +18,32 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class StubMemoryStore : IAgentMemoryStore
         {
-            public bool TryLoad(string roleId, out AgentMemoryState state) { state = default; return false; }
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => null;
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = default;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -35,13 +55,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildHttpClient_PassesMemoryStore_ToOpenAiChatLlmClient()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             // Set minimum required fields for HTTP client creation
             SetField(settings, "apiBaseUrl", "http://localhost:1234/v1");
             SetField(settings, "modelName", "test-model");
 
-            var memoryStore = new StubMemoryStore();
+            StubMemoryStore memoryStore = new();
 
             ILlmClient client = LlmPipelineInstaller.BuildHttpClient(
                 settings, LlmExecutionMode.ClientOwnedApi, memoryStore);
@@ -51,16 +71,16 @@ namespace CoreAI.Tests.EditMode
                 "ClientOwnedApi mode should return OpenAiChatLlmClient");
 
             // Verify memory store was propagated by checking the inner MeaiLlmClient
-            var meaiField = typeof(OpenAiChatLlmClient)
+            FieldInfo meaiField = typeof(OpenAiChatLlmClient)
                 .GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(meaiField, "Should find _client field on OpenAiChatLlmClient");
-            var meaiClient = meaiField.GetValue(client);
+            object meaiClient = meaiField.GetValue(client);
             Assert.IsNotNull(meaiClient, "MeaiLlmClient should exist");
 
-            var storeField = meaiClient.GetType()
+            FieldInfo storeField = meaiClient.GetType()
                 .GetField("_memoryStore", BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(storeField, "Should find _memoryStore field on MeaiLlmClient");
-            var actualStore = storeField.GetValue(meaiClient);
+            object actualStore = storeField.GetValue(meaiClient);
 
             Assert.AreSame(memoryStore, actualStore,
                 "BuildHttpClient must propagate memoryStore to MeaiLlmClient — " +
@@ -70,7 +90,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildHttpClient_WithoutMemoryStore_StillCreatesClient()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             SetField(settings, "apiBaseUrl", "http://localhost:1234/v1");
             SetField(settings, "modelName", "test-model");
 
@@ -80,12 +100,12 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(client, "Should work without memoryStore (backwards compatible)");
 
             // memoryStore should be null in the inner client
-            var meaiField = typeof(OpenAiChatLlmClient)
+            FieldInfo meaiField = typeof(OpenAiChatLlmClient)
                 .GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
-            var meaiClient = meaiField?.GetValue(client);
-            var storeField = meaiClient?.GetType()
+            object meaiClient = meaiField?.GetValue(client);
+            FieldInfo storeField = meaiClient?.GetType()
                 .GetField("_memoryStore", BindingFlags.NonPublic | BindingFlags.Instance);
-            var actualStore = storeField?.GetValue(meaiClient);
+            object actualStore = storeField?.GetValue(meaiClient);
 
             Assert.IsNull(actualStore, "memoryStore should be null when not provided");
         }
@@ -93,11 +113,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildHttpClient_ClientLimited_StillPassesMemoryStore()
         {
-            var settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             SetField(settings, "apiBaseUrl", "http://localhost:1234/v1");
             SetField(settings, "modelName", "test-model");
 
-            var memoryStore = new StubMemoryStore();
+            StubMemoryStore memoryStore = new();
 
             ILlmClient client = LlmPipelineInstaller.BuildHttpClient(
                 settings, LlmExecutionMode.ClientLimited, memoryStore);
@@ -107,18 +127,18 @@ namespace CoreAI.Tests.EditMode
             Assert.IsInstanceOf<ClientLimitedLlmClientDecorator>(client,
                 "ClientLimited should wrap in ClientLimitedLlmClientDecorator");
 
-            var innerField = typeof(ClientLimitedLlmClientDecorator)
+            FieldInfo innerField = typeof(ClientLimitedLlmClientDecorator)
                 .GetField("_inner", BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(innerField, "Should find _inner field");
-            var innerClient = innerField.GetValue(client) as OpenAiChatLlmClient;
+            OpenAiChatLlmClient innerClient = innerField.GetValue(client) as OpenAiChatLlmClient;
             Assert.IsNotNull(innerClient, "Inner client should be OpenAiChatLlmClient");
 
-            var meaiField = typeof(OpenAiChatLlmClient)
+            FieldInfo meaiField = typeof(OpenAiChatLlmClient)
                 .GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
-            var meaiClient = meaiField?.GetValue(innerClient);
-            var storeField = meaiClient?.GetType()
+            object meaiClient = meaiField?.GetValue(innerClient);
+            FieldInfo storeField = meaiClient?.GetType()
                 .GetField("_memoryStore", BindingFlags.NonPublic | BindingFlags.Instance);
-            var actualStore = storeField?.GetValue(meaiClient);
+            object actualStore = storeField?.GetValue(meaiClient);
 
             Assert.AreSame(memoryStore, actualStore,
                 "ClientLimited mode must also propagate memoryStore through the decorator chain");
@@ -126,7 +146,7 @@ namespace CoreAI.Tests.EditMode
 
         private static void SetField(object obj, string fieldName, object value)
         {
-            var field = obj.GetType().GetField(fieldName,
+            FieldInfo field = obj.GetType().GetField(fieldName,
                 BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy);
             if (field == null)
             {

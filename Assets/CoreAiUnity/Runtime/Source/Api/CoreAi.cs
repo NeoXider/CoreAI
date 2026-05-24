@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -17,7 +17,7 @@ namespace CoreAI
     /// <see cref="IAiOrchestrationService"/> (queue, metrics, command publish) without hand-wiring VContainer.
     /// <para><b>Quick start.</b> Add <see cref="CoreAILifetimeScope"/> to a scene, then:</para>
     /// <code>
-    /// // Buffered reply (always await; do not use .Result/.Wait on Unity’s main thread):
+    ///
     /// string answer = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
     ///
     /// // Streaming string chunks:
@@ -86,7 +86,8 @@ namespace CoreAI
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            await foreach (LlmStreamChunk chunk in svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken))
+            await foreach (LlmStreamChunk chunk in
+                           svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(chunk.Error))
                 {
@@ -212,7 +213,10 @@ namespace CoreAI
         }
 
         /// <summary>Gets or resolves the chat service.</summary>
-        public static CoreAiChatService GetChatService() => RequireChatService();
+        public static CoreAiChatService GetChatService()
+        {
+            return RequireChatService();
+        }
 
         /// <summary>
         /// Non-throwing resolver: succeeds when <see cref="CoreAILifetimeScope"/> is present with a usable <see cref="ILlmClient"/>.
@@ -232,7 +236,10 @@ namespace CoreAI
         }
 
         /// <summary>Gets or resolves <see cref="IAiOrchestrationService"/>.</summary>
-        public static IAiOrchestrationService GetOrchestrator() => RequireOrchestrator();
+        public static IAiOrchestrationService GetOrchestrator()
+        {
+            return RequireOrchestrator();
+        }
 
         /// <summary>
         /// Non-throwing orchestrator resolver (expects <see cref="IAiOrchestrationService"/> after <c>RegisterCorePortable()</c>).
@@ -256,7 +263,11 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_settings != null) return _settings;
+                if (_settings != null)
+                {
+                    return _settings;
+                }
+
                 TryResolve(out _, out _, out _settings);
                 return _settings;
             }
@@ -267,7 +278,8 @@ namespace CoreAI
         /// <param name="toolName">Tool name.</param>
         /// <param name="arguments">Model-provided arguments (optional).</param>
         /// <param name="result">Tool return payload (optional).</param>
-        public delegate void ToolExecutedHandler(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result);
+        public delegate void ToolExecutedHandler(string roleId, string toolName,
+            IDictionary<string, object?>? arguments, object? result);
 
         /// <summary>
         /// Raised after the MEAI stack executes a tool (VFX, audio, analytics, etc.).
@@ -278,7 +290,8 @@ namespace CoreAI
         public static event ToolExecutedHandler? OnToolExecuted;
 
         /// <summary>Internal hook for <c>SmartToolCallingChatClient</c> to surface tool calls to <see cref="OnToolExecuted"/>.</summary>
-        internal static void NotifyToolExecuted(string roleId, string toolName, IDictionary<string, object?>? arguments, object? result)
+        internal static void NotifyToolExecuted(string roleId, string toolName, IDictionary<string, object?>? arguments,
+            object? result)
         {
             try
             {
@@ -313,16 +326,24 @@ namespace CoreAI
                 {
                     try
                     {
-                        var memStore = (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
+                        IAgentMemoryStore? memStore =
+                            (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
                         if (memStore != null)
                         {
-                            if (clearLongTermMemory) memStore.Clear(roleId);
-                            if (clearChatHistory) memStore.ClearChatHistory(roleId);
+                            if (clearLongTermMemory)
+                            {
+                                memStore.Clear(roleId);
+                            }
+
+                            if (clearChatHistory)
+                            {
+                                memStore.ClearChatHistory(roleId);
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        UnityEngine.Debug.LogWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
+                        Debug.LogWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
                     }
                 }
             }
@@ -332,7 +353,11 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_chatService != null) return _chatService;
+                if (_chatService != null)
+                {
+                    return _chatService;
+                }
+
                 if (!TryResolve(out _chatService, out _, out _settings) || _chatService == null)
                 {
                     throw new InvalidOperationException(
@@ -348,7 +373,11 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_orchestrator != null) return _orchestrator;
+                if (_orchestrator != null)
+                {
+                    return _orchestrator;
+                }
+
                 if (!TryResolve(out _, out _orchestrator, out _settings) || _orchestrator == null)
                 {
                     throw new InvalidOperationException(
@@ -385,7 +414,7 @@ namespace CoreAI
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CoreAi] Resolve IAiOrchestrationService: {ex.Message}");
+                Debug.LogWarning($"[CoreAi] Resolve IAiOrchestrationService: {ex.Message}");
             }
 
             try
@@ -394,7 +423,7 @@ namespace CoreAI
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CoreAi] Resolve ICoreAISettings: {ex.Message}");
+                Debug.LogWarning($"[CoreAi] Resolve ICoreAISettings: {ex.Message}");
             }
 
             if (_chatService == null)

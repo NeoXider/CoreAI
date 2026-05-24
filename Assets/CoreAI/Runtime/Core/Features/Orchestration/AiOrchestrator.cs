@@ -66,7 +66,7 @@ namespace CoreAI.Ai
             _metrics = metrics ?? new NullAiOrchestrationMetrics();
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _contextManager = contextManager ??
-                new DeterministicConversationContextManager(new InMemoryConversationSummaryStore());
+                              new DeterministicConversationContextManager(new InMemoryConversationSummaryStore());
             _traceSink = traceSink ?? new NullAgentTurnTraceSink();
             _contextBudgetPolicy = contextBudgetPolicy ?? new DefaultContextBudgetPolicy();
             _tokenEstimator = tokenEstimator ?? new HeuristicTokenEstimator();
@@ -139,7 +139,8 @@ namespace CoreAI.Ai
                 {
                     HistoryTokenBudget = historyBudget,
                     SourceBudget = budget,
-                    UseLlmContextCompaction = _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
+                    UseLlmContextCompaction =
+                        _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
                     MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0
                 };
             }
@@ -218,7 +219,7 @@ namespace CoreAI.Ai
                     {
                         // WebGL player: do not detach from the captured Unity SynchronizationContext.
                         // Single-threaded IL2CPP has no real thread pool, so ConfigureAwait(false) here
-                        // queues the resumption to TaskScheduler.Default and the awaiter never resumes —
+                        /* Implementation note in English. */
                         // chat UI stays on typing dots even though the LLM result has arrived.
 #if UNITY_WEBGL && !UNITY_EDITOR
                         result = await _llm
@@ -365,12 +366,12 @@ namespace CoreAI.Ai
             }
 
             RequestBundle bundle = await BuildRequestAsync(task, 0, cancellationToken).ConfigureAwait(false);
-            System.Text.StringBuilder accumulated = new();
+            StringBuilder accumulated = new();
             int chunkCount = 0;
             string terminalError = null;
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
-            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
+            /* Implementation note in English. */
 
             LlmCompletionRequest req = BuildCompletionRequest(
                 bundle, task, bundle.UserPayload,
@@ -459,7 +460,14 @@ namespace CoreAI.Ai
                 sw.Stop();
                 if (enumerator != null)
                 {
-                    try { await enumerator.DisposeAsync(); } catch { /* swallow */ }
+                    try
+                    {
+                        await enumerator.DisposeAsync();
+                    }
+                    catch
+                    {
+                        /* swallow */
+                    }
                 }
 
                 _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
@@ -506,13 +514,14 @@ namespace CoreAI.Ai
             public int ChatHistoryMessageCount;
         }
 
-        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory)> BuildChatHistoryAsync(
-            string roleId,
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig,
-            string system,
-            ConversationContextBuildArgs buildArgs,
-            string traceId,
-            CancellationToken cancellationToken)
+        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory)>
+            BuildChatHistoryAsync(
+                string roleId,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                string system,
+                ConversationContextBuildArgs buildArgs,
+                string traceId,
+                CancellationToken cancellationToken)
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
@@ -562,7 +571,8 @@ namespace CoreAI.Ai
             return (resultSystem, chatHistory);
         }
 
-        private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse, string error)
+        private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse,
+            string error)
         {
             if (_traceSink == null || bundle == null)
             {
@@ -781,6 +791,7 @@ namespace CoreAI.Ai
                     sb.Append(": ");
                     sb.Append(SingleLine(tool.Description, 500));
                 }
+
                 sb.AppendLine();
 
                 if (!string.IsNullOrWhiteSpace(tool.ParametersSchema) && tool.ParametersSchema.Trim() != "{}")

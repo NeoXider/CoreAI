@@ -1,17 +1,17 @@
 namespace CoreAI.Authority
 {
     /// <summary>
-    /// Где разрешён запуск LLM/оркестратора в мультиплеере. В одиночке используйте <see cref="DefaultSoloNetworkPeer"/>.
+    /// Defines which network peers may execute AI-generated commands.
     /// </summary>
     public enum AiNetworkExecutionPolicy
     {
-        /// <summary>По умолчанию: ИИ может выполняться на каждом узле (дублирование вызовов — осознанный выбор).</summary>
+        /// <summary>Allows AI commands to execute on every participating peer.</summary>
         AllPeers = 0,
 
-        /// <summary>Только узел с авторитетом (хост / dedicated server / solo).</summary>
+        /// <summary>Allows AI commands to execute only on the authoritative host.</summary>
         HostOnly = 1,
 
-        /// <summary>Только «чистые» клиенты без роли хоста (не listen-server).</summary>
+        /// <summary>Allows AI commands to execute only on non-host client peers.</summary>
         ClientPeersOnly = 2
     }
 }

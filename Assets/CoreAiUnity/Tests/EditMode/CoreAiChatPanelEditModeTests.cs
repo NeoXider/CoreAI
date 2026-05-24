@@ -12,7 +12,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void IsEscapeKey_EscapeKeyCode_ReturnsTrue()
         {
-            bool isEscape = CoreAiChatPanel.IsEscapeKey(KeyCode.Escape, character: '\0');
+            bool isEscape = CoreAiChatPanel.IsEscapeKey(KeyCode.Escape, '\0');
             Assert.IsTrue(isEscape);
         }
 
@@ -48,13 +48,14 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void IsOpenChatHotkeyFromKeys_None_ReturnsFalse()
         {
-            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.None, KeyCode.C, '\0', false, false, false));
+            Assert.IsFalse(
+                CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.None, KeyCode.C, '\0', false, false, false));
         }
 
         [Test]
         public void IsOpenChatHotkeyFromKeys_WithCtrl_ReturnsFalse()
         {
-            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.C, '\0', ctrlHeld: true, false, false));
+            Assert.IsFalse(CoreAiChatPanel.IsOpenChatHotkeyFromKeys(KeyCode.C, KeyCode.C, '\0', true, false, false));
         }
 
         [Test]
@@ -66,55 +67,55 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void GetSendButtonPresentation_WhenIdle_ReturnsSendState()
         {
-            Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(isBusy: false));
-            Assert.AreEqual("Отправить сообщение", CoreAiChatPanel.GetSendButtonTooltip(isBusy: false));
+            Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(false));
+            Assert.AreEqual("Отправить сообщение", CoreAiChatPanel.GetSendButtonTooltip(false));
         }
 
         [Test]
         public void GetSendButtonPresentation_WhenBusy_ReturnsStopState()
         {
-            Assert.AreEqual("X", CoreAiChatPanel.GetSendButtonText(isBusy: true));
-            Assert.AreEqual("Остановить генерацию (Esc)", CoreAiChatPanel.GetSendButtonTooltip(isBusy: true));
+            Assert.AreEqual("X", CoreAiChatPanel.GetSendButtonText(true));
+            Assert.AreEqual("Остановить генерацию (Esc)", CoreAiChatPanel.GetSendButtonTooltip(true));
         }
 
         [Test]
         public void IsChatInputLocked_WhenStoppingOrClearing_ReturnsTrue()
         {
             Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(
-                isSending: false,
-                isStreaming: false,
-                isStopping: true,
-                isClearing: false));
+                false,
+                false,
+                true,
+                false));
 
             Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(
-                isSending: false,
-                isStreaming: false,
-                isStopping: false,
-                isClearing: true));
+                false,
+                false,
+                false,
+                true));
         }
 
         [Test]
         public void IsChatInputLocked_WhenNoBusyFlags_ReturnsFalse()
         {
             Assert.IsFalse(CoreAiChatPanel.IsChatInputLocked(
-                isSending: false,
-                isStreaming: false,
-                isStopping: false,
-                isClearing: false));
+                false,
+                false,
+                false,
+                false));
         }
 
         [Test]
         public void ShouldSubmitOnEnter_DefaultEnterSendsShiftEnterNewline()
         {
-            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: false, shiftHeld: false));
-            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: false, shiftHeld: true));
+            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(false, false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(false, true));
         }
 
         [Test]
         public void ShouldSubmitOnEnter_LegacyShiftEnterModeStillSupported()
         {
-            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: true, shiftHeld: false));
-            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(sendOnShiftEnter: true, shiftHeld: true));
+            Assert.IsFalse(CoreAiChatPanel.ShouldSubmitOnEnter(true, false));
+            Assert.IsTrue(CoreAiChatPanel.ShouldSubmitOnEnter(true, true));
         }
 
         /// <summary>
@@ -133,32 +134,32 @@ namespace CoreAI.Tests.EditMode
         public void ShouldSendButtonBeEnabled_WhenRequestIsRunning_ReturnsTrue()
         {
             Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                isSending: true,
-                isStreaming: false,
-                isStopping: false,
-                isClearing: false));
+                true,
+                false,
+                false,
+                false));
 
             Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                isSending: false,
-                isStreaming: true,
-                isStopping: false,
-                isClearing: false));
+                false,
+                true,
+                false,
+                false));
         }
 
         [Test]
         public void ShouldSendButtonBeEnabled_WhenStoppingOrClearing_ReturnsFalse()
         {
             Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                isSending: true,
-                isStreaming: true,
-                isStopping: true,
-                isClearing: false));
+                true,
+                true,
+                true,
+                false));
 
             Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                isSending: false,
-                isStreaming: false,
-                isStopping: false,
-                isClearing: true));
+                false,
+                false,
+                false,
+                true));
         }
 
         [Test]
@@ -166,7 +167,7 @@ namespace CoreAI.Tests.EditMode
         {
             string content = "{\"telemetry\":{},\"hint\":\"привет\",\"ai_task_source\":\"Chat\"}";
 
-            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: true);
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, true);
 
             Assert.AreEqual("привет", formatted);
         }
@@ -176,7 +177,7 @@ namespace CoreAI.Tests.EditMode
         {
             string content = "{\"hint\":\"не показывать\"}";
 
-            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: false);
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, false);
 
             Assert.AreEqual(content, formatted);
         }
@@ -186,7 +187,7 @@ namespace CoreAI.Tests.EditMode
         {
             string content = "{\"telemetry\":{},\"hint\":}";
 
-            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, isUser: true);
+            string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, true);
 
             Assert.AreEqual(content, formatted);
         }

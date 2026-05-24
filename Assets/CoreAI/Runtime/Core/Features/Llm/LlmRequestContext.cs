@@ -15,24 +15,24 @@ namespace CoreAI.Ai
     /// <see cref="IRequestHeaderProvider"/>:</b> they cover three layers and never conflict.
     /// </para>
     /// <list type="bullet">
-    /// <item><see cref="LlmCompletionRequest.IdempotencyKey"/> — <b>per logical request</b>,
+    /// Provides API usage information.
     /// owned by the orchestrator. Auto-assigned once when empty and reused across decorator
     /// retries (e.g. <c>RefreshOnUnauthorizedDecorator</c>). The MEAI host (<c>MeaiLlmClient</c>)
     /// copies this value into <see cref="Begin"/> on every <c>CompleteAsync</c>/<c>CompleteStreamingAsync</c>
     /// invocation.</item>
-    /// <item><see cref="LlmRequestContext"/> — <b>ambient flow</b> (this class), readable from any
+    /// Provides API usage information.
     /// transport without plumbing the request object through MEAI's <c>IChatClient</c> seam.
     /// Implemented as <see cref="AsyncLocal{T}"/> so it follows <c>await</c> continuations across
     /// thread-pool hops.</item>
-    /// <item><see cref="IRequestHeaderProvider"/> on <see cref="IOpenAiHttpSettings.HeaderProvider"/> —
+    /// Provides API usage information.
     /// <b>per settings</b> static/host-supplied headers (e.g. <c>X-Client-Version</c>, custom routing
     /// hints). When this provider also exposes <c>IdempotencyKey</c>/<c>RequestId</c> they act only as
     /// fallbacks for callers using <see cref="MeaiOpenAiChatClient"/> directly without an orchestrator.</item>
     /// </list>
     /// <para>
     /// Resolution order in <c>MeaiOpenAiChatClient.BuildTransportHeaders</c>:
-    /// <see cref="LlmRequestContext.Current"/> → <see cref="ILlmAuthContextProvider"/> from
-    /// <see cref="LlmAuthContextRegistry"/> → <see cref="IRequestHeaderProvider"/> on settings.
+    /// Provides API usage information.
+    /// Provides API usage information.
     /// Earlier sources win; later sources fill missing slots only.
     /// </para>
     /// <para>

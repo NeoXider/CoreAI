@@ -9,13 +9,13 @@ using UnityEngine.SceneManagement;
 
 namespace CoreAI.Infrastructure.World
 {
-    /// <summary>Минимальный исполнитель: spawn/move/destroy/load_scene. Всё через whitelist registry.</summary>
+    /// <summary>Executes validated CoreAI world commands against Unity scene objects.</summary>
     public sealed class CoreAiWorldCommandExecutor : ICoreAiWorldCommandExecutor
     {
         private readonly IGameLogger _logger;
-        private readonly CoreAiPrefabRegistryAsset _prefabRegistry;
+        private readonly ICoreAiPrefabRegistry _prefabRegistry;
 
-        public CoreAiWorldCommandExecutor(IGameLogger logger, CoreAiPrefabRegistryAsset prefabRegistry = null)
+        public CoreAiWorldCommandExecutor(IGameLogger logger, ICoreAiPrefabRegistry prefabRegistry = null)
         {
             _logger = logger;
             _prefabRegistry = prefabRegistry;
@@ -117,7 +117,7 @@ namespace CoreAI.Infrastructure.World
 
             Vector3 pos = new(env.x, env.y, env.z);
 
-            // Валидация позиции спавна (проверка коллизий)
+            // Skip processing when the checked condition is already satisfied.
             if (!ValidateSpawnPosition(pos, 0.5f))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
@@ -131,12 +131,12 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-        /// Проверяет, свободна ли позиция для спавна (нет пересечений с существующими коллайдерами).
+/// Executes validate spawn position.
         /// </summary>
         private bool ValidateSpawnPosition(Vector3 position, float checkRadius)
         {
             Collider[] overlaps = Physics.OverlapSphere(position, checkRadius);
-            // Считаем только статические / не-trigger коллайдеры
+            // Iterate through the data sequence.
             foreach (Collider col in overlaps)
             {
                 if (!col.isTrigger)
@@ -272,7 +272,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Пробуем UI Text (Canvas)
+            // No-op guard before a conditional operation.
             UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
             if (uiText != null)
             {
@@ -283,7 +283,7 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // Пробуем TextMesh (3D)
+            // No-op guard before a conditional operation.
             TextMesh textMesh = go.GetComponent<TextMesh>();
             if (textMesh != null)
             {
@@ -294,7 +294,7 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // Если нет компонента текста — создаём TextMesh
+            // No-op guard before a conditional operation.
             TextMesh newMesh = go.AddComponent<TextMesh>();
             newMesh.text = env.stringValue;
             newMesh.fontSize = 24;
@@ -335,7 +335,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Пробуем UI Text
+            // No-op guard before a conditional operation.
             UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
             if (uiText != null)
             {
@@ -345,7 +345,7 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // Пробуем TextMesh
+            // No-op guard before a conditional operation.
             TextMesh textMesh = go.GetComponent<TextMesh>();
             if (textMesh != null)
             {
@@ -436,11 +436,11 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Ищем Animator компонент
+            // No-op guard before a conditional operation.
             Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.enabled)
             {
-                // Проверяем что анимация существует в контроллере
+                // Skip processing when the checked condition is already satisfied.
                 if (TryGetAnimationState(animator, animationName, out string statePath))
                 {
                     animator.Play(statePath);
@@ -449,14 +449,14 @@ namespace CoreAI.Infrastructure.World
                     return true;
                 }
 
-                // Если не нашли состояние, пробуем просто Play (Unity может найти по имени)
+                // No-op guard before a conditional operation.
                 animator.Play(animationName);
                 _logger.LogInfo(GameLogFeature.MessagePipe,
                     $"[World] play_animation: '{animationName}' on '{go.name}' (Animator, state not verified)");
                 return true;
             }
 
-            // Legacy Animation компонент
+            // No-op guard before a conditional operation.
             Animation animation = go.GetComponent<Animation>();
             if (animation != null && animation.enabled)
             {
@@ -482,7 +482,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Получаем все анимационные клипы из контроллера
+            // No-op guard before a conditional operation.
             AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
             foreach (AnimationClip clip in clips)
             {
@@ -500,17 +500,18 @@ namespace CoreAI.Infrastructure.World
         {
             if (ResolveObject(env.targetName, out GameObject go))
             {
-                // Ищем AudioSource
+                // No-op guard before a conditional operation.
                 AudioSource[] audioSources = go.GetComponents<AudioSource>();
                 if (audioSources == null || audioSources.Length == 0)
                 {
-                    _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: no AudioSource on '{go.name}'");
+                    _logger.LogWarning(GameLogFeature.MessagePipe,
+                        $"[World] play_sound: no AudioSource on '{go.name}'");
                     return false;
                 }
 
                 string clipName = (env.stringValue ?? "").Trim();
-                
-                // Если имя клипа не указано, просто проигрываем первый попавшийся AudioSource (если у него есть клип)
+
+                // Skip processing when the checked condition is already satisfied.
                 if (string.IsNullOrEmpty(clipName))
                 {
                     foreach (AudioSource src in audioSources)
@@ -518,36 +519,42 @@ namespace CoreAI.Infrastructure.World
                         if (src.clip != null)
                         {
                             src.Play();
-                            _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_sound: playing existing clip '{src.clip.name}' on '{go.name}'");
+                            _logger.LogInfo(GameLogFeature.MessagePipe,
+                                $"[World] play_sound: playing existing clip '{src.clip.name}' on '{go.name}'");
                             return true;
                         }
                     }
-                    _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: no predefined AudioClip found in any AudioSource on '{go.name}'");
+
+                    _logger.LogWarning(GameLogFeature.MessagePipe,
+                        $"[World] play_sound: no predefined AudioClip found in any AudioSource on '{go.name}'");
                     return false;
                 }
 
-                // Ищем конкретный клип
+                // Iterate through the data sequence.
                 foreach (AudioSource src in audioSources)
                 {
                     if (src.clip != null && src.clip.name.Equals(clipName, StringComparison.OrdinalIgnoreCase))
                     {
                         src.Play();
-                        _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] play_sound: playing '{clipName}' on '{go.name}'");
+                        _logger.LogInfo(GameLogFeature.MessagePipe,
+                            $"[World] play_sound: playing '{clipName}' on '{go.name}'");
                         return true;
                     }
                 }
 
-                // Поиск среди загруженных ресурсов (Resources / StreamingAssets) здесь можно добавить по желанию
-                _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: AudioClip '{clipName}' not found on '{go.name}'");
+                // No-op guard before a conditional operation.
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] play_sound: AudioClip '{clipName}' not found on '{go.name}'");
                 return false;
             }
 
-            _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] play_sound: object not found (name='{env.targetName}')");
+            _logger.LogWarning(GameLogFeature.MessagePipe,
+                $"[World] play_sound: object not found (name='{env.targetName}')");
             return false;
         }
 
         /// <summary>
-        /// Получить список доступных анимаций для объекта.
+/// Executes get available animations.
         /// </summary>
         public string[] GetAvailableAnimations(GameObject go)
         {
@@ -558,7 +565,7 @@ namespace CoreAI.Infrastructure.World
 
             List<string> animationsList = new();
 
-            // Animator компонент - получаем клипы из AnimatorController
+            // No-op guard before a conditional operation.
             Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.runtimeAnimatorController != null)
             {
@@ -572,7 +579,7 @@ namespace CoreAI.Infrastructure.World
                 }
             }
 
-            // Legacy Animation компонент
+            // No-op guard before a conditional operation.
             Animation anim = go.GetComponent<Animation>();
             if (anim != null)
             {
@@ -592,7 +599,7 @@ namespace CoreAI.Infrastructure.World
         {
             string searchPattern = (env.stringValue ?? "").Trim().ToLowerInvariant();
 
-            // Собираем все GameObject из сцены
+            // No-op guard before a conditional operation.
             GameObject[] rootObjects = SceneManager.GetActiveScene().GetRootGameObjects();
             List<Dictionary<string, object>> results = new();
 
@@ -601,7 +608,7 @@ namespace CoreAI.Infrastructure.World
                 CollectObjectsRecursive(root, searchPattern, results);
             }
 
-            // Сохраняем результат в последнюю known result для доступа извне
+            // No-op guard before a conditional operation.
             LastListedObjects = results;
 
             _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] list_objects: found {results.Count} objects");
@@ -616,7 +623,7 @@ namespace CoreAI.Infrastructure.World
                 return;
             }
 
-            // Проверяем имя на соответствие паттерну
+            // Skip processing when the checked condition is already satisfied.
             if (string.IsNullOrEmpty(searchPattern) ||
                 parent.name.ToLowerInvariant().Contains(searchPattern))
             {
@@ -637,7 +644,7 @@ namespace CoreAI.Infrastructure.World
                 });
             }
 
-            // Рекурсивно обходим детей
+            // Iterate through the data sequence.
             for (int i = 0; i < parent.transform.childCount; i++)
             {
                 CollectObjectsRecursive(parent.transform.GetChild(i).gameObject, searchPattern, results);
@@ -652,7 +659,7 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // Получаем список анимаций
+            // No-op guard before a conditional operation.
             string[] animations = GetAvailableAnimations(go);
             LastListedAnimations = animations;
 
@@ -662,7 +669,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-        /// Разрешает объект по targetName.
+/// Executes resolve object.
         /// </summary>
         private bool ResolveObject(string targetName, out GameObject gameObject)
         {
@@ -677,10 +684,10 @@ namespace CoreAI.Infrastructure.World
             return false;
         }
 
-        /// <summary>Последний результат list_objects для тестов.</summary>
+        /// <summary>Most recent object names returned by a list command.</summary>
         public List<Dictionary<string, object>> LastListedObjects { get; private set; } = new();
 
-        /// <summary>Последний результат list_animations для тестов.</summary>
+        /// <summary>Most recent animation names returned by a list command.</summary>
         public string[] LastListedAnimations { get; private set; } = Array.Empty<string>();
     }
 }

@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -10,7 +10,7 @@ using CoreAI.Infrastructure.Logging;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// HTTP OpenAI-compatible клиент. Делегирует в <see cref="MeaiLlmClient"/>.
+    /// OpenAI-compatible chat completion client.
     /// </summary>
     public sealed class OpenAiChatLlmClient : ILlmClient
     {
@@ -26,11 +26,23 @@ namespace CoreAI.Infrastructure.Llm
         {
         }
 
-        public OpenAiChatLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings, IGameLogger logger, IAgentMemoryStore? memoryStore)
+        public OpenAiChatLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings, IGameLogger logger,
+            IAgentMemoryStore? memoryStore)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (coreSettings == null) throw new ArgumentNullException(nameof(coreSettings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (coreSettings == null)
+            {
+                throw new ArgumentNullException(nameof(coreSettings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
 
             _client = MeaiLlmClient.CreateHttp(settings, coreSettings, logger, memoryStore);
         }
@@ -47,10 +59,10 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Делегирует реальный SSE-стриминг в <see cref="MeaiLlmClient.CompleteStreamingAsync"/>.
-        /// Без этого override'а default-реализация интерфейса сделала бы fallback к
-        /// <see cref="CompleteAsync"/> и выдала бы весь ответ одним чанком,
-        /// из-за чего streaming не был бы виден в UI.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// </summary>
         public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

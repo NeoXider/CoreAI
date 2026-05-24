@@ -12,15 +12,15 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.AiMemory
 {
     /// <summary>
-    /// Персистентная память агентов в <see cref="Application.persistentDataPath"/> (JSON на роль).
+    ///
     /// WebGL player: same store under <see cref="CoreAILifetimeScope"/> (<b>v1.6.19+</b>); after writes calls
     /// <c>CoreAi_PersistFsSync</c> (<c>CoreAiPersistFs.jslib</c>) so IDBFS reaches IndexedDB on reload / tab close.
     /// The jslib runs <c>FS.syncfs</c> single-flight (<b>v1.7.2+</b>) so rapid successive writes do not overlap syncs.
-    /// Учитывайте квоту хранилища браузера и режим инкогнито (данные могут не пережить сессию).
-    /// Поддерживает 2 типа памяти:
-    /// 1) MemoryTool — явная память через function call (memory поле)
-    /// 2) ChatHistory — полная история диалога (chatHistory поле)
-    /// Также реализует <see cref="IConversationTranscriptStore"/> с миграцией из плоской истории.
+    ///
+    ///
+    ///
+    ///
+    ///
     /// </summary>
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore
     {
@@ -31,7 +31,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <summary>
         /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a reload.
-        /// On other platforms <c>File.WriteAllText</c> already touches real disk — this is a no-op.
+        ///
         /// </summary>
         private static void PersistFsForWebGl()
         {
@@ -45,7 +45,7 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             public string lastSystemPrompt;
             public string memory;
-            public string chatHistoryJson; // JSON массив ChatMessage[]
+            public string chatHistoryJson; // Serialized chat history JSON payload for persistence.
             public string transcriptEntriesJson;
         }
 
@@ -54,7 +54,7 @@ namespace CoreAI.Infrastructure.AiMemory
         private readonly Dictionary<string, List<ConversationEntry>> _transcripts = new();
         private readonly ILog _log;
 
-        /// <summary>Каталог памяти: CoreAI/AgentMemory под persistentDataPath.</summary>
+        /// <summary>Executes file agent memory store operation.</summary>
         public FileAgentMemoryStore(ILog log = null)
         {
             _dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
@@ -136,7 +136,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     if (p != null)
                     {
                         p.memory = "";
-                        p.lastSystemPrompt = ""; // Очищаем промпт
+                        p.lastSystemPrompt = ""; // Clear previous system prompt cache entry to avoid leaking across sessions.
                         File.WriteAllText(path, JsonUtility.ToJson(p, true));
                         PersistFsForWebGl();
                     }
@@ -151,7 +151,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
         {
-            // Очищаем из оперативной памяти
+            // Skip processing when the checked condition is already satisfied.
             if (_ephemeralHistory.ContainsKey(roleId))
             {
                 _ephemeralHistory.Remove(roleId);
@@ -164,7 +164,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
             _loadedRoles.Remove(roleId); // re-sync _ephemeralHistory on next access after removing the list above
 
-            // Очищаем с диска
+            // Wrap the following block with exception-safe behavior.
             try
             {
                 string path = GetPath(roleId);
@@ -189,7 +189,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
         private string GetPath(string roleId)
         {
-            // Упрощенная санитизация имени файла
+            // Resolve and cache required local values.
             string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
             return Path.Combine(_dir, $"{safeName}.json");
         }
@@ -262,7 +262,8 @@ namespace CoreAI.Infrastructure.AiMemory
                     try
                     {
                         List<ConversationEntry> loaded =
-                            JsonConvert.DeserializeObject<List<ConversationEntry>>(p.transcriptEntriesJson, TranscriptJson);
+                            JsonConvert.DeserializeObject<List<ConversationEntry>>(p.transcriptEntriesJson,
+                                TranscriptJson);
                         if (loaded != null && loaded.Count > 0)
                         {
                             _transcripts[roleId].InsertRange(0, loaded);
@@ -339,10 +340,9 @@ namespace CoreAI.Infrastructure.AiMemory
                 _log?.Error($"[FileAgentMemoryStore] Failed to persist JSON for {roleId}: {ex.Message}");
             }
         }
+
         /// <summary>
-        /// Добавляет сообщение в историю.
-        /// persistToDisk=false используется для промежуточных tool call (сохраняется только в оперативку).
-        /// persistToDisk=true используется для финальных ответов (синхронизируется на диск).
+        /// Executes append chat message.
         /// </summary>
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
@@ -357,7 +357,7 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 Role = role,
                 Content = content,
-                // Используем миллисекунды для гарантии правильной сортировки при быстром добавлении
+                // No-op guard before a conditional operation.
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
 
@@ -406,8 +406,9 @@ namespace CoreAI.Infrastructure.AiMemory
             int n = maxEntries > 0 ? Math.Min(maxEntries, list.Count) : list.Count;
             return list.Skip(list.Count - n).ToList();
         }
+
         /// <summary>
-        /// Возвращает объединенную историю (с диска + из оперативки), отсортированную по времени.
+        /// Gets chat history.
         /// </summary>
         public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {

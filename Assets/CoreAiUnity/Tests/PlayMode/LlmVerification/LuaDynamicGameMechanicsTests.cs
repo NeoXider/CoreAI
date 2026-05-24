@@ -38,9 +38,10 @@ namespace CoreAI.Tests.PlayMode
                     {
                         ScriptInstance = Sandbox.CreateScript(Registry);
                     }
-                    
+
                     DynValue result = Sandbox.RunChunk(ScriptInstance, code);
-                    return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = result?.ToString() ?? "ok" });
+                    return Task.FromResult(
+                        new LuaTool.LuaResult { Success = true, Output = result?.ToString() ?? "ok" });
                 }
                 catch (Exception ex)
                 {
@@ -50,29 +51,56 @@ namespace CoreAI.Tests.PlayMode
 
             public double CallFunctionCurrent(string functionName)
             {
-                if (ScriptInstance == null) return 0;
+                if (ScriptInstance == null)
+                {
+                    return 0;
+                }
+
                 DynValue func = ScriptInstance.Globals.Get(functionName);
                 if (func.Type == DataType.Function)
                 {
                     return ScriptInstance.Call(func).Number;
                 }
+
                 return 0;
             }
         }
 
         private sealed class InMemoryStore : IAgentMemoryStore
         {
-            public bool TryLoad(string roleId, out AgentMemoryState state) { state = default; return false; }
-            public void Save(string roleId, AgentMemoryState state) {}
-            public void Clear(string roleId) {}
-            public void ClearChatHistory(string roleId) {}
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) {}
-            public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<Ai.ChatMessage>();
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = default;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class NullSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command) {}
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
         }
 
         [UnityTest]
@@ -112,11 +140,11 @@ end
 
                 // 2.  -,     execute_lua
                 CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                
+
                 //  
                 AgentBuilder builder = new AgentBuilder("GameMaster")
                     .WithSystemPrompt("You are the GameMaster. You manage game mechanics.")
-                    .WithTool(new LuaLlmTool(executor, settings, CoreAI.Logging.NullLog.Instance))
+                    .WithTool(new LuaLlmTool(executor, settings, Logging.NullLog.Instance))
                     .WithAllowDuplicateToolCalls(true)
                     .WithMode(AgentMode.ToolsOnly);
 
@@ -124,7 +152,7 @@ end
                 AgentMemoryPolicy policy = new();
                 config.ApplyToPolicy(policy);
 
-                AiOrchestrator orch = new AiOrchestrator(
+                AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     handle.Client,
                     new NullSink(),
@@ -160,7 +188,7 @@ end
                 double modifiedDamage = executor.CallFunctionCurrent("calculate_damage");
                 Debug.Log($"[LuaDynamic] Modified calculate_damage() = {modifiedDamage}");
 
-                Assert.AreEqual(50.0, modifiedDamage, 
+                Assert.AreEqual(50.0, modifiedDamage,
                     "AI must successfully rewrite the lua logic to return 50!");
 
                 Debug.Log("[LuaDynamic]  AI successfully modified game logic at runtime!");
@@ -172,6 +200,4 @@ end
         }
     }
 #endif
-
 }
-

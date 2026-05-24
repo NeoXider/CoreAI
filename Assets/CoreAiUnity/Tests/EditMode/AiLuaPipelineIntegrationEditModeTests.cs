@@ -503,7 +503,8 @@ namespace CoreAI.Tests.EditMode.Integration
                 new NullAgentMemoryStore(),
                 new AgentMemoryPolicy(),
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
         #endregion

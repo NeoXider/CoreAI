@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Результат проверки совместимости ингредиентов.
+    /// Result object returned by crafting compatibility checks.
     /// </summary>
     public sealed class CompatibilityResult
     {

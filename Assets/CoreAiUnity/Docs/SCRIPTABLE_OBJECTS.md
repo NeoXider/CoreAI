@@ -1,83 +1,86 @@
-# CoreAI: ScriptableObject (SO) guide
+# CoreAI: ScriptableObject guide
 
-In **CoreAI**, **ScriptableObject** patterns are used heavily for configuration, AI model settings, routing rules, and scene prefab catalogs.
+CoreAI uses **Options + ScriptableObject wrapper** for Unity-authored settings.
 
-This keeps data separate from logic (data-driven design), avoids god objects on `MonoBehaviour`, and lets you tune balance directly in the Inspector.
+## Architectural rule
 
----
+- `Assets/CoreAI` contains portable runtime contracts, options and snapshots. It must not depend on `UnityEngine`.
+- `Assets/CoreAiUnity` contains Unity authoring assets: `ScriptableObject`, Inspector metadata, `TextAsset`, `Sprite`, `KeyCode`, `GameObject`, editor lifecycle and resource loading.
+- Serialized fields stay private with `[SerializeField]`. Do not make Inspector fields public just to make tests mutable.
+- Each framework SO exposes a runtime shape: `I*Options`, `*Options`, `ToOptions()`, `ToDefinition()`, `ToRouteTable()` or a Unity-side interface when the data cannot be portable.
+- Runtime consumers should depend on interfaces/options/snapshots. Concrete SO references are allowed only in composition, editor/bootstrap and asset serialization/default tests.
+- Tests should create plain options/classes unless the test specifically checks asset defaults, Inspector serialization or Unity object references.
 
-## 🛠️ Core (system) ScriptableObjects
+## Framework ScriptableObjects
 
-These assets are required for the framework. When the plugin loads in Unity they are **created automatically** with defaults if missing (see `CoreAI/Setup/Create Default Assets`).
+| Asset | Layer | Runtime contract | Notes |
+| --- | --- | --- | --- |
+| `CoreAiChatConfig` | CoreAiUnity | `ICoreAiChatOptions`, `CoreAiChatOptions`, `ToOptions()`, `ApplyOptions(...)` | Unity-only view fields such as `Sprite` and `KeyCode` stay on the asset. `CoreAiChatPanel.SetRuntimeOptions(...)` allows tests/bootstrap without SO mutation. |
+| `CoreAISettingsAsset` | CoreAiUnity | `ICoreAISettings`, `CoreAISettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | Singleton/resource loading remains Unity-only. Portable host settings live in CoreAI. |
+| `OpenAiHttpLlmSettings` | CoreAiUnity | `IOpenAiHttpSettings`, `OpenAiHttpOptions`, `ToOptions()`, `ApplyOptions(...)` | HTTP clients consume `IOpenAiHttpSettings`; the asset is an Inspector profile. |
+| `GameLogSettingsAsset` | CoreAiUnity | `IGameLogSettings`, `GameLogSettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | `GameLogFeature` and `GameLogLevel` are portable because they do not depend on Unity. |
+| `AiPermissionsAsset` | CoreAiUnity | `IAiPermissions`, `AiPermissionsOptions`, `ToOptions()`, `ApplyOptions(...)` | Dashboard/runtime code can use the interface/options. |
+| `LlmRoutingManifest` | CoreAiUnity | `LlmRouteTable`, `ToRouteTable()`, `ToOptions()` | Manifest stays Unity authoring storage. Runtime routing uses the portable route table. Backend construction may still use Unity profile entries in composition. |
+| `AgentPromptsManifest` | CoreAiUnity | `AgentPromptsDefinition`, `ToDefinition()` | Reads `TextAsset.text` into plain strings. Prompt providers consume the snapshot. |
+| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. |
+| `CoreAiPrefabRegistryAsset` | CoreAiUnity | `ICoreAiPrefabRegistry` | Not portable because it stores `GameObject` prefab references. Consumers depend on the Unity-side interface. |
 
-### 1. `CoreAISettingsAsset`
-**Purpose:** Global LLM configuration, timeouts, fallback models, and logging. Single entry point (singleton), loaded from `Resources/CoreAISettings.asset`.
-- **Path:** `Assets/Resources/CoreAISettings.asset` (must live under Resources / or be assigned on the scope).
-- **Responsibilities:**
-  - Which backend to use (`LlmUnity` vs `OpenAiHttp` vs `Auto`).
-  - API key, URL, model name.
-  - Reasoning / thinking mode (`Enable Reasoning / Thinking mode`).
-  - Fallback behavior (offline mode).
-- **Unity menu:** Quick access via `CoreAI -> Settings`.
-- **Clear runtime saves (Editor):** **CoreAI → Delete All Persistent Saves...** removes **`Application.persistentDataPath/CoreAI`** (memory, chat JSON, summaries, Lua/data-overlay version stores). Disabled during Play Mode; does not delete assets in `Assets/`.
+## How to use from runtime code
 
-### 2. `AgentPromptsManifest`
-**Purpose:** Store of initial and system prompts for each agent by `RoleId`.
-- **Where:** `Assets/CoreAiUnity/Settings/AgentPromptsManifest.asset`
-- **Responsibilities:**
-  - Personas (Assistant, Programmer, Storyteller, UI Designer).
-  - Which tools and rules each agent should rely on.
-- **Integration:** Wired to `CoreAILifetimeScope` (dependency injection).
+Prefer constructor/DI parameters typed as interfaces or options:
 
-### 3. `LlmRoutingManifest`
-**Purpose:** Route backends per agent role (backend-per-task).
-- **Where:** `Assets/CoreAiUnity/Settings/LlmRoutingManifest.asset`
-- **Responsibilities:**
-  - Example: `Writer` → local Llama-3-8b (`LlmUnity`).
-  - Example: `Coder` → GPT-4o or Claude (`OpenAiHttp`).
-  - If a role is unspecified → default **Routing Profile**.
+```csharp
+public MyChatBootstrap(CoreAiChatPanel panel)
+{
+    panel.SetRuntimeOptions(new CoreAiChatOptions
+    {
+        RoleId = "Teacher",
+        ShowToolCallsInChat = false
+    });
+}
+```
 
-### 4. `CoreAiPrefabRegistryAsset`
-**Purpose:** Catalog of prefabs (GameObjects/units) the LLM may spawn via the `WorldCommand` tool (e.g. `spawn_entity`).
-- **Where:** `Assets/CoreAiUnity/Settings/CoreAiPrefabRegistry.asset`
-- **Responsibilities:**
-  - Safe spawning (string name → Unity prefab resolver). The LLM never loads assets directly; it uses keys from this registry.
-- **Integration:** Injected into `PrefabRuleValidator` and `WorldLlmTool`.
+For authoring, keep using assets in the Inspector. At composition boundaries, convert them:
 
-### 5. `GameLogSettingsAsset`
-**Purpose:** Fine-grained logging for framework subsystems.
-- **Where:** `Assets/CoreAiUnity/Settings/GameLogSettings.asset`
-- **Responsibilities:**
-  - Enable/disable specific features (e.g. reduce spam from `NavMesh` or verbose `LlmToolCalls` logs).
+```csharp
+CoreAiChatOptions runtime = chatConfig.ToOptions();
+AgentPromptsDefinition prompts = promptsManifest.ToDefinition();
+LlmRouteTable routes = routingManifest.ToRouteTable();
+```
 
-### 6. `AiPermissionsAsset`
-**Purpose:** Access control for API features or in-game components (permissions and scopes).
-- **Where:** `Assets/CoreAiUnity/Settings/AiPermissions.asset`
-- **Responsibilities:**
-  - Which modules the AI may use in the current context. Restricts scope (e.g. forbid weather control inside a dungeon).
+## Test guidance
 
----
+Use plain options/classes for mutable test setup:
 
-## 🗑️ Deprecated ScriptableObjects
+```csharp
+var options = new CoreAiChatOptions
+{
+    RoleId = "SmartChat",
+    ShowToolCallsInChat = false
+};
+chatPanel.SetRuntimeOptions(options);
+```
 
-These assets were superseded and remain **only for backward compatibility**; **they will be removed in v1.0**.
+Use `ScriptableObject.CreateInstance<T>()` only when the test verifies:
 
-### `OpenAiHttpLlmSettings`
-- 🚫 **Status:** Deprecated.
-- **Replaced by:** `CoreAISettingsAsset`.
-- **Reason:** It blurred local model config (`LLMUnity`) vs remote API config. Everything now lives in `CoreAISettingsAsset`.
+- asset default values;
+- `ToOptions()` / `ToDefinition()` / `ToRouteTable()` mapping;
+- `ApplyOptions(...)` mapping;
+- Unity-specific fields such as `Sprite`, `TextAsset`, `GameObject`, `KeyCode`;
+- serialized field compatibility for old `.asset` files.
 
----
+Do not write private serialized fields via reflection for normal runtime tests.
 
-## 💡 Custom (game) ScriptableObjects
+## Custom game ScriptableObjects
 
-Beyond built-ins, you can author your own SOs and expose them to agents via `IGameConfigStore`:
-- Example: `ItemConfig : ScriptableObject` holding weapon stats and prices.
-- Pass that SO into `GameConfigLlmTool` so the agent can read stats and use them in replies.
+Game-specific SOs are still valid. Keep the same rule:
 
----
+- authoring asset in Unity;
+- runtime options/snapshot for systems and tests;
+- adapter at composition boundary.
 
-## How loading works
+Example: `ItemConfigAsset : ScriptableObject` can expose `ToItemConfig()` returning a plain `ItemConfig` used by game logic and tests.
 
-CoreAI uses `[InitializeOnLoadMethod]`. On first import (or recompile), `CoreAIBuildMenu` checks for `CoreAISettingsAsset` under `Resources`.
-If it (or other system SOs) is missing, assets are **auto-created** with safe defaults to avoid `NullReferenceException` crashes.
+## Loading and bootstrap
+
+CoreAI uses editor bootstrap utilities to create default assets when missing. That bootstrap stays in CoreAiUnity. Portable CoreAI code must not load Unity resources or know about asset paths.

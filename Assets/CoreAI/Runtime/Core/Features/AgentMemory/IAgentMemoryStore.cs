@@ -1,40 +1,40 @@
-namespace CoreAI.Ai
+﻿namespace CoreAI.Ai
 {
-    /// <summary>Хранилище долговременной «памяти» агента по id роли.</summary>
+    /// <summary>IAgentMemoryStore interface.</summary>
     public interface IAgentMemoryStore
     {
-        /// <summary>Прочитать состояние; <c>false</c>, если записи нет.</summary>
+        /// <summary>Attempts to load persisted memory state for the requested role.</summary>
         bool TryLoad(string roleId, out AgentMemoryState state);
 
-        /// <summary>Сохранить или перезаписать память роли.</summary>
+        /// <summary>Persists memory state for the requested role.</summary>
         void Save(string roleId, AgentMemoryState state);
 
-        /// <summary>Удалить память роли.</summary>
+        /// <summary>Clears all memory state for the requested role.</summary>
         void Clear(string roleId);
 
-        /// <summary>Удалить только историю чата (ChatHistory) роли.</summary>
+        /// <summary>Clears only the chat history stored for the requested role.</summary>
         void ClearChatHistory(string roleId);
 
         /// <summary>
-        /// Добавить сообщение в историю чата (Тип 2: ChatHistory).
-        /// Используется LLMAgent для сохранения полного контекста диалога.
+/// Executes AppendChatMessage API operation.
+        ///
         /// </summary>
-        /// <param name="roleId">ID роли агента.</param>
-        /// <param name="role">"user" или "assistant".</param>
-        /// <param name="content">Текст сообщения.</param>
-        /// <param name="persistToDisk">Сохранять ли на диск (если хранилище поддерживает).</param>
+        /// <param name="roleId">The role id value.</param>
+        /// <param name="role">The role value.</param>
+        /// <param name="content">The content value.</param>
+        /// <param name="persistToDisk">The persist to disk value.</param>
         void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true);
 
         /// <summary>
-        /// Получить историю чата (Тип 2: ChatHistory).
+/// Executes GetChatHistory API operation.
         /// </summary>
-        /// <param name="roleId">ID роли агента.</param>
-        /// <param name="maxMessages">Максимум последних сообщений (0 = все).</param>
-        /// <returns>Список сообщений или null если истории нет.</returns>
+        /// <param name="roleId">The role id value.</param>
+        /// <param name="maxMessages">The max messages value.</param>
+        /// <returns>The operation result.</returns>
         ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0);
     }
 
-    /// <summary>Одно сообщение в истории чата.</summary>
+    /// <summary>ChatMessage struct.</summary>
     [System.Serializable]
     public struct ChatMessage
     {

@@ -131,7 +131,10 @@ namespace CoreAI.Tests.PlayMode
             public string LastContent;
             public bool LastOk;
 
-            public CaptureLlm(ILlmClient inner) => _inner = inner;
+            public CaptureLlm(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken ct = default)
@@ -154,7 +157,9 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class Sink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand c) { }
+            public void Publish(ApplyAiGameCommand c)
+            {
+            }
         }
 
         // ── Test ──────────────────────────────────────────────────────────────
@@ -225,9 +230,9 @@ namespace CoreAI.Tests.PlayMode
 
                 const string roleId = "AlchemyMaster";
                 AgentConfig config = new AgentBuilder(roleId)
-                {
-                    SuppressBuildWarnings = true
-                }
+                    {
+                        SuppressBuildWarnings = true
+                    }
                     .WithSystemPrompt(
                         "You are a Game Master. The player wants to brew potions.\n" +
                         "IMPORTANT: You MUST call read_skill('Alchemy') first to learn the guild's secret protocol.\n" +
@@ -265,7 +270,8 @@ namespace CoreAI.Tests.PlayMode
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "Brew me a healing potion. Remember to read the Alchemy skill first to learn the secret protocol!"
+                    Hint =
+                        "Brew me a healing potion. Remember to read the Alchemy skill first to learn the secret protocol!"
                 });
                 yield return PlayModeTestAwait.WaitTask(t, 120f, "alchemy brewing");
 
@@ -311,8 +317,9 @@ namespace CoreAI.Tests.PlayMode
                 if (!_calledTools.Contains("brew_potion"))
                 {
                     bool modelTriedToolCall = cap.LastContent != null &&
-                        (cap.LastContent.Contains("read_skill") || cap.LastContent.Contains("brew_potion") ||
-                         cap.LastContent.Contains("call_skill_tool"));
+                                              (cap.LastContent.Contains("read_skill") ||
+                                               cap.LastContent.Contains("brew_potion") ||
+                                               cap.LastContent.Contains("call_skill_tool"));
                     if (modelTriedToolCall)
                     {
                         Assert.Inconclusive(

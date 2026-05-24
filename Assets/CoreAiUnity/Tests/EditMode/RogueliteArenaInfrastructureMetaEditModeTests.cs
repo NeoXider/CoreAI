@@ -20,7 +20,7 @@ namespace CoreAI.Tests.EditMode
             Assert.That(File.Exists(fullPath), Is.True, $"Missing {fullPath}");
 
             string text = File.ReadAllText(fullPath);
-            var match = Regex.Match(text, @"^guid:\s*([0-9a-fA-F]+)\s*$", RegexOptions.Multiline);
+            Match match = Regex.Match(text, @"^guid:\s*([0-9a-fA-F]+)\s*$", RegexOptions.Multiline);
             Assert.That(match.Success, Is.True, "Expected a guid: line in Infrastructure.meta");
 
             string guid = match.Groups[1].Value;

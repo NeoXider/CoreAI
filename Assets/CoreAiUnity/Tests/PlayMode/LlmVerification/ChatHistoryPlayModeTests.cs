@@ -89,7 +89,8 @@ namespace CoreAI.Tests.PlayMode
                     new SessionTelemetryCollector(),
                     new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                         new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
-                    store1, policy1, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                    store1, policy1, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
                 Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                     { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
@@ -127,7 +128,8 @@ namespace CoreAI.Tests.PlayMode
                     new SessionTelemetryCollector(),
                     new AiPromptComposer(new CustomAgentPromptProvider(chatAgent.SystemPrompt),
                         new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
-                    store2, policy2, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                    store2, policy2, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
                 Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                     { RoleId = chatAgent.RoleId, Hint = "What was my secret word?" });
@@ -194,5 +196,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-
-

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
@@ -22,10 +23,26 @@ namespace CoreAI.Tests.EditMode
         private sealed class StubLogger : ILog
         {
             public readonly List<string> Logs = new();
-            public void Debug(string message, string tag = null) => Logs.Add($"[DBG] {message}");
-            public void Info(string message, string tag = null) => Logs.Add($"[INFO] {message}");
-            public void Warn(string message, string tag = null) => Logs.Add($"[WARN] {message}");
-            public void Error(string message, string tag = null) => Logs.Add($"[ERR] {message}");
+
+            public void Debug(string message, string tag = null)
+            {
+                Logs.Add($"[DBG] {message}");
+            }
+
+            public void Info(string message, string tag = null)
+            {
+                Logs.Add($"[INFO] {message}");
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                Logs.Add($"[WARN] {message}");
+            }
+
+            public void Error(string message, string tag = null)
+            {
+                Logs.Add($"[ERR] {message}");
+            }
         }
 
         private sealed class StubSettings : ICoreAISettings
@@ -91,11 +108,12 @@ namespace CoreAI.Tests.EditMode
         private static MEAI.ChatOptions MakeChatOptions(params (string name, string result)[] tools)
         {
             MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
-            foreach (var (name, result) in tools)
+            foreach ((string name, string result) in tools)
             {
                 opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => result),
                     new MEAI.AIFunctionFactoryOptions { Name = name, Description = $"Tool {name}" }));
             }
+
             return opts;
         }
 
@@ -104,28 +122,28 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CheckDuplicate_FirstCall_ReturnsNull()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "greet" } },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("greet") };
-            var result = policy.CheckDuplicate(calls);
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("greet") };
+            List<MEAI.FunctionResultContent> result = policy.CheckDuplicate(calls);
             Assert.IsNull(result, "First call should not be blocked");
         }
 
         [Test]
         public void CheckDuplicate_SameSignatureTwice_BlocksSecond()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "greet" } },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var args = new Dictionary<string, object?> { { "who", "world" } };
-            var calls1 = new List<MEAI.FunctionCallContent> { MakeToolCall("greet", args) };
-            var calls2 = new List<MEAI.FunctionCallContent> { MakeToolCall("greet", args) };
+            Dictionary<string, object> args = new() { { "who", "world" } };
+            List<MEAI.FunctionCallContent> calls1 = new() { MakeToolCall("greet", args) };
+            List<MEAI.FunctionCallContent> calls2 = new() { MakeToolCall("greet", args) };
 
             Assert.IsNull(policy.CheckDuplicate(calls1));
-            var blocked = policy.CheckDuplicate(calls2);
+            List<MEAI.FunctionResultContent> blocked = policy.CheckDuplicate(calls2);
             Assert.IsNotNull(blocked, "Second identical call should be blocked");
             Assert.AreEqual(1, blocked.Count);
         }
@@ -133,13 +151,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CheckDuplicate_DifferentArgs_Allowed()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "greet" } },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var calls1 = new List<MEAI.FunctionCallContent>
+            List<MEAI.FunctionCallContent> calls1 = new()
                 { MakeToolCall("greet", new Dictionary<string, object?> { { "who", "A" } }) };
-            var calls2 = new List<MEAI.FunctionCallContent>
+            List<MEAI.FunctionCallContent> calls2 = new()
                 { MakeToolCall("greet", new Dictionary<string, object?> { { "who", "B" } }) };
 
             Assert.IsNull(policy.CheckDuplicate(calls1));
@@ -149,12 +167,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CheckDuplicate_AllowDuplicatesGlobal_NeverBlocks()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "greet" } },
-                allowDuplicateToolCalls: true, "test", 3);
+                true, "test", 3);
 
-            var args = new Dictionary<string, object?> { { "x", 1 } };
-            var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("greet", args) };
+            Dictionary<string, object> args = new() { { "x", 1 } };
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("greet", args) };
 
             Assert.IsNull(policy.CheckDuplicate(calls));
             Assert.IsNull(policy.CheckDuplicate(calls), "Global AllowDuplicateToolCalls=true should never block");
@@ -163,13 +181,13 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CheckDuplicate_PerToolAllowDuplicates_Respected()
         {
-            var tool = new StubTool { Name = "repeat_action", AllowDuplicates = true };
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            StubTool tool = new() { Name = "repeat_action", AllowDuplicates = true };
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { tool },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var args = new Dictionary<string, object?> { { "action", "jump" } };
-            var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("repeat_action", args) };
+            Dictionary<string, object> args = new() { { "action", "jump" } };
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("repeat_action", args) };
 
             Assert.IsNull(policy.CheckDuplicate(calls));
             Assert.IsNull(policy.CheckDuplicate(calls), "Per-tool AllowDuplicates should be respected");
@@ -180,7 +198,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RecordSuccess_ResetsCounter()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
 
             policy.RecordFailure();
@@ -194,7 +212,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RecordFailure_IncrementsCounter()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
 
             policy.RecordFailure();
@@ -206,7 +224,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void IsMaxErrorsReached_AtThreshold_ReturnsTrue()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 2);
 
             Assert.IsFalse(policy.IsMaxErrorsReached);
@@ -219,11 +237,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Reset_ClearsEverything()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "t" } },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var args = new Dictionary<string, object?> { { "a", 1 } };
+            Dictionary<string, object> args = new() { { "a", 1 } };
             policy.CheckDuplicate(new List<MEAI.FunctionCallContent> { MakeToolCall("t", args) });
             policy.RecordFailure();
             policy.RecordFailure();
@@ -240,13 +258,14 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ExecuteSingle_ToolFound_ReturnsResult()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
 
-            var opts = MakeChatOptions(("hello", "world"));
-            var fc = MakeToolCall("hello");
+            MEAI.ChatOptions opts = MakeChatOptions(("hello", "world"));
+            MEAI.FunctionCallContent fc = MakeToolCall("hello");
 
-            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsTrue(result.Succeeded);
             Assert.IsNotNull(result.Result);
         }
@@ -254,7 +273,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ExecuteSingle_AsyncTool_WaitsForCompletion()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
             bool completed = false;
             Func<CancellationToken, Task<string>> func = async ct =>
@@ -269,7 +288,8 @@ namespace CoreAI.Tests.EditMode
             MEAI.FunctionCallContent fc = MakeToolCall("async_tool");
 
             Stopwatch sw = Stopwatch.StartNew();
-            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             sw.Stop();
 
             Assert.IsTrue(result.Succeeded);
@@ -281,13 +301,14 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ExecuteSingle_ToolNotFound_ReturnsFailed()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
 
-            var opts = MakeChatOptions();
-            var fc = MakeToolCall("nonexistent");
+            MEAI.ChatOptions opts = MakeChatOptions();
+            MEAI.FunctionCallContent fc = MakeToolCall("nonexistent");
 
-            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsFalse(result.Succeeded);
             Assert.IsTrue(result.Result.Result.ToString().Contains("not found"));
         }
@@ -316,16 +337,17 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ExecuteBatch_AllSucceed_ResetsErrorCounter()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), true, "test", 3);
 
             policy.RecordFailure(); // Pre-existing failure
             Assert.AreEqual(1, policy.ConsecutiveErrors);
 
-            var opts = MakeChatOptions(("tool_a", "ok"));
-            var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("tool_a") };
+            MEAI.ChatOptions opts = MakeChatOptions(("tool_a", "ok"));
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("tool_a") };
 
-            var batch = await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
             Assert.IsFalse(batch.AnyFailed);
             Assert.AreEqual(0, policy.ConsecutiveErrors, "Success should reset error counter");
         }
@@ -333,20 +355,21 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ExecuteBatch_DuplicateBlocked_ReturnsFailed()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "dup" } },
-                allowDuplicateToolCalls: false, "test", 3);
+                false, "test", 3);
 
-            var args = new Dictionary<string, object?> { { "x", 1 } };
-            var opts = MakeChatOptions(("dup", "ok"));
-            var calls = new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) };
+            Dictionary<string, object> args = new() { { "x", 1 } };
+            MEAI.ChatOptions opts = MakeChatOptions(("dup", "ok"));
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("dup", args) };
 
             // First call succeeds
-            var batch1 = await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+            ToolExecutionPolicy.BatchToolCallResult batch1 =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
             Assert.IsFalse(batch1.AnyFailed);
 
             // Second identical call is blocked by duplicate detection
-            var batch2 = await policy.ExecuteBatchAsync(
+            ToolExecutionPolicy.BatchToolCallResult batch2 = await policy.ExecuteBatchAsync(
                 new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) },
                 opts, CancellationToken.None);
             Assert.IsTrue(batch2.AnyFailed, "Duplicate should be blocked");
@@ -357,10 +380,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildMaxErrorsResponse_ContainsErrorText()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool>(), false, "test", 3);
 
-            var response = policy.BuildMaxErrorsResponse();
+            MEAI.ChatResponse response = policy.BuildMaxErrorsResponse();
             Assert.IsNotNull(response);
             Assert.IsTrue(response.Text.Contains("error"), "Should contain error description");
         }
@@ -370,12 +393,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryRepairToolName_ExactMatch_ReturnsSameFc()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
-            var fc = MakeToolCall("memory");
-            var repaired = policy.TryRepairToolName(fc);
+            MEAI.FunctionCallContent fc = MakeToolCall("memory");
+            MEAI.FunctionCallContent repaired = policy.TryRepairToolName(fc);
 
             Assert.IsNotNull(repaired);
             Assert.AreEqual("memory", repaired.Name, "Exact match should be returned as-is");
@@ -385,12 +408,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryRepairToolName_WrongCase_ReturnsRepaired()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
-            var fc = MakeToolCall("MEMORY");
-            var repaired = policy.TryRepairToolName(fc);
+            MEAI.FunctionCallContent fc = MakeToolCall("MEMORY");
+            MEAI.FunctionCallContent repaired = policy.TryRepairToolName(fc);
 
             Assert.IsNotNull(repaired, "Should repair wrong casing");
             Assert.AreEqual("memory", repaired.Name, "Name should be corrected to registered casing");
@@ -400,11 +423,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryRepairToolName_MixedCase_ReturnsRepaired()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "spawn_quiz" } },
                 false, "test", 3);
 
-            var repaired = policy.TryRepairToolName(MakeToolCall("Spawn_Quiz"));
+            MEAI.FunctionCallContent repaired = policy.TryRepairToolName(MakeToolCall("Spawn_Quiz"));
             Assert.IsNotNull(repaired);
             Assert.AreEqual("spawn_quiz", repaired.Name);
         }
@@ -412,18 +435,18 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryRepairToolName_UnknownTool_ReturnsNull()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
-            var result = policy.TryRepairToolName(MakeToolCall("completely_unknown_tool_xyz"));
+            MEAI.FunctionCallContent result = policy.TryRepairToolName(MakeToolCall("completely_unknown_tool_xyz"));
             Assert.IsNull(result, "Unknown tool should return null");
         }
 
         [Test]
         public void TryRepairToolName_NullFc_ReturnsNull()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
@@ -434,26 +457,28 @@ namespace CoreAI.Tests.EditMode
         public async Task ExecuteSingle_WrongCaseName_IsRepaired()
         {
             // Model called "MEMORY" but tool is registered as "memory"
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
-            var opts = MakeChatOptions(("memory", "Memory saved"));
-            var fc = MakeToolCall("MEMORY"); // wrong casing from model
+            MEAI.ChatOptions opts = MakeChatOptions(("memory", "Memory saved"));
+            MEAI.FunctionCallContent fc = MakeToolCall("MEMORY"); // wrong casing from model
 
-            var result = await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsTrue(result.Succeeded, "Tool should succeed after name repair");
         }
 
         [Test]
         public async Task ExecuteSingle_TrulyUnknownTool_ReturnsFailed()
         {
-            var policy = new ToolExecutionPolicy(new StubLogger(), new StubSettings(),
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
                 new List<ILlmTool> { new StubTool { Name = "memory" } },
                 false, "test", 3);
 
-            var opts = MakeChatOptions(("memory", "ok"));
-            var result = await policy.ExecuteSingleAsync(MakeToolCall("totally_unknown"), opts, CancellationToken.None);
+            MEAI.ChatOptions opts = MakeChatOptions(("memory", "ok"));
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("totally_unknown"), opts, CancellationToken.None);
 
             Assert.IsFalse(result.Succeeded);
             Assert.IsTrue(result.Result.Result.ToString().Contains("Unknown tool") ||
@@ -467,8 +492,9 @@ namespace CoreAI.Tests.EditMode
         public void ComputeBackoff_ZeroAttempt_Returns2s()
         {
             // Access via reflection since it's private static
-            var method = typeof(LoggingLlmClientDecorator)
-                .GetMethod("ComputeBackoff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            MethodInfo method = typeof(LoggingLlmClientDecorator)
+                .GetMethod("ComputeBackoff",
+                    BindingFlags.NonPublic | BindingFlags.Static);
             Assert.IsNotNull(method, "ComputeBackoff should exist");
 
             int val = (int)method.Invoke(null, new object[] { 0 });
@@ -478,8 +504,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ComputeBackoff_ExponentialCurve_CappedAt30()
         {
-            var method = typeof(LoggingLlmClientDecorator)
-                .GetMethod("ComputeBackoff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            MethodInfo method = typeof(LoggingLlmClientDecorator)
+                .GetMethod("ComputeBackoff",
+                    BindingFlags.NonPublic | BindingFlags.Static);
             Assert.IsNotNull(method);
 
             // attempt 0 → 2*2^0=2, attempt 1 → 4, attempt 2 → 8, attempt 3 → 16, attempt 4 → 30 (capped)
@@ -549,4 +576,3 @@ namespace CoreAI.Tests.EditMode
     }
 }
 #endif
-

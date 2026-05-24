@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Потокобезопасное in-memory хранилище (тесты, хост без персистенции).</summary>
+    /// <summary>In-memory Lua script version store with original/current revision tracking.</summary>
     public sealed class MemoryLuaScriptVersionStore : ILuaScriptVersionStore
     {
         private readonly object _lock = new();
@@ -217,7 +217,7 @@ namespace CoreAI.Ai
             return LuaScriptVersionPromptFormatter.Format(scriptKey, snap);
         }
 
-        /// <summary>Сбросить все слоты (тесты / перед загрузкой с диска).</summary>
+        /// <summary>Removes all stored Lua script version records.</summary>
         public void ClearAll()
         {
             lock (_lock)
@@ -226,7 +226,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Заменить состояние из снимков (десериализация с диска).</summary>
+        /// <summary>Imports Lua script version records into the in-memory store.</summary>
         public void ImportFromRecords(IEnumerable<LuaScriptVersionRecord> records)
         {
             if (records == null)
@@ -270,7 +270,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Все слоты для сериализации.</summary>
+        /// <summary>Exports all Lua script version records from the in-memory store.</summary>
         public List<LuaScriptVersionRecord> ExportAllRecords()
         {
             lock (_lock)

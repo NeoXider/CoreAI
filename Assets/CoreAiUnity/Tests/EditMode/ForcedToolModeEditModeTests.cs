@@ -28,7 +28,9 @@ namespace CoreAI.Tests.EditMode
         {
             public LlmCompletionRequest LastRequest { get; private set; }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
@@ -47,12 +49,17 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command) { }
+            public void Publish(ApplyAiGameCommand command)
+            {
+            }
         }
 
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class TestSettings : ICoreAISettings
@@ -79,12 +86,20 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class NullSys : IAgentSystemPromptProvider
         {
-            public bool TryGetSystemPrompt(string roleId, out string prompt) { prompt = null; return false; }
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = null;
+                return false;
+            }
         }
 
         private sealed class NullUsr : IAgentUserPromptTemplateProvider
         {
-            public bool TryGetUserTemplate(string roleId, out string template) { template = null; return false; }
+            public bool TryGetUserTemplate(string roleId, out string template)
+            {
+                template = null;
+                return false;
+            }
         }
 
         private sealed class StubTool : ILlmTool
@@ -100,18 +115,18 @@ namespace CoreAI.Tests.EditMode
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memoryStore: null, memoryPolicy: policy ?? new AgentMemoryPolicy(),
-                structuredPolicy: null, metrics: null, settings: new TestSettings());
+                null, policy ?? new AgentMemoryPolicy(),
+                null, null, new TestSettings());
         }
 
         [Test]
         public void Defaults_AreAuto_AndEmptyName()
         {
-            AiTaskRequest task = new AiTaskRequest();
+            AiTaskRequest task = new();
             Assert.AreEqual(LlmToolChoiceMode.Auto, task.ForcedToolMode);
             Assert.AreEqual(string.Empty, task.RequiredToolName);
 
-            LlmCompletionRequest req = new LlmCompletionRequest();
+            LlmCompletionRequest req = new();
             Assert.AreEqual(LlmToolChoiceMode.Auto, req.ForcedToolMode);
             Assert.AreEqual(string.Empty, req.RequiredToolName);
         }
@@ -122,7 +137,7 @@ namespace CoreAI.Tests.EditMode
             CapturingLlmClient llm = new();
             AiOrchestrator orchestrator = BuildOrchestrator(llm);
 
-            AiTaskRequest task = new AiTaskRequest
+            AiTaskRequest task = new()
             {
                 RoleId = "Teacher",
                 Hint = "make me a test",
@@ -178,7 +193,8 @@ namespace CoreAI.Tests.EditMode
                 {
                     Name = "buy_item",
                     Description = "Buy an item for the player.",
-                    ParametersSchema = "{\"type\":\"object\",\"properties\":{\"itemName\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}},\"required\":[\"itemName\",\"quantity\"]}"
+                    ParametersSchema =
+                        "{\"type\":\"object\",\"properties\":{\"itemName\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}},\"required\":[\"itemName\",\"quantity\"]}"
                 }
             });
 

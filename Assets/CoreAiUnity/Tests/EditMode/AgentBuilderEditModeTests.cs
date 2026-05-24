@@ -38,7 +38,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("You are a test agent.", config.SystemPrompt);
             Assert.AreEqual(0, config.Tools.Count);
             Assert.AreEqual(AgentMode.ToolsAndChat, config.Mode);
-            Assert.IsTrue(config.UseLlmContextCompaction, "Smart compaction should default on for AgentBuilder agents.");
+            Assert.IsTrue(config.UseLlmContextCompaction,
+                "Smart compaction should default on for AgentBuilder agents.");
         }
 
         [Test]
@@ -198,7 +199,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ValidateOnBuild_CustomRole_WithoutSystemPrompt_ReportsMissingPrompt()
         {
-            var builder = new AgentBuilder("CustomNpc")
+            AgentBuilder builder = new("CustomNpc")
             {
                 SuppressBuildWarnings = true
             };
@@ -210,7 +211,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ValidateOnBuild_BuiltInRole_WithoutSystemPrompt_SkipsMissingPrompt()
         {
-            var builder = new AgentBuilder(BuiltInAgentRoleIds.Creator)
+            AgentBuilder builder = new(BuiltInAgentRoleIds.Creator)
             {
                 SuppressBuildWarnings = true
             };
@@ -222,7 +223,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ValidateOnBuild_ToolsOnlyWithoutTools_ReportsNoTools()
         {
-            var builder = new AgentBuilder("Npc")
+            AgentBuilder builder = new("Npc")
             {
                 SuppressBuildWarnings = true
             };
@@ -242,7 +243,7 @@ namespace CoreAI.Tests.EditMode
                 CoreAISettings.ResetOverrides();
                 CoreAISettings.EnableLlmContextCompaction = false;
 
-                var builder = new AgentBuilder("CompactionRole")
+                AgentBuilder builder = new("CompactionRole")
                 {
                     SuppressBuildWarnings = true
                 };

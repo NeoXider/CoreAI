@@ -21,16 +21,31 @@ namespace CoreAI.Tests.PlayMode
         private sealed class FlatTok : ITokenEstimator
         {
             private readonly int _n;
-            public FlatTok(int n) => _n = Math.Max(1, n);
-            public int EstimateText(string text) => _n;
+
+            public FlatTok(int n)
+            {
+                _n = Math.Max(1, n);
+            }
+
+            public int EstimateText(string text)
+            {
+                return _n;
+            }
         }
 
         private sealed class FixedHistoryBudgetPolicy : IContextBudgetPolicy
         {
             private readonly int _h;
-            public FixedHistoryBudgetPolicy(int h) => _h = Math.Max(1, h);
-            public ContextBudget Compute(ContextBudgetRequest req, ITokenEstimator e) =>
-                new(8192, 256, 50, _h, 0);
+
+            public FixedHistoryBudgetPolicy(int h)
+            {
+                _h = Math.Max(1, h);
+            }
+
+            public ContextBudget Compute(ContextBudgetRequest req, ITokenEstimator e)
+            {
+                return new ContextBudget(8192, 256, 50, _h, 0);
+            }
         }
 
         private sealed class SplitCountingLlm : ILlmClient
@@ -42,9 +57,15 @@ namespace CoreAI.Tests.PlayMode
             /// <summary>Last auxiliary compaction request only (role <see cref="BuiltInAgentRoleIds.ContextCompactionAux"/>).</summary>
             public LlmCompletionRequest LastCompactionRequest { get; private set; }
 
-            public SplitCountingLlm(ILlmClient inner) => _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            public SplitCountingLlm(ILlmClient inner)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+                _inner.SetTools(tools);
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -74,25 +95,43 @@ namespace CoreAI.Tests.PlayMode
                 return false;
             }
 
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
 
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) =>
-                maxMessages > 0 && Rows.Count > maxMessages
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return maxMessages > 0 && Rows.Count > maxMessages
                     ? Rows.GetRange(Rows.Count - maxMessages, maxMessages).ToArray()
                     : Rows.ToArray();
+            }
         }
 
         private sealed class Sink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand c) { }
+            public void Publish(ApplyAiGameCommand c)
+            {
+            }
         }
 
         private sealed class Telemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class PromptSys : IAgentSystemPromptProvider
@@ -165,7 +204,7 @@ namespace CoreAI.Tests.PlayMode
             ITokenEstimator compactEst = new FlatTok(10);
 
             StubLlmClient stubMain = new();
-            SplitCountingLlm counting1 = new SplitCountingLlm(stubMain);
+            SplitCountingLlm counting1 = new(stubMain);
             Mem mem1 = new();
             Seed(mem1, 9);
             AgentMemoryPolicy policy1 = MakePolicy(smartRole);
@@ -192,7 +231,8 @@ namespace CoreAI.Tests.PlayMode
             Task t1 = o1.RunTaskAsync(new AiTaskRequest { RoleId = smartRole, Hint = "playmode" });
             yield return PlayModeTestAwait.WaitTask(t1, 120f, "smart role compaction");
 
-            Assert.GreaterOrEqual(counting1.CompactionCompletes, 1, "Compaction LLM expected for roles with smart compaction.");
+            Assert.GreaterOrEqual(counting1.CompactionCompletes, 1,
+                "Compaction LLM expected for roles with smart compaction.");
             Assert.IsNotNull(counting1.LastCompactionRequest);
             Assert.IsNull(counting1.LastCompactionRequest.ChatHistory,
                 "Compaction auxiliary call must not replay MEAI chat tail.");
@@ -200,10 +240,11 @@ namespace CoreAI.Tests.PlayMode
                 LlmContextCompactionOptions.DefaultSystemPrompt,
                 counting1.LastCompactionRequest.SystemPrompt,
                 "Orchestrator main-role system must not be substituted for compaction system.");
-            StringAssert.StartsWith("## Prior rolling summary", counting1.LastCompactionRequest.UserPayload.TrimStart());
+            StringAssert.StartsWith("## Prior rolling summary",
+                counting1.LastCompactionRequest.UserPayload.TrimStart());
 
             StubLlmClient stub2 = new();
-            SplitCountingLlm counting2 = new SplitCountingLlm(stub2);
+            SplitCountingLlm counting2 = new(stub2);
             Mem mem2 = new();
             Seed(mem2, 9);
             string prog = BuiltInAgentRoleIds.Programmer;

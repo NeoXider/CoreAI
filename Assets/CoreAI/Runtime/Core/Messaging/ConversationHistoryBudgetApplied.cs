@@ -1,6 +1,6 @@
 namespace CoreAI.Messaging
 {
-    /// <summary>Optional portable telemetry DTO — Unity may bridge this to MessagePipe.</summary>
+    /// <summary>Reports how chat history was trimmed to fit a context budget.</summary>
     public sealed class ConversationHistoryBudgetApplied
     {
         /// <summary>Request trace id.</summary>

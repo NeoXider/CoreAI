@@ -10,7 +10,7 @@ namespace CoreAI.Ai
     /// </summary>
     public interface IAiOrchestrationService
     {
-        /// <summary>Snapshot → system/user payloads → LLM → command sink.</summary>
+        /// <summary>Runs an AI task and returns the final textual result.</summary>
         Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -19,7 +19,7 @@ namespace CoreAI.Ai
         /// </summary>
         /// <remarks>
         /// Wrappers (queues, decorators, timeouts, authority) <b>must</b> override this method; otherwise streaming is silently reduced
-        /// to buffered completion — same invariant as <see cref="ILlmClient.CompleteStreamingAsync"/>.
+        /// Provides API usage information.
         /// </remarks>
         virtual async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,

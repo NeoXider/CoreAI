@@ -4,9 +4,7 @@ using CoreAI.Logging;
 namespace CoreAI.Unity.Logging
 {
     /// <summary>
-    /// Unity-реализация <see cref="ILog"/> — делегирует к <see cref="IGameLogger"/>.
-    /// Маппит строковые <see cref="LogTag"/> на <see cref="GameLogFeature"/> для фильтрации.
-    /// Устанавливается как <see cref="Log.Instance"/> при инициализации DI-контейнера.
+    /// Unity Log component used by CoreAI.
     /// </summary>
     public sealed class UnityLog : ILog
     {
@@ -38,8 +36,8 @@ namespace CoreAI.Unity.Logging
         }
 
         /// <summary>
-        /// Маппинг строковых тегов <see cref="LogTag"/> → <see cref="GameLogFeature"/>.
-        /// Неизвестные теги → <see cref="GameLogFeature.Core"/>.
+/// Executes map tag.
+/// Executes map tag.
         /// </summary>
         private static GameLogFeature MapTag(string tag)
         {
@@ -55,9 +53,9 @@ namespace CoreAI.Unity.Logging
                 LogTag.MessagePipe => GameLogFeature.MessagePipe,
                 LogTag.Llm => GameLogFeature.Llm,
                 LogTag.Metrics => GameLogFeature.Metrics,
-                LogTag.Lua => GameLogFeature.MessagePipe, // Lua идёт через MessagePipe pipeline
+                LogTag.Lua => GameLogFeature.MessagePipe, // Lua messages pass through the MessagePipe pipeline.
                 LogTag.World => GameLogFeature.Core,
-                LogTag.Memory => GameLogFeature.Llm, // Memory — часть LLM tool calling
+                LogTag.Memory => GameLogFeature.Llm, // Memory is routed through LLM tool-calling logs.
                 LogTag.Config => GameLogFeature.Core,
                 _ => GameLogFeature.Core
             };

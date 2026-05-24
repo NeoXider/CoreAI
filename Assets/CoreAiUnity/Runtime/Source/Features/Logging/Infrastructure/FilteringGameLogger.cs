@@ -3,14 +3,14 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Фильтрует по <see cref="IGameLogSettings"/>, затем пишет в <see cref="UnityGameLogSink"/>.
+    /// Game logger that filters entries before writing them to a sink.
     /// </summary>
     public sealed class FilteringGameLogger : IGameLogger
     {
         private readonly UnityGameLogSink _sink;
         private readonly IGameLogSettings _settings;
 
-        /// <summary>Связывает низкоуровневый sink с правилами фильтрации.</summary>
+        /// <summary>Initializes a new instance of FilteringGameLogger.</summary>
         public FilteringGameLogger(UnityGameLogSink sink, IGameLogSettings settings)
         {
             _sink = sink;

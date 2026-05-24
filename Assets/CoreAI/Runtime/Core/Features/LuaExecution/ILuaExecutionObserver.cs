@@ -1,19 +1,19 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Колбэки жизненного цикла исполнения Lua из <see cref="LuaAiEnvelopeProcessor"/>.</summary>
+    /// <summary>ILuaExecutionObserver interface.</summary>
     public interface ILuaExecutionObserver
     {
-        /// <summary>Чанк Lua выполнен успешно.</summary>
+        /// <summary>Notifies observers that Lua execution completed successfully.</summary>
         void OnLuaSuccess(string resultSummary);
 
-        /// <summary>Ошибка MoonSharp или логики песочницы.</summary>
+        /// <summary>Notifies observers that Lua execution failed.</summary>
         void OnLuaFailure(string errorMessage);
 
-        /// <summary>Запланирован повторный вызов Programmer с увеличенным поколением ремонта.</summary>
+        /// <summary>Notifies observers that a Lua repair attempt has been scheduled.</summary>
         void OnLuaRepairScheduled(int nextGeneration, string errorPreview);
     }
 
-    /// <summary>Пустая реализация наблюдателя.</summary>
+    /// <summary>No-op Lua execution observer.</summary>
     public sealed class NullLuaExecutionObserver : ILuaExecutionObserver
     {
         /// <inheritdoc />

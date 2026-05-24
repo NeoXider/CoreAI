@@ -51,7 +51,9 @@ namespace CoreAI.Tests.PlayMode
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
             if (!_setup.IsReady)
+            {
                 Assert.Ignore($"LLM backend not available ({_setup.BackendName}). Skipping.");
+            }
 
             if (_setup.Client is OfflineLlmClient)
             {
@@ -87,11 +89,16 @@ namespace CoreAI.Tests.PlayMode
             }
 
             if (s_liveLlmProbeState == -1)
+            {
                 Assert.Ignore(s_liveLlmProbeFailMessage);
-            if (s_liveLlmProbeState == 1)
-                yield break;
+            }
 
-            var probeRequest = new LlmCompletionRequest
+            if (s_liveLlmProbeState == 1)
+            {
+                yield break;
+            }
+
+            LlmCompletionRequest probeRequest = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt = "Reply with exactly one word: pong.",
@@ -103,7 +110,8 @@ namespace CoreAI.Tests.PlayMode
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 LlmCompletionResult probeResult = null;
-                Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r, CancellationToken.None);
+                Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r,
+                    CancellationToken.None);
                 yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability");
 
                 if (probeResult != null && probeResult.Ok && !string.IsNullOrWhiteSpace(probeResult.Content))
@@ -132,7 +140,9 @@ namespace CoreAI.Tests.PlayMode
         {
             CoreAISettingsAsset inst = CoreAISettingsAsset.Instance;
             if (inst == null)
+            {
                 return "no-settings";
+            }
 
             return $"{(int)inst.BackendType}|{inst.ApiBaseUrl?.Trim() ?? ""}|{inst.ModelName?.Trim() ?? ""}";
         }
@@ -140,18 +150,35 @@ namespace CoreAI.Tests.PlayMode
         private static bool IsRetryableProbeFailure(string err)
         {
             if (string.IsNullOrEmpty(err))
+            {
                 return false;
+            }
 
             if (err.IndexOf("429", StringComparison.Ordinal) >= 0)
+            {
                 return true;
+            }
+
             if (err.IndexOf("rate limit", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
                 return true;
+            }
+
             if (err.IndexOf("too many requests", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
                 return true;
+            }
+
             if (err.IndexOf("503", StringComparison.Ordinal) >= 0)
+            {
                 return true;
+            }
+
             if (err.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
                 return true;
+            }
+
             return false;
         }
 
@@ -203,7 +230,7 @@ namespace CoreAI.Tests.PlayMode
 
             _setup.MemoryStore.Clear("Teacher");
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -216,7 +243,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var box = new StreamResultBox();
+            StreamResultBox box = new();
             Task task = CollectStreamAsync(_setup.Client, request, box, CancellationToken.None);
             yield return WaitTask(task, 150f, "StreamingMemoryWrite");
 
@@ -267,7 +294,7 @@ namespace CoreAI.Tests.PlayMode
 
             _setup.MemoryStore.Clear("Teacher");
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -310,8 +337,10 @@ namespace CoreAI.Tests.PlayMode
             if (result.ExecutedToolCalls != null && result.ExecutedToolCalls.Count > 0)
             {
                 Debug.Log($"[FullPipeline2] Tool traces: {result.ExecutedToolCalls.Count}");
-                foreach (var trace in result.ExecutedToolCalls)
+                foreach (LlmToolCallTrace trace in result.ExecutedToolCalls)
+                {
                     Debug.Log($"  → {trace.Name} ok={trace.Success} dur={trace.DurationMs}ms src={trace.Source}");
+                }
             }
 
             Debug.Log("[FullPipeline2] ✓ PASSED");
@@ -332,19 +361,19 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log($"[FullPipeline3] Backend: {_setup.BackendName}");
 
-            var inventoryProvider = new TestInventoryProvider();
+            TestInventoryProvider inventoryProvider = new();
             inventoryProvider.Inventory.Add(new InventoryTool.InventoryItem
                 { Name = "Dragon Slayer", Type = "weapon", Quantity = 1, Price = 500 });
             inventoryProvider.Inventory.Add(new InventoryTool.InventoryItem
                 { Name = "Healing Elixir", Type = "consumable", Quantity = 5, Price = 75 });
 
-            var policy = new AgentMemoryPolicy();
-            var telemetry = new SessionTelemetryCollector();
-            var composer = new AiPromptComposer(
+            AgentMemoryPolicy policy = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
-            var sink = new ListSink();
+            ListSink sink = new();
 
             // Register Merchant with inventory tool
             new AgentBuilder(BuiltInAgentRoleIds.Merchant)
@@ -354,7 +383,7 @@ namespace CoreAI.Tests.PlayMode
                 .Build()
                 .ApplyToPolicy(policy);
 
-            var orch = new AiOrchestrator(
+            AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
                 _setup.Client,
                 sink,
@@ -377,7 +406,7 @@ namespace CoreAI.Tests.PlayMode
             // Check commands
             Debug.Log($"[FullPipeline3] Commands: {sink.Items.Count}");
             string response = "";
-            foreach (var cmd in sink.Items)
+            foreach (ApplyAiGameCommand cmd in sink.Items)
             {
                 Debug.Log($"[FullPipeline3] Command: '{cmd.JsonPayload}'");
                 response += cmd.JsonPayload + "\n";
@@ -431,7 +460,7 @@ namespace CoreAI.Tests.PlayMode
             _setup.MemoryStore.Clear("Teacher");
 
             // --- Phase 1: Write ---
-            var writeRequest = new LlmCompletionRequest
+            LlmCompletionRequest writeRequest = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -443,7 +472,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var writeBox = new StreamResultBox();
+            StreamResultBox writeBox = new();
             Task writeTask = CollectStreamAsync(_setup.Client, writeRequest, writeBox, CancellationToken.None);
             yield return WaitTask(writeTask, 120f, "Write_Phase");
 
@@ -457,7 +486,7 @@ namespace CoreAI.Tests.PlayMode
                 "Write phase: no JSON leak");
 
             // --- Phase 2: Read ---
-            var readRequest = new LlmCompletionRequest
+            LlmCompletionRequest readRequest = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -468,7 +497,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var readBox = new StreamResultBox();
+            StreamResultBox readBox = new();
             Task readTask = CollectStreamAsync(_setup.Client, readRequest, readBox, CancellationToken.None);
             yield return WaitTask(readTask, 120f, "Read_Phase");
 
@@ -505,7 +534,7 @@ namespace CoreAI.Tests.PlayMode
 
             _setup.MemoryStore.Clear("Teacher");
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
@@ -516,7 +545,7 @@ namespace CoreAI.Tests.PlayMode
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
-            var traceBox = new TraceResultBox();
+            TraceResultBox traceBox = new();
             Task task = CollectStreamWithTracesAsync(_setup.Client, request, traceBox, CancellationToken.None);
             yield return WaitTask(task, 150f, "StreamingTraces");
 
@@ -528,11 +557,12 @@ namespace CoreAI.Tests.PlayMode
             if (memorySaved && traceBox.Traces.Count > 0)
             {
                 Debug.Log($"[FullPipeline5] ✓ {traceBox.Traces.Count} tool traces found:");
-                foreach (var t in traceBox.Traces)
+                foreach (LlmToolCallTrace t in traceBox.Traces)
+                {
                     Debug.Log($"  → {t.Name} ok={t.Success} dur={t.DurationMs}ms src={t.Source}");
+                }
 
-                Assert.That(traceBox.Traces, Has.Some.Matches<LlmToolCallTrace>(
-                    t => t.Name == "memory" && t.Success),
+                Assert.That(traceBox.Traces, Has.Some.Matches<LlmToolCallTrace>(t => t.Name == "memory" && t.Success),
                     "Should have at least one successful 'memory' trace");
             }
             else if (memorySaved)
@@ -561,14 +591,17 @@ namespace CoreAI.Tests.PlayMode
             ILlmClient client, LlmCompletionRequest request,
             StreamResultBox box, CancellationToken ct)
         {
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             int chunks = 0;
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, ct))
             {
                 chunks++;
                 if (!string.IsNullOrEmpty(chunk.Text))
+                {
                     sb.Append(chunk.Text);
+                }
             }
+
             box.FullText = sb.ToString();
             box.ChunkCount = chunks;
         }
@@ -577,17 +610,20 @@ namespace CoreAI.Tests.PlayMode
             ILlmClient client, LlmCompletionRequest request,
             TraceResultBox box, CancellationToken ct)
         {
-            var sb = new StringBuilder();
+            StringBuilder sb = new();
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, ct))
             {
                 if (!string.IsNullOrEmpty(chunk.Text))
+                {
                     sb.Append(chunk.Text);
+                }
 
                 if (chunk.IsDone && chunk.ExecutedToolCalls != null)
                 {
                     box.Traces.AddRange(chunk.ExecutedToolCalls);
                 }
             }
+
             box.FullText = sb.ToString();
         }
 
@@ -600,7 +636,7 @@ namespace CoreAI.Tests.PlayMode
             ILlmClient client, LlmCompletionRequest request,
             Action<LlmCompletionResult> callback, CancellationToken ct)
         {
-            var r = await client.CompleteAsync(request, ct);
+            LlmCompletionResult r = await client.CompleteAsync(request, ct);
             callback(r);
         }
 
@@ -623,14 +659,21 @@ namespace CoreAI.Tests.PlayMode
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand command) => Items.Add(command);
+
+            public void Publish(ApplyAiGameCommand command)
+            {
+                Items.Add(command);
+            }
         }
 
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
             public List<InventoryTool.InventoryItem> Inventory { get; } = new();
+
             public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(CancellationToken ct)
-                => Task.FromResult(Inventory);
+            {
+                return Task.FromResult(Inventory);
+            }
         }
     }
 }

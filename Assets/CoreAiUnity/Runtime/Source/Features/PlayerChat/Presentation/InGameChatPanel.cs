@@ -1,4 +1,4 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Composition;
 using TMPro;
 using UnityEngine;
@@ -7,20 +7,20 @@ using UnityEngine.UI;
 namespace CoreAI.Presentation.PlayerChat
 {
     /// <summary>
-    /// Простая панель «чат с GPT» в игре: привяжите <see cref="TMP_InputField"/> / <see cref="TMP_Text"/> / <see cref="Button"/>.
+    /// Unity UI panel for in-game player chat.
     /// </summary>
     public sealed class InGameChatPanel : MonoBehaviour
     {
-        [Tooltip("Поле ввода сообщения игрока (TextMeshPro).")] [SerializeField]
+        [Tooltip("Player message input field (TextMeshPro).")][SerializeField]
         private TMP_InputField inputField;
 
-        [Tooltip("Куда выводить историю диалога (TextMeshPro).")] [SerializeField]
+        [Tooltip("Conversation output text area (TextMeshPro).")][SerializeField]
         private TMP_Text outputText;
 
-        [Tooltip("Отправить текущий текст в LLM.")] [SerializeField]
+        [Tooltip("Sends the current text to the LLM.")][SerializeField]
         private Button sendButton;
 
-        [Tooltip("Очистить историю на стороне сервиса чата.")] [SerializeField]
+        [Tooltip("Clears chat history on the chat service side.")][SerializeField]
         private Button clearHistoryButton;
 
         private IInGameLlmChatService _chat;
@@ -71,7 +71,7 @@ namespace CoreAI.Presentation.PlayerChat
             {
                 if (_chat == null)
                 {
-                    AppendLine("[CoreAI] Чат: контейнер не готов (нет CoreAILifetimeScope?).");
+                    AppendLine("[CoreAI] Chat service is not ready (missing CoreAILifetimeScope?).");
                     return;
                 }
 
@@ -100,7 +100,7 @@ namespace CoreAI.Presentation.PlayerChat
             catch (System.Exception ex)
             {
                 AppendLine("[error] " + ex.Message);
-                UnityEngine.Debug.LogError($"[InGameChatPanel] Exception in OnSendClicked: {ex}");
+                Debug.LogError($"[InGameChatPanel] Exception in OnSendClicked: {ex}");
             }
         }
 

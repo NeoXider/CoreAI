@@ -111,7 +111,8 @@ namespace CoreAI.Tests.PlayMode
 
                 //  LuaLlmTool    Lua (SecureLuaEnvironment)
                 RealLuaExecutor luaExecutor = new();
-                LuaLlmTool luaTool = new(luaExecutor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
+                LuaLlmTool luaTool = new(luaExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    Logging.NullLog.Instance);
 
                 AgentMemoryPolicy policy = new();
                 TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
@@ -333,7 +334,7 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
         }
 
         /// <summary>
@@ -615,5 +616,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-
-

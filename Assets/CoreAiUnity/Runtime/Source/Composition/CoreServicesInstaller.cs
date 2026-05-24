@@ -1,4 +1,4 @@
-using CoreAI.Infrastructure.Logging;
+﻿using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
 using CoreAI.Logging;
 using CoreAI.Messaging;
@@ -10,19 +10,19 @@ using VContainer;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Регистрация инфраструктуры: единый логгер (<see cref="ILog"/> + <see cref="IGameLogger"/>),
+    ///
     /// MessagePipe + <see cref="GlobalMessagePipe"/>.
-    /// Перед вызовом в контейнере должен быть зарегистрирован <see cref="IGameLogSettings"/>.
+    ///
     /// </summary>
     public static class CoreServicesInstaller
     {
-        /// <summary>Логгер Unity, брокер <see cref="CoreAI.Messaging.ApplyAiGameCommand"/>, глобальный провайдер MessagePipe.</summary>
+        /// <summary>Registers CoreAI domain services with the dependency injection container.</summary>
         public static void RegisterCore(this IContainerBuilder builder)
         {
             builder.Register<UnityGameLogSink>(Lifetime.Singleton);
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
-            // Единый логгер: ILog (DI) + Log.Instance (статика)
+            // No-op guard before a conditional operation.
             builder.Register<UnityLog>(Lifetime.Singleton).As<ILog>();
 
             MessagePipeOptions opts = builder.RegisterMessagePipe();
@@ -43,7 +43,7 @@ namespace CoreAI.Composition
 
             builder.RegisterBuildCallback(static resolver =>
             {
-                // Устанавливаем статический логгер для удобного доступа из Core
+                // No-op guard before a conditional operation.
                 Log.Instance = resolver.Resolve<ILog>();
                 GlobalMessagePipe.SetProvider(resolver.AsServiceProvider());
             });

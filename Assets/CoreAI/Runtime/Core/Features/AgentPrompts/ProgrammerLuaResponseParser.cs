@@ -3,12 +3,11 @@ using System;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Извлекает Lua из ответа LLM (fenced-блок с маркером lua). Fallback для обратной совместимости.
-    /// Основной путь: MEAI execute_lua tool call.
+    /// Extracts Lua source from programmer-role responses.
     /// </summary>
     public static class ProgrammerLuaResponseParser
     {
-        /// <summary>Вырезать код из fenced markdown-блока с меткой lua (тройные обратные кавычки).</summary>
+        /// <summary>Attempts to extract Lua code from a programmer response.</summary>
         public static bool TryExtractLuaCode(string content, out string luaCode)
         {
             luaCode = null;

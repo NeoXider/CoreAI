@@ -1,15 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CoreAI.AgentMemory;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика включения памяти по ролям.
-    /// По умолчанию память ВКЛЮЧЕНА для всех ролей.
-    /// Поддерживает 2 типа памяти:
-    /// 1) MemoryTool (function call) — явное сохранение через {"tool":"memory","action":"write/append/clear"}
-    /// 2) Chat History — автоматическое сохранение всего диалога в контекст (работает как с локальными, так и с HTTP API моделями, сохраняется между сессиями!)
+    /// Policy implementation for agent memory behavior.
     /// </summary>
     public sealed class AgentMemoryPolicy
     {
@@ -22,7 +18,7 @@ namespace CoreAI.Ai
         private static readonly MemoryLlmTool _memoryToolInstance = new();
 
         /// <summary>
-        /// Установить произвольные инструменты для роли (добавляются к MemoryTool).
+/// Executes SetToolsForRole API operation.
         /// </summary>
         public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
         {
@@ -109,28 +105,28 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Конфигурация памяти для одной роли.</summary>
+        /// <summary>RoleMemoryConfig struct.</summary>
         public struct RoleMemoryConfig
         {
-            /// <summary>Включена ли память через MemoryTool (function call).</summary>
+            /// <summary>Use memory tool.</summary>
             public bool UseMemoryTool;
 
-            /// <summary>Действие по умолчанию: write (перезаписать) или append (дополнить).</summary>
+            /// <summary>Default action.</summary>
             public MemoryToolAction DefaultAction;
 
-            /// <summary>Разрешать ли дублированные вызовы инструментов (переопределяет глобальную настройку, если не null).</summary>
+            /// <summary>Allow duplicate tool calls.</summary>
             public bool? AllowDuplicateToolCalls;
 
-            /// <summary>Сохранять и использовать ли историю чата в контексте (Role: user/assistant).</summary>
+            /// <summary>With chat history.</summary>
             public bool WithChatHistory;
 
-            /// <summary>Сохранять ли историю чата между сессиями (на диск).</summary>
+            /// <summary>Persist chat history.</summary>
             public bool PersistChatHistory;
 
-            /// <summary>Бюджет токенов (опционально, если ChatHistory активна).</summary>
+            /// <summary>Context tokens.</summary>
             public int ContextTokens;
 
-            /// <summary>Максимальное количество сообщений для сохранения и отправки в модель.</summary>
+            /// <summary>Max chat history messages.</summary>
             public int MaxChatHistoryMessages;
 
             /// <summary>Per-role LLM response token cap; null = use per-call/global/provider fallback.</summary>
@@ -166,13 +162,14 @@ namespace CoreAI.Ai
             }
         }
 
-        public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist, int maxChatHistoryMessages = 30)
+        public void ConfigureChatHistory(string roleId, bool enabled, int tokens, bool persist,
+            int maxChatHistoryMessages = 30)
         {
             lock (_lock)
             {
                 if (!_roleConfigs.TryGetValue(roleId, out RoleMemoryConfig c))
                 {
-                    c = new RoleMemoryConfig(useMemoryTool: true, defaultAction: MemoryToolAction.Append);
+                    c = new RoleMemoryConfig(true, MemoryToolAction.Append);
                 }
 
                 c.WithChatHistory = enabled;
@@ -207,14 +204,14 @@ namespace CoreAI.Ai
         {
             _roleConfigs = new Dictionary<string, RoleMemoryConfig>();
 
-            // По умолчанию: агентные роли используют MemoryTool с append.
+            /* Implementation note in English. */
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 bool smartCompaction =
                     roleId != BuiltInAgentRoleIds.Programmer;
                 _roleConfigs[roleId] = new RoleMemoryConfig(
-                    useMemoryTool: true,
-                    defaultAction: MemoryToolAction.Append,
+                    true,
+                    MemoryToolAction.Append,
                     useLlmContextCompaction: smartCompaction);
             }
 
@@ -222,21 +219,21 @@ namespace CoreAI.Ai
             // - PlainChat: no MemoryTool by default, persistent chat history only.
             // - SmartChat: MemoryTool + persistent chat history by default.
             _roleConfigs[BuiltInAgentRoleIds.PlainChat] = new RoleMemoryConfig(
-                useMemoryTool: false,
+                false,
                 withChatHistory: true,
                 persistChatHistory: true,
                 useLlmContextCompaction: true);
             _roleConfigs[BuiltInAgentRoleIds.SmartChat] = new RoleMemoryConfig(
-                useMemoryTool: true,
-                defaultAction: MemoryToolAction.Append,
-                withChatHistory: true,
-                persistChatHistory: true,
+                true,
+                MemoryToolAction.Append,
+                true,
+                true,
                 useLlmContextCompaction: true);
         }
 
         /// <summary>
-        /// Включена ли для роли подстановка и сохранение блоков памяти в ответах LLM.
-        /// По умолчанию ВКЛЮЧЕНА для всех ролей.
+/// Executes IsMemoryEnabled API operation.
+        ///
         /// </summary>
         public bool IsMemoryEnabled(string roleId)
         {
@@ -255,12 +252,12 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Неизвестная роль — тоже включаем по умолчанию
+            /* Implementation note in English. */
             return true;
         }
 
         /// <summary>
-        /// Получить конфигурацию MemoryTool для роли.
+/// Executes GetRoleConfig API operation.
         /// </summary>
         public RoleMemoryConfig GetRoleConfig(string roleId)
         {
@@ -289,7 +286,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Настроить память для роли.
+/// Executes ConfigureRole API operation.
         /// </summary>
         public void ConfigureRole(
             string roleId,
@@ -365,7 +362,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Включить MemoryTool для роли.
+/// Executes EnableMemoryTool API operation.
         /// </summary>
         public void EnableMemoryTool(string roleId)
         {
@@ -373,7 +370,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Выключить MemoryTool для роли.
+/// Executes DisableMemoryTool API operation.
         /// </summary>
         public void DisableMemoryTool(string roleId)
         {
@@ -381,7 +378,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Включить/выключить MemoryTool для всех ролей.
+/// Executes SetMemoryToolForAll API operation.
         /// </summary>
         public void SetMemoryToolForAll(bool enabled)
         {
@@ -392,7 +389,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Нужно ли подставлять память в системный промпт для этой роли.
+/// Executes ShouldInjectMemory API operation.
         /// </summary>
         public bool ShouldInjectMemory(string roleId)
         {
@@ -400,8 +397,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Получить список инструментов (tools) для роли.
-        /// Включает MemoryTool если память включена для роли + любые кастомные инструменты.
+/// Executes GetToolsForRole API operation.
+        ///
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
@@ -413,7 +410,7 @@ namespace CoreAI.Ai
                 {
                     bool customHasMemory = ListContainsMemoryTool(custom);
 
-                    // Singleton memory только если память включена и AgentBuilder ещё не положил свой MemoryLlmTool.
+                    /* Implementation note in English. */
                     if (IsMemoryEnabledLocked(roleId) && !customHasMemory)
                     {
                         tools.Add(_memoryToolInstance);
@@ -433,7 +430,11 @@ namespace CoreAI.Ai
         /// <summary>Check memory enabled under <see cref="_lock"/>.</summary>
         private bool IsMemoryEnabledLocked(string roleId)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) roleId = BuiltInAgentRoleIds.Creator;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                roleId = BuiltInAgentRoleIds.Creator;
+            }
+
             roleId = roleId.Trim();
             return _roleConfigs.TryGetValue(roleId, out RoleMemoryConfig config) ? config.UseMemoryTool : true;
         }
@@ -451,7 +452,7 @@ namespace CoreAI.Ai
             return false;
         }
 
-        // ===== Дополнительные системные промпты (слой 3: AgentBuilder) =====
+        /* Implementation note in English. */
         private readonly Dictionary<string, string> _additionalSystemPrompts = new();
 
         // ===== Override Universal Prefix (per-role) =====
@@ -461,12 +462,16 @@ namespace CoreAI.Ai
         private readonly Dictionary<string, bool> _streamingOverrides = new();
 
         /// <summary>
-        /// Установить дополнительный системный промпт для роли (из AgentBuilder).
-        /// Дополняется к базовому промпту из ManifestProvider/Resources.
+/// Executes SetAdditionalSystemPrompt API operation.
+        ///
         /// </summary>
         public void SetAdditionalSystemPrompt(string roleId, string prompt)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) return;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
             roleId = roleId.Trim();
 
             lock (_lock)
@@ -483,12 +488,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Получить дополнительный системный промпт для роли (установленный через AgentBuilder).
+/// Executes TryGetAdditionalSystemPrompt API operation.
         /// </summary>
         public bool TryGetAdditionalSystemPrompt(string roleId, out string prompt)
         {
             prompt = null;
-            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
             lock (_lock)
             {
                 return _additionalSystemPrompts.TryGetValue(roleId.Trim(), out prompt);
@@ -496,30 +505,42 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Пометить роль как «переопределяющую universalPrefix».
-        /// Если true — universalPrefix из CoreAISettings НЕ будет применяться к этой роли.
-        /// Полезно когда нужен полностью кастомный системный промпт.
+/// Executes SetOverrideUniversalPrefix API operation.
+        ///
+        ///
         /// </summary>
         public void SetOverrideUniversalPrefix(string roleId, bool shouldOverride)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) return;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
             roleId = roleId.Trim();
 
             lock (_lock)
             {
                 if (shouldOverride)
+                {
                     _overrideUniversalPrefix.Add(roleId);
+                }
                 else
+                {
                     _overrideUniversalPrefix.Remove(roleId);
+                }
             }
         }
 
         /// <summary>
-        /// Проверить, переопределяет ли роль universalPrefix.
+/// Executes IsUniversalPrefixOverridden API operation.
         /// </summary>
         public bool IsUniversalPrefixOverridden(string roleId)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
             lock (_lock)
             {
                 return _overrideUniversalPrefix.Contains(roleId.Trim());
@@ -529,13 +550,17 @@ namespace CoreAI.Ai
         // ===== Streaming (per-role override) =====
 
         /// <summary>
-        /// Задать per-role переопределение флага стриминга.
-        /// <paramref name="enabled"/> = null сбрасывает override — будет использован глобальный
+/// Executes SetStreamingEnabled API operation.
+        ///
         /// <see cref="ICoreAISettings.EnableStreaming"/>.
         /// </summary>
         public void SetStreamingEnabled(string roleId, bool? enabled)
         {
-            if (string.IsNullOrWhiteSpace(roleId)) return;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
             roleId = roleId.Trim();
 
             lock (_lock)
@@ -552,12 +577,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Получить per-role override флага стриминга, если он был задан.
+/// Executes TryGetStreamingOverride API operation.
         /// </summary>
         public bool TryGetStreamingOverride(string roleId, out bool enabled)
         {
             enabled = false;
-            if (string.IsNullOrWhiteSpace(roleId)) return false;
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
             lock (_lock)
             {
                 return _streamingOverrides.TryGetValue(roleId.Trim(), out enabled);
@@ -565,9 +594,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Вычислить эффективный флаг стриминга для роли.
-        /// Порядок приоритета: per-role override → <paramref name="globalFallback"/> →
-        /// <see cref="CoreAISettings.EnableStreaming"/> (глобальный статический прокси).
+/// Executes IsStreamingEnabled API operation.
+        ///
+        ///
         /// </summary>
         public bool IsStreamingEnabled(string roleId, ICoreAISettings globalFallback = null)
         {

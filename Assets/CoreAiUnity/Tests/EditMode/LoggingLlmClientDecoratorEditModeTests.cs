@@ -118,7 +118,7 @@ namespace CoreAI.Tests.EditMode
         {
             SpyLogger spy = new();
             RateLimitThenOkMock inner = new();
-            LoggingLlmClientDecorator dec = new(inner, spy, requestTimeoutSeconds: 0f, maxHttpRetryAttempts: 1);
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f, 1);
             LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Creator,
@@ -141,7 +141,7 @@ namespace CoreAI.Tests.EditMode
         {
             SpyLogger spy = new();
             BackendUnavailableThenOkMock inner = new();
-            LoggingLlmClientDecorator dec = new(inner, spy, requestTimeoutSeconds: 0f, maxHttpRetryAttempts: 1);
+            LoggingLlmClientDecorator dec = new(inner, spy, 0f, 1);
             LlmCompletionRequest req = new()
             {
                 AgentRoleId = BuiltInAgentRoleIds.Creator,
@@ -206,8 +206,7 @@ namespace CoreAI.Tests.EditMode
                 TraceId = "t-out",
                 UserPayload = "x"
             };
-            Assert.CatchAsync<OperationCanceledException>(
-                async () => await dec.CompleteAsync(req, cts.Token));
+            Assert.CatchAsync<OperationCanceledException>(async () => await dec.CompleteAsync(req, cts.Token));
         }
 
         /// <summary>
@@ -265,7 +264,7 @@ namespace CoreAI.Tests.EditMode
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
-                new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s1", UserPayload = "hi" }))
+                               new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s1", UserPayload = "hi" }))
             {
                 chunks.Add(chunk);
             }
@@ -288,7 +287,7 @@ namespace CoreAI.Tests.EditMode
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in dec.CompleteStreamingAsync(
-                new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s2", UserPayload = "hi" }))
+                               new LlmCompletionRequest { AgentRoleId = "Tester", TraceId = "s2", UserPayload = "hi" }))
             {
                 chunks.Add(chunk);
             }

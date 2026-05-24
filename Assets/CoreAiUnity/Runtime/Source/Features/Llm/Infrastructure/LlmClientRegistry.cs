@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CoreAI.Ai;
@@ -12,9 +12,9 @@ using IAgentMemoryStore = CoreAI.Ai.IAgentMemoryStore;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Кэш <see cref="ILlmClient"/> по profileId + матчинг ролей по <see cref="LlmRoutingManifest"/>.
+    /// Registry of LLM clients used for role and profile routing.
     /// </summary>
-    public sealed class LlmClientRegistry : CoreAI.Ai.ILlmClientRegistry, ILlmRoutingController
+    public sealed class LlmClientRegistry : ILlmClientRegistry, ILlmRoutingController
     {
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore _memoryStore;
@@ -28,7 +28,7 @@ namespace CoreAI.Infrastructure.Llm
         private ILlmRouteResolver _routeResolver = new LlmRouteResolver(new LlmRouteTable());
         private bool _useManifestRouting;
 
-        /// <param name="logger">Логи конфигурации маршрутизации (без прямого Unity Debug).</param>
+        /// <param name="logger">The logger value.</param>
         public LlmClientRegistry(IGameLogger logger, ICoreAISettings settings, IAgentMemoryStore memoryStore = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,7 +36,7 @@ namespace CoreAI.Infrastructure.Llm
             _memoryStore = memoryStore;
         }
 
-        /// <summary>Клиент по умолчанию, если маршрутизация выключена или нет совпадения.</summary>
+        /// <summary>Legacy LLM client used when no route-specific client is available.</summary>
         public void SetLegacyFallback(ILlmClient legacy)
         {
             _legacyFallback = legacy ?? new StubLlmClient();
@@ -48,9 +48,23 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public void ApplyManifest(LlmRoutingManifest manifest)
         {
+            ApplyRouteTable(
+                manifest != null ? manifest.ToRouteTable() : null,
+                manifest != null ? manifest.Profiles : null,
+                manifest != null && manifest.EnableRoleRouting);
+        }
+
+        /// <summary>
+        /// Applies a portable route table snapshot while using Unity profile entries only to build backend adapters.
+        /// </summary>
+        public void ApplyRouteTable(
+            LlmRouteTable routeTable,
+            IReadOnlyList<LlmBackendProfileEntry> profiles,
+            bool enableRouting = true)
+        {
             lock (_gate)
             {
-                if (manifest == null || !manifest.EnableRoleRouting)
+                if (!enableRouting || routeTable == null)
                 {
                     _useManifestRouting = false;
                     _byProfileId.Clear();
@@ -61,7 +75,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 _useManifestRouting = true;
-                LlmRouteTable routeTable = manifest.ToRouteTable();
                 IReadOnlyList<string> validationErrors = routeTable.Validate();
                 foreach (string error in validationErrors)
                 {
@@ -72,7 +85,7 @@ namespace CoreAI.Infrastructure.Llm
                 Dictionary<string, ILlmClient> newClients = new(StringComparer.Ordinal);
                 Dictionary<string, int> newContexts = new(StringComparer.Ordinal);
                 Dictionary<string, LlmExecutionMode> newModes = new(StringComparer.Ordinal);
-                foreach (LlmBackendProfileEntry p in manifest.Profiles)
+                foreach (LlmBackendProfileEntry p in profiles ?? Array.Empty<LlmBackendProfileEntry>())
                 {
                     if (string.IsNullOrWhiteSpace(p?.profileId))
                     {
@@ -148,7 +161,8 @@ namespace CoreAI.Infrastructure.Llm
             string profileId = ResolveProfileIdForRole(roleId);
             lock (_gate)
             {
-                return !string.IsNullOrEmpty(profileId) && _modeByProfileId.TryGetValue(profileId, out LlmExecutionMode mode)
+                return !string.IsNullOrEmpty(profileId) &&
+                       _modeByProfileId.TryGetValue(profileId, out LlmExecutionMode mode)
                     ? mode
                     : _legacyFallbackMode;
             }
@@ -198,7 +212,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         _logger.LogWarning(
                             GameLogFeature.Llm,
-                            $"LlmClientRegistry: профиль '{p.profileId}' OpenAiHttp без валидного httpSettings.");
+                            $"LlmClientRegistry: profile '{p.profileId}' uses OpenAiHttp without valid httpSettings.");
                         return new StubLlmClient();
                     }
 

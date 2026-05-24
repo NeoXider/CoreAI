@@ -6,13 +6,13 @@ using CoreAI.Sandbox;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Регистрирует демо-API для песочницы Lua: <c>report</c> (лог) и <c>add</c> (сложение).
+    /// Wraps Lua runtime bindings with logging.
     /// </summary>
     public sealed class LoggingLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
         private readonly IGameLogger _logger;
 
-        /// <param name="logger">Приёмник для вызовов <c>report</c> из скриптов.</param>
+        /// <param name="logger">The logger value.</param>
         public LoggingLuaRuntimeBindings(IGameLogger logger)
         {
             _logger = logger;

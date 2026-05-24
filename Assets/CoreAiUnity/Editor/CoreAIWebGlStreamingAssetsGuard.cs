@@ -39,13 +39,20 @@ namespace CoreAI.Editor
         [InitializeOnLoadMethod]
         private static void TryRestoreAfterInterruptedBuild()
         {
-            if (BuildPipeline.isBuildingPlayer) return;
+            if (BuildPipeline.isBuildingPlayer)
+            {
+                return;
+            }
+
             RestoreMovedFoldersIfAny();
         }
 
         public void OnPreprocessBuild(BuildReport report)
         {
-            if (report.summary.platform != BuildTarget.WebGL) return;
+            if (report.summary.platform != BuildTarget.WebGL)
+            {
+                return;
+            }
 
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? string.Empty;
             string streamingAssetsAbsolute = Path.Combine(Application.dataPath, "StreamingAssets");
@@ -58,12 +65,16 @@ namespace CoreAI.Editor
             string backupRoot = Path.Combine(projectRoot, "Library", "CoreAI", "WebGlBuildBackup");
             Directory.CreateDirectory(backupRoot);
 
-            var moved = new List<MovedFolderEntry>();
-            string[] subDirectories = Directory.GetDirectories(streamingAssetsAbsolute, "*", SearchOption.TopDirectoryOnly);
+            List<MovedFolderEntry> moved = new();
+            string[] subDirectories =
+                Directory.GetDirectories(streamingAssetsAbsolute, "*", SearchOption.TopDirectoryOnly);
             foreach (string sourceAbs in subDirectories)
             {
                 string folderName = Path.GetFileName(sourceAbs);
-                if (!ShouldGuardFolder(folderName)) continue;
+                if (!ShouldGuardFolder(folderName))
+                {
+                    continue;
+                }
 
                 string backupAbs = Path.Combine(backupRoot, folderName);
                 if (Directory.Exists(backupAbs))
@@ -87,7 +98,7 @@ namespace CoreAI.Editor
                 return;
             }
 
-            var manifest = new MovedFoldersManifest { entries = moved.ToArray() };
+            MovedFoldersManifest manifest = new() { entries = moved.ToArray() };
             SessionState.SetString(SessionStateKey, JsonUtility.ToJson(manifest));
             AssetDatabase.Refresh();
 
@@ -97,14 +108,21 @@ namespace CoreAI.Editor
 
         public void OnPostprocessBuild(BuildReport report)
         {
-            if (report.summary.platform != BuildTarget.WebGL) return;
+            if (report.summary.platform != BuildTarget.WebGL)
+            {
+                return;
+            }
+
             RestoreMovedFoldersIfAny();
         }
 
         private static void RestoreMovedFoldersIfAny()
         {
             string json = SessionState.GetString(SessionStateKey, string.Empty);
-            if (string.IsNullOrWhiteSpace(json)) return;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return;
+            }
 
             MovedFoldersManifest manifest;
             try
@@ -132,7 +150,11 @@ namespace CoreAI.Editor
                     continue;
                 }
 
-                if (!Directory.Exists(entry.backupAbsolutePath)) continue;
+                if (!Directory.Exists(entry.backupAbsolutePath))
+                {
+                    continue;
+                }
+
                 if (Directory.Exists(entry.sourceAbsolutePath))
                 {
                     CoreAIEditorLog.LogWarning(
@@ -153,7 +175,10 @@ namespace CoreAI.Editor
         {
             string fromMeta = fromPathWithoutMeta + ".meta";
             string toMeta = toPathWithoutMeta + ".meta";
-            if (!File.Exists(fromMeta)) return;
+            if (!File.Exists(fromMeta))
+            {
+                return;
+            }
 
             if (File.Exists(toMeta))
             {
@@ -165,7 +190,10 @@ namespace CoreAI.Editor
 
         private static bool ShouldGuardFolder(string folderName)
         {
-            if (string.IsNullOrWhiteSpace(folderName)) return false;
+            if (string.IsNullOrWhiteSpace(folderName))
+            {
+                return false;
+            }
 
             foreach (string prefix in GuardedFolderPrefixes)
             {

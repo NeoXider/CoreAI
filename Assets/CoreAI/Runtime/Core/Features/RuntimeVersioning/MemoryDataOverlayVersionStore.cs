@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>In-memory версии JSON/текстовых оверлеев (тесты, хост без диска).</summary>
+    /// <summary>In-memory data overlay version store.</summary>
     public sealed class MemoryDataOverlayVersionStore : IDataOverlayVersionStore
     {
         private readonly object _lock = new();

@@ -1,17 +1,17 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Действия для MemoryTool.
+    /// Defines operations supported by the memory tool.
     /// </summary>
     public enum MemoryToolAction
     {
-        /// <summary>Полная замена памяти (перезаписать всё).</summary>
+        /// <summary>Replaces an existing memory value with the supplied content.</summary>
         Write = 0,
 
-        /// <summary>Добавление к существующей памяти.</summary>
+        /// <summary>Appends supplied content to the existing memory value.</summary>
         Append = 1,
 
-        /// <summary>Очистка всей памяти.</summary>
+        /// <summary>Clears all memory state for the requested role.</summary>
         Clear = 2
     }
 }

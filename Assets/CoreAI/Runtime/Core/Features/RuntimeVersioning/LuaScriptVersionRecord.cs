@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Снимок состояния версионирования одного Lua-слота (для UI / отладки).</summary>
+    /// <summary>Version record for a Lua script managed by CoreAI.</summary>
     public sealed class LuaScriptVersionRecord
     {
         public LuaScriptVersionRecord(

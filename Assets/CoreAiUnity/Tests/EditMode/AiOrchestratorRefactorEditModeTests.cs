@@ -24,7 +24,9 @@ namespace CoreAI.Tests.EditMode
             public LlmCompletionRequest LastRequest { get; private set; }
             public int CallCount { get; private set; }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
 
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
@@ -81,13 +83,16 @@ namespace CoreAI.Tests.EditMode
             return new AiOrchestrator(
                 auth, llm, sink ?? new CapturingSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null),
-                memoryStore: null, memoryPolicy: new AgentMemoryPolicy(),
-                structuredPolicy: null, metrics: null, settings: new TestSettings());
+                null, new AgentMemoryPolicy(),
+                null, null, new TestSettings());
         }
 
         private sealed class TestTelemetry : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class TestSettings : ICoreAISettings
@@ -114,12 +119,20 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class NullSys : IAgentSystemPromptProvider
         {
-            public bool TryGetSystemPrompt(string roleId, out string prompt) { prompt = null; return false; }
+            public bool TryGetSystemPrompt(string roleId, out string prompt)
+            {
+                prompt = null;
+                return false;
+            }
         }
 
         private sealed class NullUsr : IAgentUserPromptTemplateProvider
         {
-            public bool TryGetUserTemplate(string roleId, out string template) { template = null; return false; }
+            public bool TryGetUserTemplate(string roleId, out string template)
+            {
+                template = null;
+                return false;
+            }
         }
 
         private static AiOrchestrator Build(CapturingLlmClient llm, CapturingSink sink = null)
@@ -166,13 +179,13 @@ namespace CoreAI.Tests.EditMode
             // captures the request that goes into CompleteStreamingAsync, which
             // uses the DIM fallback to call CompleteAsync.
             await foreach (LlmStreamChunk _ in orch.RunStreamingAsync(new AiTaskRequest
-            {
-                RoleId = "Tester",
-                Hint = "stream-go",
-                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                RequiredToolName = "quiz",
-                MaxOutputTokens = 256
-            }))
+                           {
+                               RoleId = "Tester",
+                               Hint = "stream-go",
+                               ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                               RequiredToolName = "quiz",
+                               MaxOutputTokens = 256
+                           }))
             {
                 // consume all chunks
             }
@@ -218,11 +231,11 @@ namespace CoreAI.Tests.EditMode
             AiOrchestrator orch = Build(llm, sink);
 
             await foreach (LlmStreamChunk _ in orch.RunStreamingAsync(new AiTaskRequest
-            {
-                RoleId = "R",
-                Hint = "stream-hint",
-                SourceTag = "stream-tag"
-            }))
+                           {
+                               RoleId = "R",
+                               Hint = "stream-hint",
+                               SourceTag = "stream-tag"
+                           }))
             {
                 // consume
             }
@@ -297,15 +310,18 @@ namespace CoreAI.Tests.EditMode
             ILlmClient client = new CapturingLlmClient();
             int chunks = 0;
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(
-                new LlmCompletionRequest
-                {
-                    AgentRoleId = "Test",
-                    SystemPrompt = "sys",
-                    UserPayload = "hi"
-                }))
+                               new LlmCompletionRequest
+                               {
+                                   AgentRoleId = "Test",
+                                   SystemPrompt = "sys",
+                                   UserPayload = "hi"
+                               }))
             {
                 chunks++;
-                if (chunk.IsDone) break;
+                if (chunk.IsDone)
+                {
+                    break;
+                }
             }
 
             Assert.GreaterOrEqual(chunks, 1, "DIM fallback must produce at least one chunk.");
@@ -328,9 +344,13 @@ namespace CoreAI.Tests.EditMode
         private sealed class FallbackOnlyService : IAiOrchestrationService
         {
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken ct = default)
-                => Task.FromResult("dim-result");
+            {
+                return Task.FromResult("dim-result");
+            }
 
-            public void CancelTasks(string scope) { }
+            public void CancelTasks(string scope)
+            {
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-namespace CoreAI.Chat
+﻿namespace CoreAI.Chat
 {
     /// <summary>
     /// Where a chat request originated; useful for future configurators to scope
@@ -18,7 +18,7 @@ namespace CoreAI.Chat
 
     /// <summary>
     /// Read-only snapshot for future chat request hooks (preview). Carries enough info
-    /// to decide whether to mutate an <see cref="CoreAI.Ai.AiTaskRequest"/> and how — e.g. for
+    ///
     /// <see cref="IChatRequestConfigurator"/> when a registration API exists.
     /// </summary>
     public sealed class ChatRequestContext

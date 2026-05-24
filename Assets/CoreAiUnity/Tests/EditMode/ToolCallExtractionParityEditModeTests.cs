@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode
             int iter = 0;
             int memInvocations = 0;
 
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return iter == 1
@@ -48,13 +48,13 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}");
             });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: true,
-                tools: new List<ILlmTool> { new TestTool("memory") },
-                roleId: "Teacher", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true,
+                new List<ILlmTool> { new TestTool("memory") },
+                "Teacher", 3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { memTool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memTool } };
             MEAI.ChatResponse response = Task.Run(() =>
                 client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
@@ -75,24 +75,25 @@ namespace CoreAI.Tests.EditMode
             // The non-streaming loop should give up after maxConsecutiveErrors because
             // each round resolves to "tool not found" (consistent with native fallback).
             int iter = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return MakeTextResponse(
                     "{\"name\":\"memory\",\"arguments\":{\"action\":\"clear\"}}");
             });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: true,
-                tools: new List<ILlmTool>(), roleId: "X", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true,
+                new List<ILlmTool>(), "X", 3);
 
             // Tools list non-empty so the text-extraction path activates, but the AIFunction
             // for "memory" is *not* in the dictionary — extraction will succeed, but execution
             // will report "Tool 'memory' not found".
-            var options = new MEAI.ChatOptions
+            MEAI.ChatOptions options = new()
             {
-                Tools = new List<MEAI.AITool> { MakeAIFunction("other_tool", _ => Task.FromResult<object>("{\"Success\":true}")) }
+                Tools = new List<MEAI.AITool>
+                    { MakeAIFunction("other_tool", _ => Task.FromResult<object>("{\"Success\":true}")) }
             };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
@@ -110,23 +111,23 @@ namespace CoreAI.Tests.EditMode
             // request.Tools contains MemoryLlmTool, but BuildAIFunctions dropped it
             // (memoryStore is null). Old behaviour: JSON leaked to the chat panel.
             // New behaviour: stream emits cleaned text, IsDone fires.
-            var inner = new StreamingScripted(
+            StreamingScripted inner = new(
                 new[] { "Saved! {\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}" });
 
-            var settings = new StubSettings();
+            StubSettings settings = new();
             // memoryStore is null → BuildAIFunctions drops MemoryLlmTool → aiTools=0
-            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
+            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt = "x",
                 UserPayload = "x",
-                Tools = new List<ILlmTool> { new CoreAI.AgentMemory.MemoryLlmTool() }
+                Tools = new List<ILlmTool> { new AgentMemory.MemoryLlmTool() }
             };
 
-            var chunks = new List<LlmStreamChunk>();
-            await foreach (var c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
             {
                 chunks.Add(c);
             }
@@ -136,7 +137,7 @@ namespace CoreAI.Tests.EditMode
                 "Tool-call JSON must be stripped from the visible stream even when the tool is not bound.");
             Assert.That(visible, Does.Contain("Saved!"), "Visible prefix must survive the strip.");
 
-            var done = chunks.LastOrDefault(c => c.IsDone);
+            LlmStreamChunk done = chunks.LastOrDefault(c => c.IsDone);
             Assert.IsNotNull(done, "Stream must yield an IsDone terminator.");
             Assert.That(done!.ExecutedToolCalls, Is.Not.Null);
             Assert.That(done.ExecutedToolCalls.Any(t => t.Source == "missing"), Is.True,
@@ -147,22 +148,25 @@ namespace CoreAI.Tests.EditMode
         public async Task Streaming_RequestedButNotBound_ChunkedStream_EmitsPrefixBeforeJsonCompletes()
         {
             // Two prose deltas before JSON: one "Saved! " delta would emit one hybrid chunk then dedupe at strip.
-            var inner = new StreamingScripted(
-                new[] { "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}" });
+            StreamingScripted inner = new(
+                new[]
+                {
+                    "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}"
+                });
 
-            var settings = new StubSettings();
-            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
+            StubSettings settings = new();
+            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt = "x",
                 UserPayload = "x",
-                Tools = new List<ILlmTool> { new CoreAI.AgentMemory.MemoryLlmTool() }
+                Tools = new List<ILlmTool> { new AgentMemory.MemoryLlmTool() }
             };
 
-            var textChunks = new List<string>();
-            await foreach (var c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            List<string> textChunks = new();
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
             {
                 if (!string.IsNullOrEmpty(c.Text))
                 {
@@ -170,7 +174,8 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(textChunks.Count, 2, "Multiple inner prose deltas should yield multiple streamed text chunks before JSON.");
+            Assert.GreaterOrEqual(textChunks.Count, 2,
+                "Multiple inner prose deltas should yield multiple streamed text chunks before JSON.");
             string visible = string.Concat(textChunks);
             Assert.AreEqual("Saved! ", visible);
             Assert.That(visible, Does.Not.Contain("\"name\":\"memory\""));
@@ -180,11 +185,11 @@ namespace CoreAI.Tests.EditMode
         public async Task Streaming_NoToolsRequested_PassesThroughTextWithoutChange()
         {
             // Sanity: when request.Tools is empty/null, extraction must NOT run.
-            var inner = new StreamingScripted(
+            StreamingScripted inner = new(
                 new[] { "Plain reply with {braces} but no tool keys." });
 
-            var client = new MeaiLlmClient(inner, new NullGameLogger(), new StubSettings(), null);
-            var request = new LlmCompletionRequest
+            MeaiLlmClient client = new(inner, new NullGameLogger(), new StubSettings(), null);
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "X",
                 SystemPrompt = "x",
@@ -193,9 +198,12 @@ namespace CoreAI.Tests.EditMode
             };
 
             string acc = "";
-            await foreach (var c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
             {
-                if (!string.IsNullOrEmpty(c.Text)) acc += c.Text;
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    acc += c.Text;
+                }
             }
 
             Assert.That(acc, Does.Contain("{braces}"));
@@ -211,7 +219,7 @@ namespace CoreAI.Tests.EditMode
             // Iter 3: plain "Done." text → loop exits.
             int iter = 0;
             int aCount = 0, bCount = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return iter switch
@@ -222,16 +230,24 @@ namespace CoreAI.Tests.EditMode
                 };
             });
 
-            MEAI.AIFunction toolA = MakeAIFunction("tool_a", _ => { aCount++; return Task.FromResult<object>("{\"Success\":true}"); });
-            MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ => { bCount++; return Task.FromResult<object>("{\"Success\":true}"); });
+            MEAI.AIFunction toolA = MakeAIFunction("tool_a", _ =>
+            {
+                aCount++;
+                return Task.FromResult<object>("{\"Success\":true}");
+            });
+            MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ =>
+            {
+                bCount++;
+                return Task.FromResult<object>("{\"Success\":true}");
+            });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: false,
-                tools: new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
-                roleId: "Chain", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                false,
+                new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
+                "Chain", 3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { toolA, toolB } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { toolA, toolB } };
             MEAI.ChatResponse response = Task.Run(() =>
                 client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
@@ -260,32 +276,41 @@ namespace CoreAI.Tests.EditMode
         {
             int iter = 0;
             int aCount = 0, bCount = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 if (iter == 1)
                 {
-                    var fcA = new MEAI.FunctionCallContent("call_a", "tool_a",
+                    MEAI.FunctionCallContent fcA = new("call_a", "tool_a",
                         new Dictionary<string, object?> { { "x", 1 } });
-                    var fcB = new MEAI.FunctionCallContent("call_b", "tool_b",
+                    MEAI.FunctionCallContent fcB = new("call_b", "tool_b",
                         new Dictionary<string, object?> { { "y", 2 } });
                     return new MEAI.ChatResponse(new MEAI.ChatMessage(
                         MEAI.ChatRole.Assistant,
                         new List<MEAI.AIContent> { fcA, fcB }));
                 }
+
                 return MakeTextResponse("Both done.");
             });
 
-            MEAI.AIFunction toolA = MakeAIFunction("tool_a", _ => { aCount++; return Task.FromResult<object>("{\"Success\":true}"); });
-            MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ => { bCount++; return Task.FromResult<object>("{\"Success\":true}"); });
+            MEAI.AIFunction toolA = MakeAIFunction("tool_a", _ =>
+            {
+                aCount++;
+                return Task.FromResult<object>("{\"Success\":true}");
+            });
+            MEAI.AIFunction toolB = MakeAIFunction("tool_b", _ =>
+            {
+                bCount++;
+                return Task.FromResult<object>("{\"Success\":true}");
+            });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: false,
-                tools: new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
-                roleId: "Parallel", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                false,
+                new List<ILlmTool> { new TestTool("tool_a"), new TestTool("tool_b") },
+                "Parallel", 3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { toolA, toolB } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { toolA, toolB } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
             Assert.AreEqual(1, aCount, "tool_a executed once");
@@ -306,19 +331,20 @@ namespace CoreAI.Tests.EditMode
             // duplicate call.
             int iter = 0;
             int execCount = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 if (iter == 1)
                 {
-                    var prefix = new MEAI.TextContent(
+                    MEAI.TextContent prefix = new(
                         "Working... {\"name\":\"phantom\",\"arguments\":{}}");
-                    var fc = new MEAI.FunctionCallContent("call_real", "real_tool",
+                    MEAI.FunctionCallContent fc = new("call_real", "real_tool",
                         new Dictionary<string, object?>());
                     return new MEAI.ChatResponse(new MEAI.ChatMessage(
                         MEAI.ChatRole.Assistant,
                         new List<MEAI.AIContent> { prefix, fc }));
                 }
+
                 return MakeTextResponse("Finished.");
             });
 
@@ -328,13 +354,13 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>("{\"Success\":true}");
             });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: false,
-                tools: new List<ILlmTool> { new TestTool("real_tool") },
-                roleId: "NativeWins", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                false,
+                new List<ILlmTool> { new TestTool("real_tool") },
+                "NativeWins", 3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { realTool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { realTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
             Assert.AreEqual(1, execCount, "Only the native real_tool should execute (no phantom from text).");
@@ -353,7 +379,7 @@ namespace CoreAI.Tests.EditMode
             // Iter 1: tool fails. Iter 2: same tool succeeds (different args). Iter 3: text.
             // With AllowDuplicateToolCalls=true and different args, both calls reach the AIFunction.
             // After success the counter resets, so the third (text) iteration finishes cleanly.
-            var inner = new StreamingScripted(
+            StreamingScripted inner = new(
                 new[] { "{\"name\":\"flaky\",\"arguments\":{\"n\":1}}" },
                 new[] { "{\"name\":\"flaky\",\"arguments\":{\"n\":2}}" },
                 new[] { "All good." });
@@ -369,10 +395,10 @@ namespace CoreAI.Tests.EditMode
                     : "{\"Success\":true}";
             };
 
-            var settings = new StubSettings();
-            var client = new MeaiLlmClient(inner, new NullGameLogger(), settings, memoryStore: null);
+            StubSettings settings = new();
+            MeaiLlmClient client = new(inner, new NullGameLogger(), settings, null);
 
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Flaky",
                 SystemPrompt = "x",
@@ -384,10 +410,17 @@ namespace CoreAI.Tests.EditMode
 
             string acc = "";
             LlmStreamChunk last = null;
-            await foreach (var c in client.CompleteStreamingAsync(request, CancellationToken.None))
+            await foreach (LlmStreamChunk c in client.CompleteStreamingAsync(request, CancellationToken.None))
             {
-                if (!string.IsNullOrEmpty(c.Text)) acc += c.Text;
-                if (c.IsDone) last = c;
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    acc += c.Text;
+                }
+
+                if (c.IsDone)
+                {
+                    last = c;
+                }
             }
 
             Assert.AreEqual(2, call, "Tool invoked twice (fail then success).");
@@ -408,11 +441,11 @@ namespace CoreAI.Tests.EditMode
             // Spy logger so we can grep the log stream for [ToolCall] lines.
             // CoreAISettingsAsset defaults LogToolCalls/LogToolCallArguments to true,
             // so a fresh ScriptableObject already opts into the per-call diagnostic line.
-            var spy = new SpyLogger();
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SpyLogger spy = new();
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
             int iter = 0;
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return iter == 1
@@ -423,12 +456,12 @@ namespace CoreAI.Tests.EditMode
             MEAI.AIFunction memTool = MakeAIFunction("memory", _ =>
                 Task.FromResult<object>("{\"Success\":true,\"Message\":\"DONE\"}"));
 
-            var client = new SmartToolCallingChatClient(inner, spy, settings,
-                allowDuplicateToolCalls: true,
-                tools: new List<ILlmTool> { new TestTool("memory") },
-                roleId: "Teacher", maxConsecutiveErrors: 3, traceId: "trace-xyz");
+            SmartToolCallingChatClient client = new(inner, spy, settings,
+                true,
+                new List<ILlmTool> { new TestTool("memory") },
+                "Teacher", 3, "trace-xyz");
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { memTool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { memTool } };
             Task.Run(() => client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Wait();
 
             string toolCallLine = spy.AllLines.FirstOrDefault(l => l.Contains("[ToolCall]"));
@@ -444,11 +477,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void FormatExecutedTools_RendersStableLine()
         {
-            var traces = new[]
+            LlmToolCallTrace[] traces = new[]
             {
                 new LlmToolCallTrace("memory", true, 12.3, "native"),
                 new LlmToolCallTrace("missing_tool", false, 0.0, "missing"),
-                new LlmToolCallTrace("memory", false, 0.0, "duplicate"),
+                new LlmToolCallTrace("memory", false, 0.0, "duplicate")
             };
 
             string line = LoggingLlmClientDecorator.FormatExecutedTools(traces);
@@ -509,7 +542,8 @@ namespace CoreAI.Tests.EditMode
         public void PortableExtractor_ArgumentsJsonKey_ExtractedAsToolCall()
         {
             // Qwen3.5 via LLMUnity emits "arguments_json" instead of "arguments".
-            string input = "{\"name\": \"read_skill\", \"arguments_json\": \"{\\\"skill_name\\\": \\\"Enchanting\\\"}\"}";
+            string input =
+                "{\"name\": \"read_skill\", \"arguments_json\": \"{\\\"skill_name\\\": \\\"Enchanting\\\"}\"}";
             bool ok = LlmToolCallTextExtractor.TryExtract(input,
                 out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
 
@@ -601,7 +635,7 @@ namespace CoreAI.Tests.EditMode
             int iter = 0;
             int readSkillInvocations = 0;
 
-            var inner = new ScriptedChatClient(_ =>
+            ScriptedChatClient inner = new(_ =>
             {
                 iter++;
                 return iter == 1
@@ -616,13 +650,13 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<object>("{\"instructions\":\"craft stuff\"}");
             });
 
-            var settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            var client = new SmartToolCallingChatClient(inner, NullLog.Instance, settings,
-                allowDuplicateToolCalls: true,
-                tools: new List<ILlmTool> { new TestTool("read_skill") },
-                roleId: "Test", maxConsecutiveErrors: 3);
+            CoreAISettingsAsset settings = UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true,
+                new List<ILlmTool> { new TestTool("read_skill") },
+                "Test", 3);
 
-            var options = new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { readSkillTool } };
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { readSkillTool } };
             MEAI.ChatResponse response = Task.Run(() =>
                 client.GetResponseAsync(new List<MEAI.ChatMessage>(), options)).Result;
 
@@ -644,20 +678,37 @@ namespace CoreAI.Tests.EditMode
 
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName)
         {
-            var fc = new MEAI.FunctionCallContent(
-                callId: "call_" + Guid.NewGuid().ToString("N"),
-                name: toolName,
-                arguments: new Dictionary<string, object?> { { "action", "write" }, { "content", "hi" } });
-            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, new List<MEAI.AIContent> { fc }));
+            MEAI.FunctionCallContent fc = new(
+                "call_" + Guid.NewGuid().ToString("N"),
+                toolName,
+                new Dictionary<string, object?> { { "action", "write" }, { "content", "hi" } });
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { fc }));
         }
 
         private sealed class SpyLogger : ILog
         {
             public readonly List<string> AllLines = new();
-            public void Debug(string message, string tag = null) => AllLines.Add(message);
-            public void Info(string message, string tag = null) => AllLines.Add(message);
-            public void Warn(string message, string tag = null) => AllLines.Add(message);
-            public void Error(string message, string tag = null) => AllLines.Add(message);
+
+            public void Debug(string message, string tag = null)
+            {
+                AllLines.Add(message);
+            }
+
+            public void Info(string message, string tag = null)
+            {
+                AllLines.Add(message);
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+                AllLines.Add(message);
+            }
+
+            public void Error(string message, string tag = null)
+            {
+                AllLines.Add(message);
+            }
         }
 
         private static MEAI.AIFunction MakeAIFunction(string name,
@@ -674,7 +725,11 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class TestTool : ILlmTool
         {
-            public TestTool(string name) { Name = name; }
+            public TestTool(string name)
+            {
+                Name = name;
+            }
+
             public string Name { get; }
             public string Description => "";
             public string ParametersSchema => "{}";
@@ -686,34 +741,59 @@ namespace CoreAI.Tests.EditMode
             private readonly Func<int, MEAI.ChatResponse> _fn;
             private int _i;
 
-            public ScriptedChatClient(Func<int, MEAI.ChatResponse> fn) { _fn = fn; }
+            public ScriptedChatClient(Func<int, MEAI.ChatResponse> fn)
+            {
+                _fn = fn;
+            }
 
-            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null, CancellationToken ct = default)
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat,
+                MEAI.ChatOptions options = null, CancellationToken ct = default)
             {
                 _i++;
                 return Task.FromResult(_fn(_i));
             }
 
-            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null, CancellationToken ct = default)
-                => throw new NotSupportedException();
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null, CancellationToken ct = default)
+            {
+                throw new NotSupportedException();
+            }
 
-            public object GetService(Type t, object key = null) => null;
-            public void Dispose() { }
+            public object GetService(Type t, object key = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
 
         private sealed class StreamingScripted : MEAI.IChatClient
         {
             private readonly Queue<string[]> _scripts;
-            public StreamingScripted(params string[][] scripts) { _scripts = new Queue<string[]>(scripts); }
 
-            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null, CancellationToken ct = default)
-                => Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            public StreamingScripted(params string[][] scripts)
+            {
+                _scripts = new Queue<string[]>(scripts);
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat,
+                MEAI.ChatOptions options = null, CancellationToken ct = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
 
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions options = null,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
             {
-                if (_scripts.Count == 0) yield break;
+                if (_scripts.Count == 0)
+                {
+                    yield break;
+                }
+
                 foreach (string s in _scripts.Dequeue())
                 {
                     ct.ThrowIfCancellationRequested();
@@ -722,8 +802,14 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            public object GetService(Type t, object key = null) => null;
-            public void Dispose() { }
+            public object GetService(Type t, object key = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
 
         private sealed class StubSettings : ICoreAISettings
@@ -750,10 +836,22 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class NullGameLogger : CoreAI.Infrastructure.Logging.IGameLogger
         {
-            public void LogDebug(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogInfo(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogWarning(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
-            public void LogError(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null) { }
+            public void LogDebug(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null)
+            {
+            }
+
+            public void LogInfo(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null)
+            {
+            }
+
+            public void LogWarning(CoreAI.Infrastructure.Logging.GameLogFeature f, string m,
+                UnityEngine.Object c = null)
+            {
+            }
+
+            public void LogError(CoreAI.Infrastructure.Logging.GameLogFeature f, string m, UnityEngine.Object c = null)
+            {
+            }
         }
     }
 }

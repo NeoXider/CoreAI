@@ -1,33 +1,25 @@
 namespace CoreAI.Logging
 {
     /// <summary>
-    /// Универсальный интерфейс логирования для CoreAI (без зависимостей от Unity).
-    /// Реализация предоставляется из внешнего слоя (Unity, консоль и т.д.).
-    ///
-    /// <para>Каждый метод принимает опциональный <paramref name="tag"/> —
-    /// строковый идентификатор подсистемы. Стандартные теги собраны в <see cref="LogTag"/>.
-    /// Unity-реализация отображает tag на <c>GameLogFeature</c> для фильтрации.</para>
-    ///
-    /// <para>Доступ: через DI (конструктор) ИЛИ статически через <see cref="Log.Instance"/>.
-    /// При инициализации DI-контейнера <see cref="Log.Instance"/> устанавливается автоматически.</para>
+    /// Minimal logging abstraction used by the CoreAI runtime.
     /// </summary>
     public interface ILog
     {
-        /// <summary>Отладочное сообщение (наиболее подробное).</summary>
+        /// <summary>Writes a debug-level log message.</summary>
         void Debug(string message, string tag = null);
 
-        /// <summary>Информационное сообщение.</summary>
+        /// <summary>Writes an informational log message.</summary>
         void Info(string message, string tag = null);
 
-        /// <summary>Предупреждение.</summary>
+        /// <summary>Writes a warning-level log message.</summary>
         void Warn(string message, string tag = null);
 
-        /// <summary>Ошибка.</summary>
+        /// <summary>Writes an error-level log message.</summary>
         void Error(string message, string tag = null);
     }
 
     /// <summary>
-    /// No-op реализация — используется до инициализации или в тестах без логгера.
+    /// No-op logger used as the default fallback.
     /// </summary>
     public sealed class NullLog : ILog
     {
@@ -52,15 +44,13 @@ namespace CoreAI.Logging
 
 
     /// <summary>
-    /// Глобальный статический доступ к логгеру.
-    /// Устанавливается автоматически при создании DI-контейнера.
-    /// Для ручного использования: <c>Log.Instance.Info("msg", LogTag.Llm)</c>.
+    /// Holds the process-wide CoreAI logger instance.
     /// </summary>
     public static class Log
     {
         private static volatile ILog _instance = NullLog.Instance;
 
-        /// <summary>Текущий логгер. По умолчанию — no-op (NullLog).</summary>
+        /// <summary>Active CoreAI logger instance.</summary>
         public static ILog Instance
         {
             get => _instance;
@@ -69,25 +59,23 @@ namespace CoreAI.Logging
     }
 
     /// <summary>
-    /// Стандартные теги подсистем для фильтрации логов.
-    /// Unity-реализация маппит эти теги на <c>GameLogFeature</c> flags.
-    /// Можно создавать собственные теги — они будут маппиться на <c>GameLogFeature.Core</c>.
+    /// Defines standard log tags used by CoreAI subsystems.
     /// </summary>
     public static class LogTag
     {
-        /// <summary>Общие сообщения ядра.</summary>
+        /// <summary>Core runtime and shared infrastructure.</summary>
         public const string Core = "Core";
 
         /// <summary>VContainer, lifetime scope, bootstrap.</summary>
         public const string Composition = "Composition";
 
-        /// <summary>Шина команд, Lua-пайплайн, подписки MessagePipe.</summary>
+        /// <summary>MessagePipe publishing and subscription infrastructure.</summary>
         public const string MessagePipe = "MessagePipe";
 
-        /// <summary>Запросы/ответы LLM, tool calling.</summary>
+        /// <summary>LLM requests, responses, routing, and transport.</summary>
         public const string Llm = "Llm";
 
-        /// <summary>Метрики оркестратора.</summary>
+        /// <summary>Runtime metrics and diagnostics.</summary>
         public const string Metrics = "Metrics";
 
         /// <summary>Lua sandbox, execution, repair.</summary>
@@ -96,10 +84,10 @@ namespace CoreAI.Logging
         /// <summary>World commands (spawn, move, destroy).</summary>
         public const string World = "World";
 
-        /// <summary>Память агентов (MemoryTool, ChatHistory).</summary>
+        /// <summary>Agent memory and chat history.</summary>
         public const string Memory = "Memory";
 
-        /// <summary>Конфигурация (GameConfig, Settings).</summary>
+        /// <summary>Runtime configuration and settings.</summary>
         public const string Config = "Config";
     }
 }

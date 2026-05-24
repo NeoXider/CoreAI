@@ -1,4 +1,4 @@
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+﻿#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using CoreAI.Infrastructure.Logging;
 using LLMUnity;
 using UnityEngine;
@@ -6,7 +6,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Разрешает <see cref="LLMAgent"/>: по имени, первый в сцене, либо автосозданный хост по <see cref="CoreAISettingsAsset"/>.
+    /// Resolves LLMUnity agents from CoreAI settings and scene configuration.
     /// </summary>
     public sealed class ConfigurableLlmAgentProvider : ILlmAgentProvider
     {
@@ -47,7 +47,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _logger.LogInfo(
                     GameLogFeature.Llm,
-                    "LLMUnity: на сцене нет LLMAgent — создаём runtime-хост по Core AI Settings (GGUF из настроек).");
+                    "LLMUnity: no LLMAgent exists in the scene; creating a runtime host from Core AI Settings.");
                 _cached = LlmUnityRuntimeHost.Create(_settings, _logger);
                 return _cached;
             }

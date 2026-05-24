@@ -63,8 +63,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task GetStreamingResponseAsync_NonSseTransport_YieldsAssistantTextFromFullCompletion()
         {
-            var client = new MeaiOpenAiChatClient(new DummyHttpSettings(), new NonSseMockTransport());
-            var parts = new List<string>();
+            MeaiOpenAiChatClient client = new(new DummyHttpSettings(), new NonSseMockTransport());
+            List<string> parts = new();
             await foreach (MEAI.ChatResponseUpdate u in client.GetStreamingResponseAsync(
                                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
             {

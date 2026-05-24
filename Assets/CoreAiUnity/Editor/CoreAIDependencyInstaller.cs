@@ -9,7 +9,7 @@ namespace CoreAI.Editor
 {
     /// <summary>
     /// One-click installer for the Git dependencies CoreAI needs in <c>Packages/manifest.json</c>.
-    /// Each entry is added only when missing — existing pins are never overwritten, so users who
+    ///
     /// already track a specific commit / branch keep their version.
     /// </summary>
     public static class CoreAIDependencyInstaller
@@ -18,7 +18,7 @@ namespace CoreAI.Editor
         private const int MenuPriority = 0;
 
         /// <summary>
-        /// (key, version) pairs added to <c>Packages/manifest.json → dependencies</c> when missing.
+        ///
         /// Order matches the README quick-start to keep the install log easy to skim.
         /// </summary>
         private static readonly (string Key, string Url)[] RequiredDependencies =
@@ -44,7 +44,7 @@ namespace CoreAI.Editor
                 "Packages", "manifest.json");
             if (!File.Exists(manifestPath))
             {
-                EditorUtility.DisplayDialog("CoreAI — Install Git Dependencies",
+                EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
                     $"Packages/manifest.json was not found:\n{manifestPath}",
                     "OK");
                 return;
@@ -57,7 +57,7 @@ namespace CoreAI.Editor
             }
             catch (Exception ex)
             {
-                EditorUtility.DisplayDialog("CoreAI — Install Git Dependencies",
+                EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
                     $"Failed to read manifest.json:\n{ex.Message}", "OK");
                 return;
             }
@@ -65,7 +65,7 @@ namespace CoreAI.Editor
             DependencySectionLocator locator = DependencySectionLocator.TryLocate(original);
             if (!locator.IsValid)
             {
-                EditorUtility.DisplayDialog("CoreAI — Install Git Dependencies",
+                EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
                     "Could not find the \"dependencies\" object in manifest.json. Edit it manually using the README quick-start table.",
                     "OK");
                 return;
@@ -89,7 +89,7 @@ namespace CoreAI.Editor
 
             if (added.Count == 0)
             {
-                EditorUtility.DisplayDialog("CoreAI — Install Git Dependencies",
+                EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
                     BuildSummary(added, alreadyPresent),
                     "OK");
                 return;
@@ -97,7 +97,7 @@ namespace CoreAI.Editor
 
             // Preview before writing.
             bool confirmed = EditorUtility.DisplayDialog(
-                "CoreAI — Install Git Dependencies",
+                "CoreAI - Install Git Dependencies",
                 BuildSummary(added, alreadyPresent) +
                 "\n\nWrite these entries to Packages/manifest.json now? Unity will then resolve and recompile.",
                 "Apply", "Cancel");
@@ -112,7 +112,7 @@ namespace CoreAI.Editor
             }
             catch (Exception ex)
             {
-                EditorUtility.DisplayDialog("CoreAI — Install Git Dependencies",
+                EditorUtility.DisplayDialog("CoreAI - Install Git Dependencies",
                     $"Failed to write manifest.json:\n{ex.Message}", "OK");
                 return;
             }
@@ -141,7 +141,7 @@ namespace CoreAI.Editor
                 return false;
             }
 
-            // Confirm a colon follows (allowing whitespace) — otherwise the match is inside a value.
+            // Resolve and cache required local values.
             int probe = idx + needle.Length;
             while (probe < manifestText.Length && char.IsWhiteSpace(manifestText[probe]))
             {
@@ -180,7 +180,7 @@ namespace CoreAI.Editor
                 sb.AppendLine($"Will add {added.Count} dependency(ies):");
                 foreach (string key in added)
                 {
-                    sb.AppendLine($"  + {key}");
+                    sb.AppendLine($"  - {key}");
                 }
             }
 
@@ -190,7 +190,7 @@ namespace CoreAI.Editor
                 sb.AppendLine($"Already present (left untouched):");
                 foreach (string key in alreadyPresent)
                 {
-                    sb.AppendLine($"  ✓ {key}");
+                    sb.AppendLine($"  - {key}");
                 }
             }
 
@@ -230,6 +230,7 @@ namespace CoreAI.Editor
                 {
                     insertOffset++;
                 }
+
                 if (insertOffset < manifestText.Length && manifestText[insertOffset] == '\n')
                 {
                     insertOffset++;
@@ -252,6 +253,7 @@ namespace CoreAI.Editor
                         probe++;
                         continue;
                     }
+
                     break;
                 }
 

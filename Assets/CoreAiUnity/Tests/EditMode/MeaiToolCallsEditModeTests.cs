@@ -82,7 +82,9 @@ namespace CoreAI.Tests.EditMode
         public void LuaTool_CreateAIFunction_ReturnsNonNull()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
+            LuaTool tool = new(executor,
+                UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                Logging.NullLog.Instance);
 
             AIFunction function = tool.CreateAIFunction();
 
@@ -94,7 +96,9 @@ namespace CoreAI.Tests.EditMode
         public async Task LuaTool_ExecuteAsync_EmptyCode_ReturnsError()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
+            LuaTool tool = new(executor,
+                UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                Logging.NullLog.Instance);
 
             string resultJson = await tool.ExecuteAsync("");
             LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);
@@ -107,7 +111,9 @@ namespace CoreAI.Tests.EditMode
         public async Task LuaTool_ExecuteAsync_ValidCode_CallsExecutor()
         {
             TestLuaExecutor executor = new();
-            LuaTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Logging.NullLog.Instance);
+            LuaTool tool = new(executor,
+                UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>(),
+                Logging.NullLog.Instance);
 
             string resultJson = await tool.ExecuteAsync("report('test')");
             LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(resultJson);
@@ -162,19 +168,20 @@ namespace CoreAI.Tests.EditMode
             Assert.Ignore("LlmUnityMeaiChatClient is not available (COREAI_NO_LLM, WebGL, or LLMUnity package missing).");
 #else
             // Симулируем ответ модели с Reasoning
-            string textWithReasoning = "<think>\nThinking about what to do...\nI will use the memory tool now.\n</think>\n" +
-                                       "{\"name\": \"memory\", \"arguments\": {\"action\": \"read\"}}";
-            
-            var dummyAction = new Action(() => {});
-            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction,
-                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "memory" });
+            string textWithReasoning =
+                "<think>\nThinking about what to do...\nI will use the memory tool now.\n</think>\n" +
+                "{\"name\": \"memory\", \"arguments\": {\"action\": \"read\"}}";
+
+            Action dummyAction = new(() => { });
+            AIFunction dummyTool = AIFunctionFactory.Create(dummyAction,
+                new AIFunctionFactoryOptions { Name = "memory" });
 
             bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
                 textWithReasoning,
                 new[] { dummyTool },
-                out var calls,
+                out List<FunctionCallContent> calls,
                 out string cleanedText);
-                
+
             Assert.IsTrue(success);
             Assert.AreEqual(1, calls.Count);
             Assert.AreEqual("memory", calls[0].Name);
@@ -190,18 +197,19 @@ namespace CoreAI.Tests.EditMode
 #if COREAI_NO_LLM || UNITY_WEBGL || !COREAI_HAS_LLMUNITY
             Assert.Ignore("LlmUnityMeaiChatClient is not available (COREAI_NO_LLM, WebGL, or LLMUnity package missing).");
 #else
-            string text = "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
-            
-            var dummyAction = new Action(() => {});
-            var dummyTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(dummyAction,
-                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "memory" });
+            string text =
+                "<think>first thought</think>\nIntermediate text\n<think>second thought</think>\n{\"name\": \"memory\", \"arguments\": {\"action\": \"clear\"}}";
+
+            Action dummyAction = new(() => { });
+            AIFunction dummyTool = AIFunctionFactory.Create(dummyAction,
+                new AIFunctionFactoryOptions { Name = "memory" });
 
             bool success = Infrastructure.Llm.LlmUnityMeaiChatClient.TryParseToolCallFromText(
                 text,
                 new[] { dummyTool },
-                out var calls,
+                out List<FunctionCallContent> calls,
                 out string cleanedText);
-                
+
             Assert.IsTrue(success);
             Assert.AreEqual(1, calls.Count);
             Assert.IsFalse(cleanedText.Contains("<think>"));

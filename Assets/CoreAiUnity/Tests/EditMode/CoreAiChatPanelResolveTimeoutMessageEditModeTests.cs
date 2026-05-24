@@ -9,19 +9,24 @@ namespace CoreAI.Tests.EditMode
     {
         private class PanelProbe : CoreAiChatPanel
         {
-            public string Call(bool stopByUser) => ResolveTimeoutMessage(stopByUser);
+            public string Call(bool stopByUser)
+            {
+                return ResolveTimeoutMessage(stopByUser);
+            }
         }
 
         private sealed class PanelSuppressTimeout : PanelProbe
         {
-            protected override string ResolveTimeoutMessage(bool stopRequestedByUser) =>
-                stopRequestedByUser ? base.ResolveTimeoutMessage(true) : null;
+            protected override string ResolveTimeoutMessage(bool stopRequestedByUser)
+            {
+                return stopRequestedByUser ? base.ResolveTimeoutMessage(true) : null;
+            }
         }
 
         [Test]
         public void ResolveTimeoutMessage_Default_TimeoutBranch_UsesConfigOrFallback()
         {
-            GameObject go = new GameObject();
+            GameObject go = new();
             PanelProbe panel = go.AddComponent<PanelProbe>();
             Assert.AreEqual("Timeout.", panel.Call(false));
             Object.DestroyImmediate(go);
@@ -30,7 +35,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ResolveTimeoutMessage_OverrideCanReturnNullForTimeoutBranch()
         {
-            GameObject go = new GameObject();
+            GameObject go = new();
             PanelSuppressTimeout panel = go.AddComponent<PanelSuppressTimeout>();
             Assert.IsNull(panel.Call(false));
             Assert.IsFalse(string.IsNullOrEmpty(panel.Call(true)));

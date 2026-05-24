@@ -147,7 +147,7 @@ namespace CoreAI.Tests.EditMode
             // Бюджет 100 инструкций на resume — цикл 1..10000 должен превысить лимит.
             LuaCoroutineHandle handle = env.CreateCoroutine(reg,
                 "for i = 1, 10000 do local x = i * 2 end",
-                budgetPerResume: 100);
+                100);
 
             Assert.Throws<ScriptRuntimeException>(() => handle.Resume(),
                 "Resume с маленьким бюджетом инструкций должен вылетать по лимиту");
@@ -178,7 +178,7 @@ namespace CoreAI.Tests.EditMode
         {
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(new LuaApiRegistry());
-            LuaExecutionGuard guard = new(timeoutMs: 50, maxSteps: 1_000_000);
+            LuaExecutionGuard guard = new(50, 1_000_000);
 
             ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
                 env.RunChunk(script, "while true do end", guard));
@@ -195,7 +195,7 @@ namespace CoreAI.Tests.EditMode
         {
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(new LuaApiRegistry());
-            LuaExecutionGuard guard = new(timeoutMs: 60_000, maxSteps: 100);
+            LuaExecutionGuard guard = new(60_000, 100);
 
             Assert.Throws<ScriptRuntimeException>(() =>
                 env.RunChunk(script, "for i = 1, 100000 do end", guard));
@@ -208,7 +208,7 @@ namespace CoreAI.Tests.EditMode
             LuaApiRegistry reg = new();
             reg.Register("mul", new Func<double, double, double>((a, b) => a * b));
             Script script = env.CreateScript(reg);
-            LuaExecutionGuard guard = new(timeoutMs: 2000, maxSteps: 500_000);
+            LuaExecutionGuard guard = new(2000, 500_000);
 
             DynValue result = env.RunChunk(script, "return mul(6, 7)", guard);
             Assert.AreEqual(42, (int)result.Number);

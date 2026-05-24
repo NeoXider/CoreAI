@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Пустая реализация метрик (без накладных расходов).</summary>
+    /// <summary>No-op orchestration metrics collector.</summary>
     public sealed class NullAiOrchestrationMetrics : IAiOrchestrationMetrics
     {
         /// <inheritdoc />

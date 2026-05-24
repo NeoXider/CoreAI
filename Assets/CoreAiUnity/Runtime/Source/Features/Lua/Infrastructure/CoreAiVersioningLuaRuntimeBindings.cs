@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Messaging;
@@ -9,7 +9,7 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Whitelist API для версионирования Lua и оверлеев данных из песочницы Programmer (DGF).
+    /// Core Ai Versioning Lua Runtime Bindings component used by CoreAI.
     /// </summary>
     public sealed class CoreAiVersioningLuaRuntimeBindings : IGameLuaRuntimeBindings
     {

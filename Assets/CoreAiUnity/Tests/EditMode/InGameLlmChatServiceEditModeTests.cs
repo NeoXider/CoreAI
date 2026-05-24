@@ -166,8 +166,8 @@ namespace CoreAI.Tests.EditMode
             StubPromptProvider prompts = new("system");
             // Лимит 2 запроса в окне 60 секунд
             InGameLlmChatService service = new(llm, prompts, 24,
-                maxRequestsPerWindow: 2,
-                rateLimitWindowSeconds: 60);
+                2,
+                60);
 
             LlmCompletionResult r1 = await service.SendPlayerMessageAsync("msg1");
             LlmCompletionResult r2 = await service.SendPlayerMessageAsync("msg2");
@@ -188,8 +188,8 @@ namespace CoreAI.Tests.EditMode
             StubLlmClient llm = new("reply");
             StubPromptProvider prompts = new("system");
             InGameLlmChatService service = new(llm, prompts, 24,
-                maxRequestsPerWindow: 0,
-                rateLimitWindowSeconds: 60);
+                0,
+                60);
 
             for (int i = 0; i < 20; i++)
             {
@@ -206,8 +206,8 @@ namespace CoreAI.Tests.EditMode
             StubLlmClient llm = new("reply");
             StubPromptProvider prompts = new("system");
             InGameLlmChatService service = new(llm, prompts, 24,
-                maxRequestsPerWindow: 1,
-                rateLimitWindowSeconds: 60);
+                1,
+                60);
 
             await service.SendPlayerMessageAsync("first");
             Assert.AreEqual(1, service.HistoryPairCount);
@@ -227,8 +227,8 @@ namespace CoreAI.Tests.EditMode
             StubPromptProvider prompts = new("system");
             // 1 запрос в окне 1 секунда — слишком жёстко, но для теста скользящего окна достаточно
             InGameLlmChatService service = new(llm, prompts, 24,
-                maxRequestsPerWindow: 1,
-                rateLimitWindowSeconds: 1);
+                1,
+                1);
 
             LlmCompletionResult first = await service.SendPlayerMessageAsync("msg1");
             LlmCompletionResult blocked = await service.SendPlayerMessageAsync("msg2");

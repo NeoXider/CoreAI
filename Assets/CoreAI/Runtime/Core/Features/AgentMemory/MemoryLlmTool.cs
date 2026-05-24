@@ -3,7 +3,7 @@ using CoreAI.Ai;
 namespace CoreAI.AgentMemory
 {
     /// <summary>
-    /// ILlmTool реализация для MemoryTool - позволяет LLM вызывать инструмент памяти.
+    /// LLM tool wrapper for agent memory operations.
     /// </summary>
     public sealed class MemoryLlmTool : LlmToolBase
     {

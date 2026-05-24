@@ -23,14 +23,20 @@ namespace CoreAI.Tests.EditMode
         private sealed class FallbackOnlyOrchestrator : IAiOrchestrationService
         {
             private readonly string _result;
-            public FallbackOnlyOrchestrator(string result) { _result = result; }
+
+            public FallbackOnlyOrchestrator(string result)
+            {
+                _result = result;
+            }
 
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
                 return Task.FromResult(_result);
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         /// <summary>
@@ -43,7 +49,10 @@ namespace CoreAI.Tests.EditMode
             public int StreamCalls { get; private set; }
             public int RunTaskCalls { get; private set; }
 
-            public StreamingOrchestrator(params string[] parts) { _parts = parts; }
+            public StreamingOrchestrator(params string[] parts)
+            {
+                _parts = parts;
+            }
 
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
@@ -66,7 +75,9 @@ namespace CoreAI.Tests.EditMode
                 yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         private sealed class MixedQueueOrchestrator : IAiOrchestrationService
@@ -105,7 +116,9 @@ namespace CoreAI.Tests.EditMode
                 yield return new LlmStreamChunk { IsDone = true };
             }
 
-            public void CancelTasks(string cancellationScope) { }
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
 
         [Test]
@@ -151,7 +164,7 @@ namespace CoreAI.Tests.EditMode
 
             List<LlmStreamChunk> chunks = new();
             await foreach (LlmStreamChunk chunk in queued.RunStreamingAsync(
-                new AiTaskRequest { RoleId = "Tester", Hint = "go" }))
+                               new AiTaskRequest { RoleId = "Tester", Hint = "go" }))
             {
                 chunks.Add(chunk);
             }
@@ -315,7 +328,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             await foreach (LlmStreamChunk chunk in queued.RunStreamingAsync(
-                new AiTaskRequest { RoleId = "T", Hint = "first" }, cts.Token))
+                               new AiTaskRequest { RoleId = "T", Hint = "first" }, cts.Token))
             {
                 collected.Add(chunk);
                 if (chunk.IsDone)
@@ -396,7 +409,9 @@ namespace CoreAI.Tests.EditMode
                 yield return new LlmStreamChunk { IsDone = true, Text = string.Empty };
             }
 
-            public void CancelTasks(string scopeId) {}
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
     }
 }

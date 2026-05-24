@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,9 +11,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.World
 {
     /// <summary>
-    /// Инструмент MEAI, позволяющий агенту делать снимки (скриншоты) с камер(ы) в игре.
-    /// Возвращает Base64-строку изображения (или сохраняет на диск), чтобы модель могла его проанализировать, 
-    /// если она поддерживает зрение (Vision).
+    /// LLM tool that exposes camera control operations.
     /// </summary>
     public sealed class CameraLlmTool : ILlmTool
     {

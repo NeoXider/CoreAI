@@ -50,7 +50,7 @@ namespace CoreAI.Tests.PlayMode
                     return new MeaiLlmClient(
                         new LlmUnityMeaiChatClient(llmUnityClient.UnityAgent, GameLoggerUnscopedFallback.Instance),
                         GameLoggerUnscopedFallback.Instance,
-                        UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(),
+                        ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                         memoryStore);
                 }
             }
@@ -63,7 +63,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     return new OpenAiChatLlmClient(handle._openAiSettings, memoryStore);
                 }
-                
+
                 if (handle._coreAiSettings != null)
                 {
                     return new OpenAiChatLlmClient(handle._coreAiSettings, memoryStore);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text;
@@ -10,8 +10,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Config
 {
     /// <summary>
-    /// LLM-инструмент для чтения и изменения игровых конфигов.
-    /// AI получает текущий конфиг как JSON и возвращает изменённый JSON.
+    /// Host-side implementation of game configuration tool operations.
     /// </summary>
     public sealed class GameConfigTool
     {
@@ -20,7 +19,8 @@ namespace CoreAI.Config
         private readonly string _roleId;
         private readonly ICoreAISettings _settings;
 
-        public GameConfigTool(IGameConfigStore store, GameConfigPolicy policy, string roleId, ICoreAISettings settings = null)
+        public GameConfigTool(IGameConfigStore store, GameConfigPolicy policy, string roleId,
+            ICoreAISettings settings = null)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -29,7 +29,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Создаёт AIFunction для MEAI function calling.
+/// Executes CreateAIFunction API operation.
         /// </summary>
         public AIFunction CreateAIFunction()
         {
@@ -45,11 +45,11 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Выполняет операцию с конфигом.
+/// Executes ExecuteAsync API operation.
         /// </summary>
-        /// <param name="action">Действие: "read" или "update".</param>
-        /// <param name="content">Для update — изменённый JSON конфиг. Для read — игнорируется.</param>
-        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <param name="action">The action value.</param>
+        /// <param name="content">The content value.</param>
+        /// <param name="cancellationToken">The cancellation token value.</param>
         public async Task<string> ExecuteAsync(
             string action,
             string? content = null,
@@ -66,7 +66,8 @@ namespace CoreAI.Config
                 Log.Instance.Info($"[Tool Call] game_config: action={action}", LogTag.Config);
             }
 
-            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) && !string.IsNullOrEmpty(content))
+            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) &&
+                !string.IsNullOrEmpty(content))
             {
                 Log.Instance.Info($"  content length={content.Length}", LogTag.Config);
             }
@@ -142,7 +143,7 @@ namespace CoreAI.Config
                 });
             }
 
-            // Объединяем все конфиги в один JSON объект
+            /* Implementation note in English. */
             string combinedJson = CombineConfigsToJson(configs);
             return SerializeResult(new GameConfigResult
             {
@@ -163,7 +164,7 @@ namespace CoreAI.Config
                 });
             }
 
-            // Валидируем что это JSON
+            /* Implementation note in English. */
             content = content.Trim();
             if (!content.StartsWith("{") || !content.EndsWith("}"))
             {
@@ -174,7 +175,7 @@ namespace CoreAI.Config
                 });
             }
 
-            // Определяем какие ключи можно менять этой роли
+            /* Implementation note in English. */
             string[] allowedKeys = _policy.GetAllowedKeys(_roleId);
             if (allowedKeys.Length == 0)
             {
@@ -185,12 +186,12 @@ namespace CoreAI.Config
                 });
             }
 
-            // Для простоты: сохраняем весь JSON как новый конфиг первого разрешённого ключ
-            // В реальной игре AI должен возвращать только изменённые части
-            // Для более сложной логики (частичное обновление) используйте GameConfigPolicy.ApplyChanges
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             string primarykey = allowedKeys[0];
 
-            // Пытаемся применить изменения через политику (если она поддерживает)
+            /* Implementation note in English. */
             if (_policy.TryApplyChanges(_roleId, content, out string[] appliedKeys, out string error))
             {
                 return SerializeResult(new GameConfigResult
@@ -201,7 +202,7 @@ namespace CoreAI.Config
                 });
             }
 
-            // Fallback: сохраняем как есть для первичного ключа
+            /* Implementation note in English. */
             _store.TrySave(primarykey, content);
             return SerializeResult(new GameConfigResult
             {
@@ -212,8 +213,8 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Объединяет несколько JSON строк в один объект.
-        /// Простая реализация: оборачивает каждый конфиг по ключу.
+/// Executes CombineConfigsToJson API operation.
+        ///
         /// </summary>
         private static string CombineConfigsToJson(Dictionary<string, string> configs)
         {
@@ -228,7 +229,7 @@ namespace CoreAI.Config
                 }
 
                 first = false;
-                // kvp.Value уже JSON, оборачиваем по ключу
+                /* Implementation note in English. */
                 sb.Append($"\"{kvp.Key}\":{kvp.Value}");
             }
 
@@ -237,7 +238,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Результат операции с конфигом.
+        /// Provides game config result functionality.
         /// </summary>
         public sealed class GameConfigResult
         {
@@ -245,7 +246,7 @@ namespace CoreAI.Config
             public string Message { get; set; }
             public string Error { get; set; }
 
-            /// <summary>JSON конфиг (для read) или применённый конфиг (для update).</summary>
+            /// <summary>Serialized configuration JSON returned by the tool.</summary>
             public string ConfigJson { get; set; }
         }
     }

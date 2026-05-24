@@ -128,7 +128,7 @@ namespace CoreAI.Ai
         public int? MaxOutputTokens { get; set; }
 
         /// <summary>
-        /// Sampling temperature (0.0–2.0). Used only when <see cref="SendTemperature"/> is <c>true</c>.
+        /// Temperature.
         /// </summary>
         public float Temperature { get; set; } = 0.1f;
 
@@ -272,6 +272,7 @@ namespace CoreAI.Ai
 
         /// <summary>Usage fields: populated on the final chunk when the backend reports usage.</summary>
         public int? PromptTokens { get; set; }
+
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
 
@@ -289,16 +290,13 @@ namespace CoreAI.Ai
         public bool BufferedStreamingUseToolProgressHint { get; set; }
 
         /// <summary>
-        /// When <c>true</c>, this chunk carries no <see cref="Text"/> but tells host UI to refresh the
-        /// typing row. If <see cref="BufferedStreamingUseToolProgressHint"/> is <c>true</c>, show the
-        /// configured short tool/buffer line; if <c>false</c>, keep the default animated «typing» dots
-        /// (e.g. unbound iteration waiting for the model step).
+        /// Whether streaming text is buffered when tool declarations have no runtime binding.
         /// </summary>
         public bool BufferedStreamingNoToolBinding { get; set; }
     }
 
     /// <summary>
-    /// Model invocation abstraction (DGF_SPEC §5.2, §7). Implementations live in Core (stub) and Unity (LLMUnity, OpenAI-compatible HTTP).
+    /// Defines completion and streaming operations for LLM backends.
     /// </summary>
     public interface ILlmClient
     {

@@ -5,16 +5,7 @@ using System.Reflection;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Factory for the <c>read_skill</c> meta-tool — self-service skill pattern.
-    /// <para>
-    /// Creates a <see cref="DelegateLlmTool"/> that the model can call to load
-    /// full skill instructions on demand, like Cursor's <c>read_file</c> pattern.
-    /// </para>
-    /// <para>
-    /// Returns: skill name, full instructions, and a list of available tools
-    /// with their parameter schemas. The model then calls <c>call_skill_tool</c>
-    /// to execute these tools.
-    /// </para>
+    /// LLM tool that reads skill instructions and metadata.
     /// </summary>
     internal static class ReadSkillLlmTool
     {
@@ -39,7 +30,10 @@ namespace CoreAI.Ai
             }
 
             // Use local function so MEAI sees the parameter name 'skill_name' in the schema
-            object ReadSkillFn(string skill_name) => Execute(skill_name, skillsByName);
+            object ReadSkillFn(string skill_name)
+            {
+                return Execute(skill_name, skillsByName);
+            }
 
             DelegateLlmTool tool = new(
                 "read_skill",
@@ -101,7 +95,7 @@ namespace CoreAI.Ai
             }
 
             // Fuzzy match
-            foreach (var kvp in skillsByName)
+            foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
                 if (kvp.Key.IndexOf(trimmed, StringComparison.OrdinalIgnoreCase) >= 0 ||
                     trimmed.IndexOf(kvp.Key, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -123,12 +117,36 @@ namespace CoreAI.Ai
 
         private static string GetFriendlyTypeName(Type type)
         {
-            if (type == typeof(string)) return "string";
-            if (type == typeof(int)) return "int";
-            if (type == typeof(float)) return "float";
-            if (type == typeof(double)) return "double";
-            if (type == typeof(bool)) return "bool";
-            if (type == typeof(long)) return "long";
+            if (type == typeof(string))
+            {
+                return "string";
+            }
+
+            if (type == typeof(int))
+            {
+                return "int";
+            }
+
+            if (type == typeof(float))
+            {
+                return "float";
+            }
+
+            if (type == typeof(double))
+            {
+                return "double";
+            }
+
+            if (type == typeof(bool))
+            {
+                return "bool";
+            }
+
+            if (type == typeof(long))
+            {
+                return "long";
+            }
+
             return type.Name;
         }
     }

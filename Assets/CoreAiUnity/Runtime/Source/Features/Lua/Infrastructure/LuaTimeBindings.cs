@@ -1,11 +1,10 @@
-using CoreAI.Sandbox;
+﻿using CoreAI.Sandbox;
 using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Предоставляет функции для работы со временем Unity (Time API) в Lua скриптах.
-    /// Полезно для долгоживущих корутин, которым нужно реагировать на TimeScale и frame delta.
+    /// Registers time-related Lua APIs.
     /// </summary>
     public sealed class LuaTimeBindings
     {

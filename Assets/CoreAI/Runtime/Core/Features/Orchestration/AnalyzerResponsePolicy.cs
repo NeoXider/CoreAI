@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов Analyzer: требует JSON с метриками или рекомендациями.
+    /// Structured-response policy for analyzer roles.
     /// </summary>
     public sealed class AnalyzerResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -22,7 +22,7 @@ namespace CoreAI.Ai
 
             string trimmed = rawContent.Trim();
 
-            // Извлекаем JSON из markdown если нужно
+            /* Implementation note in English. */
             if (trimmed.StartsWith("```json"))
             {
                 int endFence = trimmed.IndexOf("```", 7);
@@ -32,7 +32,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Должен быть JSON объект
+            /* Implementation note in English. */
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
                 int jsonStart = trimmed.IndexOf('{');
@@ -49,7 +49,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Проверяем наличие ключевых полей для Analyzer
+            /* Implementation note in English. */
             string lower = trimmed.ToLowerInvariant();
             bool hasMetricKey = lower.Contains("\"metric") ||
                                 lower.Contains("\"recommendation") || lower.Contains("\"suggestion") ||

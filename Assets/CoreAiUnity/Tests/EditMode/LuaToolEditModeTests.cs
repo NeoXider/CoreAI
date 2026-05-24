@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Logging;
+using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using NUnit.Framework;
 
@@ -121,7 +122,7 @@ namespace CoreAI.Tests.EditMode
             FakeExecutor executor = new(new LuaTool.LuaResult { Success = true });
             LuaTool tool = new(executor, new FakeSettings(), new NullLog());
 
-            var aiFunc = tool.CreateAIFunction();
+            AIFunction aiFunc = tool.CreateAIFunction();
 
             Assert.IsNotNull(aiFunc);
             Assert.AreEqual("execute_lua", aiFunc.Name);
@@ -192,7 +193,10 @@ namespace CoreAI.Tests.EditMode
                 _throwException = ex;
             }
 
-            public static FakeExecutor Throwing(Exception ex) => new(ex);
+            public static FakeExecutor Throwing(Exception ex)
+            {
+                return new FakeExecutor(ex);
+            }
 
             public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken cancellationToken)
             {
@@ -215,10 +219,21 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class NullLog : ILog
         {
-            public void Debug(string message, string tag = null) { }
-            public void Info(string message, string tag = null) { }
-            public void Warn(string message, string tag = null) { }
-            public void Error(string message, string tag = null) { }
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+            }
+
+            public void Error(string message, string tag = null)
+            {
+            }
         }
 
         private sealed class FakeSettings : ICoreAISettings

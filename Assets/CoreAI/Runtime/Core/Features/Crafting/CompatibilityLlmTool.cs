@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +10,7 @@ using Newtonsoft.Json;
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// ILlmTool обёртка для CompatibilityChecker — позволяет LLM проверять совместимость ингредиентов.
+    /// LLM tool wrapper for crafting compatibility checks.
     /// </summary>
     public sealed class CompatibilityLlmTool : LlmToolBase
     {
@@ -32,11 +32,12 @@ namespace CoreAI.Crafting
             "Score 0 = incompatible, 1 = neutral, >1 = synergy bonus.";
 
         public override string ParametersSchema => JsonParams(
-            ("ingredients", "array", true, "Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")
+            ("ingredients", "array", true,
+                "Array of ingredient names to check compatibility (e.g. ['IronOre', 'FireStone'])")
         );
 
         /// <summary>
-        /// Создаёт AIFunction для MEAI function calling.
+/// Executes CreateAIFunction API operation.
         /// </summary>
         public AIFunction CreateAIFunction()
         {
@@ -50,7 +51,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Выполняет проверку совместимости.
+/// Executes ExecuteAsync API operation.
         /// </summary>
         public Task<string> ExecuteAsync(object ingredients, CancellationToken cancellationToken = default)
         {
@@ -59,9 +60,13 @@ namespace CoreAI.Crafting
             if (ingredients != null)
             {
                 if (ingredients is string[] arr)
+                {
                     ingredientNames = arr;
+                }
                 else if (ingredients is Newtonsoft.Json.Linq.JArray jArr)
+                {
                     ingredientNames = jArr.ToObject<string[]>();
+                }
                 else if (ingredients is string str)
                 {
                     ingredientNames = str.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
@@ -70,7 +75,9 @@ namespace CoreAI.Crafting
 
             if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
-                Log.Instance.Info($"[Tool Call] check_compatibility: ingredients=[{string.Join(", ", ingredientNames ?? Array.Empty<string>())}]", LogTag.Llm);
+                Log.Instance.Info(
+                    $"[Tool Call] check_compatibility: ingredients=[{string.Join(", ", ingredientNames ?? Array.Empty<string>())}]",
+                    LogTag.Llm);
             }
 
             if (ingredientNames == null || ingredientNames.Length == 0)
@@ -89,7 +96,9 @@ namespace CoreAI.Crafting
                 {
                     string t = item?.Trim();
                     if (!string.IsNullOrEmpty(t))
+                    {
                         trimmed.Add(t);
+                    }
                 }
 
                 if (trimmed.Count < 2)

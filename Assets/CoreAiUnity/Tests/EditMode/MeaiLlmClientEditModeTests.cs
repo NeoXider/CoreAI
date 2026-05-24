@@ -20,11 +20,13 @@ namespace CoreAI.Tests.EditMode
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.GetType()
-                .GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetField("useOpenAiCompatibleHttp",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 .SetValue(settings, true);
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger);
 
             Assert.IsNotNull(client);
             UnityEngine.Object.DestroyImmediate(settings);
@@ -47,13 +49,14 @@ namespace CoreAI.Tests.EditMode
         {
             Exception ex = Assert.Catch<Exception>(() =>
             {
-                MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                MeaiLlmClient.CreateLlmUnity(null, GameLoggerUnscopedFallback.Instance,
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>());
             });
 
 #if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
             Assert.That(ex, Is.TypeOf<NotSupportedException>());
 #else
-            Assert.That(ex, Is.TypeOf<System.ArgumentNullException>());
+            Assert.That(ex, Is.TypeOf<ArgumentNullException>());
 #endif
         }
 
@@ -62,13 +65,15 @@ namespace CoreAI.Tests.EditMode
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
             settings.GetType()
-                .GetField("useOpenAiCompatibleHttp", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetField("useOpenAiCompatibleHttp",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 .SetValue(settings, true);
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             TestMemoryStore memoryStore = new();
 
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger, memoryStore);
+            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger, memoryStore);
 
             List<ILlmTool> tools = new() { new MemoryLlmTool() };
             client.SetTools(tools);
@@ -143,7 +148,7 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_SingleLargeInnerDelta_FansOutToMultipleTextChunks()
         {
             const int len = 150;
-            string blob = new string('z', len);
+            string blob = new('z', len);
             StreamingScriptedChatClient inner = new(new[] { blob });
             MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
             LlmCompletionRequest request = new()
@@ -163,7 +168,8 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(texts.Count, 4, "One 150-char SSE-style blob should fan out into multiple UI chunks.");
+            Assert.GreaterOrEqual(texts.Count, 4,
+                "One 150-char SSE-style blob should fan out into multiple UI chunks.");
             Assert.AreEqual(len, string.Concat(texts).Length);
             Assert.AreEqual(blob, string.Concat(texts));
         }
@@ -172,7 +178,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_ToolJsonInStream_ExecutesToolAndReturnsFinalText()
         {
             StreamingScriptedChatClient inner = new(
-                new[] { "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Saved from stream\"}}" },
+                new[]
+                {
+                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Saved from stream\"}}"
+                },
                 new[] { "Quiz created successfully." });
 
             StatefulMemoryStore memoryStore = new();
@@ -208,7 +217,10 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteStreamingAsync_ToolJsonWithVisiblePrefix_KeepsPrefixAndHidesJson()
         {
             StreamingScriptedChatClient inner = new(
-                new[] { "Working... {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Prefix persisted\"}}" },
+                new[]
+                {
+                    "Working... {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"Prefix persisted\"}}"
+                },
                 new[] { "Done." });
 
             StatefulMemoryStore memoryStore = new();
@@ -246,7 +258,10 @@ namespace CoreAI.Tests.EditMode
             // Two prose deltas before the JSON so hybrid streaming yields two Text chunks; a single "Saved! "
             // delta would already be a full safe prefix and the final strip step dedupes to one chunk.
             StreamingScriptedChatClient inner = new(
-                new[] { "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}" });
+                new[]
+                {
+                    "Saved", "! ", "{\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"foo\"}}"
+                });
             MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
             LlmCompletionRequest request = new()
             {
@@ -265,7 +280,8 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(texts.Count, 2, "Multiple inner prose deltas should surface as multiple streamed chunks before JSON.");
+            Assert.GreaterOrEqual(texts.Count, 2,
+                "Multiple inner prose deltas should surface as multiple streamed chunks before JSON.");
             string full = string.Concat(texts);
             Assert.AreEqual("Saved! ", full);
             Assert.That(full, Does.Not.Contain("\"name\":\"memory\""));
@@ -319,23 +335,59 @@ namespace CoreAI.Tests.EditMode
                 return true;
             }
 
-            public void Save(string roleId, AgentMemoryState state) { }
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<ChatMessage>();
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class StatefulMemoryStore : IAgentMemoryStore
         {
             private readonly Dictionary<string, AgentMemoryState> _states = new();
 
-            public bool TryLoad(string roleId, out AgentMemoryState state) => _states.TryGetValue(roleId, out state);
-            public void Save(string roleId, AgentMemoryState state) => _states[roleId] = state;
-            public void Clear(string roleId) => _states.Remove(roleId);
-            public void ClearChatHistory(string roleId) { }
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => Array.Empty<ChatMessage>();
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                return _states.TryGetValue(roleId, out state);
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                _states[roleId] = state;
+            }
+
+            public void Clear(string roleId)
+            {
+                _states.Remove(roleId);
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
         }
 
         private sealed class StubCoreSettings : ICoreAISettings
@@ -372,13 +424,17 @@ namespace CoreAI.Tests.EditMode
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chatMessages,
                 MEAI.ChatOptions options = null,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "x");
                 await Task.Yield();
             }
 
-            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
 
             public void Dispose()
             {
@@ -395,7 +451,8 @@ namespace CoreAI.Tests.EditMode
                 _streamScripts = new Queue<string[]>(streamScripts ?? Array.Empty<string[]>());
             }
 
-            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages, MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
             {
                 return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
             }
@@ -403,7 +460,8 @@ namespace CoreAI.Tests.EditMode
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chatMessages,
                 MEAI.ChatOptions options = null,
-                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
             {
                 StreamCalls++;
                 if (_streamScripts.Count == 0)
@@ -420,8 +478,14 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
-            public object GetService(Type serviceType, object serviceKey = null) => null;
-            public void Dispose() { }
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
     }
 
@@ -435,8 +499,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void SingleToolCall_ExtractedCorrectly()
         {
-            string text = "Here is the result: {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"hello\"}}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            string text =
+                "Here is the result: {\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"hello\"}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -450,7 +516,8 @@ namespace CoreAI.Tests.EditMode
         {
             string text =
                 "Action=write content=\"Final exam is on June 15th.\" memory_type=\"text\" action=\"write\"";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -465,7 +532,8 @@ namespace CoreAI.Tests.EditMode
         public void PseudoActionWrite_WithProsePrefix_StripsPseudoTailOnly()
         {
             string text = "Okay. Action=write content=\"hello\"";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -476,8 +544,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void MultipleToolCalls_AllExtracted()
         {
-            string text = "{\"name\":\"tool_a\",\"arguments\":{\"x\":1}} some text {\"name\":\"tool_b\",\"arguments\":{\"y\":2}}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            string text =
+                "{\"name\":\"tool_a\",\"arguments\":{\"x\":1}} some text {\"name\":\"tool_b\",\"arguments\":{\"y\":2}}";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(2, calls.Count);
@@ -489,8 +559,10 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void JsonInCodeBlock_NotExtracted()
         {
-            string text = "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\nDone.";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            string text =
+                "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\nDone.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsFalse(found, "JSON inside code blocks should be ignored");
             Assert.AreEqual(0, calls.Count);
@@ -500,7 +572,8 @@ namespace CoreAI.Tests.EditMode
         public void MalformedJson_GracefullySkipped()
         {
             string text = "Partial: {\"name\":\"tool\",\"arguments\":{\"broken";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsFalse(found, "Unclosed JSON should not produce tool calls");
             Assert.AreEqual(0, calls.Count);
@@ -510,7 +583,8 @@ namespace CoreAI.Tests.EditMode
         public void JsonWithoutNameAndArguments_NotExtracted()
         {
             string text = "Config: {\"key\":\"value\",\"count\":42}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsFalse(found, "Regular JSON without name+arguments keys should be ignored");
         }
@@ -527,7 +601,8 @@ namespace CoreAI.Tests.EditMode
         public void NestedBracesInArguments_HandledCorrectly()
         {
             string text = "{\"name\":\"config\",\"arguments\":{\"data\":{\"nested\":true}}}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -558,7 +633,7 @@ namespace CoreAI.Tests.EditMode
         public void FindToolCallJsonSpans_MultipleSpans()
         {
             string text = "A {\"name\":\"a\",\"arguments\":{}} B {\"name\":\"b\",\"arguments\":{\"x\":1}}";
-            var spans = MeaiLlmClient.FindToolCallJsonSpans(text);
+            List<MeaiLlmClient.JsonSpan> spans = MeaiLlmClient.FindToolCallJsonSpans(text);
 
             Assert.AreEqual(2, spans.Count);
         }
@@ -618,7 +693,8 @@ namespace CoreAI.Tests.EditMode
         public void ToolCallWithStringContainingBraces_HandledCorrectly()
         {
             string text = "{\"name\":\"tool\",\"arguments\":{\"code\":\"function() { return {}; }\"}}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -634,7 +710,8 @@ namespace CoreAI.Tests.EditMode
             string suffix = " Done processing.";
             string text = prefix + json + suffix;
 
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -647,11 +724,13 @@ namespace CoreAI.Tests.EditMode
         public void CodeBlockFollowedByRealToolCall_OnlyRealCallExtracted()
         {
             // Model shows an example in code block, then makes a real call
-            string text = "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\n" +
-                          "Now I will actually call it:\n" +
-                          "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"real\"}}";
+            string text =
+                "Here is an example:\n```json\n{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}\n```\n" +
+                "Now I will actually call it:\n" +
+                "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"real\"}}";
 
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found, "Should extract the real call outside the code block");
             Assert.AreEqual(1, calls.Count, "Only the non-code-block call should be extracted");
@@ -662,7 +741,8 @@ namespace CoreAI.Tests.EditMode
         public void ToolCallWithArrayArguments_ExtractedCorrectly()
         {
             string text = "{\"name\":\"batch_tool\",\"arguments\":{\"items\":[1,2,3],\"mode\":\"sync\"}}";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.AreEqual(1, calls.Count);
@@ -673,8 +753,10 @@ namespace CoreAI.Tests.EditMode
         public void CleanedText_IsTrimmable_NoLeadingTrailingJson()
         {
             // Tool call at very start of text — cleaned should not start with JSON
-            string text = "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"x\"}} Here is my answer.";
-            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out var calls, out string cleaned);
+            string text =
+                "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"x\"}} Here is my answer.";
+            bool found = MeaiLlmClient.TryExtractToolCallsFromText(text, out List<MEAI.FunctionCallContent> calls,
+                out string cleaned);
 
             Assert.IsTrue(found);
             Assert.That(cleaned.TrimStart(), Does.Not.StartWith("{\"name\""),
@@ -684,4 +766,3 @@ namespace CoreAI.Tests.EditMode
     }
 #endif
 }
-

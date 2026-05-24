@@ -4,20 +4,23 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Диалог с игроком (как с GPT): история в памяти, системный промпт из провайдера для роли <see cref="BuiltInAgentRoleIds.SmartChat"/>.
+    /// Defines the contract for in game llm chat service implementations.
     /// </summary>
     public interface IInGameLlmChatService
     {
-        /// <summary>Отправить реплику игрока в чат с моделью (роль <see cref="BuiltInAgentRoleIds.SmartChat"/>).</summary>
+        /// <summary>Sends a player chat message to the in-game LLM chat service.</summary>
         Task<LlmCompletionResult> SendPlayerMessageAsync(string message, CancellationToken cancellationToken = default);
 
-        /// <summary>Сбросить историю диалога в памяти сервиса.</summary>
+        /// <summary>Clears the stored chat history for the selected agent role.</summary>
         void ClearHistory();
 
-        /// <summary>Число пар user/assistant в истории (для UI).</summary>
+        /// <summary>Number of user/assistant message pairs currently retained in history.</summary>
         int HistoryPairCount { get; }
 
         /// <summary>Snapshot of the sliding-window rate limiter state for diagnostics / dashboard.</summary>
-        CoreAI.RateLimiterMetrics GetRateLimiterMetrics() => default;
+        RateLimiterMetrics GetRateLimiterMetrics()
+        {
+            return default;
+        }
     }
 }

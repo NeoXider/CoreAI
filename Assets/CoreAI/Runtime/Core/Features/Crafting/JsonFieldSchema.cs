@@ -1,29 +1,29 @@
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Определение поля JSON-схемы.
+    /// Describes one field in a JSON tool schema.
     /// </summary>
     public sealed class JsonFieldSchema
     {
-        /// <summary>Имя поля в JSON объекте.</summary>
+        /// <summary>Public name.</summary>
         public string Name { get; set; }
 
-        /// <summary>Ожидаемый тип: string, number, integer, boolean, array, object.</summary>
+        /// <summary>Expected JSON value type.</summary>
         public string Type { get; set; }
 
-        /// <summary>Обязательное ли поле.</summary>
+        /// <summary>Whether this field is required.</summary>
         public bool Required { get; set; }
 
-        /// <summary>Минимальное значение (для number/integer).</summary>
+        /// <summary>Minimum numeric value accepted by this field.</summary>
         public double? Min { get; set; }
 
-        /// <summary>Максимальное значение (для number/integer).</summary>
+        /// <summary>Maximum numeric value accepted by this field.</summary>
         public double? Max { get; set; }
 
-        /// <summary>Допустимые значения (enum constraint).</summary>
+        /// <summary>Allowed literal values for this field.</summary>
         public string[] AllowedValues { get; set; }
 
-        /// <summary>Описание поля (для отчётов об ошибках).</summary>
+        /// <summary>Human-readable description.</summary>
         public string Description { get; set; }
     }
 }

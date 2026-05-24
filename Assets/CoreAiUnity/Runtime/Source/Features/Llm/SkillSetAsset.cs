@@ -1,23 +1,10 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using UnityEngine;
 
 namespace CoreAI.Unity
 {
     /// <summary>
-    /// Unity ScriptableObject wrapper for <see cref="SkillSet"/> — self-service skill pattern.
-    /// <para>
-    /// Allows defining skills as assets in the Unity Editor:
-    /// set the skill name, short description, and drag a TextAsset with full instructions.
-    /// Tools are added programmatically via <see cref="BuildSkillSet"/>.
-    /// </para>
-    /// <para>
-    /// Usage in Inspector:
-    /// <list type="bullet">
-    /// <item>Create → CoreAI → Skill Set Asset</item>
-    /// <item>Fill in Name, Description, and Instructions TextAsset</item>
-    /// <item>In code: call <c>asset.BuildSkillSet(tools)</c> to get a <see cref="SkillSet"/></item>
-    /// </list>
-    /// </para>
+    /// ScriptableObject asset that defines LLM skills and tool bindings.
     /// </summary>
     /// <example>
     /// <code>
@@ -37,20 +24,24 @@ namespace CoreAI.Unity
     {
         [Header("Skill Identity")]
         [Tooltip("Human-readable name shown in the skill catalog (e.g. 'Crafting', 'Combat').")]
-        [SerializeField] private string skillName = "NewSkill";
+        [SerializeField]
+        private string skillName = "NewSkill";
 
         [Tooltip("Short one-line description for the catalog. The model sees this to understand what the skill does.")]
         [TextArea(1, 3)]
-        [SerializeField] private string description = "";
+        [SerializeField]
+        private string description = "";
 
         [Header("Instructions")]
         [Tooltip("Full instructions loaded on demand via read_skill(). " +
                  "Drag a .txt or .md TextAsset here. If empty, tool descriptions are used.")]
-        [SerializeField] private TextAsset instructionsAsset;
+        [SerializeField]
+        private TextAsset instructionsAsset;
 
         [Tooltip("Alternative: type instructions directly (used if TextAsset is null).")]
         [TextArea(3, 15)]
-        [SerializeField] private string inlineInstructions = "";
+        [SerializeField]
+        private string inlineInstructions = "";
 
         /// <summary>Skill name as configured in the Inspector.</summary>
         public string SkillName => skillName;
@@ -59,10 +50,23 @@ namespace CoreAI.Unity
         public string Description => description;
 
         /// <summary>
-        /// Full instructions text — from TextAsset if assigned, otherwise from inline field.
+/// Executes build skill set.
         /// </summary>
         public string Instructions =>
             instructionsAsset != null ? instructionsAsset.text : inlineInstructions;
+
+        /// <summary>
+        /// Builds a Unity-free skill definition snapshot without TextAsset references.
+        /// </summary>
+        public SkillSetDefinition ToSkillDefinition()
+        {
+            return new SkillSetDefinition
+            {
+                Name = SkillName,
+                Description = Description ?? "",
+                Instructions = Instructions ?? ""
+            };
+        }
 
         /// <summary>
         /// Builds a <see cref="SkillSet"/> from this asset's configuration and the provided tools.
@@ -71,7 +75,7 @@ namespace CoreAI.Unity
         /// <returns>A ready-to-use <see cref="SkillSet"/> for <see cref="AgentBuilder.WithSkill"/>.</returns>
         public SkillSet BuildSkillSet(params ILlmTool[] tools)
         {
-            return new SkillSet(SkillName, Description, Instructions, tools);
+            return ToSkillDefinition().BuildSkillSet(tools);
         }
     }
 }

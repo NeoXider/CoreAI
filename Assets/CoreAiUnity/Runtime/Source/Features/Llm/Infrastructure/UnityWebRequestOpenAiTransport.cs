@@ -22,7 +22,7 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             byte[] raw = Encoding.UTF8.GetBytes(request.JsonBody ?? "");
-            using UnityWebRequest uwr = new UnityWebRequest(request.Url, UnityWebRequest.kHttpVerbPOST);
+            using UnityWebRequest uwr = new(request.Url, UnityWebRequest.kHttpVerbPOST);
             uwr.uploadHandler = new UploadHandlerRaw(raw);
             uwr.downloadHandler = new DownloadHandlerBuffer();
             uwr.SetRequestHeader("Content-Type", "application/json");
@@ -66,18 +66,29 @@ namespace CoreAI.Infrastructure.Llm
                 uwr.SetRequestHeader("Accept", "text/event-stream");
             }
 
-            if (request.Headers == null) return;
+            if (request.Headers == null)
+            {
+                return;
+            }
 
             foreach (KeyValuePair<string, string> kv in request.Headers)
             {
-                if (string.IsNullOrEmpty(kv.Key)) continue;
+                if (string.IsNullOrEmpty(kv.Key))
+                {
+                    continue;
+                }
+
                 uwr.SetRequestHeader(kv.Key, kv.Value ?? "");
             }
         }
 
         private static int MapFailureToStatus(UnityWebRequest uwr)
         {
-            if (uwr.result == UnityWebRequest.Result.Success) return 200;
+            if (uwr.result == UnityWebRequest.Result.Success)
+            {
+                return 200;
+            }
+
             return 0;
         }
     }

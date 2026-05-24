@@ -18,7 +18,8 @@ namespace CoreAI.Ai
             table ??= new LlmRouteTable();
             _profiles = table.ProfilesById();
             _rules = (table.Rules ?? Array.Empty<LlmRouteRule>())
-                .Where(r => r != null && !string.IsNullOrWhiteSpace(r.RolePattern) && !string.IsNullOrWhiteSpace(r.ProfileId))
+                .Where(r => r != null && !string.IsNullOrWhiteSpace(r.RolePattern) &&
+                            !string.IsNullOrWhiteSpace(r.ProfileId))
                 .OrderBy(r => r.SortOrder)
                 .ThenBy(r => Specificity(r.RolePattern))
                 .ToList();

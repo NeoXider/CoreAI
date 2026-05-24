@@ -20,7 +20,7 @@ namespace CoreAI.Ai
         /// <summary>Optional max output tokens for this call.</summary>
         public int? MaxOutputTokens { get; set; }
 
-        /// <summary>0 = normal; 1 = after one context-overflow retry — shrink history budget.</summary>
+        /// <summary>Retry level used when progressively shrinking context.</summary>
         public int ContextRetryLevel { get; set; }
     }
 }

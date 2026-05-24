@@ -1,7 +1,7 @@
-namespace CoreAI.Infrastructure.Logging
+﻿namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Всё включено (удобно до появления своего <see cref="GameLogSettingsAsset"/>).
+    /// Default game log filtering settings used when no asset is provided.
     /// </summary>
     public sealed class DefaultGameLogSettings : IGameLogSettings
     {

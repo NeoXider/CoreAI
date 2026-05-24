@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -7,7 +7,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Config
 {
     /// <summary>
-    /// Обёртка GameConfigTool для ILlmTool интерфейса.
+    /// LLM tool wrapper for reading and writing game configuration.
     /// </summary>
     public sealed class GameConfigLlmTool : ILlmTool
     {
@@ -39,7 +39,7 @@ namespace CoreAI.Config
             "}";
 
         /// <summary>
-        /// Создаёт AIFunction для MEAI function calling.
+/// Executes CreateAIFunction API operation.
         /// </summary>
         public AIFunction CreateAIFunction()
         {

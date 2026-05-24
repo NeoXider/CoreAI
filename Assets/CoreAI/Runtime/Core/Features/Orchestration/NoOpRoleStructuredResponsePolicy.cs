@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Политика по умолчанию: не валидировать ответы, без повторных запросов.</summary>
+    /// <summary>Structured-response policy that accepts all role output.</summary>
     public sealed class NoOpRoleStructuredResponsePolicy : IRoleStructuredResponsePolicy
     {
         /// <inheritdoc />

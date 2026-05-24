@@ -34,7 +34,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton()
         {
-            var builder = new ContainerBuilder();
+            ContainerBuilder builder = new();
             builder.RegisterInstance<ILog>(NullLog.Instance);
             CoreAILifetimeScope.RegisterAgentMemoryStore(builder);
             using IObjectResolver container = builder.Build();
@@ -59,7 +59,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RegisterConversationSummaryForLifetimeScope_Resolves_FileConversationSummaryStore()
         {
-            var builder = new ContainerBuilder();
+            ContainerBuilder builder = new();
             builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             builder.RegisterCore();
 

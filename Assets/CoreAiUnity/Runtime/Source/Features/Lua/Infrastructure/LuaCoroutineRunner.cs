@@ -6,26 +6,18 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// MonoBehaviour, который тикает долгоживущие Lua-корутины каждый кадр.
-    /// <para>
-    /// Каждый <see cref="LuaCoroutineHandle"/> получает бюджет инструкций на кадр
-    /// через <see cref="LuaCoroutineHandle.Resume"/>. Корутина выполняется до
-    /// <c>coroutine.yield()</c> и отдаёт управление Unity.
-    /// </para>
-    /// <para>
-    /// Мёртвые корутины (завершённые или убитые) автоматически удаляются из очереди.
-    /// </para>
+    /// Provides lua coroutine runner functionality.
     /// </summary>
     public sealed class LuaCoroutineRunner : MonoBehaviour
     {
         private readonly List<LuaCoroutineHandle> _handles = new();
         private readonly List<LuaCoroutineHandle> _toRemove = new();
 
-        /// <summary>Количество активных корутин.</summary>
+        /// <summary>Active count.</summary>
         public int ActiveCount => _handles.Count;
 
         /// <summary>
-        /// Зарегистрировать корутину для покадрового выполнения.
+/// Executes register.
         /// </summary>
         public void Register(LuaCoroutineHandle handle)
         {
@@ -38,7 +30,7 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>
-        /// Снять корутину с выполнения и убить её.
+/// Executes unregister.
         /// </summary>
         public void Unregister(LuaCoroutineHandle handle)
         {
@@ -52,7 +44,7 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>
-        /// Убить и снять с выполнения все корутины.
+/// Executes unregister all.
         /// </summary>
         public void UnregisterAll()
         {
@@ -87,7 +79,7 @@ namespace CoreAI.Infrastructure.Lua
                 {
                     h.Resume();
 
-                    // Coroutine may have finished during Resume — mark for removal immediately
+                    // Skip processing when the checked condition is already satisfied.
                     if (!h.IsAlive)
                     {
                         _toRemove.Add(h);
@@ -105,7 +97,7 @@ namespace CoreAI.Infrastructure.Lua
                 }
             }
 
-            // Удаляем завершённые/ошибочные корутины
+            // Iterate through the data sequence.
             for (int i = _toRemove.Count - 1; i >= 0; i--)
             {
                 _handles.Remove(_toRemove[i]);

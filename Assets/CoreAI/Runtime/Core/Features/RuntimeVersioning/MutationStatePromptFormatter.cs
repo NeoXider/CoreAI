@@ -3,7 +3,7 @@ using System.Text;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Единый блок mutation state для Programmer: Lua + data overlays.</summary>
+    /// <summary>Formats mutation state for inclusion in AI prompts.</summary>
     public static class MutationStatePromptFormatter
     {
         private const int MaxChars = 5000;

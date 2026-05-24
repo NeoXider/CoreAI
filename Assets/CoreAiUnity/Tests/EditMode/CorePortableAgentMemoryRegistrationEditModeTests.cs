@@ -43,8 +43,8 @@ namespace CoreAI.Tests.EditMode
                     Lifetime.Singleton);
 
                 builder.RegisterCorePortable(
-                    suppressDefaultConversationSummaryStore: true,
-                    suppressDefaultAgentMemoryStore: true);
+                    true,
+                    true);
 
                 builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
                     .As<IAgentMemoryStore>()
@@ -56,7 +56,8 @@ namespace CoreAI.Tests.EditMode
 
                 // Must not stack portable Null + host File under one contract (desktop: VContainer keeps both in collection).
                 IReadOnlyList<IAgentMemoryStore> all = container.Resolve<IReadOnlyList<IAgentMemoryStore>>();
-                Assert.AreEqual(1, all.Count, "suppressDefaultAgentMemoryStore must leave a single IAgentMemoryStore binding.");
+                Assert.AreEqual(1, all.Count,
+                    "suppressDefaultAgentMemoryStore must leave a single IAgentMemoryStore binding.");
             }
             finally
             {
@@ -86,8 +87,8 @@ namespace CoreAI.Tests.EditMode
                     Lifetime.Singleton);
 
                 builder.RegisterCorePortable(
-                    suppressDefaultConversationSummaryStore: true,
-                    suppressDefaultAgentMemoryStore: false);
+                    true,
+                    false);
 
                 builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
                     .As<IAgentMemoryStore>()
@@ -107,7 +108,7 @@ namespace CoreAI.Tests.EditMode
 
         private static ContainerBuilder CreateMinimalBuilderForPortableStack(out CoreAISettingsAsset settings)
         {
-            var builder = new ContainerBuilder();
+            ContainerBuilder builder = new();
             builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             builder.RegisterCore();
 

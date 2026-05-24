@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -29,8 +29,8 @@ namespace CoreAI.Infrastructure.Llm
         private readonly float _requestTimeoutSeconds;
         private readonly int _maxHttpRetryAttempts;
 
-        /// <param name="requestTimeoutSeconds">0 — no limit; otherwise cancel <see cref="CompleteAsync"/> after N seconds (combined with external token).</param>
-        /// <param name="maxHttpRetryAttempts">Max retries for HTTP 429/5xx with Retry-After or exponential backoff. 0 — disabled.</param>
+        /// <param name="requestTimeoutSeconds">The request timeout seconds value.</param>
+        /// <param name="maxHttpRetryAttempts">The max http retry attempts value.</param>
         public LoggingLlmClientDecorator(ILlmClient inner, ILog logger,
             float requestTimeoutSeconds = 0f, int maxHttpRetryAttempts = 0)
         {
@@ -41,7 +41,7 @@ namespace CoreAI.Infrastructure.Llm
             _backendLabel = inner?.GetType().Name ?? "?";
         }
 
-        /// <summary>Inner client (without decorators — the outermost in the chain).</summary>
+        /// <summary>Inner.</summary>
         public ILlmClient Inner => _inner;
 
         /// <summary>Peels all <see cref="LoggingLlmClientDecorator"/> from the top of the chain.</summary>
@@ -72,31 +72,31 @@ namespace CoreAI.Infrastructure.Llm
                 routing.PreflightAnnotate(request);
             }
 
-            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "—" : request.TraceId.Trim();
+            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
             string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
-                ? "(роль не задана)"
+                ? "(role not set)"
                 : request.AgentRoleId.Trim();
             string system = request.SystemPrompt ?? "";
             string user = request.UserPayload ?? "";
             string backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
                 ? _backendLabel
-                : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
+                : $"{_backendLabel}->{request.RoutingProfileId.Trim()}";
 
             _logger.Info(
                 $"LLM ▶ traceId={trace} role={role} backend={backendLine}\n" +
-                $"  system ({system.Length} симв.): {Preview(system, SystemPreviewChars)}\n" +
-                $"  user ({user.Length} симв.): {Preview(user, UserPreviewChars)}\n" +
+                $"  system ({system.Length} chars): {Preview(system, SystemPreviewChars)}\n" +
+                $"  user ({user.Length} chars): {Preview(user, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = null;
             // Timeout is now enforced by the Unity-aware caller (CoreAiChatService)
-            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
+            /* Implementation note in English. */
             // This decorator only handles logging and HTTP 429/5xx retries.
             try
             {
                 // WebGL player: keep continuation on Unity SynchronizationContext. See note in
-                // SmartToolCallingChatClient.GetResponseAsync — ConfigureAwait(false) on the single-threaded
+                /* Implementation note in English. */
                 // browser stack hangs the await chain after HTTP completes, leaving chat UI stuck.
 #if UNITY_WEBGL && !UNITY_EDITOR
                 result = await _inner.CompleteAsync(request, cancellationToken);
@@ -112,13 +112,14 @@ namespace CoreAI.Infrastructure.Llm
                 IsRetryableHttpError(httpEx, out int httpWait) &&
                 _maxHttpRetryAttempts > 0)
             {
-                // HTTP 429/5xx — retry with Retry-After or exponential backoff
+                /* Implementation note in English. */
                 bool exhausted = true;
                 for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
                 {
                     int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
                     _logger.Warn(
-                        $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s", LogTag.Llm);
+                        $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s",
+                        LogTag.Llm);
 #if UNITY_WEBGL && !UNITY_EDITOR
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
                     try
@@ -141,6 +142,7 @@ namespace CoreAI.Infrastructure.Llm
                         // will retry again if attempts remain
                     }
                 }
+
                 if (exhausted)
                 {
                     sw.Stop();
@@ -151,7 +153,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // HTTP adapters (e.g. MeaiLlmClient) often return LlmCompletionResult with ErrorCode instead of throwing —
+            /* Implementation note in English. */
             // apply the same retry policy as for LlmClientException above.
             if (result != null &&
                 !result.Ok &&
@@ -164,7 +166,8 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
                     _logger.Warn(
-                        $"LLM ↺ traceId={trace} role={role} | {result.ErrorCode} — retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)", LogTag.Llm);
+                        $"LLM ↺ traceId={trace} role={role} | {result.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)",
+                        LogTag.Llm);
 #if UNITY_WEBGL && !UNITY_EDITOR
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
                     try
@@ -251,14 +254,16 @@ namespace CoreAI.Infrastructure.Llm
             if (result == null)
             {
                 _logger.Warn(
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | результат null", LogTag.Llm);
+                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | result is null",
+                    LogTag.Llm);
                 return new LlmCompletionResult { Ok = false, Error = "null result" };
             }
 
             if (!result.Ok)
             {
                 _logger.Warn(
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(без текста)"}", LogTag.Llm);
+                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(no text)"}",
+                    LogTag.Llm);
                 return result;
             }
 
@@ -267,14 +272,16 @@ namespace CoreAI.Infrastructure.Llm
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
                 $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
-                $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
+                $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
 
             return result;
         }
 
-        /// <summary>Exponential backoff: 2s → 4s → 8s… capped at <see cref="MaxRetryCapSeconds"/>.</summary>
+        /// <summary>Computes the retry backoff delay for a zero-based retry attempt.</summary>
         internal static int ComputeBackoff(int attempt)
-            => (int)Math.Min(2 * Math.Pow(2, attempt), MaxRetryCapSeconds);
+        {
+            return (int)Math.Min(2 * Math.Pow(2, attempt), MaxRetryCapSeconds);
+        }
 
         /// <summary>
         /// Returns true if the exception is a retryable HTTP error (429 or 5xx)
@@ -290,6 +297,7 @@ namespace CoreAI.Infrastructure.Llm
                 retryAfterSeconds = llmEx.RetryAfterSeconds ?? 0;
                 return true;
             }
+
             return false;
         }
 
@@ -322,7 +330,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <remarks>
         /// Without this override, <see cref="ILlmClient.CompleteStreamingAsync"/>
         /// would fall back to <see cref="CompleteAsync"/> and emit the entire response as
-        /// one chunk — streaming was invisible in the UI.
+        /// Provides API usage information.
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
@@ -340,21 +348,21 @@ namespace CoreAI.Infrastructure.Llm
                 routing.PreflightAnnotate(request);
             }
 
-            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "—" : request.TraceId.Trim();
+            string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
             string role = string.IsNullOrWhiteSpace(request.AgentRoleId)
-                ? "(роль не задана)"
+                ? "(role not set)"
                 : request.AgentRoleId.Trim();
             string backendLine = string.IsNullOrWhiteSpace(request.RoutingProfileId)
                 ? _backendLabel
-                : $"{_backendLabel}→{request.RoutingProfileId.Trim()}";
+                : $"{_backendLabel}->{request.RoutingProfileId.Trim()}";
             string streamSystem = request.SystemPrompt ?? "";
             string streamUser = request.UserPayload ?? "";
             IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
             _logger.Info(
                 $"LLM ▶ (stream) traceId={trace} role={role} backend={backendLine}\n" +
-                $"  system ({streamSystem.Length} симв.): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
-                $"  user ({streamUser.Length} симв.): {Preview(request.UserPayload, UserPreviewChars)}\n" +
+                $"  system ({streamSystem.Length} chars): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
+                $"  user ({streamUser.Length} chars): {Preview(request.UserPayload, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -364,23 +372,25 @@ namespace CoreAI.Infrastructure.Llm
             int? completionTokens = null;
             int? totalTokens = null;
             string terminalError = null;
-            IReadOnlyList<CoreAI.Ai.LlmToolCallTrace> executedTools = Array.Empty<CoreAI.Ai.LlmToolCallTrace>();
+            IReadOnlyList<LlmToolCallTrace> executedTools = Array.Empty<LlmToolCallTrace>();
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
-            // via UniTask.CancelAfterSlim — compatible with WebGL's PlayerLoop.
+            /* Implementation note in English. */
 
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
             string initError = null;
             try
             {
-                enumerator = _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                enumerator = _inner.CompleteStreamingAsync(request, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception ex)
             {
                 sw.Stop();
                 initError = ex.Message;
                 _logger.Warn(
-                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}", LogTag.Llm);
+                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
+                    LogTag.Llm);
             }
 
             if (initError != null)
@@ -443,10 +453,26 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (current != null)
                     {
-                        if (current.PromptTokens.HasValue) promptTokens = current.PromptTokens;
-                        if (current.CompletionTokens.HasValue) completionTokens = current.CompletionTokens;
-                        if (current.TotalTokens.HasValue) totalTokens = current.TotalTokens;
-                        if (!string.IsNullOrEmpty(current.Error)) terminalError = current.Error;
+                        if (current.PromptTokens.HasValue)
+                        {
+                            promptTokens = current.PromptTokens;
+                        }
+
+                        if (current.CompletionTokens.HasValue)
+                        {
+                            completionTokens = current.CompletionTokens;
+                        }
+
+                        if (current.TotalTokens.HasValue)
+                        {
+                            totalTokens = current.TotalTokens;
+                        }
+
+                        if (!string.IsNullOrEmpty(current.Error))
+                        {
+                            terminalError = current.Error;
+                        }
+
                         if (current.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
                         {
                             executedTools = current.ExecutedToolCalls;
@@ -461,7 +487,14 @@ namespace CoreAI.Infrastructure.Llm
                 sw.Stop();
                 if (enumerator != null)
                 {
-                    try { await enumerator.DisposeAsync(); } catch { /* swallow */ }
+                    try
+                    {
+                        await enumerator.DisposeAsync();
+                    }
+                    catch
+                    {
+                        /* swallow */
+                    }
                 }
 
                 double wallMs = sw.Elapsed.TotalMilliseconds;
@@ -476,29 +509,31 @@ namespace CoreAI.Infrastructure.Llm
                     Error = terminalError ?? "",
                     ExecutedToolCalls = executedTools
                 };
-                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser, streamTools);
+                string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, streamSystem, streamUser,
+                    streamTools);
                 string toolsLine = FormatExecutedTools(executedTools);
 
                 if (!string.IsNullOrEmpty(terminalError))
                 {
                     _logger.Warn(
-                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}", LogTag.Llm);
+                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}",
+                        LogTag.Llm);
                 }
                 else
                 {
                     _logger.Info(
                         $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
-                        $"  content ({content.Length} симв.): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
+                        $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
                 }
             }
         }
 
         /// <summary>
-        /// Renders the executed-tool diagnostic shown at the tail of every <c>LLM ◀</c> line.
+/// Executes FormatExecutedTools API operation.
         /// Returns an empty string when no tool was invoked, so plain text turns stay one-line.
         /// Format: <c> | tools=[name(ok,12ms),name(fail,4ms,native)]</c>.
         /// </summary>
-        internal static string FormatExecutedTools(IReadOnlyList<CoreAI.Ai.LlmToolCallTrace> traces)
+        internal static string FormatExecutedTools(IReadOnlyList<LlmToolCallTrace> traces)
         {
             if (traces == null || traces.Count == 0)
             {
@@ -509,8 +544,12 @@ namespace CoreAI.Infrastructure.Llm
             sb.Append(" | tools=[");
             for (int i = 0; i < traces.Count; i++)
             {
-                if (i > 0) sb.Append(',');
-                CoreAI.Ai.LlmToolCallTrace t = traces[i];
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+
+                LlmToolCallTrace t = traces[i];
                 string status = t.Success ? "ok" : "fail";
                 sb.Append(t.Name);
                 sb.Append('(');
@@ -523,8 +562,10 @@ namespace CoreAI.Infrastructure.Llm
                     sb.Append(',');
                     sb.Append(t.Source);
                 }
+
                 sb.Append(')');
             }
+
             sb.Append(']');
             return sb.ToString();
         }
@@ -546,17 +587,17 @@ namespace CoreAI.Infrastructure.Llm
             {
                 double tps = result.CompletionTokens.Value / (wallMs / 1000.0);
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (по completion){outWordsPart}{budgetSuffix}";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (completion){outWordsPart}{budgetSuffix}";
             }
 
             if (result.TotalTokens.HasValue)
             {
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s н/д{outWordsPart}{budgetSuffix}";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s n/a{outWordsPart}{budgetSuffix}";
             }
 
             return
-                $"tokens н/д (бэкенд не вернул usage для этого ответа — типично для стриминга/локальных клиентов и части Chat API) | outChars={outChars} | оценка скорости н/д{outWordsPart}{budgetSuffix}";
+                $"tokens n/a (backend did not return usage for this response - common for streaming/local clients and some Chat API responses) | outChars={outChars} | speed estimate n/a{outWordsPart}{budgetSuffix}";
         }
 
         /// <summary>
@@ -618,7 +659,7 @@ namespace CoreAI.Infrastructure.Llm
                 $"| system estTok≈{sysTokWhole} (core≈{coreTok} mem≈{memTok} toolsDef≈{toolsTok}; partsSum≈{sysTokFromParts + toolsTok}) " +
                 $"| system words≈{coreWords + memWords + toolsWords} (core≈{coreWords} mem≈{memWords} tools≈{toolsWords}) " +
                 $"| chat chars={chatChars} estTok≈{chatTok} words≈{chatWords} " +
-                $"[estTok=⌈chars/4⌉; toolsDef≈размер описаний инструментов]";
+                $"[estTok=⌈chars/4⌉; toolsDef≈tool definition size]";
         }
 
         /// <summary>
@@ -652,8 +693,10 @@ namespace CoreAI.Infrastructure.Llm
         private static int LlmUnityToolsRulesPreambleCharCount =>
             "\n\nCRITICAL SYSTEM RULES FOR TOOLS:\n".Length +
             "1. You have access to the following tools. You MUST use one if it matches the user request.\n".Length +
-            "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n".Length +
-            "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n".Length;
+            "2. To use a tool, output ONLY valid JSON matching this format: ```json\n{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}\n```\n"
+                .Length +
+            "3. DO NOT output conversational text if you call a tool. ONLY output the JSON block.\n\nAVAILABLE TOOLS:\n"
+                .Length;
 
         private static string BuildToolsCatalogBlobForWordCount(IReadOnlyList<ILlmTool> tools)
         {
@@ -725,14 +768,14 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string Fmt(int? n)
         {
-            return n.HasValue ? n.Value.ToString() : "—";
+            return n.HasValue ? n.Value.ToString() : "-";
         }
 
         private static string Preview(string text, int maxChars)
         {
             if (string.IsNullOrEmpty(text))
             {
-                return "(пусто)";
+                return "(empty)";
             }
 
             string t = text.Trim();
@@ -741,7 +784,7 @@ namespace CoreAI.Infrastructure.Llm
                 return t;
             }
 
-            return t.Substring(0, maxChars) + $"... [+{t.Length - maxChars} симв.]";
+            return t.Substring(0, maxChars) + $"... [+{t.Length - maxChars} chars]";
         }
     }
 }

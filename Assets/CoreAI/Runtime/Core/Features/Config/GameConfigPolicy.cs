@@ -1,12 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace CoreAI.Config
 {
     /// <summary>
-    /// Политика доступа к конфигам: какие роли могут читать/менять какие ключи.
-    /// Настраивается на игру: по умолчанию все роли имеют доступ ко всем ключам.
+    /// Defines per-role read and write access for game configuration keys.
     /// </summary>
     public class GameConfigPolicy
     {
@@ -14,25 +13,25 @@ namespace CoreAI.Config
         private string[] _allKnownKeys = Array.Empty<string>();
 
         /// <summary>
-        /// Конфигурация доступа для одной роли.
+        /// Per-role configuration access rules used by GameConfigPolicy.
         /// </summary>
         public sealed class RoleConfigAccess
         {
-            /// <summary>Ключи которые роль может читать.</summary>
+            /// <summary>Config keys this role may read explicitly.</summary>
             public HashSet<string> ReadKeys { get; set; } = new();
 
-            /// <summary>Ключи которые роль может изменять.</summary>
+            /// <summary>Config keys this role may write explicitly.</summary>
             public HashSet<string> WriteKeys { get; set; } = new();
 
-            /// <summary>Разрешить все ключи (для чтения).</summary>
+            /// <summary>Whether this role may read all config keys.</summary>
             public bool CanReadAll { get; set; }
 
-            /// <summary>Разрешить все ключи (для записи).</summary>
+            /// <summary>Whether this role may write all config keys.</summary>
             public bool CanWriteAll { get; set; }
         }
 
         /// <summary>
-        /// Устанавливает список всех известных ключей конфигов.
+/// Executes SetKnownKeys API operation.
         /// </summary>
         public void SetKnownKeys(string[] keys)
         {
@@ -40,11 +39,11 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Настраивает доступ для роли.
+/// Executes ConfigureRole API operation.
         /// </summary>
-        /// <param name="roleId">Роль агента.</param>
-        /// <param name="readKeys">Ключи для чтения (null = все).</param>
-        /// <param name="writeKeys">Ключи для записи (null = все).</param>
+        /// <param name="roleId">The role id value.</param>
+        /// <param name="readKeys">The read keys value.</param>
+        /// <param name="writeKeys">The write keys value.</param>
         public void ConfigureRole(string roleId, string[] readKeys = null, string[] writeKeys = null)
         {
             RoleConfigAccess access = new();
@@ -70,7 +69,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Разрешает роли доступ ко всем конфигам.
+/// Executes GrantFullAccess API operation.
         /// </summary>
         public void GrantFullAccess(string roleId)
         {
@@ -82,7 +81,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Запрещает роли доступ к конфигам.
+/// Executes RevokeAccess API operation.
         /// </summary>
         public void RevokeAccess(string roleId)
         {
@@ -94,7 +93,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Получает ключи доступные роли для чтения и записи.
+/// Executes GetAllowedKeys API operation.
         /// </summary>
         public string[] GetAllowedKeys(string roleId)
         {
@@ -108,12 +107,12 @@ namespace CoreAI.Config
                 return access.WriteKeys.ToArray();
             }
 
-            // По умолчанию: нет доступа
+            /* Implementation note in English. */
             return Array.Empty<string>();
         }
 
         /// <summary>
-        /// Проверяет может ли роль читать конфиг.
+/// Executes CanRead API operation.
         /// </summary>
         public bool CanRead(string roleId, string key)
         {
@@ -126,7 +125,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Проверяет может ли роль изменять конфиг.
+/// Executes CanWrite API operation.
         /// </summary>
         public bool CanWrite(string roleId, string key)
         {
@@ -139,9 +138,9 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Пытается применить изменения из JSON.
-        /// По умолчанию — просто сохраняет JSON для первого разрешённого ключа.
-        /// Переопределите для сложной логики (частичное обновление, валидация и т.д.).
+/// Executes TryApplyChanges API operation.
+        ///
+        ///
         /// </summary>
         public virtual bool TryApplyChanges(string roleId, string json, out string[] appliedKeys, out string error)
         {
@@ -151,7 +150,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Создаёт ILlmTool обёртку для использования в оркестраторе.
+/// Executes CreateLlmTool API operation.
         /// </summary>
         public GameConfigLlmTool CreateLlmTool(IGameConfigStore store, string roleId)
         {

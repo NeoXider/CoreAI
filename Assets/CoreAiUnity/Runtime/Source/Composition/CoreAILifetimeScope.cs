@@ -1,4 +1,4 @@
-using CoreAI;
+﻿using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.AiMemory;
@@ -18,47 +18,42 @@ using VContainer.Unity;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Корневой VContainer scope **ядра CoreAI** (лог, MessagePipe, промпты, LLM, оркестратор).
-    /// Имя отделено от «игрового» <see cref="LifetimeScope"/>: на сцене игры добавляйте свои feature-scope'ы
-    /// с <b>Parent</b> = этот объект, чтобы не путать с корнем тайтла.
+    /// Unity lifetime scope that wires CoreAI runtime services and scene assets.
     /// </summary>
     public sealed class CoreAILifetimeScope : LifetimeScope
     {
-        [Tooltip(
-            "Единые настройки CoreAI: API-ключ, URL, модель, LLMUnity/HTTP переключение и др. Если null — ищется в Resources/CoreAISettings.")]
+        [Tooltip("Shared CoreAI settings asset. If null, Resources/CoreAISettings is used.")]
         [SerializeField]
         private CoreAISettingsAsset coreAiSettings;
 
-        [Tooltip(
-            "Если null — логируются все фичи (DefaultGameLogSettings). Иначе — фильтр по флагам и минимальному уровню.")]
+        [Tooltip("Optional log settings asset. If null, DefaultGameLogSettings is used.")]
         [SerializeField]
         private GameLogSettingsAsset gameLogSettings;
 
-        [Tooltip("Опционально: переопределения и кастомные агенты (системный/user шаблоны из TextAsset).")]
+        [Tooltip("Optional prompt overrides and custom agents loaded from TextAssets.")]
         [SerializeField]
         private AgentPromptsManifest agentPromptsManifest;
 
-        [Tooltip(
-            "Опционально: маршрутизация ILlmClient по роли (Enable Role Routing). Иначе — только legacy Open Ai + LLMUnity.")]
+        [Tooltip("Optional ILlmClient routing by role. When null, legacy routing is used.")]
         [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
 
-        [Header("World Commands (Lua → MessagePipe → main thread)")]
-        [Tooltip("Whitelist префабов, которые разрешено спавнить из Lua.")]
+        [Header("World Commands (Lua -> MessagePipe -> main thread)")]
+        [Tooltip("Prefab whitelist that Lua world commands are allowed to spawn.")]
         [SerializeField]
         private CoreAiPrefabRegistryAsset worldPrefabRegistry;
 
         [Header("Network / AI authority")]
-        [Tooltip("Где разрешён запуск LLM и оркестратора: все узлы, только хост или только чистые клиенты.")]
+        [Tooltip("Controls where LLM and orchestration execution is allowed.")]
         [SerializeField]
         private AiNetworkExecutionPolicy aiNetworkExecutionPolicy = AiNetworkExecutionPolicy.AllPeers;
 
-        [Tooltip("Опционально: компонент с ролью узла в сети (Netcode и т.д.). Пусто — одиночный хост.")]
+        [Tooltip("Optional network peer role provider, for example Netcode. Empty means a standalone host.")]
         [SerializeField]
         private CoreAiNetworkPeerBehaviour networkPeerBehaviour;
 
         /// <summary>
-        /// Получить настройки CoreAI. Приоритет: field → Resources → new instance.
+        ///
         /// </summary>
         public CoreAISettingsAsset Settings
         {
@@ -74,23 +69,23 @@ namespace CoreAI.Composition
             }
         }
 
-        /// <summary>Регистрирует лог, промпты, LLM (маршрутизация + таймаут), оркестратор, Lua, память и entry points.</summary>
+        /// <summary>Registers CoreAI services into the VContainer lifetime scope.</summary>
         protected override void Configure(IContainerBuilder builder)
         {
-            // ── 1. Settings ────────────────────────────────────────────────
+            // No-op guard before a conditional operation.
             CoreAISettingsAsset settings = Settings;
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);
-                // Один InstanceRegistrationBuilder: и ICoreAISettings, и CoreAISettingsAsset (иначе VContainer ставит guard-ключ
-                // по ImplementationType и второй RegisterInstance<CoreAISettingsAsset> даёт duplicate key).
+                // No-op guard before a conditional operation.
+                // No-op guard before a conditional operation.
                 builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
 
-                // Статический прокси делегирует в DI-экземпляр автоматически
+                // No-op guard before a conditional operation.
                 CoreAISettings.Instance = settings;
             }
 
-            // ── 2. Logging ─────────────────────────────────────────────────
+            // Skip processing when the checked condition is already satisfied.
             if (gameLogSettings != null)
             {
                 builder.RegisterInstance<IGameLogSettings>(gameLogSettings);
@@ -100,17 +95,17 @@ namespace CoreAI.Composition
                 builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             }
 
-            // ── 3. Agent Prompts ───────────────────────────────────────────
+            // No-op guard before a conditional operation.
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // ── 4. World Commands (Lua, prefabs, config) ───────────────────
+            // No-op guard before a conditional operation.
             builder.RegisterWorldCommands(worldPrefabRegistry);
 
-            // ── 5. LLM Pipeline (clients, routing, orchestration) ──────────
+            // No-op guard before a conditional operation.
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 
-            // ── 6. Network Authority ───────────────────────────────────────
+            // Skip processing when the checked condition is already satisfied.
             if (networkPeerBehaviour != null)
             {
                 builder.RegisterInstance<IAiNetworkPeer>(networkPeerBehaviour);
@@ -126,7 +121,7 @@ namespace CoreAI.Composition
 
             RegisterConversationSummaryForCoreAiLifetimeScope(builder);
 
-            // Runtime overrides: файловые версии скриптов и агентной памяти
+            // No-op guard before a conditional operation.
             builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
@@ -135,7 +130,7 @@ namespace CoreAI.Composition
             // so chat/memory JSON survives reload when Application.Quit does not run (tab close).
             RegisterAgentMemoryStore(builder);
 
-            // ── 8. Entry Points ────────────────────────────────────────────
+            // No-op guard before a conditional operation.
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -168,8 +163,8 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
 
             builder.RegisterCorePortable(
-                suppressDefaultConversationSummaryStore: true,
-                suppressDefaultAgentMemoryStore: true);
+                true,
+                true);
 #else
             builder.RegisterCorePortable(
                 suppressDefaultConversationSummaryStore: false,

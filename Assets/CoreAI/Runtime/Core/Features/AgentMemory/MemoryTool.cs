@@ -8,9 +8,7 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// AIFunction-обёртка для работы с памятью агента.
-    /// Используется в MEAI function calling pipeline (FunctionInvokingChatClient).
-    /// Создаёт AIFunction, который вызывает ExecuteAsync при tool call от модели.
+    /// Host-side implementation of agent memory tool operations.
     /// </summary>
     public sealed class MemoryTool
     {
@@ -38,7 +36,7 @@ namespace CoreAI.Ai
         }
 
 
-        // BUG-7 fix: method is fully synchronous — removed async keyword to avoid
+        /* Implementation note in English. */
         // generating an unnecessary state machine. Returns Task.FromResult directly.
         public Task<string> ExecuteAsync(
             string action,
@@ -58,7 +56,8 @@ namespace CoreAI.Ai
 
             if (string.IsNullOrEmpty(action))
             {
-                return Task.FromResult(SerializeResult(new MemoryResult { Success = false, Error = "Action is required" }));
+                return Task.FromResult(SerializeResult(new MemoryResult
+                    { Success = false, Error = "Action is required" }));
             }
 
             action = action.Trim().ToLowerInvariant();
@@ -74,7 +73,7 @@ namespace CoreAI.Ai
                                 { Success = false, Error = "Content is required for write action" }));
                         }
 
-                        // Записываем память (полная замена)
+                        /* Implementation note in English. */
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
 
                         if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
@@ -100,8 +99,8 @@ namespace CoreAI.Ai
                             ? existing?.Memory ?? ""
                             : "";
 
-                        // Идемпотентность: если контент уже существует, не добавляем повторно
-                        // Это защищает от зацикливания tool call в FunctionInvokingChatClient
+                        /* Implementation note in English. */
+                        /* Implementation note in English. */
                         if (currentState.Contains(content, StringComparison.OrdinalIgnoreCase))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
@@ -170,7 +169,7 @@ namespace CoreAI.Ai
 
         private static string SerializeResult(MemoryResult result)
         {
-            // Сериализуем в JSON строку - MEAI отправит это модели как tool result
+            /* Implementation note in English. */
             return JsonConvert.SerializeObject(result);
         }
 

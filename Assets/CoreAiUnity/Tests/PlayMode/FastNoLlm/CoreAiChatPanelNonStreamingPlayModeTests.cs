@@ -32,10 +32,15 @@ namespace CoreAI.Tests.PlayMode
         {
             private readonly string _text;
 
-            public StubOrchestrator(string text) => _text = text;
+            public StubOrchestrator(string text)
+            {
+                _text = text;
+            }
 
-            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default) =>
-                Task.FromResult(_text ?? "");
+            public Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(_text ?? "");
+            }
 
             public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
                 AiTaskRequest request,
@@ -47,19 +52,23 @@ namespace CoreAI.Tests.PlayMode
                 await Task.CompletedTask;
             }
 
-            public void CancelTasks(string scopeId) { }
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
 
         private static void SetPrivateField<T>(CoreAiChatPanel panel, string fieldName, T value)
         {
-            FieldInfo field = typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo field =
+                typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(field, $"Field {fieldName}");
             field.SetValue(panel, value);
         }
 
         private static T GetPrivateField<T>(CoreAiChatPanel panel, string fieldName)
         {
-            FieldInfo field = typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo field =
+                typeof(CoreAiChatPanel).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(field, $"Field {fieldName}");
             return (T)field.GetValue(panel);
         }
@@ -67,7 +76,8 @@ namespace CoreAI.Tests.PlayMode
         private static CoreAiChatConfig CreateChatConfig(bool streaming)
         {
             CoreAiChatConfig cfg = ScriptableObject.CreateInstance<CoreAiChatConfig>();
-            FieldInfo f = typeof(CoreAiChatConfig).GetField("_enableStreaming", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo f =
+                typeof(CoreAiChatConfig).GetField("_enableStreaming", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(f);
             f.SetValue(cfg, streaming);
             return cfg;
@@ -81,7 +91,7 @@ namespace CoreAI.Tests.PlayMode
             go.SetActive(false);
 
             PanelHarness panel = go.AddComponent<PanelHarness>();
-            CoreAiChatConfig cfg = CreateChatConfig(streaming: false);
+            CoreAiChatConfig cfg = CreateChatConfig(false);
             StubOrchestrator orchestrator = new("Hello from stub LLM");
             CoreAiChatService svc = new(orchestrator);
             panel.AssignTest(cfg, svc);
@@ -117,7 +127,10 @@ namespace CoreAI.Tests.PlayMode
                 ChatService = svc;
             }
 
-            protected override string FormatResponseText(string rawText) => string.Empty;
+            protected override string FormatResponseText(string rawText)
+            {
+                return string.Empty;
+            }
         }
 
         [UnityTest]
@@ -128,7 +141,7 @@ namespace CoreAI.Tests.PlayMode
             go.SetActive(false);
 
             PanelEmptyFormat panel = go.AddComponent<PanelEmptyFormat>();
-            CoreAiChatConfig cfg = CreateChatConfig(streaming: false);
+            CoreAiChatConfig cfg = CreateChatConfig(false);
             StubOrchestrator orchestrator = new("ignored body");
             CoreAiChatService svc = new(orchestrator);
             panel.AssignTest(cfg, svc);

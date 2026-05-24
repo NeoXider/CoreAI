@@ -3,12 +3,12 @@ using CoreAI.Infrastructure.Logging;
 
 namespace CoreAI.Infrastructure.Lua
 {
-    /// <summary>Пишет события выполнения Lua (<see cref="ILuaExecutionObserver"/>) в игровой лог.</summary>
+    /// <summary>Logs Lua execution success, failures, and repair scheduling.</summary>
     public sealed class LoggingLuaExecutionObserver : ILuaExecutionObserver
     {
         private readonly IGameLogger _logger;
 
-        /// <param name="logger">Куда писать строки о успехе, ошибке и плане починки.</param>
+        /// <param name="logger">The logger value.</param>
         public LoggingLuaExecutionObserver(IGameLogger logger)
         {
             _logger = logger;

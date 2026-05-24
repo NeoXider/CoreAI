@@ -1,22 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Легковесный валидатор JSON-ответов от LLM.
-    /// Проверяет обязательные поля, типы, числовые диапазоны и enum-значения.
-    /// Не требует внешних зависимостей (использует Newtonsoft.Json.Linq).
-    /// 
-    /// Пример использования для CoreMechanicAI:
-    /// <code>
-    /// var schema = new JsonSchemaValidator("CraftResult");
-    /// schema.AddField("itemName", "string", required: true);
-    /// schema.AddField("quality", "number", required: true, min: 0, max: 100);
-    /// schema.AddField("rarity", "string", required: true, allowedValues: new[]{"common","rare","epic","legendary"});
-    /// var result = schema.Validate(llmResponseJson);
-    /// </code>
+    /// Small JSON schema validator used by CoreAI tool contracts.
     /// </summary>
     public sealed class JsonSchemaValidator
     {
@@ -24,7 +13,7 @@ namespace CoreAI.Crafting
         private readonly List<JsonFieldSchema> _fields = new();
 
         /// <summary>
-        /// Создаёт валидатор с заданным именем схемы (для отчётов об ошибках).
+        /// Initializes a new instance of JsonSchemaValidator.
         /// </summary>
         public JsonSchemaValidator(string schemaName)
         {
@@ -32,7 +21,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Добавляет определение поля в схему.
+/// Executes AddField API operation.
         /// </summary>
         public JsonSchemaValidator AddField(JsonFieldSchema field)
         {
@@ -41,7 +30,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Добавляет определение поля (shortcut).
+/// Executes AddField API operation.
         /// </summary>
         public JsonSchemaValidator AddField(
             string name,
@@ -66,7 +55,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Валидирует JSON-строку против схемы.
+/// Executes Validate API operation.
         /// </summary>
         public JsonValidationResult Validate(string json)
         {
@@ -83,8 +72,16 @@ namespace CoreAI.Crafting
             if (json.StartsWith("```"))
             {
                 int firstNewline = json.IndexOf('\n');
-                if (firstNewline >= 0) json = json.Substring(firstNewline + 1);
-                if (json.EndsWith("```")) json = json.Substring(0, json.Length - 3);
+                if (firstNewline >= 0)
+                {
+                    json = json.Substring(firstNewline + 1);
+                }
+
+                if (json.EndsWith("```"))
+                {
+                    json = json.Substring(0, json.Length - 3);
+                }
+
                 json = json.Trim();
             }
 
@@ -112,7 +109,10 @@ namespace CoreAI.Crafting
                     continue;
                 }
 
-                if (token == null || token.Type == JTokenType.Null) continue;
+                if (token == null || token.Type == JTokenType.Null)
+                {
+                    continue;
+                }
 
                 // Type check
                 if (!CheckType(token, field.Type, out string typeError))
@@ -168,7 +168,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-        /// Генерирует описание схемы как строку для вставки в system prompt.
+/// Executes ToPromptDescription API operation.
         /// </summary>
         public string ToPromptDescription()
         {
@@ -183,18 +183,20 @@ namespace CoreAI.Crafting
                 {
                     range = $" range:[{f.Min?.ToString() ?? "..."},{f.Max?.ToString() ?? "..."}]";
                 }
+
                 string allowed = f.AllowedValues != null ? $" values:[{string.Join(",", f.AllowedValues)}]" : "";
-                string desc = !string.IsNullOrEmpty(f.Description) ? $" — {f.Description}" : "";
+                string desc = !string.IsNullOrEmpty(f.Description) ? $" - {f.Description}" : "";
                 lines.Add($"  \"{f.Name}\": {f.Type}{req}{range}{allowed}{desc}");
             }
+
             lines.Add("}");
             return string.Join("\n", lines);
         }
 
-        /// <summary>Количество полей в схеме.</summary>
+        /// <summary>Field count.</summary>
         public int FieldCount => _fields.Count;
 
-        /// <summary>Имя схемы.</summary>
+        /// <summary>Schema name.</summary>
         public string SchemaName => _schemaName;
 
         private static bool CheckType(JToken token, string expectedType, out string error)
@@ -208,6 +210,7 @@ namespace CoreAI.Crafting
                         error = $"expected string but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 case "number":
@@ -216,6 +219,7 @@ namespace CoreAI.Crafting
                         error = $"expected number but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 case "integer":
@@ -230,11 +234,14 @@ namespace CoreAI.Crafting
                                 error = $"expected integer but got float {d}";
                                 return false;
                             }
+
                             return true;
                         }
+
                         error = $"expected integer but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 case "boolean":
@@ -243,6 +250,7 @@ namespace CoreAI.Crafting
                         error = $"expected boolean but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 case "array":
@@ -251,6 +259,7 @@ namespace CoreAI.Crafting
                         error = $"expected array but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 case "object":
@@ -259,6 +268,7 @@ namespace CoreAI.Crafting
                         error = $"expected object but got {token.Type}";
                         return false;
                     }
+
                     return true;
 
                 default:

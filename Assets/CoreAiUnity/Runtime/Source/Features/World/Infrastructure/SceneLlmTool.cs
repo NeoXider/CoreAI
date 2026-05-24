@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -12,8 +12,7 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Инструмент MEAI для инспекции и манипуляции с иерархией сцены во время PlayMode (Runtime).
-    /// Выполняет все операции в главном потоке (Main Thread) через UniTask, чтобы избежать исключений Unity.
+    /// LLM tool that exposes scene inspection and manipulation operations.
     /// </summary>
     public sealed class SceneLlmTool : ILlmTool
     {

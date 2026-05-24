@@ -1,4 +1,4 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
@@ -12,25 +12,21 @@ using VContainer.Unity;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Регистрация подсистемы World Commands: Lua bidings, execution observer, prefab registry, world executor.
+    /// Registers world-command routing and execution services in the DI container.
     /// </summary>
     public static class WorldCommandsInstaller
     {
         /// <summary>
-        /// Регистрирует все компоненты подсистемы мировых команд и Lua runtime.
+        /// Registers world commands.
         /// </summary>
         public static void RegisterWorldCommands(
             this IContainerBuilder builder,
             CoreAiPrefabRegistryAsset worldPrefabRegistry)
         {
-            if (worldPrefabRegistry != null)
-            {
-                builder.RegisterInstance(worldPrefabRegistry);
-            }
-            else
-            {
-                builder.RegisterInstance(ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>());
-            }
+            CoreAiPrefabRegistryAsset registry =
+                worldPrefabRegistry != null ? worldPrefabRegistry : ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            builder.RegisterInstance(registry);
+            builder.RegisterInstance<ICoreAiPrefabRegistry, CoreAiPrefabRegistryAsset>(registry);
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton)
                 .As<IDataOverlayPayloadValidator>();

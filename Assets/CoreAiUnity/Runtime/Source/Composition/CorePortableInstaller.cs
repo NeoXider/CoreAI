@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Ai;
 using CoreAI;
 using CoreAI.Authority;
@@ -18,18 +18,12 @@ namespace CoreAI.Composition
     /// (Unity <see cref="CoreAILifetimeScope"/> uses <see cref="FileConversationSummaryStore"/> this way).
     /// Pass <paramref name="suppressDefaultAgentMemoryStore"/> when the host registers <see cref="IAgentMemoryStore"/>
     /// (e.g. <see cref="CoreAI.Infrastructure.AiMemory.FileAgentMemoryStore"/> on all Unity players, including WebGL)
-    /// after <c>RegisterCorePortable</c> — otherwise VContainer sees two singletons for the same contract.
+    ///
     /// </summary>
     public static class CorePortableInstaller
     {
         /// <summary>
-        /// Регистрация портабельных сервисов оркестрации. По умолчанию включает
-        /// <see cref="InMemoryConversationSummaryStore"/> — накопление свёрток истории между ходами;
-        /// для Unity с файловым store вызовите с <paramref name="suppressDefaultConversationSummaryStore"/><c>true</c>
-        /// после регистрации своего <see cref="IConversationSummaryStore"/>.
-        /// Если хост регистрирует свой <see cref="IAgentMemoryStore"/> (как <see cref="CoreAILifetimeScope"/>),
-        /// передайте <paramref name="suppressDefaultAgentMemoryStore"/><c>true</c>, иначе VContainer увидит два singleton
-        /// на один контракт.
+        /// Registers core portable.
         /// </summary>
         public static void RegisterCorePortable(this IContainerBuilder builder,
             bool suppressDefaultConversationSummaryStore = false,
@@ -39,6 +33,7 @@ namespace CoreAI.Composition
             {
                 builder.Register<InMemoryConversationSummaryStore>(Lifetime.Singleton).As<IConversationSummaryStore>();
             }
+
             builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
             builder.Register<Func<IAiOrchestrationService>>(c =>
             {
@@ -55,7 +50,8 @@ namespace CoreAI.Composition
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
             builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
             builder.Register<HeuristicTokenEstimator>(Lifetime.Singleton).As<ITokenEstimator>();
-            builder.Register<DefaultConversationCompactionCoordinator>(Lifetime.Singleton).As<IConversationCompactionCoordinator>();
+            builder.Register<DefaultConversationCompactionCoordinator>(Lifetime.Singleton)
+                .As<IConversationCompactionCoordinator>();
 
             builder.Register<IConversationContextManager>(c =>
                     ConversationContextManagerFactories.Create(

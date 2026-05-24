@@ -1,17 +1,17 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Sandbox;
 
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Дополнительные биндинги Lua (игровой слой регистрирует здесь свои <see cref="IGameLuaRuntimeBindings"/>).
+    /// Game Lua Bindings Extensibility component used by CoreAI.
     /// </summary>
     public static class GameLuaBindingsExtensibility
     {
         private static readonly List<IGameLuaRuntimeBindings> Additional = new();
 
-        /// <summary>Регистрация на время жизни арены / сцены; снимать через <see cref="Unregister"/>.</summary>
+        /// <summary>Registers a new value or callback with the target runtime registry.</summary>
         public static void Register(IGameLuaRuntimeBindings bindings)
         {
             if (bindings == null)

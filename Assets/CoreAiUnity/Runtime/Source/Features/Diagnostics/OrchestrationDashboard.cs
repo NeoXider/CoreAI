@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using System.Text;
 using CoreAI.Ai;
 using UnityEngine;
@@ -8,18 +9,17 @@ using UnityEngine.InputSystem;
 namespace CoreAI.Diagnostics
 {
     /// <summary>
-    /// Runtime debug dashboard для метрик оркестрации.
-    /// Отображает OnGUI overlay с ключевыми метриками LLM-пайплайна.
-    /// Включается через CoreAISettings или добавлением компонента на сцену.
+    /// On-screen diagnostics panel for CoreAI orchestration metrics.
     /// </summary>
     public sealed class OrchestrationDashboard : MonoBehaviour
     {
         [Header("Metrics Source")]
-        [Tooltip("Ссылка на InMemoryAiOrchestrationMetrics. Если null — создаётся при Start.")]
+        [Tooltip("Optional metrics source. If null, one is created on Start.")]
         private InMemoryAiOrchestrationMetrics _metrics;
 
-        [Header("Display Settings")]
-        [SerializeField] private bool _showDashboard = true;
+        [Header("Display Settings")] [SerializeField]
+        private bool _showDashboard = true;
+
         [SerializeField] private KeyCode _toggleKey = KeyCode.F9;
         [SerializeField] private float _unresponsiveThresholdSeconds = 300f;
 
@@ -29,8 +29,11 @@ namespace CoreAI.Diagnostics
         private GUIStyle _alertStyle;
         private bool _stylesInitialized;
 
-        /// <summary>Назначить источник метрик (вызывается из DI / LifetimeScope).</summary>
-        public void SetMetrics(InMemoryAiOrchestrationMetrics metrics) => _metrics = metrics;
+        /// <summary>Assigns the orchestration metrics source displayed by the dashboard.</summary>
+        public void SetMetrics(InMemoryAiOrchestrationMetrics metrics)
+        {
+            _metrics = metrics;
+        }
 
         private void Update()
         {
@@ -41,10 +44,10 @@ namespace CoreAI.Diagnostics
         }
 
         /// <summary>
-        /// Совместимо с обоими input-системами Unity: Legacy Input Manager и new Input System Package.
-        /// При <c>Active Input Handling = Both</c> сначала пробуем legacy (быстрый путь), затем new.
-        /// При установленном только Input System пакете обращение к <c>UnityEngine.Input</c>
-        /// бросает <c>InvalidOperationException</c>, поэтому защищены символом <c>ENABLE_LEGACY_INPUT_MANAGER</c>.
+/// Executes is toggle key pressed this frame.
+/// Executes is toggle key pressed this frame.
+/// Executes is toggle key pressed this frame.
+/// Executes is toggle key pressed this frame.
         /// </summary>
         private bool IsToggleKeyPressedThisFrame()
         {
@@ -70,8 +73,8 @@ namespace CoreAI.Diagnostics
 
 #if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
         /// <summary>
-        /// Маппинг наиболее популярных <see cref="KeyCode"/> → new-Input-System <see cref="Key"/>.
-        /// Возвращает <see cref="Key.None"/> для неподдерживаемых, чтобы клиент мог переопределить.
+/// Executes to input system key.
+/// Executes to input system key.
         /// </summary>
         private static Key ToInputSystemKey(KeyCode keyCode)
         {
@@ -101,7 +104,10 @@ namespace CoreAI.Diagnostics
 
         private void InitStyles()
         {
-            if (_stylesInitialized) return;
+            if (_stylesInitialized)
+            {
+                return;
+            }
 
             _headerStyle = new GUIStyle(GUI.skin.label)
             {
@@ -126,27 +132,32 @@ namespace CoreAI.Diagnostics
 
         private void OnGUI()
         {
-            if (!_showDashboard || _metrics == null) return;
+            if (!_showDashboard || _metrics == null)
+            {
+                return;
+            }
+
             InitStyles();
 
-            _windowRect = GUI.Window(98765, _windowRect, DrawWindow, "CoreAI — Orchestration Dashboard");
+            _windowRect = GUI.Window(98765, _windowRect, DrawWindow, "CoreAI - Orchestration Dashboard");
         }
 
         private void DrawWindow(int id)
         {
             StringBuilder sb = new();
 
-            // ─── Global counters ───
+            // No-op guard before a conditional operation.
             GUILayout.Label("Global Metrics", _headerStyle);
 
             sb.Clear();
-            sb.AppendLine($"  Completions: {_metrics.TotalCompletions} (OK: {_metrics.SuccessfulCompletions}, Fail: {_metrics.FailedCompletions})");
+            sb.AppendLine(
+                $"  Completions: {_metrics.TotalCompletions} (OK: {_metrics.SuccessfulCompletions}, Fail: {_metrics.FailedCompletions})");
             sb.AppendLine($"  Avg Latency: {_metrics.AverageLatencyMs:F0} ms");
             sb.AppendLine($"  Retries:     {_metrics.StructuredRetries}");
             sb.AppendLine($"  Published:   {_metrics.CommandsPublished}");
             GUILayout.Label(sb.ToString(), _valueStyle);
 
-            // ─── Health ───
+            // Resolve and cache required local values.
             double secsSinceLast = _metrics.SecondsSinceLastSuccess;
             bool unresponsive = _metrics.IsLlmUnresponsive(_unresponsiveThresholdSeconds);
 
@@ -155,17 +166,17 @@ namespace CoreAI.Diagnostics
 
             if (unresponsive)
             {
-                GUILayout.Label("  ⚠ LLM UNRESPONSIVE", _alertStyle);
+                GUILayout.Label("  ! LLM UNRESPONSIVE", _alertStyle);
             }
 
-            // ─── Per-role summary ───
-            var roles = _metrics.GetAllRoleMetrics();
+            // No-op guard before a conditional operation.
+            Dictionary<string, InMemoryAiOrchestrationMetrics.RoleMetrics> roles = _metrics.GetAllRoleMetrics();
             if (roles.Count > 0)
             {
                 GUILayout.Label("Per-Role", _headerStyle);
-                foreach (var kvp in roles)
+                foreach (KeyValuePair<string, InMemoryAiOrchestrationMetrics.RoleMetrics> kvp in roles)
                 {
-                    var rm = kvp.Value;
+                    InMemoryAiOrchestrationMetrics.RoleMetrics rm = kvp.Value;
                     GUILayout.Label(
                         $"  {kvp.Key}: {rm.Successes}/{rm.Completions} OK, {rm.AverageLatencyMs:F0}ms avg",
                         _valueStyle);

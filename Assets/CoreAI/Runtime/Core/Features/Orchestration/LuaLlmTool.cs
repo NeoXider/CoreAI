@@ -1,21 +1,19 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using Microsoft.Extensions.AI;
-
 using CoreAI.Logging;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Обёртка LuaTool для ILlmTool интерфейса.
-    /// Позволяет использовать Lua tool в оркестраторе через MEAI function calling.
+    /// LLM tool implementation for lua llm operations.
     /// </summary>
     public sealed class LuaLlmTool : ILlmTool
     {
         private readonly LuaTool.ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
-        private readonly CoreAI.Logging.ILog _logger;
+        private readonly ILog _logger;
 
-        public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, CoreAI.Logging.ILog logger)
+        public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, ILog logger)
         {
             _executor = executor;
             _settings = settings;
@@ -44,7 +42,7 @@ namespace CoreAI.Ai
             "}";
 
         /// <summary>
-        /// Создаёт AIFunction для MEAI function calling.
+/// Executes CreateAIFunction API operation.
         /// </summary>
         public AIFunction CreateAIFunction()
         {

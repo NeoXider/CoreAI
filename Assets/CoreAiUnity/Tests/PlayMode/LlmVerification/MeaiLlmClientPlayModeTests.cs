@@ -119,7 +119,8 @@ namespace CoreAI.Tests.PlayMode
 
 #if COREAI_HAS_LLMUNITY
             MeaiLlmClient client =
-                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger, settings,
+                MeaiLlmClient.CreateLlmUnity(handle.Client is MeaiLlmUnityClient mc ? mc.UnityAgent : null, logger,
+                    settings,
                     store);
 #else
             MeaiLlmClient client =
@@ -159,18 +160,18 @@ namespace CoreAI.Tests.PlayMode
         {
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
 
-            Assert.Throws<System.ArgumentNullException>(() =>
-                MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), logger));
+            Assert.Throws<ArgumentNullException>(() =>
+                MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null,
+                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(), logger));
 
             Exception ex = Assert.Catch<Exception>(() =>
-                MeaiLlmClient.CreateLlmUnity(null, logger, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>()));
+                MeaiLlmClient.CreateLlmUnity(null, logger, ScriptableObject.CreateInstance<CoreAISettingsAsset>()));
 #if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
             Assert.That(ex, Is.TypeOf<NotSupportedException>());
 #else
-            Assert.That(ex, Is.TypeOf<System.ArgumentNullException>());
+            Assert.That(ex, Is.TypeOf<ArgumentNullException>());
 #endif
         }
     }
 #endif
 }
-

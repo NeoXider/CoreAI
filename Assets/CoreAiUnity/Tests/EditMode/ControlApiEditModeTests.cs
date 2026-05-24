@@ -1,5 +1,6 @@
 #if !COREAI_NO_LLM
 using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -38,7 +39,7 @@ namespace CoreAI.Tests.EditMode
                 capturedResult = result;
             };
 
-            var testArgs = new Dictionary<string, object> { { "x", 42 }, { "mode", "fast" } };
+            Dictionary<string, object> testArgs = new() { { "x", 42 }, { "mode", "fast" } };
             CoreAi.NotifyToolExecuted("Teacher", "spawn_item", testArgs, "item_123");
 
             Assert.AreEqual("Teacher", capturedRoleId);
@@ -63,10 +64,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void NotifyToolExecuted_SubscriberThrows_DoesNotPropagateException()
         {
-            bool secondCalled = false;
             CoreAi.OnToolExecuted += (_, _, _, _) =>
                 throw new System.InvalidOperationException("Bad subscriber");
-            CoreAi.OnToolExecuted += (_, _, _, _) => secondCalled = true;
+            CoreAi.OnToolExecuted += (_, _, _, _) => { };
 
             // NotifyToolExecuted wraps in try/catch, should not throw
             Assert.DoesNotThrow(() =>
@@ -104,14 +104,14 @@ namespace CoreAI.Tests.EditMode
         {
             // В EditMode нет CoreAILifetimeScope, ClearContext должен отработать молча
             Assert.DoesNotThrow(() =>
-                CoreAi.ClearContext("SomeRole", clearChatHistory: true, clearLongTermMemory: false));
+                CoreAi.ClearContext("SomeRole", true, false));
         }
 
         [Test]
         public void ClearContext_BothFlagsTrue_DoesNotThrow()
         {
             Assert.DoesNotThrow(() =>
-                CoreAi.ClearContext("SomeRole", clearChatHistory: true, clearLongTermMemory: true));
+                CoreAi.ClearContext("SomeRole", true, true));
         }
 
         [Test]
@@ -119,7 +119,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Edge case: nothing to clear
             Assert.DoesNotThrow(() =>
-                CoreAi.ClearContext("SomeRole", clearChatHistory: false, clearLongTermMemory: false));
+                CoreAi.ClearContext("SomeRole", false, false));
         }
 
         // ===================== StopAgent (без LifetimeScope — EditMode) =====================
@@ -139,13 +139,13 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         private static void ClearOnToolExecutedSubscribers()
         {
-            var field = typeof(CoreAi).GetField("OnToolExecuted",
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic |
-                System.Reflection.BindingFlags.Public);
+            FieldInfo field = typeof(CoreAi).GetField("OnToolExecuted",
+                BindingFlags.Static | BindingFlags.NonPublic |
+                BindingFlags.Public);
 
             // For events, the backing field has the same name
-            var eventField = typeof(CoreAi).GetField("OnToolExecuted",
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            FieldInfo eventField = typeof(CoreAi).GetField("OnToolExecuted",
+                BindingFlags.Static | BindingFlags.NonPublic);
 
             if (eventField != null)
             {

@@ -1,7 +1,7 @@
 namespace CoreAI.Config
 {
     /// <summary>
-    /// Заглушка хранилища конфигов (по умолчанию: ничего не хранит).
+    /// No-op game configuration store used when config persistence is unavailable.
     /// </summary>
     public sealed class NullGameConfigStore : IGameConfigStore
     {

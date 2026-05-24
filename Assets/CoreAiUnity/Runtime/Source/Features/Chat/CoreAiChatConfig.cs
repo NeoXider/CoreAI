@@ -1,117 +1,109 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace CoreAI.Chat
 {
     /// <summary>
-    /// Конфигурация универсального чата CoreAI.
-    /// Назначается в Inspector на <see cref="CoreAiChatPanel"/>.
-    /// Создать: Assets → Create → CoreAI → Chat Config
+    /// ScriptableObject configuration for the CoreAI chat UI and runtime behavior.
     /// </summary>
     [CreateAssetMenu(fileName = "CoreAiChatConfig", menuName = "CoreAI/Chat Config")]
-    public class CoreAiChatConfig : ScriptableObject
+    public class CoreAiChatConfig : ScriptableObject, ICoreAiChatOptions
     {
         [Header("Agent")]
-        [Tooltip("ID роли агента (AgentBuilder roleId). Используется для маршрутизации промптов и chat history.")]
-        [SerializeField] private string _roleId = "SmartChat";
+        [Tooltip("Agent role id used for prompt routing and chat history.")]
+        [SerializeField]
+        private string _roleId = "SmartChat";
 
-        [Header("UI — Заголовок")]
-        [SerializeField] private string _headerTitle = "AI Chat";
+        [Header("UI - Header")]
+        [SerializeField]
+        private string _headerTitle = "AI Chat";
 
-        [Header("UI — Приветствие")]
-        [Tooltip("Сообщение, показываемое при открытии чата. Пустая строка = без приветствия.")]
-        [TextArea(2, 4)]
-        [SerializeField] private string _welcomeMessage = "Привет! Чем могу помочь?";
+        [Header("UI - Welcome")]
+        [SerializeField]
+        private string _welcomeMessage = "How can I help?";
 
-        [Header("Сессия / история")]
-        [Tooltip(
-            "При включении панели подгружать в UI сохранённую историю чата из IAgentMemoryStore для RoleId " +
-            "(файл под persistentDataPath, если у роли включён persist chat в AgentMemoryPolicy). " +
-            "Если история непустая — приветствие не дублируется.")]
+        [Tooltip("Load persisted chat history when the panel starts.")]
         [SerializeField]
         private bool _loadPersistedChatOnStartup = true;
 
-        [Tooltip("Максимум последних сообщений для отображения при подгрузке (0 = все сохранённые).")]
+        [Tooltip("Maximum number of persisted messages restored into the UI. Zero disables restore.")]
         [SerializeField]
-        private int _maxPersistedMessagesForUi = 0;
+        private int _maxPersistedMessagesForUi = 50;
 
-        [Header("UI — Иконки")]
-        [Tooltip("Иконка AI-аватара (опционально).")]
-        [SerializeField] private Sprite _aiAvatarIcon;
-        [Tooltip("Иконка пользователя (опционально).")]
-        [SerializeField] private Sprite _userAvatarIcon;
-
-        [Header("Streaming")]
-        [Tooltip("Если true, ответ AI показывается по мере генерации (streaming). Если false — ждёт полный ответ.")]
-        [SerializeField] private bool _enableStreaming = true;
-
-        [Header("UI — Диагностика")]
-        [Tooltip(
-            "Показывать в ленте чата строки о вызовах инструментов (native tool), когда модель их выполняет. " +
-            "Только для текущей сессии UI — не сохраняется в IAgentMemoryStore. Фильтр по RoleId панели.")]
+        [Header("UI - Icons")]
+        [Tooltip("Optional AI avatar icon.")]
         [SerializeField]
-        private bool _showToolCallsInChat;
+        private Sprite _aiAvatarIcon;
 
-        [Header("UI — Индикатор набора")]
-        [Tooltip("Префикс перед анимированными точками (например, \"Печатает\" → \"Печатает...\"). " +
-                 "Оставьте пустым чтобы показывать только анимированные точки \"...\".")]
-        [SerializeField] private string _typingIndicatorText = "";
-
-        [Header("UI — Стриминг: инструмент / буфер")]
-        [Tooltip(
-            "Короткая строка в индикаторе набора при действии агента (вызов инструмента: native или text-shaped) " +
-            "или при удержании tool-json в hybrid-стриме. Пустая строка — встроенный дефолт панели. " +
-            "Ожидание шага без вызова инструмента (маркер без второго флага в потоке) — обычная анимация «...».")]
-        [TextArea(1, 2)]
+        [Tooltip("Optional user avatar icon.")]
         [SerializeField]
-        private string _streamingToolProgressHint = "Действие…";
+        private Sprite _userAvatarIcon;
 
-        [Header("UI — Долгий ход (подсказка под набором)")]
-        [Tooltip(
-            "Строка под `#coreai-typing-indicator` после ~3 с с момента **старта запроса** к LLM в этом ходу " +
-            "(индикатор набора, стриминг или ожидание полного ответа). Плейсхолдер: **{elapsed}** — секунды (целое). Пустая строка — не показывать.")]
-        [TextArea(1, 3)]
+        [Header("UI - Streaming")]
+        [Tooltip("Display AI responses while they are generated. When false, the UI waits for the full response.")]
         [SerializeField]
-        private string _longRequestHintFormat = "⌛ Ответ формируется… ~{elapsed} с";
+        private bool _enableStreaming = true;
 
-        [Header("UI — Размеры")]
+        [Tooltip("Show tool-call progress entries in chat when available.")]
+        [SerializeField]
+        private bool _showToolCallsInChat = false;
+
+        [Header("UI - Typing Indicator")]
+        [SerializeField]
+        private string _typingIndicatorText = "";
+
+        [Tooltip("Hint shown while a streaming response is waiting for tool progress. Empty value uses the panel default.")]
+        [SerializeField]
+        private string _streamingToolProgressHint = "Processing...";
+
+        [Tooltip("Format shown when a request runs longer than the configured delay. Use {elapsed} for whole seconds; empty disables the hint.")]
+        [SerializeField]
+        private string _longRequestHintFormat = "Response is still being generated... ~{elapsed}s";
+
+        [Header("UI - Layout")]
         [CoreAiChatLayoutOption]
-        [Tooltip(
-            "Если включено, панель растягивается почти на весь экран (отступы от краёв). " +
-            "По умолчанию выключено: плавающее окно справа снизу по ширине/высоте ниже.")]
+        [Tooltip("Stretch the chat panel close to fullscreen instead of using the floating window size.")]
         [SerializeField]
         private bool _useFullscreenChat;
 
-        [Tooltip("Ширина плавающего окна чата (px), когда fullscreen выключен. Дефолт пакета: 650 (≈ +30% к прежним 500; совпадает с `CoreAiChat.uss`).")]
-        [SerializeField] private int _chatWidth = 650;
-        [Tooltip("Высота плавающего окна чата (px), когда fullscreen выключен. Дефолт пакета: 910 (≈ +30% к прежним 700; совпадает с `CoreAiChat.uss`).")]
-        [SerializeField] private int _chatHeight = 910;
+        [Tooltip("Floating chat window width in pixels when fullscreen is disabled.")]
+        [SerializeField]
+        private int _chatWidth = 650;
 
-        [Header("Ввод")]
-        [Tooltip("Если true — Shift+Enter отправляет сообщение. Если false — Enter отправляет, а Shift+Enter вставляет перенос строки.")]
-        [SerializeField] private bool _sendOnShiftEnter = false;
+        [Tooltip("Floating chat window height in pixels when fullscreen is disabled.")]
+        [SerializeField]
+        private int _chatHeight = 910;
 
-        [Tooltip("Максимальная длина сообщения (0 = без лимита).")]
-        [SerializeField] private int _maxMessageLength = 2000;
+        [Header("Input")]
+        [Tooltip("When true, Shift+Enter sends the message. When false, Enter sends and Shift+Enter inserts a newline.")]
+        [SerializeField]
+        private bool _sendOnShiftEnter = false;
 
-        [Header("Горячие клавиши")]
-        [Tooltip(
-            "Пока чат свёрнут (FAB), разрешить открытие с клавиатуры (UI Toolkit + опрос Legacy Input, когда фокус не на UITK). Выключите, если клавиша конфликтует с управлением в игре.")]
+        [Tooltip("Maximum message length. Zero disables the limit.")]
+        [SerializeField]
+        private int _maxMessageLength = 2000;
+
+        [Header("Hotkeys")]
+        [Tooltip("Allow opening the collapsed chat from the keyboard.")]
         [SerializeField]
         private bool _enableOpenChatKeyboardShortcut = true;
 
-        [Tooltip("Клавиша открытия свёрнутого чата (без Ctrl / Cmd / Alt). Игнорируется, если открытие с клавиатуры выключено.")]
+        [Tooltip("Hotkey used to open the collapsed chat. Ctrl, Cmd, and Alt are not used.")]
         [SerializeField]
         private KeyCode _openChatHotkey = KeyCode.C;
 
-        [Tooltip(
-            "Пока чат развёрнут: Esc останавливает генерацию (если идёт) или сворачивает панель. Выключите, если Esc нужен только игроку.")]
+        [Tooltip("When the chat is open, Esc stops generation or collapses the panel.")]
         [SerializeField]
         private bool _enableEscapeChatShortcuts = true;
 
-        [Header("Ошибки")]
-        [SerializeField] private string _errorMessagePrefix = "Error: ";
-        [SerializeField] private string _timeoutMessage = "Request timeout.";
-        [SerializeField] private string _noResponseMessage = "Не удалось получить ответ. Попробуйте ещё раз.";
+        [Header("Errors")]
+        [SerializeField]
+        private string _errorMessagePrefix = "Error: ";
+
+        [SerializeField]
+        private string _timeoutMessage = "Timeout.";
+
+        [SerializeField]
+        private string _noResponseMessage = "Could not get a response. Try again.";
 
         // === Public API ===
 
@@ -138,5 +130,39 @@ namespace CoreAI.Chat
         public string ErrorMessagePrefix => _errorMessagePrefix;
         public string TimeoutMessage => _timeoutMessage;
         public string NoResponseMessage => _noResponseMessage;
+
+        public CoreAiChatOptions ToOptions()
+        {
+            return CoreAiChatOptions.From(this);
+        }
+
+        public void ApplyOptions(ICoreAiChatOptions options)
+        {
+            if (options == null)
+            {
+                return;
+            }
+
+            _roleId = options.RoleId;
+            _headerTitle = options.HeaderTitle;
+            _welcomeMessage = options.WelcomeMessage;
+            _loadPersistedChatOnStartup = options.LoadPersistedChatOnStartup;
+            _maxPersistedMessagesForUi = options.MaxPersistedMessagesForUi;
+            _enableStreaming = options.EnableStreaming;
+            _showToolCallsInChat = options.ShowToolCallsInChat;
+            _typingIndicatorText = options.TypingIndicatorText;
+            _streamingToolProgressHint = options.StreamingToolProgressHint;
+            _longRequestHintFormat = options.LongRequestHintFormat;
+            _useFullscreenChat = options.UseFullscreenChat;
+            _chatWidth = options.ChatWidth;
+            _chatHeight = options.ChatHeight;
+            _sendOnShiftEnter = options.SendOnShiftEnter;
+            _maxMessageLength = options.MaxMessageLength;
+            _enableOpenChatKeyboardShortcut = options.EnableOpenChatKeyboardShortcut;
+            _enableEscapeChatShortcuts = options.EnableEscapeChatShortcuts;
+            _errorMessagePrefix = options.ErrorMessagePrefix;
+            _timeoutMessage = options.TimeoutMessage;
+            _noResponseMessage = options.NoResponseMessage;
+        }
     }
 }

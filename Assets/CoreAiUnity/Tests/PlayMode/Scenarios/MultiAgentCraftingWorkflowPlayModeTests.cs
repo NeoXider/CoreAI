@@ -52,7 +52,7 @@ namespace CoreAI.Tests.PlayMode
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return System.Array.Empty<ChatMessage>();
+                return Array.Empty<ChatMessage>();
             }
         }
 
@@ -477,7 +477,8 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
         #region Logging
@@ -511,4 +512,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-

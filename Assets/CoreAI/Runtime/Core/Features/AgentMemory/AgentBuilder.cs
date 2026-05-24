@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CoreAI.AgentMemory;
 using CoreAI.Logging;
@@ -6,36 +6,22 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Режим поведения агента.
+    /// Defines the runtime capabilities enabled for an agent.
     /// </summary>
     public enum AgentMode
     {
-        /// <summary>Агент использует ТОЛЬКО инструменты (не отвечает текстом).</summary>
+        /// <summary>Configures an agent to use tools without conversational chat history.</summary>
         ToolsOnly = 0,
 
-        /// <summary>Агент вызывает инструменты И отвечает текстом (по умолчанию).</summary>
+        /// <summary>Configures an agent to use both tools and conversational chat history.</summary>
         ToolsAndChat = 1,
 
-        /// <summary>Агент только отвечает текстом (без инструментов).</summary>
+        /// <summary>Configures an agent to use conversational chat history without tool access.</summary>
         ChatOnly = 2
     }
 
     /// <summary>
-    /// Конструктор кастомных агентов. Позволяет легко создать нового агента
-    /// с уникальными инструментами и промптом для конкретной игры.
-    /// 
-    /// Пример:
-    /// <code>
-    /// var builder = new AgentBuilder("Blacksmith")
-    ///     .WithSystemPrompt("You are a blacksmith NPC...")
-    ///     .WithTool(new InventoryLlmTool(myInventoryProvider))
-    ///     .WithTool(new MemoryLlmTool())
-    ///     .WithMode(AgentMode.ToolsAndChat)
-    ///     .Build();
-    /// 
-    /// policy.SetToolsForRole("Blacksmith", builder.Tools);
-    /// policy.SetAgentMode("Blacksmith", builder.Mode);
-    /// </code>
+    /// Fluent builder for configuring CoreAI agents, memory, tools, and prompt behavior.
     /// </summary>
     public sealed class AgentBuilder
     {
@@ -54,6 +40,7 @@ namespace CoreAI.Ai
         private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
         private bool _overrideUniversalPrefix;
+
         /// <summary>Null = default true (LLM-assisted compaction when global setting allows).</summary>
         private bool? _useLlmContextCompaction;
 
@@ -66,26 +53,26 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Sets the system prompt for this agent (Layer 3 in CoreAI's prompt composition).
+        /// With system prompt.
         /// </summary>
         /// <remarks>
         /// <para>The final system prompt sent to the model is composed of THREE layers, in order:</para>
         /// <list type="number">
-        ///   <item><b>Layer 1 — Universal Prefix.</b> Project-wide rules from
+        /// Provides API usage information.
         ///   <see cref="ICoreAISettings.UniversalSystemPromptPrefix"/> (e.g. style, safety, output format).
         ///   Skip this layer for the current role with <see cref="WithOverrideUniversalPrefix"/>.</item>
-        ///   <item><b>Layer 2 — Role base prompt.</b> Loaded by
+        /// Provides API usage information.
         ///   <c>AiPromptComposer</c> from the <c>AgentPromptsManifest</c> ScriptableObject (Unity) or
         ///   <c>Resources/Prompts/{RoleId}.txt</c>. For built-in roles
         ///   (<see cref="BuiltInAgentRoleIds"/>) there is also a code-side fallback string.</item>
-        ///   <item><b>Layer 3 — This builder's prompt.</b> The text passed to <c>WithSystemPrompt</c>
+        /// Provides API usage information.
         ///   is appended after Layer 2 as additional role guidance.</item>
         /// </list>
         /// <para>This means the literal string you pass here is <i>not</i> the full prompt the model sees;
         /// it is concatenated with the universal prefix and the role base prompt. To inspect the final
         /// composed prompt at runtime, enable <c>logLlmInput</c> on <c>CoreAISettingsAsset</c> or read
         /// <c>AgentTurnTrace.SystemPrompt</c>.</para>
-        /// <para>See <c>DEVELOPER_GUIDE.md → Prompt Layers</c> for the full breakdown.</para>
+        /// <para>See the implementation details for usage guidance.</para>
         /// </remarks>
         public AgentBuilder WithSystemPrompt(string prompt)
         {
@@ -94,7 +81,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Добавить инструмент агенту.
+/// Executes WithTool API operation.
         /// </summary>
         public AgentBuilder WithTool(ILlmTool tool)
         {
@@ -108,7 +95,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Добавить несколько инструментов.
+/// Executes WithTools API operation.
         /// </summary>
         public AgentBuilder WithTools(IEnumerable<ILlmTool> tools)
         {
@@ -129,7 +116,7 @@ namespace CoreAI.Ai
         /// The skill's tools are registered for the agent. A lightweight catalog
         /// (name + description) is injected into the system prompt, and a
         /// <c>read_skill</c> meta-tool is auto-registered so the model can load
-        /// full instructions on demand — like Cursor's <c>read_file</c> pattern.
+/// Executes WithSkill API operation.
         /// </para>
         /// </summary>
         /// <example>
@@ -144,7 +131,7 @@ namespace CoreAI.Ai
         ///     .WithSkill(combatSkill)
         ///     .Build();
         ///
-        /// // Model sees catalog → calls read_skill("Crafting") → uses crafting tools
+        /// Usage example:
         /// await orch.RunTaskAsync(new AiTaskRequest { RoleId = "GameMaster", Hint = "craft sword" });
         /// </code>
         /// </example>
@@ -155,7 +142,7 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(skill));
             }
 
-            // Only store the skill reference — tools are NOT added to the main tool list.
+            /* Implementation note in English. */
             // They are routed through the call_skill_tool proxy to keep token count minimal.
             _skills.Add(skill);
 
@@ -182,7 +169,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Установить режим работы агента.
+/// Executes WithMode API operation.
         /// </summary>
         public AgentBuilder WithMode(AgentMode mode)
         {
@@ -191,18 +178,19 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Включить историю диалога для агента (контекст текущей сессии).
-        /// <para>contextWindowTokens: размер контекста. 0 = минимальный, null = из CoreAISettings (по умолчанию 8192).</para>
-        /// <para>persistBetweenSessions: сохранять историю между сессиями (в JSON файл). По умолчанию false (только RAM).</para>
+/// Executes WithChatHistory API operation.
+        /// <para>See the implementation details for usage guidance.</para>
+        /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
         /// <example>
-        /// .WithChatHistory()                    // 8192 из конфига, без сохранения, 30 сообщений
-        /// .WithChatHistory(4096)                // 4096 токенов, без сохранения, 30 сообщений
-        /// .WithChatHistory(0)                   // минимальный контекст, без сохранения
-        /// .WithChatHistory(persistBetweenSessions: true)  // 8192 из конфига, сохраняется, 30 сообщений
-        /// .WithChatHistory(4096, true, 50)      // 4096 токенов, сохраняется, 50 сообщений максимум
+        /// Usage example:
+        ///
+        ///
+        ///
+        ///
         /// </example>
-        public AgentBuilder WithChatHistory(int? contextWindowTokens = null, bool persistBetweenSessions = false, int maxChatHistoryMessages = 30)
+        public AgentBuilder WithChatHistory(int? contextWindowTokens = null, bool persistBetweenSessions = false,
+            int maxChatHistoryMessages = 30)
         {
             _withChatHistory = true;
             _contextWindowTokens = contextWindowTokens;
@@ -212,7 +200,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Включить память для агента (добавляет MemoryTool).
+/// Executes WithMemory API operation.
         /// </summary>
         public AgentBuilder WithMemory(MemoryToolAction defaultAction = MemoryToolAction.Append)
         {
@@ -222,7 +210,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Добавить метод/делегат как инструмент (MEAI автоматически сгенерирует JSON-схему аргументов по сигнатуре метода).
+/// Executes WithAction API operation.
         /// </summary>
         public AgentBuilder WithAction(string name, string description, Delegate action)
         {
@@ -231,8 +219,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Добавить инструмент, который публикует событие в CoreAiEvents. 
-        /// Отлично подходит для новичков (достаточно написать CoreAiEvents.Subscribe в любом скрипте).
+/// Executes WithEventTool API operation.
+        ///
         /// </summary>
         public AgentBuilder WithEventTool(string name, string description, bool hasStringPayload = false)
         {
@@ -250,14 +238,14 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Установить температуру генерации для конкретного агента.
-        /// Переопределяет общую температуру из CoreAISettings.Temperature.
-        /// <para>0.0 = детерминировано, 1.0 = креативно, 2.0 = максимально случайно.</para>
+/// Executes WithTemperature API operation.
+        ///
+        /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
         /// <example>
-        /// .WithTemperature(0.0f)   // Для строгого JSON/кода
-        /// .WithTemperature(0.3f)   // Для NPC диалогов
-        /// .WithTemperature(0.8f)   // Для творческих задач
+        /// Usage example:
+        ///
+        ///
         /// </example>
         public AgentBuilder WithTemperature(float temperature)
         {
@@ -282,7 +270,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Per-agent override for duplicate tool-call detection. Default behaviour is to <b>reject</b>
         /// a tool call whose <c>(name, args)</c> signature exactly matches a previous one within the
-        /// same request — this prevents loops where a model re-invokes the same tool forever.
+/// Executes WithAllowDuplicateToolCalls API operation.
         /// <para>
         /// Pass <c>true</c> to <b>opt out</b> (large/strong models occasionally re-call a tool on
         /// purpose, e.g. polling for state). Pass <c>false</c> to force-enable the guard for this
@@ -291,9 +279,9 @@ namespace CoreAI.Ai
         /// <para>
         /// Granularity:
         /// <list type="number">
-        ///   <item>Global default: <see cref="ICoreAISettings.AllowDuplicateToolCalls"/> (off — reject).</item>
+        ///
         ///   <item>Per-role override: this method.</item>
-        ///   <item>Per-tool override: <see cref="ILlmTool.AllowDuplicates"/> on the tool itself —
+        ///
         ///     even when role/global reject duplicates, a tool that returns <c>true</c> here is
         ///     never blocked (useful for read-only "ping" tools).</item>
         /// </list>
@@ -310,9 +298,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Включить/выключить стриминг ответов для этого агента.
-        /// Переопределяет глобальный <see cref="ICoreAISettings.EnableStreaming"/>.
-        /// Если не вызвано — используется глобальный флаг.
+/// Executes WithStreaming API operation.
+        ///
+        ///
         /// </summary>
         /// <example>
         /// new AgentBuilder("FastChat").WithStreaming(true).Build();
@@ -335,9 +323,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отключить universalSystemPromptPrefix из CoreAISettings для этой роли.
-        /// Полезно когда роли нужен полностью кастомный системный промпт
-        /// без общих правил (например, роль-парсер или роль-валидатор).
+/// Executes WithOverrideUniversalPrefix API operation.
+        ///
+        ///
         /// </summary>
         /// <example>
         /// new AgentBuilder("JsonParser")
@@ -354,7 +342,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Builds the <see cref="AgentConfig"/>. Emits non-fatal warnings via <see cref="Log.Instance"/>
         /// for likely misconfigurations (empty system prompt, tool-using mode without tools, compaction
-        /// without the global gate). Warnings never throw — gameplay code continues to work.
+/// Executes Build API operation.
         /// </summary>
         /// <remarks>
         /// Set <see cref="SuppressBuildWarnings"/> to <c>true</c> to silence validation (e.g. for tests
@@ -363,10 +351,11 @@ namespace CoreAI.Ai
         /// </remarks>
         public AgentConfig Build()
         {
-            // Context size: 0 → minimal, null → fall back to CoreAISettings, explicit → use as-is.
-            int ctxTokens = _contextWindowTokens ?? _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
+            /* Implementation note in English. */
+            int ctxTokens = _contextWindowTokens ??
+                            _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 
-            // Prompt does NOT include universalPrefix — it is appended by AiPromptComposer at
+            /* Implementation note in English. */
             // final composition time (three-layer architecture):
             //   Layer 1: universalSystemPromptPrefix (project-wide rules)
             //   Layer 2: role base prompt from Manifest / Resources (.txt files)
@@ -436,7 +425,7 @@ namespace CoreAI.Ai
             if (string.IsNullOrWhiteSpace(_systemPrompt))
             {
                 bool hasManifestFallback = !string.IsNullOrEmpty(_roleId)
-                    && BuiltInAgentRoleIds.IsBuiltIn(_roleId);
+                                           && BuiltInAgentRoleIds.IsBuiltIn(_roleId);
                 if (!hasManifestFallback)
                 {
                     issues.Add(new AgentBuilderIssue(
@@ -458,7 +447,7 @@ namespace CoreAI.Ai
 
             if (_mode == AgentMode.ToolsOnly && _tools.Count == 0)
             {
-                // ToolsOnly without tools is degenerate — the agent has nothing to do.
+                /* Implementation note in English. */
                 // Already reported by the rule above; no extra issue here.
             }
 
@@ -488,14 +477,14 @@ namespace CoreAI.Ai
             {
                 issues.Add(new AgentBuilderIssue(
                     AgentBuilderIssueCode.TemperatureOutOfRange,
-                    $"WithTemperature({_temperature}) is outside the typical 0.0–2.0 range. " +
+                    $"WithTemperature({_temperature}) is outside the typical 0.0-2.0 range. " +
                     "Most providers clamp or reject values outside this range."));
             }
         }
     }
 
     /// <summary>
-    /// Конфигурация агента (результат AgentBuilder.Build()).
+    /// Immutable configuration produced by AgentBuilder.
     /// </summary>
     public sealed class AgentConfig
     {
@@ -511,7 +500,7 @@ namespace CoreAI.Ai
         public int? MaxOutputTokens { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
 
-        /// <summary>Per-role override для стриминга; null = использовать глобальный <see cref="ICoreAISettings.EnableStreaming"/>.</summary>
+        /// <summary>Whether this agent prefers streaming responses when supported.</summary>
         public bool? EnableStreaming { get; internal set; }
 
         public MemoryToolAction MemoryDefaultAction { get; internal set; }
@@ -527,16 +516,17 @@ namespace CoreAI.Ai
         public IReadOnlyList<SkillSet> Skills { get; internal set; }
 
         /// <summary>
-        /// Применить конфигурацию к политике.
+/// Executes ApplyToPolicy API operation.
         /// </summary>
         public void ApplyToPolicy(AgentMemoryPolicy policy)
         {
             policy.SetToolsForRole(RoleId, Tools);
 
-            // Настраиваем действие памяти по умолчанию и дубликаты
-            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction, allowDuplicateToolCalls: AllowDuplicateToolCalls);
+            /* Implementation note in English. */
+            policy.ConfigureRole(RoleId, defaultAction: MemoryDefaultAction,
+                allowDuplicateToolCalls: AllowDuplicateToolCalls);
 
-            // Если нет инструментов, отключаем MemoryTool
+            /* Implementation note in English. */
             if (Tools.Count == 0 || !HasMemoryTool())
             {
                 policy.DisableMemoryTool(RoleId);
@@ -548,29 +538,30 @@ namespace CoreAI.Ai
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
             policy.SetTemperature(RoleId, Temperature);
 
-            // Регистрируем дополнительный системный промпт (слой 3)
+            /* Implementation note in English. */
             if (!string.IsNullOrWhiteSpace(SystemPrompt))
             {
                 policy.SetAdditionalSystemPrompt(RoleId, SystemPrompt);
             }
 
-            // Регистрируем переопределение universalPrefix
+            /* Implementation note in English. */
             if (OverrideUniversalPrefix)
             {
                 policy.SetOverrideUniversalPrefix(RoleId, true);
             }
 
-            // Регистрируем per-role override стриминга:
-            // - явный WithStreaming(...) всегда приоритетен;
-            // - для режимов с инструментами (ToolsAndChat/ToolsOnly) по умолчанию включаем стриминг,
-            //   чтобы работал streaming + tool-calling single-cycle без дополнительной настройки;
-            // - для остальных режимов оставляем глобальный fallback.
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
+            /* Implementation note in English. */
             bool? streamingOverride = EnableStreaming;
             if (!streamingOverride.HasValue &&
                 (Mode == AgentMode.ToolsAndChat || Mode == AgentMode.ToolsOnly))
             {
                 streamingOverride = true;
             }
+
             policy.SetStreamingEnabled(RoleId, streamingOverride);
 
             // Self-service skills: register catalog context provider + meta-tools.

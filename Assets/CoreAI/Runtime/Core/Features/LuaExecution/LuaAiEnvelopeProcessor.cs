@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Messaging;
 using CoreAI.Sandbox;
 using MoonSharp.Interpreter;
@@ -7,12 +7,12 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Разбор <see cref="AiGameCommandTypeIds.Envelope"/>, исполнение Lua в песочнице, при ошибке — повторный вызов Programmer.
+    /// Processes AI commands that contain Lua execution envelopes.
     /// </summary>
     public sealed class LuaAiEnvelopeProcessor
     {
-        /// <summary>Максимум подряд неудачных Lua repair попыток в одном конверте.</summary>
-        public const int DefaultMaxLuaRepairRetries = 3; // Совместимо с CoreAISettings.MaxLuaRepairRetries
+        /// <summary>Default max lua repair retries.</summary>
+        public const int DefaultMaxLuaRepairRetries = 3; // Matches CoreAISettings.MaxLuaRepairRetries compatibility.
 
         private readonly SecureLuaEnvironment _sandbox;
         private readonly IGameLuaRuntimeBindings _bindings;
@@ -40,7 +40,7 @@ namespace CoreAI.Ai
             _settings = settings;
         }
 
-        /// <summary>Обработать команду-конверт: извлечь Lua, выполнить, опубликовать результат или запланировать ремонт.</summary>
+        /// <summary>Processes an AI game command and dispatches any embedded Lua work.</summary>
         public void Process(ApplyAiGameCommand cmd)
         {
             if (cmd == null || cmd.CommandTypeId != Envelope)

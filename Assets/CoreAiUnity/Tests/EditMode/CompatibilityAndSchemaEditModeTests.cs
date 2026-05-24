@@ -37,7 +37,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Compatibility_TwoIngredients_NoRules_ReturnsDefault()
         {
-            CompatibilityChecker checker = new(defaultScore: 0.8f);
+            CompatibilityChecker checker = new(0.8f);
             CompatibilityResult result = checker.Check("IronOre", "Coal");
             Assert.IsTrue(result.IsCompatible);
             Assert.AreEqual(0.8f, result.CompatibilityScore);
@@ -285,7 +285,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_MissingRequiredField_ReturnsError()
         {
             JsonSchemaValidator schema = new("CraftResult");
-            schema.AddField("itemName", "string", required: true);
+            schema.AddField("itemName", "string", true);
 
             JsonValidationResult result = schema.Validate("{}");
             Assert.IsFalse(result.IsValid);
@@ -296,8 +296,8 @@ namespace CoreAI.Tests.EditMode
         public void Schema_AllRequiredFieldsPresent_IsValid()
         {
             JsonSchemaValidator schema = new("CraftResult");
-            schema.AddField("itemName", "string", required: true);
-            schema.AddField("quality", "number", required: true);
+            schema.AddField("itemName", "string", true);
+            schema.AddField("quality", "number", true);
 
             JsonValidationResult result = schema.Validate("{\"itemName\":\"Sword\",\"quality\":85}");
             Assert.IsTrue(result.IsValid);
@@ -308,7 +308,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_WrongType_String_ReturnsError()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("name", "string", required: true);
+            schema.AddField("name", "string", true);
 
             JsonValidationResult result = schema.Validate("{\"name\": 42}");
             Assert.IsFalse(result.IsValid);
@@ -319,7 +319,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_WrongType_Number_ReturnsError()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("value", "number", required: true);
+            schema.AddField("value", "number", true);
 
             JsonValidationResult result = schema.Validate("{\"value\": \"not a number\"}");
             Assert.IsFalse(result.IsValid);
@@ -330,7 +330,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_NumberBelowMin_ReturnsError()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("quality", "number", required: true, min: 0, max: 100);
+            schema.AddField("quality", "number", true, 0, 100);
 
             JsonValidationResult result = schema.Validate("{\"quality\": -5}");
             Assert.IsFalse(result.IsValid);
@@ -341,7 +341,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_NumberAboveMax_ReturnsError()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("quality", "number", required: true, min: 0, max: 100);
+            schema.AddField("quality", "number", true, 0, 100);
 
             JsonValidationResult result = schema.Validate("{\"quality\": 150}");
             Assert.IsFalse(result.IsValid);
@@ -352,7 +352,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_NumberInRange_IsValid()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("quality", "number", required: true, min: 0, max: 100);
+            schema.AddField("quality", "number", true, 0, 100);
 
             JsonValidationResult result = schema.Validate("{\"quality\": 85.5}");
             Assert.IsTrue(result.IsValid);
@@ -362,7 +362,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_EnumValue_Valid()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("rarity", "string", required: true,
+            schema.AddField("rarity", "string", true,
                 allowedValues: new[] { "common", "rare", "epic", "legendary" });
 
             JsonValidationResult result = schema.Validate("{\"rarity\": \"epic\"}");
@@ -373,7 +373,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_EnumValue_Invalid()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("rarity", "string", required: true,
+            schema.AddField("rarity", "string", true,
                 allowedValues: new[] { "common", "rare", "epic", "legendary" });
 
             JsonValidationResult result = schema.Validate("{\"rarity\": \"mythic\"}");
@@ -385,7 +385,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_EnumValue_CaseInsensitive()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("rarity", "string", required: true,
+            schema.AddField("rarity", "string", true,
                 allowedValues: new[] { "common", "rare" });
 
             JsonValidationResult result = schema.Validate("{\"rarity\": \"Rare\"}");
@@ -396,8 +396,8 @@ namespace CoreAI.Tests.EditMode
         public void Schema_OptionalField_MissingIsOk()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("name", "string", required: true);
-            schema.AddField("description", "string", required: false);
+            schema.AddField("name", "string", true);
+            schema.AddField("description", "string", false);
 
             JsonValidationResult result = schema.Validate("{\"name\": \"Sword\"}");
             Assert.IsTrue(result.IsValid);
@@ -407,7 +407,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_BooleanField_Validates()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("isActive", "boolean", required: true);
+            schema.AddField("isActive", "boolean", true);
 
             Assert.IsTrue(schema.Validate("{\"isActive\": true}").IsValid);
             Assert.IsFalse(schema.Validate("{\"isActive\": \"yes\"}").IsValid);
@@ -417,7 +417,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_ArrayField_Validates()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("ingredients", "array", required: true);
+            schema.AddField("ingredients", "array", true);
 
             Assert.IsTrue(schema.Validate("{\"ingredients\": [\"a\",\"b\"]}").IsValid);
             Assert.IsFalse(schema.Validate("{\"ingredients\": \"not array\"}").IsValid);
@@ -427,7 +427,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_ObjectField_Validates()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("stats", "object", required: true);
+            schema.AddField("stats", "object", true);
 
             Assert.IsTrue(schema.Validate("{\"stats\": {\"hp\": 100}}").IsValid);
             Assert.IsFalse(schema.Validate("{\"stats\": 42}").IsValid);
@@ -437,7 +437,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_IntegerField_AcceptsWholeFloat()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("count", "integer", required: true);
+            schema.AddField("count", "integer", true);
 
             Assert.IsTrue(schema.Validate("{\"count\": 5}").IsValid);
             Assert.IsTrue(schema.Validate("{\"count\": 5.0}").IsValid);
@@ -448,7 +448,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_MarkdownFences_StrippedBeforeParsing()
         {
             JsonSchemaValidator schema = new("Test");
-            schema.AddField("name", "string", required: true);
+            schema.AddField("name", "string", true);
 
             JsonValidationResult result = schema.Validate("```json\n{\"name\": \"Sword\"}\n```");
             Assert.IsTrue(result.IsValid);
@@ -458,9 +458,9 @@ namespace CoreAI.Tests.EditMode
         public void Schema_MultipleErrors_AllReported()
         {
             JsonSchemaValidator schema = new("CraftResult");
-            schema.AddField("itemName", "string", required: true);
-            schema.AddField("quality", "number", required: true, min: 0, max: 100);
-            schema.AddField("rarity", "string", required: true,
+            schema.AddField("itemName", "string", true);
+            schema.AddField("quality", "number", true, 0, 100);
+            schema.AddField("rarity", "string", true,
                 allowedValues: new[] { "common", "rare" });
 
             // All three fields wrong or missing
@@ -473,8 +473,8 @@ namespace CoreAI.Tests.EditMode
         public void Schema_ToPromptDescription_ContainsFieldNames()
         {
             JsonSchemaValidator schema = new("CraftResult");
-            schema.AddField("itemName", "string", required: true, description: "Name of the crafted item");
-            schema.AddField("quality", "number", required: true, min: 0, max: 100);
+            schema.AddField("itemName", "string", true, description: "Name of the crafted item");
+            schema.AddField("quality", "number", true, 0, 100);
 
             string prompt = schema.ToPromptDescription();
             Assert.IsTrue(prompt.Contains("itemName"));
@@ -505,7 +505,7 @@ namespace CoreAI.Tests.EditMode
         public void Schema_FluentApi_Chainable()
         {
             JsonSchemaValidator schema = new JsonSchemaValidator("Test")
-                .AddField("a", "string", required: true)
+                .AddField("a", "string", true)
                 .AddField("b", "number")
                 .AddField("c", "boolean");
 
@@ -517,13 +517,13 @@ namespace CoreAI.Tests.EditMode
         {
             // Реалистичный сценарий: CoreMechanicAI возвращает результат крафта
             JsonSchemaValidator schema = new JsonSchemaValidator("CraftResult")
-                .AddField("itemName", "string", required: true, description: "Name of crafted item")
-                .AddField("quality", "number", required: true, min: 0, max: 100)
-                .AddField("rarity", "string", required: true,
+                .AddField("itemName", "string", true, description: "Name of crafted item")
+                .AddField("quality", "number", true, 0, 100)
+                .AddField("rarity", "string", true,
                     allowedValues: new[] { "common", "uncommon", "rare", "epic", "legendary" })
-                .AddField("durability", "integer", required: true, min: 1, max: 1000)
-                .AddField("effects", "array", required: false)
-                .AddField("isCursed", "boolean", required: false);
+                .AddField("durability", "integer", true, 1, 1000)
+                .AddField("effects", "array", false)
+                .AddField("isCursed", "boolean", false);
 
             string validJson = @"{
                 ""itemName"": ""Flaming Sword"",

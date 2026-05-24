@@ -4,8 +4,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Обёртка InventoryTool для ILlmTool интерфейса.
-    /// Позволяет игровым чат-ролям вызывать инструмент получения инвентаря (если инструмент зарегистрирован для роли).
+    /// LLM tool that exposes inventory operations to agents.
     /// </summary>
     public sealed class InventoryLlmTool : ILlmTool
     {

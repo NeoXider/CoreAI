@@ -4,8 +4,7 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// In-memory реализация <see cref="IAiOrchestrationMetrics"/>: хранит счётчики и историю
-    /// для отображения в dashboard / экспорта в StatsD / Prometheus / Application Insights.
+    /// Thread-safe in-memory collector for AI orchestration counters and per-role metrics.
     /// </summary>
     public sealed class InMemoryAiOrchestrationMetrics : IAiOrchestrationMetrics
     {
@@ -16,48 +15,56 @@ namespace CoreAI.Ai
         // ARCH-9: cap per-role dictionary to prevent unbounded growth from dynamic roleIds.
         private const int MaxRoles = 256;
 
-        /// <summary>Общее число completion запросов.</summary>
+        /// <summary>Total number of recorded LLM completions.</summary>
         public int TotalCompletions { get; private set; }
 
-        /// <summary>Число успешных completion запросов.</summary>
+        /// <summary>Number of successful LLM completions.</summary>
         public int SuccessfulCompletions { get; private set; }
 
-        /// <summary>Число неудачных completion запросов.</summary>
+        /// <summary>Number of failed LLM completions.</summary>
         public int FailedCompletions { get; private set; }
 
-        /// <summary>Число retry из-за structured response policy.</summary>
+        /// <summary>Number of structured-response retries.</summary>
         public int StructuredRetries { get; private set; }
 
-        /// <summary>Число опубликованных команд.</summary>
+        /// <summary>Number of AI commands published through orchestration.</summary>
         public int CommandsPublished { get; private set; }
 
-        /// <summary>Суммарная задержка LLM в миллисекундах.</summary>
+        /// <summary>Accumulated LLM completion latency in milliseconds.</summary>
         public double TotalLatencyMs { get; private set; }
 
-        /// <summary>Средняя задержка LLM (0 если нет данных).</summary>
+        /// <summary>Average LLM completion latency in milliseconds.</summary>
         public double AverageLatencyMs => TotalCompletions > 0 ? TotalLatencyMs / TotalCompletions : 0;
 
-        /// <summary>Время последней успешной операции (UTC).</summary>
+        /// <summary>UTC timestamp of the most recent successful LLM completion.</summary>
         public DateTime LastSuccessUtc
         {
             get
             {
-                lock (_lock) return _lastSuccessUtc;
+                lock (_lock)
+                {
+                    return _lastSuccessUtc;
+                }
             }
         }
 
-        /// <summary>Секунд с последней успешной операции.</summary>
+        /// <summary>Elapsed seconds since the most recent successful LLM completion.</summary>
         public double SecondsSinceLastSuccess
         {
             get
             {
-                lock (_lock) return (DateTime.UtcNow - _lastSuccessUtc).TotalSeconds;
+                lock (_lock)
+                {
+                    return (DateTime.UtcNow - _lastSuccessUtc).TotalSeconds;
+                }
             }
         }
 
-        /// <summary>true если LLM не отвечал дольше указанного порога.</summary>
+        /// <summary>Returns whether no successful LLM completion has occurred within the threshold.</summary>
         public bool IsLlmUnresponsive(double thresholdSeconds = 300)
-            => SecondsSinceLastSuccess > thresholdSeconds;
+        {
+            return SecondsSinceLastSuccess > thresholdSeconds;
+        }
 
         /// <inheritdoc />
         public void RecordLlmCompletion(string roleId, string traceId, bool ok, double wallMs)
@@ -100,7 +107,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Получить метрики для конкретной роли (null если роль не использовалась).</summary>
+        /// <summary>Gets accumulated orchestration metrics for a single role.</summary>
         public RoleMetrics GetRoleMetrics(string roleId)
         {
             lock (_lock)
@@ -109,7 +116,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Получить все роли с метриками.</summary>
+        /// <summary>Gets a snapshot of orchestration metrics for every recorded role.</summary>
         public Dictionary<string, RoleMetrics> GetAllRoleMetrics()
         {
             lock (_lock)
@@ -118,7 +125,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Сбросить все счётчики.</summary>
+        /// <summary>Clears all accumulated metrics and resets the success timestamp.</summary>
         public void Reset()
         {
             lock (_lock)
@@ -153,7 +160,10 @@ namespace CoreAI.Ai
                         }
                     }
 
-                    if (evictKey != null) _perRole.Remove(evictKey);
+                    if (evictKey != null)
+                    {
+                        _perRole.Remove(evictKey);
+                    }
                 }
 
                 rm = new RoleMetrics(roleId);
@@ -163,7 +173,7 @@ namespace CoreAI.Ai
             return rm;
         }
 
-        /// <summary>Метрики для отдельной роли.</summary>
+        /// <summary>Provides role metrics functionality.</summary>
         public sealed class RoleMetrics
         {
             public string RoleId { get; }
@@ -184,8 +194,14 @@ namespace CoreAI.Ai
             {
                 Completions++;
                 TotalLatencyMs += wallMs;
-                if (ok) Successes++;
-                else Failures++;
+                if (ok)
+                {
+                    Successes++;
+                }
+                else
+                {
+                    Failures++;
+                }
             }
         }
     }

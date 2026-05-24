@@ -302,10 +302,10 @@ namespace CoreAI.Tests.PlayMode
         {
             public volatile bool LastCommandWasCalled;
             public string LastCommandJson;
-            public System.Collections.Generic.List<string> AllCommandsJson = new();
+            public List<string> AllCommandsJson = new();
 
-            public string[] LastListedAnimations { get; private set; } = System.Array.Empty<string>();
-            public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>> LastListedObjects { get; private set; } = new();
+            public string[] LastListedAnimations { get; private set; } = Array.Empty<string>();
+            public List<Dictionary<string, object>> LastListedObjects { get; private set; } = new();
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
@@ -319,4 +319,3 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
-

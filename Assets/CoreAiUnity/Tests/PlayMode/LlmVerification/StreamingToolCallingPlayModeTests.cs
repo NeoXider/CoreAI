@@ -45,7 +45,7 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_WithToolCapablePrompt_CompletesSuccessfully()
         {
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful game assistant. You have tools available. " +
@@ -53,7 +53,7 @@ namespace CoreAI.Tests.PlayMode
                 UserPayload = "What is 2 + 2?"
             };
 
-            var chunks = new List<LlmStreamChunk>();
+            List<LlmStreamChunk> chunks = new();
             bool gotDone = false;
 
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
@@ -65,9 +65,12 @@ namespace CoreAI.Tests.PlayMode
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
 
             string full = "";
-            foreach (var c in chunks)
+            foreach (LlmStreamChunk c in chunks)
             {
-                if (!string.IsNullOrEmpty(c.Text)) full += c.Text;
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    full += c.Text;
+                }
             }
 
             Debug.Log($"[StreamingToolTest] Full response ({chunks.Count} chunks): {full}");
@@ -85,16 +88,16 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_EarlyCancellation_StopsCleanly()
         {
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a verbose assistant. Write as much as possible.",
                 UserPayload = "Write a very detailed essay about the history of computing from the 1940s to today."
             };
 
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter(System.TimeSpan.FromSeconds(5));
-            var counter = new StreamCancelCounter();
+            CancellationTokenSource cts = new();
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            StreamCancelCounter counter = new();
 
             Task streamTask = ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter);
 
@@ -103,7 +106,8 @@ namespace CoreAI.Tests.PlayMode
 
             yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_EarlyCancel");
 
-            Debug.Log($"[StreamingToolTest] EarlyCancel: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
+            Debug.Log(
+                $"[StreamingToolTest] EarlyCancel: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
             Assert.IsTrue(counter.WasCancelled,
                 "Streaming task should observe cancellation and finish without hanging.");
         }
@@ -116,14 +120,14 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator Streaming_ThenNonStreaming_NoStateContamination()
         {
             // First: streaming request
-            var streamRequest = new LlmCompletionRequest
+            LlmCompletionRequest streamRequest = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a test agent. Be very brief.",
                 UserPayload = "Say 'STREAM_OK'."
             };
 
-            var chunks = new List<LlmStreamChunk>();
+            List<LlmStreamChunk> chunks = new();
             bool gotDone = false;
 
             Task streamTask = CollectStreamAsync(_setup.Client, streamRequest, CancellationToken.None,
@@ -134,14 +138,14 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(gotDone, "Streaming should complete");
 
             // Second: non-streaming request
-            var nonStreamRequest = new LlmCompletionRequest
+            LlmCompletionRequest nonStreamRequest = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a test agent. Be very brief.",
                 UserPayload = "Say 'NONSTREAM_OK'."
             };
 
-            var resultBox = new LlmResultBox();
+            LlmResultBox resultBox = new();
             Task nonStreamTask = CompleteOnMainThreadAsync(_setup.Client, nonStreamRequest, resultBox);
 
             yield return _setup.RunAndWait(nonStreamTask, ResolveLlmWaitSeconds(), "NonStreaming_Second");
@@ -176,12 +180,15 @@ namespace CoreAI.Tests.PlayMode
             LlmCompletionRequest request,
             CancellationToken ct,
             List<LlmStreamChunk> chunks,
-            System.Action<bool> setDone)
+            Action<bool> setDone)
         {
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, ct))
             {
                 chunks.Add(chunk);
-                if (chunk.IsDone) setDone(true);
+                if (chunk.IsDone)
+                {
+                    setDone(true);
+                }
             }
         }
 

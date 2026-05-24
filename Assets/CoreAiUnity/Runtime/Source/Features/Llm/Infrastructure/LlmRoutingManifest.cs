@@ -12,14 +12,15 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class LlmRoleRouteEntry
     {
         /// <summary>Exact role id match, or <c>*</c> for any role.</summary>
-        [Tooltip("Точное совпадение с RoleId, либо * для любой роли (обычно последним в списке).")]
+        [Tooltip("Exact RoleId match, or * for any role. Keep wildcard routes last.")]
         public string rolePattern = "Creator";
 
         /// <summary>Profile id from the manifest profile list.</summary>
-        [Tooltip("Id из записи в profiles.")] public string profileId = "default";
+        [Tooltip("Unique profile id referenced by routes.")]
+        public string profileId = "default";
 
         /// <summary>Sort order; lower values are evaluated first.</summary>
-        [Tooltip("Меньше — раньше проверяется (среди совпадений порядок в списке тоже важен).")]
+        [Tooltip("Lower values are checked first; list order breaks ties.")]
         public int sortOrder;
     }
 
@@ -30,7 +31,7 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class LlmBackendProfileEntry
     {
         /// <summary>Unique profile id referenced by route entries.</summary>
-        [Tooltip("Уникальный id, на который ссылаются routes.")]
+        [Tooltip("Unique profile id referenced by routes.")]
         public string profileId = "default";
 
         /// <summary>Legacy backend kind used by existing assets.</summary>
@@ -40,23 +41,23 @@ namespace CoreAI.Infrastructure.Llm
         public LlmExecutionMode executionMode = LlmExecutionMode.Auto;
 
         /// <summary>For HTTP-backed modes: profile-specific OpenAI-compatible settings.</summary>
-        [Tooltip("Для OpenAiHttp: asset с Use Open Ai Compatible Http = true.")]
+        [Tooltip("OpenAI-compatible HTTP settings asset used by OpenAiHttp profiles.")]
         public OpenAiHttpLlmSettings httpSettings;
 
         /// <summary>For local model mode: GameObject name with <c>LLMAgent</c>; empty selects the first available agent.</summary>
-        [Tooltip("Для LlmUnity: имя GameObject с LLMAgent (пусто = первый FindFirstObjectByType).")]
+        [Tooltip("GameObject name with LLMAgent for LlmUnity profiles. Empty uses the first LLMAgent found.")]
         public string unityAgentGameObjectName = "";
 
         /// <summary>Maximum LLM requests allowed by this profile in the current session; zero disables the profile limit.</summary>
-        [Min(0)] [Tooltip("Для ClientLimited: максимум запросов в текущей сессии. 0 = без лимита.")]
+        [Min(0)] [Tooltip("ClientLimited maximum requests in the current session. Zero disables the limit.")]
         public int maxRequestsPerSession;
 
         /// <summary>Maximum prompt characters allowed by this profile; zero disables the profile limit.</summary>
-        [Min(0)] [Tooltip("Для ClientLimited: максимум символов prompt на запрос. 0 = без лимита.")]
+        [Min(0)] [Tooltip("ClientLimited maximum prompt characters per request. Zero disables the limit.")]
         public int maxPromptChars;
 
         /// <summary>Context window in tokens for requests routed to this profile.</summary>
-        [Min(256)] [Tooltip("Контекстное окно (токены) для профиля. По умолчанию 8192.")]
+        [Min(256)] [Tooltip("Context window size in tokens for this profile. Default is 8192.")]
         public int contextWindowTokens = 8192;
     }
 
@@ -66,7 +67,7 @@ namespace CoreAI.Infrastructure.Llm
     [CreateAssetMenu(menuName = "CoreAI/LLM/Llm Routing Manifest", fileName = "LlmRoutingManifest")]
     public sealed class LlmRoutingManifest : ScriptableObject
     {
-        [Tooltip("Если выключено — CoreAILifetimeScope использует только legacy Open Ai Http + LLMUnity без таблицы.")]
+        [Tooltip("When disabled, CoreAILifetimeScope uses only legacy OpenAI HTTP plus LLMUnity routing.")]
         [SerializeField]
         private bool enableRoleRouting = true;
 
@@ -82,6 +83,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Role-to-profile routing rules.</summary>
         public IReadOnlyList<LlmRoleRouteEntry> Routes => routes;
+
+        /// <summary>Alias for <see cref="ToRouteTable"/> to match the Options + SO wrapper rule.</summary>
+        public LlmRouteTable ToOptions()
+        {
+            return ToRouteTable();
+        }
 
         /// <summary>Converts this Unity asset to the portable CoreAI route table.</summary>
         public LlmRouteTable ToRouteTable()

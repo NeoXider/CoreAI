@@ -3,44 +3,44 @@ using CoreAI.Ai;
 namespace CoreAI.Messaging
 {
     /// <summary>
-    /// Типизированная команда применения решения ИИ к игре (шина Unity — MessagePipe).
+    /// Serializable command requested by an AI agent for host-side execution.
     /// </summary>
     public sealed class ApplyAiGameCommand
     {
-        /// <summary>Тип команды; см. <see cref="AiGameCommandTypeIds"/>.</summary>
+        /// <summary>Stable command type identifier used by the command router.</summary>
         public string CommandTypeId { get; set; } = "";
 
-        /// <summary>Тело команды: JSON, Lua, текст — по соглашению для данного <see cref="CommandTypeId"/>.</summary>
+        /// <summary>Command payload serialized as JSON.</summary>
         public string JsonPayload { get; set; } = "";
 
-        /// <summary>Роль, с которой оркестратор вызывал LLM (для маршрутизации Lua и т.д.).</summary>
+        /// <summary>Role id of the agent that produced the command.</summary>
         public string SourceRoleId { get; set; } = "";
 
-        /// <summary>Исходный hint задачи (для цикла исправления Programmer).</summary>
+        /// <summary>Original task hint that led to this command.</summary>
         public string SourceTaskHint { get; set; } = "";
 
-        /// <summary>Совпадает с <see cref="AiTaskRequest.SourceTag"/> у вызвавшей задачи (пусто — не задано).</summary>
+        /// <summary>Subsystem tag associated with the command source.</summary>
         public string SourceTag { get; set; } = "";
 
-        /// <summary>0 — первый ответ модели; увеличивается при каждом ремонте Lua.</summary>
+        /// <summary>Lua repair generation associated with this command.</summary>
         public int LuaRepairGeneration { get; set; }
 
-        /// <summary>Совпадает с TraceId в <see cref="LlmCompletionRequest"/> одного вызова оркестратора.</summary>
+        /// <summary>Trace id used to correlate logs and metrics.</summary>
         public string TraceId { get; set; } = "";
 
-        /// <summary>Совпадает с <see cref="AiTaskRequest.LuaScriptVersionKey"/> (пусто — не задано).</summary>
+        /// <summary>Script key used by Lua version tracking.</summary>
         public string LuaScriptVersionKey { get; set; } = "";
 
-        /// <summary>Совпадает с <see cref="AiTaskRequest.DataOverlayVersionKeysCsv"/>.</summary>
+        /// <summary>Comma-separated data overlay keys affected by the command.</summary>
         public string DataOverlayVersionKeysCsv { get; set; } = "";
     }
 
     /// <summary>
-    /// Абстракция публикации команд из портативного ядра (реализация в Source через MessagePipe).
+    /// Defines the contract for ai game command sink implementations.
     /// </summary>
     public interface IAiGameCommandSink
     {
-        /// <summary>Отправить команду подписчикам шины (например MessagePipe).</summary>
+        /// <summary>Publishes an AI game command to the host messaging system.</summary>
         void Publish(ApplyAiGameCommand command);
     }
 }

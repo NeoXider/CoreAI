@@ -43,8 +43,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void GetChatService_WithoutLifetimeScope_ThrowsInvalidOperation()
         {
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-                () => CoreAi.GetChatService());
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => CoreAi.GetChatService());
             StringAssert.Contains("CoreAILifetimeScope", ex.Message,
                 "Исключение должно подсказывать, где искать проблему");
         }
@@ -59,8 +58,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void GetOrchestrator_WithoutLifetimeScope_ThrowsInvalidOperation()
         {
-            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-                () => CoreAi.GetOrchestrator());
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => CoreAi.GetOrchestrator());
             StringAssert.Contains("IAiOrchestrationService", ex.Message,
                 "Исключение должно объяснять, что не зарегистрирован оркестратор");
         }

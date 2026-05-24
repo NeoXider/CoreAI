@@ -1,9 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace CoreAI.Editor
 {
     /// <summary>
-    /// Единственная точка вывода в Unity Console для Editor-скриптов CoreAiUnity (аналог UnityGameLogSink в рантайме).
+    /// Writes CoreAI editor diagnostics to the Unity console.
     /// </summary>
     internal static class CoreAIEditorLog
     {

@@ -40,7 +40,10 @@ namespace CoreAI.Tests.PlayMode
             public bool LastOk;
             public long ElapsedMs;
 
-            public BenchmarkCaptureLlm(ILlmClient inner) => _inner = inner;
+            public BenchmarkCaptureLlm(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
@@ -64,14 +67,18 @@ namespace CoreAI.Tests.PlayMode
 
         // ── Dummy tools (realistic names and schemas) ─────────────────────────
 
-        private static DelegateLlmTool Tool(string name, string desc) =>
-            new(name, desc, new Action(() => { }));
+        private static DelegateLlmTool Tool(string name, string desc)
+        {
+            return new DelegateLlmTool(name, desc, new Action(() => { }));
+        }
 
         // ── Skills ────────────────────────────────────────────────────────────
 
-        private static SkillSet MakeCraftingSkill() => new("Crafting",
-            "Forge weapons, armor, and items from raw materials",
-            @"## Crafting System
+        private static SkillSet MakeCraftingSkill()
+        {
+            return new SkillSet("Crafting",
+                "Forge weapons, armor, and items from raw materials",
+                @"## Crafting System
 You are a master craftsman. When the player asks to craft, follow this protocol:
 1. Call get_recipes to check available recipes for the requested item type.
 2. Call check_inventory to verify the player has required materials.
@@ -81,14 +88,17 @@ You are a master craftsman. When the player asks to craft, follow this protocol:
 
 Quality modifiers: 1.0 = normal, 1.5 = fine, 2.0 = masterwork (requires special tools).
 Always check durability of crafting tools before starting.",
-            Tool("get_recipes", "Get available crafting recipes. Params: item_type (string)"),
-            Tool("check_inventory", "Check player inventory for materials. Params: material_list (string[])"),
-            Tool("craft_item", "Craft an item. Params: recipe_id (string), quality_modifier (float)"),
-            Tool("get_material_sources", "Find where to gather materials. Params: material_name (string)"));
+                Tool("get_recipes", "Get available crafting recipes. Params: item_type (string)"),
+                Tool("check_inventory", "Check player inventory for materials. Params: material_list (string[])"),
+                Tool("craft_item", "Craft an item. Params: recipe_id (string), quality_modifier (float)"),
+                Tool("get_material_sources", "Find where to gather materials. Params: material_name (string)"));
+        }
 
-        private static SkillSet MakeCombatSkill() => new("Combat",
-            "Fight enemies and manage combat encounters",
-            @"## Combat System
+        private static SkillSet MakeCombatSkill()
+        {
+            return new SkillSet("Combat",
+                "Fight enemies and manage combat encounters",
+                @"## Combat System
 You manage combat encounters. Follow these rules:
 1. Call get_enemy_stats before suggesting tactics.
 2. Use calculate_damage to determine attack outcomes.
@@ -99,15 +109,19 @@ You manage combat encounters. Follow these rules:
 
 Damage formula: base_damage * weapon_modifier * (1 + strength/100) - armor_rating.
 Always narrate combat dramatically.",
-            Tool("get_enemy_stats", "Get enemy statistics. Params: enemy_id (string)"),
-            Tool("calculate_damage", "Calculate damage. Params: attacker_id, target_id, weapon_id (string)"),
-            Tool("apply_status_effect", "Apply status effect. Params: target_id (string), effect (string), duration (int)"),
-            Tool("get_initiative", "Get combat initiative order"),
-            Tool("interact_environment", "Interact with environment hazard. Params: hazard_id (string)"));
+                Tool("get_enemy_stats", "Get enemy statistics. Params: enemy_id (string)"),
+                Tool("calculate_damage", "Calculate damage. Params: attacker_id, target_id, weapon_id (string)"),
+                Tool("apply_status_effect",
+                    "Apply status effect. Params: target_id (string), effect (string), duration (int)"),
+                Tool("get_initiative", "Get combat initiative order"),
+                Tool("interact_environment", "Interact with environment hazard. Params: hazard_id (string)"));
+        }
 
-        private static SkillSet MakeLoreSkill() => new("Lore",
-            "World knowledge, history, and codex entries",
-            @"## Lore & Knowledge System
+        private static SkillSet MakeLoreSkill()
+        {
+            return new SkillSet("Lore",
+                "World knowledge, history, and codex entries",
+                @"## Lore & Knowledge System
 You are the keeper of world knowledge. When asked about lore:
 1. Call search_codex to find relevant lore entries.
 2. Use get_npc_backstory for character information.
@@ -117,15 +131,18 @@ You are the keeper of world knowledge. When asked about lore:
 
 Never reveal major plot twists without checking prerequisites.
 Present lore as in-character narration, not raw data.",
-            Tool("search_codex", "Search the lore codex. Params: query (string)"),
-            Tool("get_npc_backstory", "Get NPC backstory. Params: npc_id (string)"),
-            Tool("get_quest_history", "Get player quest history"),
-            Tool("reveal_secret", "Reveal a world secret. Params: secret_id (string)"),
-            Tool("mark_lore_discovered", "Mark lore as discovered. Params: lore_id (string)"));
+                Tool("search_codex", "Search the lore codex. Params: query (string)"),
+                Tool("get_npc_backstory", "Get NPC backstory. Params: npc_id (string)"),
+                Tool("get_quest_history", "Get player quest history"),
+                Tool("reveal_secret", "Reveal a world secret. Params: secret_id (string)"),
+                Tool("mark_lore_discovered", "Mark lore as discovered. Params: lore_id (string)"));
+        }
 
-        private static SkillSet MakeTradingSkill() => new("Trading",
-            "Buy, sell, and haggle with merchants",
-            @"## Trading System
+        private static SkillSet MakeTradingSkill()
+        {
+            return new SkillSet("Trading",
+                "Buy, sell, and haggle with merchants",
+                @"## Trading System
 You handle all commerce. Protocol:
 1. Call get_merchant_inventory for available goods and prices.
 2. Use check_player_gold to verify funds.
@@ -135,22 +152,28 @@ You handle all commerce. Protocol:
 
 Price formula: base_price * supply_demand_modifier * (1 - haggle_discount).
 Some merchants only trade specific item types.",
-            Tool("get_merchant_inventory", "Get merchant inventory. Params: merchant_id (string)"),
-            Tool("check_player_gold", "Check player gold balance"),
-            Tool("execute_trade", "Execute trade. Params: item_id (string), quantity (int), is_buying (bool)"),
-            Tool("haggle_modifier", "Calculate haggle discount. Params: charisma (int)"),
-            Tool("get_reputation", "Get player reputation with faction. Params: faction_id (string)"));
+                Tool("get_merchant_inventory", "Get merchant inventory. Params: merchant_id (string)"),
+                Tool("check_player_gold", "Check player gold balance"),
+                Tool("execute_trade", "Execute trade. Params: item_id (string), quantity (int), is_buying (bool)"),
+                Tool("haggle_modifier", "Calculate haggle discount. Params: charisma (int)"),
+                Tool("get_reputation", "Get player reputation with faction. Params: faction_id (string)"));
+        }
 
         // ── Infra stubs ───────────────────────────────────────────────────────
 
         private sealed class Sink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand c) { }
+            public void Publish(ApplyAiGameCommand c)
+            {
+            }
         }
 
         private sealed class Tele : ISessionTelemetryProvider
         {
-            public GameSessionSnapshot BuildSnapshot() => new();
+            public GameSessionSnapshot BuildSnapshot()
+            {
+                return new GameSessionSnapshot();
+            }
         }
 
         private sealed class Sys : IAgentSystemPromptProvider
@@ -186,7 +209,8 @@ Some merchants only trade specific item types.",
         private static void LogResult(BenchmarkResult r)
         {
             Debug.Log($"[SkillBenchmark] ┌── {r.Label} ──");
-            Debug.Log($"[SkillBenchmark] │ System prompt: {r.SystemPromptChars} chars (~{r.SystemPromptChars / 4} tokens)");
+            Debug.Log(
+                $"[SkillBenchmark] │ System prompt: {r.SystemPromptChars} chars (~{r.SystemPromptChars / 4} tokens)");
             Debug.Log($"[SkillBenchmark] │ Tools sent:    {r.ToolCount}");
             Debug.Log($"[SkillBenchmark] │ LLM time:      {r.ElapsedMs} ms");
             Debug.Log($"[SkillBenchmark] │ Response:      {r.ResponseChars} chars");
@@ -228,9 +252,9 @@ Some merchants only trade specific item types.",
                 Debug.Log("[SkillBenchmark] ── RUN A: WITH Skills (proxy, 2 meta-tools) ──");
 
                 AgentConfig cfgSkills = new AgentBuilder("GM_skills")
-                {
-                    SuppressBuildWarnings = true
-                }
+                    {
+                        SuppressBuildWarnings = true
+                    }
                     .WithSystemPrompt(basePrompt)
                     .WithSkill(crafting)
                     .WithSkill(combat)
@@ -286,16 +310,21 @@ Some merchants only trade specific item types.",
                 foreach (SkillSet skill in new[] { crafting, combat, lore, trading })
                 {
                     foreach (ILlmTool tool in skill.Tools)
+                    {
                         allTools.Add(tool);
+                    }
                 }
 
-                AgentBuilder directBuilder = new AgentBuilder("GM_direct")
+                AgentBuilder directBuilder = new("GM_direct")
                 {
                     SuppressBuildWarnings = true
                 };
                 directBuilder.WithSystemPrompt(basePrompt);
                 foreach (ILlmTool tool in allTools)
+                {
                     directBuilder.WithTool(tool);
+                }
+
                 directBuilder.WithMode(AgentMode.ToolsAndChat);
                 AgentConfig cfgDirect = directBuilder.Build();
 
@@ -343,7 +372,7 @@ Some merchants only trade specific item types.",
                 int savedTools = rB.ToolCount - rA.ToolCount;
                 int savedChars = rB.SystemPromptChars - rA.SystemPromptChars;
                 float promptReduction = rB.SystemPromptChars > 0
-                    ? (savedChars * 100f / rB.SystemPromptChars)
+                    ? savedChars * 100f / rB.SystemPromptChars
                     : 0;
 
                 Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");
@@ -358,6 +387,7 @@ Some merchants only trade specific item types.",
                     float speedup = (float)rB.ElapsedMs / rA.ElapsedMs;
                     Debug.Log($"[SkillBenchmark] Speedup:        {speedup:0.0}x");
                 }
+
                 Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");
 
                 // Structural asserts

@@ -6,7 +6,10 @@ namespace CoreAI.Ai
     public sealed class NullConversationSummaryStore : IConversationSummaryStore
     {
         /// <inheritdoc />
-        public string LoadSummary(string roleId) => "";
+        public string LoadSummary(string roleId)
+        {
+            return "";
+        }
 
         /// <inheritdoc />
         public void SaveSummary(string roleId, string summary)

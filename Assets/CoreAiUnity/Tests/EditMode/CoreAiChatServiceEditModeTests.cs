@@ -43,7 +43,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: null);
 
-            bool ok = service.TryGetPersistedChatHistory("SmartChat", out ChatMessage[] msgs, maxMessages: 0);
+            bool ok = service.TryGetPersistedChatHistory("SmartChat", out ChatMessage[] msgs, 0);
 
             Assert.IsFalse(ok);
             Assert.IsNotNull(msgs);
@@ -53,7 +53,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryGetPersistedChatHistory_EmptyHistory_ReturnsFalse()
         {
-            var store = new ListBackedChatHistoryStore();
+            ListBackedChatHistoryStore store = new();
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
 
             Assert.IsFalse(service.TryGetPersistedChatHistory("SmartChat", out ChatMessage[] msgs, 0));
@@ -62,16 +62,16 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryGetPersistedChatHistory_ReturnsTailWhenMaxMessagesSet()
         {
-            var store = new ListBackedChatHistoryStore();
+            ListBackedChatHistoryStore store = new();
             const string role = "SmartChat";
             for (int i = 0; i < 5; i++)
             {
-                store.AppendChatMessage(role, i % 2 == 0 ? "user" : "assistant", $"m{i}", persistToDisk: false);
+                store.AppendChatMessage(role, i % 2 == 0 ? "user" : "assistant", $"m{i}", false);
             }
 
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
 
-            Assert.IsTrue(service.TryGetPersistedChatHistory(role, out ChatMessage[] msgs, maxMessages: 2));
+            Assert.IsTrue(service.TryGetPersistedChatHistory(role, out ChatMessage[] msgs, 2));
             Assert.AreEqual(2, msgs.Length);
             Assert.AreEqual("m3", msgs[0].Content);
             Assert.AreEqual("m4", msgs[1].Content);
@@ -80,19 +80,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void PersistedChat_UiFormattingRoundTrip_MatchesCoreAiChatPanelRules()
         {
-            var store = new ListBackedChatHistoryStore();
+            ListBackedChatHistoryStore store = new();
             const string role = "SmartChat";
             string userComposer =
                 "{\"telemetry\":{},\"hint\":\"stored user line\",\"ai_task_source\":\"Chat\"}";
-            store.AppendChatMessage(role, "user", userComposer, persistToDisk: false);
-            store.AppendChatMessage(role, "assistant", "visible reply", persistToDisk: false);
+            store.AppendChatMessage(role, "user", userComposer, false);
+            store.AppendChatMessage(role, "assistant", "visible reply", false);
 
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
             Assert.IsTrue(service.TryGetPersistedChatHistory(role, out ChatMessage[] msgs, 0));
             Assert.AreEqual(2, msgs.Length);
 
-            string userLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[0].Content, isUser: true);
-            string assistantLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[1].Content, isUser: false);
+            string userLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[0].Content, true);
+            string assistantLine = CoreAiChatPanel.FormatPersistedMessageForUi(msgs[1].Content, false);
 
             Assert.AreEqual("stored user line", userLine);
             Assert.AreEqual("visible reply", assistantLine);
@@ -117,8 +117,8 @@ namespace CoreAI.Tests.EditMode
         {
             StubSettings settings = new() { EnableStreaming = false };
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
-                memoryPolicy: null,
-                settings: settings);
+                null,
+                settings);
 
             Assert.IsFalse(service.IsStreamingEnabled("AnyRole", uiOverride: true));
 
@@ -134,8 +134,8 @@ namespace CoreAI.Tests.EditMode
             policy.SetStreamingEnabled("FastRole", true);
 
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
-                memoryPolicy: policy,
-                settings: settings);
+                policy,
+                settings);
 
             Assert.IsTrue(service.IsStreamingEnabled("FastRole", uiOverride: true), "per-role override wins");
             Assert.IsFalse(service.IsStreamingEnabled("OtherRole", uiOverride: true), "other roles → global");
@@ -151,8 +151,8 @@ namespace CoreAI.Tests.EditMode
             policy.SetStreamingEnabled("Role", true);
 
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
-                memoryPolicy: policy,
-                settings: settings);
+                policy,
+                settings);
 
             // UI слой выключил стриминг → всё остальное игнорируется
             Assert.IsFalse(service.IsStreamingEnabled("Role", uiOverride: false));
@@ -163,13 +163,13 @@ namespace CoreAI.Tests.EditMode
         {
             StubSettings settings = new() { EnableStreaming = true };
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"),
-                memoryPolicy: null,
-                settings: settings);
+                null,
+                settings);
 
             // Перегрузка bool?: false выключает, true/null — обычное разрешение
-            Assert.IsFalse(service.IsStreamingEnabled("Role", uiOverride: (bool?)false));
-            Assert.IsTrue(service.IsStreamingEnabled("Role", uiOverride: (bool?)true));
-            Assert.IsTrue(service.IsStreamingEnabled("Role", uiOverride: (bool?)null));
+            Assert.IsFalse(service.IsStreamingEnabled("Role", (bool?)false));
+            Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)true));
+            Assert.IsTrue(service.IsStreamingEnabled("Role", (bool?)null));
         }
 
         // ===================== SendMessage — happy path =====================
@@ -192,11 +192,10 @@ namespace CoreAI.Tests.EditMode
         {
             // v1.5.1: CoreAiChatService no longer swallows exceptions.
             // Errors propagate to the caller (CoreAiChatPanel), which displays them.
-            FakeAiOrchestrator orchestrator = new(null, errorMessage: "connection refused");
+            FakeAiOrchestrator orchestrator = new(null, "connection refused");
             CoreAiChatService service = new(orchestrator);
 
-            var ex = Assert.ThrowsAsync<System.Exception>(
-                async () => await service.SendMessageAsync("hi", "TestRole"));
+            Exception ex = Assert.ThrowsAsync<Exception>(async () => await service.SendMessageAsync("hi", "TestRole"));
             Assert.AreEqual("connection refused", ex.Message);
         }
 
@@ -210,7 +209,10 @@ namespace CoreAI.Tests.EditMode
             await foreach (LlmStreamChunk chunk in
                            service.SendMessageStreamingAsync("hi", "TestRole"))
             {
-                if (!string.IsNullOrEmpty(chunk.Text)) visible.Add(chunk.Text);
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    visible.Add(chunk.Text);
+                }
             }
 
             CollectionAssert.AreEqual(new[] { "Hel", "lo", " world" }, visible);
@@ -225,13 +227,19 @@ namespace CoreAI.Tests.EditMode
             FakeAiOrchestrator orchestrator = new(streamChunks: new[] { "A", "B", "C" });
             StubSettings settings = new() { EnableStreaming = true };
             CoreAiChatService service = new(orchestrator,
-                memoryPolicy: null,
-                settings: settings);
+                null,
+                settings);
 
             List<string> chunks = new();
             string full = await service.SendMessageSmartAsync(
                 "hi", "Role",
-                onChunk: c => { if (!string.IsNullOrEmpty(c.Text)) chunks.Add(c.Text); });
+                c =>
+                {
+                    if (!string.IsNullOrEmpty(c.Text))
+                    {
+                        chunks.Add(c.Text);
+                    }
+                });
 
             Assert.AreEqual("ABC", full);
             CollectionAssert.AreEqual(new[] { "A", "B", "C" }, chunks);
@@ -245,13 +253,19 @@ namespace CoreAI.Tests.EditMode
             FakeAiOrchestrator orchestrator = new("Full response text");
             StubSettings settings = new() { EnableStreaming = false };
             CoreAiChatService service = new(orchestrator,
-                memoryPolicy: null,
-                settings: settings);
+                null,
+                settings);
 
             List<string> chunks = new();
             string full = await service.SendMessageSmartAsync(
                 "hi", "Role",
-                onChunk: c => { if (!string.IsNullOrEmpty(c.Text)) chunks.Add(c.Text); });
+                c =>
+                {
+                    if (!string.IsNullOrEmpty(c.Text))
+                    {
+                        chunks.Add(c.Text);
+                    }
+                });
 
             Assert.AreEqual("Full response text", full);
             Assert.AreEqual(1, orchestrator.CompleteCallCount);
@@ -268,13 +282,13 @@ namespace CoreAI.Tests.EditMode
             FakeAiOrchestrator orchestrator = new("Non-streaming answer");
             StubSettings settings = new() { EnableStreaming = true };
             CoreAiChatService service = new(orchestrator,
-                memoryPolicy: null,
-                settings: settings);
+                null,
+                settings);
 
             string full = await service.SendMessageSmartAsync(
                 "hi", "Role",
-                onChunk: null,
-                uiStreamingOverride: false);
+                null,
+                false);
 
             Assert.AreEqual("Non-streaming answer", full);
             Assert.AreEqual(1, orchestrator.CompleteCallCount);
@@ -290,7 +304,7 @@ namespace CoreAI.Tests.EditMode
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"), memoryStore: store);
 
             service.ClearHistory("Role123");
-            
+
             Assert.AreEqual("Role123", store.ClearedRole);
         }
 
@@ -298,7 +312,7 @@ namespace CoreAI.Tests.EditMode
         public void StopAgent_CallsFacade_DoesNotThrowWithoutScope()
         {
             CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
-            
+
             // В EditMode нет CoreAILifetimeScope — StopAgent должен отработать молча (graceful degradation).
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
         }
@@ -343,7 +357,7 @@ namespace CoreAI.Tests.EditMode
         {
             // AiOrchestrator may return null on soft failures;
             // CoreAiChatService should convert to "" (not crash)
-            FakeAiOrchestrator orchestrator = new(content: null);
+            FakeAiOrchestrator orchestrator = new(null);
             CoreAiChatService service = new(orchestrator);
 
             string response = await service.SendMessageAsync("hi", "TestRole");
@@ -436,7 +450,10 @@ namespace CoreAI.Tests.EditMode
                 _history.Remove(roleId);
             }
 
-            public void ClearChatHistory(string roleId) => _history.Remove(roleId);
+            public void ClearChatHistory(string roleId)
+            {
+                _history.Remove(roleId);
+            }
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
@@ -468,13 +485,34 @@ namespace CoreAI.Tests.EditMode
         private sealed class FakeMemoryStore : IAgentMemoryStore
         {
             public string ClearedRole { get; private set; }
-            
-            public void Clear(string roleId) { }
-            public void ClearChatHistory(string roleId) => ClearedRole = roleId;
-            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true) { }
-            public CoreAI.Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0) => System.Array.Empty<CoreAI.Ai.ChatMessage>();
-            public bool TryLoad(string roleId, out CoreAI.Ai.AgentMemoryState state) { state = null; return false; }
-            public void Save(string roleId, CoreAI.Ai.AgentMemoryState state) { }
+
+            public void Clear(string roleId)
+            {
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+                ClearedRole = roleId;
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return Array.Empty<ChatMessage>();
+            }
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = null;
+                return false;
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+            }
         }
 
         private sealed class FakeAiOrchestrator : IAiOrchestrationService
@@ -501,7 +539,7 @@ namespace CoreAI.Tests.EditMode
 
                 if (_error != null)
                 {
-                    throw new System.Exception(_error);
+                    throw new Exception(_error);
                 }
 
                 return Task.FromResult(_content ?? "");
@@ -528,6 +566,7 @@ namespace CoreAI.Tests.EditMode
                         yield return new LlmStreamChunk { Text = c };
                         await Task.Yield();
                     }
+
                     yield return new LlmStreamChunk { IsDone = true };
                     yield break;
                 }
@@ -536,7 +575,9 @@ namespace CoreAI.Tests.EditMode
                 yield return new LlmStreamChunk { IsDone = true };
             }
 
-            public void CancelTasks(string scopeId) { }
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
 
         /// <summary>
@@ -563,7 +604,9 @@ namespace CoreAI.Tests.EditMode
                 await Task.CompletedTask;
             }
 
-            public void CancelTasks(string scopeId) { }
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
 
         /// <summary>Blocks <see cref="RunTaskAsync"/> until <paramref name="ct"/> is cancelled (timeout or user).</summary>
@@ -571,7 +614,7 @@ namespace CoreAI.Tests.EditMode
         {
             public async Task<string> RunTaskAsync(AiTaskRequest request, CancellationToken ct = default)
             {
-                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 return "unreachable";
             }
 
@@ -580,11 +623,13 @@ namespace CoreAI.Tests.EditMode
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken ct = default)
             {
-                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 yield return new LlmStreamChunk { Text = "unreachable", IsDone = true };
             }
 
-            public void CancelTasks(string scopeId) { }
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
     }
 }

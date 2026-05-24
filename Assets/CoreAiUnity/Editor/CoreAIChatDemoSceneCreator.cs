@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using CoreAI.Chat;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
@@ -15,11 +15,11 @@ using UnityEngine.UIElements;
 namespace CoreAI.Editor
 {
     /// <summary>
-    /// Создаёт готовую демо-сцену <c>CoreAiChatDemo</c> с подключённым
-    /// <see cref="CoreAILifetimeScope"/>, UIDocument c UXML/USS чата и
-    /// компонентом <see cref="CoreAiChatPanel"/>. Позволяет быстро проверить
-    /// работу стриминга и чата без ручной сборки сцены.
-    /// <para>Меню: <c>CoreAI → Setup → Create Chat Demo Scene</c>.</para>
+    ///
+    ///
+    ///
+    ///
+    /// <para>See the implementation details for usage guidance.</para>
     /// </summary>
     public static class CoreAIChatDemoSceneCreator
     {
@@ -43,9 +43,9 @@ namespace CoreAI.Editor
             if (File.Exists(ScenePath))
             {
                 if (!EditorUtility.DisplayDialog(
-                        "CoreAI — Chat Demo Scene",
-                        $"Сцена уже существует: {ScenePath}\nПересоздать?",
-                        "Пересоздать", "Отмена"))
+                        "CoreAI - Chat Demo Scene",
+                        $"Scene already exists: {ScenePath}\nRecreate it?",
+                        "Recreate", "Cancel"))
                 {
                     EditorSceneManager.OpenScene(ScenePath);
                     return;
@@ -60,7 +60,7 @@ namespace CoreAI.Editor
             CoreAiChatConfig config = EnsureDemoChatConfig();
             PanelSettings panelSettings = EnsureDemoPanelSettings();
 
-            UnityEngine.SceneManagement.Scene scene = EditorSceneManager.NewScene(
+            Scene scene = EditorSceneManager.NewScene(
                 NewSceneSetup.EmptyScene,
                 NewSceneMode.Single);
 
@@ -73,14 +73,14 @@ namespace CoreAI.Editor
             bool saved = EditorSceneManager.SaveScene(scene, ScenePath);
             if (!saved)
             {
-                CoreAIEditorLog.LogError("Не удалось сохранить Chat Demo сцену.");
+                CoreAIEditorLog.LogError("Failed to save the Chat Demo scene.");
                 return;
             }
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            CoreAIEditorLog.Log($"Chat Demo сцена создана: {ScenePath}");
+            CoreAIEditorLog.Log($"Chat Demo scene created: {ScenePath}");
             EditorUtility.FocusProjectWindow();
             Selection.activeObject = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
             EditorGUIUtility.PingObject(Selection.activeObject);
@@ -165,7 +165,7 @@ namespace CoreAI.Editor
 
             if (uxml == null)
             {
-                CoreAIEditorLog.LogWarning($"Chat UXML не найден: {UxmlPath}");
+                CoreAIEditorLog.LogWarning($"Chat UXML not found: {UxmlPath}");
             }
             else
             {
@@ -192,7 +192,10 @@ namespace CoreAI.Editor
         private static CoreAiChatConfig EnsureDemoChatConfig()
         {
             CoreAiChatConfig existing = AssetDatabase.LoadAssetAtPath<CoreAiChatConfig>(DemoConfigPath);
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                return existing;
+            }
 
             CoreAiChatConfig asset = ScriptableObject.CreateInstance<CoreAiChatConfig>();
             AssetDatabase.CreateAsset(asset, DemoConfigPath);
@@ -203,7 +206,10 @@ namespace CoreAI.Editor
         private static PanelSettings EnsureDemoPanelSettings()
         {
             PanelSettings existing = AssetDatabase.LoadAssetAtPath<PanelSettings>(DemoPanelSettingsPath);
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                return existing;
+            }
 
             PanelSettings asset = ScriptableObject.CreateInstance<PanelSettings>();
             asset.scaleMode = PanelScaleMode.ScaleWithScreenSize;
@@ -217,7 +223,10 @@ namespace CoreAI.Editor
 
         private static void EnsureFolder(string folderPath)
         {
-            if (AssetDatabase.IsValidFolder(folderPath)) return;
+            if (AssetDatabase.IsValidFolder(folderPath))
+            {
+                return;
+            }
 
             string[] parts = folderPath.Split('/');
             string current = parts[0];
@@ -228,6 +237,7 @@ namespace CoreAI.Editor
                 {
                     AssetDatabase.CreateFolder(current, parts[i]);
                 }
+
                 current = next;
             }
         }
@@ -235,7 +245,10 @@ namespace CoreAI.Editor
         private static void SetProp(SerializedObject so, string name, Object value)
         {
             SerializedProperty p = so.FindProperty(name);
-            if (p != null) p.objectReferenceValue = value;
+            if (p != null)
+            {
+                p.objectReferenceValue = value;
+            }
         }
     }
 }

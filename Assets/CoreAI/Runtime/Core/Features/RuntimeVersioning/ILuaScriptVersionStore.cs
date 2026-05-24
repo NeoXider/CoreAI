@@ -1,44 +1,43 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Версионирование Lua, которые выдаёт Programmer: исходный (первый успешный или заданный seed),
-    /// текущий последний успешный, история; сброс к исходнику.
+    /// Tracks original and current Lua script versions.
     /// </summary>
     public interface ILuaScriptVersionStore
     {
-        /// <summary>Прочитать состояние слота; <c>false</c> — слота ещё не было.</summary>
+        /// <summary>Attempts to read the current version snapshot for a Lua script.</summary>
         bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot);
 
         /// <summary>
-        /// Зафиксировать успешное выполнение Lua из конверта (после MoonSharp без ошибки).
-        /// Первый вызов для ключа задаёт и original, и current.
+/// Executes RecordSuccessfulExecution API operation.
+        ///
         /// </summary>
         void RecordSuccessfulExecution(string scriptKey, string executedLuaSource);
 
         /// <summary>
-        /// Задать исходный вариант до первого запуска (например из ассета игры).
-        /// Если слот уже есть и <paramref name="overwriteExistingOriginal"/> ложь — original не перезаписывается.
+/// Executes SeedOriginal API operation.
+        ///
         /// </summary>
         void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false);
 
-        /// <summary>Текущий код = исходный; история сокращается до одной ревизии-оригинала.</summary>
+        /// <summary>Restores the requested script to its original version.</summary>
         void ResetToOriginal(string scriptKey);
 
         /// <summary>
-        /// Откатить current на указанную ревизию (по <see cref="LuaScriptRevision.Index"/>).
-        /// Если ревизия не найдена — no-op.
+/// Executes ResetToRevision API operation.
+        ///
         /// </summary>
         void ResetToRevision(string scriptKey, int revisionIndex);
 
-        /// <summary>Сброс всех слотов к baseline (как <see cref="ResetToOriginal"/> по каждому известному ключу).</summary>
+        /// <summary>Restores all tracked versioned values to their original payloads.</summary>
         void ResetAllToOriginal();
 
-        /// <summary>Ключи слотов с ненулевой историей (для отладки, Lua API, дашборда).</summary>
+        /// <summary>Gets all script keys known to the version store.</summary>
         IReadOnlyList<string> GetKnownKeys();
 
-        /// <summary>Фрагмент для user-промпта Programmer (пусто, если ключ пустой или store отключён).</summary>
+        /// <summary>Builds the programmer prompt section that describes the current script version.</summary>
         string BuildProgrammerPromptSection(string scriptKey);
     }
 }

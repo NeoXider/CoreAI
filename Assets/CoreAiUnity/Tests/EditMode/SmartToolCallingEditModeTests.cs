@@ -18,26 +18,38 @@ namespace CoreAI.Tests.EditMode
         {
             public Queue<ChatResponse> Responses = new();
 
-            public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> chatMessages, ChatOptions options = null, CancellationToken cancellationToken = default)
+            public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> chatMessages,
+                ChatOptions options = null, CancellationToken cancellationToken = default)
             {
                 if (Responses.Count > 0)
+                {
                     return Task.FromResult(Responses.Dequeue());
-                
+                }
+
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Stop")));
             }
 
-            public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> chatMessages, ChatOptions options = null, CancellationToken cancellationToken = default)
-                => throw new NotImplementedException();
+            public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> chatMessages,
+                ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                throw new NotImplementedException();
+            }
 
-            public void Dispose() { }
-            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose()
+            {
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
         }
 
         private CoreAISettingsAsset _settings;
         private AIFunction _dummyFunc;
-        private CoreAI.Ai.ILlmTool _dummyLlmTool;
+        private Ai.ILlmTool _dummyLlmTool;
 
-        private sealed class DummyLlmTool : CoreAI.Ai.ILlmTool
+        private sealed class DummyLlmTool : Ai.ILlmTool
         {
             public string Name => "dummy_tool";
             public string Description => "Dummy tool";
@@ -49,7 +61,8 @@ namespace CoreAI.Tests.EditMode
         public void Setup()
         {
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            _dummyFunc = AIFunctionFactory.Create((Func<string>)(() => "Success"), new AIFunctionFactoryOptions { Name = "dummy_tool" });
+            _dummyFunc = AIFunctionFactory.Create((Func<string>)(() => "Success"),
+                new AIFunctionFactoryOptions { Name = "dummy_tool" });
             _dummyLlmTool = new DummyLlmTool();
         }
 
@@ -57,28 +70,31 @@ namespace CoreAI.Tests.EditMode
         public async Task DuplicateProtection_ResetsOnNewRequest()
         {
             // Убеждаемся, что разные независимые вызовы (новые реквесты) могут использовать один и тот же инструмент.
-            MockChatClient mockInner = new MockChatClient();
-            SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, NullLog.Instance, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole"
+            MockChatClient mockInner = new();
+            SmartToolCallingChatClient smartClient = new(
+                mockInner, NullLog.Instance, _settings, false, new[] { _dummyLlmTool }, "TestRole"
             );
 
-            ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };
-            
+            ChatOptions options = new() { Tools = new[] { _dummyFunc } };
+
             // Request 1
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
-            ChatResponse r1 = await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 1") }, options);
-            
+            ChatResponse r1 =
+                await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 1") }, options);
+
             // Запрос должен был успешно закончиться (mockInner возвращает Text "Stop" на 2-й итерации)
             Assert.AreEqual("Stop", r1.Text);
 
             // Request 2 (Новый внешний запрос)
             // Мы вызываем ТОТ ЖЕ самый инструмент, это НЕ дубликат, т.к. это уже новый GetResponseAsync.
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
-            ChatResponse r2 = await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 2") }, options);
+            ChatResponse r2 =
+                await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Call 2") }, options);
 
             // Если бы защита не сбросилась, r2 завершился бы ошибкой duplicate tool. 
             // Но мы ожидаем, что будет Text "Stop", так как цикл пройдёт успешно.
-            Assert.AreEqual("Stop", r2.Text, "Защита дубликатов должна сбрасываться при новом вызове GetResponseAsync.");
+            Assert.AreEqual("Stop", r2.Text,
+                "Защита дубликатов должна сбрасываться при новом вызове GetResponseAsync.");
         }
 
         [Test]
@@ -86,13 +102,13 @@ namespace CoreAI.Tests.EditMode
         {
             // Убеждаемся, что если модель внутри ОДНОГО цикла (т.е. LLM решил снова вызвать тот же тул после ошибки или успеха), 
             // это будет заблокировано внутри SmartToolCallingChatClient.
-            MockChatClient mockInner = new MockChatClient();
-            SmartToolCallingChatClient smartClient = new SmartToolCallingChatClient(
-                mockInner, NullLog.Instance, _settings, allowDuplicateToolCalls: false, new[] { _dummyLlmTool }, "TestRole", maxConsecutiveErrors: 2
+            MockChatClient mockInner = new();
+            SmartToolCallingChatClient smartClient = new(
+                mockInner, NullLog.Instance, _settings, false, new[] { _dummyLlmTool }, "TestRole", 2
             );
 
-            ChatOptions options = new ChatOptions { Tools = new[] { _dummyFunc } };
-            
+            ChatOptions options = new() { Tools = new[] { _dummyFunc } };
+
             // Модель вызывает тул на первой итерации
             mockInner.Responses.Enqueue(CreateResponseWithToolCall("dummy_tool"));
             // И затем СРАЗУ же вызывает его снова на второй итерации (внутри того же GetResponseAsync!)
@@ -101,12 +117,13 @@ namespace CoreAI.Tests.EditMode
             mockInner.Responses.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Stop")));
 
             // Request
-            ChatResponse result = await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Do loop") }, options);
+            ChatResponse result =
+                await smartClient.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Do loop") }, options);
 
             // Первый тул проходит, второй блокируется (isDuplicate = true). 
             // Блокировка делает anyFailed = true -> consecutiveErrors = 1. Если maxConsecutiveErrors = 2, он прокрутит еще и на 3-й выйдет "Stop".
             // Однако в истории переписок мы увидим сообщение от тула об ошибке "Error: You just executed this exact same tool call...".
-            
+
             // Давайте убедимся, что duplicate был заблокирован, запрашивая _any_ failed tool call block behavior. 
             // К счастью, SmartToolCallingChatClient возвращает финальный message (или падает по max errors).
             // Поскольку max errors (2) не был превышен до завершения, мы просто проверим историю, если это возможно, либо поведение.
@@ -115,8 +132,8 @@ namespace CoreAI.Tests.EditMode
 
         private ChatResponse CreateResponseWithToolCall(string toolName)
         {
-            var call = new FunctionCallContent("call_123", toolName, new Dictionary<string, object>());
-            var msg = new ChatMessage(ChatRole.Assistant, new[] { call });
+            FunctionCallContent call = new("call_123", toolName, new Dictionary<string, object>());
+            ChatMessage msg = new(ChatRole.Assistant, new[] { call });
             return new ChatResponse(msg);
         }
     }

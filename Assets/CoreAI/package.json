@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "2.3.1",
+  "version": "2.5.0",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. SkillSet — self-service tool groups via read_skill + call_skill_tool proxy. Resilience: MaxToolResultChars, DefaultToolTimeoutMs, MaxResponseChars, MaxToolCallRoundtrips, MaxToolCallHistoryMessages. RateLimiterMetrics. v2.3.1: LLMUnity text-mode tool calling (function-call syntax, arguments_json key, JObject normalization). Unity integration ships in com.nexoider.coreaiunity.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. SkillSet self-service tool groups via read_skill + call_skill_tool proxy. Resilience limits and RateLimiterMetrics. v2.5.0: version parity with CoreAI Unity for ScriptableObject wrapper and options/snapshot contracts. Unity integration ships in com.nexoider.coreaiunity.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

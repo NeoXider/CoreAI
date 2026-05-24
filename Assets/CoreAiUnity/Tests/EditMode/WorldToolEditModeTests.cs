@@ -23,7 +23,8 @@ namespace CoreAI.Tests.EditMode
         public void WorldLlmTool_CreateAIFunction_Basic()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             AIFunction function = tool.CreateAIFunction();
 
@@ -35,7 +36,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_Spawn_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("spawn", prefabKey: "Enemy", x: 1f, y: 2f, z: 3f);
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -50,7 +52,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_Move_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("move", targetName: "obj1", x: 10f, y: 20f, z: 30f);
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -65,7 +68,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_Destroy_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("destroy", targetName: "obj1");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -79,7 +83,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_SpawnWithoutPrefab_ReturnsError()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("spawn", targetName: "obj1", x: 0f, y: 0f, z: 0f);
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -98,7 +103,8 @@ namespace CoreAI.Tests.EditMode
                 UnityEngine.TestTools.LogAssert.Expect(UnityEngine.LogType.Error,
                     new System.Text.RegularExpressions.Regex(".*Unknown action: 'invalid_action'.*"));
                 TestWorldExecutor executor = new();
-                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                    Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
                 string resultJson = await tool.ExecuteAsync("invalid_action");
                 WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -118,7 +124,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_PlayAnimation_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("play_animation", targetName: "enemy1", stringValue: "attack");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -133,7 +140,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_LoadScene_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("load_scene", stringValue: "Level2");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -148,7 +156,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_ListObjects_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("list_objects");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -162,7 +171,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_ListAnimations_ReturnsSuccess()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("list_animations", targetName: "enemy1");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -177,7 +187,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_ListAnimationsWithoutTarget_ReturnsHelpfulError()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("list_animations");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -185,14 +196,16 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(result.Success);
             Assert.AreEqual("list_animations", result.Action);
             StringAssert.Contains("targetName", result.Message);
-            Assert.IsNull(executor.LastCommandJson, "Executor should not run when required world-command args are missing.");
+            Assert.IsNull(executor.LastCommandJson,
+                "Executor should not run when required world-command args are missing.");
         }
 
         [Test]
         public async Task WorldLlmTool_ExecuteAsync_DoesNotForceThreadPoolExecution()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
             int callerThreadId = Thread.CurrentThread.ManagedThreadId;
 
             string resultJson = await tool.ExecuteAsync("list_objects");
@@ -207,7 +220,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_MoveWithTargetName_IncludesTargetName()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("move", targetName: "Player", x: 10f, y: 20f, z: 30f);
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -222,7 +236,8 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldLlmTool_ExecuteAsync_DestroyWithTargetName_IncludesTargetName()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             string resultJson = await tool.ExecuteAsync("destroy", targetName: "Enemy");
             WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
@@ -241,7 +256,8 @@ namespace CoreAI.Tests.EditMode
         public void WorldLlmTool_CreateAIFunction_ReturnsNonNull()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             AIFunction function = tool.CreateAIFunction();
 
@@ -254,7 +270,8 @@ namespace CoreAI.Tests.EditMode
         public void WorldLlmTool_Properties_AreValid()
         {
             TestWorldExecutor executor = new();
-            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>(), CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
 
             Assert.AreEqual("world_command", tool.Name);
             StringAssert.Contains("spawn", tool.Description);

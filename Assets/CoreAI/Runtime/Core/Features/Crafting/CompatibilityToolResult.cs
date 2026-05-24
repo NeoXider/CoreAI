@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Результат проверки совместимости для LLM.
+    /// Serializable response returned by the compatibility tool.
     /// </summary>
     public sealed class CompatibilityToolResult
     {

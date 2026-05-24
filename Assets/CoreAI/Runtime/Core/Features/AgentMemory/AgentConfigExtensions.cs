@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -6,29 +6,18 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Упрощённые extension-методы для <see cref="AgentConfig"/>.
-    /// Позволяют вызывать агента одной строкой без ручной сборки <see cref="AiTaskRequest"/>.
-    /// <code>
-    /// // Async:
-    /// await merchant.AskAsync(CoreAIAgent.Orchestrator, "Что у тебя есть?");
-    /// 
-    /// // Fire-and-forget:
-    /// merchant.Ask("Что у тебя есть?");
-    /// 
-    /// // С callback:
-    /// merchant.Ask("Что у тебя есть?", onDone: () => Debug.Log("Готово!"));
-    /// </code>
+    /// Provides agent config extensions functionality.
     /// </summary>
     public static class AgentConfigExtensions
     {
         /// <summary>
-        /// Отправить запрос агенту (async).
-        /// <para>Использует <see cref="CoreAIAgent.Orchestrator"/> по умолчанию.</para>
+/// Executes AskAsync API operation.
+        /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
-        /// <param name="config">Конфигурация агента (результат <see cref="AgentBuilder.Build"/>).</param>
-        /// <param name="message">Сообщение/запрос для агента.</param>
-        /// <param name="priority">Приоритет в очереди (больше = раньше).</param>
-        /// <param name="cancellationToken">Токен отмены.</param>
+        /// <param name="config">The config value.</param>
+        /// <param name="message">The message value.</param>
+        /// <param name="priority">The priority value.</param>
+        /// <param name="cancellationToken">The cancellation token value.</param>
         /// <example>
         /// await merchant.AskAsync("Show me your swords");
         /// </example>
@@ -42,7 +31,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Отправить запрос агенту (async, явный оркестратор).
+/// Executes AskAsync API operation.
         /// </summary>
         public static Task<string> AskAsync(
             this AgentConfig config,
@@ -62,25 +51,26 @@ namespace CoreAI.Ai
                 RoleId = config.RoleId,
                 Hint = message,
                 Priority = priority,
-                CancellationScope = config.RoleId // Автоматически отменяет предыдущий вызов этого же агента, если он ещё генерируется
+                CancellationScope =
+                    config.RoleId // Automatically cancels previous in-flight call for same role, if still generating.
             }, cancellationToken);
         }
 
         /// <summary>
-        /// Отправить запрос агенту (fire-and-forget, без await) и получить текстовый ответ.
-        /// Удобно для UI кнопок, событий и скриптов где async неудобен.
-        /// <para>Использует <see cref="CoreAIAgent.Orchestrator"/> синглтон.</para>
+/// Executes Ask API operation.
+        ///
+        /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
-        /// <param name="config">Конфигурация агента.</param>
-        /// <param name="message">Сообщение/запрос.</param>
-        /// <param name="onDone">Опциональный callback по завершению с текстовым ответом модели.</param>
-        /// <param name="priority">Приоритет в очереди.</param>
+        /// <param name="config">The config value.</param>
+        /// <param name="message">The message value.</param>
+        /// <param name="onDone">The on done value.</param>
+        /// <param name="priority">The priority value.</param>
         /// <example>
-        /// // Простой вызов:
-        /// merchant.Ask("Покажи мечи");
-        /// 
-        /// // С callback:
-        /// merchant.Ask("Покажи мечи", (s) => Debug.Log("Ответ: " + s));
+        /// Usage example:
+        ///
+        ///
+        ///
+        ///
         /// </example>
         public static void Ask(
             this AgentConfig config,
@@ -109,8 +99,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Очистить память (историю диалога) для роли агента.
-        /// Требует инициализированного CoreAIAgent.MemoryStore.
+/// Executes ClearMemory API operation.
+        ///
         /// </summary>
         public static void ClearMemory(this AgentConfig config)
         {
@@ -120,7 +110,8 @@ namespace CoreAI.Ai
             }
             else
             {
-                Log.Instance.Warn("Невозможно очистить память: CoreAIAgent.MemoryStore не инициализирован.", LogTag.Memory);
+                Log.Instance.Warn("Cannot clear memory: CoreAIAgent.MemoryStore is not initialized.",
+                    LogTag.Memory);
             }
         }
     }

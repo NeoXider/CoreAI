@@ -5,22 +5,22 @@ using MoonSharp.Interpreter;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Обёртка исполнения с таймаутом (best-effort) и перехватом исключений.
+    /// Provides lua execution guard functionality.
     /// </summary>
     public sealed class LuaExecutionGuard
     {
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
 
-        /// <param name="timeoutMs">Мягкий лимит длительности вызова Lua (после исполнения).</param>
-        /// <param name="maxSteps">Best-effort лимит «шагов» Lua (через debugger callbacks).</param>
+        /// <param name="timeoutMs">The timeout ms value.</param>
+        /// <param name="maxSteps">The max steps value.</param>
         public LuaExecutionGuard(int timeoutMs = 2000, long maxSteps = 200_000)
         {
             _timeoutMs = timeoutMs;
             _maxSteps = maxSteps;
         }
 
-        /// <summary>Вызвать Lua-функцию с проверкой таймаута по wall-clock.</summary>
+        /// <summary>Executes a Lua function through the instruction guard.</summary>
         public DynValue Execute(Script script, DynValue function, params DynValue[] args)
         {
             if (function.Type != DataType.Function)
@@ -31,8 +31,8 @@ namespace CoreAI.Sandbox
             Stopwatch sw = Stopwatch.StartNew();
             try
             {
-                // MoonSharp: без debugger бесконечный цикл может зависнуть навсегда.
-                // Подключаем минимальный debugger, который ограничивает шаги и wall-clock (best-effort).
+                /* Implementation note in English. */
+                /* Implementation note in English. */
                 script.AttachDebugger(new InstructionLimitDebugger(_maxSteps, _timeoutMs));
                 DynValue result = script.Call(function, args);
                 if (sw.ElapsedMilliseconds > _timeoutMs)

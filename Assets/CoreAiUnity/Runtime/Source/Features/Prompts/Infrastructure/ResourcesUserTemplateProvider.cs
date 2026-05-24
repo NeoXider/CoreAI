@@ -4,13 +4,13 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Prompts
 {
     /// <summary>
-    /// Шаблоны user-сообщений из <c>Resources</c>: путь <c>{prefix}/{roleId}</c> (TextAsset без расширения в пути).
+    /// Loads user prompt templates from Unity Resources.
     /// </summary>
     public sealed class ResourcesUserTemplateProvider : IAgentUserPromptTemplateProvider
     {
         private readonly string _resourcePathPrefix;
 
-        /// <param name="resourcePathPrefix">Корень в Resources, по умолчанию <c>AgentPrompts/User</c>.</param>
+        /// <param name="resourcePathPrefix">The resource path prefix value.</param>
         public ResourcesUserTemplateProvider(string resourcePathPrefix)
         {
             _resourcePathPrefix = resourcePathPrefix?.Trim().TrimEnd('/') ?? "AgentPrompts/User";

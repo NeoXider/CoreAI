@@ -3,13 +3,13 @@ using CoreAI.Infrastructure.Logging;
 
 namespace CoreAI.Infrastructure.Ai
 {
-    /// <summary>Пишет события <see cref="IAiOrchestrationMetrics"/> в лог при включённом <see cref="GameLogFeature.Metrics"/>.</summary>
+    /// <summary>Metrics decorator that writes orchestration events to the game logger.</summary>
     public sealed class LoggingAiOrchestrationMetrics : IAiOrchestrationMetrics
     {
         private readonly IGameLogger _logger;
         private readonly IGameLogSettings _settings;
 
-        /// <summary>Создать метрики с фильтрацией по настройкам лога.</summary>
+        /// <summary>Initializes a new instance of LoggingAiOrchestrationMetrics.</summary>
         public LoggingAiOrchestrationMetrics(IGameLogger logger, IGameLogSettings settings)
         {
             _logger = logger;

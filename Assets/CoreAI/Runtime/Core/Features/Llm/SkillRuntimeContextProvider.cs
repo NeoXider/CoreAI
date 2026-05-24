@@ -3,17 +3,7 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// <see cref="IAgentRuntimeContextProvider"/> that injects the skill catalog
-    /// into the system prompt — self-service pattern.
-    /// <para>
-    /// Instead of injecting full instructions for active skills, this provider
-    /// adds a lightweight catalog (name + description + tool names per skill).
-    /// The model reads full instructions on demand via <see cref="ReadSkillLlmTool"/>.
-    /// </para>
-    /// <para>
-    /// Registered automatically by <see cref="AgentConfig.ApplyToPolicy"/> when the agent
-    /// has skills registered via <see cref="AgentBuilder.WithSkill"/>.
-    /// </para>
+    /// Provides runtime context and callable tools for skills.
     /// </summary>
     internal sealed class SkillRuntimeContextProvider : IAgentRuntimeContextProvider
     {

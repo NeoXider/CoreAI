@@ -66,7 +66,10 @@ namespace CoreAI.Tests.PlayMode
             public bool LastOk;
             public string FirstSystemPrompt;
 
-            public CaptureLlm(ILlmClient inner) => _inner = inner;
+            public CaptureLlm(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken ct = default)
@@ -84,7 +87,9 @@ namespace CoreAI.Tests.PlayMode
                     {
                         Debug.Log($"[ToolDiscovery] 🔧 Tools sent to model ({request.Tools.Count}):");
                         foreach (ILlmTool tool in request.Tools)
+                        {
                             Debug.Log($"[ToolDiscovery]    • {tool.Name}: {tool.Description}");
+                        }
                     }
                 }
 
@@ -95,7 +100,9 @@ namespace CoreAI.Tests.PlayMode
                 LastContent = result?.Content;
 
                 if (!string.IsNullOrEmpty(result?.Content))
+                {
                     Debug.Log($"[ToolDiscovery] 💬 Model response: {result.Content}");
+                }
 
                 return result;
             }
@@ -103,7 +110,9 @@ namespace CoreAI.Tests.PlayMode
 
         private sealed class Sink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand c) { }
+            public void Publish(ApplyAiGameCommand c)
+            {
+            }
         }
 
         [UnityTest]
@@ -148,9 +157,9 @@ namespace CoreAI.Tests.PlayMode
 
                 const string roleId = "EnchantMaster";
                 AgentConfig config = new AgentBuilder(roleId)
-                {
-                    SuppressBuildWarnings = true
-                }
+                    {
+                        SuppressBuildWarnings = true
+                    }
                     .WithSystemPrompt(
                         "You are a Game Master in a fantasy RPG.\n" +
                         "When the player asks you to do something:\n" +
@@ -203,13 +212,16 @@ namespace CoreAI.Tests.PlayMode
                     "enchant_weapon should NOT be in system prompt — only discoverable via read_skill.");
 
                 if (!cap.LastOk)
+                {
                     Assert.Inconclusive("LLM did not return a valid response.");
+                }
 
                 if (!_enchantWeaponCalled)
                 {
                     bool modelTriedToolCall = cap.LastContent != null &&
-                        (cap.LastContent.Contains("read_skill") || cap.LastContent.Contains("enchant_weapon") ||
-                         cap.LastContent.Contains("call_skill_tool"));
+                                              (cap.LastContent.Contains("read_skill") ||
+                                               cap.LastContent.Contains("enchant_weapon") ||
+                                               cap.LastContent.Contains("call_skill_tool"));
                     if (modelTriedToolCall)
                     {
                         Assert.Inconclusive(

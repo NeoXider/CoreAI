@@ -96,7 +96,10 @@ namespace CoreAI.Infrastructure.Llm
                 httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
             }
 
-            if (headers == null) return;
+            if (headers == null)
+            {
+                return;
+            }
 
             foreach (KeyValuePair<string, string> kv in headers)
             {
@@ -111,7 +114,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private static Dictionary<string, IEnumerable<string>> CopyHeaders(HttpResponseMessage response)
         {
-            var d = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, IEnumerable<string>> d = new(StringComparer.OrdinalIgnoreCase);
             foreach (KeyValuePair<string, IEnumerable<string>> h in response.Headers)
             {
                 d[h.Key] = h.Value.ToList();

@@ -20,6 +20,7 @@ namespace CoreAI.Tests.EditMode
             {
                 sb.Append(filter.ProcessChunk(c));
             }
+
             sb.Append(filter.Flush());
             return sb.ToString();
         }
@@ -119,6 +120,7 @@ namespace CoreAI.Tests.EditMode
             {
                 sb.Append(filter.ProcessChunk(ch.ToString()));
             }
+
             sb.Append(filter.Flush());
 
             Assert.AreEqual("AB", sb.ToString());
@@ -247,6 +249,7 @@ namespace CoreAI.Tests.EditMode
             {
                 sb.Append(filter.ProcessChunk($"chunk {i} of reasoning... "));
             }
+
             sb.Append(filter.ProcessChunk("</think>"));
             sb.Append(filter.ProcessChunk("FINAL"));
             sb.Append(filter.Flush());

@@ -72,7 +72,7 @@ namespace CoreAI.Tests.PlayMode
                 setup.MemoryStore,
                 setup.Policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
             const int recallMaxAttempts = 3;
             string recallResult = null;
@@ -112,5 +112,3 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
-
-

@@ -71,7 +71,7 @@ namespace CoreAI
         /// </summary>
         string ToolContractAdditionalInstructions => "";
 
-        /// <summary>Default sampling temperature (0.0–2.0).</summary>
+        /// <summary>Sampling temperature requested from the LLM backend.</summary>
         float Temperature { get; }
 
         /// <summary>
@@ -108,15 +108,7 @@ namespace CoreAI
         bool EnableStreaming { get; }
 
         /// <summary>
-        /// Default max output tokens for both HTTP and LLMUnity when callers omit explicit limits.
-        /// Applied through <c>ChatOptions.MaxOutputTokens</c> when absent on the outgoing request.
-        /// <para>
-        /// Priority: <c>LlmCompletionRequest.MaxOutputTokens</c> → <c>AiTaskRequest.MaxOutputTokens</c> → per-agent policy →
-        /// <see cref="MaxTokens"/> (this fallback) → provider default.
-        /// </para>
-        /// <para>
-        /// <c>0</c> or negative means unset — skip this fallback. Default interface member returns <c>0</c> so legacy stub settings compile unchanged.
-        /// </para>
+        /// Maximum tokens.
         /// </summary>
         int MaxTokens => 0;
 
@@ -142,8 +134,7 @@ namespace CoreAI
         int ConversationRolledSummaryMaxTokens => 0;
 
         /// <summary>
-        /// Marshaler for MEAI <see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/> so tool bodies run on the host’s required thread.
-        /// Default portable implementation: <see cref="PassThroughLlmAsyncMarshaler.Instance"/>.
+        /// Tool invocation marshaler.
         /// </summary>
         ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;
 
@@ -178,7 +169,7 @@ namespace CoreAI
         /// Maximum number of tool call message pairs (assistant + tool result) to keep in the
         /// MEAI message list during a single request's tool-calling loop in <see cref="SmartToolCallingChatClient"/>.
         /// When the count exceeds this limit, the oldest tool call pair is removed to prevent unbounded growth.
-        /// <para>0 = no limit (retain all). Default 20 (10 roundtrips × 2 messages each).</para>
+        /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
         int MaxToolCallHistoryMessages => 20;
     }

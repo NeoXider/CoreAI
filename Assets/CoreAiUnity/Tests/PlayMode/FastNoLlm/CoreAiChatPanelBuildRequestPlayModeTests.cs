@@ -16,8 +16,10 @@ namespace CoreAI.Tests.PlayMode
     {
         private sealed class PanelForTesting : CoreAiChatPanel
         {
-            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId) =>
-                BuildAiTaskRequest(userText, roleId);
+            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId)
+            {
+                return BuildAiTaskRequest(userText, roleId);
+            }
         }
 
         private sealed class PanelWithAllowedTools : CoreAiChatPanel
@@ -29,8 +31,10 @@ namespace CoreAI.Tests.PlayMode
                 return r;
             }
 
-            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId) =>
-                BuildAiTaskRequest(userText, roleId);
+            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId)
+            {
+                return BuildAiTaskRequest(userText, roleId);
+            }
         }
 
         [UnityTest]

@@ -18,10 +18,16 @@ namespace CoreAI.Tests.EditMode
         private const string OpenRouterChatUrl = "https://openrouter.ai/api/v1/chat/completions";
 
         [SetUp]
-        public void SetUp() => LlmAuthContextRegistry.ClearProvider();
+        public void SetUp()
+        {
+            LlmAuthContextRegistry.ClearProvider();
+        }
 
         [TearDown]
-        public void TearDown() => LlmAuthContextRegistry.ClearProvider();
+        public void TearDown()
+        {
+            LlmAuthContextRegistry.ClearProvider();
+        }
 
         private sealed class StubHttpSettings : IOpenAiHttpSettings
         {
@@ -42,7 +48,11 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class StubAuth : ILlmAuthContextProvider
         {
-            public string GetAuthorizationHeader() => "";
+            public string GetAuthorizationHeader()
+            {
+                return "";
+            }
+
             public string TenantId => "tenant-a";
             public string UserId => "user-b";
             public string SessionId => "sess-c";
@@ -64,7 +74,11 @@ namespace CoreAI.Tests.EditMode
                 _reqId = requestId;
             }
 
-            public IReadOnlyList<KeyValuePair<string, string>> GetHeaders() => _extra;
+            public IReadOnlyList<KeyValuePair<string, string>> GetHeaders()
+            {
+                return _extra;
+            }
+
             public string IdempotencyKey => _idem;
             public string RequestId => _reqId;
         }
@@ -82,14 +96,16 @@ namespace CoreAI.Tests.EditMode
             return null;
         }
 
-        private static bool HasHeader(IReadOnlyList<KeyValuePair<string, string>> list, string name) =>
-            FirstHeaderValue(list, name) != null;
+        private static bool HasHeader(IReadOnlyList<KeyValuePair<string, string>> list, string name)
+        {
+            return FirstHeaderValue(list, name) != null;
+        }
 
         [Test]
         public void BuildTransportHeaders_OmitCorrelationFalse_IncludesContextAuthAndCorrelationHeaders()
         {
             LlmAuthContextRegistry.SetProvider(new StubAuth());
-            var settings = new StubHttpSettings
+            StubHttpSettings settings = new()
             {
                 HeaderProviderImpl = new StubHeaderProvider(
                     new List<KeyValuePair<string, string>> { new("X-Custom-Ok", "1") })
@@ -99,9 +115,9 @@ namespace CoreAI.Tests.EditMode
             {
                 List<KeyValuePair<string, string>> list = MeaiOpenAiChatClient.BuildTransportHeadersForTests(
                     OpenRouterChatUrl,
-                    acceptEventStream: false,
-                    omitCorsSensitiveCorrelationHeaders: false,
-                    authorizationHeader: "Bearer sk-test",
+                    false,
+                    false,
+                    "Bearer sk-test",
                     settings,
                     NullLog.Instance);
 
@@ -125,15 +141,15 @@ namespace CoreAI.Tests.EditMode
         public void BuildTransportHeaders_OmitCorrelationTrue_StripsCorrelation_KeepsAuthAndOpenRouterHeaders()
         {
             LlmAuthContextRegistry.SetProvider(new StubAuth());
-            var settings = new StubHttpSettings { HeaderProviderImpl = null };
+            StubHttpSettings settings = new() { HeaderProviderImpl = null };
 
             using (LlmRequestContext.Begin("Teacher", "trace-xyz", "idem-abc"))
             {
                 List<KeyValuePair<string, string>> list = MeaiOpenAiChatClient.BuildTransportHeadersForTests(
                     OpenRouterChatUrl,
-                    acceptEventStream: false,
-                    omitCorsSensitiveCorrelationHeaders: true,
-                    authorizationHeader: "Bearer sk-test",
+                    false,
+                    true,
+                    "Bearer sk-test",
                     settings,
                     NullLog.Instance);
 
@@ -152,7 +168,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildTransportHeaders_OmitCorrelationTrue_FiltersSensitiveNamesFromHeaderProviderGetHeaders()
         {
-            var settings = new StubHttpSettings
+            StubHttpSettings settings = new()
             {
                 HeaderProviderImpl = new StubHeaderProvider(
                     new List<KeyValuePair<string, string>>
@@ -162,15 +178,15 @@ namespace CoreAI.Tests.EditMode
                         new("X-Tenant-Id", "should-drop-3"),
                         new("X-Client-Keep", "ok-value")
                     },
-                    idempotencyKey: "hp-idem",
-                    requestId: "hp-req")
+                    "hp-idem",
+                    "hp-req")
             };
 
             List<KeyValuePair<string, string>> list = MeaiOpenAiChatClient.BuildTransportHeadersForTests(
                 "https://api.openai.com/v1/chat/completions",
-                acceptEventStream: false,
-                omitCorsSensitiveCorrelationHeaders: true,
-                authorizationHeader: null,
+                false,
+                true,
+                null,
                 settings,
                 NullLog.Instance);
 
@@ -184,19 +200,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildTransportHeaders_OmitCorrelationTrue_DoesNotAppendHeaderProviderIdempotencyOrRequestId()
         {
-            var settings = new StubHttpSettings
+            StubHttpSettings settings = new()
             {
                 HeaderProviderImpl = new StubHeaderProvider(
                     new List<KeyValuePair<string, string>>(),
-                    idempotencyKey: "from-hp-only",
-                    requestId: "from-hp-req-only")
+                    "from-hp-only",
+                    "from-hp-req-only")
             };
 
             List<KeyValuePair<string, string>> list = MeaiOpenAiChatClient.BuildTransportHeadersForTests(
                 "https://api.example/v1/chat/completions",
-                acceptEventStream: false,
-                omitCorsSensitiveCorrelationHeaders: true,
-                authorizationHeader: "",
+                false,
+                true,
+                "",
                 settings,
                 NullLog.Instance);
 
@@ -207,19 +223,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void BuildTransportHeaders_OmitCorrelationFalse_AppendsHeaderProviderIdempotencyWhenMissing()
         {
-            var settings = new StubHttpSettings
+            StubHttpSettings settings = new()
             {
                 HeaderProviderImpl = new StubHeaderProvider(
                     new List<KeyValuePair<string, string>>(),
-                    idempotencyKey: "from-hp-only",
-                    requestId: "from-hp-req-only")
+                    "from-hp-only",
+                    "from-hp-req-only")
             };
 
             List<KeyValuePair<string, string>> list = MeaiOpenAiChatClient.BuildTransportHeadersForTests(
                 "https://api.example/v1/chat/completions",
-                acceptEventStream: false,
-                omitCorsSensitiveCorrelationHeaders: false,
-                authorizationHeader: "",
+                false,
+                false,
+                "",
                 settings,
                 NullLog.Instance);
 

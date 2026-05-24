@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Хранилище-заглушка: ничего не сохраняет, <see cref="TryLoad"/> всегда <c>false</c>.</summary>
+    /// <summary>No-op agent memory store used when persistence is unavailable.</summary>
     public sealed class NullAgentMemoryStore : IAgentMemoryStore
     {
         /// <inheritdoc />

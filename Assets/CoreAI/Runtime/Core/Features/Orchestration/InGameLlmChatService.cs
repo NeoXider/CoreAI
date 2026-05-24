@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -9,8 +9,7 @@ using Microsoft.Extensions.AI;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Игровой чат с LLM: склеивает историю реплик, системный промпт для <see cref="BuiltInAgentRoleIds.SmartChat"/>, вызов <see cref="ILlmClient"/>.
-    /// Включает sliding-window rate limiter для защиты от спама.
+    /// Chat service that keeps player conversation history around LLM requests.
     /// </summary>
     public sealed class InGameLlmChatService : IInGameLlmChatService
     {
@@ -28,13 +27,13 @@ namespace CoreAI.Ai
         private long _totalRejected;
 
         /// <summary>
-        /// Создать чат-сервис с опциональным rate limiting.
+        /// Initializes a new instance of InGameLlmChatService.
         /// </summary>
-        /// <param name="llm">LLM клиент.</param>
-        /// <param name="systemPrompts">Провайдер промптов.</param>
-        /// <param name="maxMessages">Максимум сообщений в истории.</param>
-        /// <param name="maxRequestsPerWindow">Максимум запросов в окне (0 = без лимита).</param>
-        /// <param name="rateLimitWindowSeconds">Размер окна в секундах.</param>
+        /// <param name="llm">The llm value.</param>
+        /// <param name="systemPrompts">The system prompts value.</param>
+        /// <param name="maxMessages">The max messages value.</param>
+        /// <param name="maxRequestsPerWindow">The max requests per window value.</param>
+        /// <param name="rateLimitWindowSeconds">The rate limit window seconds value.</param>
         public InGameLlmChatService(
             ILlmClient llm,
             IAgentSystemPromptProvider systemPrompts,
@@ -95,7 +94,7 @@ namespace CoreAI.Ai
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
-            // Match <see cref="AiPromptComposer"/> Layer 1 — this service does not use the composer.
+            /* Implementation note in English. */
             string prefix = CoreAISettings.UniversalSystemPromptPrefix;
             string system = string.IsNullOrWhiteSpace(prefix)
                 ? baseSystem
@@ -172,18 +171,21 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Sliding-window rate limiter: отклоняет запрос если превышен лимит.
+/// Executes TryAcquireRateSlot API operation.
         /// </summary>
         private bool TryAcquireRateSlot()
         {
-            if (_maxRequestsPerWindow <= 0) return true; // Лимит отключён
+            if (_maxRequestsPerWindow <= 0)
+            {
+                return true; // No rate limit is configured.
+            }
 
             lock (_rateLock)
             {
                 DateTime now = DateTime.UtcNow;
                 DateTime cutoff = now - _rateLimitWindow;
 
-                // Удаляем устаревшие timestamps
+                /* Implementation note in English. */
                 while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoff)
                 {
                     _requestTimestamps.Dequeue();

@@ -1,15 +1,15 @@
 namespace CoreAI.Authority
 {
     /// <summary>
-    /// Узел, разрешённый запускать оркестратор и LLM (хост или локальный solo).
+    /// Evaluates whether AI work may run on the current host or peer.
     /// </summary>
     public interface IAuthorityHost
     {
-        /// <summary>Разрешено ли на этом узле вызывать LLM и оркестратор (хост / solo).</summary>
+        /// <summary>Returns whether AI tasks may run for the requested network execution policy.</summary>
         bool CanRunAiTasks { get; }
     }
 
-    /// <summary>Локальный solo: ИИ всегда разрешён (заглушка для мультиплеерного хоста).</summary>
+    /// <summary>Authority host implementation for local solo-player execution.</summary>
     public sealed class SoloAuthorityHost : IAuthorityHost
     {
         /// <inheritdoc />

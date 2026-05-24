@@ -65,7 +65,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_NormalText_PassesThrough()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
             string result = filter.ProcessChunk("Hello world");
             Assert.AreEqual("Hello world", result);
         }
@@ -73,7 +73,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_ThinkBlockInSingleChunk_Removed()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
             string result = filter.ProcessChunk("<think>reasoning</think>Answer.");
             Assert.AreEqual("Answer.", result);
         }
@@ -81,7 +81,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_ThinkBlockAcrossMultipleChunks()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
 
             string r1 = filter.ProcessChunk("<thi");
             string r2 = filter.ProcessChunk("nk>I am thinking about this");
@@ -97,7 +97,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_TextBeforeThink_Preserved()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
             string result = filter.ProcessChunk("Prefix <think>hidden</think> Suffix");
             Assert.AreEqual("Prefix  Suffix", result);
         }
@@ -105,7 +105,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_MultipleThinkBlocks()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
             string r1 = filter.ProcessChunk("<think>a</think>Hello ");
             string r2 = filter.ProcessChunk("<think>b</think>World");
 
@@ -116,7 +116,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_ThinkAtEnd_NoOutput()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
             string r1 = filter.ProcessChunk("<think>still thinking...");
 
             Assert.AreEqual("", r1, "No output while inside think block");
@@ -125,7 +125,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void StreamFilter_SplitOpenTag()
         {
-            var filter = new ThinkBlockFilter();
+            ThinkBlockFilter filter = new();
 
             // "<think>" split across chunks
             string r1 = filter.ProcessChunk("Hello <th");
@@ -143,7 +143,11 @@ namespace CoreAI.Tests.EditMode
 
         private static string StripThinkBlocks(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text;
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
             return Regex.Replace(text, @"<think>[\s\S]*?</think>\s*", "",
                 RegexOptions.IgnoreCase).Trim();
         }
@@ -159,7 +163,10 @@ namespace CoreAI.Tests.EditMode
 
             public string ProcessChunk(string chunk)
             {
-                if (string.IsNullOrEmpty(chunk)) return "";
+                if (string.IsNullOrEmpty(chunk))
+                {
+                    return "";
+                }
 
                 _buffer.Append(chunk);
                 string buf = _buffer.ToString();
@@ -187,7 +194,11 @@ namespace CoreAI.Tests.EditMode
                         int openIdx = buf.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
                         if (openIdx >= 0)
                         {
-                            if (openIdx > 0) visible.Append(buf.Substring(0, openIdx));
+                            if (openIdx > 0)
+                            {
+                                visible.Append(buf.Substring(0, openIdx));
+                            }
+
                             _insideThink = true;
                             buf = buf.Substring(openIdx + 7);
                         }

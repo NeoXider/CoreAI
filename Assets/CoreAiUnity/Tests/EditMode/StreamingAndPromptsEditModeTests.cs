@@ -18,13 +18,13 @@ namespace CoreAI.Tests.EditMode
         public void AiPromptComposer_GetSystemPrompt_Combines3Layers()
         {
             // Arrange
-            var provider = new TestSystemPromptProvider("Teacher", "Ты учитель.");
-            var policy = new AgentMemoryPolicy();
+            TestSystemPromptProvider provider = new("Teacher", "Ты учитель.");
+            AgentMemoryPolicy policy = new();
             policy.SetAdditionalSystemPrompt("Teacher", "Используй аналогии из игр.");
 
-            var settings = new TestCoreAISettings { UniversalSystemPromptPrefix = "Отвечай кратко." };
+            TestCoreAISettings settings = new() { UniversalSystemPromptPrefix = "Отвечай кратко." };
 
-            var composer = new AiPromptComposer(provider, new NullUserPromptTemplateProvider(),
+            AiPromptComposer composer = new(provider, new NullUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore(), null, policy, settings);
 
             // Act
@@ -69,8 +69,8 @@ namespace CoreAI.Tests.EditMode
         public void AiPromptComposer_GetSystemPrompt_WorksWithoutPolicy()
         {
             // No policy, no settings — should still return base prompt
-            var provider = new TestSystemPromptProvider("Creator", "Ты создатель.");
-            var composer = new AiPromptComposer(provider, new NullUserPromptTemplateProvider(),
+            TestSystemPromptProvider provider = new("Creator", "Ты создатель.");
+            AiPromptComposer composer = new(provider, new NullUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
             string result = composer.GetSystemPrompt("Creator");
@@ -80,8 +80,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AiPromptComposer_GetSystemPrompt_FallbackForUnknownRole()
         {
-            var provider = new TestSystemPromptProvider("Known", "Known prompt.");
-            var composer = new AiPromptComposer(provider, new NullUserPromptTemplateProvider(),
+            TestSystemPromptProvider provider = new("Known", "Known prompt.");
+            AiPromptComposer composer = new(provider, new NullUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
             string result = composer.GetSystemPrompt("UnknownRole");
@@ -91,9 +91,9 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AiPromptComposer_GetSystemPrompt_UniversalPrefixAppliedToAllRoles()
         {
-            var provider = new TestSystemPromptProvider("RoleA", "Base A.");
-            var settings = new TestCoreAISettings { UniversalSystemPromptPrefix = "GLOBAL RULES" };
-            var composer = new AiPromptComposer(provider, new NullUserPromptTemplateProvider(),
+            TestSystemPromptProvider provider = new("RoleA", "Base A.");
+            TestCoreAISettings settings = new() { UniversalSystemPromptPrefix = "GLOBAL RULES" };
+            AiPromptComposer composer = new(provider, new NullUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore(), null, null, settings);
 
             string resultA = composer.GetSystemPrompt("RoleA");
@@ -108,7 +108,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentMemoryPolicy_SetAndGetAdditionalSystemPrompt()
         {
-            var policy = new AgentMemoryPolicy();
+            AgentMemoryPolicy policy = new();
 
             // Initially empty
             Assert.False(policy.TryGetAdditionalSystemPrompt("Teacher", out _));
@@ -126,7 +126,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentMemoryPolicy_AdditionalPrompts_TrimsWhitespace()
         {
-            var policy = new AgentMemoryPolicy();
+            AgentMemoryPolicy policy = new();
             policy.SetAdditionalSystemPrompt("  Teacher  ", "  Trimmed prompt  ");
 
             Assert.True(policy.TryGetAdditionalSystemPrompt("Teacher", out string prompt));
@@ -136,7 +136,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentMemoryPolicy_AdditionalPrompts_EmptyStringClears()
         {
-            var policy = new AgentMemoryPolicy();
+            AgentMemoryPolicy policy = new();
             policy.SetAdditionalSystemPrompt("Teacher", "Something");
             policy.SetAdditionalSystemPrompt("Teacher", "   ");
 
@@ -148,12 +148,12 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentConfig_ApplyToPolicy_RegistersAdditionalPrompt()
         {
-            var builder = new AgentBuilder("TestRole")
+            AgentBuilder builder = new AgentBuilder("TestRole")
                 .WithSystemPrompt("My custom prompt.")
                 .WithMode(AgentMode.ChatOnly);
 
-            var config = builder.Build();
-            var policy = new AgentMemoryPolicy();
+            AgentConfig config = builder.Build();
+            AgentMemoryPolicy policy = new();
 
             config.ApplyToPolicy(policy);
 
@@ -164,11 +164,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void AgentConfig_ApplyToPolicy_NoPrompt_DoesNotRegister()
         {
-            var builder = new AgentBuilder("NoPromptRole")
+            AgentBuilder builder = new AgentBuilder("NoPromptRole")
                 .WithMode(AgentMode.ChatOnly);
 
-            var config = builder.Build();
-            var policy = new AgentMemoryPolicy();
+            AgentConfig config = builder.Build();
+            AgentMemoryPolicy policy = new();
 
             config.ApplyToPolicy(policy);
 
@@ -181,11 +181,11 @@ namespace CoreAI.Tests.EditMode
             // AgentBuilder no longer prepends universalPrefix — that's AiPromptComposer's job
             CoreAISettings.ResetOverrides();
 
-            var settings = new TestCoreAISettings { UniversalSystemPromptPrefix = "PREFIX:" };
-            var builder = new AgentBuilder("TestRole", settings)
+            TestCoreAISettings settings = new() { UniversalSystemPromptPrefix = "PREFIX:" };
+            AgentBuilder builder = new AgentBuilder("TestRole", settings)
                 .WithSystemPrompt("My prompt");
 
-            var config = builder.Build();
+            AgentConfig config = builder.Build();
 
             Assert.AreEqual("My prompt", config.SystemPrompt,
                 "Build should NOT prepend universalPrefix — composer handles it");
@@ -196,7 +196,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LlmStreamChunk_DefaultValues()
         {
-            var chunk = new LlmStreamChunk();
+            LlmStreamChunk chunk = new();
             Assert.AreEqual("", chunk.Text, "Default Text should be empty string");
             Assert.IsFalse(chunk.IsDone);
             Assert.IsNull(chunk.Error);
@@ -207,7 +207,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void LlmStreamChunk_FinalChunk()
         {
-            var chunk = new LlmStreamChunk { IsDone = true, Text = "" };
+            LlmStreamChunk chunk = new() { IsDone = true, Text = "" };
             Assert.IsTrue(chunk.IsDone);
             Assert.AreEqual("", chunk.Text);
         }
@@ -219,9 +219,9 @@ namespace CoreAI.Tests.EditMode
         {
             ILlmClient client = new FakeLlmClient("Hello, world!");
 
-            var chunks = new List<LlmStreamChunk>();
-            await foreach (var chunk in client.CompleteStreamingAsync(
-                new LlmCompletionRequest { UserPayload = "test" }, CancellationToken.None))
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(
+                               new LlmCompletionRequest { UserPayload = "test" }, CancellationToken.None))
             {
                 chunks.Add(chunk);
             }
@@ -240,8 +240,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentMemoryPolicy_Streaming_GlobalFallback_True()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = true };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = true };
 
             Assert.IsTrue(policy.IsStreamingEnabled("AnyRole", settings));
         }
@@ -250,8 +250,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentMemoryPolicy_Streaming_GlobalFallback_False()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = false };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = false };
 
             Assert.IsFalse(policy.IsStreamingEnabled("AnyRole", settings));
         }
@@ -260,8 +260,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentMemoryPolicy_Streaming_PerRoleOverride_WinsOverGlobal()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = false };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = false };
 
             policy.SetStreamingEnabled("FastChat", true);
 
@@ -275,8 +275,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentMemoryPolicy_Streaming_PerRoleDisable_WinsOverGlobal()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = true };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = true };
 
             policy.SetStreamingEnabled("StrictJsonRole", false);
 
@@ -288,8 +288,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentMemoryPolicy_Streaming_ClearOverride_FallsBackToGlobal()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = true };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = true };
 
             policy.SetStreamingEnabled("Role", false);
             Assert.IsFalse(policy.IsStreamingEnabled("Role", settings));
@@ -303,8 +303,8 @@ namespace CoreAI.Tests.EditMode
         public void AgentBuilder_WithStreaming_RegistersInPolicy()
         {
             CoreAISettings.ResetOverrides();
-            var policy = new AgentMemoryPolicy();
-            var settings = new TestCoreAISettings { EnableStreaming = true };
+            AgentMemoryPolicy policy = new();
+            TestCoreAISettings settings = new() { EnableStreaming = true };
 
             new AgentBuilder("SilentRole").WithStreaming(false).Build().ApplyToPolicy(policy);
             new AgentBuilder("NoisyRole").WithStreaming(true).Build().ApplyToPolicy(policy);
@@ -333,9 +333,9 @@ namespace CoreAI.Tests.EditMode
         {
             ILlmClient client = new FakeLlmClient(null, "Connection failed");
 
-            var chunks = new List<LlmStreamChunk>();
-            await foreach (var chunk in client.CompleteStreamingAsync(
-                new LlmCompletionRequest { UserPayload = "test" }, CancellationToken.None))
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(
+                               new LlmCompletionRequest { UserPayload = "test" }, CancellationToken.None))
             {
                 chunks.Add(chunk);
             }
@@ -365,6 +365,7 @@ namespace CoreAI.Tests.EditMode
                     prompt = _prompt;
                     return true;
                 }
+
                 prompt = null;
                 return false;
             }
@@ -416,12 +417,16 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken ct = default)
             {
                 if (_error != null)
+                {
                     return Task.FromResult(new LlmCompletionResult { Ok = false, Error = _error });
+                }
 
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _response });
             }
 
-            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
         }
     }
 }

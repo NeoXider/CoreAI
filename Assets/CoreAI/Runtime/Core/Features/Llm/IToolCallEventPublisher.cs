@@ -29,8 +29,16 @@ namespace CoreAI.Infrastructure.Llm
     {
         public static readonly NullToolCallEventPublisher Instance = new();
 
-        public void PublishStarted(LlmToolCallInfo info) { }
-        public void PublishCompleted(LlmToolCallInfo info, string resultJson, double durationMs) { }
-        public void PublishFailed(LlmToolCallInfo info, string error, double durationMs) { }
+        public void PublishStarted(LlmToolCallInfo info)
+        {
+        }
+
+        public void PublishCompleted(LlmToolCallInfo info, string resultJson, double durationMs)
+        {
+        }
+
+        public void PublishFailed(LlmToolCallInfo info, string error, double durationMs)
+        {
+        }
     }
 }

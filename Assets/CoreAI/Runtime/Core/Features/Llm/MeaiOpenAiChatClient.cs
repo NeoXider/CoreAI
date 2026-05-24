@@ -101,6 +101,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 reqBody["temperature"] = options.Temperature.Value;
             }
+
             if (options?.MaxOutputTokens.HasValue == true)
             {
                 reqBody["max_tokens"] = options.MaxOutputTokens.Value;
@@ -125,7 +126,8 @@ namespace CoreAI.Infrastructure.Llm
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
                 int transportTimeoutSec = _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
-                _log.Info($"MeaiOpenAiChatClient: Timeout={transportTimeoutSec}s ({_transport.DebugLabel})", LogTag.Llm);
+                _log.Info($"MeaiOpenAiChatClient: Timeout={transportTimeoutSec}s ({_transport.DebugLabel})",
+                    LogTag.Llm);
 
                 try
                 {
@@ -136,7 +138,7 @@ namespace CoreAI.Infrastructure.Llm
                             JsonBody = json,
                             AcceptEventStream = false,
                             TransportTimeoutSeconds = transportTimeoutSec,
-                            Headers = BuildTransportHeaders(url, acceptEventStream: false)
+                            Headers = BuildTransportHeaders(url, false)
                         }, cancellationToken);
 
                     if (postResult.IsSuccessStatusCode)
@@ -151,7 +153,8 @@ namespace CoreAI.Infrastructure.Llm
                     _log.Warn($"MeaiOpenAiChatClient: {errorDetail}", LogTag.Llm);
 
                     bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
-                        && IsTransientLocalLlmReloadError(postResult.StatusCode, postResult.BodyText, errorDetail);
+                                             && IsTransientLocalLlmReloadError(postResult.StatusCode,
+                                                 postResult.BodyText, errorDetail);
 
                     if (canRetryTransient)
                     {
@@ -173,6 +176,7 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiOpenAiChatClient: Request timeout or transport canceled ({ex.GetType().Name}): {ex.Message}",
                             LogTag.Llm);
                     }
+
                     throw;
                 }
                 catch (LlmClientException)
@@ -188,7 +192,8 @@ namespace CoreAI.Infrastructure.Llm
 
             if (responseJson == null)
             {
-                throw new InvalidOperationException("MeaiOpenAiChatClient: request completed without success or typed error.");
+                throw new InvalidOperationException(
+                    "MeaiOpenAiChatClient: request completed without success or typed error.");
             }
 
             if (_settings.EnableHttpDebugLogging)
@@ -236,6 +241,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 reqBody["temperature"] = options.Temperature.Value;
             }
+
             if (options?.MaxOutputTokens.HasValue == true)
             {
                 reqBody["max_tokens"] = options.MaxOutputTokens.Value;
@@ -252,7 +258,8 @@ namespace CoreAI.Infrastructure.Llm
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
-                int streamTransportTimeoutSec = _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
+                int streamTransportTimeoutSec =
+                    _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
 
                 OpenAiHttpPostRequest transportReq = new()
                 {
@@ -260,7 +267,7 @@ namespace CoreAI.Infrastructure.Llm
                     JsonBody = json,
                     AcceptEventStream = true,
                     TransportTimeoutSeconds = streamTransportTimeoutSec,
-                    Headers = BuildTransportHeaders(url, acceptEventStream: true)
+                    Headers = BuildTransportHeaders(url, true)
                 };
 
                 _log.Info(
@@ -280,6 +287,7 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiOpenAiChatClient: stream open: Request timeout or transport canceled ({ex.GetType().Name}): {ex.Message}",
                             LogTag.Llm);
                     }
+
                     throw;
                 }
                 catch (LlmClientException)
@@ -289,13 +297,15 @@ namespace CoreAI.Infrastructure.Llm
                 catch (Exception ex)
                 {
                     _log.Warn($"MeaiOpenAiChatClient: stream open failed: {ex.Message}", LogTag.Llm);
-                    throw new LlmClientException($"HTTP stream send failed: {ex.Message}", LlmErrorCode.BackendUnavailable);
+                    throw new LlmClientException($"HTTP stream send failed: {ex.Message}",
+                        LlmErrorCode.BackendUnavailable);
                 }
 
                 using (openResult)
                 {
                     string ctype = TryGetHeaderFirstValue(openResult.ResponseHeaders, "Content-Type") ?? "n/a";
-                    LogStreamingHttpResponseSummary(openResult.StatusCode, openResult.StatusCode >= 200 && openResult.StatusCode < 300, "", ctype);
+                    LogStreamingHttpResponseSummary(openResult.StatusCode,
+                        openResult.StatusCode >= 200 && openResult.StatusCode < 300, "", ctype);
 
                     if (openResult.StatusCode < 200 || openResult.StatusCode >= 300)
                     {
@@ -307,17 +317,20 @@ namespace CoreAI.Infrastructure.Llm
                         _log.Warn($"MeaiOpenAiChatClient: stream error — {streamErr}", LogTag.Llm);
 
                         bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
-                            && IsTransientLocalLlmReloadError(openResult.StatusCode, streamBody, streamErr);
+                                                 && IsTransientLocalLlmReloadError(openResult.StatusCode, streamBody,
+                                                     streamErr);
 
                         if (canRetryTransient)
                         {
-                            _log.Info("MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...",
+                            _log.Info(
+                                "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...",
                                 LogTag.Llm);
                             await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
                             continue;
                         }
 
-                        throw BuildHttpException(openResult.StatusCode, streamBody, streamErr, openResult.ResponseHeaders);
+                        throw BuildHttpException(openResult.StatusCode, streamBody, streamErr,
+                            openResult.ResponseHeaders);
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
@@ -332,7 +345,7 @@ namespace CoreAI.Infrastructure.Llm
                     DateTime lastProgressUtc = DateTime.UtcNow;
                     int parsedSseDeltas = 0;
 
-                    // Unified byte-level line reader for all platforms — bypasses StreamReader.ReadLineAsync
+                    /* Implementation note in English. */
                     // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
                     await foreach (string line in ReadUtf8LinesFromStreamAsync(stream, cancellationToken))
@@ -371,7 +384,7 @@ namespace CoreAI.Infrastructure.Llm
                                 foreach (string piece in SplitForSmoothStreaming(updateText))
                                 {
                                     yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
-                                    // No ConfigureAwait(false) — on WebGL the continuation
+                                    /* Implementation note in English. */
                                     // must run via UnitySynchronizationContext to come back at all.
                                     await Task.Delay(15, cancellationToken);
                                 }
@@ -424,17 +437,22 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static IEnumerable<string> SplitForSmoothStreaming(string text)
         {
-            if (string.IsNullOrEmpty(text)) yield break;
+            if (string.IsNullOrEmpty(text))
+            {
+                yield break;
+            }
+
             const int targetChunkSize = 6;
             int i = 0;
             while (i < text.Length)
             {
                 int end = Math.Min(i + targetChunkSize, text.Length);
                 // Extend to the next whitespace to avoid splitting inside a word when possible.
-                while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && (end - i) < targetChunkSize * 2)
+                while (end < text.Length && !char.IsWhiteSpace(text[end - 1]) && end - i < targetChunkSize * 2)
                 {
                     end++;
                 }
+
                 yield return text.Substring(i, end - i);
                 i = end;
             }
@@ -449,12 +467,13 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
             Stream stream,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken)
         {
             byte[] byteBuffer = new byte[8192];
             char[] charBuffer = new char[8192];
             Decoder decoder = Encoding.UTF8.GetDecoder();
-            StringBuilder lineBuilder = new StringBuilder(256);
+            StringBuilder lineBuilder = new(256);
 
             while (true)
             {
@@ -467,7 +486,7 @@ namespace CoreAI.Infrastructure.Llm
                     break;
                 }
 
-                int charCount = decoder.GetChars(byteBuffer, 0, read, charBuffer, 0, flush: false);
+                int charCount = decoder.GetChars(byteBuffer, 0, read, charBuffer, 0, false);
                 for (int i = 0; i < charCount; i++)
                 {
                     char c = charBuffer[i];
@@ -485,7 +504,7 @@ namespace CoreAI.Infrastructure.Llm
 
             while (true)
             {
-                int flushedChars = decoder.GetChars(byteBuffer, 0, 0, charBuffer, 0, flush: true);
+                int flushedChars = decoder.GetChars(byteBuffer, 0, 0, charBuffer, 0, true);
                 if (flushedChars <= 0)
                 {
                     break;
@@ -538,14 +557,16 @@ namespace CoreAI.Infrastructure.Llm
             bool omitCorsSensitiveCorrelationHeaders,
             string? authorizationHeader,
             IOpenAiHttpSettings settings,
-            ILog log) =>
-            BuildTransportHeadersCore(
+            ILog log)
+        {
+            return BuildTransportHeadersCore(
                 url,
                 acceptEventStream,
                 omitCorsSensitiveCorrelationHeaders,
                 authorizationHeader,
                 settings,
                 log);
+        }
 
         private static List<KeyValuePair<string, string>> BuildTransportHeadersCore(
             string url,
@@ -683,7 +704,11 @@ namespace CoreAI.Infrastructure.Llm
         private static string? TryGetHeaderFirstValue(IReadOnlyDictionary<string, IEnumerable<string>> headers,
             string name)
         {
-            if (headers == null) return null;
+            if (headers == null)
+            {
+                return null;
+            }
+
             foreach (KeyValuePair<string, IEnumerable<string>> kv in headers)
             {
                 if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
@@ -697,7 +722,11 @@ namespace CoreAI.Infrastructure.Llm
 
         private static IEnumerable<MEAI.AIContent> EnumerableContents(MEAI.ChatMessage msg)
         {
-            if (msg.Contents == null) yield break;
+            if (msg.Contents == null)
+            {
+                yield break;
+            }
+
             foreach (MEAI.AIContent c in msg.Contents)
             {
                 yield return c;
@@ -707,7 +736,11 @@ namespace CoreAI.Infrastructure.Llm
         private static IEnumerable<MEAI.ChatResponseUpdate> FullResponseToSimulatedStreamingUpdates(
             MEAI.ChatResponse response)
         {
-            if (response?.Messages == null || response.Messages.Count == 0) yield break;
+            if (response?.Messages == null || response.Messages.Count == 0)
+            {
+                yield break;
+            }
+
             MEAI.ChatMessage msg = response.Messages[0];
 
             if (msg.Contents != null && msg.Contents.Count > 0)
@@ -979,7 +1012,11 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string StripRedactedThinkingBlock(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text ?? "";
+            if (string.IsNullOrEmpty(text))
+            {
+                return text ?? "";
+            }
+
             return System.Text.RegularExpressions.Regex.Replace(text,
                 @"<think>[\s\S]*?</think>\s*", "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
@@ -988,10 +1025,14 @@ namespace CoreAI.Infrastructure.Llm
         private static string ExtractMessageContentString(JToken contentToken)
         {
             if (contentToken == null || contentToken.Type == JTokenType.Null)
+            {
                 return "";
+            }
 
             if (contentToken.Type == JTokenType.String)
+            {
                 return contentToken.Value<string>() ?? "";
+            }
 
             if (contentToken.Type == JTokenType.Array)
             {
@@ -1000,7 +1041,11 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (part.Type == JTokenType.String)
                     {
-                        if (sb.Length > 0) sb.Append('\n');
+                        if (sb.Length > 0)
+                        {
+                            sb.Append('\n');
+                        }
+
                         sb.Append(part.ToString());
                     }
                     else if (part is JObject o)
@@ -1008,11 +1053,16 @@ namespace CoreAI.Infrastructure.Llm
                         string t = o["text"]?.ToString();
                         if (!string.IsNullOrEmpty(t))
                         {
-                            if (sb.Length > 0) sb.Append('\n');
+                            if (sb.Length > 0)
+                            {
+                                sb.Append('\n');
+                            }
+
                             sb.Append(t);
                         }
                     }
                 }
+
                 return sb.ToString();
             }
 
@@ -1022,29 +1072,47 @@ namespace CoreAI.Infrastructure.Llm
         private static string ParseAssistantMessageVisibleText(JToken msg)
         {
             if (msg == null || msg.Type == JTokenType.Null || msg.Type == JTokenType.Undefined)
+            {
                 return "";
+            }
 
             if (msg.Type == JTokenType.String)
+            {
                 return StripRedactedThinkingBlock(msg.Value<string>() ?? "");
+            }
 
             if (msg.Type != JTokenType.Object)
+            {
                 return "";
+            }
 
             JObject m = (JObject)msg;
 
             string content = StripRedactedThinkingBlock(ExtractMessageContentString(m["content"]));
             if (!string.IsNullOrWhiteSpace(content))
+            {
                 return content;
+            }
 
             foreach (string key in new[] { "reasoning_content", "reasoningContent", "reasoning" })
             {
                 JToken t = SelectPropertyCaseInsensitive(m, key);
-                if (t == null || t.Type == JTokenType.Null) continue;
-                if (t.Type != JTokenType.String) continue;
+                if (t == null || t.Type == JTokenType.Null)
+                {
+                    continue;
+                }
+
+                if (t.Type != JTokenType.String)
+                {
+                    continue;
+                }
+
                 string reasoning = t.Value<string>() ?? "";
                 reasoning = StripRedactedThinkingBlock(reasoning);
                 if (!string.IsNullOrWhiteSpace(reasoning))
+                {
                     return reasoning;
+                }
             }
 
             return "";
@@ -1055,13 +1123,16 @@ namespace CoreAI.Infrastructure.Llm
             foreach (JProperty p in obj.Properties())
             {
                 if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
                     return p.Value;
+                }
             }
 
             return null;
         }
 
-        private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw, SseToolCallAccumulator accumulator)
+        private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw,
+            SseToolCallAccumulator accumulator)
         {
             string[] lines = raw.Split('\n');
             foreach (string line in lines)
@@ -1218,8 +1289,10 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson) =>
-            ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
+        internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson)
+        {
+            return ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
+        }
 
         private sealed class SseToolCallAccumulator
         {
@@ -1227,15 +1300,23 @@ namespace CoreAI.Infrastructure.Llm
 
             public void Feed(int index, string callId, string name, string argumentsFragment)
             {
-                if (!_pending.TryGetValue(index, out var entry))
+                if (!_pending.TryGetValue(index, out (string id, string name, StringBuilder args) entry))
                 {
                     entry = (callId, name, new StringBuilder());
                     _pending[index] = entry;
                 }
                 else
                 {
-                    if (!string.IsNullOrEmpty(callId)) entry.id = callId;
-                    if (!string.IsNullOrEmpty(name)) entry.name = name;
+                    if (!string.IsNullOrEmpty(callId))
+                    {
+                        entry.id = callId;
+                    }
+
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        entry.name = name;
+                    }
+
                     _pending[index] = entry;
                 }
 
@@ -1248,15 +1329,21 @@ namespace CoreAI.Infrastructure.Llm
 
             public MEAI.ChatResponseUpdate Flush()
             {
-                if (_pending.Count == 0) return null;
+                if (_pending.Count == 0)
+                {
+                    return null;
+                }
 
                 MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
                 update.Contents = new List<MEAI.AIContent>();
 
-                foreach (var kvp in _pending)
+                foreach (KeyValuePair<int, (string id, string name, StringBuilder args)> kvp in _pending)
                 {
-                    var (id, name, argsBuilder) = kvp.Value;
-                    if (string.IsNullOrEmpty(name)) continue;
+                    (string id, string name, StringBuilder argsBuilder) = kvp.Value;
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        continue;
+                    }
 
                     Dictionary<string, object> args = null;
                     string argsStr = argsBuilder.ToString();
@@ -1266,7 +1353,9 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argsStr);
                         }
-                        catch { }
+                        catch
+                        {
+                        }
                     }
 
                     args ??= new Dictionary<string, object>();

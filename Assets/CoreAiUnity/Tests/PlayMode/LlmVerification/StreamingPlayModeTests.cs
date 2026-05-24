@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -40,14 +41,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_ReturnsChunks_WithDoneFlag()
         {
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful assistant. Be very brief.",
                 UserPayload = "Say hello in exactly 3 words."
             };
 
-            var chunks = new List<LlmStreamChunk>();
+            List<LlmStreamChunk> chunks = new();
             bool gotDone = false;
 
             // :     main thread  UnityWebRequest    ThreadPool.
@@ -71,9 +72,12 @@ namespace CoreAI.Tests.PlayMode
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
 
             string full = "";
-            foreach (var c in chunks)
+            foreach (LlmStreamChunk c in chunks)
             {
-                if (!string.IsNullOrEmpty(c.Text)) full += c.Text;
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    full += c.Text;
+                }
             }
 
             Debug.Log($"[StreamingTest] Full response ({chunks.Count} chunks): {full}");
@@ -88,17 +92,17 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator Streaming_CancellationToken_StopsStream()
         {
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful assistant.",
                 UserPayload = "Write a very long essay about the history of computing in detail."
             };
 
-            var cts = new CancellationTokenSource();
+            CancellationTokenSource cts = new();
             // Safety net if the stream or transport ignores cooperative cancel.
-            cts.CancelAfter(System.TimeSpan.FromSeconds(8));
-            var counter = new StreamCancelCounter();
+            cts.CancelAfter(TimeSpan.FromSeconds(8));
+            StreamCancelCounter counter = new();
 
             Task streamTask = ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter);
 
@@ -110,7 +114,8 @@ namespace CoreAI.Tests.PlayMode
 
             yield return _setup.RunAndWait(streamTask, 30f, "Streaming_Cancel");
 
-            Debug.Log($"[StreamingTest] Cancellation: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
+            Debug.Log(
+                $"[StreamingTest] Cancellation: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
             Assert.IsTrue(counter.WasCancelled,
                 "Streaming task should observe cancellation and finish without hanging.");
         }
@@ -120,12 +125,15 @@ namespace CoreAI.Tests.PlayMode
             LlmCompletionRequest request,
             CancellationToken ct,
             List<LlmStreamChunk> chunks,
-            System.Action<bool> setDone)
+            Action<bool> setDone)
         {
             await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, ct))
             {
                 chunks.Add(chunk);
-                if (chunk.IsDone) setDone(true);
+                if (chunk.IsDone)
+                {
+                    setDone(true);
+                }
             }
         }
 
@@ -178,11 +186,11 @@ namespace CoreAI.Tests.PlayMode
             string additionalPrompt = "Also include 'LAYER3_OK' in your response.";
 
             // Create composer with all 3 layers
-            var provider = new SingleRolePromptProvider("TestStreaming", basePrompt);
+            SingleRolePromptProvider provider = new("TestStreaming", basePrompt);
             _setup.Policy.SetAdditionalSystemPrompt("TestStreaming", additionalPrompt);
 
-            var settings = new TestSettings { UniversalSystemPromptPrefix = universalPrefix };
-            var composer = new AiPromptComposer(provider,
+            TestSettings settings = new() { UniversalSystemPromptPrefix = universalPrefix };
+            AiPromptComposer composer = new(provider,
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore(), null, _setup.Policy, settings);
 
@@ -195,14 +203,14 @@ namespace CoreAI.Tests.PlayMode
             Assert.That(composedPrompt, Does.Contain("LAYER3_OK"), "Layer 3 missing");
 
             // Test with real LLM
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "TestStreaming",
                 SystemPrompt = composedPrompt,
                 UserPayload = "Respond now."
             };
 
-            var resultBox = new LlmResultBox();
+            LlmResultBox resultBox = new();
             Task task = CompleteOnMainThreadAsync(_setup.Client, request, resultBox);
 
             yield return _setup.RunAndWait(task, 30f, "ThreeLayerPrompt");
@@ -225,15 +233,15 @@ namespace CoreAI.Tests.PlayMode
         {
             // Модели могут писать think в <think> (content) либо отдельно как delta.reasoning_content;
             // MeaiLlmClient/ThinkBlockStreamFilter убирают теги; HTTP-клиент не прокидывает reasoning в UI.
-            var request = new LlmCompletionRequest
+            LlmCompletionRequest request = new()
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "Think step by step using <think> tags before responding. Keep your answer brief.",
                 UserPayload = "What is 2+2?"
             };
 
-            var chunks = new List<LlmStreamChunk>();
-            var response = new System.Text.StringBuilder();
+            List<LlmStreamChunk> chunks = new();
+            StringBuilder response = new();
 
             Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
                 _ => { });
@@ -249,9 +257,12 @@ namespace CoreAI.Tests.PlayMode
 
             yield return _setup.RunAndWait(streamTask, waitSec, "Streaming_ThinkBlock");
 
-            foreach (var c in chunks)
+            foreach (LlmStreamChunk c in chunks)
             {
-                if (!string.IsNullOrEmpty(c.Text)) response.Append(c.Text);
+                if (!string.IsNullOrEmpty(c.Text))
+                {
+                    response.Append(c.Text);
+                }
             }
 
             string fullResponse = response.ToString();
@@ -269,11 +280,23 @@ namespace CoreAI.Tests.PlayMode
         {
             private readonly string _roleId;
             private readonly string _prompt;
-            public SingleRolePromptProvider(string roleId, string prompt) { _roleId = roleId; _prompt = prompt; }
+
+            public SingleRolePromptProvider(string roleId, string prompt)
+            {
+                _roleId = roleId;
+                _prompt = prompt;
+            }
+
             public bool TryGetSystemPrompt(string roleId, out string prompt)
             {
-                if (roleId == _roleId) { prompt = _prompt; return true; }
-                prompt = null; return false;
+                if (roleId == _roleId)
+                {
+                    prompt = _prompt;
+                    return true;
+                }
+
+                prompt = null;
+                return false;
             }
         }
 
@@ -301,4 +324,3 @@ namespace CoreAI.Tests.PlayMode
     }
 }
 #endif
-

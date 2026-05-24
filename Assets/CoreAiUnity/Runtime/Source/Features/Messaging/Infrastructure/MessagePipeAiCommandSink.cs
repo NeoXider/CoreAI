@@ -4,13 +4,13 @@ using UnityEngine.Scripting;
 
 namespace CoreAI.Infrastructure.Messaging
 {
-    /// <summary>Мост <see cref="IAiGameCommandSink"/> → MessagePipe <see cref="IPublisher{TMessage}"/>.</summary>
+    /// <summary>Publishes AI game commands through MessagePipe.</summary>
     [Preserve]
     public sealed class MessagePipeAiCommandSink : IAiGameCommandSink
     {
         private readonly IPublisher<ApplyAiGameCommand> _publisher;
 
-        /// <summary>Создать sink с брокером команд.</summary>
+        /// <summary>Initializes a new instance of MessagePipeAiCommandSink.</summary>
         [Preserve]
         public MessagePipeAiCommandSink(IPublisher<ApplyAiGameCommand> publisher)
         {

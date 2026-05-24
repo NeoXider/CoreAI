@@ -3,22 +3,22 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Поставщик системного промпта по id роли. Реализации: файлы Resources (Unity), манифест, встроенные fallback.
+    /// Defines the contract for agent system prompt provider implementations.
     /// </summary>
     public interface IAgentSystemPromptProvider
     {
-        /// <summary>Получить системный промпт для роли; <c>false</c>, если провайдер не знает роль.</summary>
+        /// <summary>Attempts to resolve the base system prompt for an agent role.</summary>
         bool TryGetSystemPrompt(string roleId, out string systemPrompt);
     }
 
     /// <summary>
-    /// Цепочка: первый провайдер, вернувший текст, побеждает.
+    /// Combines multiple system prompt providers in priority order.
     /// </summary>
     public sealed class ChainedAgentSystemPromptProvider : IAgentSystemPromptProvider
     {
         private readonly IReadOnlyList<IAgentSystemPromptProvider> _chain;
 
-        /// <param name="chain">Порядок приоритета: первый успешный <see cref="TryGetSystemPrompt"/> выигрывает.</param>
+        /// <param name="chain">The chain value.</param>
         public ChainedAgentSystemPromptProvider(IReadOnlyList<IAgentSystemPromptProvider> chain)
         {
             _chain = chain;
@@ -42,7 +42,7 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
-    /// Встроенные тексты, если нет файлов и манифеста.
+    /// Provides built-in fallback system prompts for known CoreAI roles.
     /// </summary>
     public sealed class BuiltInDefaultAgentSystemPromptProvider : IAgentSystemPromptProvider
     {
@@ -62,7 +62,7 @@ namespace CoreAI.Ai
                 _ =>
                     $"You are agent \"{roleId}\" in CoreAI. Follow the user message and any session hints; prefer structured output when the game requests it."
             };
-            // Universal prefix is Layer 1 in <see cref="AiPromptComposer.GetSystemPrompt"/> only — do not prepend here
+            /* Implementation note in English. */
             // or every orchestrator request duplicates it (built-in strings are raw role prompts).
             systemPrompt = basePrompt;
             return true;

@@ -14,23 +14,34 @@ namespace CoreAI.Tests.EditMode
     {
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private static DelegateLlmTool MakeTool(string name) =>
-            new(name, $"Test tool: {name}", new Action(() => { }));
+        private static DelegateLlmTool MakeTool(string name)
+        {
+            return new DelegateLlmTool(name, $"Test tool: {name}", new Action(() => { }));
+        }
 
-        private static SkillSet MakeCraftingSkill() => new("Crafting",
-            "Forge weapons and armor from raw materials",
-            "1. Call get_recipes to list recipes.\n2. Call craft_item to craft.",
-            MakeTool("get_recipes"), MakeTool("craft_item"));
+        private static SkillSet MakeCraftingSkill()
+        {
+            return new SkillSet("Crafting",
+                "Forge weapons and armor from raw materials",
+                "1. Call get_recipes to list recipes.\n2. Call craft_item to craft.",
+                MakeTool("get_recipes"), MakeTool("craft_item"));
+        }
 
-        private static SkillSet MakeCombatSkill() => new("Combat",
-            "Fight enemies and manage encounters",
-            "Call get_enemy_stats before attacking. Use calculate_damage for hits.",
-            MakeTool("get_enemy_stats"), MakeTool("calculate_damage"));
+        private static SkillSet MakeCombatSkill()
+        {
+            return new SkillSet("Combat",
+                "Fight enemies and manage encounters",
+                "Call get_enemy_stats before attacking. Use calculate_damage for hits.",
+                MakeTool("get_enemy_stats"), MakeTool("calculate_damage"));
+        }
 
-        private static SkillSet MakeLoreSkill() => new("Lore",
-            "World knowledge and history",
-            "Call search_codex to find lore entries.",
-            MakeTool("search_codex"));
+        private static SkillSet MakeLoreSkill()
+        {
+            return new SkillSet("Lore",
+                "World knowledge and history",
+                "Call search_codex to find lore entries.",
+                MakeTool("search_codex"));
+        }
 
         // ══════════════════════════════════════════════════════════════════════
         //  Construction
@@ -73,10 +84,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Constructor_NoTools_Throws()
+        public void Constructor_NoTools_CreatesInstructionOnlySkill()
         {
-            Assert.Throws<ArgumentException>(() =>
-                new SkillSet("Empty", "desc", "inst"));
+            SkillSet skill = new("Empty", "desc", "inst");
+            Assert.AreEqual("Empty", skill.Name);
+            Assert.AreEqual("desc", skill.Description);
+            Assert.AreEqual("inst", skill.Instructions);
+            Assert.AreEqual(0, skill.Tools.Count);
+            Assert.AreEqual(0, skill.ToolNames.Length);
         }
 
         [Test]
@@ -254,7 +269,11 @@ namespace CoreAI.Tests.EditMode
         {
             bool called = false;
             DelegateLlmTool inner = new("test_tool", "A test",
-                new Func<string, object>(x => { called = true; return new { echo = x }; }));
+                new Func<string, object>(x =>
+                {
+                    called = true;
+                    return new { echo = x };
+                }));
             SkillSet skill = new("TestSkill", "Test", "instructions", inner);
 
             DelegateLlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
@@ -277,9 +296,9 @@ namespace CoreAI.Tests.EditMode
             SkillSet combat = MakeCombatSkill();
 
             AgentConfig config = new AgentBuilder("test_agent")
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkill(crafting)
                 .WithSkill(combat)
                 .WithMode(AgentMode.ToolsAndChat)
@@ -298,9 +317,9 @@ namespace CoreAI.Tests.EditMode
             SkillSet b = MakeCombatSkill();
 
             AgentConfig config = new AgentBuilder("test_multi")
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkills(a, b)
                 .Build();
 
@@ -313,9 +332,9 @@ namespace CoreAI.Tests.EditMode
         {
             SkillSet crafting = MakeCraftingSkill();
             AgentConfig config = new AgentBuilder("test_policy")
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkill(crafting)
                 .WithMode(AgentMode.ToolsAndChat)
                 .Build();
@@ -331,8 +350,15 @@ namespace CoreAI.Tests.EditMode
             bool hasCallSkillTool = false;
             foreach (ILlmTool tool in tools)
             {
-                if (tool.Name == "read_skill") hasReadSkill = true;
-                if (tool.Name == "call_skill_tool") hasCallSkillTool = true;
+                if (tool.Name == "read_skill")
+                {
+                    hasReadSkill = true;
+                }
+
+                if (tool.Name == "call_skill_tool")
+                {
+                    hasCallSkillTool = true;
+                }
             }
 
             Assert.IsTrue(hasReadSkill, "read_skill meta-tool should be registered.");
@@ -352,9 +378,9 @@ namespace CoreAI.Tests.EditMode
             SkillSet crafting = MakeCraftingSkill();
             SkillSet combat = MakeCombatSkill();
             AgentConfig config = new AgentBuilder("test_catalog")
-            {
-                SuppressBuildWarnings = true
-            }
+                {
+                    SuppressBuildWarnings = true
+                }
                 .WithSkill(crafting)
                 .WithSkill(combat)
                 .Build();
@@ -363,7 +389,8 @@ namespace CoreAI.Tests.EditMode
             config.ApplyToPolicy(policy);
 
             // RuntimeContextProvider should produce catalog
-            Assert.IsTrue(policy.TryGetRuntimeContextProvider("test_catalog", out var provider),
+            Assert.IsTrue(
+                policy.TryGetRuntimeContextProvider("test_catalog", out IAgentRuntimeContextProvider provider),
                 "RuntimeContextProvider should be registered.");
             string context = provider.BuildContext(
                 new AiTaskRequest { RoleId = "test_catalog" }, "test_catalog", "trace");

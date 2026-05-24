@@ -1,15 +1,15 @@
 namespace CoreAI.Authority
 {
     /// <summary>
-    /// Роль текущего процесса в сети (solo / Netcode / кастом). Реализация в игре — MonoBehaviour в сборке Source.
+    /// Describes the local peer authority state used by CoreAI network checks.
     /// </summary>
     public interface IAiNetworkPeer
     {
-        /// <summary>Узел владеет серверным/хостовым авторитетом (в solo всегда true).</summary>
+        /// <summary>Gets whether this peer is the authoritative host.</summary>
         bool IsHostAuthority { get; }
 
         /// <summary>
-        /// Узел — только удалённый клиент (без host authority). В solo/listen на машине хоста — false.
+        /// Gets whether this peer is a non-host client.
         /// </summary>
         bool IsPureClient { get; }
     }

@@ -25,9 +25,20 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore memoryStore = null)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (coreSettings == null) throw new ArgumentNullException(nameof(coreSettings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (coreSettings == null)
+            {
+                throw new ArgumentNullException(nameof(coreSettings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
 
             _client = MeaiLlmClient.CreateHttp(settings, coreSettings, logger, memoryStore);
         }

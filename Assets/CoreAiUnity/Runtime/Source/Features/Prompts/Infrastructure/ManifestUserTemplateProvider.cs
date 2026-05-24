@@ -2,45 +2,45 @@ using CoreAI.Ai;
 
 namespace CoreAI.Infrastructure.Prompts
 {
-    /// <summary>User-шаблоны из <see cref="AgentPromptsManifest"/> (переопределения и кастомные роли).</summary>
+    /// <summary>Resolves user prompt templates from an AgentPrompts manifest.</summary>
     public sealed class ManifestUserTemplateProvider : IAgentUserPromptTemplateProvider
     {
-        private readonly AgentPromptsManifest _manifest;
+        private readonly AgentPromptsDefinition _definition;
 
-        /// <param name="manifest">ScriptableObject с записями ролей; может быть <c>null</c> (всегда miss).</param>
+        /// <param name="manifest">The manifest value.</param>
         public ManifestUserTemplateProvider(AgentPromptsManifest manifest)
+            : this(manifest != null ? manifest.ToDefinition() : null)
         {
-            _manifest = manifest;
+        }
+
+        /// <param name="definition">Unity-free prompt snapshot.</param>
+        public ManifestUserTemplateProvider(AgentPromptsDefinition definition)
+        {
+            _definition = definition;
         }
 
         /// <inheritdoc />
         public bool TryGetUserTemplate(string roleId, out string template)
         {
             template = null;
-            if (_manifest == null || string.IsNullOrWhiteSpace(roleId))
+            if (_definition == null || string.IsNullOrWhiteSpace(roleId))
             {
                 return false;
             }
 
-            foreach (AgentPromptsManifest.Entry e in _manifest.EnumerateEntries())
+            foreach (AgentPromptEntryDefinition e in _definition.EnumerateEntries())
             {
-                if (e == null || string.IsNullOrWhiteSpace(e.roleId) || e.userPromptTemplate == null)
+                if (e == null || string.IsNullOrWhiteSpace(e.RoleId) || string.IsNullOrWhiteSpace(e.UserPromptTemplate))
                 {
                     continue;
                 }
 
-                if (e.roleId.Trim() != roleId.Trim())
+                if (e.RoleId.Trim() != roleId.Trim())
                 {
                     continue;
                 }
 
-                string t = e.userPromptTemplate.text;
-                if (string.IsNullOrWhiteSpace(t))
-                {
-                    return false;
-                }
-
-                template = t;
+                template = e.UserPromptTemplate;
                 return true;
             }
 

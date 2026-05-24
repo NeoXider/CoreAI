@@ -14,8 +14,10 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class PanelForTesting : CoreAiChatPanel
         {
-            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId) =>
-                BuildAiTaskRequest(userText, roleId);
+            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId)
+            {
+                return BuildAiTaskRequest(userText, roleId);
+            }
         }
 
         private sealed class PanelWithAllowedTools : CoreAiChatPanel
@@ -27,8 +29,10 @@ namespace CoreAI.Tests.EditMode
                 return r;
             }
 
-            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId) =>
-                BuildAiTaskRequest(userText, roleId);
+            public AiTaskRequest InvokeBuildAiTaskRequest(string userText, string roleId)
+            {
+                return BuildAiTaskRequest(userText, roleId);
+            }
         }
 
         [Test]

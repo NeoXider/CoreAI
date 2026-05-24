@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -51,8 +51,7 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Удаляет <c>Application.persistentDataPath/CoreAI</c> — память агентов, чат, сводки, версии Lua/оверлеев.
-        /// Не трогает ассеты проекта (только рантайм-сейвы редактора/билда).
+        /// Executes delete all persistent saves.
         /// </summary>
         [MenuItem("CoreAI/Delete All Persistent Saves...", false, 60)]
         public static void DeleteAllPersistentSaves()
@@ -61,22 +60,22 @@ namespace CoreAI.Editor
             {
                 EditorUtility.DisplayDialog(
                     "CoreAI",
-                    "Удаление сохранений недоступно во время Play Mode. Остановите воспроизведение и повторите.",
+                    "Stored data cannot be deleted while Play Mode is running. Stop playback and try again.",
                     "OK");
                 return;
             }
 
             string root = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName);
             if (!EditorUtility.DisplayDialog(
-                    "CoreAI — удаление сохранений",
-                    "Удалить все файлы CoreAI в persistentDataPath?\n\n" +
-                    "• AgentMemory — память агентов и история чата\n" +
-                    "• ConversationSummaries — сводки для компакции\n" +
-                    "• LuaScriptVersions — версии Lua Programmer\n" +
-                    "• DataOverlayVersions — оверлеи данных\n\n" +
+                    "CoreAI - Delete Persistent Saves",
+                    "Delete all CoreAI files in persistentDataPath?\n\n" +
+                    "- AgentMemory: agent memory and chat history\n" +
+                    "- ConversationSummaries: compacted conversation summaries\n" +
+                    "- LuaScriptVersions: Lua Programmer versions\n" +
+                    "- DataOverlayVersions: data overlay versions\n\n" +
                     root,
-                    "Удалить",
-                    "Отмена"))
+                    "Delete",
+                    "Cancel"))
             {
                 return;
             }
@@ -85,20 +84,20 @@ namespace CoreAI.Editor
             {
                 if (Directory.Exists(root))
                 {
-                    Directory.Delete(root, recursive: true);
+                    Directory.Delete(root, true);
                     CoreAIEditorLog.Log($"Persistent saves deleted: {root}");
-                    EditorUtility.DisplayDialog("CoreAI", "Каталог удалён:\n" + root, "OK");
+                    EditorUtility.DisplayDialog("CoreAI", "Folder deleted:\n" + root, "OK");
                 }
                 else
                 {
                     CoreAIEditorLog.Log($"CoreAI persistent folder not found (nothing to delete): {root}");
-                    EditorUtility.DisplayDialog("CoreAI", "Каталог не найден (удалять нечего):\n" + root, "OK");
+                    EditorUtility.DisplayDialog("CoreAI", "Folder not found; nothing to delete:\n" + root, "OK");
                 }
             }
             catch (Exception ex)
             {
                 CoreAIEditorLog.LogError($"Failed to delete persistent saves: {ex.Message}");
-                EditorUtility.DisplayDialog("CoreAI", "Не удалось удалить каталог:\n" + ex.Message, "OK");
+                EditorUtility.DisplayDialog("CoreAI", "Failed to delete folder:\n" + ex.Message, "OK");
             }
         }
 
@@ -112,8 +111,7 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Не создаём ассеты в том же кадре, что и domain reload: AssetDatabase/Resources ещё могут не
-        /// отдать существующий CoreAISettings.asset — тогда создавался бы новый с дефолтами и перезаписывал файл на диске.
+        /// Executes auto create default assets on load.
         /// </summary>
         [InitializeOnLoadMethod]
         private static void AutoCreateDefaultAssetsOnLoad()
@@ -129,13 +127,13 @@ namespace CoreAI.Editor
                 return;
             }
 
-            // 1. Уже в БД ассетов
+            // Skip processing when the checked condition is already satisfied.
             if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
             {
                 return;
             }
 
-            // 2. Файл уже есть на диске (клон репозитория / первая загрузка), но импорт ещё не подхватил — не создаём дубликат
+            // Resolve and cache required local values.
             string onDisk = Path.Combine(Application.dataPath, "Resources", "CoreAISettings.asset");
             if (File.Exists(onDisk))
             {
@@ -146,7 +144,7 @@ namespace CoreAI.Editor
                 }
             }
 
-            // 3. Другая папка Resources/ с тем же логическим именем «CoreAISettings»
+            // No-op guard before a conditional operation.
             CoreAISettingsAsset existing = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
             if (existing != null)
             {
@@ -166,8 +164,8 @@ namespace CoreAI.Editor
 
             GameLogSettingsAsset logSettings = EnsureAsset<GameLogSettingsAsset>(LogSettingsPath);
 
-            // CoreAISettings: проверяем через Resources.Load, чтобы не перезаписать
-            // настройки пользователя, расположенные в другой папке Resources/
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
             CoreAISettingsAsset coreAiSettings = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
             if (coreAiSettings == null)
             {
@@ -236,12 +234,12 @@ namespace CoreAI.Editor
         [MenuItem("CoreAI/Setup/Create Bare Scene (advanced)", priority = 8)]
         public static void CreateSceneSetup()
         {
-            // 1. Проверка: не дублировать CoreAILifetimeScope
+            // No-op guard before a conditional operation.
             CoreAILifetimeScope existingScope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (existingScope != null)
             {
                 if (!EditorUtility.DisplayDialog(
-                        "CoreAI — Bare Scene Setup",
+                        "CoreAI - Bare Scene Setup",
                         "CoreAILifetimeScope already exists in this scene.\nSelect it in the Inspector?",
                         "Select", "Cancel"))
                 {
@@ -253,15 +251,15 @@ namespace CoreAI.Editor
                 return;
             }
 
-            // 2. Гарантируем наличие ассетов
+            // No-op guard before a conditional operation.
             CreateDefaultAssets();
 
-            // 3. Создаём GameObject с CoreAILifetimeScope
+            // No-op guard before a conditional operation.
             GameObject scopeGo = new("CoreAILifetimeScope");
             Undo.RegisterCreatedObjectUndo(scopeGo, "Create CoreAI Bare Scene Setup");
             CoreAILifetimeScope scope = scopeGo.AddComponent<CoreAILifetimeScope>();
 
-            // 4. Назначаем ассеты
+            // No-op guard before a conditional operation.
             GameLogSettingsAsset logSettings =
                 AssetDatabase.LoadAssetAtPath<GameLogSettingsAsset>(LogSettingsPath);
             CoreAISettingsAsset coreAiSettings =
@@ -314,16 +312,16 @@ namespace CoreAI.Editor
             }
         }
 
-        /// <summary>Добавить LLM и LLMAgent на сцену (без compile-time зависимости через #if).</summary>
+        /// <summary>Creates LLMAgent scene objects needed for LLMUnity integration when they are missing.</summary>
         private static void TryCreateLlmUnityObjects(GameObject parentScope)
         {
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             try
             {
-                // Проверяем, нет ли уже LLM на сцене
+                // Skip processing when the checked condition is already satisfied.
                 if (TryFindMonoBehaviourByTypeName("LLM") != null)
                 {
-                    CoreAIEditorLog.Log("Scene Setup: LLM уже есть на сцене, пропускаем создание.");
+                    CoreAIEditorLog.Log("Scene Setup: LLM already exists in the scene; skipping creation.");
                     return;
                 }
 
@@ -340,7 +338,7 @@ namespace CoreAI.Editor
                 agent.remote = false;
                 agent.llm = llm;
 
-                // Попробовать назначить модель из настроек
+                // No-op guard before a conditional operation.
                 CoreAISettingsAsset settings = AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
                 if (settings != null)
                 {
@@ -353,15 +351,14 @@ namespace CoreAI.Editor
                 }
 
                 EditorUtility.SetDirty(llmGo);
-                CoreAIEditorLog.Log($"Scene Setup: LLM + LLMAgent созданы (модель: {llm.model ?? "не назначена"}).");
+                CoreAIEditorLog.Log($"Scene Setup: LLM + LLMAgent created (model: {llm.model ?? "not assigned"}).");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                CoreAIEditorLog.LogWarning($"Scene Setup: не удалось создать LLM объекты: {ex.Message}");
+                CoreAIEditorLog.LogWarning($"Scene Setup: failed to create LLM objects: {ex.Message}");
             }
 #else
-            CoreAIEditorLog.LogWarning(
-                "Scene Setup: LLMUnity недоступен (пакет не установлен или UNITY_WEBGL). LLM и LLMAgent не созданы.");
+            CoreAIEditorLog.LogWarning("Scene Setup: LLMUnity is unavailable (package not installed or UNITY_WEBGL). LLM and LLMAgent were not created.");
 #endif
         }
 
@@ -379,7 +376,7 @@ namespace CoreAI.Editor
                 found = true;
                 if (i == 0)
                 {
-                    CoreAIEditorLog.Log($"{labelForLog} уже первая в Build Settings.");
+                    CoreAIEditorLog.Log($"{labelForLog} is already first in Build Settings.");
                     return;
                 }
 
@@ -402,7 +399,7 @@ namespace CoreAI.Editor
             }
 
             EditorBuildSettings.scenes = scenes;
-            CoreAIEditorLog.Log($"Build Settings: первая сцена — {labelForLog}.");
+            CoreAIEditorLog.Log($"Build Settings: first scene is {labelForLog}.");
         }
 
         private static void EnsureFolder(string folderPath)
@@ -437,7 +434,7 @@ namespace CoreAI.Editor
                 return;
             }
 
-            SerializedObject so = new SerializedObject(created);
+            SerializedObject so = new(created);
             SerializedProperty enable = so.FindProperty("enableStreaming");
             if (enable != null && enable.propertyType == SerializedPropertyType.Boolean)
             {
@@ -470,7 +467,8 @@ namespace CoreAI.Editor
         /// <summary>Optional LLMUnity integration: no compile-time reference to the package.</summary>
         private static MonoBehaviour TryFindMonoBehaviourByTypeName(string typeName)
         {
-            foreach (MonoBehaviour mb in UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include,
+            foreach (MonoBehaviour mb in UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
+                         FindObjectsInactive.Include,
                          FindObjectsSortMode.None))
             {
                 if (mb != null && mb.GetType().Name == typeName)

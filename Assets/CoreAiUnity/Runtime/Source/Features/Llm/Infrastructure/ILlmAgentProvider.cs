@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -6,22 +6,20 @@ namespace CoreAI.Infrastructure.Llm
     using LLMUnity;
 
     /// <summary>
-    /// Абстракция для поиска или создания <see cref="LLMAgent"/> без вызова <c>FindFirstObjectByType</c> в composition root.
-    /// Реализация по умолчанию: <see cref="ConfigurableLlmAgentProvider"/>.
+    /// Resolves LLMUnity agents by logical agent name.
     /// </summary>
     public interface ILlmAgentProvider
     {
-        /// <summary>Найти LLMAgent по имени (или первый доступный, если имя пустое). Null если не найден.</summary>
+        /// <summary>Resolves an LLMAgent or Unity object by configured agent name.</summary>
         LLMAgent Resolve(string agentName);
     }
 #else
     /// <summary>
-    /// WebGL / no LLMUnity: локальный LLMUnity бэкенд недоступен, провайдер агента не используется.
-    /// Оставляем интерфейс для DI без зависимости от пакета LLMUnity.
+    /// Resolves LLMUnity agents by logical agent name.
     /// </summary>
     public interface ILlmAgentProvider
     {
-        /// <summary>Всегда возвращает <c>null</c> когда LLMUnity не установлен.</summary>
+        /// <summary>Resolves an LLMAgent or Unity object by configured agent name.</summary>
         Object Resolve(string agentName);
     }
 

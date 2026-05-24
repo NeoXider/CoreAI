@@ -188,12 +188,12 @@ namespace CoreAI.Infrastructure.Llm
                 pub?.Publish(new LlmAuthExpired(
                     request?.TraceId ?? "",
                     request?.AgentRoleId ?? "",
-                    refreshAttempted: ServerManagedAuthorization.Refresher != null,
-                    refreshSucceeded: false));
+                    ServerManagedAuthorization.Refresher != null,
+                    false));
             }
             catch
             {
-                // GlobalMessagePipe may be uninitialized in editor tests — silently ignore.
+                // No-op guard before a conditional operation.
             }
         }
     }

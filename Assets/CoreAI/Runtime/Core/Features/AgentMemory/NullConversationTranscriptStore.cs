@@ -11,7 +11,9 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public IReadOnlyList<ConversationEntry> GetTranscriptEntries(string roleId, int maxEntries) =>
-            System.Array.Empty<ConversationEntry>();
+        public IReadOnlyList<ConversationEntry> GetTranscriptEntries(string roleId, int maxEntries)
+        {
+            return System.Array.Empty<ConversationEntry>();
+        }
     }
 }

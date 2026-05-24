@@ -3,33 +3,32 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Идентификаторы ролей (строки) — синхрон с каталогом AI_AGENT_ROLES.md по смыслу.
-    /// Для своих агентов используйте любой стабильный id (например <c>MyGame.Economist</c>).
+    /// Defines built-in agent role identifiers used by CoreAI.
     /// </summary>
     public static class BuiltInAgentRoleIds
     {
-        /// <summary>Процедурный дизайн / контент (волны, модификаторы и т.д.).</summary>
+        /// <summary>Creator.</summary>
         public const string Creator = "Creator";
 
-        /// <summary>Аналитика состояния сессии без прямого изменения мира.</summary>
+        /// <summary>Analyzer.</summary>
         public const string Analyzer = "Analyzer";
 
-        /// <summary>Генерация и исполнение Lua в песочнице.</summary>
+        /// <summary>Programmer.</summary>
         public const string Programmer = "Programmer";
 
-        /// <summary>Диалоги и поведение NPC.</summary>
+        /// <summary>Ai npc.</summary>
         public const string AiNpc = "AINpc";
 
-        /// <summary>Ядро правил тайтла (мета-логика).</summary>
+        /// <summary>Role id for the core gameplay mechanics agent.</summary>
         public const string CoreMechanic = "CoreMechanicAI";
 
-        /// <summary>Простой чат с игроком без MemoryTool по умолчанию (история диалога сохраняется).</summary>
+        /// <summary>Plain chat.</summary>
         public const string PlainChat = "PlainChat";
 
-        /// <summary>Умный чат с игроком: чат + MemoryTool по умолчанию.</summary>
+        /// <summary>Smart chat.</summary>
         public const string SmartChat = "SmartChat";
 
-        /// <summary>Торговец/NPC с инвентарём для продажи предметов игроку.</summary>
+        /// <summary>Merchant.</summary>
         public const string Merchant = "Merchant";
 
         /// <summary>
@@ -38,7 +37,7 @@ namespace CoreAI.Ai
         /// </summary>
         public const string ContextCompactionAux = "__CoreAI_ContextCompaction";
 
-        /// <summary>Все встроенные роли (для тестов и валидации манифестов).</summary>
+        /// <summary>All built in roles.</summary>
         public static readonly IReadOnlyList<string> AllBuiltInRoles = new[]
         {
             Creator,

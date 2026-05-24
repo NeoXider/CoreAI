@@ -44,9 +44,21 @@ namespace CoreAI.Tests.PlayMode
 
             var recipes = new[]
             {
-                new { recipe_id = "iron_sword_01", name = "Iron Sword", materials = new[] { "iron_ingot x3", "leather_strip x1" }, quality = "normal" },
-                new { recipe_id = "iron_dagger_01", name = "Iron Dagger", materials = new[] { "iron_ingot x1", "leather_strip x1" }, quality = "normal" },
-                new { recipe_id = "steel_shield_01", name = "Steel Shield", materials = new[] { "steel_ingot x4", "leather x2" }, quality = "fine" }
+                new
+                {
+                    recipe_id = "iron_sword_01", name = "Iron Sword",
+                    materials = new[] { "iron_ingot x3", "leather_strip x1" }, quality = "normal"
+                },
+                new
+                {
+                    recipe_id = "iron_dagger_01", name = "Iron Dagger",
+                    materials = new[] { "iron_ingot x1", "leather_strip x1" }, quality = "normal"
+                },
+                new
+                {
+                    recipe_id = "steel_shield_01", name = "Steel Shield",
+                    materials = new[] { "steel_ingot x4", "leather x2" }, quality = "fine"
+                }
             };
 
             string result = Newtonsoft.Json.JsonConvert.SerializeObject(recipes);
@@ -121,7 +133,10 @@ namespace CoreAI.Tests.PlayMode
             public long ElapsedMs;
             public int CallCount;
 
-            public CaptureLlm(ILlmClient inner) => _inner = inner;
+            public CaptureLlm(ILlmClient inner)
+            {
+                _inner = inner;
+            }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken ct = default)
@@ -149,7 +164,11 @@ namespace CoreAI.Tests.PlayMode
         private sealed class Sink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
-            public void Publish(ApplyAiGameCommand c) => Items.Add(c);
+
+            public void Publish(ApplyAiGameCommand c)
+            {
+                Items.Add(c);
+            }
         }
 
         // ── Test: Self-Service Pattern ────────────────────────────────────────
@@ -208,9 +227,9 @@ namespace CoreAI.Tests.PlayMode
 
                 const string roleId = "SkillCraftmaster";
                 AgentConfig config = new AgentBuilder(roleId)
-                {
-                    SuppressBuildWarnings = true
-                }
+                    {
+                        SuppressBuildWarnings = true
+                    }
                     .WithSystemPrompt(
                         "You are a Game Master for a fantasy RPG. " +
                         "When the player asks to do something, first call read_skill to load " +
@@ -277,7 +296,7 @@ namespace CoreAI.Tests.PlayMode
                 bool readSkillCalled = _calledTools.Contains("read_skill");
                 Debug.Log($"[SkillRealTest] read_skill called:         {readSkillCalled}");
 
-                foreach (var kvp in _toolResults)
+                foreach (KeyValuePair<string, string> kvp in _toolResults)
                 {
                     Debug.Log($"[SkillRealTest] Tool result [{kvp.Key}]: {kvp.Value}");
                 }
@@ -306,7 +325,8 @@ namespace CoreAI.Tests.PlayMode
                     // Small models via LLMUnity may output tool calls as text without native function calling.
                     // If model tried to call read_skill in text, it's a backend limitation, not a test failure.
                     bool modelTriedToolCall = cap.LastContent != null &&
-                        (cap.LastContent.Contains("read_skill") || cap.LastContent.Contains("call_skill_tool"));
+                                              (cap.LastContent.Contains("read_skill") ||
+                                               cap.LastContent.Contains("call_skill_tool"));
                     if (modelTriedToolCall)
                     {
                         Assert.Inconclusive(

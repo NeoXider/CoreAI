@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Версионирование JSON/текстовых оверлеев конфигурации (ключ — логический use case, например <c>progression.baseline</c>).</summary>
+    /// <summary>Version record for a mutable data overlay payload.</summary>
     public sealed class DataOverlayVersionRecord
     {
         public DataOverlayVersionRecord(

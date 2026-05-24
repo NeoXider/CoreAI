@@ -14,7 +14,7 @@ namespace CoreAI.Ai
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Important:</b> the orchestrator’s <b>main agent system prompt</b> (role instructions, universal prefix,
+    /// Provides API usage information.
     /// memory block, tool contract, etc.) is <b>never</b> sent to the compaction LLM. Only chat transcript lines from
     /// <see cref="IAgentMemoryStore.GetChatHistory"/> (plus stored rolling summary) appear in <see cref="LlmCompletionRequest.UserPayload"/>.
     /// The compaction call uses its own compact <see cref="LlmContextCompactionOptions.SystemPrompt"/> (default via
@@ -22,7 +22,7 @@ namespace CoreAI.Ai
     /// </para>
     /// <para>
     /// After compaction, the orchestrator merges the updated summary under <c>## Conversation Summary</c> into the main
-    /// system prompt separately — that text is consumed by the <b>main</b> model, not re-fed into the compaction pass.
+    /// Provides API usage information.
     /// </para>
     /// </remarks>
     public sealed class LlmAssistedConversationContextManager : IAsyncConversationContextManager
@@ -165,7 +165,8 @@ namespace CoreAI.Ai
             return NormalizeSummaryText(result.Content, _options.MaxSummaryChars);
         }
 
-        private static string BuildCompactionUserPayload(string priorSummary, ChatMessage[] history, int splitExclusive, LlmContextCompactionOptions options)
+        private static string BuildCompactionUserPayload(string priorSummary, ChatMessage[] history, int splitExclusive,
+            LlmContextCompactionOptions options)
         {
             int maxChars = options.MaxPayloadChars;
             int maxPerMsg = options.MaxPerMessageChars;
@@ -187,7 +188,8 @@ namespace CoreAI.Ai
             }
 
             sb.AppendLine();
-            sb.AppendLine("Output a compact updated rolling summary (bullets or short paragraphs). Do not repeat wording unnecessarily.");
+            sb.AppendLine(
+                "Output a compact updated rolling summary (bullets or short paragraphs). Do not repeat wording unnecessarily.");
 
             string text = sb.ToString();
             return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "\n…[truncated]";

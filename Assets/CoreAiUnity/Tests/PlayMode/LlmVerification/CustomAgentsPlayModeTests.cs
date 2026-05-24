@@ -89,7 +89,7 @@ namespace CoreAI.Tests.PlayMode
                 LastTools = request.Tools;
                 LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken);
                 LastOk = result != null && result.Ok;
-                LastError = result is { Ok: false } ? (result.Error ?? "(no error message)") : null;
+                LastError = result is { Ok: false } ? result.Error ?? "(no error message)" : null;
                 if (result != null && result.Ok)
                 {
                     LastContent = result.Content;
@@ -157,6 +157,7 @@ namespace CoreAI.Tests.PlayMode
                         "Production-like LLM did not return usable output (see MeaiOpenAiChatClient / HTTP logs; fix endpoint). " +
                         $"Last error: {r.LlmError ?? "null"}");
                 }
+
                 Debug.Log("[CustomAgents] TEST 1 PASSED");
             }
             finally
@@ -233,6 +234,7 @@ namespace CoreAI.Tests.PlayMode
                         "Production-like LLM did not return usable output (HTTP 500 / offline). " +
                         $"Last error: {r.LlmError ?? "null"}");
                 }
+
                 Debug.Log("[CustomAgents] TEST 3 PASSED");
             }
             finally
@@ -296,7 +298,8 @@ namespace CoreAI.Tests.PlayMode
                 new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
                 new AiPromptComposer(new CustomAgentPromptProvider(cfg.SystemPrompt),
                     new NoAgentUserPromptTemplateProvider(), new NullLuaScriptVersionStore()),
-                store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                store, policy, new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
             Debug.Log($"[CustomAgents] PROMPT TO MODEL ({cfg.RoleId}):");
             Debug.Log($"[CustomAgents] System: {cfg.SystemPrompt}");
@@ -373,5 +376,3 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
-
-

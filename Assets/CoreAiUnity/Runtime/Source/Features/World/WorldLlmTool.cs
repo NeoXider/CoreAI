@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -14,11 +14,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// ILlmTool реализация для WorldTool — позволяет LLM вызывать world commands.
-    /// Включает логику выполнения (ExecuteAsync) и метаданные инструмента.
-    /// 
-    /// Примечание: этот класс находится в CoreAiUnity потому что зависит от Unity и WorldCommand.
-    /// Для других движков нужно создать аналогичный инструмент.
+    /// LLM tool that converts model requests into world commands.
     /// </summary>
     public sealed class WorldLlmTool : LlmToolBase
     {
@@ -64,7 +60,8 @@ namespace CoreAI.Infrastructure.Llm
             ("prefabKey", "string", false, "Prefab key for spawn command"),
             ("animationName", "string", false, "Name of the animation to play/stop"),
             ("textToDisplay", "string", false, "Text for show_text / update_score"),
-            ("stringValue", "string", false, "Generic string value (e.g. search pattern for list_objects, clip name for play_sound)"),
+            ("stringValue", "string", false,
+                "Generic string value (e.g. search pattern for list_objects, clip name for play_sound)"),
             ("volume", "number", false, "Volume level 0.0-1.0 for set_volume")
         );
 
@@ -202,19 +199,22 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_settings.LogToolCallResults)
                 {
-                    _logger.LogInfo(GameLogFeature.MessagePipe, $"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
+                    _logger.LogInfo(GameLogFeature.MessagePipe,
+                        $"[Tool Call] world_command: {(success ? "SUCCESS" : "FAILED")} - {action}");
                 }
 
                 if (success && action == "list_animations")
                 {
                     string[] anims = _executor.LastListedAnimations ?? Array.Empty<string>();
-                    return SerializeResult(true, $"Found {anims.Length} animations: {string.Join(", ", anims)}", action);
+                    return SerializeResult(true, $"Found {anims.Length} animations: {string.Join(", ", anims)}",
+                        action);
                 }
 
                 if (success && action == "list_objects")
                 {
-                    var objs = _executor.LastListedObjects ?? new List<Dictionary<string, object>>();
-                    return SerializeResult(true, $"Found {objs.Count} matching objects.\n" + 
+                    List<Dictionary<string, object>> objs = _executor.LastListedObjects ??
+                                                            new List<Dictionary<string, object>>();
+                    return SerializeResult(true, $"Found {objs.Count} matching objects.\n" +
                                                  Newtonsoft.Json.JsonConvert.SerializeObject(objs), action);
                 }
 
@@ -349,37 +349,62 @@ namespace CoreAI.Infrastructure.Llm
 
         private static CoreAiWorldCommandEnvelope CreateStopAnimationCommand(string? targetName)
         {
-            if (string.IsNullOrEmpty(targetName)) return null;
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.StopAnimation(targetName);
         }
 
         private static CoreAiWorldCommandEnvelope CreatePlaySoundCommand(string? targetName, string? clipName)
         {
-            if (string.IsNullOrEmpty(targetName)) return null;
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.PlaySound(targetName, clipName ?? "", 1f);
         }
 
         private static CoreAiWorldCommandEnvelope CreateSetVolumeCommand(string? targetName, float volume)
         {
-            if (string.IsNullOrEmpty(targetName)) return null;
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.SetVolume(targetName, volume);
         }
 
         private static CoreAiWorldCommandEnvelope CreateHidePanelCommand(string? targetName)
         {
-            if (string.IsNullOrEmpty(targetName)) return null;
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.HidePanel(targetName);
         }
 
         private static CoreAiWorldCommandEnvelope CreateUpdateScoreCommand(string? targetName, string? text)
         {
-            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(text)) return null;
+            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(text))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.UpdateScore(targetName, text);
         }
 
-        private static CoreAiWorldCommandEnvelope CreateSetVelocityCommand(string? targetName, float fx, float fy, float fz)
+        private static CoreAiWorldCommandEnvelope CreateSetVelocityCommand(string? targetName, float fx, float fy,
+            float fz)
         {
-            if (string.IsNullOrEmpty(targetName)) return null;
+            if (string.IsNullOrEmpty(targetName))
+            {
+                return null;
+            }
+
             return CoreAiWorldCommandEnvelope.SetVelocity(targetName, new Vector3(fx, fy, fz));
         }
 
@@ -414,22 +439,32 @@ namespace CoreAI.Infrastructure.Llm
         {
             return action switch
             {
-                "spawn" => "Missing required parameters for action 'spawn': prefabKey is required; targetName is recommended.",
+                "spawn" =>
+                    "Missing required parameters for action 'spawn': prefabKey is required; targetName is recommended.",
                 "move" => "Missing required parameters for action 'move': targetName is required.",
                 "destroy" => "Missing required parameters for action 'destroy': targetName is required.",
-                "load_scene" => "Missing required parameters for action 'load_scene': stringValue must be the scene name.",
+                "load_scene" =>
+                    "Missing required parameters for action 'load_scene': stringValue must be the scene name.",
                 "set_active" => "Missing required parameters for action 'set_active': targetName is required.",
-                "play_animation" => "Missing required parameters for action 'play_animation': targetName and animationName (or stringValue) are required.",
+                "play_animation" =>
+                    "Missing required parameters for action 'play_animation': targetName and animationName (or stringValue) are required.",
                 "stop_animation" => "Missing required parameters for action 'stop_animation': targetName is required.",
-                "list_animations" => "Missing required parameters for action 'list_animations': targetName is required (for example targetName='Enemy').",
-                "play_sound" => "Missing required parameters for action 'play_sound': targetName and stringValue are required.",
+                "list_animations" =>
+                    "Missing required parameters for action 'list_animations': targetName is required (for example targetName='Enemy').",
+                "play_sound" =>
+                    "Missing required parameters for action 'play_sound': targetName and stringValue are required.",
                 "set_volume" => "Missing required parameters for action 'set_volume': targetName is required.",
-                "show_text" => "Missing required parameters for action 'show_text': targetName and textToDisplay (or stringValue) are required.",
+                "show_text" =>
+                    "Missing required parameters for action 'show_text': targetName and textToDisplay (or stringValue) are required.",
                 "hide_panel" => "Missing required parameters for action 'hide_panel': targetName is required.",
-                "update_score" => "Missing required parameters for action 'update_score': targetName and textToDisplay (or stringValue) are required.",
-                "apply_force" => "Missing required parameters for action 'apply_force': targetName and force components are required.",
-                "set_velocity" => "Missing required parameters for action 'set_velocity': targetName and velocity components are required.",
-                "spawn_particles" => "Missing required parameters for action 'spawn_particles': targetName and stringValue are required.",
+                "update_score" =>
+                    "Missing required parameters for action 'update_score': targetName and textToDisplay (or stringValue) are required.",
+                "apply_force" =>
+                    "Missing required parameters for action 'apply_force': targetName and force components are required.",
+                "set_velocity" =>
+                    "Missing required parameters for action 'set_velocity': targetName and velocity components are required.",
+                "spawn_particles" =>
+                    "Missing required parameters for action 'spawn_particles': targetName and stringValue are required.",
                 "list_objects" => "Missing required parameters for action 'list_objects'.",
                 _ => $"Missing required parameters for action '{action}'."
             };
@@ -446,7 +481,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Результат выполнения world command.
+        /// World Result component used by CoreAI.
         /// </summary>
         public sealed class WorldResult
         {

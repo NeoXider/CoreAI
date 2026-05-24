@@ -3,20 +3,20 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Настройки логирования по фичам (аналог идеи Feature Log Settings из GameDev-Last-War).
+    /// ScriptableObject settings for CoreAI game logging filters.
     /// </summary>
     [CreateAssetMenu(fileName = "GameLogSettings", menuName = "CoreAI/Logging/Game Log Settings")]
     public sealed class GameLogSettingsAsset : ScriptableObject, IGameLogSettings
     {
-        [Tooltip("Для каких категорий разрешён вывод")] [SerializeField]
+        [Tooltip("Minimum log level; Warning hides Debug and Info.")] [SerializeField]
         private GameLogFeature enabledFeatures = GameLogFeature.AllBuiltIn;
 
-        [Tooltip("Минимальный уровень: например Warning отсечёт Debug и Info")] [SerializeField]
+        [Tooltip("Minimum log level; Warning hides Debug and Info.")] [SerializeField]
         private GameLogLevel minimumLevel = GameLogLevel.Debug;
 
         private void OnValidate()
         {
-            // До добавления Llm в enum «все встроенные» давали маску без бита Llm — дополняем при открытии asset.
+            // No-op guard before a conditional operation.
             const GameLogFeature legacyAllBuiltIn =
                 GameLogFeature.Core | GameLogFeature.Composition | GameLogFeature.MessagePipe |
                 GameLogFeature.ExampleRoguelite;
@@ -40,6 +40,32 @@ namespace CoreAI.Infrastructure.Logging
             }
 
             return level >= minimumLevel;
+        }
+
+        /// <summary>
+        /// Builds a Unity-free logging settings snapshot.
+        /// </summary>
+        public GameLogSettingsOptions ToOptions()
+        {
+            return new GameLogSettingsOptions
+            {
+                EnabledFeatures = enabledFeatures,
+                MinimumLevel = minimumLevel
+            };
+        }
+
+        /// <summary>
+        /// Copies portable logging settings into this Unity authoring asset.
+        /// </summary>
+        public void ApplyOptions(GameLogSettingsOptions options)
+        {
+            if (options == null)
+            {
+                return;
+            }
+
+            enabledFeatures = options.EnabledFeatures;
+            minimumLevel = options.MinimumLevel;
         }
     }
 }

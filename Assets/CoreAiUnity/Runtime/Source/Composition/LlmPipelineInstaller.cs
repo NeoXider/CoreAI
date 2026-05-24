@@ -14,15 +14,12 @@ using VContainer;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Регистрация LLM pipeline: клиент, маршрутизация, декоратор логирования, метрики оркестратора.
-    /// MEAI tool-call диагностика публикуется через <see cref="MessagePipeToolCallEventPublisher.Instance"/>
-    /// (см. <see cref="MeaiLlmClient"/>); отдельная регистрация <c>IToolCallEventPublisher</c> в VContainer не требуется.
+    /// Registers LLM clients, routing, tool calling, and orchestration services.
     /// </summary>
     public static class LlmPipelineInstaller
     {
         /// <summary>
-        /// Регистрирует <see cref="ILlmClient"/>, <see cref="ILlmClientRegistry"/>,
-        /// <see cref="ILlmAgentProvider"/>, очередь оркестратора и метрики.
+        /// Registers llm pipeline.
         /// </summary>
         public static void RegisterLlmPipeline(
             this IContainerBuilder builder,
@@ -32,7 +29,7 @@ namespace CoreAI.Composition
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            // Lazy provider: сцена, либо автосозданный LLM+LLMAgent по Core AI Settings (см. ConfigurableLlmAgentProvider).
+            // No-op guard before a conditional operation.
             builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
 #else
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
@@ -68,7 +65,7 @@ namespace CoreAI.Composition
                     llmTimeout,
                     settings != null ? settings.MaxLlmRequestRetries : 0), Lifetime.Singleton);
 
-            // Orchestrator настройки
+            // Resolve and cache required local values.
             int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
@@ -160,27 +157,40 @@ namespace CoreAI.Composition
             if (httpFirst)
             {
                 ILlmClient httpClient = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
-                if (httpClient != null) return httpClient;
+                if (httpClient != null)
+                {
+                    return httpClient;
+                }
 
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
-                if (llmUnityClient != null) return llmUnityClient;
+                if (llmUnityClient != null)
+                {
+                    return llmUnityClient;
+                }
 
                 return BuildOfflineClient(settings);
             }
             else
             {
                 ILlmClient llmUnityClient = TryResolveLlmUnityClient(settings, logger, memoryStore, agentProvider);
-                if (llmUnityClient != null) return llmUnityClient;
+                if (llmUnityClient != null)
+                {
+                    return llmUnityClient;
+                }
 
                 ILlmClient httpClient2 = TryResolveHttpApiClient(settings, LlmExecutionMode.Auto, memoryStore);
-                if (httpClient2 != null) return httpClient2;
+                if (httpClient2 != null)
+                {
+                    return httpClient2;
+                }
 
                 return BuildOfflineClient(settings);
             }
 #endif
         }
 
-        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode, IAgentMemoryStore memoryStore = null)
+        private static ILlmClient TryResolveHttpApiClient(CoreAISettingsAsset settings, LlmExecutionMode mode,
+            IAgentMemoryStore memoryStore = null)
         {
 #if COREAI_NO_LLM
             return null;
@@ -188,14 +198,16 @@ namespace CoreAI.Composition
             if (settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
                 !string.IsNullOrEmpty(settings.ModelName))
             {
-                return BuildHttpClient(settings, mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode, memoryStore);
+                return BuildHttpClient(settings, mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode,
+                    memoryStore);
             }
 
             return null;
 #endif
         }
 
-        internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode, IAgentMemoryStore memoryStore = null)
+        internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode,
+            IAgentMemoryStore memoryStore = null)
         {
 #if COREAI_NO_LLM
             return new StubLlmClient();
@@ -232,7 +244,7 @@ namespace CoreAI.Composition
                 new SecondarySettingsAdapter(settings),
                 settings,
                 GameLoggerUnscopedFallback.Instance,
-                memoryStore: null);
+                null);
 #endif
         }
 
@@ -241,7 +253,11 @@ namespace CoreAI.Composition
         private sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
-            public SecondarySettingsAdapter(CoreAISettingsAsset s) { _s = s; }
+
+            public SecondarySettingsAdapter(CoreAISettingsAsset s)
+            {
+                _s = s;
+            }
 
             public string ApiBaseUrl => _s.SecondaryApiBaseUrl;
             public string ApiKey => _s.SecondaryApiKey;
@@ -279,7 +295,10 @@ namespace CoreAI.Composition
             return null;
 #else
             LLMAgent agent = agentProvider?.Resolve(settings?.LlmUnityAgentName);
-            if (agent == null) return null;
+            if (agent == null)
+            {
+                return null;
+            }
 
             LLM llm = agent.llm != null ? agent.llm : agent.GetComponent<LLM>();
             if (llm != null && settings != null)
@@ -349,7 +368,7 @@ namespace CoreAI.Composition
                     return trimmed;
                 }
 
-                string host = UnityEngine.Application.absoluteURL;
+                string host = Application.absoluteURL;
                 if (string.IsNullOrEmpty(host))
                 {
                     return trimmed;
@@ -357,8 +376,8 @@ namespace CoreAI.Composition
 
                 try
                 {
-                    System.Uri baseUri = new System.Uri(host);
-                    System.Uri resolved = new System.Uri(baseUri, trimmed);
+                    System.Uri baseUri = new(host);
+                    System.Uri resolved = new(baseUri, trimmed);
                     return resolved.ToString().TrimEnd('/');
                 }
                 catch

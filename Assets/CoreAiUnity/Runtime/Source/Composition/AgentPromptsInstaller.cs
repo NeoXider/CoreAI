@@ -5,18 +5,20 @@ using VContainer;
 
 namespace CoreAI.Composition
 {
-    /// <summary>Регистрация цепочек <see cref="IAgentSystemPromptProvider"/> и user-шаблонов из манифеста и Resources.</summary>
+    /// <summary>Registers prompt providers and prompt-version services in the DI container.</summary>
     public static class AgentPromptsInstaller
     {
         /// <summary>
-        /// Регистрирует цепочку провайдеров промптов. Вызвать до <see cref="CorePortableInstaller.RegisterCorePortable"/>.
+        /// Registers and chains manifest, resource, and fallback prompt providers.
         /// </summary>
         public static void RegisterAgentPrompts(this IContainerBuilder builder, AgentPromptsManifest manifest)
         {
+            AgentPromptsDefinition definition = manifest != null ? manifest.ToDefinition() : null;
+
             List<IAgentSystemPromptProvider> systemChain = new();
-            if (manifest != null)
+            if (definition != null)
             {
-                systemChain.Add(new ManifestAgentSystemPromptProvider(manifest));
+                systemChain.Add(new ManifestAgentSystemPromptProvider(definition));
             }
 
             systemChain.Add(new ResourcesAgentSystemPromptProvider("AgentPrompts/System"));
@@ -25,9 +27,9 @@ namespace CoreAI.Composition
             builder.RegisterInstance<IAgentSystemPromptProvider>(new ChainedAgentSystemPromptProvider(systemChain));
 
             List<IAgentUserPromptTemplateProvider> userChain = new();
-            if (manifest != null)
+            if (definition != null)
             {
-                userChain.Add(new ManifestUserTemplateProvider(manifest));
+                userChain.Add(new ManifestUserTemplateProvider(definition));
             }
 
             userChain.Add(new ResourcesUserTemplateProvider("AgentPrompts/User"));
@@ -36,19 +38,22 @@ namespace CoreAI.Composition
             builder.RegisterInstance<IAgentUserPromptTemplateProvider>(
                 new ChainedAgentUserPromptTemplateProvider(userChain));
 
-            // Применяем overrideUniversalPrefix из манифеста при старте контейнера
-            if (manifest != null)
+            // Skip processing when the checked condition is already satisfied.
+            if (definition != null)
             {
                 builder.RegisterBuildCallback(container =>
                 {
                     AgentMemoryPolicy policy = (AgentMemoryPolicy)container.Resolve(typeof(AgentMemoryPolicy));
-                    if (policy == null) return;
-
-                    foreach (AgentPromptsManifest.Entry entry in manifest.EnumerateEntries())
+                    if (policy == null)
                     {
-                        if (entry.overrideUniversalPrefix && !string.IsNullOrWhiteSpace(entry.roleId))
+                        return;
+                    }
+
+                    foreach (AgentPromptEntryDefinition entry in definition.EnumerateEntries())
+                    {
+                        if (entry.OverrideUniversalPrefix && !string.IsNullOrWhiteSpace(entry.RoleId))
                         {
-                            policy.SetOverrideUniversalPrefix(entry.roleId, true);
+                            policy.SetOverrideUniversalPrefix(entry.RoleId, true);
                         }
                     }
                 });

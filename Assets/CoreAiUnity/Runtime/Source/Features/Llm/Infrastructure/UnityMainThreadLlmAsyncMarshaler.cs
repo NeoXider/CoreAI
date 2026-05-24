@@ -9,19 +9,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Runs MEAI tool bodies on Unity's player loop when <see cref="Application"/>.isPlaying (<c>true</c> in
-    /// Player/Play Mode) — required when callers use thread-pool continuations
-    /// (<see cref="SmartToolCallingChatClient"/> uses <c>ConfigureAwait(false)</c>).
-    /// In the Unity Editor outside Play Mode (<c>!Application.isPlaying</c>), invokes the factory inline without
-    /// <c>SwitchToMainThread</c> so Edit Mode stacks that synchronously wait on the main thread do not deadlock.
-    /// Editor **thread-pool** stacks **must not** call <see cref="Application"/>.isPlaying — native getters can fault
-    /// in ways that propagate as <see cref="AggregateException"/> and bypass typed catches. Record the Unity **script**
-    /// main <see cref="Thread.ManagedThreadId"/> beside the **isPlaying** mirror (see <c>Application.onBeforeRender</c>)
-    /// and probe <see cref="Application.isPlaying"/> only when <c>ManagedThreadId</c>s match.
-    /// Off the mirrored main thread, inline when the mirror is not <c>1</c> (Edit idle <c>0</c> or unknown <c>-1</c>).
-    /// Unknown must inline so Edit Mode tests that use <c>Task.Run(...).Wait()</c> on the main thread while MEAI
-    /// continues on the pool do not deadlock on <c>SwitchToMainThread</c>. Scene-load priming reduces stale <c>0</c>
-    /// during Play Mode (see <c>EditorIsPlayingMirrorScenePriming</c>).
+    /// Marshals LLM continuations back to Unity main thread when required.
     /// </summary>
     public sealed class UnityMainThreadLlmAsyncMarshaler : ILlmAsyncMarshaler
     {
@@ -35,7 +23,7 @@ namespace CoreAI.Infrastructure.Llm
         {
 #if UNITY_EDITOR
             // Same bypass as !isPlaying below, but must not call Application.isPlaying off the managed
-            // main thread — MEAI continuations often resume on the CLR thread pool (ConfigureAwait(false)).
+            // Skip processing when the checked condition is already satisfied.
             if (ShouldInvokeToolBodyInlineInEditor())
             {
                 return await factory().ConfigureAwait(false);
@@ -61,7 +49,7 @@ namespace CoreAI.Infrastructure.Llm
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
             private static void Register()
             {
-                // Do not probe Application.isPlaying here — SubsystemRegistration may not run on the Unity script thread.
+                // No-op guard before a conditional operation.
                 EnsureEditorIsPlayingMirrorHook();
             }
         }

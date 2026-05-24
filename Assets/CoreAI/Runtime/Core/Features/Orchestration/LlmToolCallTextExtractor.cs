@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -8,19 +8,7 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Engine-agnostic helper that extracts (or strips) tool-call JSON embedded in assistant
-    /// text. Mirrors the logic used by the streaming and non-streaming pipelines so the
-    /// orchestrator can apply the same rules at boundary points (chat history, command
-    /// envelope) without depending on Microsoft.Extensions.AI types.
-    /// <para>
-    /// Match rule: a balanced JSON object that contains both <c>"name"</c> and <c>"arguments"</c>
-    /// keys. JSON inside fenced code blocks (<c>```...```</c>) is excluded by default to avoid
-    /// stripping example snippets shown by the model.
-    /// </para>
-    /// <para>
-    /// Fallback: local GGUF models sometimes emit pseudo key=value lines such as
-    /// <c>Action=write content="..."</c> instead of JSON — those are mapped to the <c>memory</c> tool when detected.
-    /// </para>
+    /// Extracts tool-call text payloads from model responses.
     /// </summary>
     public static class LlmToolCallTextExtractor
     {
@@ -78,9 +66,16 @@ namespace CoreAI.Ai
             int lastEnd = 0;
             foreach ((int Start, int Length) span in spans)
             {
-                if (span.Start >= text.Length || span.Start + span.Length > text.Length) continue;
+                if (span.Start >= text.Length || span.Start + span.Length > text.Length)
+                {
+                    continue;
+                }
+
                 string original = text.Substring(span.Start, span.Length);
-                if (!LooksLikeToolCallJson(original)) continue;
+                if (!LooksLikeToolCallJson(original))
+                {
+                    continue;
+                }
 
                 string name;
                 string argsJson;
@@ -90,14 +85,25 @@ namespace CoreAI.Ai
                     name = json["name"]?.ToString()?.Trim();
                     // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
                     JToken args = json["arguments"] ?? json["arguments_json"];
-                    if (string.IsNullOrWhiteSpace(name) || args == null) continue;
+                    if (string.IsNullOrWhiteSpace(name) || args == null)
+                    {
+                        continue;
+                    }
+
                     // If args is a string ("arguments_json": "{...}"), parse it as JSON.
                     if (args.Type == JTokenType.String)
                     {
                         string argsStr = args.ToString();
-                        try { args = JToken.Parse(argsStr); }
-                        catch { /* keep as-is */ }
+                        try
+                        {
+                            args = JToken.Parse(argsStr);
+                        }
+                        catch
+                        {
+                            /* keep as-is */
+                        }
                     }
+
                     argsJson = args.ToString(Formatting.None);
                 }
                 catch
@@ -125,11 +131,12 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// GGUF / llama.cpp stacks (e.g. Qwen via LLMUnity) sometimes emit pseudo key=value “tool” lines
+/// Executes TryExtractMemoryPseudoWriteSyntax API operation.
         /// instead of JSON tool calls, e.g. <c>Action=write content="exam on June 15"</c>. Map to the
         /// <c>memory</c> tool so the pipeline can persist and strip the noise.
         /// </summary>
-        private static bool TryExtractMemoryPseudoWriteSyntax(string text, out List<Match> matches, out string cleanedText)
+        private static bool TryExtractMemoryPseudoWriteSyntax(string text, out List<Match> matches,
+            out string cleanedText)
         {
             matches = new List<Match>();
             cleanedText = text ?? string.Empty;
@@ -195,7 +202,7 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Removes any embedded tool-call JSON from <paramref name="assistantText"/> for display
-        /// purposes. Does not execute the calls. Safe to apply to any assistant text — a payload
+/// Executes StripForDisplay API operation.
         /// that does not contain matching JSON is returned unchanged.
         /// </summary>
         public static string StripForDisplay(string assistantText)
@@ -214,7 +221,11 @@ namespace CoreAI.Ai
         /// </summary>
         public static string StripCodeBlocks(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text;
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
             string result = CodeBlockRegex.Replace(text, m => new string(' ', m.Length));
             // BUG-6 safety: StripCodeBlocks MUST preserve length so that span offsets
             // found in the replaced text map correctly back to the original.
@@ -226,7 +237,11 @@ namespace CoreAI.Ai
         /// <summary>Quick textual heuristic before full JSON parsing.</summary>
         public static bool LooksLikeToolCallJson(string json)
         {
-            if (string.IsNullOrWhiteSpace(json)) return false;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
             // Accept both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity emits the latter).
             return json.Contains("\"name\"") &&
                    (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
@@ -240,13 +255,19 @@ namespace CoreAI.Ai
         public static List<(int Start, int Length)> FindBalancedToolCallSpans(string text)
         {
             List<(int Start, int Length)> spans = new();
-            if (string.IsNullOrEmpty(text)) return spans;
+            if (string.IsNullOrEmpty(text))
+            {
+                return spans;
+            }
 
             int i = 0;
             while (i < text.Length)
             {
                 int braceStart = text.IndexOf('{', i);
-                if (braceStart < 0) break;
+                if (braceStart < 0)
+                {
+                    break;
+                }
 
                 int depth = 0;
                 bool inString = false;
@@ -256,11 +277,33 @@ namespace CoreAI.Ai
                 for (; j < text.Length; j++)
                 {
                     char c = text[j];
-                    if (escaped) { escaped = false; continue; }
-                    if (c == '\\' && inString) { escaped = true; continue; }
-                    if (c == '"') { inString = !inString; continue; }
-                    if (inString) continue;
-                    if (c == '{') depth++;
+                    if (escaped)
+                    {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (c == '\\' && inString)
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        continue;
+                    }
+
+                    if (c == '{')
+                    {
+                        depth++;
+                    }
                     else if (c == '}')
                     {
                         depth--;
@@ -271,16 +314,18 @@ namespace CoreAI.Ai
                             {
                                 spans.Add((braceStart, j - braceStart + 1));
                             }
+
                             break;
                         }
                     }
                 }
 
-                i = (depth == 0 && j < text.Length) ? j + 1 : braceStart + 1;
+                i = depth == 0 && j < text.Length ? j + 1 : braceStart + 1;
             }
 
             return spans;
         }
+
         /// <summary>
         /// Fallback for local GGUF models (Qwen3.5 via LLMUnity) that output tool calls as
         /// function-call syntax instead of JSON, e.g.:
@@ -359,7 +404,11 @@ namespace CoreAI.Ai
 
         private static string StripQuotes(string s)
         {
-            if (string.IsNullOrEmpty(s)) return s;
+            if (string.IsNullOrEmpty(s))
+            {
+                return s;
+            }
+
             s = s.Trim();
             if (s.Length >= 2 &&
                 ((s[0] == '"' && s[s.Length - 1] == '"') ||
@@ -367,6 +416,7 @@ namespace CoreAI.Ai
             {
                 return s.Substring(1, s.Length - 2);
             }
+
             return s;
         }
 
@@ -386,7 +436,9 @@ namespace CoreAI.Ai
                 {
                     current.Append(c);
                     if (c == quoteChar && (i == 0 || argsStr[i - 1] != '\\'))
+                    {
                         inQuote = false;
+                    }
                 }
                 else if (c == '"' || c == '\'')
                 {
@@ -394,8 +446,16 @@ namespace CoreAI.Ai
                     quoteChar = c;
                     current.Append(c);
                 }
-                else if (c == '{') { depth++; current.Append(c); }
-                else if (c == '}') { depth--; current.Append(c); }
+                else if (c == '{')
+                {
+                    depth++;
+                    current.Append(c);
+                }
+                else if (c == '}')
+                {
+                    depth--;
+                    current.Append(c);
+                }
                 else if (c == ',' && depth == 0)
                 {
                     parts.Add(current.ToString().Trim());
@@ -406,7 +466,12 @@ namespace CoreAI.Ai
                     current.Append(c);
                 }
             }
-            if (current.Length > 0) parts.Add(current.ToString().Trim());
+
+            if (current.Length > 0)
+            {
+                parts.Add(current.ToString().Trim());
+            }
+
             return parts.ToArray();
         }
     }

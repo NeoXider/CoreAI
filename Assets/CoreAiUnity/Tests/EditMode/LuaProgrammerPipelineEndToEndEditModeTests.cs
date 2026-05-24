@@ -110,7 +110,8 @@ namespace CoreAI.Tests.EditMode
             EnvelopeDispatchSink sink = new(proc, events);
             orchestrator = new AiOrchestrator(new SoloAuthorityHost(), llm, sink, telemetry, composer,
                 new NullAgentMemoryStore(), new AgentMemoryPolicy(),
-                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
+                UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {
@@ -172,7 +173,8 @@ namespace CoreAI.Tests.EditMode
             EnvelopeDispatchSink sink = new(proc, events);
             orchestrator = new AiOrchestrator(new SoloAuthorityHost(), capturingLlm, sink, telemetry, composer,
                 new NullAgentMemoryStore(), new AgentMemoryPolicy(),
-                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NoOpRoleStructuredResponsePolicy(), new NullAiOrchestrationMetrics(),
+                UnityEngine.ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
 
             await orchestrator.RunTaskAsync(new AiTaskRequest
             {

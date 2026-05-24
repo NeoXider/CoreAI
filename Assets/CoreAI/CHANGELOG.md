@@ -1,5 +1,26 @@
 # Changelog
 
+## [v2.5.0] - 2026-05-24
+
+### Version Parity With CoreAI Unity
+
+- Bumped `com.nexoider.coreai` to `2.5.0` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- Updated the Unity package dependency contract to `com.nexoider.coreai` `2.5.0`.
+- No additional portable runtime behavior change beyond the release-train alignment for the Unity ScriptableObject wrapper and options/snapshot work.
+
+## [v2.4.0] - 2026-05-24
+
+### Portable Options and Snapshot Contracts
+
+- Added Unity-free runtime options/snapshots for Unity-authored configuration: `CoreAiChatOptions`, `CoreAISettingsOptions`, `OpenAiHttpOptions`, `GameLogSettingsOptions`, `AiPermissionsOptions`, `AgentPromptsDefinition`, and `SkillSetDefinition`.
+- Moved Unity-free logging contracts (`GameLogFeature`, `GameLogLevel`, `IGameLogSettings`) into the portable CoreAI package.
+- Preserved the rule that `Assets/CoreAI` has no `UnityEngine` dependency; Unity-specific authoring stays in `com.nexoider.coreaiunity`.
+
+### Migration Notes
+
+- Runtime/tests should prefer plain options/classes over mutating Unity `ScriptableObject` assets.
+- Unity assets remain supported through wrapper methods in `com.nexoider.coreaiunity`.
+
 ## [v2.3.1] — 2026-05-08
 
 ### LLMUnity Text-Mode Tool Calling

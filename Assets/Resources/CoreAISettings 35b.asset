@@ -18,7 +18,7 @@ MonoBehaviour:
   apiBaseUrl: http://192.168.1.154:1234/v1
   apiKey: 
   modelName: qwen3.5-4b
-  overrideTemperature: 0
+  enableTemperatureOverriding: 0
   temperature: 0.1
   maxTokens: 2048
   maxClientLimitedRequestsPerSession: 2

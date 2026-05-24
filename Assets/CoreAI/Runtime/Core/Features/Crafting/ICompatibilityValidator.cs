@@ -1,16 +1,15 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Crafting
 {
     /// <summary>
-    /// Интерфейс для пользовательской валидации совместимости.
-    /// Позволяет игре добавить свои правила (физика, химия, магия и т.д.).
+    /// Validates crafting compatibility requests.
     /// </summary>
     public interface ICompatibilityValidator
     {
         /// <summary>
-        /// Проверяет совместимость набора ингредиентов.
-        /// Возвращает null если валидатор не имеет мнения по данным ингредиентам.
+/// Executes Validate API operation.
+        ///
         /// </summary>
         CompatibilityResult Validate(IReadOnlyList<string> ingredients);
     }

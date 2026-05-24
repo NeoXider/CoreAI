@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>Один зафиксированный успешный снимок Lua для слота <see cref="ILuaScriptVersionStore"/>.</summary>
+    /// <summary>Single revision entry in a Lua script version record.</summary>
     public sealed class LuaScriptRevision
     {
         public LuaScriptRevision(int index, string source, long utcTicks)

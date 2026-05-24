@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Ai;
 using CoreAI.Logging;
 using VContainer.Unity;
@@ -6,7 +6,7 @@ using VContainer.Unity;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Точка старта после построения контейнера (аналог раннего bootstrap без MonoBehaviour).
+    /// VContainer entry point that initializes and resets the global CoreAI facade.
     /// </summary>
     public sealed class CoreAIGameEntryPoint : IStartable, IDisposable
     {
@@ -14,8 +14,7 @@ namespace CoreAI.Composition
         private static bool _isInitialized;
 
         /// <summary>
-        /// Если true — при старте автоматически запускается Creator-агент (bootstrap).
-        /// По умолчанию false — оркестратор не запускается сам, дочерний проект решает, когда и что запускать.
+        /// Auto bootstrap.
         /// </summary>
         public static bool AutoBootstrap { get; set; } = false;
 
@@ -25,8 +24,9 @@ namespace CoreAI.Composition
         private readonly IAgentMemoryStore _memoryStore;
         private bool _started;
 
-        /// <summary>DI: лог, оркестратор и политика для bootstrap + глобальный фасад CoreAI.</summary>
-        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy, IAgentMemoryStore memoryStore)
+        /// <summary>Initializes a new instance of CoreAIGameEntryPoint.</summary>
+        public CoreAIGameEntryPoint(ILog logger, IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
+            IAgentMemoryStore memoryStore)
         {
             _logger = logger;
             _orchestrator = orchestrator;
@@ -34,7 +34,7 @@ namespace CoreAI.Composition
             _memoryStore = memoryStore;
         }
 
-        /// <summary>Вызывается VContainer после сборки контейнера; инициализирует CoreAI фасад и опционально запускает bootstrap.</summary>
+        /// <summary>Starts the entry point and registers CoreAI services for runtime use.</summary>
         public void Start()
         {
             lock (StartGate)
@@ -46,8 +46,8 @@ namespace CoreAI.Composition
 
                 if (_isInitialized)
                 {
-                    // Ожидаемо при втором LifetimeScope в процессе (additive scene / тесты без domain reload)
-                    // или пока первый scope ещё не Dispose. Не Warning — иначе шум и stack trace в консоли.
+                    // No-op guard before a conditional operation.
+                    // No-op guard before a conditional operation.
                     _logger.Debug(
                         "CoreAI already initialized in this process. Duplicate CoreAIGameEntryPoint start skipped.",
                         LogTag.Composition);
@@ -58,12 +58,12 @@ namespace CoreAI.Composition
                 _started = true;
             }
 
-            // Инициализируем глобальный фасад CoreAI — 
-            // позволяет вызывать merchant.Ask("text") без DI/container
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
             CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
 
             _logger.Info(
-                "VContainer + MessagePipe (GlobalMessagePipe) + ILog с фильтром по тегам готовы.",
+                "VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.",
                 LogTag.Composition);
 
             if (AutoBootstrap)
@@ -72,7 +72,8 @@ namespace CoreAI.Composition
             }
             else
             {
-                _logger.Info("AutoBootstrap отключён — оркестратор не запускает Creator-агента автоматически.", LogTag.Composition);
+                _logger.Info("AutoBootstrap is disabled; the orchestrator will not start the Creator agent automatically.",
+                    LogTag.Composition);
             }
         }
 

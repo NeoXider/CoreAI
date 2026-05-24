@@ -1,5 +1,6 @@
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,8 +15,7 @@ using System.Text.RegularExpressions;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// MEAI IChatClient обёртка над LLMAgent.
-    /// Парсит tool calls из текстового ответа модели (Qwen не поддерживает структурные tool_calls).
+    /// MEAI chat client backed by LLMUnity.
     /// </summary>
     public sealed class LlmUnityMeaiChatClient : MEAI.IChatClient
     {
@@ -29,8 +29,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Единая сборка system/user для LLMUnity (один вызов <see cref="LLMAgent.Chat"/>).
-        /// Используется и для нестриминга, и для стриминга — паритет с HTTP-путём на уровне MEAI-сообщений.
+/// Executes build llm unity prompt.
+/// Executes build llm unity prompt.
         /// </summary>
         internal static void BuildLlmUnityPrompt(
             IEnumerable<MEAI.ChatMessage> chatMessages,
@@ -113,13 +113,13 @@ namespace CoreAI.Infrastructure.Llm
 
             if (options?.Tools != null && options.Tools.Count > 0)
             {
-                // Дополняет orchestrator ## Tool Contract — без противоречия «только JSON навсегда»,
-                // но явно требует объект вызова; иначе малые GGUF часто отвечают прозой («Saved…») без tool.
+                // No-op guard before a conditional operation.
+                // No-op guard before a conditional operation.
                 sysMessage += "\n\n## Local inference (LLMUnity)\n";
                 sysMessage +=
                     "This runtime has no native API tool channel: the host extracts a JSON object with \"name\" and \"arguments\" from your reply text.\n";
                 sysMessage +=
-                    "Rules: (1) To run a tool, include that JSON object in this assistant reply — describing the tool in words alone never executes it.\n";
+                    "Rules: (1) To run a tool, include that JSON object in this assistant reply - describing the tool in words alone never executes it.\n";
                 sysMessage +=
                     "(2) Put the JSON object before any short closing phrase if you also acknowledge the user.\n";
                 sysMessage +=
@@ -282,26 +282,33 @@ namespace CoreAI.Infrastructure.Llm
             _unityAgent.systemPrompt = sys;
             ApplySamplingToAgent(options);
 
-            // Настоящий стриминг через LLMAgent.Chat callback.
-            // Callback получает полный текст на данный момент — вычисляем дельту.
-            // ВАЖНО: <think>-блоки НЕ фильтруем здесь — это делает внешний
-            // stateful CoreAI.Ai.ThinkBlockStreamFilter в MeaiLlmClient.CompleteStreamingAsync.
-            var chunkQueue = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
+            // No-op guard before a conditional operation.
+            ConcurrentQueue<string> chunkQueue = new();
             bool isCompleted = false;
             int previousLength = 0;
             string previousText = "";
-            var deltaLock = new object();
+            object deltaLock = new();
 
             _ = _unityAgent.Chat(userForChat,
                 (string fullSoFar) =>
                 {
-                    if (string.IsNullOrEmpty(fullSoFar)) return;
+                    if (string.IsNullOrEmpty(fullSoFar))
+                    {
+                        return;
+                    }
 
-                    // Delta-диф под локом: LLMUnity может вызывать callback из worker-потока.
+                    // Resolve and cache required local values.
                     string delta;
                     lock (deltaLock)
                     {
-                        if (fullSoFar.Length <= previousLength) return;
+                        if (fullSoFar.Length <= previousLength)
+                        {
+                            return;
+                        }
+
                         delta = fullSoFar.Substring(previousLength);
                         previousLength = fullSoFar.Length;
                         previousText = fullSoFar;
@@ -313,7 +320,7 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 },
                 () => { isCompleted = true; },
-                addToHistory: false);
+                false);
 
             try
             {
@@ -336,11 +343,11 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                // Для диагностики: если стрим отменён, сохраняем, сколько успели получить.
+                // No-op guard before a conditional operation.
                 _ = previousText;
             }
 
-            // Слив остаточной очереди (на случай гонки между isCompleted и Enqueue).
+            // Iterate through the data sequence.
             while (chunkQueue.TryDequeue(out string remaining))
             {
                 if (!string.IsNullOrEmpty(remaining))

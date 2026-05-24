@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
 {
-    /// <summary>Персистентные оверлеи данных под <see cref="Application.persistentDataPath"/>/CoreAI/DataOverlayVersions/.</summary>
+    /// <summary>Persists data overlay version records to the local file system.</summary>
     public sealed class FileDataOverlayVersionStore : IDataOverlayVersionStore
     {
         private readonly IGameLogger _logger;

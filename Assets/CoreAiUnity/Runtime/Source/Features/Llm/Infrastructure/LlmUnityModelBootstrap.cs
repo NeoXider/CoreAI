@@ -4,38 +4,21 @@ using System.Collections.Generic;
 using System.IO;
 using CoreAI.Infrastructure.Logging;
 using LLMUnity;
-using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// В инспекторе LLMUnity список моделей (Model Manager) может быть заполнен, а поле <see cref="LLM.model"/> в сцене —
-    /// пустым (сцена не сохранена, не нажата радиокнопка и т.д.). Тогда CoreAI честно уходит в <see cref="StubLlmClient"/>.
-    /// Пытаемся подставить модель из Model Manager (см. README LLMUnity «LLM model management»):
-    /// при нескольких кандидатах с файлом на диске предпочитаем записи с <see cref="ModelEntry.includeInBuild"/>
-    /// (колонка Build в инспекторе), иначе первую по порядку в списке. Эталонный способ — радиокнопка у модели и Save сцены.
+    /// Bootstraps local LLMUnity model loading from CoreAI settings.
     /// </summary>
     public static class LlmUnityModelBootstrap
     {
-        /// <summary>
-        /// Возвращает ожидаемое имя .gguf-файла из подсказки (путь или basename). Пустая строка если ввод пустой.
-        /// </summary>
+        /// <summary>Returns the file name part of a GGUF path or hint.</summary>
         public static string NormalizeGgufHintToFileName(string ggufHint)
         {
-            if (string.IsNullOrWhiteSpace(ggufHint))
-            {
-                return "";
-            }
-
-            return Path.GetFileName(ggufHint.Trim());
+            return string.IsNullOrWhiteSpace(ggufHint) ? string.Empty : Path.GetFileName(ggufHint.Trim());
         }
 
-        /// <summary>
-        /// Назначает GGUF из подсказки Core AI (<see cref="CoreAISettingsAsset.GgufModelPath"/>): полный путь к файлу,
-        /// либо имя файла, совпадающее с записью Model Manager (без учёта регистра).
-        /// Вызывать до <see cref="TryAutoAssignResolvableModel"/> чтобы не подставлялась «первая попавшаяся» модель.
-        /// </summary>
-        /// <returns><c>true</c> если <see cref="LLM.model"/> уже был задан или успешно назначен.</returns>
+        /// <summary>Assigns a matching LLMUnity model when the configured GGUF hint resolves to a known model entry.</summary>
         public static bool TryAssignModelFromGgufHint(LLM llm, IGameLogger logger, string ggufHint)
         {
             if (logger == null)
@@ -59,44 +42,20 @@ namespace CoreAI.Infrastructure.Llm
                 try
                 {
                     llm.SetModel(trimmed);
+                    return !string.IsNullOrWhiteSpace(llm.model);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(GameLogFeature.Llm, "LLMUnity: SetModel по полному пути не удался: " + ex.Message);
+                    logger.LogWarning(GameLogFeature.Llm, "LLMUnity: failed to assign GGUF path from settings: " + ex.Message);
                     return false;
                 }
-
-                return !string.IsNullOrWhiteSpace(llm.model);
             }
 
-            string wantedFile = NormalizeGgufHintToFileName(trimmed);
-            if (string.IsNullOrWhiteSpace(wantedFile))
-            {
-                return false;
-            }
-
-            List<ModelEntry> candidates = CollectResolvableNonLoraEntries();
-            foreach (ModelEntry e in candidates)
-            {
-                if (e == null || string.IsNullOrWhiteSpace(e.filename))
-                {
-                    continue;
-                }
-
-                string fn = Path.GetFileName(e.filename);
-                if (string.Equals(fn, wantedFile, StringComparison.OrdinalIgnoreCase))
-                {
-                    return TrySetModelFromEntry(llm, e, logger);
-                }
-            }
-
-            return false;
+            string fileName = NormalizeGgufHintToFileName(trimmed);
+            return TryAssignModelMatchingFilename(llm, logger, fileName);
         }
 
-        /// <summary>
-        /// Если <see cref="LLM.model"/> пусто, подставляет первую подходящую модель из Model Manager (файл на диске).
-        /// </summary>
-        /// <returns><c>true</c>, если модель уже была или успешно назначена; иначе <c>false</c>.</returns>
+        /// <summary>Assigns the only resolvable non-LoRA model, or an included-in-build candidate when several exist.</summary>
         public static bool TryAutoAssignResolvableModel(LLM llm, IGameLogger logger)
         {
             if (logger == null)
@@ -104,7 +63,12 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentNullException(nameof(logger));
             }
 
-            if (llm == null || !string.IsNullOrWhiteSpace(llm.model))
+            if (llm == null)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(llm.model))
             {
                 return true;
             }
@@ -115,13 +79,12 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            // Среди моделей с реальным файлом: сначала первая с includeInBuild (колонка Build), иначе первая в списке.
             ModelEntry chosen = null;
-            foreach (ModelEntry c in candidates)
+            foreach (ModelEntry candidate in candidates)
             {
-                if (c.includeInBuild)
+                if (candidate.includeInBuild)
                 {
-                    chosen = c;
+                    chosen = candidate;
                     break;
                 }
             }
@@ -132,18 +95,15 @@ namespace CoreAI.Infrastructure.Llm
             {
                 logger.LogWarning(
                     GameLogFeature.Llm,
-                    "LLMUnity: в Model Manager несколько .gguf с файлами, а LLM.model в сцене пусто — " +
-                    "временно выбрано: «" + chosen.filename +
-                    "». Нажмите радиокнопку у нужной модели и сохраните сцену.");
+                    "LLMUnity: multiple .gguf files are available in Model Manager and LLM.model is empty; temporarily selected: " +
+                    chosen.filename +
+                    ". Select the desired model in Model Manager and save the scene.");
             }
 
             return TrySetModelFromEntry(llm, chosen, logger);
         }
 
-        /// <summary>
-        /// Назначает модель из Model Manager, если имя файла .gguf (без учёта регистра) содержит все непустые токены.
-        /// Удобно для Play Mode тестов (например Qwen3.5 0.8B: токены «qwen», «0.8»).
-        /// </summary>
+        /// <summary>Assigns the first resolvable model whose file name contains all provided tokens.</summary>
         public static bool TryAssignModelMatchingFilename(LLM llm, IGameLogger logger,
             params string[] filenameSubstringsMustContainAll)
         {
@@ -163,14 +123,12 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             List<string> tokens = new();
-            foreach (string t in filenameSubstringsMustContainAll)
+            foreach (string token in filenameSubstringsMustContainAll)
             {
-                if (string.IsNullOrWhiteSpace(t))
+                if (!string.IsNullOrWhiteSpace(token))
                 {
-                    continue;
+                    tokens.Add(token.Trim().ToLowerInvariant());
                 }
-
-                tokens.Add(t.Trim().ToLowerInvariant());
             }
 
             if (tokens.Count == 0)
@@ -178,24 +136,23 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            List<ModelEntry> candidates = CollectResolvableNonLoraEntries();
             List<ModelEntry> matched = new();
-            foreach (ModelEntry e in candidates)
+            foreach (ModelEntry entry in CollectResolvableNonLoraEntries())
             {
-                string fn = Path.GetFileName(e.filename ?? "").ToLowerInvariant();
-                bool ok = true;
-                foreach (string tok in tokens)
+                string fileName = Path.GetFileName(entry.filename ?? string.Empty).ToLowerInvariant();
+                bool matches = true;
+                foreach (string token in tokens)
                 {
-                    if (!fn.Contains(tok))
+                    if (!fileName.Contains(token))
                     {
-                        ok = false;
+                        matches = false;
                         break;
                     }
                 }
 
-                if (ok)
+                if (matches)
                 {
-                    matched.Add(e);
+                    matched.Add(entry);
                 }
             }
 
@@ -205,11 +162,11 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             ModelEntry chosen = null;
-            foreach (ModelEntry m in matched)
+            foreach (ModelEntry entry in matched)
             {
-                if (m.includeInBuild)
+                if (entry.includeInBuild)
                 {
-                    chosen = m;
+                    chosen = entry;
                     break;
                 }
             }
@@ -230,24 +187,17 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             List<ModelEntry> candidates = new();
-            foreach (ModelEntry e in LLMManager.modelEntries)
+            foreach (ModelEntry entry in LLMManager.modelEntries)
             {
-                if (e == null || e.lora)
+                if (entry == null || entry.lora || string.IsNullOrWhiteSpace(entry.filename))
                 {
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(e.filename))
+                if (TryResolveModelFilePath(entry, out string fullPath) && File.Exists(fullPath))
                 {
-                    continue;
+                    candidates.Add(entry);
                 }
-
-                if (!TryResolveModelFilePath(e, out string fullPath) || !File.Exists(fullPath))
-                {
-                    continue;
-                }
-
-                candidates.Add(e);
             }
 
             return candidates;
@@ -255,13 +205,18 @@ namespace CoreAI.Infrastructure.Llm
 
         private static bool TrySetModelFromEntry(LLM llm, ModelEntry chosen, IGameLogger logger)
         {
+            if (chosen == null || string.IsNullOrWhiteSpace(chosen.filename))
+            {
+                return false;
+            }
+
             try
             {
                 llm.SetModel(chosen.filename);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(GameLogFeature.Llm, "LLMUnity: SetModel не удался: " + ex.Message);
+                logger.LogWarning(GameLogFeature.Llm, "LLMUnity: failed to assign model from Model Manager: " + ex.Message);
                 return false;
             }
 
@@ -270,38 +225,34 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            logger.LogInfo(
-                GameLogFeature.Llm,
-                "LLMUnity: поле model было пусто — назначена модель из Model Manager: " + llm.model);
+            logger.LogInfo(GameLogFeature.Llm, "LLMUnity: model was empty; assigned model from Model Manager: " + llm.model);
             return true;
         }
 
-        private static bool TryResolveModelFilePath(ModelEntry e, out string fullPath)
+        private static bool TryResolveModelFilePath(ModelEntry entry, out string fullPath)
         {
             fullPath = null;
-            if (!string.IsNullOrWhiteSpace(e.path) && File.Exists(e.path))
+            if (!string.IsNullOrWhiteSpace(entry.path) && File.Exists(entry.path))
             {
-                fullPath = e.path;
+                fullPath = entry.path;
                 return true;
             }
 
-            // Как в LLM.GetLLMManagerAssetRuntime: путь через Model Manager.
-            string managerPath = LLMManager.GetAssetPath(e.filename);
+            string managerPath = LLMManager.GetAssetPath(entry.filename);
             if (!string.IsNullOrWhiteSpace(managerPath) && File.Exists(managerPath))
             {
                 fullPath = managerPath;
                 return true;
             }
 
-            // Файл в StreamingAssets / persistent (как после скачивания через LLMUnity).
-            string assetPath = LLMUnitySetup.GetAssetPath(e.filename);
+            string assetPath = LLMUnitySetup.GetAssetPath(entry.filename);
             if (!string.IsNullOrWhiteSpace(assetPath) && File.Exists(assetPath))
             {
                 fullPath = assetPath;
                 return true;
             }
 
-            string downloadPath = LLMUnitySetup.GetDownloadAssetPath(e.filename);
+            string downloadPath = LLMUnitySetup.GetDownloadAssetPath(entry.filename);
             if (!string.IsNullOrWhiteSpace(downloadPath) && File.Exists(downloadPath))
             {
                 fullPath = downloadPath;

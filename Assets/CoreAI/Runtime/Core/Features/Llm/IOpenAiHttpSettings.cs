@@ -3,15 +3,14 @@ using System.Collections.Generic;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Абстракция настроек HTTP API (OpenAI-compatible).
-    /// Позволяет использовать разные источники настроек в хосте (Unity asset, server config и т.д.).
+    /// Defines the contract for open ai http settings implementations.
     /// </summary>
     public interface IOpenAiHttpSettings
     {
-        /// <summary>Базовый URL API без завершающего слэша.</summary>
+        /// <summary>OpenAI-compatible API base URL.</summary>
         string ApiBaseUrl { get; }
 
-        /// <summary>Bearer-токен (API ключ).</summary>
+        /// <summary>API key used for hosted LLM providers.</summary>
         string ApiKey { get; }
 
         /// <summary>
@@ -19,25 +18,25 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         string AuthorizationHeader { get; }
 
-        /// <summary>Название модели.</summary>
+        /// <summary>Model identifier requested from the LLM backend.</summary>
         string Model { get; }
 
-        /// <summary>Температура генерации (0.0–2.0).</summary>
+        /// <summary>Sampling temperature requested from the LLM backend.</summary>
         float Temperature { get; }
 
-        /// <summary>Таймаут HTTP-запроса в секундах.</summary>
+        /// <summary>Per-request timeout in seconds.</summary>
         int RequestTimeoutSeconds { get; }
 
-        /// <summary>Максимум токенов в ответе.</summary>
+        /// <summary>Maximum number of output tokens requested from the backend.</summary>
         int MaxTokens { get; }
 
-        /// <summary>Логировать входящие промпты (system, user) и инструменты.</summary>
+        /// <summary>Gets whether LLM request prompts should be logged.</summary>
         bool LogLlmInput { get; }
 
-        /// <summary>Логировать исходящие ответы модели и результаты tool calls.</summary>
+        /// <summary>Gets whether LLM responses should be logged.</summary>
         bool LogLlmOutput { get; }
 
-        /// <summary>Логировать сырые HTTP request/response JSON.</summary>
+        /// <summary>Gets whether verbose HTTP diagnostics are enabled.</summary>
         bool EnableHttpDebugLogging { get; }
 
         /// <summary>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
@@ -10,16 +10,11 @@ using CoreAI.Infrastructure.World;
 namespace CoreAI.Infrastructure.Messaging
 {
     /// <summary>
-    /// Подписка на команды ИИ: исполнение Lua из конверта + логирование + UI-событие.
-    /// Обработка маршалится на главный поток Unity (<see cref="Cysharp.Threading.Tasks.UniTask.SwitchToMainThread"/>),
-    /// потому что после <c>ConfigureAwait(false)</c> в <see cref="CoreAI.Ai.QueuedAiOrchestrator"/> продолжение
-    /// <see cref="CoreAI.Ai.AiOrchestrator"/> и <c>Publish</c> в MessagePipe часто выполняются с пула потоков.
-    /// Подписчики на <see cref="CommandReceived"/> не должны сами полагаться на поток доставки из шины.
-    /// Нормативно: <c>Assets/CoreAiUnity/Docs/DGF_SPEC.md</c> §9.4 (ADR-9.4).
+    /// Provides ai game command router functionality.
     /// </summary>
     public sealed class AiGameCommandRouter : IStartable, IDisposable
     {
-        /// <summary>Событие для простого UI (MVP), без жёсткой связи с Canvas.</summary>
+        /// <summary>Command received.</summary>
         public static event Action<ApplyAiGameCommand> CommandReceived;
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
@@ -29,7 +24,7 @@ namespace CoreAI.Infrastructure.Messaging
         private IDisposable _subscription;
         private volatile bool _disposed;
 
-        /// <summary>Подписка на шину: Lua-процессор + статическое событие для UI + лог с traceId.</summary>
+        /// <summary>Initializes a new instance of AiGameCommandRouter.</summary>
         public AiGameCommandRouter(
             ISubscriber<ApplyAiGameCommand> subscriber,
             IGameLogger logger,
@@ -66,8 +61,8 @@ namespace CoreAI.Infrastructure.Messaging
                         _worldExecutor?.TryExecute(captured);
                         CommandReceived?.Invoke(captured);
                         string pay = captured.JsonPayload ?? "";
-                        string shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "…" : pay;
-                        string trace = string.IsNullOrWhiteSpace(captured.TraceId) ? "—" : captured.TraceId;
+                        string shortPay = pay.Length > 200 ? pay.Substring(0, 200) + "..." : pay;
+                        string trace = string.IsNullOrWhiteSpace(captured.TraceId) ? "-" : captured.TraceId;
                         _logger.LogInfo(GameLogFeature.MessagePipe,
                             $"ApplyAiGameCommand traceId={trace} type={captured.CommandTypeId} role={captured.SourceRoleId} gen={captured.LuaRepairGeneration} payload={shortPay}");
                     }
@@ -79,7 +74,7 @@ namespace CoreAI.Infrastructure.Messaging
             });
         }
 
-        /// <summary>Отписаться от MessagePipe.</summary>
+        /// <summary>Releases subscriptions and runtime resources held by this object.</summary>
         public void Dispose()
         {
             _disposed = true;

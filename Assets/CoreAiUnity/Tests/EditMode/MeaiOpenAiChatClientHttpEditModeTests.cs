@@ -17,10 +17,16 @@ namespace CoreAI.Tests.EditMode
     public sealed class MeaiOpenAiChatClientHttpEditModeTests
     {
         [SetUp]
-        public void SetUp() => MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        public void SetUp()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        }
 
         [TearDown]
-        public void TearDown() => MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        public void TearDown()
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+        }
 
         [Test]
         public void MeaiOpenAiChatClient_LivesInPortableCoreAssembly()
@@ -36,8 +42,9 @@ namespace CoreAI.Tests.EditMode
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
                 new DelegateHttpHandler(_ => OkJson(body))) { Timeout = System.TimeSpan.FromSeconds(30) };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
-            MEAI.ChatResponse r = await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") });
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            MEAI.ChatResponse r =
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") });
 
             Assert.AreEqual("hello from mock", r.Text);
         }
@@ -58,8 +65,8 @@ namespace CoreAI.Tests.EditMode
                 Timeout = System.TimeSpan.FromSeconds(30)
             };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
-            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options: null);
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
 
             Assert.NotNull(capturedJson);
             Assert.That(capturedJson, Does.Not.Contain("\"temperature\""));
@@ -81,8 +88,8 @@ namespace CoreAI.Tests.EditMode
                 Timeout = System.TimeSpan.FromSeconds(30)
             };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
-            var options = new MEAI.ChatOptions { Temperature = 0.42f };
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            MEAI.ChatOptions options = new() { Temperature = 0.42f };
             await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options);
 
             Assert.NotNull(capturedJson);
@@ -96,7 +103,7 @@ namespace CoreAI.Tests.EditMode
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
                 new DelegateHttpHandler(_ =>
                 {
-                    var r = new HttpResponseMessage((HttpStatusCode)429)
+                    HttpResponseMessage r = new((HttpStatusCode)429)
                     {
                         Content = new StringContent("{}", Encoding.UTF8, "application/json")
                     };
@@ -104,7 +111,7 @@ namespace CoreAI.Tests.EditMode
                     return r;
                 })) { Timeout = System.TimeSpan.FromSeconds(30) };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
 
             try
             {
@@ -132,8 +139,8 @@ namespace CoreAI.Tests.EditMode
                 Timeout = System.TimeSpan.FromHours(1)
             };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
-            var parts = new List<string>();
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
+            List<string> parts = new();
             await foreach (MEAI.ChatResponseUpdate u in client.GetStreamingResponseAsync(
                                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") }))
             {
@@ -175,7 +182,7 @@ namespace CoreAI.Tests.EditMode
                 Timeout = System.TimeSpan.FromHours(1)
             };
 
-            var client = new MeaiOpenAiChatClient(TestHttpSettings.Instance);
+            MeaiOpenAiChatClient client = new(TestHttpSettings.Instance);
             await foreach (MEAI.ChatResponseUpdate _ in client.GetStreamingResponseAsync(
                                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "x") }))
             {
@@ -231,7 +238,7 @@ namespace CoreAI.Tests.EditMode
 
         private static HttpResponseMessage OkEventStream(Stream stream)
         {
-            var content = new StreamContent(stream);
+            StreamContent content = new(stream);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         }

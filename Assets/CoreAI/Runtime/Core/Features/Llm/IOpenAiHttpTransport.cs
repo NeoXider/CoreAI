@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -32,6 +32,7 @@ namespace CoreAI.Infrastructure.Llm
         public string JsonBody { get; set; } = "";
         public bool AcceptEventStream { get; set; }
         public int TransportTimeoutSeconds { get; set; }
+
         public IReadOnlyList<KeyValuePair<string, string>> Headers { get; set; } =
             new List<KeyValuePair<string, string>>();
     }
@@ -41,6 +42,7 @@ namespace CoreAI.Infrastructure.Llm
         public int StatusCode { get; set; }
         public string BodyText { get; set; } = "";
         public bool IsSuccessStatusCode => StatusCode >= 200 && StatusCode < 300;
+
         public IReadOnlyDictionary<string, IEnumerable<string>> ResponseHeaders { get; set; } =
             new Dictionary<string, IEnumerable<string>>();
     }
@@ -54,6 +56,7 @@ namespace CoreAI.Infrastructure.Llm
 
         public int StatusCode { get; set; }
         public string ErrorBodyText { get; set; } = "";
+
         public IReadOnlyDictionary<string, IEnumerable<string>> ResponseHeaders { get; set; } =
             new Dictionary<string, IEnumerable<string>>();
 
@@ -61,7 +64,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Transfers ownership of <paramref name="stream"/>, <paramref name="response"/>, and <paramref name="httpClient"/>.
-        /// Do not dispose <paramref name="httpClient"/> until the stream is fully read — disposing it cancels the body.
+/// Executes WithStreamResponseAndClient API operation.
         /// </summary>
         internal OpenAiHttpSseOpenResult WithStreamResponseAndClient(Stream? stream, HttpResponseMessage? response,
             HttpClient httpClient)

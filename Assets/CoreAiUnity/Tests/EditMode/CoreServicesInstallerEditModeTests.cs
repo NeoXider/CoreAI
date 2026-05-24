@@ -23,7 +23,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RegisterCore_Builds_AndResolves_IAiGameCommandSink_As_MessagePipeSink()
         {
-            var builder = new ContainerBuilder();
+            ContainerBuilder builder = new();
             builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             builder.RegisterCore();
 

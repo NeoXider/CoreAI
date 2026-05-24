@@ -9,7 +9,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Персистентное хранилище версий Lua под <see cref="Application.persistentDataPath"/>/CoreAI/LuaScriptVersions/.
+    /// File Lua Script Version Store component used by CoreAI.
     /// </summary>
     public sealed class FileLuaScriptVersionStore : ILuaScriptVersionStore
     {
@@ -28,7 +28,7 @@ namespace CoreAI.Infrastructure.Lua
             LoadFromDisk();
         }
 
-        /// <summary>Для тестов редактора: явный путь к файлу.</summary>
+        /// <summary>Initializes a new instance of FileLuaScriptVersionStore.</summary>
         public FileLuaScriptVersionStore(IGameLogger logger, string jsonFilePath)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));

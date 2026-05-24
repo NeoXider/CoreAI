@@ -50,7 +50,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Gets the currently configured Authorization header value.
+        /// Get authorization header.
         /// </summary>
         public static string GetAuthorizationHeader()
         {

@@ -61,7 +61,8 @@ namespace CoreAI.Tests.PlayMode
                 Does.Contain(WriteExpectedSubstring).IgnoreCase,
                 () => MemoryMismatchMessage("write", WriteExpectedSubstring, state.Memory));
 
-            Debug.Log($"[AgentMemoryOpenAiApiPlayMode] Write OK — stored memory ({state.Memory.Length} chars): {FormatMemoryForLog(state.Memory)}");
+            Debug.Log(
+                $"[AgentMemoryOpenAiApiPlayMode] Write OK — stored memory ({state.Memory.Length} chars): {FormatMemoryForLog(state.Memory)}");
         }
 
         [UnityTest]
@@ -130,7 +131,8 @@ namespace CoreAI.Tests.PlayMode
                 state.Memory,
                 Does.Contain(AppendMarker).IgnoreCase,
                 () => MemoryMismatchMessage("append (marker)", AppendMarker, state.Memory));
-            Debug.Log($"[AgentMemoryOpenAiApiPlayMode] Append OK — stored memory ({state.Memory.Length} chars): {FormatMemoryForLog(state.Memory)}");
+            Debug.Log(
+                $"[AgentMemoryOpenAiApiPlayMode] Append OK — stored memory ({state.Memory.Length} chars): {FormatMemoryForLog(state.Memory)}");
         }
 
         [UnityTest]
@@ -180,7 +182,8 @@ namespace CoreAI.Tests.PlayMode
             CoreAISettingsAsset s = CoreAISettingsAsset.Instance;
             if (s == null)
             {
-                Debug.LogWarning("[AgentMemoryOpenAiApiPlayMode] CoreAISettingsAsset.Instance is null — verbose LLM trace skipped.");
+                Debug.LogWarning(
+                    "[AgentMemoryOpenAiApiPlayMode] CoreAISettingsAsset.Instance is null — verbose LLM trace skipped.");
                 return;
             }
 
@@ -244,7 +247,7 @@ namespace CoreAI.Tests.PlayMode
 
         private static string ReadMemoryOrEmpty(TestAgentSetup setup)
         {
-            return setup.MemoryStore.TryLoad(Role, out AgentMemoryState st) ? (st.Memory ?? "") : "";
+            return setup.MemoryStore.TryLoad(Role, out AgentMemoryState st) ? st.Memory ?? "" : "";
         }
 
         private static void LogMemorySnapshot(TestAgentSetup setup, string phase)

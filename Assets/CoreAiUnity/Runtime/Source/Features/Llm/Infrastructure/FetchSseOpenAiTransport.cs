@@ -1,4 +1,4 @@
-#if UNITY_WEBGL && !UNITY_EDITOR
+﻿#if UNITY_WEBGL && !UNITY_EDITOR
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -36,7 +36,8 @@ namespace CoreAI.Infrastructure.Llm
 
         public bool SupportsSseStreaming => true;
 
-        public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request, CancellationToken cancellationToken = default)
+        public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request, CancellationToken cancellationToken
+ = default)
         {
             throw new NotSupportedException("Use UnityWebRequestOpenAiTransport for non-streaming in WebGL.");
         }
@@ -71,12 +72,12 @@ namespace CoreAI.Infrastructure.Llm
                 Marshal.GetFunctionPointerForDelegate(_onErrorDelegate));
 
             // Wait for fetch headers (status + Content-Type) before returning. Do NOT add
-            // a Task.Yield() after ConfigureAwait(false) on WebGL — it can route the
+            // No-op guard before a conditional operation.
             // continuation through the (non-existent) browser ThreadPool and hang the
             // open path forever. The JS bridge already defers the first ReadableStream
             // read via setTimeout(0), so MeaiOpenAiChatClient gets time to attach its
             // line reader before the first onChunk lands.
-            // No ConfigureAwait(false) — on WebGL we need the UnitySynchronizationContext
+            // No-op guard before a conditional operation.
             // to be captured so the continuation reliably runs on the browser main thread.
             // ConfigureAwait(false) routes the continuation to ThreadPool, which doesn't
             // exist in WebGL, and the await never resumes.
@@ -95,7 +96,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             else
             {
-                // Non-OK: drop the stream — caller will throw before reading.
+                // No-op guard before a conditional operation.
                 States.TryRemove(id, out _);
                 state.Dispose();
             }
@@ -231,7 +232,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Synchronous continuations: WebGL is single-threaded, so we want the awaiting C# code to resume
-            // inside the JS-fired callback's call stack — RunContinuationsAsynchronously would queue the
+            // No-op guard before a conditional operation.
             // continuation to a thread pool that never runs in browser builds, hanging the await forever.
             private readonly TaskCompletionSource<OpenInfo> _openTcs = new();
             private readonly ConcurrentQueue<string> _queue = new();
@@ -267,7 +268,7 @@ namespace CoreAI.Infrastructure.Llm
                 _signal.Set();
                 _stream.PumpPendingRead();
                 // Defensive: if SignalDone fires before SignalOpen (shouldn't happen, but
-                // avoids a hung consumer) — complete the open task with status 0 so the
+                // No-op guard before a conditional operation.
                 // caller surfaces a transport error instead of awaiting forever.
                 _openTcs.TrySetResult(new OpenInfo(0, "fetch completed without headers",
                     new Dictionary<string, IEnumerable<string>>()));
@@ -326,7 +327,7 @@ namespace CoreAI.Infrastructure.Llm
             public override long Length => throw new NotSupportedException();
             public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
 
-            /// <summary>Synchronous read — only used by paths that ignore <c>ReadAsync</c>; never blocks.</summary>
+            /// <summary>Reads buffered SSE bytes into the caller-provided destination buffer.</summary>
             public override int Read(byte[] buffer, int offset, int count)
             {
                 if (_error != null) throw _error;
@@ -405,7 +406,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_queue.TryDequeue(out string chunk))
                 {
-                    // JS bridge forwards raw SSE bytes as UTF-8 text fragments — feed them
+                    // No-op guard before a conditional operation.
                     // through unchanged so the OpenAI SSE parser owns framing, [DONE],
                     // tool_calls, role, finish_reason, etc.
                     if (string.IsNullOrEmpty(chunk)) return 0;

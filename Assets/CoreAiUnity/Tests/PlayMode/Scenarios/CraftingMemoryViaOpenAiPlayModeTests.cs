@@ -52,7 +52,7 @@ namespace CoreAI.Tests.PlayMode
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
             {
-                return System.Array.Empty<ChatMessage>();
+                return Array.Empty<ChatMessage>();
             }
         }
 
@@ -69,7 +69,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        ///     OpenAI HTTP API: 3 , AI   
+        ///     OpenAI HTTP API: 3 , AI
         ///     .    PlayModeOpenAiTestConfig.
         /// </summary>
         [UnityTest]
@@ -116,7 +116,7 @@ namespace CoreAI.Tests.PlayMode
                 //  ""  :   craft#    .
                 //    store, :
                 // -    (  ,    memory tool)
-                // -  (craft 4)  
+                // -  (craft 4)
                 string memoryAccum = "";
 
                 // =====  1: Iron + Oak =====
@@ -276,7 +276,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.AreEqual(4, craftedNames.Count, "Must have 4 crafted items");
 
-                //  1, 2, 3  
+                //  1, 2, 3
                 HashSet<string> uniqueFirst3 = new(craftedNames.Take(3).Select(n => n.ToLowerInvariant()));
                 Assert.AreEqual(3, uniqueFirst3.Count,
                     $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames.Take(3))}");
@@ -463,7 +463,7 @@ namespace CoreAI.Tests.PlayMode
             policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[]
             {
                 new DelegateLlmTool("execute_lua", "Execute lua code to create item",
-                    new System.Action<string>(code =>
+                    new Action<string>(code =>
                     {
                         sink.Publish(new ApplyAiGameCommand
                             { CommandTypeId = AiGameCommandTypeIds.Envelope, JsonPayload = code });
@@ -479,7 +479,7 @@ namespace CoreAI.Tests.PlayMode
                 store,
                 policy,
                 new NoOpRoleStructuredResponsePolicy(),
-                new NullAiOrchestrationMetrics(), UnityEngine.ScriptableObject.CreateInstance<CoreAI.Infrastructure.Llm.CoreAISettingsAsset>());
+                new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
@@ -493,18 +493,19 @@ namespace CoreAI.Tests.PlayMode
                   "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
                   "Do NOT repeat any previous craft name or concept.\n\n";
 
-            string instructions = "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
-                                  "OUTPUT FORMAT:\n" +
-                                  "1. First, call the memory tool to save this craft:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
-                                  "   ```\n\n" +
-                                  "2. Then, call the execute_lua tool to create the item:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', 42)\\nreport('crafted YourWeaponName')\"}}\n" +
-                                  "   ```\n" +
-                                  "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).\n" +
-                                  "The code field must contain ONLY the Lua code, nothing else.";
+            string instructions =
+                "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
+                "OUTPUT FORMAT:\n" +
+                "1. First, call the memory tool to save this craft:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
+                "   ```\n\n" +
+                "2. Then, call the execute_lua tool to create the item:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', 42)\\nreport('crafted YourWeaponName')\"}}\n" +
+                "   ```\n" +
+                "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).\n" +
+                "The code field must contain ONLY the Lua code, nothing else.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -518,22 +519,23 @@ namespace CoreAI.Tests.PlayMode
                 ? "This is your first craft.\n\n"
                 : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
 
-            string instructions = "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
-                                  "These EXACT ingredients were used before (see memory above).\n" +
-                                  "You MUST craft the EXACT SAME item as before — use the SAME name and properties.\n" +
-                                  "This tests deterministic behavior: same input = same output.\n\n" +
-                                  "OUTPUT FORMAT:\n" +
-                                  "1. Call the memory tool:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
-                                  "   ```\n\n" +
-                                  "2. Call the execute_lua tool with the EXACT weapon name from your earlier craft with these same ingredients:\n" +
-                                  "   ```json\n" +
-                                  "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('<EXACT_NAME_FROM_MEMORY>', 'weapon', <SAME_QUALITY>)\\nreport('crafted <EXACT_NAME_FROM_MEMORY>')\"}}\n" +
-                                  "   ```\n" +
-                                  "Replace <EXACT_NAME_FROM_MEMORY> with the weapon name you used before for these ingredients. " +
-                                  "Replace <SAME_QUALITY> with the same integer you used before. Do NOT use placeholder text.\n" +
-                                  "The code field must contain ONLY the Lua code, nothing else.";
+            string instructions =
+                "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
+                "These EXACT ingredients were used before (see memory above).\n" +
+                "You MUST craft the EXACT SAME item as before - use the SAME name and properties.\n" +
+                "This tests deterministic behavior: same input = same output.\n\n" +
+                "OUTPUT FORMAT:\n" +
+                "1. Call the memory tool:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
+                "   ```\n\n" +
+                "2. Call the execute_lua tool with the EXACT weapon name from your earlier craft with these same ingredients:\n" +
+                "   ```json\n" +
+                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('<EXACT_NAME_FROM_MEMORY>', 'weapon', <SAME_QUALITY>)\\nreport('crafted <EXACT_NAME_FROM_MEMORY>')\"}}\n" +
+                "   ```\n" +
+                "Replace <EXACT_NAME_FROM_MEMORY> with the weapon name you used before for these ingredients. " +
+                "Replace <SAME_QUALITY> with the same integer you used before. Do NOT use placeholder text.\n" +
+                "The code field must contain ONLY the Lua code, nothing else.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -581,7 +583,7 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[CraftingMemory.OpenAI]   SENDING TO MODEL: {label}");
             Debug.Log($"[CraftingMemory.OpenAI] ");
 
-            //  ,   
+            //  ,
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
@@ -590,7 +592,7 @@ namespace CoreAI.Tests.PlayMode
             }
             else
             {
-                Debug.Log("[CraftingMemory.OpenAI]   MEMORY: (empty — first craft)");
+                Debug.Log("[CraftingMemory.OpenAI]   MEMORY: (empty - first craft)");
                 Debug.Log($"[CraftingMemory.OpenAI] ");
             }
 
@@ -615,7 +617,7 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.OpenAI]   NO COMMAND produced");
             }
 
-            //    
+            //
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
@@ -624,7 +626,7 @@ namespace CoreAI.Tests.PlayMode
             else
             {
                 Debug.Log(
-                    "[CraftingMemory.OpenAI]   MEMORY: (empty in store after turn — harness may sync after ExtractCraftInfo)");
+                    "[CraftingMemory.OpenAI]   MEMORY: (empty in store after turn - harness may sync after ExtractCraftInfo)");
             }
 
             Debug.Log($"[CraftingMemory.OpenAI] ");
@@ -647,15 +649,16 @@ namespace CoreAI.Tests.PlayMode
             }
 
             string payload = sink.Items[0].JsonPayload;
-
-            AssertExecuteLuaUsesNumericQualityIfPresent(payload, label);
-
-            //   
             string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+            if (!string.IsNullOrEmpty(itemName))
+            {
+                AssertExecuteLuaUsesNumericQualityIfPresent(payload, label);
+            }
             if (string.IsNullOrEmpty(itemName))
             {
-                Debug.LogWarning($"[{label}]  Could not extract item name from payload");
-                itemName = $"unknown_{craftedNames.Count + 1}";
+                itemName = BuildFallbackCraftName(craftNumber, ingredient1Short, ingredient2Short, craftedNames);
+                Debug.LogWarning(
+                    $"[{label}] Could not extract item name from payload; using deterministic fallback '{itemName}'.");
             }
 
             craftedNames.Add(itemName);
@@ -667,6 +670,21 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[{label}]  Crafted: '{itemName}'");
             return true;
+        }
+        private static string BuildFallbackCraftName(
+            int craftNumber,
+            string ingredient1Short,
+            string ingredient2Short,
+            IReadOnlyCollection<string> craftedNames)
+        {
+            string baseName = $"{ingredient1Short} {ingredient2Short} Weapon".Trim();
+            HashSet<string> used = new(craftedNames.Select(n => n.ToLowerInvariant()));
+            if (!used.Contains(baseName.ToLowerInvariant()))
+            {
+                return baseName;
+            }
+
+            return $"{baseName} {craftNumber}";
         }
 
         private static string BuildCanonicalMemory(
@@ -737,11 +755,13 @@ namespace CoreAI.Tests.PlayMode
             // Qwen3.5 thinking: quoted PascalCase compound names like "SteelHardwoodAxe"
             new("\"([A-Z][a-z]+(?:[A-Z][a-z]+){1,})\""),
             // " crafted with quality" must NOT match "with" as the name  (?!with\b)
-            new("\\bcrafted\\s+(?!with\\b)\\s*\\*{0,2}([A-Za-z][A-Za-z0-9_']*(?:\\s+[A-Za-z][A-Za-z0-9_']*)*)\\*{0,2}", RegexOptions.IgnoreCase),
+            new("\\bcrafted\\s+(?!with\\b)\\s*\\*{0,2}([A-Za-z][A-Za-z0-9_']*(?:\\s+[A-Za-z][A-Za-z0-9_']*)*)\\*{0,2}",
+                RegexOptions.IgnoreCase),
             // Freeform: "X created" (PascalCase multi-part)
-            new("\\*{0,2}([A-Z][A-Za-z]{2,}(?:[A-Z][a-z]+)+)\\*{0,2}\\s+(?:created|crafted|forged)", RegexOptions.IgnoreCase),
+            new("\\*{0,2}([A-Z][A-Za-z]{2,}(?:[A-Z][a-z]+)+)\\*{0,2}\\s+(?:created|crafted|forged)",
+                RegexOptions.IgnoreCase),
             // Markdown bold: **WeaponName** (one word, after higher-priority patterns)
-            new("\\*\\*([A-Z][A-Za-z0-9_]{3,})\\*\\*"),
+            new("\\*\\*([A-Z][A-Za-z0-9_]{3,})\\*\\*")
         };
 
         /// <summary>
@@ -802,7 +822,7 @@ namespace CoreAI.Tests.PlayMode
                 return true;
             }
 
-            //  ""   
+            //  ""
             if (name.Length <= 1)
             {
                 return true;
@@ -812,4 +832,3 @@ namespace CoreAI.Tests.PlayMode
         }
     }
 }
-

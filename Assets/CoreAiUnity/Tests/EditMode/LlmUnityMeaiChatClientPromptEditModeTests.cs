@@ -75,8 +75,8 @@ namespace CoreAI.Tests.EditMode
         {
             return new List<MEAI.ChatMessage>
             {
-                new MEAI.ChatMessage(MEAI.ChatRole.System, "Role system."),
-                new MEAI.ChatMessage(MEAI.ChatRole.User, "Hello.")
+                new(MEAI.ChatRole.System, "Role system."),
+                new(MEAI.ChatRole.User, "Hello.")
             };
         }
 

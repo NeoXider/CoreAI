@@ -25,13 +25,7 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Единый MEAI-клиент для любого бэкенда.
-    /// Принимает <see cref="MEAI.IChatClient"/> и оборачивает в
-    /// <see cref="MEAI.FunctionInvokingChatClient"/> для автоматического tool calling.
-    ///
-    /// Создание:
-    ///   MeaiLlmClient.CreateHttp(settings, logger, memoryStore)
-    ///   MeaiLlmClient.CreateLlmUnity(unityAgent, logger, memoryStore)
+    /// Microsoft.Extensions.AI client wrapper used by CoreAI orchestration.
     /// </summary>
     public sealed class MeaiLlmClient : ILlmClient
     {
@@ -43,11 +37,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI and
-        /// <c>LLM ◀ (stream) chunks=</c> reflect incremental delivery (OpenRouter often batches the full reply).
+/// Initializes a new instance of the current component.
         /// </summary>
         private const int LiveUiStreamMaxCharsPerChunk = 48;
 
-        public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings, IAgentMemoryStore? memoryStore = null)
+        public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
+            IAgentMemoryStore? memoryStore = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -56,7 +51,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Создать HTTP клиент (OpenAI-compatible API).
+/// Executes create http.
         /// </summary>
         public static MeaiLlmClient CreateHttp(
             IOpenAiHttpSettings openAiSettings,
@@ -64,9 +59,20 @@ namespace CoreAI.Infrastructure.Llm
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (openAiSettings == null) throw new ArgumentNullException(nameof(openAiSettings));
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (openAiSettings == null)
+            {
+                throw new ArgumentNullException(nameof(openAiSettings));
+            }
+
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
 
             IOpenAiHttpTransport transport;
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -88,22 +94,29 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Создать HTTP клиент из единых настроек.
+/// Executes create http.
         /// </summary>
         public static MeaiLlmClient CreateHttp(
             CoreAISettingsAsset settings,
             IGameLogger logger,
             IAgentMemoryStore? memoryStore = null)
         {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
 
             HttpSettingsAdapter adapter = new(settings);
             return CreateHttp(adapter, settings, logger, memoryStore);
         }
 
         /// <summary>
-        /// Создать LLMUnity клиент (локальная GGUF модель).
+/// Executes create llm unity.
         /// </summary>
         public static MeaiLlmClient CreateLlmUnity(
 #if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
@@ -118,9 +131,20 @@ namespace CoreAI.Infrastructure.Llm
 #if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
             throw new NotSupportedException("LLMUnity backend is not supported on WebGL.");
 #else
-            if (unityAgent == null) throw new ArgumentNullException(nameof(unityAgent));
-            if (logger == null) throw new ArgumentNullException(nameof(logger));
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            if (unityAgent == null)
+            {
+                throw new ArgumentNullException(nameof(unityAgent));
+            }
+
+            if (logger == null)
+            {
+                throw new ArgumentNullException(nameof(logger));
+            }
+
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
 
             LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
             return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
@@ -172,7 +196,7 @@ namespace CoreAI.Infrastructure.Llm
                 chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
             }
 
-            // Логируем начальный промпт для отладки tool calling
+            // No-op guard before a conditional operation.
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Initial prompt (system={chatMessages[0].Contents?.Count ?? 0} parts, user={chatMessages[1].Contents?.Count ?? 0} parts)");
 
@@ -192,6 +216,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 chatOptions.Temperature = request.Temperature;
             }
+
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
@@ -214,7 +239,7 @@ namespace CoreAI.Infrastructure.Llm
                 return FromException(ex);
             }
 
-            // Логируем все сообщения в ответе для отладки tool calling
+            // Skip processing when the checked condition is already satisfied.
             if (response.Messages != null)
             {
                 foreach (MEAI.ChatMessage msg in response.Messages)
@@ -228,7 +253,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // Логируем результат tool calling если включено
+            // Skip processing when the checked condition is already satisfied.
             if (_settings?.EnableMeaiDebugLogging == true)
             {
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Final response: {response.Text}");
@@ -318,22 +343,22 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Стриминг ответа модели: возвращает чанки текста по мере генерации.
+/// Executes complete streaming async.
         /// <para>
-        /// Поддерживает tool calling двумя способами:
+/// Executes complete streaming async.
         /// <list type="number">
-        /// <item>Native: если <c>ChatResponseUpdate</c> содержит <c>FunctionCallContent</c> (облачные провайдеры).</item>
-        /// <item>Text fallback: извлечение tool-call JSON из текста (Ollama, llama.cpp, LM Studio, etc.).</item>
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// </list>
         /// </para>
         /// <para>
-        /// Автоматически фильтрует <c>&lt;think&gt;...&lt;/think&gt;</c> блоки stateful-фильтром —
-        /// корректно работает, даже если тег разбит между чанками.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// </para>
         /// <para>
-        /// ВАЖНО: метод должен вызываться на главном потоке Unity (из coroutine, async void,
-        /// или UniTask). Оборачивание в <c>Task.Run</c> приведёт к исключению
-        /// "Create can only be called from the main thread" из-за создания
+/// Executes complete streaming async.
+/// Executes complete streaming async.
+/// Executes complete streaming async.
         /// <c>UnityWebRequest</c>.
         /// </para>
         /// </summary>
@@ -375,6 +400,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 chatOptions.Temperature = request.Temperature;
             }
+
             if (aiTools.Count > 0)
             {
                 chatOptions.Tools = aiTools.Cast<MEAI.AITool>().ToList();
@@ -390,7 +416,7 @@ namespace CoreAI.Infrastructure.Llm
             if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    $"MeaiLlmClient: Streaming role='{_currentRoleId}' requested {(request.Tools?.Count ?? 0)} tool(s) but 0 AIFunction(s) were bound. " +
+                    $"MeaiLlmClient: Streaming role='{_currentRoleId}' requested {request.Tools?.Count ?? 0} tool(s) but 0 AIFunction(s) were bound. " +
                     "Tool calls will be stripped from output without execution. Verify tool registration.");
             }
 
@@ -418,11 +444,12 @@ namespace CoreAI.Infrastructure.Llm
 
                 // ForcedToolMode applies ONLY to the first iteration.
                 // After we feed tool results back to the model, it must decide naturally
-                // whether to call more tools or finalise with text — otherwise the
+                // No-op guard before a conditional operation.
                 // tool-choice constraint would loop forever (model is forced to re-call a tool,
                 // we feed its result, model is forced again, ...).
                 MEAI.ChatOptions iterationOptions = chatOptions;
-                if (toolIteration > 1 && chatOptions.ToolMode != null && chatOptions.ToolMode is not MEAI.AutoChatToolMode)
+                if (toolIteration > 1 && chatOptions.ToolMode != null &&
+                    chatOptions.ToolMode is not MEAI.AutoChatToolMode)
                 {
                     iterationOptions = CloneOptionsWithAutoToolMode(chatOptions);
                 }
@@ -449,13 +476,13 @@ namespace CoreAI.Infrastructure.Llm
                     if (unboundToolsRequested)
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
-                            "MeaiLlmClient: Unbound-tool streaming — tools are declared but no MEAI AIFunctions are bound for this role. " +
+                            "MeaiLlmClient: Unbound-tool streaming - tools are declared but no MEAI AIFunctions are bound for this role. " +
                             "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
                     }
                     else
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
-                            "MeaiLlmClient: Hybrid tool-json hold (bound tools) — assistant text streams only through the safe prefix; " +
+                            "MeaiLlmClient: Hybrid tool-json hold (bound tools) - assistant text streams only through the safe prefix; " +
                             "from the opening `{` of a text-shaped tool call, output is held until the JSON object completes or the turn ends, then stripped before user-visible emission.");
                     }
 
@@ -495,10 +522,16 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     string raw = GetStreamingUpdateText(update);
-                    if (string.IsNullOrEmpty(raw)) continue;
+                    if (string.IsNullOrEmpty(raw))
+                    {
+                        continue;
+                    }
 
                     string visible = thinkFilter.ProcessChunk(raw);
-                    if (string.IsNullOrEmpty(visible)) continue;
+                    if (string.IsNullOrEmpty(visible))
+                    {
+                        continue;
+                    }
 
                     chunkCount++;
                     iterationVisible.Append(visible);
@@ -535,7 +568,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             emittedHybridHoldTypingHint = true;
                             _logger.LogInfo(GameLogFeature.Llm,
-                                "MeaiLlmClient: Tool-json hold started — emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
+                                "MeaiLlmClient: Tool-json hold started - emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
                             yield return new LlmStreamChunk
                             {
                                 BufferedStreamingNoToolBinding = true,
@@ -584,7 +617,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             emittedHybridHoldTypingHint = true;
                             _logger.LogInfo(GameLogFeature.Llm,
-                                "MeaiLlmClient: Tool-json hold started — emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
+                                "MeaiLlmClient: Tool-json hold started - emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
                             yield return new LlmStreamChunk
                             {
                                 BufferedStreamingNoToolBinding = true,
@@ -626,6 +659,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         assistantContents.Add(new MEAI.TextContent(visibleText));
                     }
+
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
 
                     // Execute through shared policy
@@ -635,7 +669,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        LlmStreamChunk errChunk = new LlmStreamChunk
+                        LlmStreamChunk errChunk = new()
                         {
                             IsDone = true,
                             Error = "max consecutive tool errors reached",
@@ -653,19 +687,21 @@ namespace CoreAI.Infrastructure.Llm
                 // Run extraction whenever the *request* declared tools, not just when the
                 // backend successfully bound AIFunctions. This way, a tool that was requested
                 // but couldn't be bound (e.g., MemoryLlmTool with a null store) still has its
-                // JSON stripped from the visible reply — we just can't execute it.
+                // Resolve and cache required local values.
                 bool requestHadTools = (request.Tools?.Count ?? 0) > 0;
-                if (requestHadTools && TryExtractToolCallsFromText(visibleText, out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
+                if (requestHadTools && TryExtractToolCallsFromText(visibleText,
+                        out List<MEAI.FunctionCallContent> toolCalls, out string cleanedText))
                 {
                     if (aiTools.Count == 0)
                     {
                         // Tool was requested but no AIFunction is bound. Strip the JSON, warn,
-                        // and finish as a plain text turn — there is nothing to execute and we
+                        // No-op guard before a conditional operation.
                         // must not loop forever asking a model that has no tools to call them.
                         foreach (MEAI.FunctionCallContent fc in toolCalls)
                         {
                             policy.RecordSyntheticTrace(fc.Name ?? "", false, 0d, "missing");
                         }
+
                         _logger.LogWarning(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming saw {toolCalls.Count} text-shaped tool call(s) but no AIFunction is bound for this role. " +
                             "Stripping JSON and emitting cleaned text. Check tool registration / IAgentMemoryStore wiring.");
@@ -682,7 +718,8 @@ namespace CoreAI.Infrastructure.Llm
                                     cleanedText, visibleText, hybridRawExclusiveEndEmitted);
                                 if (!string.IsNullOrEmpty(suffix))
                                 {
-                                    foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
+                                    foreach (string part in SplitForLiveUiStreaming(suffix,
+                                                 LiveUiStreamMaxCharsPerChunk))
                                     {
                                         cancellationToken.ThrowIfCancellationRequested();
                                         yield return new LlmStreamChunk { Text = part };
@@ -691,7 +728,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
                         }
 
-                        LlmStreamChunk doneStrip = new LlmStreamChunk
+                        LlmStreamChunk doneStrip = new()
                         {
                             IsDone = true,
                             Text = string.Empty,
@@ -710,8 +747,8 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming detected {toolCalls.Count} text-extracted tool call(s), executing...");
                     }
 
-                    // Важно: текст до JSON tool-call должен быть виден пользователю.
-                    // Иначе "префикс" ответа (например, "Working...") теряется в UI.
+                    // No-op guard before a conditional operation.
+                    // Skip processing when the checked condition is already satisfied.
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                     {
                         yield return new LlmStreamChunk { Text = cleanedText };
@@ -736,6 +773,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         assistantContents.Add(new MEAI.TextContent(cleanedText));
                     }
+
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
 
                     if (!emittedToolProgressTypingHint)
@@ -755,7 +793,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (policy.IsMaxErrorsReached)
                     {
-                        LlmStreamChunk errChunk2 = new LlmStreamChunk
+                        LlmStreamChunk errChunk2 = new()
                         {
                             IsDone = true,
                             Error = "max consecutive tool errors reached",
@@ -769,7 +807,7 @@ namespace CoreAI.Infrastructure.Llm
                     continue;
                 }
 
-                // === No tool calls — emit text chunks to consumer ===
+                // Skip processing when the checked condition is already satisfied.
                 if (!streamedVisibleToConsumer)
                 {
                     string sanitizedFull = SanitizeAssistantVisibleText(visibleText, request);
@@ -807,7 +845,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 cancellationToken.ThrowIfCancellationRequested();
 
-                LlmStreamChunk terminal = new LlmStreamChunk
+                LlmStreamChunk terminal = new()
                 {
                     IsDone = true,
                     Text = string.Empty,
@@ -944,18 +982,25 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Build cleaned text by removing all found tool-call JSON spans (from original text)
-            // We need to map positions from stripped text back — since code blocks are only
+            // No-op guard before a conditional operation.
             // *hidden* from search, the positions still correspond to the original text.
             System.Text.StringBuilder cleanBuilder = new(text.Length);
             int lastEnd = 0;
             foreach (JsonSpan span in candidates)
             {
                 // Verify span is valid in original text too
-                if (span.Start >= text.Length || span.Start + span.Length > text.Length) continue;
+                if (span.Start >= text.Length || span.Start + span.Length > text.Length)
+                {
+                    continue;
+                }
+
                 string originalFragment = text.Substring(span.Start, span.Length);
 
                 // Re-validate the fragment in the original text
-                if (!IsValidToolCallJson(originalFragment)) continue;
+                if (!IsValidToolCallJson(originalFragment))
+                {
+                    continue;
+                }
 
                 try
                 {
@@ -963,7 +1008,10 @@ namespace CoreAI.Infrastructure.Llm
                     string functionName = json["name"]?.ToString()?.Trim();
                     // Support both "arguments" and "arguments_json" (Qwen3.5 via LLMUnity).
                     JToken argsToken = json["arguments"] ?? json["arguments_json"];
-                    if (string.IsNullOrWhiteSpace(functionName) || argsToken == null) continue;
+                    if (string.IsNullOrWhiteSpace(functionName) || argsToken == null)
+                    {
+                        continue;
+                    }
 
                     // If args is a string (e.g. "arguments_json": "{...}"), parse it as JSON.
                     string argsStr = argsToken.Type == JTokenType.String
@@ -985,7 +1033,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch
                 {
-                    // Malformed JSON — skip this candidate
+                    // No-op guard before a conditional operation.
                 }
             }
 
@@ -1015,7 +1063,8 @@ namespace CoreAI.Infrastructure.Llm
         {
             toolCalls = new List<MEAI.FunctionCallContent>();
             cleanedText = text ?? string.Empty;
-            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches, out cleanedText))
+            if (!LlmToolCallTextExtractor.TryExtract(text, out List<LlmToolCallTextExtractor.Match> matches,
+                    out cleanedText))
             {
                 return false;
             }
@@ -1033,7 +1082,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch
                 {
-                    // malformed arguments JSON — skip
+                    // No-op guard before a conditional operation.
                 }
             }
 
@@ -1058,7 +1107,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Removes fenced code blocks (```...```) from text to prevent false positive tool call detection.</summary>
         internal static string StripCodeBlocks(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text;
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
             // Replace ```...``` blocks with whitespace of the same length to preserve positions
             return Regex.Replace(text, @"```[\s\S]*?```", m => new string(' ', m.Length));
         }
@@ -1066,7 +1119,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Checks if a JSON string looks like a tool call (has "name" and "arguments" or "arguments_json").</summary>
         internal static bool IsValidToolCallJson(string json)
         {
-            if (string.IsNullOrWhiteSpace(json)) return false;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
             // Quick heuristic before parsing: must contain both key patterns
             return json.Contains("\"name\"") &&
                    (json.Contains("\"arguments\"") || json.Contains("\"arguments_json\""));
@@ -1075,19 +1132,27 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
         /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
-        /// Newtonsoft tokens to CLR types (e.g. <c>JObject → string</c>).
+/// Executes if.
         /// </summary>
         private static void NormalizeJTokenValues<T>(Dictionary<string, T> arguments)
         {
-            if (arguments == null) return;
+            if (arguments == null)
+            {
+                return;
+            }
+
             List<string> keys = new(arguments.Keys);
             foreach (string key in keys)
             {
                 object val = arguments[key];
                 if (val is JObject jo)
+                {
                     arguments[key] = (T)(object)jo.ToString(Formatting.None);
+                }
                 else if (val is JArray ja)
+                {
                     arguments[key] = (T)(object)ja.ToString(Formatting.None);
+                }
             }
         }
 
@@ -1098,13 +1163,19 @@ namespace CoreAI.Infrastructure.Llm
         internal static List<JsonSpan> FindToolCallJsonSpans(string text)
         {
             List<JsonSpan> spans = new();
-            if (string.IsNullOrEmpty(text)) return spans;
+            if (string.IsNullOrEmpty(text))
+            {
+                return spans;
+            }
 
             int i = 0;
             while (i < text.Length)
             {
                 int braceStart = text.IndexOf('{', i);
-                if (braceStart < 0) break;
+                if (braceStart < 0)
+                {
+                    break;
+                }
 
                 // Try to find matching closing brace
                 int depth = 0;
@@ -1134,9 +1205,15 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    if (inString) continue;
+                    if (inString)
+                    {
+                        continue;
+                    }
 
-                    if (c == '{') depth++;
+                    if (c == '{')
+                    {
+                        depth++;
+                    }
                     else if (c == '}')
                     {
                         depth--;
@@ -1147,12 +1224,13 @@ namespace CoreAI.Infrastructure.Llm
                             {
                                 spans.Add(new JsonSpan { Start = braceStart, Length = j - braceStart + 1 });
                             }
+
                             break;
                         }
                     }
                 }
 
-                i = (depth == 0 && j < text.Length) ? j + 1 : braceStart + 1;
+                i = depth == 0 && j < text.Length ? j + 1 : braceStart + 1;
             }
 
             return spans;
@@ -1203,7 +1281,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// For hybrid tool-json streaming (bound or unbound): largest <paramref name="text"/> prefix that can be emitted as raw
         /// without splitting a text-shaped tool JSON (complete <see cref="FindToolCallJsonSpans"/> hits) or
-        /// an incomplete balanced <c>{</c>…<c>EOF</c> object tail (same brace rules as span scan).
+/// Executes get exclusive end for safe unbound raw streaming.
         /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
         /// </summary>
         internal static int GetExclusiveEndForSafeUnboundRawStreaming(string text)
@@ -1307,7 +1385,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Maps <see cref="LlmCompletionRequest.ForcedToolMode"/> onto
         /// <see cref="MEAI.ChatOptions.ToolMode"/>. Called only when the request actually
-        /// has tools attached — forcing a tool with an empty tool list would error out.
+/// Executes apply forced tool mode.
         /// <para>
         /// Multi-round streaming: the caller is responsible for resetting the mode to
         /// <see cref="MEAI.ChatToolMode.Auto"/> after the first iteration via
@@ -1315,7 +1393,8 @@ namespace CoreAI.Infrastructure.Llm
         /// to keep emitting tool calls forever (it's pinned to "RequireAny" each turn).
         /// </para>
         /// </summary>
-        private void ApplyForcedToolMode(MEAI.ChatOptions options, LlmCompletionRequest request, IReadOnlyList<MEAI.AIFunction> aiTools)
+        private void ApplyForcedToolMode(MEAI.ChatOptions options, LlmCompletionRequest request,
+            IReadOnlyList<MEAI.AIFunction> aiTools)
         {
             switch (request.ForcedToolMode)
             {
@@ -1332,7 +1411,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (string.IsNullOrEmpty(targetName))
                     {
                         _logger.LogWarning(GameLogFeature.Llm,
-                            "MeaiLlmClient: ForcedToolMode=RequireSpecific but RequiredToolName is empty — falling back to RequireAny.");
+                            "MeaiLlmClient: ForcedToolMode=RequireSpecific but RequiredToolName is empty - falling back to RequireAny.");
                         options.ToolMode = MEAI.ChatToolMode.RequireAny;
                         return;
                     }
@@ -1350,7 +1429,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (!isAvailable)
                     {
                         _logger.LogWarning(GameLogFeature.Llm,
-                            $"MeaiLlmClient: ForcedToolMode=RequireSpecific('{targetName}') but tool is not registered for this role — falling back to RequireAny.");
+                            $"MeaiLlmClient: ForcedToolMode=RequireSpecific('{targetName}') but tool is not registered for this role - falling back to RequireAny.");
                         options.ToolMode = MEAI.ChatToolMode.RequireAny;
                         return;
                     }
@@ -1501,7 +1580,11 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static string EnsureIdempotencyKey(LlmCompletionRequest request)
         {
-            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
             if (string.IsNullOrEmpty(request.IdempotencyKey))
             {
                 request.IdempotencyKey = Guid.NewGuid().ToString("N");

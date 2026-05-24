@@ -2,12 +2,12 @@ using System.Text;
 
 namespace CoreAI.Ai
 {
-    /// <summary>Текст для Programmer: исходный и текущий Lua, чтобы модель видела baseline.</summary>
+    /// <summary>Formats Lua script version data for programmer prompts.</summary>
     public static class LuaScriptVersionPromptFormatter
     {
         private const int MaxLuaChars = 6000;
 
-        /// <summary>Собрать секцию для user payload; <paramref name="snapshot"/> может быть <c>null</c> (слот новый).</summary>
+        /// <summary>Formats a Lua script version snapshot for inclusion in an LLM prompt.</summary>
         public static string Format(string scriptKey, LuaScriptVersionRecord snapshot)
         {
             if (string.IsNullOrWhiteSpace(scriptKey))

@@ -24,19 +24,19 @@ namespace CoreAI.Tests.EditMode
             int received = 0;
             LlmToolCallCompleted last = default;
             using (GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>().Subscribe(evt =>
-            {
-                received++;
-                last = evt;
-            }))
+                   {
+                       received++;
+                       last = evt;
+                   }))
             {
                 GlobalMessagePipe.GetPublisher<LlmToolCallCompleted>().Publish(
                     new LlmToolCallCompleted(
-                        traceId: "editmode-bootstrap",
-                        roleId: "Creator",
-                        toolName: "memory",
-                        argumentsJson: "{\"action\":\"write\"}",
-                        resultJson: "{\"ok\":true}",
-                        durationMs: 1d));
+                        "editmode-bootstrap",
+                        "Creator",
+                        "memory",
+                        "{\"action\":\"write\"}",
+                        "{\"ok\":true}",
+                        1d));
 
                 Assert.That(received, Is.EqualTo(1));
                 Assert.That(last.ToolName, Is.EqualTo("memory"));

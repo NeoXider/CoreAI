@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Политика валидации ответов Creator: требует JSON объект с командой.
+    /// Structured-response policy for creator roles.
     /// </summary>
     public sealed class CreatorResponsePolicy : IRoleStructuredResponsePolicy
     {
@@ -22,7 +22,7 @@ namespace CoreAI.Ai
 
             string trimmed = rawContent.Trim();
 
-            // Извлекаем JSON из markdown если нужно
+            /* Implementation note in English. */
             if (trimmed.StartsWith("```json"))
             {
                 int endFence = trimmed.IndexOf("```", 7);
@@ -32,7 +32,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Должен быть JSON объект
+            /* Implementation note in English. */
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
                 int jsonStart = trimmed.IndexOf('{');

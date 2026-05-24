@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,7 +23,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ILog _logger;
         private readonly int _maxConsecutiveErrors;
         private readonly ICoreAISettings _settings;
-        private readonly IReadOnlyList<CoreAI.Ai.ILlmTool> _originalTools;
+        private readonly IReadOnlyList<ILlmTool> _originalTools;
         private readonly bool _allowDuplicateToolCalls;
         private readonly string _roleId;
         private readonly string _traceId;
@@ -32,14 +32,15 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <param name="maxConsecutiveErrors">How many failures in a row are allowed before aborting.</param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, ILog logger, ICoreAISettings settings,
-            bool allowDuplicateToolCalls, IReadOnlyList<CoreAI.Ai.ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3, string traceId = "",
+            bool allowDuplicateToolCalls, IReadOnlyList<ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3,
+            string traceId = "",
             IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? NullLog.Instance;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _allowDuplicateToolCalls = allowDuplicateToolCalls;
-            _originalTools = tools ?? new List<CoreAI.Ai.ILlmTool>();
+            _originalTools = tools ?? new List<ILlmTool>();
             _roleId = roleId ?? "Unknown";
             _traceId = traceId ?? "";
             _maxConsecutiveErrors = maxConsecutiveErrors;
@@ -79,7 +80,8 @@ namespace CoreAI.Infrastructure.Llm
                     if (maxRoundtrips > 0 && iteration > maxRoundtrips)
                     {
                         _logger.Warn(
-                            $"[SmartToolCall] ⚠ Max tool-call roundtrips ({maxRoundtrips}) reached. Stopping.", LogTag.Llm);
+                            $"[SmartToolCall] Warning: Max tool-call roundtrips ({maxRoundtrips}) reached. Stopping.",
+                            LogTag.Llm);
                         return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
                             $"Agent stopped: exceeded maximum of {maxRoundtrips} tool-call roundtrips."))
                         {
@@ -87,18 +89,19 @@ namespace CoreAI.Infrastructure.Llm
                         };
                     }
 
-                    // WebGL/Unity: avoid Task.Yield() per iteration — it posts to SynchronizationContext and
+                    /* Implementation note in English. */
                     // can stall continuation chains on the single-threaded player loop. Inner awaits use
                     // ConfigureAwait(false) so continuations do not depend on capturing the sync context.
 
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.Info(
-                            $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}", LogTag.Llm);
+                            $"[SmartToolCall] Iteration {iteration}: consecutiveErrors={policy.ConsecutiveErrors}/{_maxConsecutiveErrors}, msgs={messages.Count}",
+                            LogTag.Llm);
                     }
 
                     // WebGL player builds: keep the continuation on the captured Unity SynchronizationContext.
-                    // Single-threaded IL2CPP has no real thread pool — ConfigureAwait(false) here queued the
+                    /* Implementation note in English. */
                     // resumption to TaskScheduler.Default, where it never got pumped, so the chat panel's
                     // typing dots stayed up forever even though the HTTP response had already arrived.
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -112,10 +115,11 @@ namespace CoreAI.Infrastructure.Llm
 
                     List<MEAI.AIContent> allContents = FlattenAssistantContents(response);
 
-                    List<MEAI.FunctionCallContent> nativeCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
+                    List<MEAI.FunctionCallContent>
+                        nativeCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
 
                     // Text-mode fallback: providers that emit tool calls as JSON inside an assistant
-                    // text turn (Ollama, llama.cpp, LM Studio, some Qwen builds) — same recovery path
+                    /* Implementation note in English. */
                     // as the streaming loop, so behaviour is identical regardless of mode.
                     List<MEAI.FunctionCallContent> textCalls = new();
                     string cleanedAssistantText = null;
@@ -130,7 +134,8 @@ namespace CoreAI.Infrastructure.Llm
                             if (_settings.LogMeaiToolCallingSteps)
                             {
                                 _logger.Info(
-                                    $"[SmartToolCall] Iteration {iteration}: extracted {textCalls.Count} text-shaped tool call(s) from assistant text.", LogTag.Llm);
+                                    $"[SmartToolCall] Iteration {iteration}: extracted {textCalls.Count} text-shaped tool call(s) from assistant text.",
+                                    LogTag.Llm);
                             }
                         }
                     }
@@ -158,7 +163,8 @@ namespace CoreAI.Infrastructure.Llm
                     if (_settings.LogMeaiToolCallingSteps)
                     {
                         _logger.Info(
-                            $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})", LogTag.Llm);
+                            $"[SmartToolCall] Iteration {iteration}: {toolCalls.Count} tool call(s) ({(nativeCalls.Count > 0 ? "native" : "text")})",
+                            LogTag.Llm);
                     }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -207,7 +213,7 @@ namespace CoreAI.Infrastructure.Llm
         /// Collects every <see cref="MEAI.AIContent"/> from assistant messages in <paramref name="response"/>.
         /// In Microsoft.Extensions.AI 10.x, <see cref="MEAI.ChatMessage.Contents"/> is a non-generic
         /// <see cref="System.Collections.IList"/>; LINQ <c>SelectMany</c> combined with
-        /// <c>Enumerable.Empty&lt;AIContent&gt;()</c> does not enumerate those items reliably — native
+/// Executes FlattenAssistantContents API operation.
         /// <see cref="MEAI.FunctionCallContent"/> would be missed, the loop would mis-classify turns as
         /// text-only or text-shaped tools, and consecutive-error limits would fire early.
         /// </summary>
@@ -285,12 +291,16 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
         /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
-        /// Newtonsoft tokens to CLR types (e.g. <c>JObject → string</c>); this normalization
+/// Executes NormalizeJTokenValues API operation.
         /// ensures text-mode extracted arguments work with delegates that expect string parameters.
         /// </summary>
         private static void NormalizeJTokenValues(Dictionary<string, object> arguments)
         {
-            if (arguments == null) return;
+            if (arguments == null)
+            {
+                return;
+            }
+
             List<string> keys = new(arguments.Keys);
             foreach (string key in keys)
             {
@@ -312,20 +322,33 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public static string ConcatenateAssistantTextContents(MEAI.ChatResponse response)
         {
-            if (response?.Messages == null) return string.Empty;
+            if (response?.Messages == null)
+            {
+                return string.Empty;
+            }
+
             System.Text.StringBuilder sb = new();
             foreach (MEAI.ChatMessage m in response.Messages)
             {
-                if (m?.Contents == null) continue;
+                if (m?.Contents == null)
+                {
+                    continue;
+                }
+
                 foreach (object obj in m.Contents)
                 {
                     if (obj is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
                     {
-                        if (sb.Length > 0) sb.Append('\n');
+                        if (sb.Length > 0)
+                        {
+                            sb.Append('\n');
+                        }
+
                         sb.Append(tc.Text);
                     }
                 }
             }
+
             return sb.ToString();
         }
 
@@ -335,11 +358,19 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private void TruncateResponseText(MEAI.ChatResponse response, int maxChars)
         {
-            if (response?.Messages == null || maxChars <= 0) return;
+            if (response?.Messages == null || maxChars <= 0)
+            {
+                return;
+            }
+
             int remaining = maxChars;
             foreach (MEAI.ChatMessage m in response.Messages)
             {
-                if (m?.Contents == null || m.Role != MEAI.ChatRole.Assistant) continue;
+                if (m?.Contents == null || m.Role != MEAI.ChatRole.Assistant)
+                {
+                    continue;
+                }
+
                 for (int i = 0; i < m.Contents.Count; i++)
                 {
                     if (m.Contents[i] is MEAI.TextContent tc && !string.IsNullOrEmpty(tc.Text))
@@ -351,12 +382,12 @@ namespace CoreAI.Infrastructure.Llm
                         else
                         {
                             string truncated = remaining > 0
-                                ? tc.Text.Substring(0, remaining) + "\n…[response truncated at " + maxChars + " chars]"
-                                : "…[response truncated]";
+                                ? tc.Text.Substring(0, remaining) + "\n...[response truncated at " + maxChars + " chars]"
+                                : "...[response truncated]";
                             m.Contents[i] = new MEAI.TextContent(truncated);
                             remaining = 0;
                             _logger.Info(
-                                $"[SmartToolCall] ✂ Response truncated at {maxChars} chars", LogTag.Llm);
+                                $"[SmartToolCall] Response truncated at {maxChars} chars", LogTag.Llm);
                         }
                     }
                 }
@@ -364,7 +395,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Streaming pass-through. Tool calling is NOT supported in streaming mode —
+/// Executes GetStreamingResponseAsync API operation.
         /// native FunctionCallContent in stream updates will pass through unexecuted.
         /// When tools are present, callers should prefer non-streaming
         /// (<see cref="GetResponseAsync"/>) or enforce non-streaming at the orchestrator level.
@@ -374,13 +405,13 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            // BUG-8: warn when streaming is used with tools — the tool-calling loop,
+            /* Implementation note in English. */
             // duplicate detection, and consecutive error protection are bypassed.
             if (options?.Tools != null && options.Tools.Count > 0)
             {
                 _logger.Warn(
-                    $"[SmartToolCall] ⚠ Streaming requested with {options.Tools.Count} tool(s) active. " +
-                    "Tool calling loop is NOT supported in streaming mode — tool calls will pass through unexecuted. " +
+                    $"[SmartToolCall] Warning: Streaming requested with {options.Tools.Count} tool(s) active. " +
+                    "Tool calling loop is NOT supported in streaming mode - tool calls will pass through unexecuted. " +
                     "Consider using non-streaming mode when tools are registered.", LogTag.Llm);
             }
 
@@ -441,10 +472,11 @@ namespace CoreAI.Infrastructure.Llm
             int removed = 0;
 
             // Remove oldest tool call pairs from the list (skip system/user at the beginning).
-            for (int i = 0; i < messages.Count && removed < toRemove; )
+            for (int i = 0; i < messages.Count && removed < toRemove;)
             {
                 bool isToolMsg = messages[i].Role == MEAI.ChatRole.Tool;
-                bool isToolAssistant = messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]);
+                bool isToolAssistant =
+                    messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]);
 
                 if (isToolMsg || isToolAssistant)
                 {
@@ -460,17 +492,26 @@ namespace CoreAI.Infrastructure.Llm
             if (removed > 0 && _settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(
-                    $"[SmartToolCall] Trimmed {removed} old tool call message(s), keeping {messages.Count} total.", LogTag.Llm);
+                    $"[SmartToolCall] Trimmed {removed} old tool call message(s), keeping {messages.Count} total.",
+                    LogTag.Llm);
             }
         }
 
         private static bool HasFunctionCallContent(MEAI.ChatMessage message)
         {
-            if (message.Contents == null) return false;
+            if (message.Contents == null)
+            {
+                return false;
+            }
+
             foreach (object item in message.Contents)
             {
-                if (item is MEAI.FunctionCallContent) return true;
+                if (item is MEAI.FunctionCallContent)
+                {
+                    return true;
+                }
             }
+
             return false;
         }
     }

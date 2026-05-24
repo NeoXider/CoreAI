@@ -45,7 +45,9 @@ namespace CoreAI.Tests.EditMode
                 return Task.FromResult<string>(null);
             }
 
-            public void CancelTasks(string scopeId) {}
+            public void CancelTasks(string scopeId)
+            {
+            }
         }
 
         [Test]
@@ -181,4 +183,4 @@ namespace CoreAI.Tests.EditMode
             }
         }
     }
-}
+}
