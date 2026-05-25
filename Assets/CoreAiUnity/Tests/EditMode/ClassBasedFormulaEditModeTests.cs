@@ -9,8 +9,8 @@ using System.Collections.Generic;
 namespace CoreAI.Tests.EditMode.LuaFormulas
 {
     /// <summary>
-    /// Тесты формул урона для разных классов/ролей (воин, маг, лучник и т.д.).
-    /// Проверяет что AI может создавать уникальные формулы для каждого класса.
+    /// Tests class-specific damage formulas for roles such as warrior, mage, and archer.
+    /// Verifies that AI-authored formulas can produce distinct behavior per class.
     /// </summary>
     public sealed class ClassBasedFormulaEditModeTests
     {

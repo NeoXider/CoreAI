@@ -21,7 +21,7 @@ namespace CoreAI.Infrastructure.Llm
     }
 
     /// <summary>
-    /// No-op implementation for environments without tool execution subscribers.
+    /// Tool execution notifier used when the host has no tool-execution subscribers.
     /// </summary>
     public sealed class NullToolExecutionNotifier : IToolExecutionNotifier
     {

@@ -7,7 +7,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для AgentBuilder с новыми функциями (ChatHistory, ContextWindowTokens).
+    /// EditMode coverage for AgentBuilder chat history and context-window options.
     /// </summary>
     public sealed class AgentBuilderChatHistoryEditModeTests
     {

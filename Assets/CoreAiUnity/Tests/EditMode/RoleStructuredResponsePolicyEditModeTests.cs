@@ -4,7 +4,7 @@ using CoreAI.Ai;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Тесты валидации ответов LLM для всех ролей.
+    /// Tests structured LLM response validation for all built-in roles.
     /// </summary>
     [TestFixture]
     public class RoleStructuredResponsePolicyEditModeTests

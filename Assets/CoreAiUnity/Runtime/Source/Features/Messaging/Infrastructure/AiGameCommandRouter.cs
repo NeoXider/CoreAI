@@ -10,11 +10,11 @@ using CoreAI.Infrastructure.World;
 namespace CoreAI.Infrastructure.Messaging
 {
     /// <summary>
-    /// Provides ai game command router functionality.
+    /// Subscribes to AI command messages and routes them to Lua/world command processors on startup.
     /// </summary>
     public sealed class AiGameCommandRouter : IStartable, IDisposable
     {
-        /// <summary>Command received.</summary>
+        /// <summary>Raised after an AI command message is received by the router.</summary>
         public static event Action<ApplyAiGameCommand> CommandReceived;
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
@@ -24,7 +24,7 @@ namespace CoreAI.Infrastructure.Messaging
         private IDisposable _subscription;
         private volatile bool _disposed;
 
-        /// <summary>Initializes a new instance of AiGameCommandRouter.</summary>
+        /// <summary>Creates a router bound to MessagePipe, logging, Lua, and world-command services.</summary>
         public AiGameCommandRouter(
             ISubscriber<ApplyAiGameCommand> subscriber,
             IGameLogger logger,

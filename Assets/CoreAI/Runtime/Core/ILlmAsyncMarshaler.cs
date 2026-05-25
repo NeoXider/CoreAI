@@ -11,13 +11,13 @@ namespace CoreAI
     public interface ILlmAsyncMarshaler
     {
         /// <summary>
-        /// Executes <paramref name="factory"/> (after host-specific thread marshaling if configured).
+        /// Invokes <paramref name="factory"/> after applying any host-specific thread marshaling.
         /// </summary>
         Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken);
     }
 
     /// <summary>
-    /// Default: runs <paramref name="factory"/> immediately on the current context (existing behaviour).
+    /// Default implementation that runs the factory immediately on the current context.
     /// </summary>
     public sealed class PassThroughLlmAsyncMarshaler : ILlmAsyncMarshaler
     {

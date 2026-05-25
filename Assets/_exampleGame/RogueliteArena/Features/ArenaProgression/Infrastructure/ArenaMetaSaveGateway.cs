@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Сериализация меты в <see cref="SaveProvider"/> (строка под ключом из <see cref="ArenaPersistenceConfig"/>).</summary>
+    /// <summary>Serializes meta progression through <see cref="SaveProvider"/> using the configured persistence key.</summary>
     public sealed class ArenaMetaSaveGateway
     {
         private readonly ArenaPersistenceConfig _config;

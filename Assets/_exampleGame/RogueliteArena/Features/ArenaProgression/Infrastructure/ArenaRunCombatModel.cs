@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Мутация сессионных статов игрока/компаньона и синхронизация с <see cref="MonoBehaviour"/> на сцене.</summary>
+    /// <summary>Mutates session combat stats for the player and companion, then syncs scene behaviours.</summary>
     public sealed class ArenaRunCombatModel
     {
         private sealed class MutableStats : IArenaCombatStats

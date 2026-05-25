@@ -1,4 +1,4 @@
-namespace CoreAI.Ai
+﻿namespace CoreAI.Ai
 {
     /// <summary>
     /// Structured-response policy for AI NPC roles.
@@ -20,7 +20,6 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            /* Implementation note in English. */
             string trimmed = rawContent.Trim();
             if (trimmed.Length < 2)
             {

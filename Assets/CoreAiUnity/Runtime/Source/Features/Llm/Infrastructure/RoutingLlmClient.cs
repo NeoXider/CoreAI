@@ -90,10 +90,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// Streams a completion through the configured provider while publishing routing diagnostics.
         /// </summary>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

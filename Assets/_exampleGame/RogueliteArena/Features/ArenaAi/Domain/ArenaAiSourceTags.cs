@@ -1,6 +1,6 @@
 namespace CoreAI.ExampleGame.ArenaAi.Domain
 {
-    /// <summary>Константы <see cref="CoreAI.Ai.AiTaskRequest.SourceTag"/> для арены-примера.</summary>
+    /// <summary><see cref="CoreAI.Ai.AiTaskRequest.SourceTag"/> constants used by the arena example.</summary>
     public static class ArenaAiSourceTags
     {
         public const string DirectorWaveStart = "arena_director:wave_start";

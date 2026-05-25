@@ -10,8 +10,8 @@ using VContainer;
 namespace CoreAI.ExampleGame.SymbiosisMode
 {
     /// <summary>
-    /// Связующее звено между Скелетами-компаньонами и децентрализованной ИИ-оркестрацией CoreAI.
-    /// Регистрирует инструменты LLM для управления действиями скелетов.
+    /// Connects skeleton companions to the decentralized CoreAI orchestration flow.
+    /// Registers LLM tools that control companion actions.
     /// </summary>
     public class SymbiosisCompanionAiLink : MonoBehaviour
     {

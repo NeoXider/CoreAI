@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>No-op agent memory store used when persistence is unavailable.</summary>
+    /// <summary>Agent memory store used when persistence is unavailable.</summary>
     public sealed class NullAgentMemoryStore : IAgentMemoryStore
     {
         /// <inheritdoc />

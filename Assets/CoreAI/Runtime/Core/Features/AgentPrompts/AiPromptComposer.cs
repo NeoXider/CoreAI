@@ -38,23 +38,18 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes GetSystemPrompt API operation.
-        ///
-        ///
-        ///
+        /// Builds the final system prompt for a role from global prefix, role base prompt,
+        /// and per-role prompt additions.
         /// </summary>
         public string GetSystemPrompt(string roleId)
         {
-            /* Implementation note in English. */
             bool skipPrefix = _memoryPolicy != null &&
                               _memoryPolicy.IsUniversalPrefixOverridden(roleId);
 
-            /* Implementation note in English. */
             string prefix = skipPrefix
                 ? ""
                 : _settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
 
-            /* Implementation note in English. */
             string basePrompt;
             if (_systemPrompts.TryGetSystemPrompt(roleId, out string s) && !string.IsNullOrWhiteSpace(s))
             {
@@ -65,7 +60,6 @@ namespace CoreAI.Ai
                 basePrompt = $"You are agent \"{roleId}\".";
             }
 
-            /* Implementation note in English. */
             string additional = "";
             if (_memoryPolicy != null &&
                 _memoryPolicy.TryGetAdditionalSystemPrompt(roleId, out string extra) &&
@@ -74,7 +68,6 @@ namespace CoreAI.Ai
                 additional = extra.Trim();
             }
 
-            /* Implementation note in English. */
             StringBuilder sb = new();
             if (!string.IsNullOrWhiteSpace(prefix))
             {
@@ -151,7 +144,6 @@ namespace CoreAI.Ai
             string body;
             if (_userTemplates.TryGetUserTemplate(roleId, out string tmpl))
             {
-                /* Implementation note in English. */
                 string telemetryJson = BuildTelemetryJsonObject(snap);
                 body = tmpl
                     .Replace("{telemetry}", telemetryJson)
@@ -256,8 +248,6 @@ namespace CoreAI.Ai
 
         private static string BuildDefaultJsonPayload(GameSessionSnapshot snap, AiTaskRequest task)
         {
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             StringBuilder sb = new(256);
             sb.Append('{');
             sb.Append("\"telemetry\":");
@@ -288,8 +278,6 @@ namespace CoreAI.Ai
 
             string err = ShortenForPrompt(task.LuaRepairErrorMessage, 500);
             string code = ShortenForPrompt(task.LuaRepairPreviousCode ?? "", 1200);
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             return $"{body}; lua_repair_generation={task.LuaRepairGeneration}; lua_error={err}; fix_this_lua={code}";
         }
 

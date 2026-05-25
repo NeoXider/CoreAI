@@ -9,16 +9,15 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Тесты стримингового пути оркестратора: default-fallback в интерфейсе
-    /// <see cref="IAiOrchestrationService"/> и прозрачный проброс через
-    /// <see cref="QueuedAiOrchestrator"/>.
+    /// Tests the orchestrator streaming path, including the interface default fallback
+    /// and transparent chunk forwarding through <see cref="QueuedAiOrchestrator"/>.
     /// </summary>
     public sealed class AiOrchestratorStreamingEditModeTests
     {
         /// <summary>
-        /// Стаб-оркестратор, который реализует ТОЛЬКО <see cref="IAiOrchestrationService.RunTaskAsync"/>
-        /// и полагается на default-реализацию <c>RunStreamingAsync</c> из интерфейса.
-        /// Полезен для проверки того, что fallback корректно эмитит 2 чанка (текст + done).
+        /// Orchestrator stub that implements only <see cref="IAiOrchestrationService.RunTaskAsync"/>
+        /// and relies on the interface default <c>RunStreamingAsync</c> implementation.
+        /// Used to verify that the fallback emits text and completion chunks correctly.
         /// </summary>
         private sealed class FallbackOnlyOrchestrator : IAiOrchestrationService
         {
@@ -40,8 +39,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Оркестратор с явной реализацией стриминга: эмитит N delta-чанков.
-        /// Проверяем что QueuedAiOrchestrator корректно пробрасывает их через свою очередь.
+        /// Orchestrator stub with an explicit streaming implementation that emits configured delta chunks.
+        /// Used to verify that <see cref="QueuedAiOrchestrator"/> forwards queued chunks without buffering.
         /// </summary>
         private sealed class StreamingOrchestrator : IAiOrchestrationService
         {
@@ -380,8 +379,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Эмитит первый chunk немедленно, затем ждёт либо cancellation token, либо
-        /// завершения Gate. Gate не разделяется — у каждой реализации свой экземпляр.
+        /// Emits the first chunk immediately, then waits for either cancellation or its own gate.
         /// </summary>
         private sealed class SlowStreamingOrchestrator : IAiOrchestrationService
         {

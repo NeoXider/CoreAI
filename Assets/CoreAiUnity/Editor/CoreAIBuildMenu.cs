@@ -14,6 +14,10 @@ using CoreAI.Presentation.AiDashboard;
 
 namespace CoreAI.Editor
 {
+    /// <summary>
+    /// Unity editor menu commands for creating CoreAI assets, opening demo scenes,
+    /// validating scene setup, and managing CoreAI persistent data.
+    /// </summary>
     public static class CoreAIBuildMenu
     {
         private const string MainCoreAiScene = "Assets/CoreAiUnity/Scenes/_mainCoreAI.unity";
@@ -26,24 +30,28 @@ namespace CoreAI.Editor
         private const string AiPermissionsPath = SettingsRoot + "/AiPermissions.asset";
         private const string LlmRoutingPath = SettingsRoot + "/LlmRoutingManifest.asset";
 
+        /// <summary>Moves the packaged `_mainCoreAI` scene to the first build-settings slot.</summary>
         [MenuItem("CoreAI/Development/Set _mainCoreAI as first build scene")]
         public static void SetMainCoreAiFirstInBuild()
         {
             MoveSceneFirstInBuild(MainCoreAiScene, "_mainCoreAI");
         }
 
+        /// <summary>Opens the packaged `_mainCoreAI` scene in the editor.</summary>
         [MenuItem("CoreAI/Development/Open _mainCoreAI scene")]
         public static void OpenMainCoreAiScene()
         {
             EditorSceneManager.OpenScene(MainCoreAiScene);
         }
 
+        /// <summary>Opens the RogueliteArena example scene in the editor.</summary>
         [MenuItem("CoreAI/Development/Example Game/Open RogueliteArena scene")]
         public static void OpenRogueliteArenaScene()
         {
             EditorSceneManager.OpenScene(RogueliteArenaScene);
         }
 
+        /// <summary>Moves the RogueliteArena example scene to the first build-settings slot.</summary>
         [MenuItem("CoreAI/Development/Example Game/Set RogueliteArena as first build scene")]
         public static void SetRogueliteArenaFirstInBuild()
         {
@@ -51,7 +59,7 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Executes delete all persistent saves.
+        /// Deletes all CoreAI files under <see cref="Application.persistentDataPath"/> after user confirmation.
         /// </summary>
         [MenuItem("CoreAI/Delete All Persistent Saves...", false, 60)]
         public static void DeleteAllPersistentSaves()
@@ -101,6 +109,7 @@ namespace CoreAI.Editor
             }
         }
 
+        /// <summary>Opens or creates the project-level CoreAI settings asset.</summary>
         [MenuItem("CoreAI/Settings", priority = 1)]
         public static void OpenSettings()
         {
@@ -111,7 +120,7 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Executes auto create default assets on load.
+        /// Schedules default CoreAI asset bootstrap after the Unity editor finishes loading.
         /// </summary>
         [InitializeOnLoadMethod]
         private static void AutoCreateDefaultAssetsOnLoad()
@@ -127,7 +136,6 @@ namespace CoreAI.Editor
                 return;
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath) != null)
             {
                 return;
@@ -144,7 +152,6 @@ namespace CoreAI.Editor
                 }
             }
 
-            // No-op guard before a conditional operation.
             CoreAISettingsAsset existing = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
             if (existing != null)
             {
@@ -156,6 +163,7 @@ namespace CoreAI.Editor
             CreateDefaultAssets();
         }
 
+        /// <summary>Creates missing default CoreAI settings, prompt, logging, permission, routing, and prefab assets.</summary>
         [MenuItem("CoreAI/Setup/Create Default Assets", priority = 2)]
         public static void CreateDefaultAssets()
         {
@@ -164,8 +172,6 @@ namespace CoreAI.Editor
 
             GameLogSettingsAsset logSettings = EnsureAsset<GameLogSettingsAsset>(LogSettingsPath);
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             CoreAISettingsAsset coreAiSettings = Resources.Load<CoreAISettingsAsset>("CoreAISettings");
             if (coreAiSettings == null)
             {
@@ -184,6 +190,7 @@ namespace CoreAI.Editor
             CoreAIEditorLog.Log("Default CoreAI assets auto-generated and configured.");
         }
 
+        /// <summary>Validates the active scene for the minimum CoreAI runtime setup.</summary>
         [MenuItem("CoreAI/Setup/Validate Scene", priority = 3)]
         public static void ValidateScene()
         {
@@ -231,10 +238,10 @@ namespace CoreAI.Editor
             }
         }
 
+        /// <summary>Creates a minimal CoreAI lifetime-scope scene setup without the demo chat UI.</summary>
         [MenuItem("CoreAI/Setup/Create Bare Scene (advanced)", priority = 8)]
         public static void CreateSceneSetup()
         {
-            // No-op guard before a conditional operation.
             CoreAILifetimeScope existingScope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
             if (existingScope != null)
             {
@@ -251,15 +258,12 @@ namespace CoreAI.Editor
                 return;
             }
 
-            // No-op guard before a conditional operation.
             CreateDefaultAssets();
 
-            // No-op guard before a conditional operation.
             GameObject scopeGo = new("CoreAILifetimeScope");
             Undo.RegisterCreatedObjectUndo(scopeGo, "Create CoreAI Bare Scene Setup");
             CoreAILifetimeScope scope = scopeGo.AddComponent<CoreAILifetimeScope>();
 
-            // No-op guard before a conditional operation.
             GameLogSettingsAsset logSettings =
                 AssetDatabase.LoadAssetAtPath<GameLogSettingsAsset>(LogSettingsPath);
             CoreAISettingsAsset coreAiSettings =
@@ -318,7 +322,6 @@ namespace CoreAI.Editor
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
             try
             {
-                // Skip processing when the checked condition is already satisfied.
                 if (TryFindMonoBehaviourByTypeName("LLM") != null)
                 {
                     CoreAIEditorLog.Log("Scene Setup: LLM already exists in the scene; skipping creation.");
@@ -338,7 +341,6 @@ namespace CoreAI.Editor
                 agent.remote = false;
                 agent.llm = llm;
 
-                // No-op guard before a conditional operation.
                 CoreAISettingsAsset settings = AssetDatabase.LoadAssetAtPath<CoreAISettingsAsset>(CoreAiSettingsPath);
                 if (settings != null)
                 {

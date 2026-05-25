@@ -21,13 +21,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    ///  PlayMode    tool calls (memory, execute_lua).
-    ///    LLMUnity ( GGUF)  OpenAI-compatible HTTP API.
-    /// 
-    /// :
-    /// 1.  LLM: COREAI_PLAYMODE_LLM_BACKEND=llmunity
-    /// 2. API (LM Studio): COREAI_PLAYMODE_LLM_BACKEND=http + COREAI_OPENAI_TEST_BASE/MODEL
-    /// 3. Auto ( ): COREAI_PLAYMODE_LLM_BACKEND=auto
+    /// PlayMode verification for real tool calls such as memory and execute_lua.
+    /// Runs against LLMUnity, an OpenAI-compatible HTTP API, or automatic backend selection.
+    /// Select the backend with COREAI_PLAYMODE_LLM_BACKEND and related test settings.
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class AllToolCallsPlayModeTests

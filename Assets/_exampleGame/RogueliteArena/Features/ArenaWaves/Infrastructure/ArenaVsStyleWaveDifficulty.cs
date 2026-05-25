@@ -4,8 +4,8 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
 {
     /// <summary>
-    /// Кривая в духе Vampire Survivors: к концу забега давление растёт, но отдельные волны мягче за счёт синуса
-    /// (передышка), без монотонного «каждая волна жёстче предыдущей».
+    /// Vampire-Survivors-style pressure curve: the run gets harder overall while the
+    /// sine component creates breathing-room waves instead of monotonic escalation.
     /// </summary>
     [CreateAssetMenu(fileName = "ArenaVsWaveDifficulty", menuName = "CoreAI Example/Arena/VS-style Wave Difficulty", order = 30)]
     public sealed class ArenaVsStyleWaveDifficulty : ScriptableObject, IArenaWaveDifficulty

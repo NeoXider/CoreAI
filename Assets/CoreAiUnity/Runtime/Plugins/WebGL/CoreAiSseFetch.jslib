@@ -13,7 +13,8 @@
 
 mergeInto(LibraryManager.library, {
   $CoreAiSseFetchState: {
-    controllers: {}
+    controllers: {},
+    abortReasons: {}
   },
 
   CoreAi_FetchSseOpen__deps: ['$CoreAiSseFetchState'],
@@ -23,7 +24,12 @@ mergeInto(LibraryManager.library, {
     var modeStr = UTF8ToString(credentialsMode);
     var credentials = modeStr === 'include' ? 'include' : modeStr === 'omit' ? 'omit' : 'same-origin';
     var controller = new AbortController();
-    var timeoutId = setTimeout(function () { controller.abort(); }, timeoutSec * 1000);
+    var timeoutId = timeoutSec > 0
+      ? setTimeout(function () {
+          CoreAiSseFetchState.abortReasons[callId] = 'Timeout';
+          controller.abort();
+        }, timeoutSec * 1000)
+      : 0;
 
     CoreAiSseFetchState.controllers[callId] = controller;
 
@@ -59,7 +65,7 @@ mergeInto(LibraryManager.library, {
       signal: controller.signal,
       cache: 'no-store'
     }).then(function (response) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       var status = response.status | 0;
       var hdrFlat = flattenHeaders(response.headers);
       // console.log('[CoreAiSseFetch] response id=' + callId + ' status=' + status +
@@ -140,10 +146,14 @@ mergeInto(LibraryManager.library, {
           // browser can paint between bursts. Critical on single-threaded WebGL.
           setTimeout(pump, 0);
         }).catch(function (err) {
-          clearTimeout(timeoutId);
-          var msg = err && err.name === 'AbortError' ? 'Timeout' : (err && err.message ? err.message : 'fetch read error');
-          console.warn('[CoreAiSseFetch] read-error id=' + callId + ' msg=' + msg);
+          if (timeoutId) clearTimeout(timeoutId);
+          var reason = CoreAiSseFetchState.abortReasons[callId];
+          var msg = err && err.name === 'AbortError'
+            ? (reason || 'cancelled')
+            : (err && err.message ? err.message : 'fetch read error');
+          if (msg !== 'cancelled') console.warn('[CoreAiSseFetch] read-error id=' + callId + ' msg=' + msg);
           {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg));
+          delete CoreAiSseFetchState.abortReasons[callId];
           delete CoreAiSseFetchState.controllers[callId];
         });
       }
@@ -152,11 +162,15 @@ mergeInto(LibraryManager.library, {
       // attaches its StreamReader before the first onChunk lands.
       setTimeout(pump, 0);
     }).catch(function (err) {
-      clearTimeout(timeoutId);
-      var msg = err && err.name === 'AbortError' ? 'Timeout' : (err && err.message ? err.message : 'fetch failed (CORS/network)');
-      console.warn('[CoreAiSseFetch] fetch-rejected id=' + callId + ' msg=' + msg);
+      if (timeoutId) clearTimeout(timeoutId);
+      var reason = CoreAiSseFetchState.abortReasons[callId];
+      var msg = err && err.name === 'AbortError'
+        ? (reason || 'cancelled')
+        : (err && err.message ? err.message : 'fetch failed (CORS/network)');
+      if (msg !== 'cancelled') console.warn('[CoreAiSseFetch] fetch-rejected id=' + callId + ' msg=' + msg);
       {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, 0, utf8(msg), utf8(''));
       {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg));
+      delete CoreAiSseFetchState.abortReasons[callId];
       delete CoreAiSseFetchState.controllers[callId];
     });
   },
@@ -164,7 +178,7 @@ mergeInto(LibraryManager.library, {
   CoreAi_FetchSseAbort__deps: ['$CoreAiSseFetchState'],
   CoreAi_FetchSseAbort: function (callId) {
     var c = CoreAiSseFetchState.controllers[callId];
+    CoreAiSseFetchState.abortReasons[callId] = 'cancelled';
     if (c && c.abort) c.abort();
-    delete CoreAiSseFetchState.controllers[callId];
   }
 });

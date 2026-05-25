@@ -39,7 +39,7 @@ namespace CoreAI.Config
             "}";
 
         /// <summary>
-/// Executes CreateAIFunction API operation.
+        /// Creates the MEAI function delegated to the underlying <see cref="GameConfigTool"/>.
         /// </summary>
         public AIFunction CreateAIFunction()
         {

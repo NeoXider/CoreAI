@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides queued ai orchestrator functionality.
+    /// Adds priority queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IDisposable
     {
@@ -70,11 +70,6 @@ namespace CoreAI.Ai
             AiTaskRequest task,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             AsyncChunkQueue queue = new();
 
             StreamWorkItem work = new()
@@ -99,11 +94,6 @@ namespace CoreAI.Ai
 
             Enqueue(work);
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             if (queue.IsCompleted)
             {
                 foreach (LlmStreamChunk chunk in queue.DrainSync())
@@ -114,13 +104,6 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             await foreach (LlmStreamChunk chunk in ReadStreamingQueue(queue))
             {
                 yield return chunk;
@@ -164,7 +147,6 @@ namespace CoreAI.Ai
                 token.ThrowIfCancellationRequested();
                 // WebGL player: keep continuation on Unity SynchronizationContext.
                 // ConfigureAwait(false) on single-threaded IL2CPP queues to TaskScheduler.Default
-                /* Implementation note in English. */
 #if UNITY_WEBGL && !UNITY_EDITOR
                 string result = await _inner.RunTaskAsync(w.Task, token);
 #else
@@ -286,7 +268,6 @@ namespace CoreAI.Ai
             // BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose from ReleaseScopeToken.
             SafeCancel(activeToCancel);
 
-            /* Implementation note in English. */
             CancelRemovedPending(removedPending, removedStreamPending);
 
             lock (_lock)
@@ -562,7 +543,6 @@ namespace CoreAI.Ai
             }
             catch (ObjectDisposedException)
             {
-                /* Implementation note in English. */
             }
         }
 
@@ -582,7 +562,6 @@ namespace CoreAI.Ai
             }
             catch (ObjectDisposedException)
             {
-                /* Implementation note in English. */
             }
         }
 
@@ -629,7 +608,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Provides async chunk queue functionality.
+        /// Minimal async queue used to bridge streamed chunks between producer and consumer tasks.
         /// </summary>
         private sealed class AsyncChunkQueue
         {
@@ -689,7 +668,6 @@ namespace CoreAI.Ai
                     lock (_signalLock)
                     {
                         // Re-check inside lock to close the race between Write/Complete and the
-                        /* Implementation note in English. */
                         // we await would be missed and the reader would park forever.
                         if (_queue.TryDequeue(out LlmStreamChunk chunk2))
                         {

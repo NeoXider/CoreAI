@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides auth/session context for server-managed LLM routes.
+    /// Supplies auth and session metadata for server-managed LLM routes.
     /// </summary>
     public interface ILlmAuthContextProvider
     {

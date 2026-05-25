@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Сдвигает веса редкости на <b>копии</b> ChanceManager (оригинальный SO не трогаем).</summary>
+    /// <summary>Adjusts rarity weights on a copied ChanceManager without mutating the source asset.</summary>
     public sealed class ArenaRarityLuckModifier
     {
         public void Apply(ChanceManager runtimeCopy, float luck01)

@@ -2,7 +2,7 @@ using CoreAI.ExampleGame.ArenaProgression.UseCases;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Статические ссылки на текущую сессию прогрессии (один забег на сцену; сбрасывать при уничтожении хоста).</summary>
+    /// <summary>Static references to the current progression session; reset when the session host is destroyed.</summary>
     public static class ArenaProgressionRuntimeHub
     {
         public static IAddSessionKillXpUseCase AddSessionKillXp { get; set; }

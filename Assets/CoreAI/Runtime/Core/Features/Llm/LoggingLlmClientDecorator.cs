@@ -91,12 +91,10 @@ namespace CoreAI.Infrastructure.Llm
             Stopwatch sw = Stopwatch.StartNew();
             LlmCompletionResult result = null;
             // Timeout is now enforced by the Unity-aware caller (CoreAiChatService)
-            /* Implementation note in English. */
             // This decorator only handles logging and HTTP 429/5xx retries.
             try
             {
                 // WebGL player: keep continuation on Unity SynchronizationContext. See note in
-                /* Implementation note in English. */
                 // browser stack hangs the await chain after HTTP completes, leaving chat UI stuck.
 #if UNITY_WEBGL && !UNITY_EDITOR
                 result = await _inner.CompleteAsync(request, cancellationToken);
@@ -112,7 +110,6 @@ namespace CoreAI.Infrastructure.Llm
                 IsRetryableHttpError(httpEx, out int httpWait) &&
                 _maxHttpRetryAttempts > 0)
             {
-                /* Implementation note in English. */
                 bool exhausted = true;
                 for (int attempt = 0; attempt < _maxHttpRetryAttempts; attempt++)
                 {
@@ -153,7 +150,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            /* Implementation note in English. */
             // apply the same retry policy as for LlmClientException above.
             if (result != null &&
                 !result.Ok &&
@@ -330,7 +326,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <remarks>
         /// Without this override, <see cref="ILlmClient.CompleteStreamingAsync"/>
         /// would fall back to <see cref="CompleteAsync"/> and emit the entire response as
-        /// Provides API usage information.
+        /// a single buffered chunk, hiding real streaming behavior from the UI.
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,
@@ -375,7 +371,6 @@ namespace CoreAI.Infrastructure.Llm
             IReadOnlyList<LlmToolCallTrace> executedTools = Array.Empty<LlmToolCallTrace>();
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
-            /* Implementation note in English. */
 
             IAsyncEnumerator<LlmStreamChunk> enumerator = null;
             string initError = null;
@@ -529,7 +524,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes FormatExecutedTools API operation.
+        /// Formats executed tool traces for the compact LLM completion log line.
         /// Returns an empty string when no tool was invoked, so plain text turns stay one-line.
         /// Format: <c> | tools=[name(ok,12ms),name(fail,4ms,native)]</c>.
         /// </summary>

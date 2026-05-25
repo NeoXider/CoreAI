@@ -24,22 +24,14 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// Comprehensive end-to-end PlayMode scenario that exercises the full CoreAI pipeline
     /// in a single coherent RPG game session:
-    ///
-    /// Phase 1 — Skills + Tool Calling:
-    ///   Model receives SkillSet catalog → calls read_skill → uses crafting tools.
-    ///
-    /// Phase 2 — Memory Persistence:
-    ///   Model writes crafting result to memory → second turn reads it back.
-    ///
-    /// Phase 3 — Multi-Turn Conversation:
-    ///   Model answers follow-up questions using chat history context.
-    ///
-    /// Phase 4 — Cross-Skill Routing:
-    ///   Model switches from Crafting to Combat skill mid-conversation.
-    ///
+    /// Phase 1: Skills and tool calling, where the model reads the SkillSet catalog
+    /// and uses crafting tools.
+    /// Phase 2: Memory persistence, where a later turn reads back the crafting result.
+    /// Phase 3: Multi-turn conversation through chat history context.
+    /// Phase 4: Cross-skill routing from Crafting to Combat.
     /// All phases use a real LLM backend and validate the full decorator chain:
-    /// LoggingLlmClientDecorator → RoutingLlmClient → OpenAiChatLlmClient →
-    /// MeaiLlmClient → SmartToolCallingChatClient → ToolExecutionPolicy.
+    /// LoggingLlmClientDecorator, RoutingLlmClient, OpenAiChatLlmClient,
+    /// MeaiLlmClient, SmartToolCallingChatClient, and ToolExecutionPolicy.
     /// </summary>
     [TestFixture]
     public sealed class FullPipelineE2EPlayModeTests

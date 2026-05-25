@@ -64,7 +64,6 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// Transfers ownership of <paramref name="stream"/>, <paramref name="response"/>, and <paramref name="httpClient"/>.
-/// Executes WithStreamResponseAndClient API operation.
         /// </summary>
         internal OpenAiHttpSseOpenResult WithStreamResponseAndClient(Stream? stream, HttpResponseMessage? response,
             HttpClient httpClient)

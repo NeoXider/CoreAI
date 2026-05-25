@@ -1,7 +1,7 @@
 namespace CoreAI.Config
 {
     /// <summary>
-    /// No-op game configuration store used when config persistence is unavailable.
+    /// Game configuration store used when config persistence is unavailable.
     /// </summary>
     public sealed class NullGameConfigStore : IGameConfigStore
     {

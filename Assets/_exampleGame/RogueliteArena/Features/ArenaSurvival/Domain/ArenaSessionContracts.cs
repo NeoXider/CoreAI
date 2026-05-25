@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaSurvival.Domain
 {
-    /// <summary>Снимок состояния забега для UI и наблюдателей (без мутаций).</summary>
+    /// <summary>Read-only run-state snapshot for UI and observers.</summary>
     public interface IArenaSessionView
     {
         bool IsAuthoritativeSimulation { get; }
@@ -12,15 +12,15 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Domain
         int CurrentWave { get; }
         int AliveEnemies { get; }
         System.Collections.Generic.IReadOnlyCollection<ArenaEnemyBrain> ActiveEnemiesList { get; }
-        /// <summary>Убийства на текущей волне (сбрасывается при старте новой волны).</summary>
+        /// <summary>Kills during the current wave; resets when a new wave starts.</summary>
         int KillsThisWave { get; }
-        /// <summary>Всего убийств за забег.</summary>
+        /// <summary>Total kills during the run.</summary>
         int TotalKillsRun { get; }
         bool RunEnded { get; }
         bool PlayerWon { get; }
     }
 
-    /// <summary>Мутации состояния — только на узле с <see cref="IArenaSessionView.IsAuthoritativeSimulation"/>.</summary>
+    /// <summary>Run-state mutations allowed only on the authoritative simulation peer.</summary>
     public interface IArenaSessionAuthority : IArenaSessionView
     {
         void RegisterPrimaryPlayer(Transform playerTransform, ArenaPlayerHealth health);
@@ -30,7 +30,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Domain
         void RegisterEnemy(ArenaEnemyBrain enemy);
         void UnregisterEnemy(ArenaEnemyBrain enemy);
         void ResetKillsThisWave();
-        /// <summary>Вызывайте при поражении босса (хук для шины ИИ).</summary>
+        /// <summary>Call when a boss is defeated so the AI bus can react.</summary>
         void NotifyBossDefeated();
         void EndRun(bool playerWon);
     }

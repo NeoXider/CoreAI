@@ -8,8 +8,7 @@ namespace CoreAI.Crafting
     public interface ICompatibilityValidator
     {
         /// <summary>
-/// Executes Validate API operation.
-        ///
+        /// Validates an ingredient set and returns a crafting compatibility result.
         /// </summary>
         CompatibilityResult Validate(IReadOnlyList<string> ingredients);
     }

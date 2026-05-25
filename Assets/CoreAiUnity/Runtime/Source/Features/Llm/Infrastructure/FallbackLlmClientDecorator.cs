@@ -98,7 +98,6 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (!primaryFailed && hasFirst)
                 {
-                    // No-op guard before a conditional operation.
                     LlmStreamChunk first = enumerator.Current;
                     if (!string.IsNullOrEmpty(first.Error) && IsRetryableError(first.ErrorCode))
                     {

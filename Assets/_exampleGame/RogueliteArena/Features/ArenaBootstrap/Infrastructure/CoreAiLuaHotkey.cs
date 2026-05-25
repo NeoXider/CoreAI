@@ -7,7 +7,7 @@ using VContainer;
 namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
 {
     /// <summary>
-    /// F9 — задача Programmer (Lua + report). Работает с LLMUnity и OpenAI HTTP через <see cref="CoreAILifetimeScope"/>.
+    /// F9 demo shortcut that sends a Programmer task for Lua generation and reporting through <see cref="CoreAILifetimeScope"/>.
     /// </summary>
     public sealed class CoreAiLuaHotkey : MonoBehaviour
     {

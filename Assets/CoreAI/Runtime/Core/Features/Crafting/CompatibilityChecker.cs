@@ -15,16 +15,16 @@ namespace CoreAI.Crafting
         private readonly float _defaultScore;
 
         /// <summary>
-        /// Initializes a new instance of CompatibilityChecker.
+        /// Creates a checker with the score used when no explicit rule matches.
         /// </summary>
-        /// <param name="defaultScore">The default score value.</param>
+        /// <param name="defaultScore">Compatibility score for otherwise neutral combinations.</param>
         public CompatibilityChecker(float defaultScore = 1.0f)
         {
             _defaultScore = defaultScore;
         }
 
         /// <summary>
-/// Executes RegisterElement API operation.
+        /// Registers an element-to-group mapping so group rules can match concrete ingredients.
         /// </summary>
         public void RegisterElement(string element, string group)
         {
@@ -42,7 +42,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddRule API operation.
+        /// Adds an explicit compatibility rule.
         /// </summary>
         public void AddRule(CompatibilityRule rule)
         {
@@ -60,7 +60,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddRule API operation.
+        /// Adds a pairwise compatibility rule.
         /// </summary>
         public void AddRule(string elementA, string elementB, float score, string reason = null)
         {
@@ -68,7 +68,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddGroupRule API operation.
+        /// Adds a compatibility rule that matches all supplied elements or groups.
         /// </summary>
         public void AddGroupRule(float score, string reason, params string[] elements)
         {
@@ -76,7 +76,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddValidator API operation.
+        /// Adds a custom validator that can modify or reject a compatibility result.
         /// </summary>
         public void AddValidator(ICompatibilityValidator validator)
         {
@@ -84,7 +84,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes Check API operation.
+        /// Evaluates the supplied ingredients against explicit rules, groups, and validators.
         /// </summary>
         public CompatibilityResult Check(IReadOnlyList<string> ingredients)
         {
@@ -113,15 +113,12 @@ namespace CoreAI.Crafting
             bool hasBlocking = false;
             string blockingReason = null;
 
-            /* Implementation note in English. */
             List<string> resolved = new();
             foreach (string ing in ingredients)
             {
                 resolved.Add(GetGroup(ing) ?? ing);
             }
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             List<CompatibilityRule> sortedRules = _rules.OrderByDescending(r => r.Size).ToList();
             List<CompatibilityRule> matchedRules = new();
 
@@ -133,12 +130,10 @@ namespace CoreAI.Crafting
                 }
             }
 
-            /* Implementation note in English. */
             float combinedScore;
 
             if (matchedRules.Count > 0)
             {
-                /* Implementation note in English. */
                 float weightedSum = 0f;
                 float totalWeight = 0f;
 
@@ -171,11 +166,9 @@ namespace CoreAI.Crafting
             }
             else
             {
-                /* Implementation note in English. */
                 combinedScore = _defaultScore;
             }
 
-            /* Implementation note in English. */
             foreach (ICompatibilityValidator validator in _validators)
             {
                 CompatibilityResult customResult = validator.Validate(ingredients);
@@ -193,7 +186,6 @@ namespace CoreAI.Crafting
                 }
             }
 
-            /* Implementation note in English. */
             if (hasBlocking)
             {
                 return new CompatibilityResult
@@ -219,7 +211,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes Check API operation.
+        /// Evaluates a params-array ingredient list.
         /// </summary>
         public CompatibilityResult Check(params string[] ingredients)
         {
@@ -227,8 +219,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes IsSubsetMatch API operation.
-        ///
+        /// Returns whether every rule element matches a distinct ingredient or resolved group.
         /// </summary>
         private bool IsSubsetMatch(List<string> ruleElements, IReadOnlyList<string> ingredients,
             List<string> resolvedGroups)
@@ -238,7 +229,6 @@ namespace CoreAI.Crafting
                 return false;
             }
 
-            /* Implementation note in English. */
             bool[] used = new bool[ingredients.Count];
 
             foreach (string ruleEl in ruleElements)
@@ -251,7 +241,6 @@ namespace CoreAI.Crafting
                         continue;
                     }
 
-                    /* Implementation note in English. */
                     if (ruleEl.Equals(ingredients[i], StringComparison.OrdinalIgnoreCase))
                     {
                         used[i] = true;
@@ -259,7 +248,6 @@ namespace CoreAI.Crafting
                         break;
                     }
 
-                    /* Implementation note in English. */
                     if (resolvedGroups[i] != null &&
                         ruleEl.Equals(resolvedGroups[i], StringComparison.OrdinalIgnoreCase))
                     {

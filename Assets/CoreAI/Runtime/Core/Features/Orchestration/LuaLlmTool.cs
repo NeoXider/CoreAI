@@ -5,7 +5,7 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// LLM tool implementation for lua llm operations.
+    /// LLM tool wrapper that exposes the sandboxed Lua executor as <c>execute_lua</c>.
     /// </summary>
     public sealed class LuaLlmTool : ILlmTool
     {
@@ -42,7 +42,7 @@ namespace CoreAI.Ai
             "}";
 
         /// <summary>
-/// Executes CreateAIFunction API operation.
+        /// Creates the MEAI function delegated to <see cref="LuaTool"/>.
         /// </summary>
         public AIFunction CreateAIFunction()
         {

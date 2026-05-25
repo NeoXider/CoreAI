@@ -1,4 +1,4 @@
-namespace CoreAI.Ai
+﻿namespace CoreAI.Ai
 {
     /// <summary>
     /// Structured-response policy for creator roles.
@@ -22,7 +22,6 @@ namespace CoreAI.Ai
 
             string trimmed = rawContent.Trim();
 
-            /* Implementation note in English. */
             if (trimmed.StartsWith("```json"))
             {
                 int endFence = trimmed.IndexOf("```", 7);
@@ -32,7 +31,6 @@ namespace CoreAI.Ai
                 }
             }
 
-            /* Implementation note in English. */
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
                 int jsonStart = trimmed.IndexOf('{');

@@ -6,8 +6,8 @@ using System.Text.RegularExpressions;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Тесты для фильтрации &lt;think&gt; блоков из стримингового ответа LLM.
-    /// Тестируем state machine через ThinkBlockFilter — вынесенную логику.
+    /// Tests filtering of <c>&lt;think&gt;</c> blocks from streaming LLM responses
+    /// through the extracted ThinkBlockFilter state machine.
     /// </summary>
     public class ThinkBlockFilterEditModeTests
     {

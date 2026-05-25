@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
 {
-    /// <summary>Линейный рост числа врагов (дефолт прототипа). Заменяемым на <see cref="IArenaWaveSchedule"/> из данных ИИ.</summary>
+    /// <summary>Prototype default schedule with linear enemy-count growth; replaceable by AI-validated data.</summary>
     [Serializable]
     public sealed class ArenaLinearWaveSchedule : IArenaWaveSchedule
     {

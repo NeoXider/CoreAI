@@ -210,9 +210,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Мок-клиент со своей реализацией стриминга: эмитит N чанков подряд.
-        /// Нужен чтобы проверить, что decorator/RoutingLlmClient не делают fallback
-        /// на default-реализацию (которая собрала бы всё в 1 чанк через CompleteAsync).
+        /// Mock client with its own streaming implementation that emits a configured
+        /// number of chunks. Used to verify decorators do not fall back to buffered completion.
         /// </summary>
         private sealed class StreamingMockLlm : ILlmClient
         {

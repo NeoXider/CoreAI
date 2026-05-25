@@ -5,10 +5,8 @@ using CoreAI;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для статического фасада <see cref="CoreAi"/>.
-    /// Без CoreAILifetimeScope в сцене синглтон не может резолвнуть сервисы,
-    /// поэтому тесты фиксируют контракт: IsReady=false, методы бросают понятное
-    /// исключение, Invalidate безопасен.
+    /// EditMode coverage for the static <see cref="CoreAi"/> facade when no
+    /// <c>CoreAILifetimeScope</c> is present in the scene.
     /// </summary>
     public sealed class CoreAiFacadeEditModeTests
     {

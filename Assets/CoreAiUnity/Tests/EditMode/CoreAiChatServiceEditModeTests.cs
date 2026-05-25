@@ -13,11 +13,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для <see cref="CoreAiChatService"/>:
-    /// — иерархия вычисления флага стриминга (UI → per-agent → global);
-    /// — SmartSend (автоматический выбор streaming/non-streaming);
-    /// — базовые сценарии Send/Streaming с поддельным <see cref="IAiOrchestrationService"/>;
-    /// — восстановление сессии чата: <see cref="CoreAiChatService.TryGetPersistedChatHistory"/> и форматирование строк для UI.
+    /// EditMode coverage for <see cref="CoreAiChatService"/> streaming selection,
+    /// smart-send behavior, fake-orchestrator send paths, and persisted chat formatting.
     /// </summary>
     [TestFixture]
     public sealed class CoreAiChatServiceEditModeTests

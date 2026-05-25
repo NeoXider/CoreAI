@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
 {
-    /// <summary>Эталонные планы волн для отладки / сравнения (только данные, без рантайм-логики).</summary>
+    /// <summary>Reference wave plans used for debugging and comparison; data only, no runtime logic.</summary>
     [CreateAssetMenu(menuName = "CoreAI Example/Arena Wave Preset Library", fileName = "ArenaWavePresetLibrary")]
     public sealed class ArenaWavePresetLibrary : ScriptableObject
     {

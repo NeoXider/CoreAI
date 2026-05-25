@@ -89,7 +89,6 @@ namespace CoreAI.Infrastructure.Llm
                         };
                     }
 
-                    /* Implementation note in English. */
                     // can stall continuation chains on the single-threaded player loop. Inner awaits use
                     // ConfigureAwait(false) so continuations do not depend on capturing the sync context.
 
@@ -101,7 +100,6 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     // WebGL player builds: keep the continuation on the captured Unity SynchronizationContext.
-                    /* Implementation note in English. */
                     // resumption to TaskScheduler.Default, where it never got pumped, so the chat panel's
                     // typing dots stayed up forever even though the HTTP response had already arrived.
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -119,7 +117,6 @@ namespace CoreAI.Infrastructure.Llm
                         nativeCalls = allContents.OfType<MEAI.FunctionCallContent>().ToList();
 
                     // Text-mode fallback: providers that emit tool calls as JSON inside an assistant
-                    /* Implementation note in English. */
                     // as the streaming loop, so behaviour is identical regardless of mode.
                     List<MEAI.FunctionCallContent> textCalls = new();
                     string cleanedAssistantText = null;
@@ -213,9 +210,9 @@ namespace CoreAI.Infrastructure.Llm
         /// Collects every <see cref="MEAI.AIContent"/> from assistant messages in <paramref name="response"/>.
         /// In Microsoft.Extensions.AI 10.x, <see cref="MEAI.ChatMessage.Contents"/> is a non-generic
         /// <see cref="System.Collections.IList"/>; LINQ <c>SelectMany</c> combined with
-/// Executes FlattenAssistantContents API operation.
-        /// <see cref="MEAI.FunctionCallContent"/> would be missed, the loop would mis-classify turns as
-        /// text-only or text-shaped tools, and consecutive-error limits would fire early.
+        /// a generic cast can skip provider-specific content wrappers. Explicit iteration keeps
+        /// <see cref="MEAI.FunctionCallContent"/> visible so the loop does not mis-classify turns
+        /// as text-only or text-shaped tools.
         /// </summary>
         private static List<MEAI.AIContent> FlattenAssistantContents(MEAI.ChatResponse response)
         {
@@ -291,7 +288,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
         /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
-/// Executes NormalizeJTokenValues API operation.
+        /// Newtonsoft tokens directly, so this normalization
         /// ensures text-mode extracted arguments work with delegates that expect string parameters.
         /// </summary>
         private static void NormalizeJTokenValues(Dictionary<string, object> arguments)
@@ -395,7 +392,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes GetStreamingResponseAsync API operation.
+        /// Streams the inner chat client response. Tool-calling loops are not executed in this path;
         /// native FunctionCallContent in stream updates will pass through unexecuted.
         /// When tools are present, callers should prefer non-streaming
         /// (<see cref="GetResponseAsync"/>) or enforce non-streaming at the orchestrator level.
@@ -405,8 +402,7 @@ namespace CoreAI.Infrastructure.Llm
             MEAI.ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            /* Implementation note in English. */
-            // duplicate detection, and consecutive error protection are bypassed.
+            // Streaming bypasses the non-streaming tool loop, duplicate detection, and error guard.
             if (options?.Tools != null && options.Tools.Count > 0)
             {
                 _logger.Warn(

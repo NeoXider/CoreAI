@@ -8,7 +8,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Тесты для 3-слойной архитектуры промптов, streaming API и AgentMemoryPolicy.
+    /// Tests the three-layer prompt architecture, streaming API, and <see cref="AgentMemoryPolicy"/>.
     /// </summary>
     public class StreamingAndPromptsEditModeTests
     {

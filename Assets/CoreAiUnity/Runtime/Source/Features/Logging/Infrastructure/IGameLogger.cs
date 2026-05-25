@@ -7,16 +7,16 @@ namespace CoreAI.Infrastructure.Logging
     /// </summary>
     public interface IGameLogger
     {
-        /// <summary>Executes log debug.</summary>
+        /// <summary>Writes a debug message for the selected feature.</summary>
         void LogDebug(GameLogFeature feature, string message, Object context = null);
 
-        /// <summary>Executes log info.</summary>
+        /// <summary>Writes an informational message for the selected feature.</summary>
         void LogInfo(GameLogFeature feature, string message, Object context = null);
 
-        /// <summary>Executes log warning.</summary>
+        /// <summary>Writes a warning message for the selected feature.</summary>
         void LogWarning(GameLogFeature feature, string message, Object context = null);
 
-        /// <summary>Executes log error.</summary>
+        /// <summary>Writes an error message for the selected feature.</summary>
         void LogError(GameLogFeature feature, string message, Object context = null);
     }
 }

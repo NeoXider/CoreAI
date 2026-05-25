@@ -18,8 +18,8 @@ using VContainer;
 namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 {
     /// <summary>
-    /// Собирает минимальную арену: сессия без синглтона, директор только на авторитетном узле.
-    /// Мультиплеер: заменить спавн на сетевой (NGO), реплицировать волну/HP; роль <see cref="ArenaSimulationRole"/> на клиенте — <see cref="ArenaSimulationRole.ClientPresentationOnly"/>.
+    /// Builds the minimal arena runtime with a non-singleton session and an authoritative director.
+    /// Multiplayer projects should replace spawn with network spawn and replicate wave/HP state.
     /// </summary>
     public sealed class ArenaSurvivalProceduralSetup : MonoBehaviour
     {

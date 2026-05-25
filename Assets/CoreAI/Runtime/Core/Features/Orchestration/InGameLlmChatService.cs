@@ -94,7 +94,6 @@ namespace CoreAI.Ai
                 ? sys.Trim()
                 : "You are a helpful in-game assistant.";
 
-            /* Implementation note in English. */
             string prefix = CoreAISettings.UniversalSystemPromptPrefix;
             string system = string.IsNullOrWhiteSpace(prefix)
                 ? baseSystem
@@ -171,7 +170,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes TryAcquireRateSlot API operation.
+        /// Attempts to reserve one request slot in the sliding-window rate limiter.
         /// </summary>
         private bool TryAcquireRateSlot()
         {
@@ -185,7 +184,6 @@ namespace CoreAI.Ai
                 DateTime now = DateTime.UtcNow;
                 DateTime cutoff = now - _rateLimitWindow;
 
-                /* Implementation note in English. */
                 while (_requestTimestamps.Count > 0 && _requestTimestamps.Peek() < cutoff)
                 {
                     _requestTimestamps.Dequeue();

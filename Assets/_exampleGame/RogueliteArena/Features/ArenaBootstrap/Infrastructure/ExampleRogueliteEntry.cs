@@ -4,9 +4,8 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
 {
     /// <summary>
-    /// Маркер сцены примера. DI — <see cref="CoreAI.Composition.CoreAILifetimeScope"/> на том же объекте.
-    /// Арена: либо объект с <see cref="ArenaSurvivalProceduralSetup"/> в сцене (<see cref="sceneArenaBootstrap"/>),
-    /// либо создание <c>ArenaSurvivalRoot</c> из кода при <see cref="startWaveArenaPrototype"/>.
+    /// Example-scene marker. DI comes from <see cref="CoreAI.Composition.CoreAILifetimeScope"/>
+    /// on the same object; the arena can be scene-authored or generated at startup.
     /// </summary>
     public sealed class ExampleRogueliteEntry : MonoBehaviour
     {

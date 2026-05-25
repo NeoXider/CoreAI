@@ -131,7 +131,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes TryExtractMemoryPseudoWriteSyntax API operation.
+        /// Detects models that emit memory writes as pseudo key/value syntax
         /// instead of JSON tool calls, e.g. <c>Action=write content="exam on June 15"</c>. Map to the
         /// <c>memory</c> tool so the pipeline can persist and strip the noise.
         /// </summary>
@@ -202,7 +202,6 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Removes any embedded tool-call JSON from <paramref name="assistantText"/> for display
-/// Executes StripForDisplay API operation.
         /// that does not contain matching JSON is returned unchanged.
         /// </summary>
         public static string StripForDisplay(string assistantText)

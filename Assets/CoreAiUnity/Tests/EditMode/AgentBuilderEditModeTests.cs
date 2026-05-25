@@ -7,7 +7,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для AgentBuilder — конструктора кастомных агентов.
+    /// EditMode coverage for <see cref="AgentBuilder"/> custom-agent configuration.
     /// </summary>
     [TestFixture]
     public sealed class AgentBuilderEditModeTests

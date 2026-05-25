@@ -8,8 +8,8 @@ using CoreAI.Ai;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты GameConfigTool и GameConfigPolicy.
-    /// Проверяют что инфраструктура работает: чтение/запись JSON конфигов.
+    /// EditMode coverage for <see cref="GameConfigTool"/> and <see cref="GameConfigPolicy"/>
+    /// JSON configuration read/write behavior.
     /// </summary>
     [TestFixture]
     public class GameConfigEditModeTests

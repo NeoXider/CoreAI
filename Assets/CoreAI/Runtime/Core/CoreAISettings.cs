@@ -1,7 +1,7 @@
 ﻿namespace CoreAI
 {
     /// <summary>
-    /// Provides process-wide CoreAI runtime settings with optional in-memory overrides.
+    /// Static proxy for process-wide CoreAI runtime settings and test-time in-memory overrides.
     /// </summary>
     public static class CoreAISettings
     {
@@ -332,9 +332,8 @@
         #endregion
 
         /// <summary>
-/// Executes ResetOverrides API operation.
-        ///
-        ///
+        /// Clears all process-level setting overrides so subsequent reads fall back to
+        /// the active <see cref="Instance"/> or the built-in defaults.
         /// </summary>
         public static void ResetOverrides()
         {

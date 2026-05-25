@@ -10,9 +10,8 @@ using Object = UnityEngine.Object;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для CoreAISettings static proxy → ICoreAISettings delegation.
-    /// Верифицирует, что после установки CoreAISettings.Instance все свойства
-    /// делегируются в DI-зарегистрированный экземпляр.
+    /// EditMode coverage for <see cref="CoreAISettings"/> static proxy delegation
+    /// to the DI-registered <see cref="ICoreAISettings"/> instance.
     /// </summary>
     public sealed class CoreAISettingsSyncEditModeTests
     {

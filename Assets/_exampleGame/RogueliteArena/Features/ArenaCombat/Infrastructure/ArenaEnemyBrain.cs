@@ -33,7 +33,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             }
         }
 
-        /// <summary>Вызывать до <c>SetActive(true)</c> на экземпляре врага (спавн с шаблона).</summary>
+        /// <summary>Call before <c>SetActive(true)</c> on enemies spawned from a template.</summary>
         public void Configure(IArenaSessionAuthority session)
         {
             _session = session;

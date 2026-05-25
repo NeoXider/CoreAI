@@ -46,8 +46,6 @@ namespace CoreAI.Composition
 
                 if (_isInitialized)
                 {
-                    // No-op guard before a conditional operation.
-                    // No-op guard before a conditional operation.
                     _logger.Debug(
                         "CoreAI already initialized in this process. Duplicate CoreAIGameEntryPoint start skipped.",
                         LogTag.Composition);
@@ -58,8 +56,6 @@ namespace CoreAI.Composition
                 _started = true;
             }
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             CoreAIAgent.Initialize(_orchestrator, _policy, _memoryStore);
 
             _logger.Info(

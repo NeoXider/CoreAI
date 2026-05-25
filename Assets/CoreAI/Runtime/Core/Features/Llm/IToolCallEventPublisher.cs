@@ -6,7 +6,6 @@ namespace CoreAI.Infrastructure.Llm
     /// Portable abstraction for publishing tool-call lifecycle events
     /// (<see cref="LlmToolCallStarted"/>, <see cref="LlmToolCallCompleted"/>,
     /// <see cref="LlmToolCallFailed"/>).
-    ///
     /// <para>Unity hosts provide a MessagePipe-backed implementation;
     /// non-Unity hosts can supply their own or use <see cref="NullToolCallEventPublisher"/>.</para>
     /// </summary>
@@ -23,7 +22,7 @@ namespace CoreAI.Infrastructure.Llm
     }
 
     /// <summary>
-    /// No-op implementation for environments without an event bus.
+    /// Tool-call event publisher used when the host has no event bus subscribers.
     /// </summary>
     public sealed class NullToolCallEventPublisher : IToolCallEventPublisher
     {

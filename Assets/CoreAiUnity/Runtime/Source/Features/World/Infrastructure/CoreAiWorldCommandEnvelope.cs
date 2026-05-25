@@ -9,7 +9,6 @@ namespace CoreAI.Infrastructure.World
     {
         public string action = "";
 
-        // No-op guard before a conditional operation.
         public string targetName = "";
         public int boolValue;
         public float floatValue;

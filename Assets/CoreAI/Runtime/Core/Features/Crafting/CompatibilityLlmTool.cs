@@ -37,7 +37,7 @@ namespace CoreAI.Crafting
         );
 
         /// <summary>
-/// Executes CreateAIFunction API operation.
+        /// Creates the MEAI function exposed to the model for compatibility checks.
         /// </summary>
         public AIFunction CreateAIFunction()
         {
@@ -51,7 +51,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes ExecuteAsync API operation.
+        /// Parses model-supplied ingredients, runs the checker, and returns a JSON result.
         /// </summary>
         public Task<string> ExecuteAsync(object ingredients, CancellationToken cancellationToken = default)
         {

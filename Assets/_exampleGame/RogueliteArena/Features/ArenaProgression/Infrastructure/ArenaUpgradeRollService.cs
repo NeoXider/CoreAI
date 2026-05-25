@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Ролл офферов драфта по контенту и Neoxider ChanceData (упрощённо для примера).</summary>
+    /// <summary>Rolls draft offers from content and Neoxider ChanceData using simplified example-game rules.</summary>
     public sealed class ArenaUpgradeRollService
     {
         private readonly ArenaProgressionContent _content;

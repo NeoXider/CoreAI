@@ -29,7 +29,6 @@ namespace CoreAI.Composition
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
 
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-            // No-op guard before a conditional operation.
             builder.Register<ConfigurableLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();
 #else
             builder.Register<SceneLlmAgentProvider>(Lifetime.Singleton).As<ILlmAgentProvider>();

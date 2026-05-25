@@ -5,7 +5,7 @@ using UnityEngine.UI;
 namespace CoreAI.ExampleGame.SymbiosisMode.UI
 {
     /// <summary>
-    /// Биндит данные игрока-призрака и состояние волны к ручному Canvas.
+    /// Binds ghost-player data and wave state to the hand-authored Canvas UI.
     /// </summary>
     public class SymbiosisUiMediator : MonoBehaviour
     {

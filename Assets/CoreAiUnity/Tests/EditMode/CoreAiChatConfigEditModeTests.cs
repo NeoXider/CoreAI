@@ -5,8 +5,8 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для ScriptableObject <see cref="CoreAiChatConfig"/> —
-    /// конфигурации универсальной чат-панели CoreAI.
+    /// EditMode coverage for the <see cref="CoreAiChatConfig"/> ScriptableObject
+    /// used by the reusable CoreAI chat panel.
     /// </summary>
     [TestFixture]
     public sealed class CoreAiChatConfigEditModeTests

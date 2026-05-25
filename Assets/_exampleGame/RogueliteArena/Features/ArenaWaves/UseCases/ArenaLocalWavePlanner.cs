@@ -5,8 +5,8 @@ using CoreAI.ExampleGame.ArenaWaves.Domain;
 namespace CoreAI.ExampleGame.ArenaWaves.UseCases
 {
     /// <summary>
-    /// Локальный "Creator" для демо без реального LLM: генерирует план волны из текущего состояния сессии.
-    /// Это пример-логика, не часть Core.
+    /// Local Creator-style planner for demos without a real LLM. Generates a wave plan
+    /// from the current session state; example-game logic only.
     /// </summary>
     public static class ArenaLocalWavePlanner
     {

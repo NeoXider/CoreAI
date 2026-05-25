@@ -13,17 +13,16 @@ using UnityEngine.UIElements;
 namespace CoreAI.Chat
 {
     /// <summary>
-    ///
-    ///
-    ///
-    ///
-    ///
-    /// <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
-    /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>,
-    /// <see cref="FormatToolExecutedForChat"/>,
-    /// <see cref="ResolveTimeoutMessage"/>.
-    ///
+    /// UI Toolkit chat panel that sends player text through <see cref="CoreAiChatService"/>,
+    /// renders streamed or buffered assistant responses, and exposes overridable hooks for
+    /// request construction, message formatting, tool-call display, and error text.
     /// </summary>
+    /// <remarks>
+    /// Override <see cref="OnMessageSending"/>, <see cref="OnResponseReceived"/>,
+    /// <see cref="CreateMessageBubble"/>, <see cref="FormatResponseText"/>,
+    /// <see cref="FormatToolExecutedForChat"/>, or <see cref="ResolveTimeoutMessage"/>
+    /// to customize behaviour without replacing the whole panel.
+    /// </remarks>
     public class CoreAiChatPanel : MonoBehaviour
     {
         private const string MobileClassName = "coreai-mobile";
@@ -75,7 +74,6 @@ namespace CoreAI.Chat
         private bool _isStopping;
         private bool _isClearing;
 
-        // No-op guard before a conditional operation.
         private bool _lastPublishedBusy;
 
         // Monotonic counter incremented at the start of each agent turn.
@@ -101,8 +99,8 @@ namespace CoreAI.Chat
         private bool _nonStreamAssistantOutputStarted; // True while non-stream assistant output has started.
 
         /// <summary>
-        ///
-        /// schedules nested <c>schedule.Execute</c> work and can break ScrollView layout / stick the scrollbar.
+        /// Prevents duplicate deferred scroll jobs; nested <c>schedule.Execute</c> calls can
+        /// destabilize ScrollView layout and leave the scrollbar at an old position.
         /// </summary>
         private bool _streamingScrollScheduled;
 
@@ -183,7 +181,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes configure web gl keyboard input.
+        /// Releases global WebGL keyboard capture so browser input fields and the chat panel receive text.
         /// </summary>
         private static void ConfigureWebGlKeyboardInput()
         {
@@ -193,7 +191,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes update.
+        /// Polls keyboard shortcuts, updates long-request feedback, and reapplies responsive layout.
         /// </summary>
         protected virtual void Update()
         {
@@ -231,11 +229,6 @@ namespace CoreAI.Chat
 
         protected virtual void Start()
         {
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             // Resolve and cache required local values.
             bool defaultCollapsed = IsMobileScreen();
             bool collapsed = PlayerPrefs.GetInt(CollapsedPrefsKey, defaultCollapsed ? 1 : 0) == 1;
@@ -308,9 +301,6 @@ namespace CoreAI.Chat
             if (SendButton != null)
             {
                 SendButton.RegisterCallback<ClickEvent>(OnSendClicked);
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 SendButton.focusable = false;
             }
 
@@ -334,19 +324,11 @@ namespace CoreAI.Chat
 
             if (InputField != null)
             {
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 InputField.RegisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
             }
 
             Root?.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // Skip processing when the checked condition is already satisfied.
             if (MessageScroll != null)
             {
                 MessageScroll.focusable = false;
@@ -390,23 +372,18 @@ namespace CoreAI.Chat
                 TypingAvatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (ChatContainer != null)
             {
                 ApplyResponsiveSize(ChatContainer);
             }
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
 
             ApplyShortcutTooltips();
         }
 
         /// <summary>
-        /// Executes apply shortcut tooltips.
+        /// Refreshes button tooltips and FAB glyphs from the effective hotkey settings.
         /// </summary>
         private void ApplyShortcutTooltips()
         {
@@ -484,11 +461,10 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes apply responsive size.
+        /// Applies desktop, mobile, or fullscreen sizing constraints to the chat container.
         /// </summary>
         private void ApplyResponsiveSize(VisualElement container)
         {
-            // No-op guard before a conditional operation.
             ICoreAiChatOptions options = Options;
             float configuredWidth = options.ChatWidth;
             float configuredHeight = options.ChatHeight;
@@ -535,8 +511,6 @@ namespace CoreAI.Chat
             container.RemoveFromClassList(FullscreenLayoutClassName);
             container.RemoveFromClassList(MobileClassName);
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             container.style.left = StyleKeyword.Auto;
             container.style.top = StyleKeyword.Auto;
             container.style.right = 24f;
@@ -570,7 +544,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Sets collapsed.
+        /// Switches the panel between expanded chat mode and the collapsed floating action button.
         /// </summary>
         public void SetCollapsed(bool collapsed, bool persist = true)
         {
@@ -600,14 +574,11 @@ namespace CoreAI.Chat
 
             if (collapsed)
             {
-                // No-op guard before a conditional operation.
                 ReleaseChatKeyboardFocus();
                 Root?.schedule.Execute(ReleaseChatKeyboardFocus);
             }
             else
             {
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 InputField?.schedule.Execute(FocusInputField);
             }
 
@@ -615,26 +586,25 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes on collapsed state changed.
+        /// Called after the panel changes between expanded chat and collapsed FAB modes.
         /// </summary>
-        /// <param name="collapsed">The collapsed value.</param>
+        /// <param name="collapsed">Whether the panel is now collapsed.</param>
         protected virtual void OnCollapsedStateChanged(bool collapsed)
         {
         }
 
-        // No-op guard before a conditional operation.
 
-        /// <summary>Effective open chat keyboard shortcut enabled.</summary>
+        /// <summary>Resolved open-chat keyboard shortcut state after runtime overrides.</summary>
         public bool EffectiveOpenChatKeyboardShortcutEnabled => IsOpenChatKeyboardShortcutEnabled();
 
-        /// <summary>Effective open chat hotkey.</summary>
+        /// <summary>Resolved open-chat hotkey after runtime overrides.</summary>
         public KeyCode EffectiveOpenChatHotkey => ResolvedOpenChatHotkey();
 
-        /// <summary>Effective escape chat shortcuts enabled.</summary>
+        /// <summary>Resolved escape-shortcut state after runtime overrides.</summary>
         public bool EffectiveEscapeChatShortcutsEnabled => IsEscapeChatShortcutEnabled();
 
         /// <summary>
-        /// Sets runtime open chat keyboard shortcut enabled.
+        /// Overrides whether the runtime open-chat keyboard shortcut is enabled.
         /// </summary>
         public void SetRuntimeOpenChatKeyboardShortcutEnabled(bool? enabled)
         {
@@ -643,7 +613,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Sets runtime open chat hotkey.
+        /// Overrides the runtime hotkey used to open chat.
         /// </summary>
         public void SetRuntimeOpenChatHotkey(KeyCode? hotkey)
         {
@@ -652,7 +622,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Sets runtime escape chat shortcuts enabled.
+        /// Overrides whether Escape can blur or collapse the chat panel.
         /// </summary>
         public void SetRuntimeEscapeChatShortcutsEnabled(bool? enabled)
         {
@@ -680,11 +650,10 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes hydrate startup messages from store.
+        /// Rebuilds the visible startup transcript from persisted chat history or the welcome message.
         /// </summary>
         protected virtual void HydrateStartupMessagesFromStore()
         {
-            // Skip processing when the checked condition is already satisfied.
             if (MessageScroll != null)
             {
                 MessageScroll.Clear();
@@ -792,10 +761,7 @@ namespace CoreAI.Chat
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
 
-            // No-op guard before a conditional operation.
             // Resolve and cache required local values.
             bool isEnter =
                 evt.keyCode == KeyCode.Return ||
@@ -816,8 +782,6 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             evt.StopImmediatePropagation();
             evt.PreventDefault();
 
@@ -886,7 +850,6 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// After a few seconds of visible assistant output in this turn, shows the configured hint under the typing row.
-        ///
         /// </summary>
         private void TickLongRequestHint()
         {
@@ -935,8 +898,8 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Long-hint while the panel is busy on an LLM turn (typing, streaming, or non-stream wait).
-        ///
-        /// after the first streamed character (which often never reaches the 5 s threshold on fast replies).
+        /// The timer starts when the request is sent, not after the first streamed character,
+        /// because fast replies often never reach the hint threshold.
         /// </summary>
         private bool IsLongRequestHintBusy()
         {
@@ -960,7 +923,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes poll chat toggle shortcuts.
+        /// Handles keyboard shortcuts for opening, collapsing, and stopping the chat panel.
         /// </summary>
         private void PollChatToggleShortcuts()
         {
@@ -1008,7 +971,6 @@ namespace CoreAI.Chat
             }
             catch (InvalidOperationException)
             {
-                // No-op guard before a conditional operation.
             }
         }
 
@@ -1157,11 +1119,10 @@ namespace CoreAI.Chat
         // ===================== AI Communication =====================
 
         /// <summary>
-        /// Executes submit message from external async.
+        /// Submits a message from gameplay/test code through the same turn pipeline used by the UI.
         /// </summary>
         /// <returns>
-        ///
-        ///
+        /// Final assistant text, simulated text, or <c>null</c> when the panel is busy, canceled, or given empty input.
         /// </returns>
         public async Task<string?> SubmitMessageFromExternalAsync(
             string messageText,
@@ -1270,7 +1231,6 @@ namespace CoreAI.Chat
             }
 
             string roleId = Options.RoleId ?? "SmartChat";
-            // No-op guard before a conditional operation.
             // can compare values across awaits to detect "a newer turn is already in flight".
             Interlocked.Increment(ref _currentTurnGeneration);
             _toolRoundIterationInTurn = 1;
@@ -1356,7 +1316,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes focus input field.
+        /// Moves keyboard focus back to the chat input field when the panel is active.
         /// </summary>
         private void FocusInputField()
         {
@@ -1387,7 +1347,8 @@ namespace CoreAI.Chat
         /// <summary>
         /// Override in a subclass to add extra streaming gates per role. Default returns the chat UI flag only;
         /// WebGL incremental SSE, global settings, and per-role overrides are enforced in
-        ///
+        /// <see cref="CoreAiChatService"/>.
+        /// This keeps panel-level policy separate from runtime settings when
         /// <see cref="CoreAISettingsAsset.Instance"/> differs from the DI-registered <see cref="ICoreAISettings"/> asset).
         /// </summary>
         protected virtual bool ShouldUseStreamingForRole(string roleId, bool uiConfigWantsStreaming)
@@ -1414,7 +1375,6 @@ namespace CoreAI.Chat
                 await foreach (LlmStreamChunk chunk in _chatService.SendMessageStreamingAsync(request, ct))
                 {
                     // Stream-gap diagnostic: helps tell "model is slow" from "UI lost a chunk".
-                    // No-op guard before a conditional operation.
                     TimeSpan gap = DateTime.UtcNow - lastChunkAt;
                     if (gap.TotalSeconds > StreamGapWarnSeconds)
                     {
@@ -1428,7 +1388,6 @@ namespace CoreAI.Chat
                     lastChunkAt = DateTime.UtcNow;
 
                     // LLM/orchestrator stack uses ConfigureAwait(false); UITK must be touched on the main thread
-                    // No-op guard before a conditional operation.
                     await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(ct);
                     if (!string.IsNullOrEmpty(chunk.Error))
                     {
@@ -1448,7 +1407,6 @@ namespace CoreAI.Chat
                         // Heuristic for tool-round boundary: the orchestrator only emits a tool-progress hint
                         // mid-stream when an LLM round just produced tool calls and a new round is about to
                         // start. If prose has already streamed in this turn (`_streamingStartedVisible`),
-                        // No-op guard before a conditional operation.
                         // want to show "tool X (k/N)" badges without reflection.
                         if (chunk.BufferedStreamingUseToolProgressHint && _streamingStartedVisible)
                         {
@@ -1468,7 +1426,6 @@ namespace CoreAI.Chat
                         }
                         else
                         {
-                            // No-op guard before a conditional operation.
                             // ApplyStreamingToolProgressTypingHint (StopTypingAnimation) even before any prose.
                             ShowTypingIndicator();
                         }
@@ -1478,8 +1435,6 @@ namespace CoreAI.Chat
 
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
-                        // No-op guard before a conditional operation.
-                        // No-op guard before a conditional operation.
                         // Resolve and cache required local values.
                         string visible = FilterStreamChunk(chunk.Text);
                         if (fullResponse.Length == 0)
@@ -1548,7 +1503,6 @@ namespace CoreAI.Chat
                     return null;
                 }
 
-                // No-op guard before a conditional operation.
                 response = StripThinkBlocks(response);
                 string formatted = FormatResponseText(response);
                 if (string.IsNullOrEmpty(formatted))
@@ -1588,7 +1542,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes filter stream chunk.
+        /// Removes hidden thought text from one streamed model chunk.
         /// </summary>
         private string FilterStreamChunk(string chunk)
         {
@@ -1611,7 +1565,7 @@ namespace CoreAI.Chat
         // ===================== Virtual Extension Points =====================
 
         /// <summary>
-        /// Executes on message sending.
+        /// Hook for subclasses to validate, rewrite, or cancel outgoing user text.
         /// </summary>
         protected virtual string OnMessageSending(string text)
         {
@@ -1619,7 +1573,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes on response received.
+        /// Hook called after a full assistant response has been received.
         /// </summary>
         protected virtual void OnResponseReceived(string fullResponse)
         {
@@ -1642,7 +1596,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes format response text.
+        /// Formats assistant text before it is displayed in the chat transcript.
         /// </summary>
         protected virtual string FormatResponseText(string rawText)
         {
@@ -1650,7 +1604,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes format tool executed for chat.
+        /// Formats an executed tool call for optional display inside the chat transcript.
         /// </summary>
         protected virtual string FormatToolExecutedForChat(
             string roleId,
@@ -1753,7 +1707,6 @@ namespace CoreAI.Chat
         {
             ICoreAiChatOptions options = Options;
             string panelRole = string.IsNullOrEmpty(options.RoleId) ? "SmartChat" : options.RoleId;
-            // No-op guard before a conditional operation.
             // listeners want the name regardless of whether the bubble is rendered.
             if (string.Equals(roleId, panelRole, StringComparison.Ordinal))
             {
@@ -1830,7 +1783,6 @@ namespace CoreAI.Chat
 
         private void StopActiveGeneration()
         {
-            // Skip processing when the checked condition is already satisfied.
             if (_isStopping || !IsRequestInProgress())
             {
                 return;
@@ -1943,7 +1895,6 @@ namespace CoreAI.Chat
             TypingIndicator.style.display = DisplayStyle.Flex;
             _typingDotCount = 0;
 
-            // No-op guard before a conditional operation.
             // Resolve and cache required local values.
             string baseText = Options.TypingIndicatorText ?? string.Empty;
             _typingAnimation = TypingIndicator.schedule.Execute(() =>
@@ -2058,15 +2009,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             //
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             MessageScroll.schedule.Execute(() =>
             {
                 SnapScrollToBottom();
@@ -2135,7 +2078,6 @@ namespace CoreAI.Chat
             UpdateSendButtonVisualState();
             try
             {
-                // No-op guard before a conditional operation.
                 StopActiveGeneration();
 
                 if (MessageScroll != null)
@@ -2152,7 +2094,6 @@ namespace CoreAI.Chat
                 }
                 catch
                 {
-                    // Skip processing when the checked condition is already satisfied.
                     if (clearChatHistory)
                     {
                         _chatService?.ClearHistory(roleId);
@@ -2173,11 +2114,9 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        ///
-        /// Delegates to the unified <see cref="StopActiveGeneration"/> path and
-        /// additionally forces immediate UI cleanup when a request is in progress.
-        ///
-        /// handler in SendToAI adds it when _stopRequestedByUser is true.
+        /// Stops the active generation request and immediately restores the chat controls.
+        /// The unified stop path also marks the turn so the send handler can append the
+        /// user-cancelled system message.
         /// </summary>
         public void StopAgent()
         {
@@ -2195,7 +2134,6 @@ namespace CoreAI.Chat
                 HideTypingIndicator();
                 _isSending = false;
 
-                // No-op guard before a conditional operation.
                 // will display the stop message based on _stopRequestedByUser flag.
                 UpdateSendButtonVisualState();
             }

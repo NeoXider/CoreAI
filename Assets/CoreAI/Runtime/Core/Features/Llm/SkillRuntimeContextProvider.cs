@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides runtime context and callable tools for skills.
+    /// Builds the skill catalog prompt section for roles that use on-demand tools.
     /// </summary>
     internal sealed class SkillRuntimeContextProvider : IAgentRuntimeContextProvider
     {

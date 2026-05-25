@@ -12,7 +12,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для WorldTool (MEAI function calling для world commands).
+    /// EditMode coverage for WorldTool MEAI function calling over world commands.
     /// </summary>
     [TestFixture]
     public sealed class WorldToolEditModeTests

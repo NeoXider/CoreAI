@@ -193,7 +193,6 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch
             {
-                // No-op guard before a conditional operation.
             }
         }
     }

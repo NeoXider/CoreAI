@@ -15,11 +15,9 @@ using UnityEngine.UIElements;
 namespace CoreAI.Editor
 {
     /// <summary>
-    ///
-    ///
-    ///
-    ///
-    /// <para>See the implementation details for usage guidance.</para>
+    /// Editor utility that creates a ready-to-run CoreAI chat demo scene.
+    /// The generated scene includes the lifetime scope, chat panel, panel settings,
+    /// event system, camera, light, and default CoreAI configuration assets.
     /// </summary>
     public static class CoreAIChatDemoSceneCreator
     {

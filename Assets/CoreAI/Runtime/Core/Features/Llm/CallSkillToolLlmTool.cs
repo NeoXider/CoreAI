@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -20,7 +20,6 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(skills));
             }
 
-            /* Implementation note in English. */
             Dictionary<string, ToolEntry> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (SkillSet skill in skills)
             {
@@ -90,7 +89,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            return new { error = $"Tool '{trimmed}' is not a DelegateLlmTool — direct invocation not supported." };
+            return new { error = $"Tool '{trimmed}' is not a DelegateLlmTool - direct invocation not supported." };
         }
 
         /// <summary>

@@ -36,8 +36,7 @@ namespace CoreAI.Unity.Logging
         }
 
         /// <summary>
-/// Executes map tag.
-/// Executes map tag.
+        /// Maps a portable log tag to the closest CoreAI logging feature.
         /// </summary>
         private static GameLogFeature MapTag(string tag)
         {

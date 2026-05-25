@@ -7,7 +7,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для OfflineLlmClient.
+    /// EditMode coverage for <see cref="OfflineLlmClient"/>.
     /// </summary>
     public sealed class OfflineLlmClientEditModeTests
     {

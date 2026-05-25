@@ -10,8 +10,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.Integration
 {
     /// <summary>
-    /// Тесты интеграции AI с игровой логикой Arena: бой, прогрессия, волны.
-    /// Проверяют что AI может управлять реальной игровой механикой через Lua.
+    /// Integration coverage for Arena combat, progression, and wave logic driven by Lua.
     /// </summary>
     public sealed class ArenaGameLogicIntegrationEditModeTests
     {

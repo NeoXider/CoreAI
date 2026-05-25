@@ -58,7 +58,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes GetPolicy API operation.
+        /// Returns the structured-response policy registered for a role, or the fallback policy.
         /// </summary>
         public IRoleStructuredResponsePolicy GetPolicy(string roleId)
         {
@@ -66,7 +66,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes RegisterPolicy API operation.
+        /// Registers or replaces the structured-response policy for a role.
         /// </summary>
         public void RegisterPolicy(string roleId, IRoleStructuredResponsePolicy policy)
         {

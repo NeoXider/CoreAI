@@ -9,7 +9,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.LuaFormulas
 {
     /// <summary>
-    /// Расширенные тесты Lua формул: критические удары, вампиризм, щиты, комбо-формулы.
+    /// Extended Lua formula tests for critical hits, lifesteal, shields, and combo formulas.
     /// </summary>
     public sealed class AdvancedLuaFormulaEditModeTests
     {

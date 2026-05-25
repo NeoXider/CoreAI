@@ -13,8 +13,7 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
 {
     /// <summary>
-    /// Получает ответы роли Creator (в виде конверта) и извлекает план волны (JSON).
-    /// Директор запрашивает план через <see cref="RequestWavePlan"/>.
+    /// Receives Creator-role envelopes and extracts JSON wave plans requested by the director.
     /// </summary>
     public sealed class ArenaCreatorWavePlanner : MonoBehaviour
     {
@@ -32,16 +31,16 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         private int _lastRequestedWave;
         private int _pendingCreatorWave;
 
-        /// <summary>Планы по номеру волны (ответ LLM может прийти позже окна ожидания директора).</summary>
+        /// <summary>Plans keyed by wave number; LLM responses may arrive after the director wait window.</summary>
         private readonly Dictionary<int, ArenaWavePlan> _plansByWave = new Dictionary<int, ArenaWavePlan>();
 
         private int _invalidPlanStreak;
         private bool _forceLinear;
 
-        /// <summary>Ждём валидный план от Creator для HUD «ИИ думает».</summary>
+        /// <summary>True while the HUD should show that the AI is thinking about a valid Creator plan.</summary>
         public bool IsAwaitingCreatorPlan => _pendingCreatorWave > 0;
 
-        /// <summary>После серии битых ответов директор не запрашивает Creator.</summary>
+        /// <summary>True after repeated invalid responses disable further Creator planning requests.</summary>
         public bool ForceLinearWavePlans => _forceLinear;
 
         public void Init(
@@ -64,7 +63,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
             AiGameCommandRouter.CommandReceived -= OnCommand;
         }
 
-        /// <param name="sourceTag">См. <see cref="ArenaAiSourceTags"/>; попадает в телеметрию и user-prompt.</param>
+        /// <param name="sourceTag">Source tag forwarded to telemetry and the user prompt; see <see cref="ArenaAiSourceTags"/>.</param>
         public void RequestWavePlan(int waveIndex1Based, string sourceTag = null)
         {
             if (!enabledInExample || _forceLinear)

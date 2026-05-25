@@ -19,9 +19,9 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode setup: LLM из <see cref="CoreAISettingsAsset"/> (HTTP, LLMUnity, Offline).
-    /// В <see cref="Initialize"/> вызывается <see cref="GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics"/>,
-    /// чтобы при отсутствии сцены с <c>CoreAILifetimeScope</c> события <c>LlmToolCall*</c> публиковались в <see cref="GlobalMessagePipe"/>.
+    /// PlayMode setup that builds an LLM from <see cref="CoreAISettingsAsset"/> for HTTP,
+    /// LLMUnity, or offline modes. <see cref="Initialize"/> also bootstraps global MessagePipe
+    /// diagnostics when the test scene has no <c>CoreAILifetimeScope</c>.
     /// </summary>
     public sealed class TestAgentSetup : IDisposable
     {

@@ -1,116 +1,109 @@
-# 📚 CoreAI Documentation — Index
+# CoreAI Unity Documentation Index
 
-Pick the track that matches your current goal. Every link lands on a self-contained guide; you don't need to read them in order.
+This is the main index for the Unity package. Use it when you are setting up the
+package, debugging a scene, adding tools, or trying to understand how the runtime
+is wired.
 
-> **Manifests:** [`com.nexoider.coreai`](../../CoreAI/package.json) (`1.7.5`) · [`com.nexoider.coreaiunity`](../package.json) (`1.7.5`)
-> **Repo README:** [../../../README.md](../../../README.md) · **Changelog:** [../CHANGELOG.md](../CHANGELOG.md)
+Package manifests:
 
----
+- Unity layer: [`com.nexoider.coreaiunity`](../package.json)
+- Portable core: [`com.nexoider.coreai`](../../CoreAI/package.json)
+- Repository entry point: [Docs/README.md](../../../Docs/README.md)
 
-## 🟢 Beginner — get something on screen
+## Read By Goal
 
-Install → open scene → connect LLM → press Play.
+| Goal | Start Here | Then Read |
+|---|---|---|
+| Get a working scene | [QUICK_START.md](QUICK_START.md) | [COREAI_SETTINGS.md](COREAI_SETTINGS.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) |
+| Use CoreAI from code | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) |
+| Add tools or agents | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md), [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) |
+| Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) |
+| Understand architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md), [DGF_SPEC.md](DGF_SPEC.md) |
+| Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
+| Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
+| Run or extend tests | [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Test-specific docs listed below |
 
-| # | Document | You will learn |
-|---|----------|----------------|
-| 1 | [QUICK_START.md](QUICK_START.md) | Install, open `_mainCoreAI.unity`, wire up a backend |
-| 1b | [QUICK_START_FULL.md](QUICK_START_FULL.md) | Full 10-min walkthrough: LM Studio → Unity → first command |
-| 1a | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | 🎯 **One class for everyone** — `CoreAi.AskAsync` / `Stream` / `TryGet*` (beginner + pro guide) |
-| 1c | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | 💬 Drop-in chat panel + demo scene in one click |
-| 2 | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) | 🏗️ Build an NPC in 3 lines, agent modes, recipes |
-| 3 | [COREAI_SETTINGS](COREAI_SETTINGS.md) | ⚙️ LLM modes, routing profiles, models, timeout, streaming toggle |
-| 4 | [CHAT_TOOL_CALLING](CHAT_TOOL_CALLING.md) | 🛒 Worked example: merchant NPC with inventory |
-| 4b | [EXAMPLES](EXAMPLES.md) | 📖 Enemies, crafting, auto-repair, merchant, guard |
-
----
-
-## 💬 Chat & Streaming — new in 0.20
-
-| Document | Topic |
-|----------|-------|
-| [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | 🎯 One-line API: `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, `CoreAiChatConfig`, FAB/collapse, **hotkeys (0.25.3+)**, **persisted session (0.25.4+)**, **`SubmitMessageFromExternalAsync` (0.25.5+)**, reliable **Stop** path (0.25.6+), streaming hierarchy; **default window ~650×910**, **flush-right scrollbar**, optional **`coreai-long-request-hint`** (long-turn status) |
-| [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → `ThinkBlockStreamFilter` → UI; orchestrator streaming; cancellation; known limits |
-| [STREAMING_WEBGL_TODO](STREAMING_WEBGL_TODO.md) | WebGL: **`UnityWebRequest`** vs optional **`WebGlNativeStreaming`** (`fetch` jslib); history + verification checklist |
-| [WEBGL_BUILD_TROUBLESHOOTING](WEBGL_BUILD_TROUBLESHOOTING.md) | WebGL **Player** build: LLVM **OOM** during IL2CPP, `IOException` under `ProjectSettings/Packages`, StreamingAssets preprocess log |
-| [HTTP_TRANSPORT_SPEC](HTTP_TRANSPORT_SPEC.md) | **`IOpenAiHttpTransport`** — `HttpClient` vs `UnityWebRequest` (WebGL); simulated streaming |
-
----
-
-## 🟡 Intermediate — tools, memory, roles
-
-| # | Document | You will learn |
-|---|----------|----------------|
-| 5 | [TOOL_CALL_SPEC](TOOL_CALL_SPEC.md) | 🔧 All built-in tools: memory, Lua, world, inventory, scene, camera |
-| 5b | [JSON_COMMAND_FORMAT](JSON_COMMAND_FORMAT.md) | 📋 JSON command format per role (reference) |
-| 6 | [MemorySystem](MemorySystem.md) | 🧠 `MemoryTool` vs `ChatHistory`, per-role config |
-| 6a | [MEMORY_STORE_CUSTOM_BACKENDS](MEMORY_STORE_CUSTOM_BACKENDS.md) | 💾 `IAgentMemoryStore`: PlayerPrefs, cloud save, composite (offline-first) |
-| 7 | [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | 🤖 5 built-in roles, model selection strategy |
-| 8 | [WORLD_COMMANDS](WORLD_COMMANDS.md) | 🌍 Spawn/move/scene control from sandboxed Lua |
-| 9 | [LLMUNITY_SETUP_AND_MODELS](LLMUNITY_SETUP_AND_MODELS.md) | 📦 LLMUnity, GGUF, OpenAI HTTP, Lua pipeline |
-| 9b | [TROUBLESHOOTING](TROUBLESHOOTING.md) | 🔧 Model silent, Lua crashed, memory not written, **PlayMode HTTP 500 / LM Studio (0.25.7+)**; **CoreAI → Delete All Persistent Saves...** clears `persistentDataPath/CoreAI` |
-
----
-
-## 🔴 Architecture — how it works inside
-
-DI, threading, spec, pipelines.
-
-| # | Document | You will learn |
-|---|----------|----------------|
-| 10 | [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | 🗺️ Code map, LLM → commands pipeline, PR checklist; **child scope + `GlobalMessagePipe` for LLM subscribers** |
-| 10a | [ARCHITECTURE](ARCHITECTURE.md) | Clean architecture layers, LLM modes, MessagePipe; **§ child LifetimeScope vs `GlobalMessagePipe`**; **§ source comments (English, `TODO`/`HACK`)** |
-| 10c | [CODE_AUDIT_AND_FOLLOWUPS](CODE_AUDIT_AND_FOLLOWUPS.md) | Comment/language backlog and logic notes from manual audits |
-| 10b | [COMMAND_FLOW_DIAGRAM](COMMAND_FLOW_DIAGRAM.md) | 🗺️ Diagram: how a command travels through the system |
-| 11 | [DGF_SPEC](DGF_SPEC.md) | 📐 Normative spec: DI, threads, authority, §9.4 main-thread rules |
-| 12 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | 🛠️ MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
-| 12a | [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md) | 🔀 Portable routing modes, policy hooks, usage sinks, **timeouts vs HTTP** |
-| 12b | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | 📊 Provider `usage` vs pre-request estimates; SSE `stream_options`; HTTP vs orchestrator timeouts; tool diagnostics |
-| 12c | [CoreAI/Docs/README](../../CoreAI/Docs/README.md) | 📑 Index of every guide under `Assets/CoreAI/Docs` |
-| 13 | [MULTIPLAYER_AI](MULTIPLAYER_AI.md) | 🌐 Multiplayer + AI: host authority, replication |
-| 14 | [GameTemplateGuides/INDEX](GameTemplateGuides/INDEX.md) | 📚 Per-title guides: networking, orchestration, roles |
-
----
-
-## 🧪 Tests — documentation
-
-| Document | Tests | Scope |
-|----------|-------|-------|
-| [CraftingMemory_README](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | 5 | 🤖 Crafting workflow: Creator → CoreMechanic → Programmer |
-| [Play Mode layout](../Tests/PlayMode/README.md) | — | **FastNoLlm** vs **LlmVerification** vs **Scenarios** (+ **Shared**, **LlmInfra**) |
-| `ThinkBlockStreamFilterEditModeTests` | 24 | Streaming `<think>` filter, including split-tag cases |
-| `SecureLuaSandboxEditModeTests` | — | Sandbox escape: `io`/`os`/`debug`/`load`/`loadfile`/`dofile`, step/timeout guard |
-| `SmartToolCallingChatClientEditModeTests` | — | Duplicate detection, `AllowDuplicates`, missing tools, exceptions |
-| `InGameLlmChatServiceEditModeTests` | — | Sliding-window rate limiter |
-| `CoreAiChatServiceEditModeTests` | — | Streaming enablement hierarchy (UI → per-agent → global) |
-| `LuaExecutionPipelineEditModeTests` | 8 | Lua sandbox: exec success/failure, repair loop, role isolation |
-| `MultiAgentCraftingWorkflowPlayModeTests` | 2 | Full workflow over a live LLM |
-| `CraftingMemoryViaLlmUnityPlayModeTests` | 1 | Local GGUF: 4 crafts + determinism |
-| `CraftingMemoryViaOpenAiPlayModeTests` | 2 | HTTP: 4 crafts + 2 quick crafts |
-| `CoreAiChatPanelStopPlayModeTests` | 1 | `StopAgent()` cancels active request CTS, clears sending/streaming |
-| `AgentMemoryWithRealModelPlayModeTests` | 1 | Real LLM memory write + recall (**Ignore** on recall 5xx after retries, 0.25.7+) |
-
----
-
-## 🎮 Example game (`Assets/_exampleGame`)
+## First Run
 
 | Document | Purpose |
-|----------|---------|
-| [UNITY_SETUP](../../_exampleGame/Docs/UNITY_SETUP.md) | Step-by-step RogueliteArena scene setup |
-| [ARENA_ARCHITECTURE_AND_AI](../../_exampleGame/Docs/ARENA_ARCHITECTURE_AND_AI.md) | Arena architecture for multiplayer + AI roles |
-| [README](../../_exampleGame/README.md) | Concept, stack, folder layout |
-| [ROGUELITE_PLAYBOOK](../../_exampleGame/Docs/ROGUELITE_PLAYBOOK.md) | Gameplay: run loop, meta progression |
+|---|---|
+| [QUICK_START.md](QUICK_START.md) | Minimal path from install to Play Mode chat. |
+| [QUICK_START_FULL.md](QUICK_START_FULL.md) | Longer walkthrough with LM Studio and first command. |
+| [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
+| [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
 
----
-
-## 🎬 Demo & media
+## Chat And Streaming
 
 | Document | Purpose |
-|----------|---------|
-| [DEMO_RECORDING_GUIDE](DEMO_RECORDING_GUIDE.md) | Video/GIF capture scenarios, tools, `DemoRunner` script |
+|---|---|
+| [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | `CoreAi.AskAsync`, streaming, orchestration, and helper access. |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in chat panel, config assets, hotkeys, stop path, persisted session. |
+| [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity streaming, think-block filtering, cancellation, UI flow. |
+| [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) | Current WebGL SSE status, fetch bridge, fallback behavior, verification checklist. |
+| [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md) | OpenAI-compatible transport contracts: `HttpClient`, `UnityWebRequest`, WebGL fetch. |
+| [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md) | WebGL player build issues, IL2CPP memory, package/settings file problems. |
 
----
+## Tools, Memory, And Roles
 
-## 🗺️ Roadmap
+| Document | Purpose |
+|---|---|
+| [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | Built-in tools, schemas, examples, and tool-call patterns. |
+| [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | Naming, idempotency, result envelopes, duplicate calls, test checklist. |
+| [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md) | Worked merchant/inventory example for chat tool calling. |
+| [JSON_COMMAND_FORMAT.md](JSON_COMMAND_FORMAT.md) | JSON command format reference for role-driven commands. |
+| [MemorySystem.md](MemorySystem.md) | Agent memory, chat history, memory tools, and per-role config. |
+| [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) | Custom `IAgentMemoryStore` implementations: local, cloud, composite. |
+| [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md) | Built-in roles and model-selection strategy. |
+| [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | Sandboxed Lua/world commands for spawn, move, animation, audio, and scene control. |
 
-Live plan and recently-found gaps: [../../../TODO.md](../../../TODO.md).
+## Portable Core Deep Dives
+
+| Document | Purpose |
+|---|---|
+| [CoreAI portable docs](../../CoreAI/Docs/README.md) | Index for host-agnostic CoreAI documentation. |
+| [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) | Fluent agent configuration, tools, modes, memory, and skills. |
+| [ENGINE_AGNOSTIC_TOOLS](../../CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md) | How to keep tool logic portable and free of Unity dependencies. |
+| [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md) | Portable routing modes, policy hooks, usage sinks, and timeouts. |
+| [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline from `ILlmTool` to `AIFunction` and forced tool modes. |
+| [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
+| [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
+
+## Architecture
+
+| Document | Purpose |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Clean architecture layers, MessagePipe, LLM modes, source-comment rules. |
+| [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Code map, request pipeline, extension points, PR checklist. |
+| [DGF_SPEC.md](DGF_SPEC.md) | Normative spec for DI, threading, authority, and main-thread rules. |
+| [COMMAND_FLOW_DIAGRAM.md](COMMAND_FLOW_DIAGRAM.md) | Diagram of how a command travels through the system. |
+| [CODE_AUDIT_AND_FOLLOWUPS.md](CODE_AUDIT_AND_FOLLOWUPS.md) | Older manual audit notes and follow-up context. |
+| [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md) | Multiplayer AI authority and replication notes. |
+| [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
+
+## Tests
+
+| Document Or Test | Scope |
+|---|---|
+| [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Play Mode test layout and backend requirements. |
+| [../Tests/PlayMode/Scenarios/CraftingMemory_README.md](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | Crafting memory workflow scenario. |
+| `ThinkBlockStreamFilterEditModeTests` | Streaming `<think>` filter and split-tag cases. |
+| `SecureLuaSandboxEditModeTests` | Lua sandbox escape coverage. |
+| `SmartToolCallingChatClientEditModeTests` | Duplicate detection, missing tools, exceptions, retry behavior. |
+| `InGameLlmChatServiceEditModeTests` | Sliding-window rate limiter. |
+| `CoreAiChatServiceEditModeTests` | Streaming enablement hierarchy. |
+| `LuaExecutionPipelineEditModeTests` | Lua success/failure, repair loop, role isolation. |
+
+## Example Game And Media
+
+| Document | Purpose |
+|---|---|
+| [Assets/_exampleGame/README.md](../../_exampleGame/README.md) | RogueliteArena concept, stack, and folder layout. |
+| [UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) | Step-by-step example scene setup. |
+| [ARENA_ARCHITECTURE_AND_AI.md](../../_exampleGame/Docs/ARENA_ARCHITECTURE_AND_AI.md) | Arena architecture for multiplayer and AI roles. |
+| [ROGUELITE_PLAYBOOK.md](../../_exampleGame/Docs/ROGUELITE_PLAYBOOK.md) | Run loop, progression, and gameplay notes. |
+| [DEMO_RECORDING_GUIDE.md](DEMO_RECORDING_GUIDE.md) | Video/GIF capture scenarios and demo runner notes. |
+
+## Roadmap
+
+Live backlog and recently closed documentation debt: [../../../TODO.md](../../../TODO.md).

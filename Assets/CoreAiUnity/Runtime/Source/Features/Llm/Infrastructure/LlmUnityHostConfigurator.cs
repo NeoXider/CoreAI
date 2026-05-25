@@ -13,7 +13,7 @@ namespace CoreAI.Infrastructure.Llm
     public static class LlmUnityHostConfigurator
     {
         /// <summary>
-/// Executes apply from settings.
+        /// Applies CoreAI settings to the runtime LLMUnity host objects.
         /// </summary>
         public static void ApplyFromSettings(LLM llm, LLMAgent agent, CoreAISettingsAsset settings, IGameLogger logger)
         {
@@ -57,8 +57,6 @@ namespace CoreAI.Infrastructure.Llm
                 : settings.LlmUnityRuntimeHostObjectName.Trim();
 
             GameObject go = new(goName);
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             go.SetActive(false);
             LLM llm = go.AddComponent<LLM>();
             LLMAgent agent = go.AddComponent<LLMAgent>();

@@ -11,8 +11,8 @@ using VContainer;
 namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
 {
     /// <summary>
-    /// Единая шина «событие → <see cref="AiTaskRequest"/>» для арены: волна, HP, босс, комната, хоткеи (F1/F2).
-    /// Размещается на корне сгенерированной арены; <see cref="Init"/> вызывает <see cref="ArenaSurvivalProceduralSetup"/>.
+    /// Arena event bus that turns waves, HP changes, boss events, rooms, and hotkeys
+    /// into <see cref="AiTaskRequest"/> messages.
     /// </summary>
     public sealed class ArenaAiTaskBus : MonoBehaviour
     {
@@ -42,7 +42,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private ArenaCreatorWavePlanner _planner;
         private bool _hpCrisisLatch;
 
-        /// <summary>Явная инициализация из процедурного сетапа (предпочтительно).</summary>
+        /// <summary>Preferred explicit initialization path from the procedural arena setup.</summary>
         public void Init(
             CoreAILifetimeScope scope,
             ArenaSurvivalSession session,
@@ -157,7 +157,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
                 _hpCrisisLatch = false;
         }
 
-        /// <summary>Триггер коллайдера «вход в комнату».</summary>
+        /// <summary>Notifies the AI bus that the player entered a room trigger.</summary>
         public void NotifyRoomEntered(string roomId)
         {
             if (string.IsNullOrWhiteSpace(roomId))
@@ -176,7 +176,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
             });
         }
 
-        /// <summary>Демо-хоткей F1 — тот же путь, что раньше в <see cref="CoreAiArenaLlmHotkeys"/>.</summary>
+        /// <summary>Demo F1 path for requesting a Creator wave plan.</summary>
         public void FireHotkeyCreatorWavePlan()
         {
             if (_scope == null)
@@ -214,7 +214,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
             Debug.Log($"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF1} → Creator: ad-hoc, wave={wave}.");
         }
 
-        /// <summary>Демо-хоткей F2 — стойка компаньона.</summary>
+        /// <summary>Demo F2 path for requesting a companion stance change.</summary>
         public void FireHotkeyCompanionNpc()
         {
             TryLazyBind();

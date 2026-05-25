@@ -6,7 +6,7 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
 {
     /// <summary>
-    /// Раз в N волн запускает лёгкие задачи Analyzer и AINpc (для демонстрации маршрутизации ролей).
+    /// Triggers lightweight Analyzer and AINpc tasks every N waves to demonstrate role routing.
     /// </summary>
     public sealed class ArenaAuxLlmEveryNWaves : MonoBehaviour
     {
@@ -18,7 +18,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private ArenaSurvivalSession _session;
         private int _lastWaveTriggered;
 
-        /// <summary>Краткая строка для HUD после триггера вспомогательных ролей.</summary>
+        /// <summary>Short HUD status shown after auxiliary roles are triggered.</summary>
         public string StatusLine { get; private set; }
 
         public void Init(IAiOrchestrationService orchestrator, ArenaSurvivalSession session)

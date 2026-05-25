@@ -12,7 +12,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты: агент видит все добавленные инструменты.
+    /// EditMode coverage that verifies an agent exposes every registered tool.
     /// </summary>
     public sealed class AgentToolsVisibilityEditModeTests
     {

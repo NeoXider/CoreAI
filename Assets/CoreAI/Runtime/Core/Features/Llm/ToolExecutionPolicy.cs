@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -138,7 +138,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate"));
                     errs.Add(new MEAI.FunctionResultContent(fc.CallId,
-                        $"Duplicate tool call '{fc.Name}' with same arguments — skipped."));
+                        $"Duplicate tool call '{fc.Name}' with same arguments - skipped."));
                 }
 
                 return errs;
@@ -163,7 +163,6 @@ namespace CoreAI.Infrastructure.Llm
                 return fc;
             }
 
-            /* Implementation note in English. */
             if (_originalTools.Any(t => string.Equals(t.Name, fc.Name, StringComparison.Ordinal)))
             {
                 return fc;
@@ -176,12 +175,12 @@ namespace CoreAI.Infrastructure.Llm
             if (match != null)
             {
                 _logger.Warn(
-                    $"[ToolPolicy] ⚡ Repaired tool name casing: '{fc.Name}' → '{match.Name}'", LogTag.Llm);
+                    $"[ToolPolicy] Repaired tool name casing: '{fc.Name}' -> '{match.Name}'", LogTag.Llm);
                 return new MEAI.FunctionCallContent(fc.CallId, match.Name, fc.Arguments);
             }
 
             _logger.Warn(
-                $"[ToolPolicy] ✖ Unknown tool name: '{fc.Name}' — no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
+                $"[ToolPolicy] Unknown tool name: '{fc.Name}' - no repair found. Available: [{string.Join(", ", _originalTools.Select(t => t.Name))}]",
                 LogTag.Llm);
             return null;
         }
@@ -236,7 +235,6 @@ namespace CoreAI.Infrastructure.Llm
                 if (fc.Arguments != null)
                 {
                     // MEAI's AIFunctionFactory cannot convert Newtonsoft JObject/JArray to CLR
-                    /* Implementation note in English. */
                     // chokepoint for ALL tool calls (native, text-extracted, function-call syntax).
                     Dictionary<string, object> normalized = new(fc.Arguments);
                     foreach (string key in new List<string>(normalized.Keys))
@@ -279,7 +277,7 @@ namespace CoreAI.Infrastructure.Llm
                         // Tool-level timeout fired, not outer cancellation
                         sw.Stop();
                         string timeoutMsg = $"Error: Tool '{fc.Name}' timed out after {toolTimeoutMs}ms";
-                        _logger.Warn($"[ToolPolicy] ⏱ {timeoutMsg}", LogTag.Llm);
+                        _logger.Warn($"[ToolPolicy] вЏ± {timeoutMsg}", LogTag.Llm);
                         _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
                         _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
                             "timeout"));
@@ -310,9 +308,9 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     int originalLen = resultText.Length;
                     resultText = resultText.Substring(0, maxResultChars) +
-                                 $"\n…[truncated: {originalLen} chars total → {maxResultChars} shown]";
+                                 $"\n...[truncated: {originalLen} chars total -> {maxResultChars} shown]";
                     _logger.Info(
-                        $"[ToolPolicy] ✂ Tool '{fc.Name}' result truncated: {originalLen} → {maxResultChars} chars",
+                        $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {maxResultChars} chars",
                         LogTag.Llm);
                 }
 
@@ -399,7 +397,7 @@ namespace CoreAI.Infrastructure.Llm
             if (_settings.LogToolCallResults && !string.IsNullOrEmpty(resultText))
             {
                 const int max = 240;
-                string trimmed = resultText.Length <= max ? resultText : resultText.Substring(0, max) + "…";
+                string trimmed = resultText.Length <= max ? resultText : resultText.Substring(0, max) + "...";
                 preview = " result=" + trimmed.Replace('\n', ' ');
             }
 
@@ -501,7 +499,7 @@ namespace CoreAI.Infrastructure.Llm
             if (_settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(
-                    "[ToolPolicy] ✓ All succeeded, error counter reset to 0", LogTag.Llm);
+                    "[ToolPolicy] All succeeded, error counter reset to 0", LogTag.Llm);
             }
         }
 
@@ -512,7 +510,7 @@ namespace CoreAI.Infrastructure.Llm
             if (_settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(
-                    $"[ToolPolicy] ✗ Some failed, error counter={_consecutiveErrors}/{_maxConsecutiveErrors}",
+                    $"[ToolPolicy] Some failed, error counter={_consecutiveErrors}/{_maxConsecutiveErrors}",
                     LogTag.Llm);
             }
         }
@@ -521,7 +519,7 @@ namespace CoreAI.Infrastructure.Llm
         public MEAI.ChatResponse BuildMaxErrorsResponse()
         {
             _logger.Warn(
-                $"[ToolPolicy] ⚠ Max consecutive errors ({_maxConsecutiveErrors}), stopping.", LogTag.Llm);
+                $"[ToolPolicy] вљ  Max consecutive errors ({_maxConsecutiveErrors}), stopping.", LogTag.Llm);
 
             return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
                 "{\"error\":\"Agent aborted due to hitting maximum consecutive tool processing errors.\"}"))
@@ -573,12 +571,10 @@ namespace CoreAI.Infrastructure.Llm
                     return (bool)token;
                 }
 
-                /* Implementation note in English. */
                 return true;
             }
             catch
             {
-                /* Implementation note in English. */
                 // This preserves backward compatibility for tools that return plain text.
                 return !resultText.Contains("\"Success\":false") &&
                        !resultText.Contains("\"success\":false");

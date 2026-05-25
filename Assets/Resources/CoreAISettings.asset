@@ -23,6 +23,10 @@ MonoBehaviour:
   maxClientLimitedRequestsPerSession: 0
   maxClientLimitedPromptChars: 0
   requestTimeoutSeconds: 240
+  enableFallbackBackend: 0
+  secondaryApiBaseUrl: 
+  secondaryApiKey: 
+  secondaryModelName: 
   llmUnityAgentName: 
   llmUnityAutoCreateRuntimeHost: 1
   llmUnityRuntimeHostObjectName: 
@@ -45,6 +49,11 @@ MonoBehaviour:
   allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
   contextWindowTokens: 50000
+  maxToolResultChars: 8000
+  defaultToolTimeoutMs: 30000
+  maxResponseChars: 0
+  maxToolCallRoundtrips: 10
+  maxToolCallHistoryMessages: 20
   enableStreaming: 1
   webGlNativeStreaming: 1
   sameOriginCredentials: 0

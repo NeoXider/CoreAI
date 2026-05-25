@@ -5,10 +5,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для production-класса <see cref="ThinkBlockStreamFilter"/>.
-    /// Покрывают все ключевые сценарии стриминговой фильтрации <c>&lt;think&gt;...&lt;/think&gt;</c>:
-    /// split-теги, несколько блоков, <see cref="ThinkBlockStreamFilter.Flush"/>,
-    /// <see cref="ThinkBlockStreamFilter.Reset"/>, регистронезависимость и edge-cases.
+    /// EditMode coverage for <see cref="ThinkBlockStreamFilter"/> streaming filtering:
+    /// split tags, multiple blocks, flush/reset behavior, case-insensitivity, and edge cases.
     /// </summary>
     [TestFixture]
     public sealed class ThinkBlockStreamFilterEditModeTests

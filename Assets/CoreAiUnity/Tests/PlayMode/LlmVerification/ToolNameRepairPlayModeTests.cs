@@ -18,13 +18,10 @@ using MEAI = Microsoft.Extensions.AI;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode тесты для TryRepairToolName.
-    ///
-    /// Обёртка на уровне <see cref="MEAI.IChatClient"/>:
-    /// первый streaming-вызов — скрипт (wrong casing / unknown tool),
-    /// все последующие — реальный LLM через <see cref="MeaiOpenAiChatClient"/>.
-    /// Оборачиваем в <see cref="MeaiLlmClient"/> чтобы TryExtractToolCallsFromText
-    /// и TryRepairToolName работали на каждом ответе.
+    /// PlayMode verification for tool-name repair behavior.
+    /// Wraps <see cref="MEAI.IChatClient"/> so the first streaming response is scripted
+    /// and later responses use a real LLM through <see cref="MeaiOpenAiChatClient"/>.
+    /// The outer <see cref="MeaiLlmClient"/> keeps text extraction and tool-name repair active.
     /// </summary>
     public sealed class ToolNameRepairPlayModeTests
     {

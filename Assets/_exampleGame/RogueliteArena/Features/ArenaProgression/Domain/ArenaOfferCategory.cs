@@ -1,6 +1,6 @@
 namespace CoreAI.ExampleGame.ArenaProgression.Domain
 {
-    /// <summary>Категория выпадения карты после выбора редкости (индексы в ChanceData должны совпадать с порядком в SO).</summary>
+    /// <summary>Upgrade-card category selected after rarity; ChanceData indices must match ScriptableObject order.</summary>
     public enum ArenaOfferCategory
     {
         Stat = 0,

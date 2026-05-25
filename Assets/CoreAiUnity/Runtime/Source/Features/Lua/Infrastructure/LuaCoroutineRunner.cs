@@ -6,18 +6,18 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
-    /// Provides lua coroutine runner functionality.
+    /// Unity component that resumes active sandboxed Lua coroutines across frames.
     /// </summary>
     public sealed class LuaCoroutineRunner : MonoBehaviour
     {
         private readonly List<LuaCoroutineHandle> _handles = new();
         private readonly List<LuaCoroutineHandle> _toRemove = new();
 
-        /// <summary>Active count.</summary>
+        /// <summary>Number of coroutine handles currently managed by this runner.</summary>
         public int ActiveCount => _handles.Count;
 
         /// <summary>
-/// Executes register.
+        /// Adds a coroutine handle to the frame update loop.
         /// </summary>
         public void Register(LuaCoroutineHandle handle)
         {
@@ -30,7 +30,7 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>
-/// Executes unregister.
+        /// Stops and removes a coroutine handle from the frame update loop.
         /// </summary>
         public void Unregister(LuaCoroutineHandle handle)
         {
@@ -44,7 +44,7 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>
-/// Executes unregister all.
+        /// Stops and removes every coroutine handle managed by this runner.
         /// </summary>
         public void UnregisterAll()
         {
@@ -79,7 +79,6 @@ namespace CoreAI.Infrastructure.Lua
                 {
                     h.Resume();
 
-                    // Skip processing when the checked condition is already satisfied.
                     if (!h.IsAlive)
                     {
                         _toRemove.Add(h);

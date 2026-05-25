@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CoreAI.Logging;
 using System.Diagnostics;
@@ -219,7 +219,6 @@ namespace CoreAI.Ai
                     {
                         // WebGL player: do not detach from the captured Unity SynchronizationContext.
                         // Single-threaded IL2CPP has no real thread pool, so ConfigureAwait(false) here
-                        /* Implementation note in English. */
                         // chat UI stays on typing dots even though the LLM result has arrived.
 #if UNITY_WEBGL && !UNITY_EDITOR
                         result = await _llm
@@ -371,7 +370,6 @@ namespace CoreAI.Ai
             string terminalError = null;
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
-            /* Implementation note in English. */
 
             LlmCompletionRequest req = BuildCompletionRequest(
                 bundle, task, bundle.UserPayload,
@@ -901,7 +899,7 @@ namespace CoreAI.Ai
 
             if (msg.Length > 400)
             {
-                return msg.Substring(0, 400) + "…";
+                return msg.Substring(0, 400) + "...";
             }
 
             return msg;

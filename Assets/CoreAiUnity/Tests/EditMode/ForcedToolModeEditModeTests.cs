@@ -17,7 +17,6 @@ namespace CoreAI.Tests.EditMode
     /// Validates that <see cref="AiTaskRequest.ForcedToolMode"/> + <see cref="AiTaskRequest.RequiredToolName"/>
     /// reach <see cref="LlmCompletionRequest"/> verbatim through both the orchestrator and the
     /// streaming/structured-retry paths.
-    ///
     /// Backend-level mapping to <c>ChatOptions.ToolMode</c> is exercised by the live LLM tests;
     /// here we only assert the in-process plumbing so the contract can't silently break.
     /// </summary>

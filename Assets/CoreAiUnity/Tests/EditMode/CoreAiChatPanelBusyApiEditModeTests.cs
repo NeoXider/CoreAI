@@ -1,4 +1,4 @@
-using CoreAI.Ai;
+﻿using CoreAI.Ai;
 using CoreAI.Chat;
 using NUnit.Framework;
 using System.Collections.Generic;
@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode
     /// <c>IsBusy</c>, <c>BusyStateChanged</c>, <c>CurrentTurnGeneration</c>, <c>ToolRoundStarted</c>
     /// and <c>ResetBusyStateWithoutCancellation</c>.
     /// External hosts (RedoSchool's submit-unlock gate) used to read the private flags via
-    /// reflection � these tests pin the contract so we never silently regress it.
+    /// reflection - these tests pin the contract so we never silently regress it.
     /// </summary>
     [TestFixture]
     public sealed class CoreAiChatPanelBusyApiEditModeTests
@@ -626,3 +626,4 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+

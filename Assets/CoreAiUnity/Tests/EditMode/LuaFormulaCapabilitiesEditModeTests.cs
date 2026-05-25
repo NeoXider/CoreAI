@@ -9,8 +9,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.LuaFormulas
 {
     /// <summary>
-    /// Тесты для проверки возможностей модификации формул через Lua.
-    /// Проверяет что AI может менять формулы урона, уровней и добавлять новые механики.
+    /// Tests Lua-based formula modification for damage, leveling, and new mechanics.
     /// </summary>
     public sealed class LuaFormulaCapabilitiesEditModeTests
     {

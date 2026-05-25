@@ -11,7 +11,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для InGameLlmChatService — склейка истории, ClearHistory, лимит сообщений.
+    /// EditMode coverage for <see cref="InGameLlmChatService"/> history stitching,
+    /// clearing, and message limits.
     /// </summary>
     [TestFixture]
     public sealed class InGameLlmChatServiceEditModeTests

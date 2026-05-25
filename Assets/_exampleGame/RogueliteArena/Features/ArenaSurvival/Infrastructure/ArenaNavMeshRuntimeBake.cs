@@ -7,7 +7,7 @@ using UnityEngine.AI;
 namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 {
     /// <summary>
-    /// Временно отключает агентов/контроллеры перед запеканием NavMesh, чтобы избежать артефактов и зависаний.
+    /// Temporarily disables agents and controllers before NavMesh baking to avoid artifacts and stalls.
     /// </summary>
     internal static class ArenaNavMeshRuntimeBake
     {
@@ -41,7 +41,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             return new Restore(agentStates, ccStates);
         }
 
-        /// <param name="forceFullRebuild">Если true — всегда <see cref="NavMeshSurface.BuildNavMesh"/> (дороже).</param>
+        /// <param name="forceFullRebuild">When true, always runs the more expensive full <see cref="NavMeshSurface.BuildNavMesh"/> path.</param>
         public static void EnsureNavMeshBuilt(NavMeshSurface surface, bool forceFullRebuild)
         {
             if (surface == null)

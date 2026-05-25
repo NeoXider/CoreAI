@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
@@ -42,7 +42,7 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
-    /// Provides built-in fallback system prompts for known CoreAI roles.
+    /// Built-in fallback system prompt provider for known CoreAI roles.
     /// </summary>
     public sealed class BuiltInDefaultAgentSystemPromptProvider : IAgentSystemPromptProvider
     {
@@ -62,7 +62,6 @@ namespace CoreAI.Ai
                 _ =>
                     $"You are agent \"{roleId}\" in CoreAI. Follow the user message and any session hints; prefer structured output when the game requests it."
             };
-            /* Implementation note in English. */
             // or every orchestrator request duplicates it (built-in strings are raw role prompts).
             systemPrompt = basePrompt;
             return true;

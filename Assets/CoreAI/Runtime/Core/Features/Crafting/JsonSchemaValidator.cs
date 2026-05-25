@@ -13,7 +13,7 @@ namespace CoreAI.Crafting
         private readonly List<JsonFieldSchema> _fields = new();
 
         /// <summary>
-        /// Initializes a new instance of JsonSchemaValidator.
+        /// Creates a validator with a schema name used in diagnostic messages.
         /// </summary>
         public JsonSchemaValidator(string schemaName)
         {
@@ -21,7 +21,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddField API operation.
+        /// Adds a field schema to this validator.
         /// </summary>
         public JsonSchemaValidator AddField(JsonFieldSchema field)
         {
@@ -30,7 +30,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes AddField API operation.
+        /// Adds a field schema from inline field constraints.
         /// </summary>
         public JsonSchemaValidator AddField(
             string name,
@@ -55,7 +55,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes Validate API operation.
+        /// Validates a JSON object string against the configured fields.
         /// </summary>
         public JsonValidationResult Validate(string json)
         {
@@ -168,7 +168,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes ToPromptDescription API operation.
+        /// Builds a compact schema description suitable for prompt injection.
         /// </summary>
         public string ToPromptDescription()
         {

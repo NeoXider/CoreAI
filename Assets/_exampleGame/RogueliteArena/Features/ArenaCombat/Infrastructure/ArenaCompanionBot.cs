@@ -4,20 +4,20 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 {
-    /// <summary>Боевой темп компаньона после ответа AINpc (F2): заметно меняет скорость и радиусы.</summary>
+    /// <summary>Companion combat stance selected by AINpc responses; affects speed and radii.</summary>
     public enum CompanionCombatStance
     {
-        /// <summary>Базовые параметры из инспектора.</summary>
+        /// <summary>Baseline values configured in the Inspector.</summary>
         Balanced = 0,
 
-        /// <summary>Дальше лезет к врагам, выше скорость, уже «хвост» у игрока.</summary>
+        /// <summary>More aggressive stance with higher speed, wider aggro, and shorter follow distance.</summary>
         Aggressive = 1,
 
-        /// <summary>Ближе к игроку, меньше агро-радиус, медленнее.</summary>
+        /// <summary>Defensive stance that stays closer to the player with lower aggro and speed.</summary>
         Defensive = 2
     }
 
-    /// <summary>Простой бот-компаньон: следует за игроком, бьёт ближайшего врага. F2 + AINpc меняет <see cref="CompanionCombatStance"/>.</summary>
+    /// <summary>Simple companion bot that follows the player, attacks nearby enemies, and reacts to AINpc stance changes.</summary>
     [RequireComponent(typeof(CharacterController))]
     public sealed class ArenaCompanionBot : MonoBehaviour
     {
@@ -43,15 +43,15 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private float _baseEnemyAcquireRadius;
         private Renderer _visRenderer;
 
-        /// <summary>Текущая стойка после последнего применения (в т.ч. с F2).</summary>
+        /// <summary>Current stance after the most recent direct or AINpc-driven change.</summary>
         public CompanionCombatStance CurrentStance => _stance;
 
         public void Init(IArenaSessionView session) => _session = session;
 
         /// <summary>
-        /// Применяет множители к скорости, дистанции следования и радиусу поиска врагов (видно в игре и в логе).
+        /// Applies stance multipliers to speed, follow distance, and enemy search radius.
         /// </summary>
-        /// <param name="logChange">Ложь при инициализации из Awake.</param>
+        /// <param name="logChange">False during Awake initialization to avoid noisy startup logs.</param>
         public void ApplyCombatStance(CompanionCombatStance stance, bool logChange = true)
         {
             _stance = stance;

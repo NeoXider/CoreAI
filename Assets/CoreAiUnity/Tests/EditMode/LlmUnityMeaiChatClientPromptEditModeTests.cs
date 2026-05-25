@@ -8,8 +8,8 @@ using MEAI = Microsoft.Extensions.AI;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Паритет подготовки промпта LLMUnity между стримингом и нестримингом:
-    /// общий <see cref="LlmUnityMeaiChatClient.BuildLlmUnityPrompt"/> без реального <c>LLMAgent</c>.
+    /// Verifies LLMUnity prompt preparation parity between streaming and non-streaming paths
+    /// through <see cref="LlmUnityMeaiChatClient.BuildLlmUnityPrompt"/>.
     /// </summary>
     [TestFixture]
     public sealed class LlmUnityMeaiChatClientPromptEditModeTests

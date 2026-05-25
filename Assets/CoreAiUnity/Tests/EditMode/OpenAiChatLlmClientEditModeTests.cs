@@ -10,7 +10,7 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для OpenAiChatLlmClient (фабрика для MeaiLlmClient).
+    /// EditMode coverage for <see cref="OpenAiChatLlmClient"/> and MEAI client factory wiring.
     /// </summary>
 #if !COREAI_NO_LLM
     public sealed class OpenAiChatLlmClientEditModeTests

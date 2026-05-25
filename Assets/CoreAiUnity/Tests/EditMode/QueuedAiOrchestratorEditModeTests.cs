@@ -8,17 +8,16 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для <see cref="QueuedAiOrchestrator"/>:
-    /// приоритет очереди, CancellationScope и MaxConcurrent.
+    /// EditMode coverage for <see cref="QueuedAiOrchestrator"/> queue priority,
+    /// cancellation scopes, and maximum concurrency.
     /// </summary>
     public sealed class QueuedAiOrchestratorEditModeTests
     {
         #region Helpers
 
         /// <summary>
-        /// Stub-оркестратор, записывающий порядок выполнения задач.
-        /// Каждая задача ждёт <see cref="TaskCompletionSource"/> перед завершением, что позволяет
-        /// управлять моментом завершения извне.
+        /// Stub orchestrator that records execution order and waits on externally
+        /// controlled gates before completing each task.
         /// </summary>
         private sealed class RecordingOrchestrator : IAiOrchestrationService
         {
@@ -58,14 +57,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Stub-оркестратор для немедленного завершения (для тестов приоритета).
+        /// Stub orchestrator that completes immediately for priority-order tests.
         /// </summary>
         private sealed class ImmediateRecordingOrchestrator : IAiOrchestrationService
         {
             private readonly object _lock = new();
             public List<string> ExecutionLog { get; } = new();
 
-            /// <summary>Delay перед завершением, чтобы Queue успел набрать элементы.</summary>
+            /// <summary>Delay before completion so the queue can accumulate pending items.</summary>
             public TaskCompletionSource<string> StartGate { get; } = new();
 
             public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)

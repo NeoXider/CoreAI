@@ -1,111 +1,165 @@
-# 🚀 CoreAI — Quick Start
+# CoreAI Quick Start
 
-Minimal path from an empty project to a working **LLM + orchestrator + Lua + Chat UI** inside the Editor.
+This guide gets you from a Unity project to a working CoreAI chat scene with an
+LLM backend, orchestration, tools, and optional Lua support.
 
-> Looking for a full 10-minute walkthrough (LM Studio → Unity → first command)? See [QUICK_START_FULL.md](QUICK_START_FULL.md).
-
----
+For a longer walkthrough with LM Studio and a first command, use
+[QUICK_START_FULL.md](QUICK_START_FULL.md).
 
 ## 1. Requirements
 
 | Item | Value |
-|------|-------|
-| **Unity** | As pinned in `ProjectSettings/ProjectVersion.txt` (currently **6000.4.x**). |
-| **Disk / network** | For local LLMUnity: space for a GGUF model and time for the first download. |
-| **Optional** | LM Studio, OpenAI, or any OpenAI-compatible HTTP server. |
+|---|---|
+| Unity | Use the editor pinned in `ProjectSettings/ProjectVersion.txt`. |
+| Packages | Install the portable CoreAI package first, then the Unity package. |
+| Backend | LLMUnity, LM Studio, OpenAI, vLLM, Ollama, or a server-managed proxy. |
+| Local models | Leave time and disk space for the first GGUF download. |
 
----
+## 2. Install The Packages
 
-## 2. Install the packages
+In Unity Package Manager, choose **Add package from Git URL** and add these in
+order:
 
-Via Unity Package Manager → **Add package from Git URL** (in this order):
-
-```
-https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI          # portable core
-https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity     # Unity layer
-```
-
-NuGet DLLs, VContainer/MoonSharp/UniTask/MessagePipe/LLMUnity Git dependencies — see the root [README §Quick Start](../../../README.md#-quick-start).
-
----
-
-## 3. Create a scene (one click)
-
-You have **two** options:
-
-### 3a. Bare scene (lifetime scope — no demo UI)
-
-```
-CoreAI → Setup → Create Bare Scene (advanced)
+```text
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
+https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-Creates `CoreAILifetimeScope` with every required asset (`CoreAISettings`, `GameLogSettings`, `AgentPromptsManifest`, `CoreAiPrefabRegistry`, `LlmRoutingManifest`, `AiPermissions`). If the backend is `LlmUnity`, it also adds `LLM` and `LLMAgent` GameObjects.
+The Unity package brings the scene-facing layer. The portable package contains
+the host-agnostic contracts, agents, routing, memory, tools, and MEAI integration.
 
-### 3b. Chat-ready demo scene (recommended for first run)
+If Unity reports missing Git dependencies, use:
 
+```text
+CoreAI -> Setup -> Install Git Dependencies
 ```
-CoreAI → Setup → Create Chat Demo Scene
+
+## 3. Create A Scene
+
+Choose one path.
+
+### Chat Demo Scene
+
+Recommended for a first run:
+
+```text
+CoreAI -> Setup -> Create Chat Demo Scene
 ```
 
-Produces `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeScope`, a `UIDocument` + `CoreAiChatPanel` and a prepared `CoreAiChatConfig_Demo.asset`. Press **Play** and chat. The stock chat template uses a **~30% larger** floating window (**650×910**), a **right-flush** vertical scrollbar, and an optional **long-turn status** label after the typing row (see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md)).
+This creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with:
 
-### 3c. Reset saved chat / memory / summaries (Editor)
+- `CoreAILifetimeScope`
+- `UIDocument`
+- `CoreAiChatPanel`
+- `CoreAiChatConfig_Demo.asset`
+- required default CoreAI assets
 
-**CoreAI → Delete All Persistent Saves...** deletes **`persistentDataPath/CoreAI`** (see **`CoreAiPersistentPaths`**). Exit **Play Mode** first. Project assets are untouched.
+Press **Play** and type in the chat panel.
 
----
+### Bare Scene
 
-## 4. Connect an LLM backend
+Use this when you want the runtime services without demo UI:
 
-Open `Resources/CoreAISettings` (or create one via **Create → CoreAI → Core AI Settings**) and pick an **LLM Mode**:
+```text
+CoreAI -> Setup -> Create Bare Scene (advanced)
+```
 
-### A. LocalModel — LLMUnity
+This creates the lifetime scope and required assets such as `CoreAISettings`,
+`GameLogSettings`, `AgentPromptsManifest`, `CoreAiPrefabRegistry`,
+`LlmRoutingManifest`, and `AiPermissions`.
 
-1. **LLM Mode** → `LocalModel` (or `Auto`).
-2. Select a GGUF model on the `LlmManager` object (for example **Qwen3.5-4B**). If the list is empty, download a model via the LLMUnity Model Manager.
-3. On play, `CoreAILifetimeScope` discovers `LLMAgent` automatically.
+## 4. Connect An LLM Backend
 
-> LLMUnity is installed automatically as a Unity Package Manager dependency. Plugin reference: [LLMUnity on GitHub](https://github.com/undreamai/LLMUnity).
+Open `Resources/CoreAISettings` or create one from:
 
-### B. ClientOwnedApi — LM Studio / OpenAI / vLLM / Ollama
+```text
+Create -> CoreAI -> Core AI Settings
+```
 
-1. **LLM Mode** → `ClientOwnedApi`.
-2. **Api Base Url** → e.g. `http://localhost:1234/v1` (LM Studio).
-3. **Model** → the model name your server exposes (e.g. `qwen3.5-4b`).
-4. **Api Key** → only required for OpenAI itself.
+Then choose an `LLM Mode`.
 
-> 💡 Not sure which to pick? Install [LM Studio](https://lmstudio.ai), load **Qwen3.5-4B** or **Gemma 4 26B**, start the local server, and choose HTTP API in Unity. That's the fastest path to a working setup.
+### LocalModel: LLMUnity
 
-### C. ClientLimited
+Use this for local GGUF models inside Unity.
 
-Choose `ClientLimited` when you need local request or prompt-size limits for prototypes. This is useful for demos and local control, but it is not a production security boundary.
+1. Set `LLM Mode` to `LocalModel` or `Auto`.
+2. Select a GGUF model on the LLMUnity object.
+3. Press Play. `CoreAILifetimeScope` discovers `LLMAgent` automatically.
 
-### D. ServerManagedApi
+LLMUnity is a package dependency. Plugin reference:
+[LLMUnity on GitHub](https://github.com/undreamai/LLMUnity).
 
-Choose `ServerManagedApi` when the Unity client should call your backend proxy and the backend owns provider credentials. This is the recommended production path for WebGL, multiplayer, classrooms, and shared API budgets.
+### ClientOwnedApi: LM Studio, OpenAI, vLLM, Ollama
 
-For mixed setups, assign different modes per role in `LlmRoutingManifest`; for example `SmartChat → ServerManagedApi`, `Analyzer → ClientLimited`, `Creator → LocalModel`.
+Use this when the Unity client calls an OpenAI-compatible endpoint directly.
 
----
+1. Set `LLM Mode` to `ClientOwnedApi`.
+2. Set `Api Base Url`, for example `http://localhost:1234/v1` for LM Studio.
+3. Set `Model` to the model name exposed by the server.
+4. Set `Api Key` only when the provider requires it.
 
-## 5. Global toggles
+This is the quickest path for local development with LM Studio.
 
-`CoreAISettings.asset` exposes the project-wide defaults:
+### ClientLimited
+
+Use this for prototypes that need local request limits or prompt-size limits. It
+is useful for demos, but it is not a production security boundary.
+
+### ServerManagedApi
+
+Use this when Unity should call your backend proxy and the backend owns provider
+credentials. This is the recommended production shape for WebGL, multiplayer,
+classrooms, shared budgets, and paid API usage.
+
+For mixed setups, assign different modes per role in `LlmRoutingManifest`, such as:
+
+```text
+SmartChat -> ServerManagedApi
+Analyzer -> ClientLimited
+Creator -> LocalModel
+```
+
+## 5. Check The Main Toggles
+
+`CoreAISettings.asset` holds project-wide defaults:
 
 | Setting | Purpose |
-|---------|---------|
-| `LLM Mode` | `LocalModel` / `ClientOwnedApi` / `ClientLimited` / `ServerManagedApi` / `Auto` / `Offline` |
-| `Backend Type` | Legacy backend selector retained for old assets |
-| `Model` / `Api Base Url` / `Api Key` | Backend credentials |
-| `Temperature` / `Max Tokens` / `Request Timeout` | Generation controls |
-| `Enable Streaming` | Global streaming default (new in 0.20) |
-| `Universal System Prompt Prefix` | Prepended to every agent's system prompt |
+|---|---|
+| `LLM Mode` | Chooses local, client-owned HTTP, server-managed, auto, offline, or limited execution. |
+| `Model`, `Api Base Url`, `Api Key` | Backend model and connection fields. |
+| `Temperature`, `Max Tokens`, `Request Timeout` | Generation controls and timeout guardrails. |
+| `Enable Streaming` | Global streaming default. |
+| `Universal System Prompt Prefix` | Text prepended to every agent system prompt. |
 
-Streaming priority is **UI toggle → per-agent `AgentBuilder.WithStreaming(bool)` → global**. Details: [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md).
+Streaming priority is:
 
----
+```text
+UI toggle -> AgentBuilder.WithStreaming(bool) -> global setting
+```
 
-## 6. Build your first agent
+Details: [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md).
+
+## 6. Try The Static API
+
+If the scene has `CoreAILifetimeScope`, the fastest code path is the static facade:
+
+```csharp
+string reply = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
+
+await foreach (string chunk in CoreAi.StreamAsync("Tell me a joke", "SmartChat"))
+{
+    label.text += chunk;
+}
+
+string json = await CoreAi.OrchestrateAsync(
+    new AiTaskRequest { RoleId = "Creator", Hint = "spawn JSON" });
+```
+
+Full reference: [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md).
+
+## 7. Build A Custom Agent
+
+Use `AgentBuilder` when you need a specific role, memory, tools, or mode:
 
 ```csharp
 var storyteller = new AgentBuilder("Storyteller")
@@ -120,60 +174,47 @@ storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 await storyteller.Ask("Tell me about the ruins to the east.");
 ```
 
-Full reference with ready-made recipes: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md).
+Full reference: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md).
 
-### One-line alternative — `CoreAi` singleton
-
-If your scene already has `CoreAILifetimeScope` (step 3), you can skip `AgentBuilder` and DI — every call style is available through the static facade `CoreAi`:
-
-```csharp
-// Async ask:
-string reply = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
-
-// Streaming (live UI):
-await foreach (string chunk in CoreAi.StreamAsync("Tell me a joke", "SmartChat"))
-    label.text += chunk;
-
-// Full orchestrator pipeline (history + authority + publish command):
-string json = await CoreAi.OrchestrateAsync(
-    new AiTaskRequest { RoleId = "Creator", Hint = "spawn JSON" });
-```
-
-Full reference: [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md).
-
-### Sanity check in Play mode
+## 8. Sanity Check In Play Mode
 
 1. Press **Play**.
-2. The console prints `VContainer + MessagePipe ... ready.`.
-3. Call `myAgent.Ask("Hello");` from any script — you should see a request/response round-trip in the console.
+2. Confirm the console reports that VContainer and MessagePipe are ready.
+3. Send a chat message or call `CoreAi.AskAsync`.
+4. Confirm you see a request/response round trip in the console.
 
-> If `ILlmClient` cannot find an `LLMAgent` and HTTP is disabled, `StubLlmClient` takes over and returns canned replies. Configure §4A or §4B for real model output.
+If no real backend is available, the offline/stub path may return canned replies.
+Configure `LocalModel` or `ClientOwnedApi` for real model output.
 
----
+## 9. Reset Saved Runtime Data
 
-## 7. Tests
+To reset agent memory, persisted chat, conversation summaries, Lua versions, and
+data overlay versions:
 
-| Suite | How to run | What it covers |
-|-------|------------|----------------|
-| **CoreAI.Tests** (EditMode) | Window → General → Test Runner → EditMode | 83 tests: prompts, Lua sandbox, streaming filter, rate limiter, tool-calling duplicates |
-| **CoreAI.Tests.PlayMode.\*** | Test Runner → Play Mode (filter assembly) | **`FastNoLlm`** (stubs), **`LlmVerification`** (real LLM / HTTP), **`Scenarios`** (workflows). Uses `COREAI_OPENAI_TEST_*` where applicable ([LLMUNITY_SETUP_AND_MODELS §7](LLMUNITY_SETUP_AND_MODELS.md)). |
+```text
+CoreAI -> Delete All Persistent Saves...
+```
 
----
+Stop Play Mode first. This deletes `persistentDataPath/CoreAI`; project assets
+under `Assets/` are not touched.
 
-## 8. Next steps
+## 10. Tests
 
-| Doc | What it covers |
-|-----|----------------|
-| [DOCS_INDEX](DOCS_INDEX.md) | Full documentation map |
-| [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) | One-line `CoreAi.AskAsync` / `StreamAsync` / `OrchestrateAsync` |
-| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel`, styles, events, FAB/hotkeys ([§ chat-hotkeys](../Runtime/Source/Features/Chat/README_CHAT.md#chat-hotkeys)) |
-| [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | How streaming works end-to-end |
-| [DEVELOPER_GUIDE](DEVELOPER_GUIDE.md) | Architecture, data flow, PR checklist |
-| [AI_AGENT_ROLES](AI_AGENT_ROLES.md) | Roles, model selection strategy |
-| [TROUBLESHOOTING](TROUBLESHOOTING.md) | Model silent, Lua crash, memory not written |
+| Suite | How To Run | What It Covers |
+|---|---|---|
+| CoreAI EditMode tests | Window -> General -> Test Runner -> EditMode | Prompts, Lua sandbox, streaming filter, rate limiter, tool-call duplicate handling. |
+| CoreAI PlayMode tests | Test Runner -> PlayMode, filter by assembly or folder | Fast no-LLM tests, real LLM verification, and workflow scenarios. |
 
----
+Some PlayMode tests require a configured HTTP backend or local GGUF model. See
+[LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md).
 
-**Version:** aligned with [`package.json`](../package.json) — **1.7.4** (UPM). For a one-line API, see [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — `CoreAi.AskAsync` / `StreamAsync`.
+## Next Steps
 
-**First script from scratch?** Read [COREAI_SINGLETON_API](COREAI_SINGLETON_API.md) — 3 steps + copy-paste `AskAsync` / `StreamAsync`.
+| Document | Read When |
+|---|---|
+| [DOCS_INDEX.md](DOCS_INDEX.md) | You need the full documentation map. |
+| [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | You are customizing the chat panel. |
+| [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | You are adding or debugging tools. |
+| [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | You want reliable, compact, testable tool contracts. |
+| [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | You are debugging streaming, cancellation, or WebGL behavior. |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Something is silent, stuck, failing, or returning fallback responses. |

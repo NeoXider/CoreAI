@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace CoreAI.Ai
 {
@@ -22,10 +22,6 @@ namespace CoreAI.Ai
                 return false;
             }
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
 
             failureReason = "";
             return true;

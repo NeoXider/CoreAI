@@ -4,8 +4,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Опции <see cref="CoreAiChatExternalSubmitOptions"/> для <see cref="CoreAiChatPanel.SubmitMessageFromExternalAsync"/>.
-    /// Саму панель без полного UITK + DI не тестируем здесь — только контракт полей.
+    /// Field-contract coverage for <see cref="CoreAiChatExternalSubmitOptions"/> used by
+    /// <see cref="CoreAiChatPanel.SubmitMessageFromExternalAsync"/>.
     /// </summary>
     public sealed class CoreAiChatExternalSubmitOptionsEditModeTests
     {

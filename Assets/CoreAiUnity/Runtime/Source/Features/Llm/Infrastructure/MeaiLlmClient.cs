@@ -51,7 +51,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes create http.
+        /// Creates an OpenAI-compatible HTTP-backed MEAI client.
         /// </summary>
         public static MeaiLlmClient CreateHttp(
             IOpenAiHttpSettings openAiSettings,
@@ -94,7 +94,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes create http.
+        /// Creates an OpenAI-compatible HTTP-backed MEAI client from a Unity settings asset.
         /// </summary>
         public static MeaiLlmClient CreateHttp(
             CoreAISettingsAsset settings,
@@ -116,7 +116,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes create llm unity.
+        /// Creates a MEAI client that delegates completions to an LLMUnity agent.
         /// </summary>
         public static MeaiLlmClient CreateLlmUnity(
 #if UNITY_WEBGL || !COREAI_HAS_LLMUNITY
@@ -196,7 +196,6 @@ namespace CoreAI.Infrastructure.Llm
                 chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
             }
 
-            // No-op guard before a conditional operation.
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Initial prompt (system={chatMessages[0].Contents?.Count ?? 0} parts, user={chatMessages[1].Contents?.Count ?? 0} parts)");
 
@@ -239,7 +238,6 @@ namespace CoreAI.Infrastructure.Llm
                 return FromException(ex);
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (response.Messages != null)
             {
                 foreach (MEAI.ChatMessage msg in response.Messages)
@@ -253,7 +251,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (_settings?.EnableMeaiDebugLogging == true)
             {
                 _logger.LogInfo(GameLogFeature.Llm, $"MeaiLlmClient: Final response: {response.Text}");
@@ -343,22 +340,21 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes complete streaming async.
+        /// Streams a completion and preserves CoreAI tool-call semantics across MEAI backends.
         /// <para>
-/// Executes complete streaming async.
+        /// The streaming path handles three provider shapes:
         /// <list type="number">
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// <item><description>native text chunks;</description></item>
+        /// <item><description>tool calls surfaced as MEAI function calls;</description></item>
+        /// <item><description>tool calls encoded as text-shaped JSON.</description></item>
         /// </list>
         /// </para>
         /// <para>
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// Tool execution can require additional model turns, so the method yields assistant text,
+        /// tool-call chunks, and final completion chunks as they become available.
         /// </para>
         /// <para>
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// WebGL transports may use the browser fetch bridge while editor and standalone players use
         /// <c>UnityWebRequest</c>.
         /// </para>
         /// </summary>
@@ -444,7 +440,6 @@ namespace CoreAI.Infrastructure.Llm
 
                 // ForcedToolMode applies ONLY to the first iteration.
                 // After we feed tool results back to the model, it must decide naturally
-                // No-op guard before a conditional operation.
                 // tool-choice constraint would loop forever (model is forced to re-call a tool,
                 // we feed its result, model is forced again, ...).
                 MEAI.ChatOptions iterationOptions = chatOptions;
@@ -695,7 +690,6 @@ namespace CoreAI.Infrastructure.Llm
                     if (aiTools.Count == 0)
                     {
                         // Tool was requested but no AIFunction is bound. Strip the JSON, warn,
-                        // No-op guard before a conditional operation.
                         // must not loop forever asking a model that has no tools to call them.
                         foreach (MEAI.FunctionCallContent fc in toolCalls)
                         {
@@ -747,8 +741,6 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming detected {toolCalls.Count} text-extracted tool call(s), executing...");
                     }
 
-                    // No-op guard before a conditional operation.
-                    // Skip processing when the checked condition is already satisfied.
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                     {
                         yield return new LlmStreamChunk { Text = cleanedText };
@@ -807,7 +799,6 @@ namespace CoreAI.Infrastructure.Llm
                     continue;
                 }
 
-                // Skip processing when the checked condition is already satisfied.
                 if (!streamedVisibleToConsumer)
                 {
                     string sanitizedFull = SanitizeAssistantVisibleText(visibleText, request);
@@ -982,7 +973,6 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Build cleaned text by removing all found tool-call JSON spans (from original text)
-            // No-op guard before a conditional operation.
             // *hidden* from search, the positions still correspond to the original text.
             System.Text.StringBuilder cleanBuilder = new(text.Length);
             int lastEnd = 0;
@@ -1033,7 +1023,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch
                 {
-                    // No-op guard before a conditional operation.
                 }
             }
 
@@ -1082,7 +1071,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch
                 {
-                    // No-op guard before a conditional operation.
                 }
             }
 
@@ -1132,7 +1120,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Converts any <see cref="JObject"/>/<see cref="JArray"/> values in the dictionary to
         /// their JSON string representation. MEAI's <c>AIFunctionFactory</c> cannot convert
-/// Executes if.
+        /// nested Newtonsoft tokens directly.
         /// </summary>
         private static void NormalizeJTokenValues<T>(Dictionary<string, T> arguments)
         {
@@ -1281,7 +1269,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// For hybrid tool-json streaming (bound or unbound): largest <paramref name="text"/> prefix that can be emitted as raw
         /// without splitting a text-shaped tool JSON (complete <see cref="FindToolCallJsonSpans"/> hits) or
-/// Executes get exclusive end for safe unbound raw streaming.
+        /// an incomplete JSON object that may become a tool call.
         /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
         /// </summary>
         internal static int GetExclusiveEndForSafeUnboundRawStreaming(string text)
@@ -1385,7 +1373,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Maps <see cref="LlmCompletionRequest.ForcedToolMode"/> onto
         /// <see cref="MEAI.ChatOptions.ToolMode"/>. Called only when the request actually
-/// Executes apply forced tool mode.
+        /// contains tools and an explicit forced-tool setting.
         /// <para>
         /// Multi-round streaming: the caller is responsible for resetting the mode to
         /// <see cref="MEAI.ChatToolMode.Auto"/> after the first iteration via

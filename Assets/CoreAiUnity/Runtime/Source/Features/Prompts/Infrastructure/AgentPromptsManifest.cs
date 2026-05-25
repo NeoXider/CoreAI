@@ -9,7 +9,7 @@ namespace CoreAI.Infrastructure.Prompts
     [CreateAssetMenu(fileName = "AgentPromptsManifest", menuName = "CoreAI/Agent Prompts Manifest")]
     public sealed class AgentPromptsManifest : ScriptableObject
     {
-        /// <summary>Provides entry functionality.</summary>
+        /// <summary>Prompt override entry for one built-in or custom role.</summary>
         [System.Serializable]
         public sealed class Entry
         {
@@ -26,8 +26,7 @@ namespace CoreAI.Infrastructure.Prompts
             public TextAsset userPromptTemplate;
 
             /// <summary>
-/// Executes new.
-/// Executes new.
+            /// Whether this role should ignore the global universal system prompt prefix.
             /// </summary>
             [Tooltip("Disable universalSystemPromptPrefix for this role when the prompt must be fully custom.")]
             public bool overrideUniversalPrefix;

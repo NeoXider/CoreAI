@@ -15,24 +15,23 @@ namespace CoreAI.Ai
     /// <see cref="IRequestHeaderProvider"/>:</b> they cover three layers and never conflict.
     /// </para>
     /// <list type="bullet">
-    /// Provides API usage information.
+    /// <item><description><see cref="LlmCompletionRequest.IdempotencyKey"/> belongs to the logical request
     /// owned by the orchestrator. Auto-assigned once when empty and reused across decorator
     /// retries (e.g. <c>RefreshOnUnauthorizedDecorator</c>). The MEAI host (<c>MeaiLlmClient</c>)
     /// copies this value into <see cref="Begin"/> on every <c>CompleteAsync</c>/<c>CompleteStreamingAsync</c>
-    /// invocation.</item>
-    /// Provides API usage information.
+    /// invocation.</description></item>
+    /// <item><description><see cref="LlmRequestContext"/> is the ambient bridge used by the HTTP
     /// transport without plumbing the request object through MEAI's <c>IChatClient</c> seam.
     /// Implemented as <see cref="AsyncLocal{T}"/> so it follows <c>await</c> continuations across
-    /// thread-pool hops.</item>
-    /// Provides API usage information.
+    /// thread-pool hops.</description></item>
+    /// <item><description><see cref="IRequestHeaderProvider"/> contributes
     /// <b>per settings</b> static/host-supplied headers (e.g. <c>X-Client-Version</c>, custom routing
     /// hints). When this provider also exposes <c>IdempotencyKey</c>/<c>RequestId</c> they act only as
-    /// fallbacks for callers using <see cref="MeaiOpenAiChatClient"/> directly without an orchestrator.</item>
+    /// fallbacks for callers using <see cref="MeaiOpenAiChatClient"/> directly without an orchestrator.</description></item>
     /// </list>
     /// <para>
     /// Resolution order in <c>MeaiOpenAiChatClient.BuildTransportHeaders</c>:
-    /// Provides API usage information.
-    /// Provides API usage information.
+    /// request context first, then host-provided headers, then settings fallbacks.
     /// Earlier sources win; later sources fill missing slots only.
     /// </para>
     /// <para>

@@ -8,7 +8,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для CompatibilityChecker и JsonSchemaValidator.
+    /// EditMode coverage for <see cref="CompatibilityChecker"/> and <see cref="JsonSchemaValidator"/>.
     /// </summary>
     public sealed class CompatibilityAndSchemaEditModeTests
     {

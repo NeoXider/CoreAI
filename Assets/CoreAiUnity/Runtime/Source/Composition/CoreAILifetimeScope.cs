@@ -53,7 +53,8 @@ namespace CoreAI.Composition
         private CoreAiNetworkPeerBehaviour networkPeerBehaviour;
 
         /// <summary>
-        ///
+        /// Effective settings asset for this scope, falling back to the Resources singleton when
+        /// no scene-specific asset is assigned.
         /// </summary>
         public CoreAISettingsAsset Settings
         {
@@ -72,20 +73,15 @@ namespace CoreAI.Composition
         /// <summary>Registers CoreAI services into the VContainer lifetime scope.</summary>
         protected override void Configure(IContainerBuilder builder)
         {
-            // No-op guard before a conditional operation.
             CoreAISettingsAsset settings = Settings;
             if (settings != null)
             {
                 CoreAISettingsAsset.SetInstance(settings);
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
 
-                // No-op guard before a conditional operation.
                 CoreAISettings.Instance = settings;
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (gameLogSettings != null)
             {
                 builder.RegisterInstance<IGameLogSettings>(gameLogSettings);
@@ -95,17 +91,13 @@ namespace CoreAI.Composition
                 builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
             }
 
-            // No-op guard before a conditional operation.
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            // No-op guard before a conditional operation.
             builder.RegisterWorldCommands(worldPrefabRegistry);
 
-            // No-op guard before a conditional operation.
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 
-            // Skip processing when the checked condition is already satisfied.
             if (networkPeerBehaviour != null)
             {
                 builder.RegisterInstance<IAiNetworkPeer>(networkPeerBehaviour);
@@ -121,7 +113,6 @@ namespace CoreAI.Composition
 
             RegisterConversationSummaryForCoreAiLifetimeScope(builder);
 
-            // No-op guard before a conditional operation.
             builder.Register(c => new FileLuaScriptVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<ILuaScriptVersionStore>();
             builder.Register(c => new FileDataOverlayVersionStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
@@ -130,7 +121,6 @@ namespace CoreAI.Composition
             // so chat/memory JSON survives reload when Application.Quit does not run (tab close).
             RegisterAgentMemoryStore(builder);
 
-            // No-op guard before a conditional operation.
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL

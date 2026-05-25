@@ -13,7 +13,6 @@ namespace CoreAI.Unity
     /// SkillSet skill = craftingAsset.BuildSkillSet(
     ///     new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
     ///     new DelegateLlmTool("craft_item", "Craft an item", (string id) => ...));
-    ///
     /// var agent = new AgentBuilder("GameMaster")
     ///     .WithSkill(skill)
     ///     .Build();
@@ -50,7 +49,8 @@ namespace CoreAI.Unity
         public string Description => description;
 
         /// <summary>
-/// Executes build skill set.
+        /// Full on-demand instructions supplied to <c>read_skill</c>, loaded from the
+        /// assigned <see cref="TextAsset"/> when present or from the inline field otherwise.
         /// </summary>
         public string Instructions =>
             instructionsAsset != null ? instructionsAsset.text : inlineInstructions;

@@ -12,8 +12,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для всех MEAI tool calls.
-    /// Тестирует: MemoryTool, LuaTool, и общий парсинг JSON tool calls.
+    /// EditMode coverage for MEAI tool calls, including MemoryTool, LuaTool,
+    /// and shared JSON tool-call parsing.
     /// </summary>
     [TestFixture]
     public sealed class MeaiToolCallsEditModeTests

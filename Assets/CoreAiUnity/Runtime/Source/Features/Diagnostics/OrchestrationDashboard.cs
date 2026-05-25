@@ -44,10 +44,7 @@ namespace CoreAI.Diagnostics
         }
 
         /// <summary>
-/// Executes is toggle key pressed this frame.
-/// Executes is toggle key pressed this frame.
-/// Executes is toggle key pressed this frame.
-/// Executes is toggle key pressed this frame.
+        /// Returns whether the configured dashboard toggle key was pressed during this frame.
         /// </summary>
         private bool IsToggleKeyPressedThisFrame()
         {
@@ -73,8 +70,7 @@ namespace CoreAI.Diagnostics
 
 #if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
         /// <summary>
-/// Executes to input system key.
-/// Executes to input system key.
+        /// Maps a legacy <see cref="KeyCode"/> value to the Input System key enum.
         /// </summary>
         private static Key ToInputSystemKey(KeyCode keyCode)
         {
@@ -146,7 +142,6 @@ namespace CoreAI.Diagnostics
         {
             StringBuilder sb = new();
 
-            // No-op guard before a conditional operation.
             GUILayout.Label("Global Metrics", _headerStyle);
 
             sb.Clear();
@@ -169,7 +164,6 @@ namespace CoreAI.Diagnostics
                 GUILayout.Label("  ! LLM UNRESPONSIVE", _alertStyle);
             }
 
-            // No-op guard before a conditional operation.
             Dictionary<string, InMemoryAiOrchestrationMetrics.RoleMetrics> roles = _metrics.GetAllRoleMetrics();
             if (roles.Count > 0)
             {

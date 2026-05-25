@@ -2,14 +2,14 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaWaves.Domain
 {
-    /// <summary>Множители волны относительно базы (расписание / план Creator).</summary>
+    /// <summary>Wave multipliers relative to the baseline schedule or Creator plan.</summary>
     public readonly struct ArenaWaveDifficultySample
     {
         public float EnemyCountMultiplier { get; }
         public float HpMultiplier { get; }
         public float DamageMultiplier { get; }
         public float MoveSpeedMultiplier { get; }
-        /// <summary>Множитель к интервалу спавна (&lt;1 — чаще спавн).</summary>
+        /// <summary>Spawn interval multiplier; values below <c>1</c> spawn more often.</summary>
         public float SpawnIntervalMultiplier { get; }
 
         public ArenaWaveDifficultySample(

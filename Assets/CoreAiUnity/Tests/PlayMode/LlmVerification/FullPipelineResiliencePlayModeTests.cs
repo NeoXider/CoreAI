@@ -20,17 +20,15 @@ namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
     /// Comprehensive end-to-end PlayMode tests validating the full CoreAI resilience pipeline.
-    ///
     /// What is covered:
-    /// 1. Tool calling → tool executes → JSON never leaks into user-facing text.
-    /// 2. Streaming + tool calling → text flows token-by-token → JSON stripped mid-stream.
-    /// 3. Memory write → read cycle with a real LLM.
-    /// 4. Orchestrator-level tool calling with Merchant + inventory → clean output.
+    /// 1. Tool calls execute without leaking JSON into user-facing text.
+    /// 2. Streaming tool calls keep text flowing while JSON is stripped mid-stream.
+    /// 3. Memory write/read cycles work with a real LLM.
+    /// 4. Orchestrator-level Merchant inventory calls produce clean output.
     /// 5. Tool call trace diagnostics populated on streaming chunks.
-    ///
     /// All tests use a real LLM backend (HTTP API or LLMUnity) and validate that
-    /// LoggingLlmClientDecorator → RoutingLlmClient → OpenAiChatLlmClient → MeaiLlmClient →
-    /// SmartToolCallingChatClient → ToolExecutionPolicy → AIFunction all work correctly together.
+    /// LoggingLlmClientDecorator, RoutingLlmClient, OpenAiChatLlmClient, MeaiLlmClient,
+    /// SmartToolCallingChatClient, ToolExecutionPolicy, and AIFunction work together.
     /// </summary>
     public sealed class FullPipelineResiliencePlayModeTests
     {

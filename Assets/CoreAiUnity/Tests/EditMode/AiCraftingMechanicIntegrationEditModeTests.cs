@@ -15,16 +15,15 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.Integration
 {
     /// <summary>
-    /// Интеграционные тесты AI механики крафта.
-    /// AI придумывает УНИКАЛЬНЫЕ свойства предметов на основе характеристик ингредиентов.
-    /// Пайплайн: Ингредиенты → AI Analyzer (анализ) → AI Programmer (создает формулу) → Execution → Result.
+    /// Integration coverage for AI-assisted crafting mechanics, ingredient analysis,
+    /// generated formulas, execution, and resulting item properties.
     /// </summary>
     public sealed class AiCraftingMechanicIntegrationEditModeTests
     {
         #region Crafting Domain
 
         /// <summary>
-        /// Ингредиент с характеристиками
+        /// Test ingredient with gameplay stats.
         /// </summary>
         private sealed class CraftingIngredient
         {
@@ -44,7 +43,7 @@ namespace CoreAI.Tests.EditMode.Integration
         }
 
         /// <summary>
-        /// Результат крафта - предмет с УНИКАЛЬНЫМИ свойствами
+        /// Crafted test item with generated properties.
         /// </summary>
         private sealed class CraftedItem
         {
@@ -62,7 +61,7 @@ namespace CoreAI.Tests.EditMode.Integration
         }
 
         /// <summary>
-        /// Состояние системы крафта
+        /// Mutable crafting-system state used by the tests.
         /// </summary>
         private sealed class CraftingSystemState
         {

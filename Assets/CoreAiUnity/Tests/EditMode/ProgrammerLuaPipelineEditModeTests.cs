@@ -6,8 +6,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Проверка извлечения Lua из «ответа Programmer» и исполнения в песочнице.
-    /// Полный рантайм-пайплайн (оркестратор → команда → MoonSharp) пока не подключает Lua автоматически — см. AiGameCommandRouter.
+    /// Verifies Lua extraction from Programmer responses and sandbox execution.
+    /// The full orchestrator-to-command runtime pipeline is covered separately by <see cref="AiGameCommandRouter"/>.
     /// </summary>
     public sealed class ProgrammerLuaPipelineEditModeTests
     {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace CoreAI.Ai
@@ -77,7 +77,6 @@ namespace CoreAI.Ai
                     _history[roleId] = list;
                 }
 
-                /* Implementation note in English. */
                 foreach (PromptVersion pv in list)
                 {
                     pv.IsActive = false;

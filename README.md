@@ -484,7 +484,8 @@ var storyteller = new AgentBuilder("Storyteller")
 
 Start from the index and pick the level that matches your goal:
 
-> 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — full documentation map (Beginner → Intermediate → Architecture).
+> 🧭 **[Docs/README.md](Docs/README.md)** — repository documentation entry point.
+> 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — CoreAI Unity map (Beginner → Intermediate → Architecture).
 
 **Reset CoreAI file persistence (Editor):** **CoreAI → Delete All Persistent Saves...** (exit Play Mode first) deletes **`persistentDataPath/CoreAI`** — agent memory, persisted chat JSON, summaries (desktop), Lua/data-overlay version files. Project assets under `Assets/` are untouched. See [TROUBLESHOOTING.md](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).
 
@@ -505,6 +506,7 @@ Start from the index and pick the level that matches your goal:
 | 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in `CoreAiChatPanel` + demo scene |
 | 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → filters → UI · orchestrator streaming |
 | 📊 [MEAI_TOKENS_FACT_VS_ESTIMATE.md](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider `usage` vs pre-flight estimates; SSE `include_usage`; HTTP vs orchestrator timeouts |
+| 🔒 [LUA_SANDBOX_SECURITY.md](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules |
 
 ### Tools, memory, roles
 
@@ -522,6 +524,7 @@ Start from the index and pick the level that matches your goal:
 | 🗺️ [DEVELOPER_GUIDE.md](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) | Code map, LLM→commands flow, PR checklist |
 | 📐 [DGF_SPEC.md](Assets/CoreAiUnity/Docs/DGF_SPEC.md) | Normative spec: DI, threads, authority |
 | 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` → `AIFunction` → `FunctionInvokingChatClient` |
+| 🧰 [TOOL_CALLING_BEST_PRACTICES.md](Assets/CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | Tool schema, idempotency, duplicate calls, SkillSet organization |
 | 🔀 [LLM_ROUTING.md](Assets/CoreAI/Docs/LLM_ROUTING.md) | Portable routing: modes, policy, usage sinks, timeouts |
 | 📑 [CoreAI/Docs/README.md](Assets/CoreAI/Docs/README.md) | Index of all portable CoreAI markdown guides |
 | 📋 [CHANGELOG.md](Assets/CoreAI/CHANGELOG.md) · [CHANGELOG (Unity)](Assets/CoreAiUnity/CHANGELOG.md) | Version history |

@@ -439,7 +439,6 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Bearer-style API credential.</summary>
         public string ApiKey => apiKey ?? "";
 
-        // No-op guard before a conditional operation.
 
         /// <summary>Whether fallback to secondary backend is enabled.</summary>
         public bool EnableFallbackBackend => enableFallbackBackend;
@@ -860,8 +859,8 @@ namespace CoreAI.Infrastructure.Llm
 
 #if UNITY_EDITOR
         /// <summary>
-/// Executes reset.
-        /// Ensures global streaming and the WebGL fetch bridge default to <b>on</b> (matches <see cref="ICoreAISettings"/> contract).
+        /// Restores editor defaults for newly created settings assets.
+        /// Ensures global streaming and the WebGL fetch bridge default to <b>on</b>.
         /// </summary>
         private void Reset()
         {

@@ -1,6 +1,6 @@
 namespace CoreAI.ExampleGame.ArenaProgression.Domain
 {
-    /// <summary>Снимок боевых чисел юнита (игрок / компаньон) на время забега.</summary>
+    /// <summary>Runtime combat-stat snapshot for a player or companion during one run.</summary>
     public struct ArenaUnitRuntimeStats
     {
         public float MaxHealth;

@@ -6,12 +6,12 @@ using UnityEngine.InputSystem;
 namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
 {
     /// <summary>
-    /// Демо-хоткеи: делегируют в <see cref="ArenaAiTaskBus"/> (единая шина событий → ИИ).
-    /// В релизе компонент можно отключить — тот же функционал вызывается из событий арены.
+    /// Demo hotkeys that delegate to <see cref="ArenaAiTaskBus"/> for AI event dispatch.
+    /// Disable this component in release builds and trigger the same flow from arena events.
     /// </summary>
     public sealed class CoreAiArenaLlmHotkeys : MonoBehaviour
     {
-        /// <summary>Префикс в <see cref="CoreAI.Ai.AiTaskRequest.Hint"/> — слушатель компаньона реагирует только на такие ответы AINpc.</summary>
+        /// <summary>Hint prefix used by the companion listener to identify relevant AINpc responses.</summary>
         public const string CompanionHotkeyHintPrefix = "companion_hotkey_F2";
 
         private void Update()

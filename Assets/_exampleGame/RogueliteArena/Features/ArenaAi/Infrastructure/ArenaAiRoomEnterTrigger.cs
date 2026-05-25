@@ -3,8 +3,8 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
 {
     /// <summary>
-    /// Триггер входа в «комнату»: <see cref="ArenaAiTaskBus.NotifyRoomEntered"/>.
-    /// Повесьте на объект с <see cref="Collider"/> <c>isTrigger</c>, игрок с тегом <c>Player</c>.
+    /// Room-entry trigger that calls <see cref="ArenaAiTaskBus.NotifyRoomEntered"/>.
+    /// Attach it to a trigger collider and use a player object tagged <c>Player</c>.
     /// </summary>
     [RequireComponent(typeof(Collider))]
     public sealed class ArenaAiRoomEnterTrigger : MonoBehaviour

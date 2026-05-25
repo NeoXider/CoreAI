@@ -10,9 +10,8 @@ using VContainer;
 namespace CoreAI.Composition
 {
     /// <summary>
-    ///
-    /// MessagePipe + <see cref="GlobalMessagePipe"/>.
-    ///
+    /// Registers shared logging, MessagePipe brokers, and the global MessagePipe service provider
+    /// used by CoreAI runtime services.
     /// </summary>
     public static class CoreServicesInstaller
     {
@@ -22,7 +21,6 @@ namespace CoreAI.Composition
             builder.Register<UnityGameLogSink>(Lifetime.Singleton);
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
-            // No-op guard before a conditional operation.
             builder.Register<UnityLog>(Lifetime.Singleton).As<ILog>();
 
             MessagePipeOptions opts = builder.RegisterMessagePipe();
@@ -43,7 +41,6 @@ namespace CoreAI.Composition
 
             builder.RegisterBuildCallback(static resolver =>
             {
-                // No-op guard before a conditional operation.
                 Log.Instance = resolver.Resolve<ILog>();
                 GlobalMessagePipe.SetProvider(resolver.AsServiceProvider());
             });

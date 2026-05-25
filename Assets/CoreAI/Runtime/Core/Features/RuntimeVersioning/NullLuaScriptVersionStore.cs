@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Ai
 {
-    /// <summary>No-op Lua script version store.</summary>
+    /// <summary>Lua script version store used when runtime version history is disabled.</summary>
     public sealed class NullLuaScriptVersionStore : ILuaScriptVersionStore
     {
         public bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot)

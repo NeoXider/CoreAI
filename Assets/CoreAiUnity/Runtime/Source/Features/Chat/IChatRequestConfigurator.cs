@@ -9,7 +9,7 @@ namespace CoreAI.Chat
     /// <b>Supported host pattern today:</b> derive from <see cref="CoreAiChatPanel"/> and override
     /// <see cref="CoreAiChatPanel.BuildAiTaskRequest(string, string)"/>. That path is used for
     /// player input, <see cref="CoreAiChatPanel.SubmitMessageFromExternalAsync"/>, and any code
-    ///
+    /// path that dispatches through the panel.
     /// </para>
     /// <para>
     /// <see cref="IChatRequestConfigurator"/> is reserved for a future DI registration API; it is
@@ -21,7 +21,6 @@ namespace CoreAI.Chat
     {
         /// <summary>
         /// Cheap pre-check; return <c>false</c> to skip <see cref="Configure"/>.
-        ///
         /// </summary>
         bool AppliesTo(ChatRequestContext context);
 

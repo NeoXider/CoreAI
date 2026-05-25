@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>No-op orchestration metrics collector.</summary>
+    /// <summary>Metrics collector used when the host does not record orchestration metrics.</summary>
     public sealed class NullAiOrchestrationMetrics : IAiOrchestrationMetrics
     {
         /// <inheritdoc />

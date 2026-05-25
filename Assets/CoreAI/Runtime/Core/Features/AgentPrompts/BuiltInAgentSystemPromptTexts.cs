@@ -55,9 +55,7 @@
             "Remember what the player bought from you using the memory tool.";
 
         /// <summary>
-/// Executes WithUniversalPrefix API operation.
-        ///
-        ///
+        /// Prepends the global universal prompt prefix to a role system prompt when configured.
         /// </summary>
         internal static string WithUniversalPrefix(string systemPrompt, ICoreAISettings settings = null)
         {

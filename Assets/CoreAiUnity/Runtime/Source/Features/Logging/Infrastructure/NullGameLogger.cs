@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Logging
 {
-    /// <summary>No-op game logger used when logging is intentionally disabled.</summary>
+    /// <summary>Game logger used when Unity-facing logging is intentionally disabled.</summary>
     public sealed class NullGameLogger : IGameLogger
     {
         /// <inheritdoc />

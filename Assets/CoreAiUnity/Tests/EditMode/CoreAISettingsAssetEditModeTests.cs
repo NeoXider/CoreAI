@@ -9,7 +9,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для CoreAISettingsAsset.
+    /// EditMode coverage for <see cref="CoreAISettingsAsset"/> defaults and validation.
     /// </summary>
     public sealed class CoreAISettingsAssetEditModeTests
     {

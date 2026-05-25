@@ -20,7 +20,7 @@ namespace CoreAI.Ai
             return this;
         }
 
-        /// <summary>Sets a fallback reply used when no rule matches.</summary>
+        /// <summary>Configures the reply returned when none of the scripted marker rules match.</summary>
         public ScriptedLlmClient OtherwiseReply(string reply)
         {
             _fallback = reply ?? "";

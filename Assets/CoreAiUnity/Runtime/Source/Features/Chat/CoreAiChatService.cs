@@ -126,7 +126,7 @@ namespace CoreAI.Chat
         /// </summary>
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
-        ///
+        /// so WebGL builds do not rely on thread-pool timers.
         /// Exceptions are NOT swallowed; callers (e.g. <c>CoreAiChatPanel</c>) are responsible
         /// for catching and displaying errors to the user.
         /// </remarks>
@@ -162,7 +162,6 @@ namespace CoreAI.Chat
             catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
             {
                 // Linked-token / CancelAfterSlim may not set CTS.IsCancellationRequested in the same
-                // No-op guard before a conditional operation.
                 // and the caller token instead of probing the linked source.
                 throw new LlmOperationTimeoutException();
             }
@@ -196,7 +195,7 @@ namespace CoreAI.Chat
         /// </summary>
         /// <remarks>
         /// Timeout is enforced here via <c>CancelAfterSlim</c> (UniTask, PlayerLoop-based)
-        ///
+        /// and cancellation is propagated to the underlying async enumerator.
         /// </remarks>
         public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
             AiTaskRequest request,
@@ -342,13 +341,13 @@ namespace CoreAI.Chat
 #endif
 
         /// <summary>
-        ///
+        /// Resolves whether the chat turn should stream by applying WebGL transport support,
+        /// the UI fallback flag, per-role memory policy, and global settings in that order.
         /// <list type="number">
-        ///
-        ///
-        ///
+        /// <item><description>WebGL requires the native fetch bridge for incremental SSE.</description></item>
+        /// <item><description>A disabled UI fallback always disables streaming.</description></item>
+        /// <item><description>Per-role policy wins over the global setting when available.</description></item>
         /// </list>
-        ///
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool uiFallback = true)
         {
@@ -378,13 +377,10 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        ///
-        ///
-        /// <see cref="ICoreAISettings.EnableStreaming"/>.
+        /// Resolves whether the chat turn should stream when the UI may provide an explicit override.
         /// <para>
-        ///
-        ///
-        ///
+        /// A value of <c>false</c> disables streaming immediately; <c>true</c> and <c>null</c>
+        /// continue through per-role policy and then <see cref="ICoreAISettings.EnableStreaming"/>.
         /// </para>
         /// </summary>
         public bool IsStreamingEnabled(string roleId, bool? uiOverride = null)
@@ -415,7 +411,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes send message smart async.
+        /// Sends a chat turn using streaming when enabled, otherwise falls back to buffered completion.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             string userText,
@@ -450,7 +446,7 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Executes send message smart async.
+        /// Sends a prepared AI task using streaming when enabled, otherwise falls back to buffered completion.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             AiTaskRequest request,

@@ -19,7 +19,7 @@ namespace CoreAI.Ai
         /// </summary>
         /// <remarks>
         /// Wrappers (queues, decorators, timeouts, authority) <b>must</b> override this method; otherwise streaming is silently reduced
-        /// Provides API usage information.
+        /// to one buffered text chunk.
         /// </remarks>
         virtual async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
             AiTaskRequest task,

@@ -8,7 +8,7 @@ using UnityEngine;
 namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 {
     /// <summary>
-    /// Реакция на ответ AINpc после F2: разбор JSON/эвристик и вызов <see cref="ArenaCompanionBot.ApplyCombatStance"/>.
+    /// Handles AINpc responses after F2 by parsing JSON or heuristics and applying a companion stance.
     /// </summary>
     public sealed class ArenaCompanionAiListener : MonoBehaviour
     {

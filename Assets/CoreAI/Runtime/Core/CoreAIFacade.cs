@@ -4,21 +4,17 @@
     /// Exposes the global CoreAI agent facade used by host applications and Unity composition.
     /// </summary>
     /// <example>
-    /// Usage example:
+    /// <code>
     /// var merchant = new AgentBuilder("Blacksmith")
     ///     .WithSystemPrompt("You are a blacksmith.")
     ///     .WithMemory()
     ///     .Build();
     /// merchant.ApplyToPolicy(CoreAIAgent.Policy);
-    ///
-    ///
     /// merchant.Ask("Show me your swords");
-    ///
     /// // Async:
     /// await merchant.AskAsync("Show me your swords");
-    ///
-    ///
     /// merchant.Ask("Show me your swords", onDone: () => Debug.Log("Done!"));
+    /// </code>
     /// </example>
     public static class CoreAIAgent
     {
@@ -30,7 +26,8 @@
         private static volatile IAgentMemoryStore _memoryStore;
 
         /// <summary>
-        /// Orchestration service currently registered for the global CoreAI agent facade. ///.</summary>
+        /// Orchestration service currently registered for the global CoreAI agent facade.
+        /// </summary>
         public static IAiOrchestrationService Orchestrator
         {
             get => _orchestrator;
@@ -38,7 +35,8 @@
         }
 
         /// <summary>
-        /// Agent memory policy currently registered for the global CoreAI agent facade. ///.</summary>
+        /// Agent memory policy currently registered for the global CoreAI agent facade.
+        /// </summary>
         public static AgentMemoryPolicy Policy
         {
             get => _policy;
@@ -46,14 +44,17 @@
         }
 
         /// <summary>
-        /// Memory store currently registered for the global CoreAI agent facade. ///.</summary>
+        /// Memory store currently registered for the global CoreAI agent facade.
+        /// </summary>
         public static IAgentMemoryStore MemoryStore
         {
             get => _memoryStore;
             private set => _memoryStore = value;
         }
 
-        /// <summary>Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade.</summary>
+        /// <summary>
+        /// Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade.
+        /// </summary>
         public static void Initialize(IAiOrchestrationService orchestrator, AgentMemoryPolicy policy,
             IAgentMemoryStore memoryStore)
         {

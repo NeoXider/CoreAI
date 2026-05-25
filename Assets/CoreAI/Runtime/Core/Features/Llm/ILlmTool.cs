@@ -16,7 +16,7 @@ namespace CoreAI.Ai
         /// <summary>JSON schema describing tool parameters.</summary>
         string ParametersSchema { get; }
 
-        /// <summary>Gets whether duplicate calls to this tool are allowed.</summary>
+        /// <summary>True when repeated calls with the same arguments are meaningful and should not be suppressed.</summary>
         bool AllowDuplicates { get; }
     }
 

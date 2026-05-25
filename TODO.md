@@ -1,5 +1,5 @@
 # TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-08 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.3.0**.
+**Обновлено:** 2026-05-25 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.5.0**.
 
 ---
 
@@ -48,8 +48,8 @@
 
 ## 📚 Документация — недостающие файлы
 
-- [ ] **`LUA_SANDBOX_SECURITY.md`** — что вырезано, какие защиты есть (steps / timeout), известные векторы атак, best practices для `LuaApiRegistry`.
-- [ ] **`TOOL_CALLING_BEST_PRACTICES.md`** — как делать идемпотентные тулы, когда ставить `AllowDuplicates=true`, как правильно возвращать ошибки, как использовать SkillSet для организации.
+- [x] **`LUA_SANDBOX_SECURITY.md`** — что вырезано, какие защиты есть (steps / timeout), известные векторы атак, best practices для `LuaApiRegistry`.
+- [x] **`TOOL_CALLING_BEST_PRACTICES.md`** — как делать идемпотентные тулы, когда ставить `AllowDuplicates=true`, как правильно возвращать ошибки, как использовать SkillSet для организации.
 
 ---
 
@@ -143,5 +143,11 @@
 - [x] `COMMAND_FLOW_DIAGRAM.md`, `JSON_COMMAND_FORMAT.md`.
 - [x] `TROUBLESHOOTING.md`, `QUICK_START_FULL.md`.
 - [x] `EXAMPLES.md`, `DEMO_RECORDING_GUIDE.md`.
+
+### v2.5.0 - Documentation debt closure (2026-05-25)
+- [x] Added `LUA_SANDBOX_SECURITY.md`.
+- [x] Added `TOOL_CALLING_BEST_PRACTICES.md`.
+- [x] Synced documentation index/package version references with `2.5.0`.
+- [x] Removed generated no-op comments from CoreAI Unity source.
 
 </details>

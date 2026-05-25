@@ -61,9 +61,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// Streams a completion through the MEAI adapter backed by LLMUnity.
         /// </summary>
         public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

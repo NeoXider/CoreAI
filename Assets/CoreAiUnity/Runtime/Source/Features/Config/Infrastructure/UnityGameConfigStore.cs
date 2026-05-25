@@ -59,12 +59,9 @@ namespace CoreAI.Infrastructure.Config
 
             try
             {
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 JsonUtility.FromJsonOverwrite(json, so);
                 _logger.LogInfo(GameLogFeature.Core, $"[GameConfig] Updated config key: {key}");
 #if UNITY_EDITOR
-                // No-op guard before a conditional operation.
                 UnityEditor.EditorUtility.SetDirty(so);
 #endif
                 return true;

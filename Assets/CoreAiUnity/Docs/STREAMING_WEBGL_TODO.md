@@ -1,6 +1,8 @@
-# TODO — WebGL SSE streaming in `MeaiOpenAiChatClient`
+# WebGL SSE Streaming Status
 
 **See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
+
+> **Current status (2.5.0):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. Keep this file as historical context and a player verification checklist because existing links still point here.
 
 **Update (v1.6.13):** new **`CoreAISettingsAsset`** instances default **`WebGlNativeStreaming`** to **`true`** (Resources presets aligned). When **`false`**, the player still uses **`UnityWebRequestOpenAiTransport`** (no incremental SSE).
 
@@ -66,7 +68,7 @@ before the pipeline advances** — hypothesis: either `Text` is unset
 
 ---
 
-## 3. Fix plan
+## 3. Historical fix plan
 
 ### 3.1. Diagnostics (required first iteration)
 
@@ -119,7 +121,7 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 
 ---
 
-## 4. Rollout status (historical checklist)
+## 4. Rollout status
 
 1. **Shipped:** document + **`WebGlNativeStreaming`** + **`CoreAiSseFetch.jslib`** / **`FetchSseOpenAiTransport`** (**v1.6.0+**, default **on** for new settings assets since **v1.6.13**).
 2. **Obsolete:** the old plan for **`ShouldUseStreamingForRole`** default **`false`** on WebGL only — transport choice is centralized in **`CoreAiChatService.IsStreamingEnabled`** + **`WebGlNativeStreaming`** instead.

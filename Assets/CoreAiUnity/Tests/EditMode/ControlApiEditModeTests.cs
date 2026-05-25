@@ -6,9 +6,9 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для Control API (<see cref="CoreAi"/>):
+    /// EditMode coverage for the <see cref="CoreAi"/> control API:
     /// — OnToolExecuted event firing;
-    /// — ClearContext с гранулярными флагами;
+    /// - ClearContext with granular flags;
     /// — NotifyToolExecuted error safety.
     /// </summary>
     [TestFixture]

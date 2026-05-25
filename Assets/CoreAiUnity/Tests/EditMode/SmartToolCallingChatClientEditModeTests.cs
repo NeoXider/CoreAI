@@ -12,14 +12,14 @@ using MEAI = Microsoft.Extensions.AI;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты SmartToolCallingChatClient: проверяют логику
-    /// consecutive-error счётчика, сброса при успехе и прерывания при N ошибках подряд.
+    /// EditMode coverage for <see cref="SmartToolCallingChatClient"/> consecutive-error
+    /// counting, reset-on-success behavior, duplicate handling, and missing-tool failures.
     /// </summary>
     [TestFixture]
     public sealed class SmartToolCallingChatClientEditModeTests
     {
         /// <summary>
-        /// 3 ошибки подряд → агент прерывается (maxConsecutiveErrors = 3).
+        /// Three consecutive tool errors abort the agent when the configured limit is three.
         /// </summary>
         [Test]
         public void ThreeConsecutiveErrors_StopsAgent()
@@ -59,9 +59,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// 2 ошибки, потом успех → счётчик сбрасывается.
-        /// Затем ещё 3 ошибки подряд → агент прерывается.
-        /// Итого: 2 ошибки + 1 успех + 3 ошибки = 6 итераций.
+        /// Two errors followed by a success reset the counter; a later run of three errors
+        /// then aborts the agent after six total iterations.
         /// </summary>
         [Test]
         public void SuccessResetsCounter_ThenThreeErrorsStop()
@@ -99,8 +98,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Успех на 3-й попытке (при maxConsecutiveErrors=3) → счётчик обнуляется.
-        /// Потом ещё 2 ошибки и текстовый ответ → агент не прерван аварийно.
+        /// A success on the third attempt resets the counter so two later errors
+        /// followed by a text response do not abort the agent.
         /// </summary>
         [Test]
         public void SuccessOnThirdAttempt_ResetsAndContinues()
@@ -148,7 +147,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Все тулзы успешны, потом текстовый ответ → нормальное завершение.
+        /// Successful tools followed by a text response complete normally.
         /// </summary>
         [Test]
         public void AllSuccess_CompletesNormally()
@@ -184,9 +183,8 @@ namespace CoreAI.Tests.EditMode
         // ===================== Duplicate Detection =====================
 
         /// <summary>
-        /// allowDuplicateToolCalls=false + модель вызывает один и тот же tool с одинаковыми
-        /// аргументами два раза подряд → второй вызов отклоняется как дубликат, в результат
-        /// возвращается сообщение "You just executed...".
+        /// With duplicate suppression enabled, two identical consecutive tool calls reject
+        /// the second call and return a duplicate-call explanation to the model.
         /// </summary>
         [Test]
         public void DuplicateToolCallsRejected_WhenAllowDuplicatesFalse()
@@ -222,7 +220,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Разные аргументы → не дубликат, даже если allowDuplicateToolCalls=false.
+        /// Different arguments are not duplicates even when global duplicate suppression is enabled.
         /// </summary>
         [Test]
         public void DifferentArgumentsNotTreatedAsDuplicate()
@@ -256,8 +254,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// ILlmTool.AllowDuplicates=true → инструмент исключается из проверки на дубликаты,
-        /// даже если allowDuplicateToolCalls=false.
+        /// Tools with <see cref="ILlmTool.AllowDuplicates"/> are exempt from duplicate suppression.
         /// </summary>
         [Test]
         public void PerToolAllowDuplicates_OverridesGlobal()
@@ -293,8 +290,7 @@ namespace CoreAI.Tests.EditMode
         // ===================== Edge Cases =====================
 
         /// <summary>
-        /// Модель вызывает несуществующий тул → возврат ошибки "not found" как результат,
-        /// счётчик ошибок увеличивается.
+        /// Missing tool calls return a not-found result and increment the consecutive-error counter.
         /// </summary>
         [Test]
         public void ToolNotFound_CountsAsError()
@@ -319,8 +315,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Инструмент бросает исключение → обработка catch-блоком, ошибка
-        /// добавляется как FunctionResultContent, счётчик ошибок растёт.
+        /// Tool exceptions are caught, converted to function results, and counted as errors.
         /// </summary>
         [Test]
         public void ToolThrowsException_HandledAsError()
@@ -349,7 +344,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Простой ILlmTool с AllowDuplicates=true для теста per-tool override.
+        /// Simple <see cref="ILlmTool"/> implementation with duplicate calls explicitly allowed.
         /// </summary>
         private sealed class AllowDupTool : Ai.ILlmTool
         {
@@ -367,7 +362,7 @@ namespace CoreAI.Tests.EditMode
         #region Helpers
 
         /// <summary>
-        /// Создаёт ChatResponse с tool call.
+        /// Creates a chat response containing a tool call.
         /// </summary>
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName, string callId)
         {
@@ -385,7 +380,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Создаёт ChatResponse с текстовым ответом (без tool calls).
+        /// Creates a text-only chat response.
         /// </summary>
         private static MEAI.ChatResponse MakeTextResponse(string text)
         {
@@ -394,7 +389,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Создаёт простую AIFunction с заданной логикой.
+        /// Creates a simple <c>AIFunction</c> using the supplied implementation.
         /// </summary>
         private static MEAI.AIFunction MakeAIFunction(string name,
             Func<IEnumerable<KeyValuePair<string, object>>, Task<object>> handler)
@@ -409,8 +404,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Скриптованный IChatClient — на каждый вызов GetResponseAsync
-        /// вызывает callback с номером итерации.
+        /// Scripted <c>IChatClient</c> that invokes a callback for each response iteration.
         /// </summary>
         private sealed class ScriptedChatClient : MEAI.IChatClient
         {
@@ -450,7 +444,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// Логгер-заглушка (ничего не делает).
+        /// Logger stub used when test output is irrelevant.
         /// </summary>
         private sealed class NullLogger : ILog
         {

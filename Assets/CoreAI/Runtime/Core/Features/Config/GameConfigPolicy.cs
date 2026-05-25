@@ -31,7 +31,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes SetKnownKeys API operation.
+        /// Replaces the known configuration-key catalog used when a role has full access.
         /// </summary>
         public void SetKnownKeys(string[] keys)
         {
@@ -39,11 +39,11 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes ConfigureRole API operation.
+        /// Configures explicit read/write key allowlists for a role.
         /// </summary>
-        /// <param name="roleId">The role id value.</param>
-        /// <param name="readKeys">The read keys value.</param>
-        /// <param name="writeKeys">The write keys value.</param>
+        /// <param name="roleId">Agent role id.</param>
+        /// <param name="readKeys">Keys the role may read; <c>null</c> grants read-all access.</param>
+        /// <param name="writeKeys">Keys the role may write; <c>null</c> grants write-all access.</param>
         public void ConfigureRole(string roleId, string[] readKeys = null, string[] writeKeys = null)
         {
             RoleConfigAccess access = new();
@@ -69,7 +69,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes GrantFullAccess API operation.
+        /// Grants read and write access to every known configuration key for a role.
         /// </summary>
         public void GrantFullAccess(string roleId)
         {
@@ -81,7 +81,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes RevokeAccess API operation.
+        /// Revokes all configuration read/write access for a role.
         /// </summary>
         public void RevokeAccess(string roleId)
         {
@@ -93,7 +93,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes GetAllowedKeys API operation.
+        /// Returns keys the role may write, expanding full-write access to the known key set.
         /// </summary>
         public string[] GetAllowedKeys(string roleId)
         {
@@ -107,12 +107,11 @@ namespace CoreAI.Config
                 return access.WriteKeys.ToArray();
             }
 
-            /* Implementation note in English. */
             return Array.Empty<string>();
         }
 
         /// <summary>
-/// Executes CanRead API operation.
+        /// Returns whether a role may read a configuration key.
         /// </summary>
         public bool CanRead(string roleId, string key)
         {
@@ -125,7 +124,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes CanWrite API operation.
+        /// Returns whether a role may write a configuration key.
         /// </summary>
         public bool CanWrite(string roleId, string key)
         {
@@ -138,9 +137,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes TryApplyChanges API operation.
-        ///
-        ///
+        /// Allows subclasses to apply structured changes across one or more config keys.
         /// </summary>
         public virtual bool TryApplyChanges(string roleId, string json, out string[] appliedKeys, out string error)
         {
@@ -150,7 +147,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes CreateLlmTool API operation.
+        /// Creates an LLM tool bound to this policy, store, and role.
         /// </summary>
         public GameConfigLlmTool CreateLlmTool(IGameConfigStore store, string roleId)
         {

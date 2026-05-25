@@ -1,6 +1,6 @@
 ﻿namespace CoreAI.Ai
 {
-    /// <summary>IAgentMemoryStore interface.</summary>
+    /// <summary>Persistence contract for role-scoped agent memory and chat history.</summary>
     public interface IAgentMemoryStore
     {
         /// <summary>Attempts to load persisted memory state for the requested role.</summary>
@@ -16,25 +16,24 @@
         void ClearChatHistory(string roleId);
 
         /// <summary>
-/// Executes AppendChatMessage API operation.
-        ///
+        /// Appends one chat message to a role's persisted conversation history.
         /// </summary>
-        /// <param name="roleId">The role id value.</param>
-        /// <param name="role">The role value.</param>
-        /// <param name="content">The content value.</param>
-        /// <param name="persistToDisk">The persist to disk value.</param>
+        /// <param name="roleId">Agent role id that owns the history.</param>
+        /// <param name="role">Message role, such as <c>user</c>, <c>assistant</c>, or <c>system</c>.</param>
+        /// <param name="content">Message text.</param>
+        /// <param name="persistToDisk">Whether the store should flush the change immediately.</param>
         void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true);
 
         /// <summary>
-/// Executes GetChatHistory API operation.
+        /// Returns recent chat history for a role.
         /// </summary>
-        /// <param name="roleId">The role id value.</param>
-        /// <param name="maxMessages">The max messages value.</param>
-        /// <returns>The operation result.</returns>
+        /// <param name="roleId">Agent role id that owns the history.</param>
+        /// <param name="maxMessages">Maximum messages to return; <c>0</c> means store default/all.</param>
+        /// <returns>Chat messages in chronological order as provided by the store.</returns>
         ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0);
     }
 
-    /// <summary>ChatMessage struct.</summary>
+    /// <summary>Serializable chat transcript entry.</summary>
     [System.Serializable]
     public struct ChatMessage
     {

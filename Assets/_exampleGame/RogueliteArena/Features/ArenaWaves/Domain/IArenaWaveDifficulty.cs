@@ -1,10 +1,10 @@
 namespace CoreAI.ExampleGame.ArenaWaves.Domain
 {
-    /// <summary>Нелинейная кривая сложности волн (суммарный рост + локальные провалы/пики).</summary>
+    /// <summary>Nonlinear wave difficulty curve with overall growth and local dips or spikes.</summary>
     public interface IArenaWaveDifficulty
     {
-        /// <param name="waveIndex1Based">Текущая волна, с 1.</param>
-        /// <param name="totalWavesInRun">Всего волн до победы.</param>
+        /// <param name="waveIndex1Based">Current one-based wave index.</param>
+        /// <param name="totalWavesInRun">Total number of waves before victory.</param>
         ArenaWaveDifficultySample Evaluate(int waveIndex1Based, int totalWavesInRun);
     }
 }

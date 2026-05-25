@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides runtime context for one configured agent role.
+    /// Builds additional runtime prompt context for one configured agent role.
     /// </summary>
     public interface IAgentRuntimeContextProvider
     {

@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для NetworkedAuthorityHost — проверка всех политик выполнения.
+    /// EditMode coverage for <see cref="NetworkedAuthorityHost"/> execution policies.
     /// </summary>
     [TestFixture]
     public sealed class NetworkedAuthorityHostEditModeTests

@@ -18,8 +18,7 @@
 
     /// <summary>
     /// Read-only snapshot for future chat request hooks (preview). Carries enough info
-    ///
-    /// <see cref="IChatRequestConfigurator"/> when a registration API exists.
+    /// for <see cref="IChatRequestConfigurator"/> implementations once a registration API exists.
     /// </summary>
     public sealed class ChatRequestContext
     {

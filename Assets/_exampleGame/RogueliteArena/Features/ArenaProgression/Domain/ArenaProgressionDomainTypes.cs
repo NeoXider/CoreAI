@@ -11,7 +11,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         float AttackCooldownSeconds { get; }
     }
 
-    /// <summary>Персистентная мета-прогрессия (между забегами).</summary>
+    /// <summary>Persistent meta progression carried between runs.</summary>
     public sealed class ArenaMetaProgressionState
     {
         public int MetaXp { get; private set; }
@@ -52,7 +52,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         }
     }
 
-    /// <summary>Сессионное состояние команды: XP, уровень, модификаторы драфта.</summary>
+    /// <summary>Per-run team progression state: XP, level, and draft modifiers.</summary>
     public sealed class ArenaTeamProgressionState
     {
         public int SessionTotalXp { get; private set; }

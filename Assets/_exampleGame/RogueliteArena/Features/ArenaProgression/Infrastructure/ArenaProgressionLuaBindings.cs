@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Lua API прогрессии арены (см. <c>Docs/ARENA_PROGRESSION.md</c>).</summary>
+    /// <summary>Lua API surface for arena progression; see <c>Docs/ARENA_PROGRESSION.md</c>.</summary>
     public sealed class ArenaProgressionLuaBindings : IGameLuaRuntimeBindings
     {
         private readonly IAddSessionKillXpUseCase _addSessionKillXp;

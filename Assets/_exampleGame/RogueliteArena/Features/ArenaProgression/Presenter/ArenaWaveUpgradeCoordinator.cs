@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Presenter
 {
-    /// <summary>Фаза 2: вставка в <see cref="CoreAI.ExampleGame.ArenaSurvival.UseCases.ArenaSurvivalDirector"/>. Сейчас — заглушка API.</summary>
+    /// <summary>Phase-two integration point for inserting upgrade drafts into the arena director flow.</summary>
     public interface IRunWaveUpgradeFlow
     {
         IEnumerator RunWaveEndUpgradeFlowCoroutine();

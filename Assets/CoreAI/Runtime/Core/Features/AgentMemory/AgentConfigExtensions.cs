@@ -6,18 +6,18 @@ using CoreAI.Logging;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides agent config extensions functionality.
+    /// Convenience methods that run an <see cref="AgentConfig"/> through the global
+    /// <see cref="CoreAIAgent"/> facade or an explicitly supplied orchestrator.
     /// </summary>
     public static class AgentConfigExtensions
     {
         /// <summary>
-/// Executes AskAsync API operation.
-        /// <para>See the implementation details for usage guidance.</para>
+        /// Sends a single prompt through the global orchestrator using this agent's role id.
         /// </summary>
-        /// <param name="config">The config value.</param>
-        /// <param name="message">The message value.</param>
-        /// <param name="priority">The priority value.</param>
-        /// <param name="cancellationToken">The cancellation token value.</param>
+        /// <param name="config">Agent configuration produced by <see cref="AgentBuilder.Build"/>.</param>
+        /// <param name="message">User or gameplay prompt to send to the agent.</param>
+        /// <param name="priority">Queue priority forwarded to <see cref="AiTaskRequest.Priority"/>.</param>
+        /// <param name="cancellationToken">Cancellation token for the orchestration call.</param>
         /// <example>
         /// await merchant.AskAsync("Show me your swords");
         /// </example>
@@ -31,7 +31,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes AskAsync API operation.
+        /// Sends a single prompt through the supplied orchestrator using this agent's role id.
         /// </summary>
         public static Task<string> AskAsync(
             this AgentConfig config,
@@ -57,21 +57,13 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Ask API operation.
-        ///
-        /// <para>See the implementation details for usage guidance.</para>
+        /// Starts a fire-and-forget prompt through the global orchestrator and invokes
+        /// <paramref name="onDone"/> with the final response.
         /// </summary>
-        /// <param name="config">The config value.</param>
-        /// <param name="message">The message value.</param>
-        /// <param name="onDone">The on done value.</param>
-        /// <param name="priority">The priority value.</param>
-        /// <example>
-        /// Usage example:
-        ///
-        ///
-        ///
-        ///
-        /// </example>
+        /// <param name="config">Agent configuration produced by <see cref="AgentBuilder.Build"/>.</param>
+        /// <param name="message">User or gameplay prompt to send to the agent.</param>
+        /// <param name="onDone">Optional callback invoked after a successful response.</param>
+        /// <param name="priority">Queue priority forwarded to <see cref="AiTaskRequest.Priority"/>.</param>
         public static void Ask(
             this AgentConfig config,
             string message,
@@ -99,8 +91,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes ClearMemory API operation.
-        ///
+        /// Clears persisted chat history for this agent role when a memory store is registered.
         /// </summary>
         public static void ClearMemory(this AgentConfig config)
         {

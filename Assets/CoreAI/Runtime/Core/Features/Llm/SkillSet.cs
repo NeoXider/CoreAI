@@ -4,7 +4,8 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Represents a named skill with instructions and tool bindings available to the LLM.
+    /// Named group of related tools that an agent can load on demand through
+    /// <c>read_skill</c> instead of exposing every tool schema on every request.
     /// </summary>
     /// <example>
     /// <code>
@@ -15,12 +16,10 @@ namespace CoreAI.Ai
     ///     "3. Call craft_item with recipe_id and quality.",
     ///     new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
     ///     new DelegateLlmTool("craft_item", "Craft an item", (string id) => ...));
-    ///
     /// var agent = new AgentBuilder("GameMaster")
     ///     .WithSkill(craftingSkill)
     ///     .WithSkill(combatSkill)
     ///     .Build();
-    ///
     /// // Model sees: catalog with "Crafting" + "Combat" + read_skill tool.
     /// // Model decides what to read on its own.
     /// await orch.RunTaskAsync(new AiTaskRequest {
@@ -35,13 +34,14 @@ namespace CoreAI.Ai
         public string Name { get; }
 
         /// <summary>
-        /// Description.
+        /// Short catalog description shown to the model before it decides whether to call
+        /// <c>read_skill</c>.
         /// </summary>
         /// <example>"Forge weapons, armor, and items from raw materials"</example>
         public string Description { get; }
 
         /// <summary>
-        /// Instructions.
+        /// Full procedural instructions returned by <c>read_skill</c> when this skill is selected.
         /// </summary>
         public string Instructions { get; }
 
@@ -49,7 +49,7 @@ namespace CoreAI.Ai
         public IReadOnlyList<ILlmTool> Tools { get; }
 
         /// <summary>
-        /// Tool names.
+        /// Stable names of tools available through this skill's <c>call_skill_tool</c> proxy.
         /// </summary>
         public string[] ToolNames { get; }
 
@@ -143,7 +143,6 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Builds a lightweight skill catalog for the system prompt.
-/// Executes BuildCatalog API operation.
         /// The model uses <c>read_skill(name)</c> to load full instructions on demand.
         /// </summary>
         public static string BuildCatalog(IReadOnlyList<SkillSet> skills)

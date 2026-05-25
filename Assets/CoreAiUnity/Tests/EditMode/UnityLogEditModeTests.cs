@@ -8,7 +8,7 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для UnityLog — мост ILog → IGameLogger с маппингом тегов.
+    /// EditMode coverage for the <see cref="UnityLog"/> bridge from <see cref="ILog"/> to <see cref="IGameLogger"/>.
     /// </summary>
     [TestFixture]
     public sealed class UnityLogEditModeTests

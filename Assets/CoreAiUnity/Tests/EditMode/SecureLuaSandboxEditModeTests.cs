@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты Lua-sandbox защит: <see cref="SecureLuaEnvironment.StripRiskyGlobals"/>,
+    /// EditMode coverage for Lua sandbox hardening via <see cref="SecureLuaEnvironment.StripRiskyGlobals"/>,
     /// <see cref="InstructionLimitDebugger"/> (steps / timeout), <see cref="LuaExecutionGuard"/>.
     /// </summary>
     [TestFixture]

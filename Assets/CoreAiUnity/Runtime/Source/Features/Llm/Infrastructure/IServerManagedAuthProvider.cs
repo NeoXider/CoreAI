@@ -1,7 +1,7 @@
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
-    /// Provides dynamic authorization for backend-managed LLM proxy calls.
+    /// Supplies dynamic authorization for backend-managed LLM proxy calls.
     /// </summary>
     public interface IServerManagedAuthProvider
     {

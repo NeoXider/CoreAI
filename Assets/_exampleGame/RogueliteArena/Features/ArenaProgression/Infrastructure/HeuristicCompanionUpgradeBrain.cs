@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Простая эвристика: kind + бонус за редкость ролла.</summary>
+    /// <summary>Simple companion-upgrade heuristic based on upgrade kind and rarity bonus.</summary>
     public sealed class HeuristicCompanionUpgradeBrain : ICompanionUpgradeBrain
     {
         public ArenaUpgradeOffer Pick(IReadOnlyList<ArenaUpgradeOffer> candidates)

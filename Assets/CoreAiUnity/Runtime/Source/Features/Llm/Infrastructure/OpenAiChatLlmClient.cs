@@ -59,10 +59,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
-/// Executes complete streaming async.
+        /// Streams a completion through the OpenAI-compatible HTTP client.
         /// </summary>
         public IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
             LlmCompletionRequest request,

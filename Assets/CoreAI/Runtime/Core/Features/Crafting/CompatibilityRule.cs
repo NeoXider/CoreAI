@@ -8,7 +8,7 @@ namespace CoreAI.Crafting
     public sealed class CompatibilityRule
     {
         /// <summary>
-        /// Elements.
+        /// Ingredient or group names that must be present for this rule to match.
         /// </summary>
         public List<string> Elements { get; set; } = new();
 
@@ -18,14 +18,14 @@ namespace CoreAI.Crafting
         /// <summary>Explanation for the compatibility result.</summary>
         public string Reason { get; set; }
 
-        /// <summary>Is blocking.</summary>
+        /// <summary>Whether this rule rejects the combination instead of modifying its score.</summary>
         public bool IsBlocking => Score <= 0f;
 
-        /// <summary>Size.</summary>
+        /// <summary>Number of required elements in this rule.</summary>
         public int Size => Elements.Count;
 
         /// <summary>
-/// Executes Pair API operation.
+        /// Creates a two-element compatibility rule.
         /// </summary>
         public static CompatibilityRule Pair(string a, string b, float score, string reason = null)
         {
@@ -38,7 +38,7 @@ namespace CoreAI.Crafting
         }
 
         /// <summary>
-/// Executes Group API operation.
+        /// Creates a compatibility rule for a larger element/group set.
         /// </summary>
         public static CompatibilityRule Group(float score, string reason, params string[] elements)
         {

@@ -14,7 +14,7 @@ namespace CoreAI.Ai
         private readonly StringBuilder _buffer = new();
         private bool _insideThink;
 
-        /// <summary>Clears the global CoreAI facade registrations.</summary>
+        /// <summary>Clears buffered partial tags and exits any active hidden-thought block.</summary>
         public void Reset()
         {
             _buffer.Clear();
@@ -22,10 +22,12 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes ProcessChunk API operation.
-        ///
-        ///
+        /// Processes one streaming text chunk and returns only text that is safe to display.
         /// </summary>
+        /// <remarks>
+        /// The filter preserves partial <c>&lt;think&gt;</c> and <c>&lt;/think&gt;</c> tags across
+        /// chunk boundaries so hidden reasoning is not leaked when providers split tokens mid-tag.
+        /// </remarks>
         public string ProcessChunk(string chunk)
         {
             if (string.IsNullOrEmpty(chunk))
@@ -49,8 +51,7 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        /* Implementation note in English. */
-                        /* Implementation note in English. */
+                        // Keep only a possible closing-tag prefix; all other hidden text stays suppressed.
                         _buffer.Clear();
                         _buffer.Append(KeepTailForPossibleTag(buf, CloseTag));
                         return visible.ToString();
@@ -71,7 +72,7 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        /* Implementation note in English. */
+                        // Hold a possible opening tag until the next chunk proves whether it is real.
                         int lastLt = buf.LastIndexOf('<');
                         if (lastLt >= 0)
                         {
@@ -100,10 +101,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Flush API operation.
-        ///
-        ///
-        ///
+        /// Returns any buffered visible tail at the end of a stream.
         /// </summary>
         public string Flush()
         {
@@ -121,16 +119,12 @@ namespace CoreAI.Ai
             string tail = _buffer.ToString();
             _buffer.Clear();
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
+            // A partial opening tag at end-of-stream should not be shown to the user.
             return IsPrefixOf(tail, OpenTag) ? string.Empty : tail;
         }
 
         /// <summary>
-/// Executes KeepTailForPossibleTag API operation.
-        ///
-        ///
-        ///
+        /// Keeps the longest suffix that may become the requested tag when the next chunk arrives.
         /// </summary>
         private static string KeepTailForPossibleTag(string buf, string tag)
         {
@@ -148,8 +142,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes IsPrefixOf API operation.
-        ///
+        /// Case-insensitive ordinal prefix check for small protocol tags.
         /// </summary>
         private static bool IsPrefixOf(string candidate, string full)
         {

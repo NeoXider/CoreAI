@@ -38,7 +38,6 @@ namespace CoreAI.Composition
             builder.RegisterInstance<IAgentUserPromptTemplateProvider>(
                 new ChainedAgentUserPromptTemplateProvider(userChain));
 
-            // Skip processing when the checked condition is already satisfied.
             if (definition != null)
             {
                 builder.RegisterBuildCallback(container =>

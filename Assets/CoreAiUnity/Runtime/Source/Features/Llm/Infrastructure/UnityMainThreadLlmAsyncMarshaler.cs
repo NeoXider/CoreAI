@@ -23,7 +23,6 @@ namespace CoreAI.Infrastructure.Llm
         {
 #if UNITY_EDITOR
             // Same bypass as !isPlaying below, but must not call Application.isPlaying off the managed
-            // Skip processing when the checked condition is already satisfied.
             if (ShouldInvokeToolBodyInlineInEditor())
             {
                 return await factory().ConfigureAwait(false);
@@ -49,7 +48,6 @@ namespace CoreAI.Infrastructure.Llm
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
             private static void Register()
             {
-                // No-op guard before a conditional operation.
                 EnsureEditorIsPlayingMirrorHook();
             }
         }

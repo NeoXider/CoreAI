@@ -14,8 +14,8 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.Integration
 {
     /// <summary>
-    /// Интеграционные тесты: проверяют СОВМЕСТНУЮ работу компонентов.
-    /// Пайплайн: AI генеррует Lua → выполняется → результат передается другому AI → улучшает скрипт.
+    /// Integration coverage for the Lua AI pipeline across generation, execution,
+    /// result handoff, and script improvement.
     /// </summary>
     public sealed class AiLuaPipelineIntegrationEditModeTests
     {

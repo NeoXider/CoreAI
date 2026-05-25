@@ -12,11 +12,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode: pipeline Memory tool через реальный LLM (HTTP / LLMUnity по <see cref="CoreAISettingsAsset"/>).
-    /// В консоль явно пишутся user-hint и итоговая строка <see cref="AiOrchestrator.RunTaskAsync"/>;
-    /// плюс включается verbose-лог CoreAI (HTTP body, MEAI, input/output, tool args/results).
-    /// Ассерты опираются на фактическое содержимое <see cref="AgentMemoryState.Memory"/> в in-memory store тестового сетапа,
-    /// а не на текст ответа оркестратора.
+    /// PlayMode verification for the Memory tool against a real LLM backend configured through
+    /// <see cref="CoreAISettingsAsset"/>. Assertions use memory-store state rather than reply text.
     /// </summary>
     public sealed class AgentMemoryOpenAiApiPlayModeTests
     {
@@ -174,8 +171,8 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        /// Включает сырые HTTP + MEAI + вход/выход LLM в лог Unity (через поля <see cref="CoreAISettingsAsset"/>).
-        /// Оркестратор в <see cref="TestAgentSetup"/> использует тот же Instance — флаги реально влияют на пайплайн.
+        /// Enables raw HTTP, MEAI, and LLM input/output logging through <see cref="CoreAISettingsAsset"/>.
+        /// The orchestrator created by <see cref="TestAgentSetup"/> uses the same settings instance.
         /// </summary>
         private static void ApplyVerboseLlmLoggingForTrace()
         {

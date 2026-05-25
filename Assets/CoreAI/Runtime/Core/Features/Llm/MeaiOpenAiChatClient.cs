@@ -1,4 +1,4 @@
-#if !COREAI_NO_LLM
+﻿#if !COREAI_NO_LLM
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -213,7 +213,7 @@ namespace CoreAI.Infrastructure.Llm
             if (!_transport.SupportsSseStreaming)
             {
                 _log.Info(
-                    "MeaiOpenAiChatClient: transport has no SSE support — using non-stream completion and simulated streaming updates (WebGL / UnityWebRequest).",
+                    "MeaiOpenAiChatClient: transport has no SSE support - using non-stream completion and simulated streaming updates (WebGL / UnityWebRequest).",
                     LogTag.Llm);
                 MEAI.ChatResponse full = await GetResponseAsync(chatMessages, options, cancellationToken);
                 foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
@@ -314,7 +314,7 @@ namespace CoreAI.Infrastructure.Llm
                         string streamErr = !string.IsNullOrEmpty(streamBody)
                             ? $"HTTP {openResult.StatusCode} | Body: {streamBody}"
                             : $"HTTP {openResult.StatusCode}";
-                        _log.Warn($"MeaiOpenAiChatClient: stream error — {streamErr}", LogTag.Llm);
+                        _log.Warn($"MeaiOpenAiChatClient: stream error - {streamErr}", LogTag.Llm);
 
                         bool canRetryTransient = attempt < transientLocalLlmReloadMaxAttempts
                                                  && IsTransientLocalLlmReloadError(openResult.StatusCode, streamBody,
@@ -345,7 +345,6 @@ namespace CoreAI.Infrastructure.Llm
                     DateTime lastProgressUtc = DateTime.UtcNow;
                     int parsedSseDeltas = 0;
 
-                    /* Implementation note in English. */
                     // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
                     await foreach (string line in ReadUtf8LinesFromStreamAsync(stream, cancellationToken))
@@ -356,7 +355,7 @@ namespace CoreAI.Infrastructure.Llm
                                 $"MeaiOpenAiChatClient: SSE stall timeout after {streamTransportTimeoutSec}s without new lines; aborting.",
                                 LogTag.Llm);
                             throw new LlmClientException(
-                                $"LLM SSE stalled — no data for {streamTransportTimeoutSec}s.",
+                                $"LLM SSE stalled - no data for {streamTransportTimeoutSec}s.",
                                 LlmErrorCode.Timeout);
                         }
 
@@ -384,7 +383,6 @@ namespace CoreAI.Infrastructure.Llm
                                 foreach (string piece in SplitForSmoothStreaming(updateText))
                                 {
                                     yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
-                                    /* Implementation note in English. */
                                     // must run via UnitySynchronizationContext to come back at all.
                                     await Task.Delay(15, cancellationToken);
                                 }
@@ -409,7 +407,7 @@ namespace CoreAI.Infrastructure.Llm
                         if (canRetryEmptyStream)
                         {
                             _log.Warn(
-                                $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments — provider/model produced no tokens). " +
+                                $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments - provider/model produced no tokens). " +
                                 $"Retrying (attempt {attempt + 1}/{transientLocalLlmReloadMaxAttempts}) after backoff...",
                                 LogTag.Llm);
                             await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
@@ -417,7 +415,7 @@ namespace CoreAI.Infrastructure.Llm
                         }
 
                         _log.Warn(
-                            "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas after all retries — " +
+                            "MeaiOpenAiChatClient: stream ended with HTTP success but 0 parsed SSE deltas after all retries - " +
                             "upstream provider produced no tokens. Surface as backend-unavailable.",
                             LogTag.Llm);
                         throw new LlmClientException(

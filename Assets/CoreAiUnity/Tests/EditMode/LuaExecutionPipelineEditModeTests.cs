@@ -8,8 +8,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.Lua
 {
     /// <summary>
-    /// Тесты Lua execution pipeline: AiEnvelope → Lua sandbox → результат/repair.
-    /// Проверяют что Lua код от AI реально выполняется, а не только парсится.
+    /// Tests the Lua execution pipeline from AI envelope to sandbox execution,
+    /// result reporting, and repair feedback.
     /// </summary>
     public sealed class LuaExecutionPipelineEditModeTests
     {

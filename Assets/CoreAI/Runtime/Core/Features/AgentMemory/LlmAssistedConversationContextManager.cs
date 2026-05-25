@@ -14,7 +14,7 @@ namespace CoreAI.Ai
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Provides API usage information.
+    /// Prompt safety: the full agent system prompt (including role rules,
     /// memory block, tool contract, etc.) is <b>never</b> sent to the compaction LLM. Only chat transcript lines from
     /// <see cref="IAgentMemoryStore.GetChatHistory"/> (plus stored rolling summary) appear in <see cref="LlmCompletionRequest.UserPayload"/>.
     /// The compaction call uses its own compact <see cref="LlmContextCompactionOptions.SystemPrompt"/> (default via
@@ -22,7 +22,7 @@ namespace CoreAI.Ai
     /// </para>
     /// <para>
     /// After compaction, the orchestrator merges the updated summary under <c>## Conversation Summary</c> into the main
-    /// Provides API usage information.
+    /// request payload before appending the retained recent chat turns.
     /// </para>
     /// </remarks>
     public sealed class LlmAssistedConversationContextManager : IAsyncConversationContextManager

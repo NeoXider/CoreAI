@@ -9,16 +9,10 @@ namespace CoreAI.Composition
     /// <summary>
     /// Ensures the global MessagePipe broker is available before CoreAI services start.
     /// </summary>
-    /// <remarks>
-    ///
-    ///
-    ///
-    ///
-    /// </remarks>
     public static class GlobalMessagePipeMinimalBootstrap
     {
         /// <summary>
-        /// Executes ensure initialized for llm diagnostics.
+        /// Initializes a minimal global MessagePipe provider for LLM diagnostics when no main lifetime scope exists yet.
         /// </summary>
         public static void EnsureInitializedForLlmDiagnostics()
         {

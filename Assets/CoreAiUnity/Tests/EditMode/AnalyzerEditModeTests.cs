@@ -9,7 +9,7 @@ using CoreAI.Messaging;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode тесты для Analyzer роли: проверка промптов, телеметрии, формата ответов.
+    /// EditMode coverage for Analyzer role prompts, telemetry, and response format.
     /// </summary>
     [TestFixture]
     public class AnalyzerEditModeTests

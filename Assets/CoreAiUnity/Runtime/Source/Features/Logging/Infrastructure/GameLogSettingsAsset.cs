@@ -16,7 +16,6 @@ namespace CoreAI.Infrastructure.Logging
 
         private void OnValidate()
         {
-            // No-op guard before a conditional operation.
             const GameLogFeature legacyAllBuiltIn =
                 GameLogFeature.Core | GameLogFeature.Composition | GameLogFeature.MessagePipe |
                 GameLogFeature.ExampleRoguelite;

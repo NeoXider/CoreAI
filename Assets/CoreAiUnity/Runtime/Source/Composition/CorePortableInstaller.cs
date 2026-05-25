@@ -18,12 +18,11 @@ namespace CoreAI.Composition
     /// (Unity <see cref="CoreAILifetimeScope"/> uses <see cref="FileConversationSummaryStore"/> this way).
     /// Pass <paramref name="suppressDefaultAgentMemoryStore"/> when the host registers <see cref="IAgentMemoryStore"/>
     /// (e.g. <see cref="CoreAI.Infrastructure.AiMemory.FileAgentMemoryStore"/> on all Unity players, including WebGL)
-    ///
     /// </summary>
     public static class CorePortableInstaller
     {
         /// <summary>
-        /// Registers core portable.
+        /// Registers portable CoreAI services into the host container.
         /// </summary>
         public static void RegisterCorePortable(this IContainerBuilder builder,
             bool suppressDefaultConversationSummaryStore = false,

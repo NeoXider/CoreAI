@@ -23,7 +23,6 @@ namespace CoreAI.Infrastructure.Llm
             // This guard is only relevant when LLMUnity package is present.
             return;
 #else
-            // No-op guard before a conditional operation.
             LLMAgent agent = FindFirstObjectByType<LLMAgent>();
             LLM llm = agent != null ? agent.GetComponent<LLM>() : FindFirstObjectByType<LLM>();
             if (llm == null)
@@ -44,7 +43,6 @@ namespace CoreAI.Infrastructure.Llm
                 return;
             }
 
-            // No-op guard before a conditional operation.
             llm.enabled = false;
 
             if (agent != null)

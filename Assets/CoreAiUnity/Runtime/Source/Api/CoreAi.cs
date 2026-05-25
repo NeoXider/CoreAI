@@ -17,16 +17,12 @@ namespace CoreAI
     /// <see cref="IAiOrchestrationService"/> (queue, metrics, command publish) without hand-wiring VContainer.
     /// <para><b>Quick start.</b> Add <see cref="CoreAILifetimeScope"/> to a scene, then:</para>
     /// <code>
-    ///
     /// string answer = await CoreAi.AskAsync("Hello!", roleId: "SmartChat");
-    ///
     /// // Streaming string chunks:
     /// await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "SmartChat"))
     ///     label.text += chunk;
-    ///
     /// // Smart path (streaming if enabled in settings / agent / UI):
     /// await CoreAi.SmartAskAsync("Question", "SmartChat", onChunk: c => label.text += c);
-    ///
     /// // Full orchestrator (memory, authority, metrics, publish):
     /// var task = new AiTaskRequest { RoleId = "Creator", Hint = "Emit a JSON command" };
     /// string result = await CoreAi.OrchestrateAsync(task);
@@ -212,7 +208,7 @@ namespace CoreAI
             return sb.ToString();
         }
 
-        /// <summary>Gets or resolves the chat service.</summary>
+        /// <summary>Returns the resolved chat service or throws when the CoreAI lifetime scope is unavailable.</summary>
         public static CoreAiChatService GetChatService()
         {
             return RequireChatService();
@@ -235,7 +231,7 @@ namespace CoreAI
             }
         }
 
-        /// <summary>Gets or resolves <see cref="IAiOrchestrationService"/>.</summary>
+        /// <summary>Returns the resolved orchestration service or throws when the CoreAI lifetime scope is unavailable.</summary>
         public static IAiOrchestrationService GetOrchestrator()
         {
             return RequireOrchestrator();

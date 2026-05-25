@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Newtonsoft.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,7 +36,6 @@ namespace CoreAI.Ai
         }
 
 
-        /* Implementation note in English. */
         // generating an unnecessary state machine. Returns Task.FromResult directly.
         public Task<string> ExecuteAsync(
             string action,
@@ -73,7 +72,6 @@ namespace CoreAI.Ai
                                 { Success = false, Error = "Content is required for write action" }));
                         }
 
-                        /* Implementation note in English. */
                         _store.Save(_roleId, new AgentMemoryState { Memory = content });
 
                         if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
@@ -99,8 +97,6 @@ namespace CoreAI.Ai
                             ? existing?.Memory ?? ""
                             : "";
 
-                        /* Implementation note in English. */
-                        /* Implementation note in English. */
                         if (currentState.Contains(content, StringComparison.OrdinalIgnoreCase))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
@@ -169,7 +165,6 @@ namespace CoreAI.Ai
 
         private static string SerializeResult(MemoryResult result)
         {
-            /* Implementation note in English. */
             return JsonConvert.SerializeObject(result);
         }
 

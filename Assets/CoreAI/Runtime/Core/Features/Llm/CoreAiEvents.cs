@@ -12,7 +12,7 @@ namespace CoreAI.Ai
         private static readonly Dictionary<string, Action<string>> _payloadSubscribers = new();
 
         /// <summary>
-/// Executes Subscribe API operation.
+        /// Subscribes a handler to a payload-free CoreAI event.
         /// </summary>
         public static void Subscribe(string eventName, Action handler)
         {
@@ -32,7 +32,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Subscribe API operation.
+        /// Subscribes a handler that receives the event payload string.
         /// </summary>
         public static void Subscribe(string eventName, Action<string> payloadHandler)
         {
@@ -52,7 +52,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Unsubscribe API operation.
+        /// Removes a payload-free event handler.
         /// </summary>
         public static void Unsubscribe(string eventName, Action handler)
         {
@@ -72,7 +72,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Unsubscribe API operation.
+        /// Removes a payload event handler.
         /// </summary>
         public static void Unsubscribe(string eventName, Action<string> payloadHandler)
         {
@@ -92,7 +92,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes Publish API operation.
+        /// Publishes an event to both payload-free and payload subscribers.
         /// </summary>
         public static void Publish(string eventName, string payload = "")
         {
@@ -113,7 +113,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes ClearAll API operation.
+        /// Removes all registered event subscriptions.
         /// </summary>
         public static void ClearAll()
         {

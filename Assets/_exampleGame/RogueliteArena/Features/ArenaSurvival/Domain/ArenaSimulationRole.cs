@@ -1,8 +1,8 @@
 namespace CoreAI.ExampleGame.ArenaSurvival.Domain
 {
     /// <summary>
-    /// Кто исполняет правила забега. Для NGO: <see cref="AuthoritativeHost"/> = listen server / dedicated;
-    /// <see cref="ClientPresentationOnly"/> = клиент без симуляции врагов и спавна (только визуал по сетевым данным — позже).
+    /// Describes which peer executes run rules. For NGO, <see cref="AuthoritativeHost"/>
+    /// is the listen or dedicated server, while <see cref="ClientPresentationOnly"/> does visuals only.
     /// </summary>
     public enum ArenaSimulationRole
     {

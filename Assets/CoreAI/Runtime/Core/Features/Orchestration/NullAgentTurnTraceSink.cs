@@ -1,7 +1,7 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// No-op trace sink.
+    /// Trace sink used when the host does not persist per-turn agent traces.
     /// </summary>
     public sealed class NullAgentTurnTraceSink : IAgentTurnTraceSink
     {

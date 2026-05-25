@@ -12,15 +12,14 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.AiMemory
 {
     /// <summary>
-    ///
+    /// File-backed Unity implementation of agent memory, chat history, and conversation transcripts.
+    /// Data is stored below <see cref="Application.persistentDataPath"/> in the CoreAI folder so it
+    /// survives scene reloads and player restarts.
+    /// <para>
     /// WebGL player: same store under <see cref="CoreAILifetimeScope"/> (<b>v1.6.19+</b>); after writes calls
     /// <c>CoreAi_PersistFsSync</c> (<c>CoreAiPersistFs.jslib</c>) so IDBFS reaches IndexedDB on reload / tab close.
     /// The jslib runs <c>FS.syncfs</c> single-flight (<b>v1.7.2+</b>) so rapid successive writes do not overlap syncs.
-    ///
-    ///
-    ///
-    ///
-    ///
+    /// </para>
     /// </summary>
     public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore
     {
@@ -31,7 +30,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <summary>
         /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a reload.
-        ///
+        /// On other platforms this method compiles to a no-op.
         /// </summary>
         private static void PersistFsForWebGl()
         {
@@ -54,7 +53,7 @@ namespace CoreAI.Infrastructure.AiMemory
         private readonly Dictionary<string, List<ConversationEntry>> _transcripts = new();
         private readonly ILog _log;
 
-        /// <summary>Executes file agent memory store operation.</summary>
+        /// <summary>Creates a file-backed agent memory store under CoreAI persistent data.</summary>
         public FileAgentMemoryStore(ILog log = null)
         {
             _dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
@@ -151,7 +150,6 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
         {
-            // Skip processing when the checked condition is already satisfied.
             if (_ephemeralHistory.ContainsKey(roleId))
             {
                 _ephemeralHistory.Remove(roleId);
@@ -342,7 +340,7 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Executes append chat message.
+        /// Appends a chat message to the in-memory transcript and optionally persists it to disk.
         /// </summary>
         public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
         {
@@ -357,7 +355,6 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 Role = role,
                 Content = content,
-                // No-op guard before a conditional operation.
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
 
@@ -408,7 +405,7 @@ namespace CoreAI.Infrastructure.AiMemory
         }
 
         /// <summary>
-        /// Gets chat history.
+        /// Returns the latest chat messages for a role, optionally capped to the requested count.
         /// </summary>
         public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {

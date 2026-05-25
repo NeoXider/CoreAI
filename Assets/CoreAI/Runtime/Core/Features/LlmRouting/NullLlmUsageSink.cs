@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// No-op usage sink used when a host does not record usage.
+    /// Usage sink used when a host does not record token or request usage.
     /// </summary>
     public sealed class NullLlmUsageSink : ILlmUsageSink
     {

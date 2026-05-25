@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Поднимает мету, сессионные статы, XP за килл, драфт и Lua на время забега.</summary>
+    /// <summary>Bootstraps meta progression, run stats, kill XP, upgrade drafts, and Lua bindings for one run.</summary>
     public sealed class ArenaProgressionSessionHost : MonoBehaviour
     {
         [Tooltip("Опционально: UI драфта. Без ссылки драфт доступен через Lua только если вид добавлен отдельно.")]

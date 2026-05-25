@@ -149,6 +149,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void CheckDuplicate_SameSignatureTwice_RecordsDuplicateTrace()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "greet" } },
+                false, "test", 3);
+
+            Dictionary<string, object> args = new() { { "who", "world" } };
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("greet", args) };
+
+            Assert.IsNull(policy.CheckDuplicate(calls));
+            Assert.AreEqual(0, policy.ExecutedTraces.Count);
+
+            List<MEAI.FunctionResultContent> blocked = policy.CheckDuplicate(calls);
+            Assert.IsNotNull(blocked, "Second identical call should be blocked");
+            Assert.AreEqual(1, blocked.Count);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count, "Duplicate must create synthetic trace");
+
+            LlmToolCallTrace trace = policy.ExecutedTraces[0];
+            Assert.AreEqual("greet", trace.Name);
+            Assert.IsFalse(trace.Success);
+            Assert.AreEqual("duplicate", trace.Source);
+        }
+
+        [Test]
         public void CheckDuplicate_DifferentArgs_Allowed()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
@@ -311,6 +335,45 @@ namespace CoreAI.Tests.EditMode
                 await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsFalse(result.Succeeded);
             Assert.IsTrue(result.Result.Result.ToString().Contains("not found"));
+        }
+
+        [Test]
+        public async Task ExecuteSingle_UnknownTool_RecordsUnknownToolTrace()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeChatOptions();
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("unknown_tool"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count, "Unknown tool should create exactly one trace");
+
+            LlmToolCallTrace trace = policy.ExecutedTraces[0];
+            Assert.AreEqual("unknown_tool", trace.Name);
+            Assert.IsFalse(trace.Success);
+            Assert.AreEqual("unknown-tool", trace.Source);
+        }
+
+        [Test]
+        public async Task ExecuteSingle_KnownToolButMissingBinding_RecordsMissingTrace()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeChatOptions();
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(MakeToolCall("memory"), opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count, "Missing binding should create exactly one trace");
+
+            LlmToolCallTrace trace = policy.ExecutedTraces[0];
+            Assert.AreEqual("memory", trace.Name);
+            Assert.IsFalse(trace.Success);
+            Assert.AreEqual("missing", trace.Source);
         }
 
         [Test]

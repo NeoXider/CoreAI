@@ -52,8 +52,7 @@ namespace CoreAI.Infrastructure.Llm
             using CancellationTokenRegistration ctReg = cancellationToken.Register(() =>
             {
                 CoreAi_FetchSseAbort(id);
-                state.SignalOpen(0, "Cancelled", "");
-                state.SignalError(new OperationCanceledException());
+                state.SignalCancelled(cancellationToken);
             });
 
             string headers = BuildHeaderString(request.Headers);
@@ -72,12 +71,10 @@ namespace CoreAI.Infrastructure.Llm
                 Marshal.GetFunctionPointerForDelegate(_onErrorDelegate));
 
             // Wait for fetch headers (status + Content-Type) before returning. Do NOT add
-            // No-op guard before a conditional operation.
             // continuation through the (non-existent) browser ThreadPool and hang the
             // open path forever. The JS bridge already defers the first ReadableStream
             // read via setTimeout(0), so MeaiOpenAiChatClient gets time to attach its
             // line reader before the first onChunk lands.
-            // No-op guard before a conditional operation.
             // to be captured so the continuation reliably runs on the browser main thread.
             // ConfigureAwait(false) routes the continuation to ThreadPool, which doesn't
             // exist in WebGL, and the await never resumes.
@@ -96,7 +93,6 @@ namespace CoreAI.Infrastructure.Llm
             }
             else
             {
-                // No-op guard before a conditional operation.
                 States.TryRemove(id, out _);
                 state.Dispose();
             }
@@ -157,8 +153,18 @@ namespace CoreAI.Infrastructure.Llm
             if (States.TryGetValue(id, out StreamState state))
             {
                 string err = Marshal.PtrToStringUTF8(errPtr) ?? "Unknown error";
-                state.SignalError(new Exception(err));
+                state.SignalError(IsCancelledMessage(err)
+                    ? new OperationCanceledException()
+                    : new Exception(err));
             }
+        }
+
+        private static bool IsCancelledMessage(string message)
+        {
+            return string.Equals(message, "cancelled", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(message, "canceled", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(message, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(message, "Canceled", StringComparison.OrdinalIgnoreCase);
         }
 
         [DllImport("__Internal")]
@@ -232,12 +238,12 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             // Synchronous continuations: WebGL is single-threaded, so we want the awaiting C# code to resume
-            // No-op guard before a conditional operation.
             // continuation to a thread pool that never runs in browser builds, hanging the await forever.
             private readonly TaskCompletionSource<OpenInfo> _openTcs = new();
             private readonly ConcurrentQueue<string> _queue = new();
             private readonly AutoResetEvent _signal = new AutoResetEvent(false);
             private readonly FetchSseStream _stream;
+            private bool _cancelled;
 
             public int CallId { get; }
 
@@ -264,11 +270,11 @@ namespace CoreAI.Infrastructure.Llm
 
             public void SignalDone()
             {
+                if (_cancelled) return;
                 _stream.NotifyCompleted();
                 _signal.Set();
                 _stream.PumpPendingRead();
                 // Defensive: if SignalDone fires before SignalOpen (shouldn't happen, but
-                // No-op guard before a conditional operation.
                 // caller surfaces a transport error instead of awaiting forever.
                 _openTcs.TrySetResult(new OpenInfo(0, "fetch completed without headers",
                     new Dictionary<string, IEnumerable<string>>()));
@@ -276,11 +282,38 @@ namespace CoreAI.Infrastructure.Llm
 
             public void SignalError(Exception ex)
             {
+                if (_cancelled && ex is not OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (ex is OperationCanceledException)
+                {
+                    _cancelled = true;
+                }
+
                 _stream.SetError(ex);
                 _signal.Set();
                 _stream.PumpPendingRead();
-                _openTcs.TrySetResult(new OpenInfo(0, ex?.Message ?? "fetch error",
-                    new Dictionary<string, IEnumerable<string>>()));
+                if (ex is OperationCanceledException)
+                {
+                    _openTcs.TrySetCanceled();
+                }
+                else
+                {
+                    _openTcs.TrySetResult(new OpenInfo(0, ex?.Message ?? "fetch error",
+                        new Dictionary<string, IEnumerable<string>>()));
+                }
+            }
+
+            public void SignalCancelled(CancellationToken cancellationToken)
+            {
+                _cancelled = true;
+                var ex = new OperationCanceledException(cancellationToken);
+                _stream.SetError(ex);
+                _signal.Set();
+                _stream.PumpPendingRead();
+                _openTcs.TrySetCanceled(cancellationToken);
             }
 
             public void Dispose()
@@ -406,7 +439,6 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_queue.TryDequeue(out string chunk))
                 {
-                    // No-op guard before a conditional operation.
                     // through unchanged so the OpenAI SSE parser owns framing, [DONE],
                     // tool_calls, role, finish_reason, etc.
                     if (string.IsNullOrEmpty(chunk)) return 0;

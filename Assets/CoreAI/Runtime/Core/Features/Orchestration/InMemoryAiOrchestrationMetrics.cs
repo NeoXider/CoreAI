@@ -107,7 +107,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Gets accumulated orchestration metrics for a single role.</summary>
+        /// <summary>Returns accumulated orchestration metrics for a single role.</summary>
         public RoleMetrics GetRoleMetrics(string roleId)
         {
             lock (_lock)
@@ -116,7 +116,7 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Gets a snapshot of orchestration metrics for every recorded role.</summary>
+        /// <summary>Returns a snapshot of orchestration metrics for every recorded role.</summary>
         public Dictionary<string, RoleMetrics> GetAllRoleMetrics()
         {
             lock (_lock)
@@ -173,7 +173,7 @@ namespace CoreAI.Ai
             return rm;
         }
 
-        /// <summary>Provides role metrics functionality.</summary>
+        /// <summary>Mutable counters recorded for one agent role.</summary>
         public sealed class RoleMetrics
         {
             public string RoleId { get; }

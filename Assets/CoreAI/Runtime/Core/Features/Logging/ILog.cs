@@ -19,7 +19,7 @@ namespace CoreAI.Logging
     }
 
     /// <summary>
-    /// No-op logger used as the default fallback.
+    /// Logger implementation used when the host has not supplied a logging sink.
     /// </summary>
     public sealed class NullLog : ILog
     {

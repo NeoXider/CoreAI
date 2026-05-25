@@ -5,14 +5,15 @@ using CoreAI.Ai;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// Единая конфигурация агента для PlayMode LLM-тестов: как в проде через
-    /// <see cref="AgentBuilder"/> — <see cref="AgentMode.ToolsAndChat"/> + <see cref="MemoryLlmTool"/>.
-    /// Вызывайте после <c>new AgentMemoryPolicy()</c> для роли по умолчанию LLM-сценариев (<see cref="BuiltInAgentRoleIds.Creator"/>).
+    /// Shared PlayMode LLM-test agent configuration mirroring production setup through
+    /// <see cref="AgentBuilder"/>, <see cref="AgentMode.ToolsAndChat"/>, and <see cref="MemoryLlmTool"/>.
+    /// Call after <c>new AgentMemoryPolicy()</c> for the default LLM scenario role
+    /// (<see cref="BuiltInAgentRoleIds.Creator"/>).
     /// </summary>
     public static class TestAgentPolicyDefaults
     {
         /// <summary>
-        /// Применяет ToolsAndChat + memory (append) к политике для указанной роли.
+        /// Applies ToolsAndChat plus append-mode memory to the policy for the requested role.
         /// </summary>
         public static void ApplyToolsAndChatWithMemory(AgentMemoryPolicy policy, string roleId = null)
         {

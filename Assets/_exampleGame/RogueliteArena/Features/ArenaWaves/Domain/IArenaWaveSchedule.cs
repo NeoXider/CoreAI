@@ -1,9 +1,9 @@
 namespace CoreAI.ExampleGame.ArenaWaves.Domain
 {
-    /// <summary>Правило «сколько врагов на волне» — можно заменить данными от ИИ после валидации.</summary>
+    /// <summary>Enemy-count rule per wave; can be replaced with validated AI-authored data.</summary>
     public interface IArenaWaveSchedule
     {
-        /// <param name="waveIndex1Based">Номер волны, начиная с 1.</param>
+        /// <param name="waveIndex1Based">One-based wave number.</param>
         int GetEnemyCountForWave(int waveIndex1Based);
     }
 }

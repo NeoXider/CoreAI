@@ -5,7 +5,8 @@ using CoreAI.AgentMemory;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Policy implementation for agent memory behavior.
+    /// Mutable role policy for memory tools, chat history, prompt overlays, and per-role
+    /// LLM behaviour overrides.
     /// </summary>
     public sealed class AgentMemoryPolicy
     {
@@ -18,7 +19,7 @@ namespace CoreAI.Ai
         private static readonly MemoryLlmTool _memoryToolInstance = new();
 
         /// <summary>
-/// Executes SetToolsForRole API operation.
+        /// Replaces the direct tool list for a role; pass an empty list to clear custom tools.
         /// </summary>
         public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
         {
@@ -105,13 +106,13 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>RoleMemoryConfig struct.</summary>
+        /// <summary>Per-role memory, history, and LLM override settings.</summary>
         public struct RoleMemoryConfig
         {
-            /// <summary>Use memory tool.</summary>
+            /// <summary>Whether the built-in memory tool is available for the role.</summary>
             public bool UseMemoryTool;
 
-            /// <summary>Default action.</summary>
+            /// <summary>Default memory action when the role uses the memory tool.</summary>
             public MemoryToolAction DefaultAction;
 
             /// <summary>Allow duplicate tool calls.</summary>
@@ -204,7 +205,6 @@ namespace CoreAI.Ai
         {
             _roleConfigs = new Dictionary<string, RoleMemoryConfig>();
 
-            /* Implementation note in English. */
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 bool smartCompaction =
@@ -232,8 +232,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes IsMemoryEnabled API operation.
-        ///
+        /// Returns whether the built-in memory tool should be available for the role.
         /// </summary>
         public bool IsMemoryEnabled(string roleId)
         {
@@ -252,12 +251,11 @@ namespace CoreAI.Ai
                 }
             }
 
-            /* Implementation note in English. */
             return true;
         }
 
         /// <summary>
-/// Executes GetRoleConfig API operation.
+        /// Returns the effective role configuration, falling back to Creator defaults for empty role ids.
         /// </summary>
         public RoleMemoryConfig GetRoleConfig(string roleId)
         {
@@ -286,7 +284,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes ConfigureRole API operation.
+        /// Updates memory-tool and duplicate-call settings for a role while preserving other role options.
         /// </summary>
         public void ConfigureRole(
             string roleId,
@@ -362,7 +360,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes EnableMemoryTool API operation.
+        /// Enables the built-in memory tool for a role.
         /// </summary>
         public void EnableMemoryTool(string roleId)
         {
@@ -370,7 +368,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes DisableMemoryTool API operation.
+        /// Disables the built-in memory tool for a role.
         /// </summary>
         public void DisableMemoryTool(string roleId)
         {
@@ -378,7 +376,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes SetMemoryToolForAll API operation.
+        /// Enables or disables the built-in memory tool for every built-in role.
         /// </summary>
         public void SetMemoryToolForAll(bool enabled)
         {
@@ -389,7 +387,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes ShouldInjectMemory API operation.
+        /// Returns whether memory instructions/tools should be injected for a role.
         /// </summary>
         public bool ShouldInjectMemory(string roleId)
         {
@@ -397,8 +395,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes GetToolsForRole API operation.
-        ///
+        /// Returns the effective tools for a role, including the built-in memory tool when enabled.
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
@@ -410,7 +407,6 @@ namespace CoreAI.Ai
                 {
                     bool customHasMemory = ListContainsMemoryTool(custom);
 
-                    /* Implementation note in English. */
                     if (IsMemoryEnabledLocked(roleId) && !customHasMemory)
                     {
                         tools.Add(_memoryToolInstance);
@@ -452,7 +448,6 @@ namespace CoreAI.Ai
             return false;
         }
 
-        /* Implementation note in English. */
         private readonly Dictionary<string, string> _additionalSystemPrompts = new();
 
         // ===== Override Universal Prefix (per-role) =====
@@ -462,8 +457,7 @@ namespace CoreAI.Ai
         private readonly Dictionary<string, bool> _streamingOverrides = new();
 
         /// <summary>
-/// Executes SetAdditionalSystemPrompt API operation.
-        ///
+        /// Replaces the extra system-prompt suffix for a role, or clears it when the value is blank.
         /// </summary>
         public void SetAdditionalSystemPrompt(string roleId, string prompt)
         {
@@ -488,7 +482,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes TryGetAdditionalSystemPrompt API operation.
+        /// Returns the extra system-prompt suffix configured for a role.
         /// </summary>
         public bool TryGetAdditionalSystemPrompt(string roleId, out string prompt)
         {
@@ -505,9 +499,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes SetOverrideUniversalPrefix API operation.
-        ///
-        ///
+        /// Controls whether a role opts out of the global universal system prompt prefix.
         /// </summary>
         public void SetOverrideUniversalPrefix(string roleId, bool shouldOverride)
         {
@@ -532,7 +524,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes IsUniversalPrefixOverridden API operation.
+        /// Returns whether a role skips the global universal system prompt prefix.
         /// </summary>
         public bool IsUniversalPrefixOverridden(string roleId)
         {
@@ -550,8 +542,7 @@ namespace CoreAI.Ai
         // ===== Streaming (per-role override) =====
 
         /// <summary>
-/// Executes SetStreamingEnabled API operation.
-        ///
+        /// Applies a per-role streaming override; <c>null</c> clears the override and uses
         /// <see cref="ICoreAISettings.EnableStreaming"/>.
         /// </summary>
         public void SetStreamingEnabled(string roleId, bool? enabled)
@@ -577,7 +568,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes TryGetStreamingOverride API operation.
+        /// Returns the explicit streaming override for a role when one has been configured.
         /// </summary>
         public bool TryGetStreamingOverride(string roleId, out bool enabled)
         {
@@ -594,9 +585,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-/// Executes IsStreamingEnabled API operation.
-        ///
-        ///
+        /// Resolves streaming for a role using the per-role override, then the supplied global
+        /// fallback, then static <see cref="CoreAISettings"/>.
         /// </summary>
         public bool IsStreamingEnabled(string roleId, ICoreAISettings globalFallback = null)
         {

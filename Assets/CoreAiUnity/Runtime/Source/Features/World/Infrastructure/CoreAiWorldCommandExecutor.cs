@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 
 namespace CoreAI.Infrastructure.World
 {
-    /// <summary>Executes validated CoreAI world commands against Unity scene objects.</summary>
+    /// <summary>Applies validated CoreAI world commands to Unity scene objects.</summary>
     public sealed class CoreAiWorldCommandExecutor : ICoreAiWorldCommandExecutor
     {
         private readonly IGameLogger _logger;
@@ -117,7 +117,6 @@ namespace CoreAI.Infrastructure.World
 
             Vector3 pos = new(env.x, env.y, env.z);
 
-            // Skip processing when the checked condition is already satisfied.
             if (!ValidateSpawnPosition(pos, 0.5f))
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
@@ -131,7 +130,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-/// Executes validate spawn position.
+        /// Checks whether a spawn position is free of blocking colliders.
         /// </summary>
         private bool ValidateSpawnPosition(Vector3 position, float checkRadius)
         {
@@ -272,7 +271,6 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // No-op guard before a conditional operation.
             UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
             if (uiText != null)
             {
@@ -283,7 +281,6 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // No-op guard before a conditional operation.
             TextMesh textMesh = go.GetComponent<TextMesh>();
             if (textMesh != null)
             {
@@ -294,7 +291,6 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // No-op guard before a conditional operation.
             TextMesh newMesh = go.AddComponent<TextMesh>();
             newMesh.text = env.stringValue;
             newMesh.fontSize = 24;
@@ -335,7 +331,6 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // No-op guard before a conditional operation.
             UnityEngine.UI.Text uiText = go.GetComponent<UnityEngine.UI.Text>();
             if (uiText != null)
             {
@@ -345,7 +340,6 @@ namespace CoreAI.Infrastructure.World
                 return true;
             }
 
-            // No-op guard before a conditional operation.
             TextMesh textMesh = go.GetComponent<TextMesh>();
             if (textMesh != null)
             {
@@ -436,11 +430,9 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // No-op guard before a conditional operation.
             Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.enabled)
             {
-                // Skip processing when the checked condition is already satisfied.
                 if (TryGetAnimationState(animator, animationName, out string statePath))
                 {
                     animator.Play(statePath);
@@ -449,14 +441,12 @@ namespace CoreAI.Infrastructure.World
                     return true;
                 }
 
-                // No-op guard before a conditional operation.
                 animator.Play(animationName);
                 _logger.LogInfo(GameLogFeature.MessagePipe,
                     $"[World] play_animation: '{animationName}' on '{go.name}' (Animator, state not verified)");
                 return true;
             }
 
-            // No-op guard before a conditional operation.
             Animation animation = go.GetComponent<Animation>();
             if (animation != null && animation.enabled)
             {
@@ -482,7 +472,6 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // No-op guard before a conditional operation.
             AnimationClip[] clips = animator.runtimeAnimatorController.animationClips;
             foreach (AnimationClip clip in clips)
             {
@@ -500,7 +489,6 @@ namespace CoreAI.Infrastructure.World
         {
             if (ResolveObject(env.targetName, out GameObject go))
             {
-                // No-op guard before a conditional operation.
                 AudioSource[] audioSources = go.GetComponents<AudioSource>();
                 if (audioSources == null || audioSources.Length == 0)
                 {
@@ -511,7 +499,6 @@ namespace CoreAI.Infrastructure.World
 
                 string clipName = (env.stringValue ?? "").Trim();
 
-                // Skip processing when the checked condition is already satisfied.
                 if (string.IsNullOrEmpty(clipName))
                 {
                     foreach (AudioSource src in audioSources)
@@ -542,7 +529,6 @@ namespace CoreAI.Infrastructure.World
                     }
                 }
 
-                // No-op guard before a conditional operation.
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[World] play_sound: AudioClip '{clipName}' not found on '{go.name}'");
                 return false;
@@ -554,7 +540,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-/// Executes get available animations.
+        /// Returns animation clip names exposed by Animator and legacy Animation components on the object.
         /// </summary>
         public string[] GetAvailableAnimations(GameObject go)
         {
@@ -565,7 +551,6 @@ namespace CoreAI.Infrastructure.World
 
             List<string> animationsList = new();
 
-            // No-op guard before a conditional operation.
             Animator animator = go.GetComponent<Animator>();
             if (animator != null && animator.runtimeAnimatorController != null)
             {
@@ -579,7 +564,6 @@ namespace CoreAI.Infrastructure.World
                 }
             }
 
-            // No-op guard before a conditional operation.
             Animation anim = go.GetComponent<Animation>();
             if (anim != null)
             {
@@ -599,7 +583,6 @@ namespace CoreAI.Infrastructure.World
         {
             string searchPattern = (env.stringValue ?? "").Trim().ToLowerInvariant();
 
-            // No-op guard before a conditional operation.
             GameObject[] rootObjects = SceneManager.GetActiveScene().GetRootGameObjects();
             List<Dictionary<string, object>> results = new();
 
@@ -608,7 +591,6 @@ namespace CoreAI.Infrastructure.World
                 CollectObjectsRecursive(root, searchPattern, results);
             }
 
-            // No-op guard before a conditional operation.
             LastListedObjects = results;
 
             _logger.LogInfo(GameLogFeature.MessagePipe, $"[World] list_objects: found {results.Count} objects");
@@ -623,7 +605,6 @@ namespace CoreAI.Infrastructure.World
                 return;
             }
 
-            // Skip processing when the checked condition is already satisfied.
             if (string.IsNullOrEmpty(searchPattern) ||
                 parent.name.ToLowerInvariant().Contains(searchPattern))
             {
@@ -659,7 +640,6 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            // No-op guard before a conditional operation.
             string[] animations = GetAvailableAnimations(go);
             LastListedAnimations = animations;
 
@@ -669,7 +649,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-/// Executes resolve object.
+        /// Resolves a scene object by its requested target name.
         /// </summary>
         private bool ResolveObject(string targetName, out GameObject gameObject)
         {

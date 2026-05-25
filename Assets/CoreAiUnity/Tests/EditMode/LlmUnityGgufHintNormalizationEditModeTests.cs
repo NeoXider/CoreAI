@@ -5,7 +5,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Регрессия: GGUF из Core AI Settings должен маппиться на имя файла до fallback Model Manager.
+    /// Regression coverage for mapping a CoreAI settings GGUF hint to a filename
+    /// before falling back to the LLMUnity Model Manager.
     /// </summary>
     public sealed class LlmUnityGgufHintNormalizationEditModeTests
     {

@@ -4,24 +4,23 @@ using MoonSharp.Interpreter;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Provides secure lua environment functionality.
+    /// Creates MoonSharp Lua runtimes with a restricted global surface and instruction guards.
     /// </summary>
     public sealed class SecureLuaEnvironment
     {
         private static readonly CoreModules SandboxModules =
             CoreModules.Preset_HardSandbox | CoreModules.Coroutine;
 
-        /// <summary>One shot hard limit steps.</summary>
+        /// <summary>Maximum instruction budget for one-shot Lua script execution.</summary>
         public const int OneShotHardLimitSteps = 500_000;
 
         /// <summary>Creates a secured MoonSharp script and registers the allowed Lua APIs.</summary>
-        /// Provides API usage information.
         public Script CreateScript(LuaApiRegistry registry)
         {
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
 
-            /* Implementation note in English. */
+            // Attach a debugger before loading host code so instruction limits cover all execution.
             InstructionLimitDebugger debugger = new(OneShotHardLimitSteps, 2000);
             script.AttachDebugger(debugger);
 
@@ -38,7 +37,7 @@ namespace CoreAI.Sandbox
         }
 
         /// <summary>
-/// Executes CreateCoroutine API operation.
+        /// Creates a sandboxed coroutine handle for Lua code that yields across Unity frames.
         /// </summary>
         public LuaCoroutineHandle CreateCoroutine(
             LuaApiRegistry registry,

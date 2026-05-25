@@ -17,8 +17,8 @@ using VContainer.Unity;
 namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 {
     /// <summary>
-    /// Волны и спавн — только при <see cref="IArenaSessionAuthority.IsAuthoritativeSimulation"/>.
-    /// В мультиплеере компонент на сервере; на клиенте отключён или заменён воспроизведением сетевых spawn.
+    /// Runs waves and spawning only on <see cref="IArenaSessionAuthority.IsAuthoritativeSimulation"/>.
+    /// In multiplayer this belongs on the server; clients should replay replicated spawns.
     /// </summary>
     public sealed class ArenaSurvivalDirector : MonoBehaviour
     {

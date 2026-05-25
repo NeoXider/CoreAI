@@ -3,7 +3,7 @@ using UnityEngine.InputSystem;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    /// <summary>Клавиша <b>L</b> — открыть драфт (см. документацию прогрессии).</summary>
+    /// <summary>Debug hotkey that opens the upgrade draft when <b>L</b> is pressed.</summary>
     public sealed class ArenaProgressionDebugHotkey : MonoBehaviour
     {
         private ArenaProgressionSessionHost _host;

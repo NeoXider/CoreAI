@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace CoreAI.Session
 {
-    /// <summary>ISessionTelemetryProvider interface.</summary>
+    /// <summary>Builds immutable snapshots of host session telemetry for prompt composition.</summary>
     public interface ISessionTelemetryProvider
     {
         /// <summary>Builds a snapshot of the current session telemetry for prompt composition.</summary>
@@ -16,7 +16,7 @@ namespace CoreAI.Session
     {
         private readonly GameSessionSnapshot _snapshot = new();
 
-        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
+        /// <summary>Stores a string telemetry value after normalizing the key.</summary>
         public void SetTelemetry(string key, string value)
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -27,19 +27,19 @@ namespace CoreAI.Session
             _snapshot.Telemetry[key.Trim()] = value ?? "";
         }
 
-        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
+        /// <summary>Stores an integer telemetry value using invariant string formatting.</summary>
         public void SetTelemetry(string key, int value)
         {
             SetTelemetry(key, value.ToString());
         }
 
-        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
+        /// <summary>Stores a floating-point telemetry value using invariant string formatting.</summary>
         public void SetTelemetry(string key, float value)
         {
             SetTelemetry(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        /// <summary>Sets a session telemetry value using a strongly typed overload.</summary>
+        /// <summary>Stores a boolean telemetry value as <c>true</c> or <c>false</c>.</summary>
         public void SetTelemetry(string key, bool value)
         {
             SetTelemetry(key, value ? "true" : "false");

@@ -14,7 +14,7 @@ namespace CoreAI.Tests.EditMode
     public sealed class RoutingLlmClientEditModeTests
     {
         /// <summary>
-        /// Клиент с полноценным стримингом (N чанков + финальный IsDone=true).
+        /// Client stub with full streaming support: configured chunks followed by a final done chunk.
         /// </summary>
         private sealed class StreamingMockLlm : ILlmClient
         {

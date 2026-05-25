@@ -1,4 +1,4 @@
-namespace CoreAI.Ai
+﻿namespace CoreAI.Ai
 {
     /// <summary>
     /// Structured-response policy for core mechanic roles.
@@ -22,10 +22,8 @@ namespace CoreAI.Ai
 
             string trimmed = rawContent.Trim();
 
-            /* Implementation note in English. */
             if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
             {
-                /* Implementation note in English. */
                 int jsonStart = trimmed.IndexOf('{');
                 int jsonEnd = trimmed.LastIndexOf('}');
 
@@ -40,8 +38,6 @@ namespace CoreAI.Ai
                 }
             }
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             bool hasNumeric = System.Text.RegularExpressions.Regex.IsMatch(
                 trimmed,
                 @"""[^""]+""\s*:\s*\d+\.?\d*");

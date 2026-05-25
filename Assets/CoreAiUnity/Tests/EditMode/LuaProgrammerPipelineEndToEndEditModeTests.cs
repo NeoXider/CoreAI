@@ -14,8 +14,8 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Пайплайн: оркестратор → конверт → <see cref="LuaAiEnvelopeProcessor"/> → при ошибке Programmer
-    /// планируется повторный <see cref="IAiOrchestrationService.RunTaskAsync"/> с полями ремонта; второй ответ LLM — валидный Lua.
+    /// End-to-end Programmer Lua pipeline coverage for orchestration, envelope processing,
+    /// repair scheduling, and a second valid Lua response.
     /// </summary>
     public sealed class LuaProgrammerPipelineEndToEndEditModeTests
     {
@@ -200,7 +200,7 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("lua_repair_generation=1", secondUserPayload);
         }
 
-        /// <summary>Прокси: первый вызов как есть; со второго вызова сохраняет user payload.</summary>
+        /// <summary>Proxy that forwards the first call and captures user payloads from later calls.</summary>
         private sealed class PayloadCapturingLlm : ILlmClient
         {
             private readonly ILlmClient _inner;

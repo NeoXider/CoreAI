@@ -459,7 +459,8 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 **Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**; портативный пакет `CoreAI` — тоже. Разбор токенов/таймаутов MEAI: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (EN). Старые ссылки на русский файл ведут на редирект: [`MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md). Корневой README_RU — навигатор по-русски; за деталями — по ссылкам на англоязычные гайды.
 
-Сначала: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.
+Сначала: **[Docs/README.md](Docs/README.md)** — общий вход по документации репозитория.
+По Unity-пакету: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.
 
 **Сброс файловых сохранений в редакторе:** **CoreAI → Delete All Persistent Saves...** (не во время Play Mode) удаляет **`persistentDataPath/CoreAI`** — память агентов, сохранённый чат, сводки (desktop), версии Lua/оверлеев. Ассеты в `Assets/` не трогаются. Подробнее: [TROUBLESHOOTING.md](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md).
 
@@ -480,12 +481,14 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 | 💬 [README_CHAT.md](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) | `CoreAiChatPanel` + демо |
 | 🌊 [STREAMING_ARCHITECTURE.md](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) | SSE / LLMUnity → фильтры → UI · стрим в оркестраторе |
 | 📊 [MEAI_TOKENS_FACT_VS_ESTIMATE.md](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | **(EN)** usage из API vs префлайт-оценки; SSE `include_usage`; таймауты HTTP/оркестратора |
+| 🔒 [LUA_SANDBOX_SECURITY.md](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | **(EN)** граница Lua sandbox, вырезанные API, лимиты исполнения |
 
 ### Инструменты, память, роли
 
 | Документ | Содержание |
 |----------|------------|
 | 🛠️ [MEAI_TOOL_CALLING.md](Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI: `ILlmTool` → `AIFunction` |
+| 🧰 [TOOL_CALLING_BEST_PRACTICES.md](Assets/CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) | **(EN)** схемы тулов, идемпотентность, SkillSet |
 | 🔧 [TOOL_CALL_SPEC.md](Assets/CoreAiUnity/Docs/TOOL_CALL_SPEC.md) | Спека tool calling |
 | 🛒 [CHAT_TOOL_CALLING.md](Assets/CoreAiUnity/Docs/CHAT_TOOL_CALLING.md) | Торговец с инвентарём |
 | 🧠 [MemorySystem.md](Assets/CoreAiUnity/Docs/MemorySystem.md) | Память и ChatHistory |

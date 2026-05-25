@@ -7,7 +7,8 @@ namespace CoreAI.Ai
     /// Deterministic fallback LLM client used when no real backend is configured.
     /// </summary>
     /// <remarks>
-    /// Provides API usage information.
+    /// The canned responses keep editor demos and tests functional without network access,
+    /// but they are not intended to simulate model quality.
     /// </remarks>
     public sealed class StubLlmClient : ILlmClient
     {

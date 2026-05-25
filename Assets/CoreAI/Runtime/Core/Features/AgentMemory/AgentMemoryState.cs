@@ -1,17 +1,17 @@
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Provides agent memory state functionality.
+    /// Serializable role memory payload stored by <see cref="IAgentMemoryStore"/>.
     /// </summary>
     public sealed class AgentMemoryState
     {
         /// <summary>
-        /// Last system prompt.
+        /// Last composed system prompt associated with the stored memory.
         /// </summary>
         public string LastSystemPrompt { get; set; }
 
         /// <summary>
-        /// Memory.
+        /// Durable memory text accumulated for the role.
         /// </summary>
         public string Memory { get; set; }
     }

@@ -5,22 +5,22 @@ using MoonSharp.Interpreter;
 namespace CoreAI.Sandbox
 {
     /// <summary>
-    /// Provides lua execution guard functionality.
+    /// Runs Lua functions with timeout and instruction-step limits.
     /// </summary>
     public sealed class LuaExecutionGuard
     {
         private readonly int _timeoutMs;
         private readonly long _maxSteps;
 
-        /// <param name="timeoutMs">The timeout ms value.</param>
-        /// <param name="maxSteps">The max steps value.</param>
+        /// <param name="timeoutMs">Maximum wall-clock time allowed for one guarded call.</param>
+        /// <param name="maxSteps">Maximum MoonSharp instruction steps allowed for one guarded call.</param>
         public LuaExecutionGuard(int timeoutMs = 2000, long maxSteps = 200_000)
         {
             _timeoutMs = timeoutMs;
             _maxSteps = maxSteps;
         }
 
-        /// <summary>Executes a Lua function through the instruction guard.</summary>
+        /// <summary>Runs a Lua function through the instruction guard.</summary>
         public DynValue Execute(Script script, DynValue function, params DynValue[] args)
         {
             if (function.Type != DataType.Function)
@@ -31,8 +31,7 @@ namespace CoreAI.Sandbox
             Stopwatch sw = Stopwatch.StartNew();
             try
             {
-                /* Implementation note in English. */
-                /* Implementation note in English. */
+                // Attach a fresh debugger for this call so reused scripts do not carry stale counters.
                 script.AttachDebugger(new InstructionLimitDebugger(_maxSteps, _timeoutMs));
                 DynValue result = script.Call(function, args);
                 if (sw.ElapsedMilliseconds > _timeoutMs)

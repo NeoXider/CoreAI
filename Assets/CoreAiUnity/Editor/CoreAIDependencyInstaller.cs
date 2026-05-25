@@ -9,8 +9,8 @@ namespace CoreAI.Editor
 {
     /// <summary>
     /// One-click installer for the Git dependencies CoreAI needs in <c>Packages/manifest.json</c>.
-    ///
-    /// already track a specific commit / branch keep their version.
+    /// Existing dependency entries are left unchanged so projects that pin a branch,
+    /// tag, or commit keep their selected version.
     /// </summary>
     public static class CoreAIDependencyInstaller
     {
@@ -18,8 +18,8 @@ namespace CoreAI.Editor
         private const int MenuPriority = 0;
 
         /// <summary>
-        ///
-        /// Order matches the README quick-start to keep the install log easy to skim.
+        /// Dependencies inserted into the manifest when the project does not already declare them.
+        /// Order matches the README quick start so the install log is easy to skim.
         /// </summary>
         private static readonly (string Key, string Url)[] RequiredDependencies =
         {

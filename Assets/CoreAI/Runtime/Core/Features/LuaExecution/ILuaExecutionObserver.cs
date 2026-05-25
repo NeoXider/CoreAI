@@ -1,6 +1,6 @@
 namespace CoreAI.Ai
 {
-    /// <summary>ILuaExecutionObserver interface.</summary>
+    /// <summary>Receives lifecycle notifications from the Lua execution and repair pipeline.</summary>
     public interface ILuaExecutionObserver
     {
         /// <summary>Notifies observers that Lua execution completed successfully.</summary>
@@ -13,7 +13,7 @@ namespace CoreAI.Ai
         void OnLuaRepairScheduled(int nextGeneration, string errorPreview);
     }
 
-    /// <summary>No-op Lua execution observer.</summary>
+    /// <summary>Lua execution observer used when the host does not collect Lua diagnostics.</summary>
     public sealed class NullLuaExecutionObserver : ILuaExecutionObserver
     {
         /// <inheritdoc />

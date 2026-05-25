@@ -29,8 +29,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-/// Executes build llm unity prompt.
-/// Executes build llm unity prompt.
+        /// Splits chat messages into the system prompt and user payload format expected by LLMUnity.
         /// </summary>
         internal static void BuildLlmUnityPrompt(
             IEnumerable<MEAI.ChatMessage> chatMessages,
@@ -113,8 +112,6 @@ namespace CoreAI.Infrastructure.Llm
 
             if (options?.Tools != null && options.Tools.Count > 0)
             {
-                // No-op guard before a conditional operation.
-                // No-op guard before a conditional operation.
                 sysMessage += "\n\n## Local inference (LLMUnity)\n";
                 sysMessage +=
                     "This runtime has no native API tool channel: the host extracts a JSON object with \"name\" and \"arguments\" from your reply text.\n";
@@ -282,10 +279,6 @@ namespace CoreAI.Infrastructure.Llm
             _unityAgent.systemPrompt = sys;
             ApplySamplingToAgent(options);
 
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
-            // No-op guard before a conditional operation.
             ConcurrentQueue<string> chunkQueue = new();
             bool isCompleted = false;
             int previousLength = 0;
@@ -343,7 +336,6 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                // No-op guard before a conditional operation.
                 _ = previousText;
             }
 

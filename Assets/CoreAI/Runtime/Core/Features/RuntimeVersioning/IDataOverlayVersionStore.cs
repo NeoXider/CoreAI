@@ -17,8 +17,7 @@ namespace CoreAI.Ai
         void ResetToOriginal(string overlayKey);
 
         /// <summary>
-/// Executes ResetToRevision API operation.
-        ///
+        /// Restores a tracked overlay payload to a specific revision index.
         /// </summary>
         void ResetToRevision(string overlayKey, int revisionIndex);
 

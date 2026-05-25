@@ -29,7 +29,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes CreateAIFunction API operation.
+        /// Creates the MEAI function exposed to the model for reading or updating game config.
         /// </summary>
         public AIFunction CreateAIFunction()
         {
@@ -45,11 +45,11 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes ExecuteAsync API operation.
+        /// Handles a game-config tool action and returns a serialized <see cref="GameConfigResult"/>.
         /// </summary>
-        /// <param name="action">The action value.</param>
-        /// <param name="content">The content value.</param>
-        /// <param name="cancellationToken">The cancellation token value.</param>
+        /// <param name="action">Tool action: <c>read</c> or <c>update</c>.</param>
+        /// <param name="content">JSON object used by the <c>update</c> action.</param>
+        /// <param name="cancellationToken">Cancellation token for future async stores.</param>
         public async Task<string> ExecuteAsync(
             string action,
             string? content = null,
@@ -143,7 +143,6 @@ namespace CoreAI.Config
                 });
             }
 
-            /* Implementation note in English. */
             string combinedJson = CombineConfigsToJson(configs);
             return SerializeResult(new GameConfigResult
             {
@@ -164,7 +163,6 @@ namespace CoreAI.Config
                 });
             }
 
-            /* Implementation note in English. */
             content = content.Trim();
             if (!content.StartsWith("{") || !content.EndsWith("}"))
             {
@@ -175,7 +173,6 @@ namespace CoreAI.Config
                 });
             }
 
-            /* Implementation note in English. */
             string[] allowedKeys = _policy.GetAllowedKeys(_roleId);
             if (allowedKeys.Length == 0)
             {
@@ -186,12 +183,8 @@ namespace CoreAI.Config
                 });
             }
 
-            /* Implementation note in English. */
-            /* Implementation note in English. */
-            /* Implementation note in English. */
             string primarykey = allowedKeys[0];
 
-            /* Implementation note in English. */
             if (_policy.TryApplyChanges(_roleId, content, out string[] appliedKeys, out string error))
             {
                 return SerializeResult(new GameConfigResult
@@ -202,7 +195,6 @@ namespace CoreAI.Config
                 });
             }
 
-            /* Implementation note in English. */
             _store.TrySave(primarykey, content);
             return SerializeResult(new GameConfigResult
             {
@@ -213,8 +205,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-/// Executes CombineConfigsToJson API operation.
-        ///
+        /// Combines per-key JSON payloads into one object keyed by config name.
         /// </summary>
         private static string CombineConfigsToJson(Dictionary<string, string> configs)
         {
@@ -229,7 +220,7 @@ namespace CoreAI.Config
                 }
 
                 first = false;
-                /* Implementation note in English. */
+                // Stored values are already JSON payloads, so write them as raw object values.
                 sb.Append($"\"{kvp.Key}\":{kvp.Value}");
             }
 
@@ -238,7 +229,7 @@ namespace CoreAI.Config
         }
 
         /// <summary>
-        /// Provides game config result functionality.
+        /// Structured response returned by the game configuration tool.
         /// </summary>
         public sealed class GameConfigResult
         {

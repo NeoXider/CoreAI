@@ -1,6 +1,25 @@
-# CoreAI portable docs (`Assets/CoreAI/Docs`)
+# CoreAI Portable Documentation
 
-Markdown in this folder documents **host-agnostic** contracts and MEAI integration. **Canonical language:** English (this package ships as `com.nexoider.coreai`). Unity-specific setup lives under [`Assets/CoreAiUnity/Docs/`](../../CoreAiUnity/Docs/). A few legacy Russian-only notes remain as clearly marked `_RU` stubs or plans.
+This folder documents the host-agnostic CoreAI layer: agents, prompts, tools,
+LLM routing, MEAI integration, memory, Lua safety, and runtime contracts that do
+not depend on Unity scene objects.
+
+Canonical language is English because this package ships as `com.nexoider.coreai`.
+Unity-specific setup lives under [`Assets/CoreAiUnity/Docs/`](../../CoreAiUnity/Docs/).
+Russian files are kept only when the filename is explicitly marked `_RU`.
+
+## Pick A Path
+
+| If You Need To | Start With |
+|---|---|
+| Build or configure an agent | [AGENT_BUILDER.md](AGENT_BUILDER.md) |
+| Add reliable tools for an LLM role | [TOOL_CALLING_BEST_PRACTICES.md](TOOL_CALLING_BEST_PRACTICES.md) |
+| Understand how tools reach MEAI | [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) |
+| Route requests across local, HTTP, or Unity hosts | [LLM_ROUTING.md](LLM_ROUTING.md) |
+| Expose AI-authored Lua safely | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) |
+| Keep tool logic free of Unity APIs | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) |
+
+## File Index
 
 | File | Topic |
 |------|--------|
@@ -8,9 +27,19 @@ Markdown in this folder documents **host-agnostic** contracts and MEAI integrati
 | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) | Tools and prompts without Unity APIs |
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
-| [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` → `AIFunction`, forced tool modes |
+| [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
+| [TOOL_CALLING_BEST_PRACTICES.md](TOOL_CALLING_BEST_PRACTICES.md) | Tool schema, idempotency, duplicate calls, SkillSet organization, result sizing, and tests |
+| [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) | MEAI pipeline: `ILlmTool` to `AIFunction`, forced tool modes |
 | [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider `usage` vs client estimates; SSE `include_usage`; HTTP vs orchestrator timeouts |
-| [MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md](MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md) | **(RU)** Redirect only — see English doc above |
-| [WEBGL_SERVER_MANAGED_PLAN_RU.md](WEBGL_SERVER_MANAGED_PLAN_RU.md) | **(RU)** WebGL / server-managed proxy notes (plan) |
+| [SERVER_MANAGED_PROTOCOL.md](SERVER_MANAGED_PROTOCOL.md) | Server-managed API contract, auth flow, request shape, and response handling |
 
-**Also:** root [README.md](../../../README.md) / [README_RU.md](../../../README_RU.md) and [DOCS_INDEX.md](../../CoreAiUnity/Docs/DOCS_INDEX.md) link here where relevant.
+## Maintenance Notes
+
+- Keep this index updated whenever a stable CoreAI guide is added.
+- Put short decision rules near the top of each guide; detailed reference material
+  should follow after the reader knows when it matters.
+- Keep XML documentation concise and contract-oriented. Explain behavior,
+  ownership, inputs, outputs, and failure modes; avoid repeating method names.
+
+Related entry points: root [README.md](../../../README.md), [README_RU.md](../../../README_RU.md),
+and [CoreAiUnity DOCS_INDEX.md](../../CoreAiUnity/Docs/DOCS_INDEX.md).

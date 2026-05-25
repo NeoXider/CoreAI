@@ -11,14 +11,13 @@ namespace CoreAI.Ai
         bool TryGetSnapshot(string scriptKey, out LuaScriptVersionRecord snapshot);
 
         /// <summary>
-/// Executes RecordSuccessfulExecution API operation.
-        ///
+        /// Records Lua source that executed successfully as the current script revision.
         /// </summary>
         void RecordSuccessfulExecution(string scriptKey, string executedLuaSource);
 
         /// <summary>
-/// Executes SeedOriginal API operation.
-        ///
+        /// <summary>
+        /// Stores the original Lua source for a script before later revisions are applied.
         /// </summary>
         void SeedOriginal(string scriptKey, string originalLuaSource, bool overwriteExistingOriginal = false);
 
@@ -26,15 +25,14 @@ namespace CoreAI.Ai
         void ResetToOriginal(string scriptKey);
 
         /// <summary>
-/// Executes ResetToRevision API operation.
-        ///
+        /// Restores a tracked script to a specific revision index.
         /// </summary>
         void ResetToRevision(string scriptKey, int revisionIndex);
 
         /// <summary>Restores all tracked versioned values to their original payloads.</summary>
         void ResetAllToOriginal();
 
-        /// <summary>Gets all script keys known to the version store.</summary>
+        /// <summary>Returns all script keys known to the version store.</summary>
         IReadOnlyList<string> GetKnownKeys();
 
         /// <summary>Builds the programmer prompt section that describes the current script version.</summary>

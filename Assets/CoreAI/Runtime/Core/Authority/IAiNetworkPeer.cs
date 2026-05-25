@@ -5,11 +5,11 @@ namespace CoreAI.Authority
     /// </summary>
     public interface IAiNetworkPeer
     {
-        /// <summary>Gets whether this peer is the authoritative host.</summary>
+        /// <summary>True when this peer may execute authoritative AI-side world changes.</summary>
         bool IsHostAuthority { get; }
 
         /// <summary>
-        /// Gets whether this peer is a non-host client.
+        /// True when this peer is a presentation client and must not execute authoritative AI mutations.
         /// </summary>
         bool IsPureClient { get; }
     }

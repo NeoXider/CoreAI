@@ -9,7 +9,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Logging
 {
     /// <summary>
-    /// Provides a process-wide fallback game logger when no scoped logger has been registered.
+    /// Installs a process-wide fallback game logger when no scoped logger has been registered.
     /// </summary>
 #if UNITY_EDITOR
     [InitializeOnLoad]
@@ -41,7 +41,6 @@ namespace CoreAI.Infrastructure.Logging
 
                 _instance = new FilteringGameLogger(new UnityGameLogSink(), new DefaultGameLogSettings());
 
-                // Skip processing when the checked condition is already satisfied.
                 if (Log.Instance is NullLog)
                 {
                     Log.Instance = new UnityLog(_instance);

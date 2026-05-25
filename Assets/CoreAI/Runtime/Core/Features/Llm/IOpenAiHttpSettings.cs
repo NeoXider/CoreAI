@@ -30,17 +30,18 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Maximum number of output tokens requested from the backend.</summary>
         int MaxTokens { get; }
 
-        /// <summary>Gets whether LLM request prompts should be logged.</summary>
+        /// <summary>True when request prompts should be written to diagnostic logs.</summary>
         bool LogLlmInput { get; }
 
-        /// <summary>Gets whether LLM responses should be logged.</summary>
+        /// <summary>True when model responses should be written to diagnostic logs.</summary>
         bool LogLlmOutput { get; }
 
-        /// <summary>Gets whether verbose HTTP diagnostics are enabled.</summary>
+        /// <summary>True when raw HTTP diagnostics are enabled for troubleshooting.</summary>
         bool EnableHttpDebugLogging { get; }
 
         /// <summary>
-        /// Provides additional HTTP headers sent with every request (e.g., tenant-id, request-id, idempotency-key).
+        /// Supplies additional HTTP headers sent with every request, such as tenant ids,
+        /// request ids, or idempotency keys.
         /// Returning null or empty falls back to no extra headers.
         /// </summary>
         IRequestHeaderProvider? HeaderProvider { get; }

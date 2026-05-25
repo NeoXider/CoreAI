@@ -6,12 +6,9 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Smoke-проверка <see cref="OrchestrationDashboard"/> на совместимость с обеими input-системами.
-    /// Полноценный keyboard-trigger потребовал бы PlayMode + симуляции <see cref="UnityEngine.Input"/>
-    /// (или <c>InputTestFixture</c>), что для дашборда метрик избыточно. Здесь ловим самое ценное:
-    /// при текущей конфигурации <c>Active Input Handling</c> компонент создаётся, инициализируется и
-    /// прокачивает <c>Update</c>-цикл без исключений (включая ветку, где legacy <c>Input</c>
-    /// отключён, а <c>UnityEngine.InputSystem</c> подцеплён через <c>versionDefines</c>).
+    /// Smoke coverage for <see cref="OrchestrationDashboard"/> compatibility with both input stacks.
+    /// Full keyboard simulation belongs in PlayMode; this test verifies construction,
+    /// initialization, and the update loop under the active input configuration.
     /// </summary>
     [TestFixture]
     public sealed class OrchestrationDashboardEditModeTests

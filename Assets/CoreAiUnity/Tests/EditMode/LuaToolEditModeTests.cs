@@ -10,9 +10,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// EditMode-тесты для MEAI-обёртки <see cref="LuaTool"/>:
-    /// проверяют ExecuteAsync на успех / пустой код / исключение / логирование.
-    /// Используется поддельный <see cref="LuaTool.ILuaExecutor"/> — без реального sandbox.
+    /// EditMode coverage for the MEAI <see cref="LuaTool"/> wrapper using a fake
+    /// executor for success, empty-code, exception, and logging paths.
     /// </summary>
     [TestFixture]
     public sealed class LuaToolEditModeTests
