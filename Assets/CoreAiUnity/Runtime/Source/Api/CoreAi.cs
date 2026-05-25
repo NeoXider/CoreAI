@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
 using CoreAI.Composition;
+using CoreAI.Messaging;
 using UnityEngine;
 
 namespace CoreAI
@@ -41,6 +42,9 @@ namespace CoreAI
         private static CoreAiChatService? _chatService;
         private static IAiOrchestrationService? _orchestrator;
         private static ICoreAISettings? _settings;
+        private static readonly object ToolCallSyncRoot = new();
+        private static readonly InMemoryLlmToolCallHistory ToolCallHistory = new(512);
+        private static event Action<LlmToolCallRecord>? OnToolCallRecord;
 
         /// <summary>True when CoreAI services resolved successfully.</summary>
         public static bool IsReady => TryResolve(out _, out _, out _);
@@ -285,18 +289,120 @@ namespace CoreAI
         /// </summary>
         public static event ToolExecutedHandler? OnToolExecuted;
 
+        /// <summary>Raised immediately before a model-requested tool call is executed.</summary>
+        public static event Action<LlmToolCallStarted>? OnToolCallStarted;
+
+        /// <summary>Raised after a model-requested tool call completes successfully.</summary>
+        public static event Action<LlmToolCallCompleted>? OnToolCallCompleted;
+
+        /// <summary>Raised after a model-requested tool call fails or returns an unsuccessful result.</summary>
+        public static event Action<LlmToolCallFailed>? OnToolCallFailed;
+
+        /// <summary>
+        /// Subscribes to all tool-call lifecycle records through a disposable handle.
+        /// Use this for gameplay observers, analytics, QA probes, and tests that need real tool execution data.
+        /// </summary>
+        /// <param name="handler">Called for started/completed/failed records.</param>
+        /// <param name="replayExisting">When true, immediately replays the current bounded history snapshot.</param>
+        /// <returns>Disposable subscription handle.</returns>
+        public static IDisposable SubscribeToolCalls(Action<LlmToolCallRecord> handler, bool replayExisting = false)
+        {
+            if (handler == null)
+            {
+                throw new ArgumentNullException(nameof(handler));
+            }
+
+            lock (ToolCallSyncRoot)
+            {
+                OnToolCallRecord += handler;
+            }
+
+            if (replayExisting)
+            {
+                foreach (LlmToolCallRecord record in GetToolCallHistorySnapshot())
+                {
+                    InvokeToolCallRecordHandler(handler, record);
+                }
+            }
+
+            return new DisposableAction(() =>
+            {
+                lock (ToolCallSyncRoot)
+                {
+                    OnToolCallRecord -= handler;
+                }
+            });
+        }
+
+        /// <summary>Returns a bounded snapshot of recent tool-call lifecycle records.</summary>
+        public static IReadOnlyList<LlmToolCallRecord> GetToolCallHistorySnapshot()
+        {
+            return ToolCallHistory.Snapshot();
+        }
+
+        /// <summary>Clears the public tool-call history snapshot. Active subscribers remain registered.</summary>
+        public static void ClearToolCallHistory()
+        {
+            ToolCallHistory.Clear();
+        }
+
         /// <summary>Internal hook for <c>SmartToolCallingChatClient</c> to surface tool calls to <see cref="OnToolExecuted"/>.</summary>
         internal static void NotifyToolExecuted(string roleId, string toolName, IDictionary<string, object?>? arguments,
             object? result)
         {
-            try
+            ToolExecutedHandler? handlers = OnToolExecuted;
+            if (handlers == null)
             {
-                OnToolExecuted?.Invoke(roleId, toolName, arguments, result);
+                return;
             }
-            catch (Exception ex)
+
+            foreach (Delegate handler in handlers.GetInvocationList())
             {
-                Debug.LogWarning($"[CoreAi] OnToolExecuted handler error: {ex.Message}");
+                try
+                {
+                    ((ToolExecutedHandler)handler).Invoke(roleId, toolName, arguments, result);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAi] OnToolExecuted handler error: {ex.Message}");
+                }
             }
+        }
+
+        /// <summary>Internal hook for tool-call lifecycle publishers.</summary>
+        internal static void NotifyToolCallStarted(LlmToolCallStarted evt)
+        {
+            ToolCallHistory.RecordStarted(evt);
+            PublishToolCallRecord(new LlmToolCallRecord { Info = evt.Info, Status = "started" });
+            PublishToolCallEvent(OnToolCallStarted, evt, "OnToolCallStarted");
+        }
+
+        /// <summary>Internal hook for tool-call lifecycle publishers.</summary>
+        internal static void NotifyToolCallCompleted(LlmToolCallCompleted evt)
+        {
+            ToolCallHistory.RecordCompleted(evt);
+            PublishToolCallRecord(new LlmToolCallRecord
+            {
+                Info = evt.Info,
+                Status = "completed",
+                ResultJson = evt.ResultJson,
+                DurationMs = evt.DurationMs
+            });
+            PublishToolCallEvent(OnToolCallCompleted, evt, "OnToolCallCompleted");
+        }
+
+        /// <summary>Internal hook for tool-call lifecycle publishers.</summary>
+        internal static void NotifyToolCallFailed(LlmToolCallFailed evt)
+        {
+            ToolCallHistory.RecordFailed(evt);
+            PublishToolCallRecord(new LlmToolCallRecord
+            {
+                Info = evt.Info,
+                Status = "failed",
+                Error = evt.Error,
+                DurationMs = evt.DurationMs
+            });
+            PublishToolCallEvent(OnToolCallFailed, evt, "OnToolCallFailed");
         }
 
         /// <summary>
@@ -431,6 +537,72 @@ namespace CoreAI
             _orchestrator = orchestrator;
             _settings = settings;
             return chatService != null || orchestrator != null;
+        }
+
+        private static void PublishToolCallRecord(LlmToolCallRecord record)
+        {
+            Action<LlmToolCallRecord>? handlers;
+            lock (ToolCallSyncRoot)
+            {
+                handlers = OnToolCallRecord;
+            }
+
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                InvokeToolCallRecordHandler((Action<LlmToolCallRecord>)handler, record);
+            }
+        }
+
+        private static void InvokeToolCallRecordHandler(Action<LlmToolCallRecord> handler, LlmToolCallRecord record)
+        {
+            try
+            {
+                handler(record);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[CoreAi] Tool-call subscriber error: {ex.Message}");
+            }
+        }
+
+        private static void PublishToolCallEvent<T>(Action<T>? handlers, T evt, string eventName)
+        {
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<T>)handler).Invoke(evt);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAi] {eventName} handler error: {ex.Message}");
+                }
+            }
+        }
+
+        private sealed class DisposableAction : IDisposable
+        {
+            private Action? _dispose;
+
+            public DisposableAction(Action dispose)
+            {
+                _dispose = dispose;
+            }
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref _dispose, null)?.Invoke();
+            }
         }
     }
 }

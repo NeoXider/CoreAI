@@ -3,7 +3,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1495,38 +1494,18 @@ namespace CoreAI.Infrastructure.Llm
                             }
 
                             break;
-                        case LuaLlmTool lt:
-                            result.Add(lt.CreateAIFunction());
-                            break;
-                        case InventoryLlmTool it:
-                            result.Add(it.CreateAIFunction());
-                            break;
-                        case GameConfigLlmTool gt:
-                            result.Add(gt.CreateAIFunction());
-                            break;
-                        case WorldLlmTool wt:
-                            result.Add(wt.CreateAIFunction());
-                            break;
-                        case SceneLlmTool slt:
-                            result.AddRange(slt.CreateAIFunctions());
-                            break;
-                        case CameraLlmTool camt:
-                            result.AddRange(camt.CreateAIFunctions());
-                            break;
                         case DelegateLlmTool dt:
                             result.Add(MEAI.AIFunctionFactory.Create(dt.ActionDelegate, dt.Name, dt.Description));
                             break;
+                        case IAIFunctionLlmTool functionTool:
+                            result.Add(functionTool.CreateAIFunction());
+                            break;
+                        case IAIFunctionsLlmTool functionTools:
+                            result.AddRange(functionTools.CreateAIFunctions());
+                            break;
                         default:
-                            MethodInfo m = tool.GetType().GetMethod("CreateAIFunction");
-                            if (m != null)
-                            {
-                                MEAI.AIFunction f = m.Invoke(tool, null) as MEAI.AIFunction;
-                                if (f != null)
-                                {
-                                    result.Add(f);
-                                }
-                            }
-
+                            _logger.LogWarning(GameLogFeature.Llm,
+                                $"MeaiLlmClient: Tool '{tool.Name}' does not implement a MEAI function binding interface and cannot be exposed to the model.");
                             break;
                     }
                 }

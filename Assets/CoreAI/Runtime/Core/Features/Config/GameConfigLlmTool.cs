@@ -9,7 +9,7 @@ namespace CoreAI.Config
     /// <summary>
     /// LLM tool wrapper for reading and writing game configuration.
     /// </summary>
-    public sealed class GameConfigLlmTool : ILlmTool
+    public sealed class GameConfigLlmTool : IAIFunctionLlmTool
     {
         private readonly GameConfigTool _tool;
 

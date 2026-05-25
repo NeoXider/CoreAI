@@ -1,4 +1,4 @@
-# CoreAI Developer Guide (template)
+﻿# CoreAI Developer Guide (template)
 
 For teams who **wire the core into their own game** or **extend this repository**. Normative contracts and the roadmap live in **[DGF_SPEC.md](DGF_SPEC.md)**; this document is a practical map of the codebase and common tasks.
 
@@ -148,6 +148,26 @@ Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionP
 
 Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized `ArgumentsJson`. Use `Info.CallId` when correlating start/completed/failed logs, especially when providers issue several tool calls in one response.
 
+Unity hosts can use the public `CoreAi` facade instead of subscribing to MessagePipe directly:
+
+```csharp
+IDisposable sub = CoreAi.SubscribeToolCalls(record =>
+{
+    if (record.Status == "completed" && record.Info.ToolName == "execute_lua")
+    {
+        Debug.Log($"Tool completed for {record.Info.RoleId}: {record.Info.ArgumentsJson}");
+    }
+});
+
+IReadOnlyList<LlmToolCallRecord> recent = CoreAi.GetToolCallHistorySnapshot();
+CoreAi.ClearToolCallHistory();
+sub.Dispose();
+```
+
+For single-event hooks, subscribe to `CoreAi.OnToolCallStarted`, `CoreAi.OnToolCallCompleted`, or `CoreAi.OnToolCallFailed`. `CoreAi.OnToolExecuted` remains available for the legacy successful-tool callback that exposes the argument dictionary and raw result object. Prefer `SubscribeToolCalls` in tests because it observes the real lifecycle event, not the final assistant text.
+
+Custom `ILlmTool` implementations that should be exposed to MEAI must implement `IAIFunctionLlmTool` for a single `AIFunction`, or `IAIFunctionsLlmTool` for multiple functions. `MeaiLlmClient` intentionally does not use reflection duck typing for `CreateAIFunction()`; unknown `ILlmTool` implementations are skipped with a warning so binding behavior stays explicit and testable.
+
 ### 3.4 Logging Architecture (v1.5.0)
 
 Since v1.5.0, CoreAI uses **two logging interfaces**:
@@ -220,7 +240,7 @@ new AgentBuilder("JsonParser")
 
 **Note (child `LifetimeScope`):** those events are published with `IPublisher<T>` from **`CoreAILifetimeScope`**. If your title uses a **child** scope and a **second** `RegisterMessagePipe()`, constructor-injected `ISubscriber<LlmRequestStarted>` (and related types) resolved **only** in the child may attach to a **different** broker graph, so you will see **no** LLM telemetry despite live completions. Use **`GlobalMessagePipe.GetSubscriber<T>()`** after the parent scope has built (same provider as `CoreServicesInstaller`’s `SetProvider`), or avoid a second `RegisterMessagePipe` and extend the parent pipe for game-only events.
 
-**Note (PlayMode tests without a scene scope):** `ToolExecutionPolicy` publishes `LlmToolCall*` via **`GlobalMessagePipe`** only if a provider exists. For package PlayMode fixtures, call **`GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics()`** (or use **`TestAgentSetup`**, which invokes it in **`Initialize`**) before asserting on tool-call messages.
+**Note (PlayMode tests without a scene scope):** use **`CoreAi.SubscribeToolCalls`** for assertions whenever possible. It receives the same lifecycle events as MessagePipe and does not require a scene `CoreAILifetimeScope`. If a test specifically validates MessagePipe integration, call **`GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics()`** (or use **`TestAgentSetup`**, which invokes it in **`Initialize`**) before subscribing to `GlobalMessagePipe.GetSubscriber<LlmToolCallCompleted>()`.
 
 `ServerManagedApi` supports dynamic backend authorization:
 
@@ -575,3 +595,4 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
 **Version of this guide:** 1.9.1 (May 2026) — Editor menu **CoreAI → Delete All Persistent Saves...** documents wiping **`persistentDataPath/CoreAI`**. **1.9** / UPM **1.7.4:** LLMUnity runtime auto-host, **`GgufModelPath`** → **`LLM.model`**, **`LlmUnityAutostartLocalServer`**. **1.7.3:** streaming hybrid hold when **`Tools`** declared; **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`**. **1.7.2:** WebGL **`CoreAiPersistFs`** **`FS.syncfs`** single-flight. **1.7.1:** `CoreAiChatPanel` typing after buffered tool-hint marker. **1.7.0:** `LlmStreamChunk.BufferedStreamingNoToolBinding`, **`BufferedStreamingUseToolProgressHint`**, **`CoreAiChatConfig.StreamingToolProgressHint`**. WebGL agent memory / chat JSON via **`FileAgentMemoryStore`** + **`CoreAi_PersistFsSync`** under **`CoreAILifetimeScope`** (**v1.6.19+**); fetch SSE jslib logs quiet by default (**v1.6.19**). Earlier: portable LLM pipeline decoupling (**v1.5**), MessagePipe event tests, UPM **v1.5.0**.
+

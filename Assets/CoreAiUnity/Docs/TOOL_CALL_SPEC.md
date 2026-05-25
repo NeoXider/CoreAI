@@ -383,11 +383,12 @@ merchant.ApplyToPolicy(policy);
 **1. Define a class:**
 
 ```csharp
-public class WeatherLlmTool : ILlmTool
+public class WeatherLlmTool : IAIFunctionLlmTool
 {
     public string Name => "get_weather";
     public string Description => "Get current weather in game world.";
     public string ParametersSchema => "{}";
+    public bool AllowDuplicates => false;
 
     public AIFunction CreateAIFunction()
     {
@@ -397,6 +398,8 @@ public class WeatherLlmTool : ILlmTool
     }
 }
 ```
+
+Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when one logical tool exposes several functions. CoreAI no longer discovers `CreateAIFunction()` by reflection; custom tool classes must implement one of these explicit contracts or use `DelegateLlmTool`.
 
 **2. Attach to an agent:**
 

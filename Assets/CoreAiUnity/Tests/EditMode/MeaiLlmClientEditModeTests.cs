@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -79,6 +80,45 @@ namespace CoreAI.Tests.EditMode
             client.SetTools(tools);
 
             UnityEngine.Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public async Task CompleteAsync_BindsExplicitAIFunctionToolContract()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool> { new ExplicitFunctionTool("explicit_tool") }
+            }, CancellationToken.None);
+
+            Assert.IsNotNull(inner.LastOptions);
+            Assert.IsNotNull(inner.LastOptions.Tools);
+            Assert.That(inner.LastOptions.Tools.Select(t => t.Name), Does.Contain("explicit_tool"));
+        }
+
+        [Test]
+        public async Task CompleteAsync_DoesNotBindLegacyDuckTypedCreateAIFunctionTool()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool> { new LegacyDuckTypedFunctionTool("legacy_tool") }
+            }, CancellationToken.None);
+
+            Assert.IsTrue(inner.LastOptions == null ||
+                          inner.LastOptions.Tools == null ||
+                          inner.LastOptions.Tools.All(t => t.Name != "legacy_tool"),
+                "Tools must opt into IAIFunctionLlmTool/IAIFunctionsLlmTool; CreateAIFunction duck typing should not bind.");
         }
 
         [Test]
@@ -410,6 +450,74 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
+        }
+
+        private sealed class ExplicitFunctionTool : ILlmTool, IAIFunctionLlmTool
+        {
+            public ExplicitFunctionTool(string name)
+            {
+                Name = name;
+            }
+
+            public string Name { get; }
+            public string Description => "Explicit MEAI function test tool.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                return MEAI.AIFunctionFactory.Create(new Action(() => { }), Name, Description);
+            }
+        }
+
+        private sealed class LegacyDuckTypedFunctionTool : ILlmTool
+        {
+            public LegacyDuckTypedFunctionTool(string name)
+            {
+                Name = name;
+            }
+
+            public string Name { get; }
+            public string Description => "Legacy duck-typed MEAI function test tool.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                return MEAI.AIFunctionFactory.Create(new Action(() => { }), Name, Description);
+            }
+        }
+
+        private sealed class CapturingChatClient : MEAI.IChatClient
+        {
+            public MEAI.ChatOptions LastOptions { get; private set; }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                LastOptions = options;
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                LastOptions = options;
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "ok");
+                await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
         }
 
         /// <summary>Minimal MEAI client for non-streaming completion tests.</summary>

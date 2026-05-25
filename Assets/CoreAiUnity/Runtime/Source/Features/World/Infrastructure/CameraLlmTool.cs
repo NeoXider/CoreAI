@@ -13,7 +13,7 @@ namespace CoreAI.Infrastructure.World
     /// <summary>
     /// LLM tool that exposes camera control operations.
     /// </summary>
-    public sealed class CameraLlmTool : ILlmTool
+    public sealed class CameraLlmTool : IAIFunctionsLlmTool
     {
         public string Name => "camera_tool";
         public string Description => "Access scene cameras to take screenshots for visual analysis.";

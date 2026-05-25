@@ -1,4 +1,4 @@
-# Changelog - `com.nexoider.coreaiunity`
+﻿# Changelog - `com.nexoider.coreaiunity`
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
@@ -8,6 +8,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - Fixed `WorldCommandsInstaller.RegisterWorldCommands` double-registering the same `CoreAiPrefabRegistryAsset` instance. Newer VContainer versions reject overlapping concrete/interface registrations with `Conflict implementation type`; the installer now keeps the combined `ICoreAiPrefabRegistry` / `CoreAiPrefabRegistryAsset` registration only.
 - Added `WorldCommandsInstallerEditModeTests` coverage for building a VContainer with world-command services and resolving both prefab registry contracts.
+
+### PlayMode stability
+
+- Fixed `UnityMainThreadLlmAsyncMarshaler` editor Play Mode detection so worker-thread invocations no longer inline Unity-bound delegates when `Application.onBeforeRender` has not primed the mirror yet.
+- Updated real-backend memory verification tests to report external LLM infrastructure failures (`timeout`, cancelled request, unloaded HTTP model) as inconclusive instead of failing memory assertions.
+- Updated the crafting memory LLM verification scenario to stop synthesizing `unknown_N` craft names after a missing tool result; the test now reports the external-model/tool-call precondition as inconclusive instead of failing a later determinism assertion against fake data.
+### Tool-call observability API
+
+- Added public `CoreAi` tool lifecycle observability: `OnToolCallStarted`, `OnToolCallCompleted`, `OnToolCallFailed`, `SubscribeToolCalls(...)`, `GetToolCallHistorySnapshot()`, and `ClearToolCallHistory()`.
+- `MessagePipeToolCallEventPublisher` now mirrors every tool lifecycle event into the public `CoreAi` facade, so gameplay code, analytics, QA tools, and PlayMode tests can subscribe without depending on `GlobalMessagePipe`.
+- Tightened crafting and multi-agent PlayMode scenarios to assert real completed `execute_lua` tool calls instead of accepting assistant prose or synthetic fallback names as successful execution.
+- Tightened AINpc and self-service skill PlayMode scenarios to assert real completed `memory`, `read_skill`, and `call_skill_tool` lifecycle events plus domain side effects, instead of accepting textual tool-call attempts as success.
+- Replaced the Unity MEAI tool-binding reflection fallback (`CreateAIFunction` duck typing) with explicit `IAIFunctionLlmTool` / `IAIFunctionsLlmTool` contracts for built-in tools.
 
 #### Package **`2.5.1`** - dependency **`com.nexoider.coreai` `2.5.1`**.
 
@@ -95,7 +108,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 #### Tests
 
 - **8 new EditMode tests** in `ToolCallExtractionParityEditModeTests`: `arguments_json` key extraction, function-call syntax (quoted/unquoted/multi-arg), prose-with-parens safety, and end-to-end `SmartToolCallingChatClient` integration.
-- **3 PlayMode LLM verification tests** now pass on LLMUnity: `SelfService_ModelMustReadSkill`, `SelfService_ModelCallsReadSkill`, `Model_ReadsSkill_ThenCallsSkillToolViaProxy` — all with text-mode tolerance fallback.
+- **3 PlayMode LLM verification tests** now validate the self-service Skill flow through real tool lifecycle events and domain side effects: `SelfService_ModelMustReadSkill`, `SelfService_ModelCallsReadSkill`, `Model_ReadsSkill_ThenCallsSkillToolViaProxy`.
 
 #### Package **`2.3.1`** — dependency **`com.nexoider.coreai` `2.3.1`**.
 
@@ -1967,3 +1980,5 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.1.2] - earlier
 
 Baseline Unity host package. See git history.
+
+

@@ -12,7 +12,7 @@ namespace CoreAI.Crafting
     /// <summary>
     /// LLM tool wrapper for crafting compatibility checks.
     /// </summary>
-    public sealed class CompatibilityLlmTool : LlmToolBase
+    public sealed class CompatibilityLlmTool : LlmToolBase, IAIFunctionLlmTool
     {
         private readonly CompatibilityChecker _checker;
         private readonly ICoreAISettings _settings;

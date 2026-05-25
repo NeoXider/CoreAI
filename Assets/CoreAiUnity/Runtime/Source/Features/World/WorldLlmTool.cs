@@ -16,7 +16,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// LLM tool that converts model requests into world commands.
     /// </summary>
-    public sealed class WorldLlmTool : LlmToolBase
+    public sealed class WorldLlmTool : LlmToolBase, IAIFunctionLlmTool
     {
         private readonly ICoreAiWorldCommandExecutor _executor;
         private readonly ICoreAISettings _settings;

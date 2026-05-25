@@ -7,7 +7,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool wrapper that exposes the sandboxed Lua executor as <c>execute_lua</c>.
     /// </summary>
-    public sealed class LuaLlmTool : ILlmTool
+    public sealed class LuaLlmTool : IAIFunctionLlmTool
     {
         private readonly LuaTool.ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;

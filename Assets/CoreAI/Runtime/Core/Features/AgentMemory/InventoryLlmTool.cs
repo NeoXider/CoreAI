@@ -6,7 +6,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool that exposes inventory operations to agents.
     /// </summary>
-    public sealed class InventoryLlmTool : ILlmTool
+    public sealed class InventoryLlmTool : IAIFunctionLlmTool
     {
         private readonly InventoryTool.IInventoryProvider _provider;
 

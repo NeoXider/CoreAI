@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Messaging;
+using MessagePipe;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -35,6 +37,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
+            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
 
             Debug.Log($"[AgentMemoryOpenAiApiPlayMode] Backend: {setup.BackendName}, role={Role}");
 
@@ -50,6 +53,11 @@ namespace CoreAI.Tests.PlayMode
             Task<string> run = setup.Orchestrator.RunTaskAsync(request);
             yield return setup.RunAndWait(run, 240f, "memory write");
             LogOrchestratorReply(run);
+
+            if (!ReadMemoryOrEmpty(setup).Contains(WriteExpectedSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                llmFailures.InconclusiveIfInfrastructureFailure("memory write");
+            }
 
             AssertAgentMemoryNonEmpty(setup, "after memory write");
             setup.MemoryStore.TryLoad(Role, out AgentMemoryState state);
@@ -74,6 +82,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
+            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
 
             setup.MemoryStore.Save(Role, new AgentMemoryState { Memory = InitialBaseline });
             AssertAgentMemoryEquals(setup, InitialBaseline, "baseline before append");
@@ -118,6 +127,13 @@ namespace CoreAI.Tests.PlayMode
                 LogMemorySnapshot(setup, "after append retry");
             }
 
+            string finalAppendMemory = ReadMemoryOrEmpty(setup);
+            if (!finalAppendMemory.Contains(InitialBaseline, StringComparison.Ordinal) ||
+                !finalAppendMemory.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                llmFailures.InconclusiveIfInfrastructureFailure("memory append");
+            }
+
             AssertAgentMemoryNonEmpty(setup, "final append state");
             setup.MemoryStore.TryLoad(Role, out AgentMemoryState state);
             Assert.That(
@@ -144,6 +160,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
+            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
 
             setup.MemoryStore.Save(Role, new AgentMemoryState { Memory = PreClearPayload });
             AssertAgentMemoryEquals(setup, PreClearPayload, "baseline before clear");
@@ -162,6 +179,12 @@ namespace CoreAI.Tests.PlayMode
             Task<string> run = setup.Orchestrator.RunTaskAsync(clearRequest);
             yield return setup.RunAndWait(run, 240f, "memory clear");
             LogOrchestratorReply(run);
+
+            if (setup.MemoryStore.TryLoad(Role, out AgentMemoryState stillPresent) &&
+                !string.IsNullOrWhiteSpace(stillPresent.Memory))
+            {
+                llmFailures.InconclusiveIfInfrastructureFailure("memory clear");
+            }
 
             AssertAgentMemoryCleared(setup, "after clear tool");
             Assert.IsFalse(
@@ -309,6 +332,93 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(
                 string.IsNullOrWhiteSpace(m),
                 $"[{phase}] After clear, memory must be empty or row removed. Still have ({m.Length} chars): {FormatMemoryForLog(m)}");
+        }
+
+        private sealed class LlmFailureMonitor : IDisposable
+        {
+            private IDisposable _subscription;
+            private bool _hasFailure;
+            private LlmRequestCompleted _lastFailure;
+
+            private LlmFailureMonitor(IDisposable subscription)
+            {
+                _subscription = subscription;
+            }
+
+            public static LlmFailureMonitor Start()
+            {
+                if (!GlobalMessagePipe.IsInitialized)
+                {
+                    return new LlmFailureMonitor(null);
+                }
+
+                LlmFailureMonitor monitor = new(null);
+                try
+                {
+                    monitor._subscription = GlobalMessagePipe
+                        .GetSubscriber<LlmRequestCompleted>()
+                        .Subscribe(monitor.OnCompleted);
+                    return monitor;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[AgentMemoryOpenAiApiPlayMode] Could not subscribe to LLM diagnostics: {e.Message}");
+                    return monitor;
+                }
+            }
+
+            public void Dispose()
+            {
+                _subscription?.Dispose();
+            }
+
+            public void InconclusiveIfInfrastructureFailure(string phase)
+            {
+                if (!_hasFailure || !IsInfrastructureFailure(_lastFailure))
+                {
+                    return;
+                }
+
+                Assert.Inconclusive(
+                    $"[{phase}] LLM backend did not complete successfully ({_lastFailure.ErrorCode}): {_lastFailure.Error}");
+            }
+
+            private void OnCompleted(LlmRequestCompleted completed)
+            {
+                if (completed.Success)
+                {
+                    return;
+                }
+
+                _hasFailure = true;
+                _lastFailure = completed;
+            }
+
+            private static bool IsInfrastructureFailure(LlmRequestCompleted completed)
+            {
+                switch (completed.ErrorCode)
+                {
+                    case LlmErrorCode.Timeout:
+                    case LlmErrorCode.Cancelled:
+                    case LlmErrorCode.AuthExpired:
+                    case LlmErrorCode.QuotaExceeded:
+                    case LlmErrorCode.RateLimited:
+                    case LlmErrorCode.BackendUnavailable:
+                    case LlmErrorCode.ProviderError:
+                    case LlmErrorCode.RoutingError:
+                    case LlmErrorCode.ContextLengthExceeded:
+                        return true;
+                }
+
+                string error = completed.Error ?? "";
+                return error.IndexOf("task was canceled", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("model is unloaded", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("http error", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("connection", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       error.IndexOf("unavailable", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
 #if !COREAI_NO_LLM
+using System;
 using System.Collections.Generic;
 using System.Reflection;
+using CoreAI.Messaging;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -19,6 +21,8 @@ namespace CoreAI.Tests.EditMode
         {
             // Cleanup static event listeners after each test
             ClearOnToolExecutedSubscribers();
+            ClearToolCallSubscribers();
+            CoreAi.ClearToolCallHistory();
         }
 
         // ===================== OnToolExecuted =====================
@@ -97,6 +101,66 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, callCount, "All three subscribers should be called");
         }
 
+        [Test]
+        public void NotifyToolExecuted_SubscriberThrows_StillCallsLaterSubscribers()
+        {
+            int callCount = 0;
+            CoreAi.OnToolExecuted += (_, _, _, _) =>
+                throw new System.InvalidOperationException("Bad subscriber");
+            CoreAi.OnToolExecuted += (_, _, _, _) => callCount++;
+
+            CoreAi.NotifyToolExecuted("Role", "tool_name", null, null);
+
+            Assert.AreEqual(1, callCount, "A throwing subscriber must not block later subscribers.");
+        }
+
+        // ===================== Tool-call lifecycle API =====================
+
+        [Test]
+        public void ToolCallLifecycle_RecordsHistoryAndNotifiesSubscribers()
+        {
+            List<LlmToolCallRecord> records = new();
+            using IDisposable sub = CoreAi.SubscribeToolCalls(records.Add);
+
+            LlmToolCallInfo info = new("trace-1", "Teacher", "call-1", "spawn_item", "{\"id\":1}");
+            CoreAi.NotifyToolCallStarted(new LlmToolCallStarted(info));
+            CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(info, "{\"ok\":true}", 12.5));
+
+            IReadOnlyList<LlmToolCallRecord> snapshot = CoreAi.GetToolCallHistorySnapshot();
+            Assert.AreEqual(2, records.Count);
+            Assert.AreEqual(2, snapshot.Count);
+            Assert.AreEqual("started", snapshot[0].Status);
+            Assert.AreEqual("completed", snapshot[1].Status);
+            Assert.AreEqual("Teacher", snapshot[1].Info.RoleId);
+            Assert.AreEqual("spawn_item", snapshot[1].Info.ToolName);
+            Assert.AreEqual("{\"ok\":true}", snapshot[1].ResultJson);
+        }
+
+        [Test]
+        public void SubscribeToolCalls_DisposeStopsNotifications()
+        {
+            int callCount = 0;
+            IDisposable sub = CoreAi.SubscribeToolCalls(_ => callCount++);
+            sub.Dispose();
+
+            CoreAi.NotifyToolCallStarted(new LlmToolCallStarted("trace", "Role", "tool", "{}"));
+
+            Assert.AreEqual(0, callCount);
+        }
+
+        [Test]
+        public void SubscribeToolCalls_ReplayExisting_ReplaysSnapshot()
+        {
+            CoreAi.NotifyToolCallFailed(new LlmToolCallFailed("trace", "Role", "tool", "{}", "boom", 3));
+
+            List<LlmToolCallRecord> replayed = new();
+            using IDisposable sub = CoreAi.SubscribeToolCalls(replayed.Add, replayExisting: true);
+
+            Assert.AreEqual(1, replayed.Count);
+            Assert.AreEqual("failed", replayed[0].Status);
+            Assert.AreEqual("boom", replayed[0].Error);
+        }
+
         // ===================== ClearContext (без LifetimeScope — EditMode) =====================
 
         [Test]
@@ -155,6 +219,22 @@ namespace CoreAI.Tests.EditMode
             {
                 field.SetValue(null, null);
             }
+        }
+
+        private static void ClearToolCallSubscribers()
+        {
+            ClearStaticEvent("OnToolCallStarted");
+            ClearStaticEvent("OnToolCallCompleted");
+            ClearStaticEvent("OnToolCallFailed");
+            ClearStaticEvent("OnToolCallRecord");
+        }
+
+        private static void ClearStaticEvent(string eventName)
+        {
+            FieldInfo eventField = typeof(CoreAi).GetField(
+                eventName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            eventField?.SetValue(null, null);
         }
     }
 }

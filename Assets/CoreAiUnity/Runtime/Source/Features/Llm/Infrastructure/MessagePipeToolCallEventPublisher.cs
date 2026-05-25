@@ -15,6 +15,9 @@ namespace CoreAI.Infrastructure.Llm
 
         public void PublishStarted(LlmToolCallInfo info)
         {
+            LlmToolCallStarted evt = new(info);
+            CoreAi.NotifyToolCallStarted(evt);
+
             if (!GlobalMessagePipe.IsInitialized)
             {
                 return;
@@ -23,7 +26,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 GlobalMessagePipe.GetPublisher<LlmToolCallStarted>()
-                    .Publish(new LlmToolCallStarted(info));
+                    .Publish(evt);
             }
             catch (Exception ex)
             {
@@ -33,6 +36,9 @@ namespace CoreAI.Infrastructure.Llm
 
         public void PublishCompleted(LlmToolCallInfo info, string resultJson, double durationMs)
         {
+            LlmToolCallCompleted evt = new(info, resultJson, durationMs);
+            CoreAi.NotifyToolCallCompleted(evt);
+
             if (!GlobalMessagePipe.IsInitialized)
             {
                 return;
@@ -41,7 +47,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 GlobalMessagePipe.GetPublisher<LlmToolCallCompleted>()
-                    .Publish(new LlmToolCallCompleted(info, resultJson, durationMs));
+                    .Publish(evt);
             }
             catch (Exception ex)
             {
@@ -51,6 +57,9 @@ namespace CoreAI.Infrastructure.Llm
 
         public void PublishFailed(LlmToolCallInfo info, string error, double durationMs)
         {
+            LlmToolCallFailed evt = new(info, error, durationMs);
+            CoreAi.NotifyToolCallFailed(evt);
+
             if (!GlobalMessagePipe.IsInitialized)
             {
                 return;
@@ -59,7 +68,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 GlobalMessagePipe.GetPublisher<LlmToolCallFailed>()
-                    .Publish(new LlmToolCallFailed(info, error, durationMs));
+                    .Publish(evt);
             }
             catch (Exception ex)
             {

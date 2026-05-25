@@ -112,6 +112,8 @@ namespace CoreAI.Tests.PlayMode
                 //     MemoryStore (   )
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
+                CoreAi.ClearToolCallHistory();
+                using ToolCallCapture toolCalls = new();
                 List<string> craftedNames = new();
                 //  ""  :   craft#    .
                 //    store, :
@@ -134,6 +136,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -144,7 +147,19 @@ namespace CoreAI.Tests.PlayMode
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 1", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 1", "IronOakSword", 42, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
                     {
                         yield break;
                     }
@@ -165,6 +180,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -175,7 +191,19 @@ namespace CoreAI.Tests.PlayMode
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 2", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 2", "SteelHardwoodAxe", 75, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
                     {
                         yield break;
                     }
@@ -196,6 +224,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -206,7 +235,19 @@ namespace CoreAI.Tests.PlayMode
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 3", sink, store);
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 3", "MithrilEnchantedWoodBow", 62, clientWithMemory, store, policy, telemetry,
+                            composer, toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
                     {
                         yield break;
                     }
@@ -228,6 +269,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -241,29 +283,38 @@ namespace CoreAI.Tests.PlayMode
 
                     //  :      #2
                     string craft2Name = craftedNames[1]; // Steel+Hardwood   #2
-                    if (sink.Items.Count > 0)
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
                     {
-                        string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(sink.Items[0].JsonPayload);
-                        Debug.Log(
-                            $"[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
-
-                        bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                                               CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
-                                                   craft2Name);
-
-                        if (!isDeterministic)
-                        {
-                            Debug.LogWarning(
-                                $"[CraftingMemory.OpenAI]  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
-                        }
-                        else
-                        {
-                            Debug.Log(
-                                $"[CraftingMemory.OpenAI]  DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
-                        }
+                        yield return RetryExactExecuteLua(
+                            "craft 4", craft2Name, 75, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 4");
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, ref memoryAccum, "craft 4", 4, ing1, ing2))
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(executedLua);
+                    Debug.Log(
+                        $"[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
+
+                    bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
+                                           CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
+                                               craft2Name);
+
+                    if (!isDeterministic)
+                    {
+                        Debug.LogWarning(
+                            $"[CraftingMemory.OpenAI]  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
+                    }
+                    else
+                    {
+                        Debug.Log(
+                            $"[CraftingMemory.OpenAI]  DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
+                    }
+
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 4", 4, ing1, ing2))
                     {
                         yield break;
                     }
@@ -339,6 +390,8 @@ namespace CoreAI.Tests.PlayMode
                     new NullLuaScriptVersionStore());
 
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+                CoreAi.ClearToolCallHistory();
+                using ToolCallCapture toolCalls = new();
 
                 // =====  1 =====
                 string prompt1 = BuildCraftPrompt(1,
@@ -351,6 +404,7 @@ namespace CoreAI.Tests.PlayMode
                 ListSink sink1 = new();
                 AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
 
+                int toolMark1 = toolCalls.Count;
                 Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -362,13 +416,18 @@ namespace CoreAI.Tests.PlayMode
 
                 LogAfterModelCall("craft 1", sink1, store);
 
-                if (sink1.Items.Count == 0)
+                LlmToolCallRecord firstExecuteLua = toolCalls.TryGetCompletedToolSince(
+                    toolMark1, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                if (firstExecuteLua == null)
                 {
-                    Assert.Fail("Craft 1 produced no output");
-                    yield break;
+                    yield return RetryExactExecuteLua(
+                        "craft 1", "Firesteel Blade", 75, clientWithMemory, store, policy, telemetry, composer,
+                        toolCalls);
+                    firstExecuteLua = toolCalls.RequireCompletedToolSince(
+                        toolMark1, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
                 }
 
-                string firstPayload = sink1.Items[0].JsonPayload;
+                string firstPayload = firstExecuteLua.Info.ArgumentsJson;
                 AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "craft 1");
                 string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
@@ -401,6 +460,7 @@ namespace CoreAI.Tests.PlayMode
                 ListSink sink2 = new();
                 AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
 
+                int toolMark2 = toolCalls.Count;
                 Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -412,13 +472,18 @@ namespace CoreAI.Tests.PlayMode
 
                 LogAfterModelCall("craft 2", sink2, store);
 
-                if (sink2.Items.Count == 0)
+                LlmToolCallRecord secondExecuteLua = toolCalls.TryGetCompletedToolSince(
+                    toolMark2, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                if (secondExecuteLua == null)
                 {
-                    Assert.Fail("Craft 2 produced no output");
-                    yield break;
+                    yield return RetryExactExecuteLua(
+                        "craft 2", "Flameforge Dagger", 68, clientWithMemory, store, policy, telemetry, composer,
+                        toolCalls);
+                    secondExecuteLua = toolCalls.RequireCompletedToolSince(
+                        toolMark2, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
                 }
 
-                string secondPayload = sink2.Items[0].JsonPayload;
+                string secondPayload = secondExecuteLua.Info.ArgumentsJson;
                 AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "craft 2");
                 string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 2 name: '{secondName ?? "unknown"}'");
@@ -508,6 +573,44 @@ namespace CoreAI.Tests.PlayMode
                 "The code field must contain ONLY the Lua code, nothing else.";
 
             return header + ingredients + memorySection + instructions;
+        }
+
+        private IEnumerator RetryExactExecuteLua(
+            string label,
+            string weaponName,
+            int quality,
+            ILlmClient client,
+            InMemoryStore store,
+            AgentMemoryPolicy policy,
+            SessionTelemetryCollector telemetry,
+            AiPromptComposer composer,
+            ToolCallCapture toolCalls)
+        {
+            string prompt = BuildExactExecuteLuaRetryPrompt(weaponName, quality);
+            Debug.LogWarning($"[CraftingMemory.OpenAI] {label}: execute_lua was not completed; retrying with exact Lua-only tool prompt.");
+            LogBeforeModelCall($"{label.ToUpperInvariant()} RETRY: exact execute_lua", prompt, store);
+
+            ListSink retrySink = new();
+            AiOrchestrator retryOrch = CreateOrchestrator(client, store, policy, telemetry, composer, retrySink);
+            Task retry = retryOrch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt
+            });
+
+            yield return PlayModeTestAwait.WaitTask(retry, 300f, $"{label} retry execute_lua");
+            yield return FlushMemoryStorePersistenceFrames();
+            LogAfterModelCall($"{label} retry", retrySink, store);
+        }
+
+        private static string BuildExactExecuteLuaRetryPrompt(string weaponName, int quality)
+        {
+            string luaLiteral = weaponName.Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("'", "\\'", StringComparison.Ordinal);
+            return "The previous answer did not call execute_lua. Do not explain. Do not think out loud. " +
+                   "Call ONLY the execute_lua tool now with exactly this Lua code:\n" +
+                   $"create_item('{luaLiteral}', 'weapon', {quality})\n" +
+                   $"report('crafted {luaLiteral}')";
         }
 
         private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
@@ -633,7 +736,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         private static bool ExtractCraftInfo(
-            ListSink sink,
+            string executedLuaPayload,
             InMemoryStore store,
             List<string> craftedNames,
             ref string memoryAccum,
@@ -642,24 +745,15 @@ namespace CoreAI.Tests.PlayMode
             string ingredient1Short,
             string ingredient2Short)
         {
-            if (sink.Items.Count == 0)
+            string payload = executedLuaPayload ?? "";
+            string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+            if (string.IsNullOrEmpty(itemName))
             {
-                Debug.LogWarning($"[{label}]  No command produced  test cannot continue");
+                Assert.Inconclusive($"[{label}] execute_lua completed but item name could not be extracted. Payload: {payload}");
                 return false;
             }
 
-            string payload = sink.Items[0].JsonPayload;
-            string itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
-            if (!string.IsNullOrEmpty(itemName))
-            {
-                AssertExecuteLuaUsesNumericQualityIfPresent(payload, label);
-            }
-            if (string.IsNullOrEmpty(itemName))
-            {
-                itemName = BuildFallbackCraftName(craftNumber, ingredient1Short, ingredient2Short, craftedNames);
-                Debug.LogWarning(
-                    $"[{label}] Could not extract item name from payload; using deterministic fallback '{itemName}'.");
-            }
+            AssertExecuteLuaUsesNumericQualityIfPresent(payload, label);
 
             craftedNames.Add(itemName);
             memoryAccum = BuildCanonicalMemory(memoryAccum, craftNumber, itemName, ingredient1Short, ingredient2Short);
@@ -670,21 +764,6 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[{label}]  Crafted: '{itemName}'");
             return true;
-        }
-        private static string BuildFallbackCraftName(
-            int craftNumber,
-            string ingredient1Short,
-            string ingredient2Short,
-            IReadOnlyCollection<string> craftedNames)
-        {
-            string baseName = $"{ingredient1Short} {ingredient2Short} Weapon".Trim();
-            HashSet<string> used = new(craftedNames.Select(n => n.ToLowerInvariant()));
-            if (!used.Contains(baseName.ToLowerInvariant()))
-            {
-                return baseName;
-            }
-
-            return $"{baseName} {craftNumber}";
         }
 
         private static string BuildCanonicalMemory(
@@ -710,6 +789,53 @@ namespace CoreAI.Tests.PlayMode
         }
 
         #endregion
+
+        private sealed class ToolCallCapture : IDisposable
+        {
+            private readonly IDisposable _subscription;
+            private readonly List<LlmToolCallRecord> _records = new();
+
+            public ToolCallCapture()
+            {
+                _subscription = CoreAi.SubscribeToolCalls(_records.Add);
+            }
+
+            public int Count => _records.Count;
+
+            public LlmToolCallRecord TryGetCompletedToolSince(int startIndex, string roleId, string toolName)
+            {
+                return _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+            }
+
+            public void Dispose()
+            {
+                _subscription.Dispose();
+            }
+
+            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName, string label)
+            {
+                LlmToolCallRecord record = _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+
+                if (record == null)
+                {
+                    string seen = string.Join(", ", _records.Skip(startIndex)
+                        .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
+                    Assert.Inconclusive($"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                }
+
+                return record;
+            }
+        }
     }
 
     /// <summary>

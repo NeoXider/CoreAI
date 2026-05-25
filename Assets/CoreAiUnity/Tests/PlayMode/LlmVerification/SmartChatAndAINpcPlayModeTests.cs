@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -321,6 +322,7 @@ namespace CoreAI.Tests.PlayMode
                     ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
 
                 Debug.Log("[AINpc] Requesting NPC with memory tool...");
+                CoreAi.ClearToolCallHistory();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.AiNpc,
@@ -334,9 +336,17 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.IsTrue(capturing.LastResult.Ok);
 
-                // Should have called memory tool
-                bool usedMemory = capturing.LastResult.Content?.Contains("memory") == true ||
-                                  capturing.LastResult.Content?.Contains("remember") == true;
+                bool completedMemoryTool = CoreAi.GetToolCallHistorySnapshot()
+                    .Any(r => r.Status == "completed" &&
+                              r.Info.RoleId == BuiltInAgentRoleIds.AiNpc &&
+                              r.Info.ToolName == "memory");
+                Assert.IsTrue(completedMemoryTool,
+                    "AINpc ToolsAndChat mode must complete a real memory tool call, not merely mention memory in text.");
+
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.AiNpc, out AgentMemoryState npcMemory),
+                    "AINpc memory tool call should persist data in the memory store.");
+                Assert.That(npcMemory.Memory, Does.Contain("Hero"),
+                    "AINpc memory store should contain the remembered player name.");
 
                 Debug.Log("[AINpc] AINpc with ToolsAndChat mode completed");
                 Debug.Log("[AINpc] TEST PASSED");

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -266,6 +267,8 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[SkillRealTest] ── Sending: 'I want to craft an iron sword' ──");
                 Debug.Log($"[SkillRealTest] Model sees: catalog + read_skill + all {config.Tools.Count} tools");
 
+                CoreAi.ClearToolCallHistory();
+
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
@@ -314,6 +317,15 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsTrue(hasCatalog, "System prompt should contain skill catalog.");
                 Assert.IsFalse(hasFullInstructions,
                     "Full instructions should NOT be in system prompt — model reads them via read_skill.");
+                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "read_skill"),
+                    "Self-service skill flow must complete a real read_skill tool call.");
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "call_skill_tool"),
+                    "Self-service skill flow must complete a real call_skill_tool proxy call.");
 
                 // At least one crafting tool was called
                 bool anyCraftTool = _calledTools.Contains("get_recipes") ||
@@ -322,18 +334,6 @@ namespace CoreAI.Tests.PlayMode
 
                 if (!anyCraftTool)
                 {
-                    // Small models via LLMUnity may output tool calls as text without native function calling.
-                    // If model tried to call read_skill in text, it's a backend limitation, not a test failure.
-                    bool modelTriedToolCall = cap.LastContent != null &&
-                                              (cap.LastContent.Contains("read_skill") ||
-                                               cap.LastContent.Contains("call_skill_tool"));
-                    if (modelTriedToolCall)
-                    {
-                        Assert.Inconclusive(
-                            $"Model attempted tool call in text but pipeline could not execute it (LLMUnity text-mode limitation). " +
-                            $"Response: {cap.LastContent}");
-                    }
-
                     Assert.Fail(
                         $"At least one crafting tool should have been called. Called: [{string.Join(", ", _calledTools)}]");
                 }

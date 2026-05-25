@@ -130,6 +130,8 @@ namespace CoreAI.Tests.PlayMode
 
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
+                CoreAi.ClearToolCallHistory();
+                using ToolCallCapture toolCalls = new();
                 List<string> craftedNames = new();
 
                 // =====  1: Iron + Oak =====
@@ -145,6 +147,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -156,7 +159,19 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 1", sink, store);
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 1", 1))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 1", "Ironwood Blade", 20, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, "craft 1", 1))
                     {
                         yield break;
                     }
@@ -175,6 +190,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -186,7 +202,19 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 2", sink, store);
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 2", 2))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 2", "Steelheart Blade", 50, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, "craft 2", 2))
                     {
                         yield break;
                     }
@@ -205,6 +233,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -216,7 +245,19 @@ namespace CoreAI.Tests.PlayMode
 
                     LogAfterModelCall("craft 3", sink, store);
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 3", 3))
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 3", "Mithrilwood Blade", 75, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
+                    }
+
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, "craft 3", 3))
                     {
                         yield break;
                     }
@@ -237,6 +278,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
@@ -249,29 +291,38 @@ namespace CoreAI.Tests.PlayMode
                     LogAfterModelCall("craft 4 (determinism)", sink, store);
 
                     string craft2Name = craftedNames[1];
-                    if (sink.Items.Count > 0)
+                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
+                    if (executeLua == null)
                     {
-                        string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(sink.Items[0].JsonPayload);
-                        Debug.Log(
-                            $"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
-
-                        bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                                               CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
-                                                   craft2Name);
-
-                        if (!isDeterministic)
-                        {
-                            Debug.LogWarning(
-                                $"[CraftingMemory.LLMUnity]  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
-                        }
-                        else
-                        {
-                            Debug.Log(
-                                $"[CraftingMemory.LLMUnity]  DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
-                        }
+                        yield return RetryExactExecuteLua(
+                            "craft 4", craft2Name, 50, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 4");
                     }
 
-                    if (!ExtractCraftInfo(sink, store, craftedNames, "craft 4", 4))
+                    string executedLua = executeLua.Info.ArgumentsJson;
+                    string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(executedLua);
+                    Debug.Log(
+                        $"[CraftingMemory.LLMUnity] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
+
+                    bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
+                                           CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
+                                               craft2Name);
+
+                    if (!isDeterministic)
+                    {
+                        Debug.LogWarning(
+                            $"[CraftingMemory.LLMUnity]  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
+                    }
+                    else
+                    {
+                        Debug.Log(
+                            $"[CraftingMemory.LLMUnity]  DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
+                    }
+
+                    if (!ExtractCraftInfo(executedLua, store, craftedNames, "craft 4", 4))
                     {
                         yield break;
                     }
@@ -452,7 +503,7 @@ namespace CoreAI.Tests.PlayMode
                                   "  - action: \"write\"\n" +
                                   $"  - content: \"{memoryWriteHint}\"\n\n" +
                                   "STEP 2: Call the 'execute_lua' tool with Lua code that ONLY calls the game API, same as crafts 1-3:\n" +
-                                  $"  create_item('{luaLiteral}', 'weapon', qualityNumber)\n" +
+                                  $"  create_item('{luaLiteral}', 'weapon', 50)\n" +
                                   $"  report('crafted {luaLiteral}')\n" +
                                   "Do NOT return Lua tables, do NOT simulate crafting in variables only — the host must see create_item and report.\n\n" +
                                   "CRITICAL: You MUST craft the EXACT SAME item as before - same name, same quality.\n" +
@@ -460,6 +511,44 @@ namespace CoreAI.Tests.PlayMode
                                   "You MUST call BOTH tools. Do NOT stop after memory.";
 
             return header + ingredients + memorySection + instructions;
+        }
+
+        private IEnumerator RetryExactExecuteLua(
+            string label,
+            string weaponName,
+            int quality,
+            ILlmClient client,
+            InMemoryStore store,
+            AgentMemoryPolicy policy,
+            SessionTelemetryCollector telemetry,
+            AiPromptComposer composer,
+            ToolCallCapture toolCalls)
+        {
+            string prompt = BuildExactExecuteLuaRetryPrompt(weaponName, quality);
+            Debug.LogWarning($"[CraftingMemory.LLMUnity] {label}: execute_lua was not completed; retrying with exact Lua-only tool prompt.");
+            LogBeforeModelCall($"{label.ToUpperInvariant()} RETRY: exact execute_lua", prompt, store);
+
+            ListSink retrySink = new();
+            AiOrchestrator retryOrch = CreateOrchestrator(client, store, policy, telemetry, composer, retrySink);
+            Task retry = retryOrch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt
+            });
+
+            yield return PlayModeTestAwait.WaitTask(retry, 300f, $"{label} retry execute_lua");
+            yield return FlushMemoryStorePersistenceFrames();
+            LogAfterModelCall($"{label} retry", retrySink, store);
+        }
+
+        private static string BuildExactExecuteLuaRetryPrompt(string weaponName, int quality)
+        {
+            string luaLiteral = weaponName.Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("'", "\\'", StringComparison.Ordinal);
+            return "The previous answer did not call execute_lua. Do not explain. Do not think out loud. " +
+                   "Call ONLY the execute_lua tool now with exactly this Lua code:\n" +
+                   $"create_item('{luaLiteral}', 'weapon', {quality})\n" +
+                   $"report('crafted {luaLiteral}')";
         }
 
         #region Logging Helpers
@@ -530,14 +619,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         private static bool ExtractCraftInfo(
-            ListSink sink,
+            string executedLuaPayload,
             InMemoryStore store,
             List<string> craftedNames,
             string label,
             int craftNumber)
         {
-            string payload = sink.Items.Count > 0 ? sink.Items[0].JsonPayload : null;
-
             // Prefer model-written memory (canonical craft line) before prose payload heuristics.
             string itemName = null;
             if (TryExtractCraftNameFromMemory(store, craftNumber, out string fromMemoryLine))
@@ -547,13 +634,24 @@ namespace CoreAI.Tests.PlayMode
 
             if (string.IsNullOrEmpty(itemName))
             {
-                itemName = CraftingMemoryItemNameExtractor.ExtractName(payload);
+                itemName = CraftingMemoryItemNameExtractor.ExtractName(executedLuaPayload);
             }
 
             if (string.IsNullOrEmpty(itemName))
             {
                 Debug.LogWarning($"[{label}] Could not extract item name from payload or memory");
-                itemName = $"unknown_{craftedNames.Count + 1}";
+                Assert.Inconclusive(
+                    $"[{label}] LLM backend did not produce an executable craft result for craft #{craftNumber}. " +
+                    $"Payload: {FormatPayloadForAssertion(executedLuaPayload)}");
+                return false;
+            }
+
+            if (IsSyntheticUnknownName(itemName))
+            {
+                Assert.Inconclusive(
+                    $"[{label}] LLM backend produced only a synthetic fallback craft name for craft #{craftNumber}: '{itemName}'. " +
+                    $"Payload: {FormatPayloadForAssertion(executedLuaPayload)}");
+                return false;
             }
 
             craftedNames.Add(itemName);
@@ -578,6 +676,23 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[{label}] Crafted: '{itemName}'");
             return true;
+        }
+
+        private static bool IsSyntheticUnknownName(string itemName)
+        {
+            return Regex.IsMatch(itemName ?? "", "^unknown(?:_\\d+)?$", RegexOptions.IgnoreCase);
+        }
+
+        private static string FormatPayloadForAssertion(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return "<empty>";
+            }
+
+            string normalized = payload.Replace("\r", "\\r").Replace("\n", "\\n");
+            const int max = 500;
+            return normalized.Length <= max ? normalized : normalized.Substring(0, max) + "...";
         }
 
         private static bool TryExtractCraftNameFromMemory(InMemoryStore store, int craftNumber, out string itemName)
@@ -613,6 +728,53 @@ namespace CoreAI.Tests.PlayMode
         }
 
         #endregion
+
+        private sealed class ToolCallCapture : IDisposable
+        {
+            private readonly IDisposable _subscription;
+            private readonly List<LlmToolCallRecord> _records = new();
+
+            public ToolCallCapture()
+            {
+                _subscription = CoreAi.SubscribeToolCalls(_records.Add);
+            }
+
+            public int Count => _records.Count;
+
+            public LlmToolCallRecord TryGetCompletedToolSince(int startIndex, string roleId, string toolName)
+            {
+                return _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+            }
+
+            public void Dispose()
+            {
+                _subscription.Dispose();
+            }
+
+            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName, string label)
+            {
+                LlmToolCallRecord record = _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+
+                if (record == null)
+                {
+                    string seen = string.Join(", ", _records.Skip(startIndex)
+                        .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
+                    Assert.Inconclusive($"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                }
+
+                return record;
+            }
+        }
     }
 #endif
 }

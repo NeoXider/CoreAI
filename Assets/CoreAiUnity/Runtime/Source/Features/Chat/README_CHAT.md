@@ -1,4 +1,4 @@
-# 🗨️ CoreAI Universal Chat Module
+﻿# 🗨️ CoreAI Universal Chat Module
 
 Built-in AI chat for any Unity game. Works out of the box with UI Toolkit.
 
@@ -376,6 +376,19 @@ Tool JSON is not rendered in assistant bubbles: the player only sees the final r
 - When **on**, `CoreAiChatPanel` subscribes to **`CoreAi.OnToolExecuted`** and appends a separate muted row for calls whose **`roleId`** matches the panel’s **`RoleId`** (same rule as other chat routing).
 - Rows are **not** written to `IAgentMemoryStore` / persisted chat history — session UI only.
 - Customize text via **`CoreAiChatPanel.FormatToolExecutedForChat`** in a subclass, or keep the default formatter **`CoreAiToolCallChatFormatter.BuildDisplayText`** (truncated JSON for args/result).
+For gameplay systems, analytics, or tests that need tool lifecycle data without rendering chat rows, use the public observability API:
+
+```csharp
+IDisposable sub = CoreAi.SubscribeToolCalls(record =>
+{
+    if (record.Status == "completed")
+    {
+        Debug.Log($"{record.Info.RoleId} used {record.Info.ToolName}");
+    }
+});
+```
+
+`CoreAi.GetToolCallHistorySnapshot()` returns recent started/completed/failed records, and `CoreAi.ClearToolCallHistory()` clears that diagnostic buffer.
 
 This behavior is on by default for roles with tools:
 
@@ -592,3 +605,4 @@ chatPanel.ResetBusyStateWithoutCancellation();
 | `CurrentTurnGeneration` | `int` (get) | Monotonic counter, incremented at the start of each agent turn. Compare across awaits to detect "a newer turn started". |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
 | `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request (in contrast to `StopActiveGeneration()` / `StopAgent()`). |
+

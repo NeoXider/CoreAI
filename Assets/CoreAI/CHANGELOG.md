@@ -1,11 +1,11 @@
-# Changelog
+﻿# Changelog
 
 ## [v2.5.1] - 2026-05-25
 
 ### Lockstep patch with CoreAI Unity
 
 - Bumped `com.nexoider.coreai` to `2.5.1` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- No portable runtime behavior change in this patch; the runtime fix ships in the Unity package (`WorldCommandsInstaller` VContainer prefab registry registration).
+- Added portable `IAIFunctionLlmTool` / `IAIFunctionsLlmTool` contracts so Unity MEAI binding can discover tool functions without reflection duck typing.
 
 ## [v2.5.0] - 2026-05-24
 
@@ -1250,3 +1250,5 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
+
+

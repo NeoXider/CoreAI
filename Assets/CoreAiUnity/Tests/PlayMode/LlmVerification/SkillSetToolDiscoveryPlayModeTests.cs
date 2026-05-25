@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -192,6 +193,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log("[ToolDiscovery] ── Request: 'Enchant my iron sword with fire' ──");
 
+                CoreAi.ClearToolCallHistory();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
@@ -216,21 +218,17 @@ namespace CoreAI.Tests.PlayMode
                     Assert.Inconclusive("LLM did not return a valid response.");
                 }
 
-                if (!_enchantWeaponCalled)
-                {
-                    bool modelTriedToolCall = cap.LastContent != null &&
-                                              (cap.LastContent.Contains("read_skill") ||
-                                               cap.LastContent.Contains("enchant_weapon") ||
-                                               cap.LastContent.Contains("call_skill_tool"));
-                    if (modelTriedToolCall)
-                    {
-                        Assert.Inconclusive(
-                            $"Model attempted tool call in text but pipeline could not execute it (LLMUnity text-mode limitation). " +
-                            $"Response: {cap.LastContent}");
-                    }
-
-                    Assert.Fail("enchant_weapon should have been called via call_skill_tool proxy.");
-                }
+                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "read_skill"),
+                    "Skill discovery must complete a real read_skill tool call.");
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "call_skill_tool"),
+                    "Skill discovery must complete a real call_skill_tool proxy call.");
+                Assert.IsTrue(_enchantWeaponCalled,
+                    "enchant_weapon should have been executed through call_skill_tool, not only mentioned in model text.");
 
                 Debug.Log("[ToolDiscovery] ✅ Model discovered enchant_weapon via read_skill");
                 Debug.Log("[ToolDiscovery] ✅ and executed it via call_skill_tool proxy!");

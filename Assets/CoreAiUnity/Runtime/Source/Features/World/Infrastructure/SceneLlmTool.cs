@@ -14,7 +14,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool that exposes scene inspection and manipulation operations.
     /// </summary>
-    public sealed class SceneLlmTool : ILlmTool
+    public sealed class SceneLlmTool : IAIFunctionsLlmTool
     {
         public string Name => "scene_tool";
         public string Description => "Manipulate and inspect Unity GameObjects dynamically at runtime.";

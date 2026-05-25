@@ -5,6 +5,9 @@ using CoreAI;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -41,7 +44,17 @@ namespace CoreAI.Infrastructure.Llm
 
         private static volatile int _editorMirroredUnityMainManagedThreadId = -1;
 
-        private static int _onBeforeRenderHooked;
+        private static int _editorMirrorHooked;
+
+        [InitializeOnLoad]
+        private static class EditorIsPlayingMirrorEditorInitializer
+        {
+            static EditorIsPlayingMirrorEditorInitializer()
+            {
+                EnsureEditorIsPlayingMirrorHook();
+                UpdateEditorIsPlayingMirrorFromEditorState();
+            }
+        }
 
         private static class EditorIsPlayingMirrorRegistration
         {
@@ -62,25 +75,26 @@ namespace CoreAI.Infrastructure.Llm
             private static void PrimeBeforeSceneLoad()
             {
                 EnsureEditorIsPlayingMirrorHook();
-                UpdateEditorIsPlayingMirror();
+                UpdateEditorIsPlayingMirrorFromEditorState();
             }
 
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
             private static void PrimeAfterSceneLoad()
             {
                 EnsureEditorIsPlayingMirrorHook();
-                UpdateEditorIsPlayingMirror();
+                UpdateEditorIsPlayingMirrorFromEditorState();
             }
         }
 
         private static void EnsureEditorIsPlayingMirrorHook()
         {
-            if (Interlocked.Exchange(ref _onBeforeRenderHooked, 1) != 0)
+            if (Interlocked.Exchange(ref _editorMirrorHooked, 1) != 0)
             {
                 return;
             }
 
             Application.onBeforeRender += UpdateEditorIsPlayingMirror;
+            EditorApplication.playModeStateChanged += _ => UpdateEditorIsPlayingMirrorFromEditorState();
         }
 
         private static void UpdateEditorIsPlayingMirror()
@@ -89,6 +103,18 @@ namespace CoreAI.Infrastructure.Llm
             {
                 Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
                 Volatile.Write(ref _editorMirrorIsPlaying, Application.isPlaying ? 1 : 0);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void UpdateEditorIsPlayingMirrorFromEditorState()
+        {
+            try
+            {
+                Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
+                Volatile.Write(ref _editorMirrorIsPlaying, EditorApplication.isPlaying ? 1 : 0);
             }
             catch
             {

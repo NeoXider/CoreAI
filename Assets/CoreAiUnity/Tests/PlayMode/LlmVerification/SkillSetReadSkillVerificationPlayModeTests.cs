@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -267,6 +268,8 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log("[ReadSkillTest] ── Sending: 'Brew me a healing potion' ──");
 
+                CoreAi.ClearToolCallHistory();
+
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
@@ -312,21 +315,19 @@ namespace CoreAI.Tests.PlayMode
                 // 1. Secret values are NOT in the system prompt
                 Assert.IsFalse(hasFullInstructions,
                     "ARCANUM-7 should NOT be in system prompt — it's only in read_skill result.");
+                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "read_skill"),
+                    "Model must complete a real read_skill tool call to learn the secret protocol.");
+                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                                 r.Info.RoleId == roleId &&
+                                                 r.Info.ToolName == "call_skill_tool"),
+                    "Model must execute alchemy through the real call_skill_tool proxy.");
 
                 // 2. brew_potion was called
                 if (!_calledTools.Contains("brew_potion"))
                 {
-                    bool modelTriedToolCall = cap.LastContent != null &&
-                                              (cap.LastContent.Contains("read_skill") ||
-                                               cap.LastContent.Contains("brew_potion") ||
-                                               cap.LastContent.Contains("call_skill_tool"));
-                    if (modelTriedToolCall)
-                    {
-                        Assert.Inconclusive(
-                            $"Model attempted tool call in text but pipeline could not execute it (LLMUnity text-mode limitation). " +
-                            $"Response: {cap.LastContent}");
-                    }
-
                     Assert.Fail($"brew_potion should have been called. Called: [{string.Join(", ", _calledTools)}]");
                 }
 

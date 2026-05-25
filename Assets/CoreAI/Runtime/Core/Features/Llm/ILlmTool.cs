@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
 {
@@ -18,6 +19,24 @@ namespace CoreAI.Ai
 
         /// <summary>True when repeated calls with the same arguments are meaningful and should not be suppressed.</summary>
         bool AllowDuplicates { get; }
+    }
+
+    /// <summary>
+    /// LLM tool that can expose itself as a single Microsoft.Extensions.AI function without reflection.
+    /// </summary>
+    public interface IAIFunctionLlmTool : ILlmTool
+    {
+        /// <summary>Creates the MEAI function binding for this tool.</summary>
+        AIFunction CreateAIFunction();
+    }
+
+    /// <summary>
+    /// LLM tool that expands into several Microsoft.Extensions.AI functions without reflection.
+    /// </summary>
+    public interface IAIFunctionsLlmTool : ILlmTool
+    {
+        /// <summary>Creates the MEAI function bindings for this tool.</summary>
+        IEnumerable<AIFunction> CreateAIFunctions();
     }
 
     /// <summary>

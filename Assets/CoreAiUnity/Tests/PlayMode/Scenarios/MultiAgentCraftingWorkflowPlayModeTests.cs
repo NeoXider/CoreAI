@@ -98,6 +98,12 @@ namespace CoreAI.Tests.PlayMode
                 policy.ConfigureRole(BuiltInAgentRoleIds.Creator, allowDuplicateToolCalls: true);
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
                 policy.ConfigureRole(BuiltInAgentRoleIds.Programmer, allowDuplicateToolCalls: true);
+                string programmerLuaCode = null;
+                policy.SetToolsForRole(BuiltInAgentRoleIds.Programmer, new ILlmTool[]
+                {
+                    new DelegateLlmTool("execute_lua", "Execute generated Lua code",
+                        new Action<string>(code => { programmerLuaCode = code ?? ""; }))
+                });
 
                 SessionTelemetryCollector telemetry = new();
                 AiPromptComposer composer = new(
@@ -107,6 +113,8 @@ namespace CoreAI.Tests.PlayMode
 
                 //     MemoryStore
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+                CoreAi.ClearToolCallHistory();
+                using ToolCallCapture toolCalls = new();
 
                 // =====  1: Creator    =====
                 {
@@ -218,6 +226,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    int toolMark = toolCalls.Count;
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Programmer,
@@ -240,6 +249,10 @@ namespace CoreAI.Tests.PlayMode
                         "Programmer response should contain Lua-related output.");
                     Assert.That(programmerPayload, Does.Not.Contain("execute_lua tool is not available"),
                         "Workflow claims execute_lua step, but tool was unavailable.");
+                    toolCalls.RequireCompletedToolSince(
+                        toolMark, BuiltInAgentRoleIds.Programmer, "execute_lua", "programmer lua");
+                    Assert.IsFalse(string.IsNullOrWhiteSpace(programmerLuaCode),
+                        "Programmer must execute Lua through the registered execute_lua tool.");
                 }
 
                 // =====  4: CoreMechanicAI    () =====
@@ -509,6 +522,43 @@ namespace CoreAI.Tests.PlayMode
         }
 
         #endregion
+
+        private sealed class ToolCallCapture : IDisposable
+        {
+            private readonly IDisposable _subscription;
+            private readonly List<LlmToolCallRecord> _records = new();
+
+            public ToolCallCapture()
+            {
+                _subscription = CoreAi.SubscribeToolCalls(_records.Add);
+            }
+
+            public int Count => _records.Count;
+
+            public void Dispose()
+            {
+                _subscription.Dispose();
+            }
+
+            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName, string label)
+            {
+                LlmToolCallRecord record = _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+
+                if (record == null)
+                {
+                    string seen = string.Join(", ", _records.Skip(startIndex)
+                        .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
+                    Assert.Inconclusive($"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                }
+
+                return record;
+            }
+        }
     }
 #endif
 }
