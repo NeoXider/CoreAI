@@ -341,9 +341,10 @@ namespace CoreAI.Tests.EditMode
         public async Task ExecuteSingle_UnknownTool_RecordsUnknownToolTrace()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
-                new List<ILlmTool>(), false, "test", 3);
+                new List<ILlmTool> { new StubTool { Name = "memory" } },
+                false, "test", 3);
 
-            MEAI.ChatOptions opts = MakeChatOptions();
+            MEAI.ChatOptions opts = MakeChatOptions(("memory", "ok"));
             ToolExecutionPolicy.ToolCallResult result =
                 await policy.ExecuteSingleAsync(MakeToolCall("unknown_tool"), opts, CancellationToken.None);
 
