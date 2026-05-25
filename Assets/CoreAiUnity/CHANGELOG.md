@@ -2,6 +2,15 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.5.1] - 2026-05-25
+
+### VContainer prefab registry registration
+
+- Fixed `WorldCommandsInstaller.RegisterWorldCommands` double-registering the same `CoreAiPrefabRegistryAsset` instance. Newer VContainer versions reject overlapping concrete/interface registrations with `Conflict implementation type`; the installer now keeps the combined `ICoreAiPrefabRegistry` / `CoreAiPrefabRegistryAsset` registration only.
+- Added `WorldCommandsInstallerEditModeTests` coverage for building a VContainer with world-command services and resolving both prefab registry contracts.
+
+#### Package **`2.5.1`** - dependency **`com.nexoider.coreai` `2.5.1`**.
+
 ## [2.5.0] - 2026-05-24
 
 ### Options + ScriptableObject Wrapper Rule

@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.5.0: ScriptableObject assets are wrappers over portable Options/snapshots; runtime tests can use plain classes without SO reflection.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.5.1: fixes VContainer prefab registry registration and keeps ScriptableObject wrapper/options contracts.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "2.5.0"
+    "com.nexoider.coreai": "2.5.1"
   }
 }

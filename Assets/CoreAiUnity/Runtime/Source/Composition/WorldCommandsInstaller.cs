@@ -4,7 +4,6 @@ using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Infrastructure.World;
-using CoreAI.Infrastructure.Lua;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -25,7 +24,6 @@ namespace CoreAI.Composition
         {
             CoreAiPrefabRegistryAsset registry =
                 worldPrefabRegistry != null ? worldPrefabRegistry : ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
-            builder.RegisterInstance(registry);
             builder.RegisterInstance<ICoreAiPrefabRegistry, CoreAiPrefabRegistryAsset>(registry);
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton)
