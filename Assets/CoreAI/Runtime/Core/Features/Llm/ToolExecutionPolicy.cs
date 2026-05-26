@@ -277,7 +277,7 @@ namespace CoreAI.Infrastructure.Llm
                         // Tool-level timeout fired, not outer cancellation
                         sw.Stop();
                         string timeoutMsg = $"Error: Tool '{fc.Name}' timed out after {toolTimeoutMs}ms";
-                        _logger.Warn($"[ToolPolicy] вЏ± {timeoutMsg}", LogTag.Llm);
+                        _logger.Warn($"[ToolPolicy] Timeout: {timeoutMsg}", LogTag.Llm);
                         _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
                         _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
                             "timeout"));
@@ -519,7 +519,7 @@ namespace CoreAI.Infrastructure.Llm
         public MEAI.ChatResponse BuildMaxErrorsResponse()
         {
             _logger.Warn(
-                $"[ToolPolicy] вљ  Max consecutive errors ({_maxConsecutiveErrors}), stopping.", LogTag.Llm);
+                $"[ToolPolicy] Max consecutive errors ({_maxConsecutiveErrors}) reached, stopping.", LogTag.Llm);
 
             return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
                 "{\"error\":\"Agent aborted due to hitting maximum consecutive tool processing errors.\"}"))
