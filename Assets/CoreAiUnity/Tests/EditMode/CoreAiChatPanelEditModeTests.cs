@@ -1,8 +1,10 @@
 using CoreAI.Chat;
 using NUnit.Framework;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -225,6 +227,166 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [Test]
+        public void LongRequestHint_WhenSendingWithoutStreaming_ShowsAfterDelay()
+        {
+            GameObject go = new("CoreAiChatPanel_LongRequestHint_NonStreaming_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                Label hint = new();
+                hint.style.display = DisplayStyle.None;
+
+                SetPrivateField(panel, "_longRequestHint", hint);
+                SetPrivateField(panel, "_longRequestHintArmedSince", Time.realtimeSinceStartup - 5f);
+                SetPrivateField(panel, "_isSending", true);
+                SetPrivateField(panel, "_isStreaming", false);
+
+                InvokePrivate(panel, "TickLongRequestHint");
+
+                Assert.AreEqual(DisplayStyle.Flex, hint.style.display.value);
+                StringAssert.Contains("Response is still being generated", hint.text);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void LongRequestHint_WhenStreamingActive_ClearsAndStaysHidden()
+        {
+            GameObject go = new("CoreAiChatPanel_LongRequestHint_Streaming_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                Label hint = new("old hint");
+                hint.style.display = DisplayStyle.Flex;
+
+                SetPrivateField(panel, "_longRequestHint", hint);
+                SetPrivateField(panel, "_longRequestHintArmedSince", Time.realtimeSinceStartup - 5f);
+                SetPrivateField(panel, "_isSending", true);
+                SetPrivateField(panel, "_isStreaming", true);
+
+                InvokePrivate(panel, "TickLongRequestHint");
+
+                Assert.AreEqual(DisplayStyle.None, hint.style.display.value);
+                Assert.AreEqual(string.Empty, hint.text);
+                Assert.AreEqual(-1f, GetPrivateField<float>(panel, "_longRequestHintArmedSince"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void StartStreaming_ClearsLongRequestHintImmediately()
+        {
+            GameObject go = new("CoreAiChatPanel_StartStreaming_LongRequestHint_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                Label hint = new("old hint");
+                hint.style.display = DisplayStyle.Flex;
+
+                SetPrivateField(panel, "_longRequestHint", hint);
+                SetPrivateField(panel, "_longRequestHintArmedSince", Time.realtimeSinceStartup - 5f);
+                SetPrivateField(panel, "_isSending", true);
+
+                InvokePrivate(panel, "StartStreaming");
+
+                Assert.AreEqual(DisplayStyle.None, hint.style.display.value);
+                Assert.AreEqual(string.Empty, hint.text);
+                Assert.AreEqual(-1f, GetPrivateField<float>(panel, "_longRequestHintArmedSince"));
+                Assert.IsTrue(GetPrivateField<bool>(panel, "_isStreaming"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void RuntimeHotkeyOverrides_ControlEffectiveProperties()
+        {
+            GameObject go = new("CoreAiChatPanel_RuntimeHotkeyOverrides_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                panel.SetRuntimeOptions(new CoreAiChatOptions
+                {
+                    RoleId = "Teacher",
+                    EnableOpenChatKeyboardShortcut = false,
+                    EnableEscapeChatShortcuts = true
+                });
+
+                Assert.IsFalse(panel.EffectiveOpenChatKeyboardShortcutEnabled);
+                Assert.AreEqual(KeyCode.C, panel.EffectiveOpenChatHotkey);
+                Assert.IsTrue(panel.EffectiveEscapeChatShortcutsEnabled);
+
+                panel.SetRuntimeOpenChatKeyboardShortcutEnabled(true);
+                panel.SetRuntimeOpenChatHotkey(KeyCode.X);
+                panel.SetRuntimeEscapeChatShortcutsEnabled(false);
+
+                Assert.IsTrue(panel.EffectiveOpenChatKeyboardShortcutEnabled);
+                Assert.AreEqual(KeyCode.X, panel.EffectiveOpenChatHotkey);
+                Assert.IsFalse(panel.EffectiveEscapeChatShortcutsEnabled);
+
+                panel.SetRuntimeOpenChatKeyboardShortcutEnabled(null);
+                panel.SetRuntimeOpenChatHotkey(null);
+                panel.SetRuntimeEscapeChatShortcutsEnabled(null);
+
+                Assert.IsFalse(panel.EffectiveOpenChatKeyboardShortcutEnabled);
+                Assert.AreEqual(KeyCode.C, panel.EffectiveOpenChatHotkey);
+                Assert.IsTrue(panel.EffectiveEscapeChatShortcutsEnabled);
+
+                panel.SetRuntimeOpenChatKeyboardShortcutEnabled(false);
+                panel.SetRuntimeOpenChatHotkey(KeyCode.F);
+                panel.SetRuntimeEscapeChatShortcutsEnabled(false);
+                panel.ClearRuntimeHotkeyOverrides();
+
+                Assert.IsFalse(panel.EffectiveOpenChatKeyboardShortcutEnabled);
+                Assert.AreEqual(KeyCode.C, panel.EffectiveOpenChatHotkey);
+                Assert.IsTrue(panel.EffectiveEscapeChatShortcutsEnabled);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void SetCollapsed_UpdatesStateAndNotifiesOverrideHook()
+        {
+            GameObject go = new("CoreAiChatPanel_SetCollapsed_Test");
+            try
+            {
+                TestableCollapsedPanel panel = go.AddComponent<TestableCollapsedPanel>();
+
+                panel.SetCollapsed(true, false);
+                panel.SetCollapsed(false, false);
+
+                Assert.IsFalse(panel.IsCollapsed);
+                CollectionAssert.AreEqual(new[] { true, false }, panel.CollapsedChanges);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        private sealed class TestableCollapsedPanel : CoreAiChatPanel
+        {
+            public readonly List<bool> CollapsedChanges = new();
+
+            protected override void OnCollapsedStateChanged(bool collapsed)
+            {
+                CollapsedChanges.Add(collapsed);
+                base.OnCollapsedStateChanged(collapsed);
+            }
+        }
+
         private static void SetPrivateField<T>(CoreAiChatPanel panel, string fieldName, T value)
         {
             typeof(CoreAiChatPanel)
@@ -237,6 +399,13 @@ namespace CoreAI.Tests.EditMode
             return (T)typeof(CoreAiChatPanel)
                 .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
                 .GetValue(panel);
+        }
+
+        private static void InvokePrivate(CoreAiChatPanel panel, string methodName)
+        {
+            typeof(CoreAiChatPanel)
+                .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.Invoke(panel, null);
         }
     }
 }

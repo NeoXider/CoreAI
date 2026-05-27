@@ -128,7 +128,7 @@ Assets/CoreAiUnity/Scenes/_mainCoreAI.unity
 
 ### 4.3 Configure CoreAISettings
 
-1. In the Project window find: `Assets/CoreAiUnity/Resources/CoreAISettings.asset`
+1. In the Project window find: `Assets/Resources/CoreAISettings.asset`
 2. Or create: **Create → CoreAI → CoreAI Settings**
 3. In the Inspector configure:
 

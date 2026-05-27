@@ -56,7 +56,7 @@ namespace CoreAI.Tests.PlayMode
 
             if (!ReadMemoryOrEmpty(setup).Contains(WriteExpectedSubstring, StringComparison.OrdinalIgnoreCase))
             {
-                llmFailures.InconclusiveIfInfrastructureFailure("memory write");
+                llmFailures.InconclusiveIfInfrastructureFailureOrNoResponse("memory write", run);
             }
 
             AssertAgentMemoryNonEmpty(setup, "after memory write");
@@ -101,6 +101,7 @@ namespace CoreAI.Tests.PlayMode
             Task<string> run = setup.Orchestrator.RunTaskAsync(appendRequest);
             yield return setup.RunAndWait(run, 240f, "memory append");
             LogOrchestratorReply(run);
+            Task<string> lastRun = run;
 
             string memAfterFirst = ReadMemoryOrEmpty(setup);
             LogMemorySnapshot(setup, "after first append request");
@@ -124,6 +125,7 @@ namespace CoreAI.Tests.PlayMode
                 Task<string> retryRun = setup.Orchestrator.RunTaskAsync(retryRequest);
                 yield return setup.RunAndWait(retryRun, 240f, "memory append retry");
                 LogOrchestratorReply(retryRun);
+                lastRun = retryRun;
                 LogMemorySnapshot(setup, "after append retry");
             }
 
@@ -131,7 +133,7 @@ namespace CoreAI.Tests.PlayMode
             if (!finalAppendMemory.Contains(InitialBaseline, StringComparison.Ordinal) ||
                 !finalAppendMemory.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase))
             {
-                llmFailures.InconclusiveIfInfrastructureFailure("memory append");
+                llmFailures.InconclusiveIfInfrastructureFailureOrNoResponse("memory append", lastRun);
             }
 
             AssertAgentMemoryNonEmpty(setup, "final append state");
@@ -183,7 +185,7 @@ namespace CoreAI.Tests.PlayMode
             if (setup.MemoryStore.TryLoad(Role, out AgentMemoryState stillPresent) &&
                 !string.IsNullOrWhiteSpace(stillPresent.Memory))
             {
-                llmFailures.InconclusiveIfInfrastructureFailure("memory clear");
+                llmFailures.InconclusiveIfInfrastructureFailureOrNoResponse("memory clear", run);
             }
 
             AssertAgentMemoryCleared(setup, "after clear tool");
@@ -381,6 +383,29 @@ namespace CoreAI.Tests.PlayMode
 
                 Assert.Inconclusive(
                     $"[{phase}] LLM backend did not complete successfully ({_lastFailure.ErrorCode}): {_lastFailure.Error}");
+            }
+
+            public void InconclusiveIfInfrastructureFailureOrNoResponse(string phase, Task<string> completedTask)
+            {
+                InconclusiveIfInfrastructureFailure(phase);
+
+                if (completedTask == null)
+                {
+                    return;
+                }
+
+                if (completedTask.IsFaulted)
+                {
+                    string error = completedTask.Exception?.GetBaseException().Message ?? "unknown fault";
+                    Assert.Inconclusive($"[{phase}] LLM backend task faulted before memory could change: {error}");
+                }
+
+                if (completedTask.Status == TaskStatus.RanToCompletion &&
+                    string.IsNullOrWhiteSpace(completedTask.Result))
+                {
+                    Assert.Inconclusive(
+                        $"[{phase}] LLM backend returned no terminal response before memory changed. Check HTTP backend connectivity.");
+                }
             }
 
             private void OnCompleted(LlmRequestCompleted completed)

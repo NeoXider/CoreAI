@@ -2,6 +2,19 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.5.3] - 2026-05-27
+
+### WebGL chat stop cancellation
+
+- Hardened `CoreAiChatPanel` user-stop handling: `SendToAIFromUiAsync` now observes user-triggered `OperationCanceledException`, and `StopActiveGeneration` / `StopAgent` guard cancellation callback failures.
+- This keeps the stop button path aligned with the existing `RunAgentTurnAsync` cancellation handling and avoids browser-side `Uncaught undefined` crashes when the user stops a generation around streaming/completion boundaries.
+- Cleared `coreai-long-request-hint` as soon as streaming starts and prevented it from reappearing while a streaming bubble is active, so the long-wait timer is only shown before the assistant begins responding.
+- Hardened `UnityMainThreadLlmAsyncMarshaler` Play Mode detection in the Unity Test Runner by priming the Editor play-state mirror from `EditorApplication.update`, not only `Application.onBeforeRender`.
+- LLM memory verification tests now report external HTTP backend no-response cases as inconclusive instead of failing later memory assertions after the orchestrator returns an empty terminal string.
+- Aligned LM Studio local-server documentation, presets, resource assets, and `CoreAISettingsAsset` resource-loading tests with the active loopback endpoint `http://127.0.0.1:1234/v1` and `qwen3.5-4b`.
+
+#### Package **`2.5.3`** - dependency **`com.nexoider.coreai` `2.5.3`**.
+
 ## [2.5.1] - 2026-05-25
 
 ### VContainer prefab registry registration
@@ -21,6 +34,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Tightened crafting and multi-agent PlayMode scenarios to assert real completed `execute_lua` tool calls instead of accepting assistant prose or synthetic fallback names as successful execution.
 - Tightened AINpc and self-service skill PlayMode scenarios to assert real completed `memory`, `read_skill`, and `call_skill_tool` lifecycle events plus domain side effects, instead of accepting textual tool-call attempts as success.
 - Replaced the Unity MEAI tool-binding reflection fallback (`CreateAIFunction` duck typing) with explicit `IAIFunctionLlmTool` / `IAIFunctionsLlmTool` contracts for built-in tools.
+
+### Settings preset coverage
+
+- Added focused EditMode regression tests for `CoreAISettingsAsset` resource loading and provider presets in `Assets/CoreAiUnity/Tests/EditMode/CoreAISettingsAssetEditModeTests.cs`.
+- Added preset smoke coverage for `Assets/Resources/{open,minmaxFree,grok}.preset` application (`Preset.ApplyTo`) and kept `COREAI_SETTINGS.md` updated with provider preset guidance.
 
 #### Package **`2.5.1`** - dependency **`com.nexoider.coreai` `2.5.1`**.
 

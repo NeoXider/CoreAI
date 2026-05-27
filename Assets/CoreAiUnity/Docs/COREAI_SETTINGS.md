@@ -12,7 +12,7 @@ A **ScriptableObject singleton** for LLM API, LLMUnity, and all CoreAI parameter
 Unity → Create → CoreAI → CoreAI Settings
 ```
 
-Save as `CoreAISettings` (or use `Assets/CoreAiUnity/Resources/CoreAISettings.asset` by default).
+Save as `CoreAISettings` (or use `Assets/Resources/CoreAISettings.asset` by default).
 
 ### 2. Open settings
 
@@ -47,6 +47,16 @@ ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJ
 ```
 
 CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings.
+
+### Preset-based setup (Resources)
+
+Three `.preset` files in `Assets/Resources` map quick provider profiles to `CoreAISettingsAsset`:
+
+- `open.preset` → `nvidia/nemotron-3-super-120b-a12b:free` (default no context-compaction)
+- `minmaxFree.preset` → `minimax/minimax-m2.5:free` (default no context-compaction)
+- `grok.preset` → `x-ai/grok-4.1-fast` (context compaction enabled)
+
+To apply from the inspector, select `CoreAISettings` and use the preset apply path. This keeps manual edits aligned with source preset values and is useful for smoke-testing provider presets in CI/automated checks.
 
 Legacy **LLM Backend** still maps to modes for existing scenes:
 
@@ -430,7 +440,7 @@ Priority:
 
 Starting **v1.5.12**, **`CoreAISettingsAsset`** binds **`ToolInvocationMarshaler`** to **`UnityMainThreadLlmAsyncMarshaler`**. Portable **`ToolExecutionPolicy`** invokes every MEAI **`AIFunction.InvokeAsync`** via **`ICoreAISettings.ToolInvocationMarshaler`** — there is **no Inspector field** for this. Non-Unity hosts keep the portable default (**`PassThroughLlmAsyncMarshaler`**).
 
-Since **v1.5.14**, in **`UNITY_EDITOR`** while **`Application.isPlaying` is false**, **`UnityMainThreadLlmAsyncMarshaler`** skips **`SwitchToMainThread`** and executes the MEAI tool body on the invoking continuation (typically the thread pool). This avoids **deadlocks** when Edit Mode tests (or tooling) block Unity’s managed main thread on **`Task.Wait()`** / **`Task.Result`** while MEAI **`ConfigureAwait(false)`** chains continue off-thread — the player loop is not pumped while blocked. Built players and Unity **Play Mode** still marshal tool bodies to **`PlayerLoopTiming.Update`**. Automated coverage: **`UnityMainThreadLlmAsyncMarshalerEditModeTests`**.
+Since **v1.5.14**, in **`UNITY_EDITOR`** while **`Application.isPlaying` is false**, **`UnityMainThreadLlmAsyncMarshaler`** skips **`SwitchToMainThread`** and executes the MEAI tool body on the invoking continuation (typically the thread pool). This avoids **deadlocks** when Edit Mode tests (or tooling) block Unity’s managed main thread on **`Task.Wait()`** / **`Task.Result`** while MEAI **`ConfigureAwait(false)`** chains continue off-thread — the player loop is not pumped while blocked. Built players and Unity **Play Mode** still marshal tool bodies to **`PlayerLoopTiming.Update`**. In the Editor, Play Mode detection is mirrored from main-thread callbacks (`RuntimeInitializeOnLoadMethod`, `Application.onBeforeRender`, and `EditorApplication.update`) so worker-thread MEAI continuations do not read Unity APIs directly. Automated coverage: **`UnityMainThreadLlmAsyncMarshalerEditModeTests`** and **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`**.
 
 **HTTP client:** **`MeaiOpenAiChatClient`** in portable **`CoreAI.Core`** uses **`System.Net.Http.HttpClient`** (no **`UnityWebRequest`**). **`await`** does not force **`ConfigureAwait(false)`**, so on hosts with a Unity synchronization context the continuation can stay main-thread bound when appropriate.
 

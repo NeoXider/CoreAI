@@ -38,7 +38,7 @@ Preset:
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: apiBaseUrl
-    value: http://192.168.1.154:1234/v1
+    value: http://127.0.0.1:1234/v1
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: apiKey
@@ -46,7 +46,7 @@ Preset:
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: modelName
-    value: qwen/qwen3.6-27b
+    value: qwen3.5-4b
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: temperature

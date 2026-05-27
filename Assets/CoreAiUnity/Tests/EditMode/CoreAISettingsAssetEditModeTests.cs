@@ -4,6 +4,7 @@ using CoreAI.Config;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.Presets;
 using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
@@ -217,11 +218,56 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Singleton_ShouldLoadFromResources()
         {
-            // Если есть Resources/CoreAISettings.asset — он загрузится
-            // Если нет — вернётся null
-            CoreAISettingsAsset instance = CoreAISettingsAsset.Instance;
-            // Не Assert.IsNull — может быть загружен из Resources
             CoreAISettingsAsset.ResetInstance();
+
+            CoreAISettingsAsset instance = CoreAISettingsAsset.Instance;
+
+            Assert.IsNotNull(instance, "Expected Resources/CoreAISettings.asset to be loadable in tests.");
+            Assert.AreEqual("CoreAISettings", instance.name);
+            Assert.AreEqual(LlmBackendType.OpenAiHttp, instance.BackendType);
+            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, instance.ExecutionMode);
+            Assert.AreEqual("http://127.0.0.1:1234/v1", instance.ApiBaseUrl);
+            Assert.AreEqual("qwen3.5-4b", instance.ModelName);
+            Assert.AreEqual(240, instance.RequestTimeoutSeconds);
+            Assert.AreEqual(512, instance.MaxTokens);
+            Assert.AreEqual(2, instance.MaxLlmRequestRetries);
+            Assert.AreEqual(50000, instance.ContextWindowTokens);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(instance.ApiKey));
+
+            CoreAISettingsAsset.ResetInstance();
+        }
+
+        [TestCase("grok", "x-ai/grok-4.1-fast", true)]
+        [TestCase("open", "nvidia/nemotron-3-super-120b-a12b:free", false)]
+        [TestCase("minmaxFree", "minimax/minimax-m2.5:free", false)]
+        public void Preset_ShouldApplyProviderOverrides(string presetFile, string expectedModel, bool expectedLlmContextCompaction)
+        {
+            Preset preset = LoadPreset(presetFile);
+
+            CoreAISettingsAsset configured = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            preset.ApplyTo(configured);
+
+            Assert.AreEqual(LlmBackendType.OpenAiHttp, configured.BackendType);
+            Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, configured.ExecutionMode);
+            Assert.AreEqual("https://openrouter.ai/api/v1", configured.ApiBaseUrl);
+            Assert.AreEqual(expectedModel, configured.ModelName);
+            Assert.AreEqual(2048, configured.MaxTokens);
+            Assert.AreEqual(120, configured.RequestTimeoutSeconds);
+            Assert.AreEqual(2, configured.MaxLlmRequestRetries);
+            Assert.AreEqual(50000, configured.ContextWindowTokens);
+            Assert.AreEqual(expectedLlmContextCompaction, configured.EnableLlmContextCompaction);
+            Assert.IsTrue(configured.EnableStreaming);
+            Assert.IsTrue(configured.WebGlNativeStreaming);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(configured.ApiKey));
+
+            Object.DestroyImmediate(configured);
+        }
+
+        private static Preset LoadPreset(string presetFile)
+        {
+            Preset preset = AssetDatabase.LoadAssetAtPath<Preset>($"Assets/Resources/{presetFile}.preset");
+            Assert.IsNotNull(preset, $"Preset file '{presetFile}.preset' should be present at Assets/Resources.");
+            return preset;
         }
 
         [Test]

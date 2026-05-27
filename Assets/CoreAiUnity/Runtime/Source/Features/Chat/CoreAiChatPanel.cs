@@ -903,7 +903,7 @@ namespace CoreAI.Chat
         /// </summary>
         private bool IsLongRequestHintBusy()
         {
-            return _isSending;
+            return _isSending && !_isStreaming;
         }
 
         private void ResetLongRequestHint()
@@ -1195,6 +1195,11 @@ namespace CoreAI.Chat
             try
             {
                 await RunAgentTurnAsync(userText, null, GetOrCreateCancellationTokenSource().Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // User stop/cancel is handled inside RunAgentTurnAsync when possible. Keep this
+                // fire-and-forget entry point from surfacing an unobserved task exception on WebGL.
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1815,8 +1820,17 @@ namespace CoreAI.Chat
                     }
                 }
 
-                // Cancel the active HTTP/streaming request
-                _activeRequestCts?.Cancel();
+                // Cancel the active HTTP/streaming request. On WebGL, cancellation callbacks can
+                // surface browser/JS-side exceptions; stop must never throw back into the UI loop.
+                try
+                {
+                    _activeRequestCts?.Cancel();
+                }
+                catch (Exception cancelEx)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
+                }
+
                 FinishStreaming();
                 HideTypingIndicator();
                 _isSending = false;
@@ -1945,6 +1959,7 @@ namespace CoreAI.Chat
         private void StartStreaming()
         {
             HideTypingIndicator();
+            ResetLongRequestHint();
             _isStreaming = true;
             RaiseBusyStateChangedIfChanged();
             _streamingLabel = null;
@@ -2126,7 +2141,15 @@ namespace CoreAI.Chat
             if (wasInProgress)
             {
                 // Force-reset the root CTS so any linked tokens are fully dead.
-                _cts?.Cancel();
+                try
+                {
+                    _cts?.Cancel();
+                }
+                catch (Exception cancelEx)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] StopAgent: root cancel failed: {cancelEx.Message}");
+                }
+
                 _cts?.Dispose();
                 _cts = new CancellationTokenSource();
 

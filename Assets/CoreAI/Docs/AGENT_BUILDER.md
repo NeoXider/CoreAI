@@ -1131,7 +1131,7 @@ This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
 Configure a secondary HTTP backend in Inspector (**🔄 Fallback Backend** section). When the primary backend fails, requests are automatically retried on the secondary:
 
 ```
-Primary: http://192.168.1.154:1234/v1 (local Qwen3.5-4B)
+Primary: http://127.0.0.1:1234/v1 (local Qwen3.5-4B)
 Secondary: https://api.openai.com/v1 (GPT-4o)
 
 Request → Primary fails (timeout/503) → Retry on Secondary → Success

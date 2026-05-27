@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## [v2.5.3] - 2026-05-27
+
+### Lockstep patch with CoreAI Unity
+
+- Bumped `com.nexoider.coreai` to `2.5.3` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- No portable runtime behavior change; the Unity fixes live in `com.nexoider.coreaiunity`.
+
 ## [v2.5.1] - 2026-05-25
 
 ### Lockstep patch with CoreAI Unity

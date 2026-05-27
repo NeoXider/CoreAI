@@ -94,6 +94,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             Application.onBeforeRender += UpdateEditorIsPlayingMirror;
+            EditorApplication.update += UpdateEditorIsPlayingMirrorFromEditorState;
             EditorApplication.playModeStateChanged += _ => UpdateEditorIsPlayingMirrorFromEditorState();
         }
 
