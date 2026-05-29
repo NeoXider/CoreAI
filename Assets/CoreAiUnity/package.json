@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.6.0: WebGL SSE stop/done handling, JS bridge self-tests, and explicit Lua WebGL guard.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.6.1: stop button cancellation no longer appends an error bubble and WebGL streaming continues past the first chunk.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "2.6.0"
+    "com.nexoider.coreai": "2.6.1"
   }
 }

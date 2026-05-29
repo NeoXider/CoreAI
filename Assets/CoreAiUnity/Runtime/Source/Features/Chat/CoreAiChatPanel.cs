@@ -1059,11 +1059,6 @@ namespace CoreAI.Chat
             return IsChatInputLocked(_isSending, _isStreaming, _isStopping, _isClearing);
         }
 
-        private bool CanStopActiveGeneration()
-        {
-            return IsRequestInProgress() && HasActiveRequestCancellationSource();
-        }
-
         internal static bool ShouldSubmitOnEnter(bool sendOnShiftEnter, bool shiftHeld)
         {
             return sendOnShiftEnter ? shiftHeld : !shiftHeld;
@@ -1078,13 +1073,9 @@ namespace CoreAI.Chat
         {
             if (IsRequestInProgress())
             {
-                if (stopIfBusy && CanStopActiveGeneration())
+                if (stopIfBusy)
                 {
                     StopActiveGeneration();
-                }
-                else if (stopIfBusy)
-                {
-                    ResetBusyStateWithoutCancellation();
                 }
 
                 return;
@@ -1291,10 +1282,13 @@ namespace CoreAI.Chat
                 FinishStreaming();
                 HideTypingIndicator();
                 ResetLongRequestHint();
-                string bubble = ResolveTimeoutMessage(_stopRequestedByUser);
-                if (!string.IsNullOrEmpty(bubble))
+                if (!_stopRequestedByUser)
                 {
-                    AddMessage(bubble, false);
+                    string bubble = ResolveTimeoutMessage(false);
+                    if (!string.IsNullOrEmpty(bubble))
+                    {
+                        AddMessage(bubble, false);
+                    }
                 }
 
                 return null;
@@ -1416,7 +1410,6 @@ namespace CoreAI.Chat
                         if (_stopRequestedByUser &&
                             string.Equals(chunk.Error, "cancelled", StringComparison.OrdinalIgnoreCase))
                         {
-                            AddMessage(Options.ErrorMessagePrefix + "Generation stopped.", false);
                             return null;
                         }
 
@@ -1611,7 +1604,7 @@ namespace CoreAI.Chat
         {
             if (stopRequestedByUser)
             {
-                return (Options.ErrorMessagePrefix ?? string.Empty) + "Generation stopped.";
+                return null;
             }
 
             return Options.TimeoutMessage ?? "Timeout.";
@@ -1820,16 +1813,6 @@ namespace CoreAI.Chat
                 string roleId = Options.RoleId ?? "SmartChat";
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
-                if (!IsCancellationSourceActive(activeRequestCts))
-                {
-                    _activeRequestCts = null;
-                    _stopRequestedByUser = false;
-                    FinishStreaming();
-                    HideTypingIndicator();
-                    _isSending = false;
-                    return;
-                }
-
                 // Cancel orchestrator tasks first
                 try
                 {
@@ -1850,24 +1833,32 @@ namespace CoreAI.Chat
 
                 // Cancel the active HTTP/streaming request. On WebGL, cancellation callbacks can
                 // surface browser/JS-side exceptions; stop must never throw back into the UI loop.
-                try
+                if (IsCancellationSourceActive(activeRequestCts))
                 {
-                    activeRequestCts.Cancel();
-                    if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+                    try
                     {
-                        _activeRequestCts = null;
+                        activeRequestCts.Cancel();
+                        if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+                        {
+                            _activeRequestCts = null;
+                        }
+                    }
+                    catch (Exception cancelEx)
+                    {
+                        if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+                        {
+                            _activeRequestCts = null;
+                        }
+
+                        Debug.LogWarning($"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
                     }
                 }
-                catch (Exception cancelEx)
+                else if (ReferenceEquals(_activeRequestCts, activeRequestCts))
                 {
-                    if (ReferenceEquals(_activeRequestCts, activeRequestCts))
-                    {
-                        _activeRequestCts = null;
-                    }
-
-                    Debug.LogWarning($"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
+                    _activeRequestCts = null;
                 }
 
+                CancelAndReplaceRootCancellationSource("StopActiveGeneration");
                 FinishStreaming();
                 HideTypingIndicator();
                 _isSending = false;
@@ -1878,11 +1869,6 @@ namespace CoreAI.Chat
                 UpdateControlButtonsState();
                 UpdateSendButtonVisualState();
             }
-        }
-
-        private bool HasActiveRequestCancellationSource()
-        {
-            return IsCancellationSourceActive(_activeRequestCts);
         }
 
         private static bool IsCancellationSourceActive(CancellationTokenSource source)
@@ -1900,6 +1886,53 @@ namespace CoreAI.Chat
             catch (ObjectDisposedException)
             {
                 return false;
+            }
+        }
+
+        private void CancelAndReplaceRootCancellationSource(string context)
+        {
+            CancellationTokenSource root = _cts;
+            if (root != null)
+            {
+                try
+                {
+                    root.Cancel();
+                }
+                catch (Exception cancelEx)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] {context}: root cancel failed: {cancelEx.Message}");
+                }
+
+                try
+                {
+                    root.Dispose();
+                }
+                catch (Exception disposeEx)
+                {
+                    Debug.LogWarning($"[CoreAiChatPanel] {context}: root dispose failed: {disposeEx.Message}");
+                }
+            }
+
+            if (ReferenceEquals(_cts, root) || _cts == null || IsCancellationRequested(_cts))
+            {
+                _cts = new CancellationTokenSource();
+            }
+        }
+
+        private static bool IsCancellationRequested(CancellationTokenSource source)
+        {
+            if (source == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return source.IsCancellationRequested;
+            }
+            catch (ObjectDisposedException)
+            {
+                return true;
             }
         }
 
@@ -2190,8 +2223,8 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Stops the active generation request and immediately restores the chat controls.
-        /// The unified stop path also marks the turn so the send handler can append the
-        /// user-cancelled system message.
+        /// The unified stop path leaves already streamed assistant text in place and does not append
+        /// an extra cancellation message.
         /// </summary>
         public void StopAgent()
         {
@@ -2200,24 +2233,10 @@ namespace CoreAI.Chat
 
             if (wasInProgress)
             {
-                // Force-reset the root CTS so any linked tokens are fully dead.
-                try
-                {
-                    _cts?.Cancel();
-                }
-                catch (Exception cancelEx)
-                {
-                    Debug.LogWarning($"[CoreAiChatPanel] StopAgent: root cancel failed: {cancelEx.Message}");
-                }
-
-                _cts?.Dispose();
-                _cts = new CancellationTokenSource();
-
                 FinishStreaming();
                 HideTypingIndicator();
                 _isSending = false;
 
-                // will display the stop message based on _stopRequestedByUser flag.
                 UpdateSendButtonVisualState();
             }
         }

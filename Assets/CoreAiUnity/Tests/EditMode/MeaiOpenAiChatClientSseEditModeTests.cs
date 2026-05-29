@@ -143,6 +143,30 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("hello", string.Concat(parts));
         }
 
+        [Test]
+        public async Task GetStreamingResponseAsync_AsyncChunkedReads_ContinuesAfterFirstChunk()
+        {
+            string[] chunks =
+            {
+                "data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            };
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new AsyncChunkedSseTransport(chunks));
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    parts.Add(update.Text);
+                }
+            }
+
+            Assert.AreEqual("AB", string.Concat(parts));
+        }
+
         private sealed class DoneSentinelTransport : IOpenAiHttpTransport
         {
             private readonly string _sse;
@@ -175,6 +199,85 @@ namespace CoreAI.Tests.EditMode
 
                 return Task.FromResult(result.WithRawStream(new ThrowsAfterPayloadStream(_sse)));
             }
+        }
+
+        private sealed class AsyncChunkedSseTransport : IOpenAiHttpTransport
+        {
+            private readonly IReadOnlyList<string> _chunks;
+
+            public AsyncChunkedSseTransport(IReadOnlyList<string> chunks)
+            {
+                _chunks = chunks;
+            }
+
+            public string DebugLabel => "AsyncChunked";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException();
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+
+                return Task.FromResult(result.WithRawStream(new AsyncChunkedReadStream(_chunks)));
+            }
+        }
+
+        private sealed class AsyncChunkedReadStream : Stream
+        {
+            private readonly Queue<byte[]> _chunks;
+
+            public AsyncChunkedReadStream(IEnumerable<string> chunks)
+            {
+                _chunks = new Queue<byte[]>(chunks.Select(Encoding.UTF8.GetBytes));
+            }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
+                CancellationToken cancellationToken)
+            {
+                await Task.Yield();
+                cancellationToken.ThrowIfCancellationRequested();
+                return Read(buffer, offset, count);
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                if (_chunks.Count == 0)
+                {
+                    return 0;
+                }
+
+                byte[] chunk = _chunks.Dequeue();
+                int toCopy = Math.Min(count, chunk.Length);
+                Array.Copy(chunk, 0, buffer, offset, toCopy);
+                return toCopy;
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
         private sealed class ThrowsAfterPayloadStream : Stream

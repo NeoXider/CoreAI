@@ -253,6 +253,33 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void StopButton_WhenRequestBusyBeforeActiveRequestCts_CancelsRootAndUnlocksUiState()
+        {
+            GameObject go = new("CoreAiChatPanel_StopButton_PreRequestCts_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                CancellationTokenSource rootCts = new();
+
+                SetPrivateField(panel, "_cts", rootCts);
+                SetPrivateField(panel, "_isSending", true);
+                SetPrivateField<CancellationTokenSource>(panel, "_activeRequestCts", null);
+
+                Assert.DoesNotThrow(() => InvokePrivate(panel, "TrySendInput", true));
+
+                Assert.IsTrue(rootCts.IsCancellationRequested);
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isSending"));
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isStreaming"));
+                Assert.IsNotNull(GetPrivateField<CancellationTokenSource>(panel, "_cts"));
+                Assert.AreNotSame(rootCts, GetPrivateField<CancellationTokenSource>(panel, "_cts"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public void LongRequestHint_WhenSendingWithoutStreaming_ShowsAfterDelay()
         {
             GameObject go = new("CoreAiChatPanel_LongRequestHint_NonStreaming_Test");
@@ -431,6 +458,13 @@ namespace CoreAI.Tests.EditMode
             typeof(CoreAiChatPanel)
                 .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.Invoke(panel, null);
+        }
+
+        private static void InvokePrivate(CoreAiChatPanel panel, string methodName, params object[] args)
+        {
+            typeof(CoreAiChatPanel)
+                .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.Invoke(panel, args);
         }
     }
 }

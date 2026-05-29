@@ -19,7 +19,7 @@ namespace CoreAI.Tests.EditMode
         {
             protected override string ResolveTimeoutMessage(bool stopRequestedByUser)
             {
-                return stopRequestedByUser ? base.ResolveTimeoutMessage(true) : null;
+                return stopRequestedByUser ? "custom stop" : null;
             }
         }
 
@@ -29,6 +29,15 @@ namespace CoreAI.Tests.EditMode
             GameObject go = new();
             PanelProbe panel = go.AddComponent<PanelProbe>();
             Assert.AreEqual("Timeout.", panel.Call(false));
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void ResolveTimeoutMessage_Default_StopBranch_DoesNotAppendChatBubble()
+        {
+            GameObject go = new();
+            PanelProbe panel = go.AddComponent<PanelProbe>();
+            Assert.IsNull(panel.Call(true));
             Object.DestroyImmediate(go);
         }
 

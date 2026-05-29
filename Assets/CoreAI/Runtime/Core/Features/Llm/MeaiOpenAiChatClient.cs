@@ -391,8 +391,7 @@ namespace CoreAI.Infrastructure.Llm
                                 foreach (string piece in SplitForSmoothStreaming(updateText))
                                 {
                                     yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, piece);
-                                    // must run via UnitySynchronizationContext to come back at all.
-                                    await Task.Delay(15, cancellationToken);
+                                    await DelayBetweenSyntheticStreamPiecesAsync(cancellationToken);
                                 }
                             }
                             else
@@ -462,6 +461,18 @@ namespace CoreAI.Infrastructure.Llm
                 yield return text.Substring(i, end - i);
                 i = end;
             }
+        }
+
+        private static Task DelayBetweenSyntheticStreamPiecesAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // Browser WebGL has no reliable worker ThreadPool. A timer-based Task.Delay here can
+            // leave a synthetic split delta stuck after the first visible piece on some builds.
+            return Task.CompletedTask;
+#else
+            return Task.Delay(15, cancellationToken);
+#endif
         }
 
         /// <summary>

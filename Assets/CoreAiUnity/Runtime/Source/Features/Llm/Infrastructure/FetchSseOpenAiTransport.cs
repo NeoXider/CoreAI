@@ -45,23 +45,19 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             int id = Interlocked.Increment(ref _nextId);
             StreamState state = new StreamState(id);
             States[id] = state;
 
-            using CancellationTokenRegistration ctReg = cancellationToken.Register(() =>
+            state.AttachCancellation(cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
             {
-                try
-                {
-                    CoreAi_FetchSseAbort(id);
-                }
-                catch
-                {
-                    // Browser abort must not throw back into the Unity cancellation path.
-                }
-
-                state.SignalCancelled(cancellationToken);
-            });
+                States.TryRemove(id, out _);
+                state.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
 
             string headers = BuildHeaderString(request.Headers);
             string credentialsMode = _sameOriginCredentials ? "same-origin" : "omit";
@@ -251,6 +247,7 @@ namespace CoreAI.Infrastructure.Llm
             private readonly ConcurrentQueue<string> _queue = new();
             private readonly AutoResetEvent _signal = new AutoResetEvent(false);
             private readonly FetchSseStream _stream;
+            private CancellationTokenRegistration _cancelRegistration;
             private bool _cancelled;
 
             public int CallId { get; }
@@ -262,6 +259,28 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             public Task<OpenInfo> WaitForOpenAsync() => _openTcs.Task;
+
+            public void AttachCancellation(CancellationToken cancellationToken)
+            {
+                if (!cancellationToken.CanBeCanceled)
+                {
+                    return;
+                }
+
+                _cancelRegistration = cancellationToken.Register(() =>
+                {
+                    try
+                    {
+                        CoreAi_FetchSseAbort(CallId);
+                    }
+                    catch
+                    {
+                        // Browser abort must not throw back into the Unity cancellation path.
+                    }
+
+                    SignalCancelled(cancellationToken);
+                });
+            }
 
             public void SignalOpen(int status, string errorBody, string headersFlat)
             {
@@ -326,6 +345,7 @@ namespace CoreAI.Infrastructure.Llm
 
             public void Dispose()
             {
+                try { _cancelRegistration.Dispose(); } catch { }
                 try { _signal.Set(); } catch { }
                 try { _signal.Dispose(); } catch { }
             }
