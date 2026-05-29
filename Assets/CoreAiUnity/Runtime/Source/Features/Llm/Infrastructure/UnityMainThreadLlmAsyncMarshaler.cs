@@ -44,6 +44,8 @@ namespace CoreAI.Infrastructure.Llm
 
         private static volatile int _editorMirroredUnityMainManagedThreadId = -1;
 
+        private static volatile int _editorRuntimePlayModeEntered;
+
         private static int _editorMirrorHooked;
 
         [InitializeOnLoad]
@@ -61,6 +63,7 @@ namespace CoreAI.Infrastructure.Llm
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
             private static void Register()
             {
+                MarkEditorRuntimePlayModeEntered();
                 EnsureEditorIsPlayingMirrorHook();
             }
         }
@@ -74,6 +77,7 @@ namespace CoreAI.Infrastructure.Llm
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
             private static void PrimeBeforeSceneLoad()
             {
+                MarkEditorRuntimePlayModeEntered();
                 EnsureEditorIsPlayingMirrorHook();
                 UpdateEditorIsPlayingMirrorFromEditorState();
             }
@@ -81,6 +85,7 @@ namespace CoreAI.Infrastructure.Llm
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
             private static void PrimeAfterSceneLoad()
             {
+                MarkEditorRuntimePlayModeEntered();
                 EnsureEditorIsPlayingMirrorHook();
                 UpdateEditorIsPlayingMirrorFromEditorState();
             }
@@ -95,7 +100,7 @@ namespace CoreAI.Infrastructure.Llm
 
             Application.onBeforeRender += UpdateEditorIsPlayingMirror;
             EditorApplication.update += UpdateEditorIsPlayingMirrorFromEditorState;
-            EditorApplication.playModeStateChanged += _ => UpdateEditorIsPlayingMirrorFromEditorState();
+            EditorApplication.playModeStateChanged += UpdateEditorPlayModeStateMirror;
         }
 
         private static void UpdateEditorIsPlayingMirror()
@@ -103,7 +108,12 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
-                Volatile.Write(ref _editorMirrorIsPlaying, Application.isPlaying ? 1 : 0);
+                bool isPlaying = Application.isPlaying;
+                Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
+                if (isPlaying)
+                {
+                    Volatile.Write(ref _editorRuntimePlayModeEntered, 1);
+                }
             }
             catch
             {
@@ -115,11 +125,36 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
-                Volatile.Write(ref _editorMirrorIsPlaying, EditorApplication.isPlaying ? 1 : 0);
+                bool isPlaying = EditorApplication.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode;
+                Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
+                if (isPlaying)
+                {
+                    Volatile.Write(ref _editorRuntimePlayModeEntered, 1);
+                }
             }
             catch
             {
             }
+        }
+
+        private static void UpdateEditorPlayModeStateMirror(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.EnteredPlayMode || state == PlayModeStateChange.ExitingEditMode)
+            {
+                MarkEditorRuntimePlayModeEntered();
+            }
+            else if (state == PlayModeStateChange.ExitingPlayMode || state == PlayModeStateChange.EnteredEditMode)
+            {
+                Volatile.Write(ref _editorRuntimePlayModeEntered, 0);
+            }
+
+            UpdateEditorIsPlayingMirrorFromEditorState();
+        }
+
+        private static void MarkEditorRuntimePlayModeEntered()
+        {
+            Volatile.Write(ref _editorRuntimePlayModeEntered, 1);
+            Volatile.Write(ref _editorMirrorIsPlaying, 1);
         }
 
         /// <summary>
@@ -147,6 +182,11 @@ namespace CoreAI.Infrastructure.Llm
             // Not confirmed Play (mirror != 1): inline on the pool. Treat unknown (-1) like Edit idle so
             // SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on the main thread) never deadlock.
             // Stale 0 while Play is mitigated by RuntimeInitialize primers + first-frame mirror updates.
+            if (Volatile.Read(ref _editorRuntimePlayModeEntered) == 1)
+            {
+                return false;
+            }
+
             if (IsEditorPlayingOrWillEnterPlayMode())
             {
                 return false;

@@ -128,7 +128,7 @@ mergeInto(LibraryManager.library, {
         return;
       }
 
-      // Headers received — let C# return its open result.
+      // Headers received - let C# return its open result.
       callOpen(status, '', hdrFlat, 'response');
 
       if (!response.body || typeof response.body.getReader !== 'function') {
