@@ -59,7 +59,7 @@ namespace CoreAI.Chat
         protected Label HeaderTitle;
         protected VisualElement HeaderIcon;
         private Label _longRequestHint;
-        private float _longRequestHintArmedSince = -1f;
+        private float _longRequestHintArmedSince = float.NaN;
         private const float LongRequestHintMinSeconds = 3f;
         private const string DefaultStreamingToolProgressHint = "Processing...";
 
@@ -754,9 +754,35 @@ namespace CoreAI.Chat
 
         // ===================== Input Handling =====================
 
+        private static void MarkInputEventHandled(EventBase evt)
+        {
+            evt.StopImmediatePropagation();
+
+            if (evt.target is VisualElement targetElement && targetElement.focusController != null)
+            {
+                targetElement.focusController.IgnoreEvent(evt);
+                return;
+            }
+
+            if (evt.currentTarget is VisualElement currentElement && currentElement.focusController != null)
+            {
+                currentElement.focusController.IgnoreEvent(evt);
+            }
+        }
+
         private void OnSendClicked(ClickEvent evt)
         {
-            TrySendInput(true);
+            MarkInputEventHandled(evt);
+
+            try
+            {
+                TrySendInput(true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[CoreAiChatPanel] Send/stop button handler failed: {ex.Message}");
+                ResetBusyStateWithoutCancellation();
+            }
         }
 
         private void OnInputKeyDown(KeyDownEvent evt)
@@ -782,8 +808,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            evt.StopImmediatePropagation();
-            evt.PreventDefault();
+            MarkInputEventHandled(evt);
 
             TrySendInput(false);
         }
@@ -794,16 +819,14 @@ namespace CoreAI.Chat
                 IsOpenChatHotkeyFromKeys(ResolvedOpenChatHotkey(), evt.keyCode, evt.character, evt.ctrlKey,
                     evt.commandKey, evt.altKey))
             {
-                evt.StopImmediatePropagation();
-                evt.PreventDefault();
+                MarkInputEventHandled(evt);
                 SetCollapsed(false, true);
                 return;
             }
 
             if (!IsCollapsed && IsEscapeChatShortcutEnabled() && IsEscape(evt))
             {
-                evt.StopImmediatePropagation();
-                evt.PreventDefault();
+                MarkInputEventHandled(evt);
                 if (IsRequestInProgress())
                 {
                     StopActiveGeneration();
@@ -865,7 +888,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            if (_longRequestHintArmedSince < 0f)
+            if (float.IsNaN(_longRequestHintArmedSince))
             {
                 _longRequestHintArmedSince = Time.realtimeSinceStartup;
             }
@@ -873,11 +896,7 @@ namespace CoreAI.Chat
             float elapsed = Time.realtimeSinceStartup - _longRequestHintArmedSince;
             if (elapsed < LongRequestHintMinSeconds)
             {
-                if (_longRequestHint.style.display != DisplayStyle.None)
-                {
-                    _longRequestHint.style.display = DisplayStyle.None;
-                }
-
+                _longRequestHint.style.display = DisplayStyle.None;
                 return;
             }
 
@@ -890,10 +909,7 @@ namespace CoreAI.Chat
 
             int sec = Mathf.Max((int)LongRequestHintMinSeconds, Mathf.FloorToInt(elapsed));
             _longRequestHint.text = tpl.Replace("{elapsed}", sec.ToString());
-            if (_longRequestHint.style.display != DisplayStyle.Flex)
-            {
-                _longRequestHint.style.display = DisplayStyle.Flex;
-            }
+            _longRequestHint.style.display = DisplayStyle.Flex;
         }
 
         /// <summary>
@@ -908,17 +924,13 @@ namespace CoreAI.Chat
 
         private void ResetLongRequestHint()
         {
-            _longRequestHintArmedSince = -1f;
+            _longRequestHintArmedSince = float.NaN;
             if (_longRequestHint == null)
             {
                 return;
             }
 
-            if (_longRequestHint.style.display != DisplayStyle.None)
-            {
-                _longRequestHint.style.display = DisplayStyle.None;
-            }
-
+            _longRequestHint.style.display = DisplayStyle.None;
             _longRequestHint.text = string.Empty;
         }
 
@@ -1049,7 +1061,7 @@ namespace CoreAI.Chat
 
         private bool CanStopActiveGeneration()
         {
-            return IsRequestInProgress();
+            return IsRequestInProgress() && HasActiveRequestCancellationSource();
         }
 
         internal static bool ShouldSubmitOnEnter(bool sendOnShiftEnter, bool shiftHeld)
@@ -1069,6 +1081,10 @@ namespace CoreAI.Chat
                 if (stopIfBusy && CanStopActiveGeneration())
                 {
                     StopActiveGeneration();
+                }
+                else if (stopIfBusy)
+                {
+                    ResetBusyStateWithoutCancellation();
                 }
 
                 return;
@@ -1345,7 +1361,8 @@ namespace CoreAI.Chat
             {
                 RoleId = roleId,
                 Hint = userText,
-                SourceTag = "Chat"
+                SourceTag = "Chat",
+                CancellationScope = roleId
             };
         }
 
@@ -1801,6 +1818,17 @@ namespace CoreAI.Chat
             {
                 _stopRequestedByUser = true;
                 string roleId = Options.RoleId ?? "SmartChat";
+                CancellationTokenSource activeRequestCts = _activeRequestCts;
+
+                if (!IsCancellationSourceActive(activeRequestCts))
+                {
+                    _activeRequestCts = null;
+                    _stopRequestedByUser = false;
+                    FinishStreaming();
+                    HideTypingIndicator();
+                    _isSending = false;
+                    return;
+                }
 
                 // Cancel orchestrator tasks first
                 try
@@ -1824,10 +1852,19 @@ namespace CoreAI.Chat
                 // surface browser/JS-side exceptions; stop must never throw back into the UI loop.
                 try
                 {
-                    _activeRequestCts?.Cancel();
+                    activeRequestCts.Cancel();
+                    if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+                    {
+                        _activeRequestCts = null;
+                    }
                 }
                 catch (Exception cancelEx)
                 {
+                    if (ReferenceEquals(_activeRequestCts, activeRequestCts))
+                    {
+                        _activeRequestCts = null;
+                    }
+
                     Debug.LogWarning($"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
                 }
 
@@ -1840,6 +1877,29 @@ namespace CoreAI.Chat
                 _isStopping = false;
                 UpdateControlButtonsState();
                 UpdateSendButtonVisualState();
+            }
+        }
+
+        private bool HasActiveRequestCancellationSource()
+        {
+            return IsCancellationSourceActive(_activeRequestCts);
+        }
+
+        private static bool IsCancellationSourceActive(CancellationTokenSource source)
+        {
+            if (source == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                _ = source.Token;
+                return !source.IsCancellationRequested;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
             }
         }
 

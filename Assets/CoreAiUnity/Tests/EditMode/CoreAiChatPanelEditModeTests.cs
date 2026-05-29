@@ -228,6 +228,31 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void StopAgent_WhenBusyFlagsAreStale_DoesNotThrowAndUnlocksUiState()
+        {
+            GameObject go = new("CoreAiChatPanel_StopAgent_Stale_Test");
+            try
+            {
+                CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
+                CancellationTokenSource activeRequestCts = new();
+                activeRequestCts.Dispose();
+
+                SetPrivateField(panel, "_isSending", true);
+                SetPrivateField(panel, "_isStreaming", true);
+                SetPrivateField(panel, "_activeRequestCts", activeRequestCts);
+
+                Assert.DoesNotThrow(panel.StopAgent);
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isSending"));
+                Assert.IsFalse(GetPrivateField<bool>(panel, "_isStreaming"));
+                Assert.IsNull(GetPrivateField<CancellationTokenSource>(panel, "_activeRequestCts"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public void LongRequestHint_WhenSendingWithoutStreaming_ShowsAfterDelay()
         {
             GameObject go = new("CoreAiChatPanel_LongRequestHint_NonStreaming_Test");
@@ -272,7 +297,7 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreEqual(DisplayStyle.None, hint.style.display.value);
                 Assert.AreEqual(string.Empty, hint.text);
-                Assert.AreEqual(-1f, GetPrivateField<float>(panel, "_longRequestHintArmedSince"));
+                Assert.IsTrue(float.IsNaN(GetPrivateField<float>(panel, "_longRequestHintArmedSince")));
             }
             finally
             {
@@ -298,7 +323,7 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreEqual(DisplayStyle.None, hint.style.display.value);
                 Assert.AreEqual(string.Empty, hint.text);
-                Assert.AreEqual(-1f, GetPrivateField<float>(panel, "_longRequestHintArmedSince"));
+                Assert.IsTrue(float.IsNaN(GetPrivateField<float>(panel, "_longRequestHintArmedSince")));
                 Assert.IsTrue(GetPrivateField<bool>(panel, "_isStreaming"));
             }
             finally

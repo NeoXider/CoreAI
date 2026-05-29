@@ -96,26 +96,15 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task WorldLlmTool_ExecuteAsync_UnknownAction_ReturnsError()
         {
-            bool oldLog = CoreAISettings.LogToolCallResults;
-            CoreAISettings.LogToolCallResults = true;
-            try
-            {
-                UnityEngine.TestTools.LogAssert.Expect(UnityEngine.LogType.Error,
-                    new System.Text.RegularExpressions.Regex(".*Unknown action: 'invalid_action'.*"));
-                TestWorldExecutor executor = new();
-                WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new Infrastructure.Logging.NullGameLogger());
 
-                string resultJson = await tool.ExecuteAsync("invalid_action");
-                WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+            string resultJson = await tool.ExecuteAsync("invalid_action");
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
 
-                Assert.IsFalse(result.Success);
-                Assert.IsTrue(result.Message.Contains("Unknown action"));
-            }
-            finally
-            {
-                CoreAISettings.LogToolCallResults = oldLog;
-            }
+            Assert.IsFalse(result.Success);
+            Assert.IsTrue(result.Message.Contains("Unknown action"));
         }
 
         // TODO: play_sound удалён из WorldLlmTool, будет реализован отдельно через IAudioController (на потом)

@@ -219,14 +219,64 @@ mergeInto(LibraryManager.library, {
     });
   },
 
+  CoreAi_FetchSseSelfTest__deps: ['$CoreAiSseFetchState'],
+  CoreAi_FetchSseSelfTest: function (callId, payloadPtr, onChunkPtr, onDonePtr, onErrorPtr) {
+    var payload = UTF8ToString(payloadPtr);
+
+    function utf8(s) { return stringToNewUTF8(s == null ? '' : s); }
+
+    function callChunk(text) {
+      try {
+        {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, utf8(text || ''));
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] self-test chunk callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
+    function callDone() {
+      try {
+        {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] self-test done callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
+    function callError(msg) {
+      try {
+        {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg || ''));
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] self-test error callback failed id=' + callId, callbackErr);
+      }
+    }
+
+    setTimeout(function () {
+      if (!callChunk(payload)) {
+        callError('self-test chunk callback failed');
+        return;
+      }
+
+      setTimeout(function () {
+        if (!callDone()) {
+          callError('self-test done callback failed');
+        }
+      }, 0);
+    }, 0);
+  },
+
   CoreAi_FetchSseAbort__deps: ['$CoreAiSseFetchState'],
   CoreAi_FetchSseAbort: function (callId) {
     var c = CoreAiSseFetchState.controllers[callId];
     CoreAiSseFetchState.abortReasons[callId] = 'cancelled';
-    try {
-      if (c && c.abort) c.abort();
-    } catch (err) {
-      console.warn('[CoreAiSseFetch] abort failed id=' + callId, err);
-    }
+    setTimeout(function () {
+      try {
+        if (c && c.abort) c.abort();
+      } catch (err) {
+        console.warn('[CoreAiSseFetch] abort failed id=' + callId, err);
+      }
+    }, 0);
   }
 });

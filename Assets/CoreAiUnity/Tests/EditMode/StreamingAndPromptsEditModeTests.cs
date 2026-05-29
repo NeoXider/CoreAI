@@ -165,7 +165,9 @@ namespace CoreAI.Tests.EditMode
         public void AgentConfig_ApplyToPolicy_NoPrompt_DoesNotRegister()
         {
             AgentBuilder builder = new AgentBuilder("NoPromptRole")
-                .WithMode(AgentMode.ChatOnly);
+            {
+                SuppressBuildWarnings = true
+            }.WithMode(AgentMode.ChatOnly);
 
             AgentConfig config = builder.Build();
             AgentMemoryPolicy policy = new();
@@ -306,8 +308,14 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             TestCoreAISettings settings = new() { EnableStreaming = true };
 
-            new AgentBuilder("SilentRole").WithStreaming(false).Build().ApplyToPolicy(policy);
-            new AgentBuilder("NoisyRole").WithStreaming(true).Build().ApplyToPolicy(policy);
+            new AgentBuilder("SilentRole") { SuppressBuildWarnings = true }
+                .WithStreaming(false)
+                .Build()
+                .ApplyToPolicy(policy);
+            new AgentBuilder("NoisyRole") { SuppressBuildWarnings = true }
+                .WithStreaming(true)
+                .Build()
+                .ApplyToPolicy(policy);
 
             Assert.IsFalse(policy.IsStreamingEnabled("SilentRole", settings));
             Assert.IsTrue(policy.IsStreamingEnabled("NoisyRole", settings));

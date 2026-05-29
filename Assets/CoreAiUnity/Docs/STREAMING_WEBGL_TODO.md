@@ -2,7 +2,9 @@
 
 **See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
 
-> **Current status (2.5.4):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. The native bridge now guards all C# callbacks (`open`, `chunk`, `done`, `error`) so callback failures are logged by the bridge instead of escaping as browser main-loop exceptions. Keep this file as historical context and a player verification checklist because existing links still point here.
+> **Current status (2.6.0):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. The native bridge guards all C# callbacks (`open`, `chunk`, `done`, `error`), treats `data: [DONE]` as terminal, and allows abort with no active controller. Keep this file as historical context and a player verification checklist because existing links still point here.
+
+**Update (v2.6.0):** WebGL Player tests now cover JS-to-C# bridge round-trip, safe abort without an active fetch controller, and the explicit Lua unsupported path. A WebGL build should no longer fail with browser `Uncaught undefined` or IL2CPP `memory access out of bounds` from the stop/Lua paths fixed in this release.
 
 **Update (v1.6.13):** new **`CoreAISettingsAsset`** instances default **`WebGlNativeStreaming`** to **`true`** (Resources presets aligned). When **`false`**, the player still uses **`UnityWebRequestOpenAiTransport`** (no incremental SSE).
 
@@ -126,6 +128,7 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 1. **Shipped:** document + **`WebGlNativeStreaming`** + **`CoreAiSseFetch.jslib`** / **`FetchSseOpenAiTransport`** (**v1.6.0+**, default **on** for new settings assets since **v1.6.13**).
 2. **Obsolete:** the old plan for **`ShouldUseStreamingForRole`** default **`false`** on WebGL only — transport choice is centralized in **`CoreAiChatService.IsStreamingEnabled`** + **`WebGlNativeStreaming`** instead.
 3. **Still valid:** keep **`UnityWebRequest`** fallback when **`WebGlNativeStreaming`** is **off**; validate CORS / credentials for your LLM host.
+4. **Verification (v2.6.0+):** run `CoreAiSseFetchWebGlBridgePlayModeTests` as WebGL Player tests before shipping WebGL transport changes.
 
 ---
 

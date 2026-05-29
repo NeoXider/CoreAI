@@ -14,9 +14,24 @@ namespace CoreAI.Sandbox
         /// <summary>Maximum instruction budget for one-shot Lua script execution.</summary>
         public const int OneShotHardLimitSteps = 500_000;
 
+        /// <summary>Whether the embedded MoonSharp sandbox is safe to instantiate on this player.</summary>
+        public static bool IsSupported
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                return false;
+#else
+                return true;
+#endif
+            }
+        }
+
         /// <summary>Creates a secured MoonSharp script and registers the allowed Lua APIs.</summary>
         public Script CreateScript(LuaApiRegistry registry)
         {
+            ThrowIfUnsupported();
+
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
 
@@ -31,6 +46,8 @@ namespace CoreAI.Sandbox
         /// <summary>Runs Lua code inside a secured script with the optional execution guard.</summary>
         public DynValue RunChunk(Script script, string luaCode, LuaExecutionGuard guard = null)
         {
+            ThrowIfUnsupported();
+
             DynValue fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_chunk");
             guard ??= new LuaExecutionGuard();
             return guard.Execute(script, fn);
@@ -44,6 +61,8 @@ namespace CoreAI.Sandbox
             string luaCode,
             int budgetPerResume = LuaCoroutineHandle.DefaultBudgetPerResume)
         {
+            ThrowIfUnsupported();
+
             Script script = new(SandboxModules);
             registry?.ApplyToGlobals(script.Globals);
 
@@ -56,6 +75,16 @@ namespace CoreAI.Sandbox
             DynValue coroutine = script.CreateCoroutine(fn);
 
             return new LuaCoroutineHandle(script, coroutine, debugger, budgetPerResume);
+        }
+
+        private static void ThrowIfUnsupported()
+        {
+            if (!IsSupported)
+            {
+                throw new PlatformNotSupportedException(
+                    "CoreAI MoonSharp Lua sandbox is disabled on WebGL player builds. " +
+                    "MoonSharp initializes reflection-based loaders that can abort WebGL/IL2CPP before a managed exception is raised.");
+            }
         }
 
         private static void StripRiskyGlobals(Script script)

@@ -35,8 +35,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken)
-                    .ConfigureAwait(false);
+                LlmCompletionResult result = await _primary.CompleteAsync(request, cancellationToken);
 
                 // If primary returned a result but with a retryable error, try secondary
                 if (result != null && !result.Ok && IsRetryableError(result.ErrorCode))
@@ -45,7 +44,7 @@ namespace CoreAI.Infrastructure.Llm
                         $"[Fallback] Primary failed ({result.ErrorCode}: {result.Error}), falling back to secondary.",
                         LogTag.Llm);
                     FallbackCount++;
-                    return await _secondary.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                    return await _secondary.CompleteAsync(request, cancellationToken);
                 }
 
                 return result;
@@ -60,7 +59,7 @@ namespace CoreAI.Infrastructure.Llm
                     $"[Fallback] Primary threw {ex.GetType().Name}: {ex.Message}, falling back to secondary.",
                     LogTag.Llm);
                 FallbackCount++;
-                return await _secondary.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                return await _secondary.CompleteAsync(request, cancellationToken);
             }
         }
 

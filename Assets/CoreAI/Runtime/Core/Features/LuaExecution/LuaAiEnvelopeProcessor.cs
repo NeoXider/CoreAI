@@ -53,6 +53,14 @@ namespace CoreAI.Ai
                 return;
             }
 
+            if (!SecureLuaEnvironment.IsSupported)
+            {
+                string msg = "CoreAI Lua execution is disabled on this platform.";
+                PublishLuaFailure(cmd, msg);
+                _observer.OnLuaFailure(msg);
+                return;
+            }
+
             try
             {
                 LuaApiRegistry registry = new();
@@ -82,17 +90,7 @@ namespace CoreAI.Ai
             catch (Exception ex)
             {
                 string msg = ex is InterpreterException ie ? ie.Message : ex.Message;
-                _sink.Publish(new ApplyAiGameCommand
-                {
-                    CommandTypeId = LuaExecutionFailed,
-                    JsonPayload = msg,
-                    SourceRoleId = cmd.SourceRoleId,
-                    SourceTaskHint = cmd.SourceTaskHint,
-                    SourceTag = cmd.SourceTag ?? "",
-                    LuaRepairGeneration = cmd.LuaRepairGeneration,
-                    TraceId = cmd.TraceId ?? "",
-                    LuaScriptVersionKey = cmd.LuaScriptVersionKey ?? ""
-                });
+                PublishLuaFailure(cmd, msg);
                 _observer.OnLuaFailure(msg);
 
                 if (string.Equals(cmd.SourceRoleId, BuiltInAgentRoleIds.Programmer, StringComparison.Ordinal) &&
@@ -103,6 +101,21 @@ namespace CoreAI.Ai
                     ScheduleProgrammerRepair(cmd, lua, msg, next);
                 }
             }
+        }
+
+        private void PublishLuaFailure(ApplyAiGameCommand cmd, string message)
+        {
+            _sink.Publish(new ApplyAiGameCommand
+            {
+                CommandTypeId = LuaExecutionFailed,
+                JsonPayload = message,
+                SourceRoleId = cmd.SourceRoleId,
+                SourceTaskHint = cmd.SourceTaskHint,
+                SourceTag = cmd.SourceTag ?? "",
+                LuaRepairGeneration = cmd.LuaRepairGeneration,
+                TraceId = cmd.TraceId ?? "",
+                LuaScriptVersionKey = cmd.LuaScriptVersionKey ?? ""
+            });
         }
 
         private void ScheduleProgrammerRepair(ApplyAiGameCommand cmd, string failedLua, string error,

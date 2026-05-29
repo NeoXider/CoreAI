@@ -367,6 +367,11 @@ namespace CoreAI.Infrastructure.Llm
                             lastProgressUtc = DateTime.UtcNow;
                         }
 
+                        if (IsSseDoneLine(line))
+                        {
+                            break;
+                        }
+
                         foreach (MEAI.ChatResponseUpdate update in ParseSseUpdates(line + "\n", toolAccumulator))
                         {
                             parsedSseDeltas++;
@@ -1199,10 +1204,28 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        private static bool IsSseDoneLine(string line)
+        {
+            string trimmed = line?.Trim();
+            if (string.IsNullOrEmpty(trimmed) ||
+                !trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string data = trimmed.Length <= 5 ? "" : trimmed.Substring(5).TrimStart();
+            return string.Equals(data, "[DONE]", StringComparison.Ordinal);
+        }
+
         /// <summary>EditMode tests: full SSE line(s) including the <c>data:</c> prefix.</summary>
         internal static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdatesForTests(string raw)
         {
             return ParseSseUpdates(raw, new SseToolCallAccumulator());
+        }
+
+        internal static bool IsSseDoneLineForTests(string line)
+        {
+            return IsSseDoneLine(line);
         }
 
         private static MEAI.ChatResponseUpdate ExtractDeltaUpdate(string json, SseToolCallAccumulator accumulator)

@@ -51,7 +51,15 @@ namespace CoreAI.Infrastructure.Llm
 
             using CancellationTokenRegistration ctReg = cancellationToken.Register(() =>
             {
-                CoreAi_FetchSseAbort(id);
+                try
+                {
+                    CoreAi_FetchSseAbort(id);
+                }
+                catch
+                {
+                    // Browser abort must not throw back into the Unity cancellation path.
+                }
+
                 state.SignalCancelled(cancellationToken);
             });
 
@@ -464,7 +472,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _isDone = true;
                     try { _signal.Set(); } catch { }
-                    CoreAi_FetchSseAbort(_owner.CallId);
+                    try { CoreAi_FetchSseAbort(_owner.CallId); } catch { }
                     States.TryRemove(_owner.CallId, out _);
                 }
 

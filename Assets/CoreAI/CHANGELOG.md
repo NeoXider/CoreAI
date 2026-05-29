@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## [v2.6.0] - 2026-05-29
+
+### WebGL streaming and Lua platform guard
+
+- Bumped `com.nexoider.coreai` to `2.6.0` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching minor versions.
+- `MeaiOpenAiChatClient` now treats OpenAI-style `data: [DONE]` SSE frames as terminal stream sentinels. WebGL native streaming can finish promptly without waiting for the browser connection to close.
+- `SecureLuaEnvironment` now exposes an explicit platform support guard. WebGL player builds report Lua as unsupported before MoonSharp can initialize reflection-heavy loader paths that crash IL2CPP/WebGL.
+- `LuaAiEnvelopeProcessor` now publishes a controlled Lua failure when the runtime is unavailable instead of constructing the sandbox on unsupported platforms.
+- Updated Lua sandbox documentation to state that Lua is temporarily unavailable on WebGL and to describe the supported future restoration paths.
+
 ## [v2.5.4] - 2026-05-29
 
 ### Lockstep patch with CoreAI Unity

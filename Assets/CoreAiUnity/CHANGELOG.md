@@ -2,6 +2,20 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.6.0] - 2026-05-29
+
+### WebGL SSE stop/done handling and Lua WebGL guard
+
+- Hardened WebGL native SSE streaming so `data: [DONE]` ends the stream promptly and the chat UI exits busy/stop state after a completed response.
+- Hardened WebGL stop-button cancellation. Browser `fetch` abort is deferred and guarded, C# abort calls are wrapped, and stale/disposed cancellation sources no longer escape into the browser main loop.
+- Tightened `CoreAiChatPanel` stop/send state handling so the stop control is enabled only while a live generation token exists and the UI unlocks after cancellation, completion, or stale busy-state cleanup.
+- Added WebGL Player coverage for JS-to-C# bridge round-trip, guarded abort with no active controller, and explicit Lua unsupported behavior on WebGL.
+- Disabled direct Lua PlayMode integration tests on WebGL while MoonSharp is unsupported there; Editor and non-WebGL player Lua paths remain covered.
+- Documented the temporary WebGL Lua limitation and the future restoration options: AOT-safe Lua runtime, trusted server-side execution, or a restricted command interpreter with WebGL Player tests.
+- Removed stale Unity project warning debt from this repo by deleting an empty test asmdef and a missing PathTracing resource reference in URP global settings.
+
+#### Package **`2.6.0`** - dependency **`com.nexoider.coreai` `2.6.0`**.
+
 ## [2.5.4] - 2026-05-29
 
 ### WebGL native SSE callback and Play Mode hardening

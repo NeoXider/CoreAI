@@ -25,6 +25,19 @@ CoreAI treats Lua as untrusted gameplay logic:
 The sandbox is a defense layer, not a permission system for sensitive server-side
 operations.
 
+## Platform Support
+
+Runtime Lua execution is currently supported in the Editor and non-WebGL player
+builds. WebGL player builds temporarily disable the MoonSharp-based sandbox:
+`SecureLuaEnvironment.IsSupported` returns `false`, and callers should treat Lua
+execution as unavailable on that platform.
+
+The WebGL guard exists because the current MoonSharp integration can initialize
+reflection-based loaders that abort WebGL/IL2CPP before a managed exception is
+raised. WebGL support can be added later by replacing this path with an AOT-safe
+Lua runtime, executing Lua on a trusted server, or mapping AI output to a
+restricted command interpreter with dedicated WebGL Player tests.
+
 ## Recommended Flow
 
 1. Register only the bindings needed for the current scene or game mode.

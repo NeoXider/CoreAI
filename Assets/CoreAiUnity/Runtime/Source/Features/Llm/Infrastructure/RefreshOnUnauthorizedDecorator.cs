@@ -36,7 +36,7 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionResult result;
             try
             {
-                result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                result = await _inner.CompleteAsync(request, cancellationToken);
             }
             catch (LlmClientException ex) when (ex.ErrorCode == LlmErrorCode.AuthExpired)
             {
@@ -56,14 +56,14 @@ namespace CoreAI.Infrastructure.Llm
                 return result;
             }
 
-            bool refreshed = await TryRefreshAsync(cancellationToken).ConfigureAwait(false);
+            bool refreshed = await TryRefreshAsync(cancellationToken);
             if (!refreshed)
             {
                 PublishExpiredEvent(request);
                 return result;
             }
 
-            return await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+            return await _inner.CompleteAsync(request, cancellationToken);
         }
 
         /// <inheritdoc />
@@ -138,7 +138,7 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            bool refreshed = await TryRefreshAsync(cancellationToken).ConfigureAwait(false);
+            bool refreshed = await TryRefreshAsync(cancellationToken);
             if (!refreshed || emittedVisibleText)
             {
                 if (!refreshed)
@@ -155,8 +155,7 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken)
-                               .ConfigureAwait(false))
+            await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken))
             {
                 yield return chunk;
             }
@@ -172,7 +171,7 @@ namespace CoreAI.Infrastructure.Llm
 
             try
             {
-                return await refresher.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                return await refresher.RefreshAsync(cancellationToken);
             }
             catch
             {

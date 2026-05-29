@@ -29,11 +29,12 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("function callChunk", js);
             StringAssert.Contains("function callDone", js);
             StringAssert.Contains("function callError", js);
+            StringAssert.Contains("CoreAi_FetchSseSelfTest: function", js);
 
             Assert.AreEqual(
-                4,
+                7,
                 Regex.Matches(js, @"makeDynCall\(").Count,
-                "Every direct makeDynCall should live in one of the four safe wrapper functions.");
+                "Every direct makeDynCall should live in a safe production or WebGL self-test wrapper.");
         }
 
         [Test]

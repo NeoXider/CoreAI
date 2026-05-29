@@ -1,14 +1,14 @@
 {
   "name": "com.nexoider.coreaiunity",
-  "version": "2.5.4",
+  "version": "2.6.0",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
-  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.5.4: hardens WebGL SSE cancellation and Editor Play Mode main-thread marshaling.",
+  "description": "Unity layer for CoreAI: MEAI, CoreAISettingsAsset, CoreAiChatPanel, HTTP retry, context compaction, resilience, routing and chat UI. v2.6.0: WebGL SSE stop/done handling, JS bridge self-tests, and explicit Lua WebGL guard.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "2.5.4"
+    "com.nexoider.coreai": "2.6.0"
   }
 }

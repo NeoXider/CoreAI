@@ -77,6 +77,14 @@ When the model decides to invoke a tool, a structure equivalent to the following
 
 **Roles:** Programmer (primary), Creator (when needed)
 
+> [!NOTE]
+> Runtime Lua execution is temporarily unavailable in WebGL player builds. In WebGL,
+> `SecureLuaEnvironment.IsSupported` is `false`, and Lua envelopes return
+> `LuaExecutionFailed` instead of creating a MoonSharp runtime. Editor and
+> non-WebGL players keep the existing Lua path. WebGL support can be added later
+> through an AOT-safe Lua runtime, server-side execution, or a restricted command
+> interpreter with WebGL Player coverage.
+
 ### Execute Lua code
 ```json
 {
