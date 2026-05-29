@@ -232,7 +232,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(512, instance.MaxTokens);
             Assert.AreEqual(2, instance.MaxLlmRequestRetries);
             Assert.AreEqual(50000, instance.ContextWindowTokens);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(instance.ApiKey));
+            Assert.IsTrue(string.IsNullOrWhiteSpace(instance.ApiKey));
 
             CoreAISettingsAsset.ResetInstance();
         }
@@ -258,7 +258,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(expectedLlmContextCompaction, configured.EnableLlmContextCompaction);
             Assert.IsTrue(configured.EnableStreaming);
             Assert.IsTrue(configured.WebGlNativeStreaming);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(configured.ApiKey));
+            Assert.IsTrue(string.IsNullOrWhiteSpace(configured.ApiKey));
 
             Object.DestroyImmediate(configured);
         }

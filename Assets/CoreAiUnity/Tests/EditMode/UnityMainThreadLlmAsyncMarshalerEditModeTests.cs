@@ -8,7 +8,7 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// Regression: in the Editor outside Play Mode, <see cref="UnityMainThreadLlmAsyncMarshaler"/>
-    /// must not await <see cref="Cysharp.Threading.Tasks.UniTask.SwitchToMainThread"/> — Edit Mode tests
+    /// must not await <see cref="Cysharp.Threading.Tasks.UniTask.SwitchToMainThread"/> - Edit Mode tests
     /// and tooling sometimes block the managed main thread on <c>Task.Wait</c> while MEAI continues on
     /// the thread pool; a main-thread hop would deadlock (player loop not pumping).
     /// It must also not treat <see cref="Application.isPlaying"/> as fatal when probed from a worker thread
@@ -19,7 +19,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void InvokeAsync_WhenNotPlaying_CompletesUnderMainThreadWait_FromThreadPool()
         {
-            Assert.IsFalse(Application.isPlaying, "Precondition: Edit Mode — Application.isPlaying must be false.");
+            Assert.IsFalse(Application.isPlaying, "Precondition: Edit Mode - Application.isPlaying must be false.");
 
             int mainId = Thread.CurrentThread.ManagedThreadId;
             Task<int> worker = Task.Run(async () =>
@@ -50,7 +50,7 @@ namespace CoreAI.Tests.EditMode
                     CancellationToken.None);
 
             Assert.AreEqual(callerId, factoryThreadId,
-                "Bypass path (no SwitchToMainThread) should invoke the factory on the caller’s thread " +
+                "Bypass path (no SwitchToMainThread) should invoke the factory on the caller's thread " +
                 "for a synchronous tool body.");
         }
 

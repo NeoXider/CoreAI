@@ -16,4 +16,4 @@ Portable **`CoreAI.Core`** exposes **`IOpenAiHttpTransport`** for OpenAI-compati
 
 **Platform defines:** Convenience ctor **`MeaiOpenAiChatClient(settings, log)`** exists when **`!UNITY_WEBGL || UNITY_EDITOR`** so Edit Mode keeps **`HttpClient`** mocks even if the active build target is WebGL.
 
-**Follow-up:** **`CoreAiSseFetch.jslib`** **`fetch`** bridge ships behind **`CoreAISettingsAsset.WebGlNativeStreaming`** (see **`STREAMING_ARCHITECTURE.md`**). Optional DevTools **`console.log`** in the jslib is commented by default (**v1.6.19**); **`console.warn`** on read / **`fetch`** errors remains.
+**Follow-up:** **`CoreAiSseFetch.jslib`** **`fetch`** bridge ships behind **`CoreAISettingsAsset.WebGlNativeStreaming`** (see **`STREAMING_ARCHITECTURE.md`**). Optional DevTools **`console.log`** in the jslib is commented by default (**v1.6.19**); **`console.warn`** on read / **`fetch`** errors remains. Since **v2.5.4**, the bridge calls C# through guarded `open` / `chunk` / `done` / `error` wrappers so callback failures do not escape as browser `Uncaught undefined` main-loop errors.

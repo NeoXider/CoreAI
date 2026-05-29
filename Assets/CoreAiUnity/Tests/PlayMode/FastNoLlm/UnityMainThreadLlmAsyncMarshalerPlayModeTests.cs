@@ -19,7 +19,7 @@ namespace CoreAI.Tests.PlayMode
         /// The true Unity main thread ID, captured in <see cref="SetUp"/> which
         /// always runs on the main thread (NUnit runner guarantee in PlayMode).
         /// We cannot rely on <c>Thread.CurrentThread.ManagedThreadId</c> inside
-        /// a coroutine body after <c>yield return</c> — some Unity versions
+        /// a coroutine body after <c>yield return</c> - some Unity versions
         /// resume coroutines on worker threads.
         /// </summary>
         private int _unityMainThreadId;

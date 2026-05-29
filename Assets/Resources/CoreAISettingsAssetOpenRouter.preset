@@ -42,7 +42,7 @@ Preset:
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: apiKey
-    value: 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
+    value:
     objectReference: {fileID: 0}
   - target: {fileID: 0}
     propertyPath: modelName

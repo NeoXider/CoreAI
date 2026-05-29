@@ -2,7 +2,7 @@
 
 **See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
 
-> **Current status (2.5.0):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. Keep this file as historical context and a player verification checklist because existing links still point here.
+> **Current status (2.5.4):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. The native bridge now guards all C# callbacks (`open`, `chunk`, `done`, `error`) so callback failures are logged by the bridge instead of escaping as browser main-loop exceptions. Keep this file as historical context and a player verification checklist because existing links still point here.
 
 **Update (v1.6.13):** new **`CoreAISettingsAsset`** instances default **`WebGlNativeStreaming`** to **`true`** (Resources presets aligned). When **`false`**, the player still uses **`UnityWebRequestOpenAiTransport`** (no incremental SSE).
 
@@ -84,7 +84,7 @@ before the pipeline advances** — hypothesis: either `Text` is unset
 Implement an emscripten plugin (`.jslib`) under `Runtime/Plugins/WebGL/` that:
 
 1. Opens `fetch(url, { method: 'POST', body, headers })` with a `ReadableStream` response body;
-2. Reads `response.body.getReader()` and invokes a C# callback via `[DllImport("__Internal")]` / `dynCall_*` on each chunk;
+2. Reads `response.body.getReader()` and invokes C# callbacks via `[DllImport("__Internal")]` / guarded Emscripten `makeDynCall` wrappers on each chunk;
 3. C# enqueues strings in `ConcurrentQueue<string>` and yields them as `IAsyncEnumerable<LlmStreamChunk>`.
 
 Pros: real browser-grade streaming. Cons: new WebGL plugin, non-WebGL fallback, and

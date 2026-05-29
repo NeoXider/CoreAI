@@ -347,7 +347,10 @@ namespace CoreAI.Infrastructure.Llm
 
                     // buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
-                    await foreach (string line in ReadUtf8LinesFromStreamAsync(stream, cancellationToken))
+                    await foreach (string line in ReadUtf8LinesFromStreamAsync(
+                                       stream,
+                                       streamTransportTimeoutSec,
+                                       cancellationToken))
                     {
                         if ((DateTime.UtcNow - lastProgressUtc).TotalSeconds > streamTransportTimeoutSec)
                         {
@@ -465,6 +468,7 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
             Stream stream,
+            int streamIdleTimeoutSeconds,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken)
         {
@@ -478,7 +482,13 @@ namespace CoreAI.Infrastructure.Llm
                 // No ConfigureAwait(false): on WebGL the continuation must capture
                 // UnitySynchronizationContext, otherwise it gets posted to the (non-existent)
                 // browser ThreadPool and the read pump silently halts after the first await.
-                int read = await stream.ReadAsync(byteBuffer, 0, byteBuffer.Length, cancellationToken);
+                int read = await ReadWithIdleTimeoutAsync(
+                    stream,
+                    byteBuffer,
+                    0,
+                    byteBuffer.Length,
+                    streamIdleTimeoutSeconds,
+                    cancellationToken);
                 if (read <= 0)
                 {
                     break;
@@ -527,6 +537,34 @@ namespace CoreAI.Infrastructure.Llm
             {
                 yield return lineBuilder.ToString();
             }
+        }
+
+        private static async Task<int> ReadWithIdleTimeoutAsync(
+            Stream stream,
+            byte[] buffer,
+            int offset,
+            int count,
+            int streamIdleTimeoutSeconds,
+            CancellationToken cancellationToken)
+        {
+            Task<int> readTask = stream.ReadAsync(buffer, offset, count, cancellationToken);
+            if (readTask.IsCompleted)
+            {
+                return await readTask;
+            }
+
+            int timeoutMs = Math.Max(1, streamIdleTimeoutSeconds) * 1000;
+            Task timeoutTask = Task.Delay(timeoutMs, cancellationToken);
+            Task completed = await Task.WhenAny(readTask, timeoutTask);
+            if (ReferenceEquals(completed, readTask))
+            {
+                return await readTask;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new LlmClientException(
+                $"LLM SSE stalled - no data for {Math.Max(1, streamIdleTimeoutSeconds)}s.",
+                LlmErrorCode.Timeout);
         }
 
         private List<KeyValuePair<string, string>> BuildTransportHeaders(string url, bool acceptEventStream)

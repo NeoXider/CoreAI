@@ -44,6 +44,46 @@ mergeInto(LibraryManager.library, {
 
     function utf8(s) { return stringToNewUTF8(s == null ? '' : s); }
 
+    function callOpen(status, errBody, hdrFlat, label) {
+      try {
+        {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, status, utf8(errBody || ''), utf8(hdrFlat || ''));
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] ' + label + ' open callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
+    function callChunk(text, label) {
+      try {
+        {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, utf8(text || ''));
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] ' + label + ' chunk callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
+    function callDone(label) {
+      try {
+        {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] ' + label + ' done callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
+    function callError(msg, label) {
+      try {
+        {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg || ''));
+        return true;
+      } catch (callbackErr) {
+        console.warn('[CoreAiSseFetch] ' + label + ' error callback failed id=' + callId, callbackErr);
+        return false;
+      }
+    }
+
     function flattenHeaders(h) {
       var out = '';
       try {
@@ -73,15 +113,15 @@ mergeInto(LibraryManager.library, {
 
       if (!response.ok) {
         response.text().then(function (errBody) {
-          {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, status, utf8(errBody || ''), utf8(hdrFlat));
+          callOpen(status, errBody || '', hdrFlat, 'http-error');
           setTimeout(function () {
-            {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+            callDone('http-error');
             delete CoreAiSseFetchState.controllers[callId];
           }, 0);
         }).catch(function () {
-          {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, status, utf8(''), utf8(hdrFlat));
+          callOpen(status, '', hdrFlat, 'http-error-body');
           setTimeout(function () {
-            {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+            callDone('http-error-body');
             delete CoreAiSseFetchState.controllers[callId];
           }, 0);
         });
@@ -89,22 +129,22 @@ mergeInto(LibraryManager.library, {
       }
 
       // Headers received — let C# return its open result.
-      {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, status, utf8(''), utf8(hdrFlat));
+      callOpen(status, '', hdrFlat, 'response');
 
       if (!response.body || typeof response.body.getReader !== 'function') {
         // Browsers without streaming body support: deliver the whole text at once.
         // C#'s SSE parser still works on a fully-buffered payload.
         response.text().then(function (txt) {
           if (txt && txt.length > 0) {
-            {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, utf8(txt));
+            callChunk(txt, 'buffered-response');
           }
           setTimeout(function () {
-            {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+            callDone('buffered-response');
             delete CoreAiSseFetchState.controllers[callId];
           }, 0);
         }).catch(function (err) {
           var msg = err && err.message ? err.message : 'response.text() failed';
-          {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg));
+          callError(msg, 'buffered-response');
           delete CoreAiSseFetchState.controllers[callId];
         });
         return;
@@ -122,7 +162,7 @@ mergeInto(LibraryManager.library, {
             var text = decoder.decode(r.value, { stream: true });
             if (text.length > 0) {
               chunkCount++;
-              {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, utf8(text));
+              callChunk(text, 'stream');
             }
           }
 
@@ -131,12 +171,12 @@ mergeInto(LibraryManager.library, {
             var tail = decoder.decode(new Uint8Array(0), { stream: false });
             if (tail && tail.length > 0) {
               chunkCount++;
-              {{{ makeDynCall('vii', 'onChunkPtr') }}}(callId, utf8(tail));
+              callChunk(tail, 'stream-tail');
             }
             // console.log('[CoreAiSseFetch] done id=' + callId +
             //             ' chunks=' + chunkCount + ' bytes=' + totalBytes);
             setTimeout(function () {
-              {{{ makeDynCall('vi', 'onDonePtr') }}}(callId);
+              callDone('stream');
               delete CoreAiSseFetchState.controllers[callId];
             }, 0);
             return;
@@ -152,7 +192,9 @@ mergeInto(LibraryManager.library, {
             ? (reason || 'cancelled')
             : (err && err.message ? err.message : 'fetch read error');
           if (msg !== 'cancelled') console.warn('[CoreAiSseFetch] read-error id=' + callId + ' msg=' + msg);
-          {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg));
+          if (msg !== 'cancelled') {
+            callError(msg, 'read-error');
+          }
           delete CoreAiSseFetchState.abortReasons[callId];
           delete CoreAiSseFetchState.controllers[callId];
         });
@@ -168,8 +210,10 @@ mergeInto(LibraryManager.library, {
         ? (reason || 'cancelled')
         : (err && err.message ? err.message : 'fetch failed (CORS/network)');
       if (msg !== 'cancelled') console.warn('[CoreAiSseFetch] fetch-rejected id=' + callId + ' msg=' + msg);
-      {{{ makeDynCall('viiii', 'onOpenPtr') }}}(callId, 0, utf8(msg), utf8(''));
-      {{{ makeDynCall('vii', 'onErrorPtr') }}}(callId, utf8(msg));
+      if (msg !== 'cancelled') {
+        callOpen(0, msg, '', 'fetch-rejected');
+        callError(msg, 'fetch-rejected');
+      }
       delete CoreAiSseFetchState.abortReasons[callId];
       delete CoreAiSseFetchState.controllers[callId];
     });
@@ -179,6 +223,10 @@ mergeInto(LibraryManager.library, {
   CoreAi_FetchSseAbort: function (callId) {
     var c = CoreAiSseFetchState.controllers[callId];
     CoreAiSseFetchState.abortReasons[callId] = 'cancelled';
-    if (c && c.abort) c.abort();
+    try {
+      if (c && c.abort) c.abort();
+    } catch (err) {
+      console.warn('[CoreAiSseFetch] abort failed id=' + callId, err);
+    }
   }
 });

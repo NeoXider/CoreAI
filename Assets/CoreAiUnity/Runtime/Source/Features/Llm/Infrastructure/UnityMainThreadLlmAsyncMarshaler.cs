@@ -147,7 +147,30 @@ namespace CoreAI.Infrastructure.Llm
             // Not confirmed Play (mirror != 1): inline on the pool. Treat unknown (-1) like Edit idle so
             // SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on the main thread) never deadlock.
             // Stale 0 while Play is mitigated by RuntimeInitialize primers + first-frame mirror updates.
+            if (IsEditorPlayingOrWillEnterPlayMode())
+            {
+                return false;
+            }
+
             return Volatile.Read(ref _editorMirrorIsPlaying) != 1;
+        }
+
+        private static bool IsEditorPlayingOrWillEnterPlayMode()
+        {
+            try
+            {
+                bool isPlaying = EditorApplication.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode;
+                if (isPlaying)
+                {
+                    Volatile.Write(ref _editorMirrorIsPlaying, 1);
+                }
+
+                return isPlaying;
+            }
+            catch (Exception ex) when (IsUnhandledIsPlayingProbeFailure(ex))
+            {
+                return false;
+            }
         }
 
         /// <summary>Unity/native failures when probing <see cref="Application.isPlaying"/> (including wrappers).</summary>
