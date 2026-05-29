@@ -4,11 +4,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [2.5.4] - 2026-05-29
 
-### WebGL native SSE callback hardening
+### WebGL native SSE callback and Play Mode hardening
 
 - Hardened `CoreAiSseFetch.jslib` so browser-side `open`, `chunk`, `done`, and `error` callbacks into C# are routed through guarded wrapper functions. A callback failure is now logged as a bridge warning instead of escaping as a browser `Uncaught undefined` / main-loop exception.
 - Cancelled browser `fetch` / `ReadableStream` paths no longer call the C# error callback for the expected `cancelled` reason, reducing noisy stop-button failures when a WebGL user interrupts generation before the model finishes.
+- Hardened `UnityMainThreadLlmAsyncMarshaler` Editor Play Mode detection for WebGL build-target test runs. Worker-thread tool invocations now refuse the Edit Mode inline path once runtime Play Mode has entered, even if the volatile editor mirror is still stale.
 - Added `CoreAiSseFetchJslibEditModeTests` coverage to pin the safe-wrapper contract and guarded abort path.
+- Updated `CoreAISettingsAsset` resource/preset tests for committed blank API keys, keeping provider presets safe to publish without embedded secrets.
 - Updated WebGL streaming docs with the native bridge callback-safety note.
 
 #### Package **`2.5.4`** - dependency **`com.nexoider.coreai` `2.5.4`**.

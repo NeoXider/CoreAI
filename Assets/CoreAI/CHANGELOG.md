@@ -5,7 +5,7 @@
 ### Lockstep patch with CoreAI Unity
 
 - Bumped `com.nexoider.coreai` to `2.5.4` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- No portable runtime behavior change; the WebGL native SSE callback hardening lives in `com.nexoider.coreaiunity`.
+- No portable runtime behavior change; the WebGL SSE cancellation and Editor Play Mode main-thread marshaling hardening live in `com.nexoider.coreaiunity`.
 
 ## [v2.5.3] - 2026-05-27
 
