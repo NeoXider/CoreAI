@@ -22,13 +22,27 @@ Symptom: Unity warning references UnityEngine.PathTracing.Core.WorldRenderPipeli
 
 Cause: Unity, URP, or PathTracing package settings mismatch in project render pipeline global settings.
 
-Impact: editor/package warning; does not affect CoreAI runtime directly.
+Impact: editor/package warning; does not affect CoreAI runtime directly. The stale reference present in this repository was removed in v2.6.0, but the warning can return after Unity/URP package changes if the editor rewrites global render pipeline settings.
 
 Recommended follow-up:
 
 - Check Unity and URP package versions.
 - Check project render pipeline global settings.
 - Remove or reassign obsolete render pipeline resource references if Unity created stale settings.
+
+## WebGL Lua execution
+
+Symptom: Lua tools or Lua envelope processing report that Lua execution is unavailable in a WebGL player.
+
+Cause: v2.6.0 explicitly disables the current MoonSharp-based sandbox in WebGL player builds. The old path could initialize reflection-based loader code that aborts WebGL/IL2CPP before managed exception handling.
+
+Impact: expected platform limitation. Editor and non-WebGL player Lua execution remain supported.
+
+Recommended follow-up:
+
+- Keep WebGL gameplay on non-Lua tools or server-managed actions for now.
+- Restore WebGL Lua only through an AOT-safe Lua runtime, trusted server-side execution, or a restricted command interpreter.
+- Add or extend WebGL Player tests before enabling any replacement Lua path.
 
 ## Warning handling policy
 
