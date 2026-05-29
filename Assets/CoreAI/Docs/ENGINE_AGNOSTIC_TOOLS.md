@@ -319,8 +319,13 @@ public:
 
 **LuaTool** uses the MoonSharp interpreter. That means:
 - ✅ Pure .NET, no `UnityEngine`
-- ✅ Sandbox behaves the same everywhere
+- ✅ Same engine-agnostic binding model where MoonSharp is supported
 - ✅ Engine-specific bindings can be added later
+
+WebGL player builds currently disable the MoonSharp path explicitly through
+`SecureLuaEnvironment.IsSupported == false`. See
+[`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support and
+future WebGL restoration options.
 
 ### Why is WorldCommand’s abstraction in CoreAI?
 
