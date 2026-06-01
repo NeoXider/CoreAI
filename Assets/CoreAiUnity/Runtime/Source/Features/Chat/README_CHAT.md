@@ -286,6 +286,14 @@ Stop the current reply in two ways:
 Under the hood this calls `CoreAi.StopAgent(roleId)` and cancels the active request `CancellationToken`, so both current generation and queued orchestrator tasks for that role stop.
 After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming` / `HideTypingIndicator`) and resets `_isSending` / `_isStreaming`; covered by `CoreAiChatPanelEditModeTests` and `CoreAiChatPanelStopPlayModeTests`.
 
+Since **2.6.x**, the WebGL verification flow also covers the real browser player path:
+
+- first message: a real HTTP model response must become visible while streaming;
+- second message: `StopAgent()` must cancel an active long stream, preserve already-rendered text, unlock the panel, and avoid browser main-loop exceptions;
+- third message: submitting again after Stop must produce a non-empty assistant response.
+
+For very short real-model replies, the final response can arrive before a test observes the transient streaming label on a later frame. In that case the recovery check should assert the completed assistant response and unlocked panel state; visible incremental streaming is already covered by the first, longer-lived stream.
+
 ### Persisted history + assistant display (since 0.25.14)
 
 - **Hydrated user messages:** If the store contains the composer JSON shape (`{"telemetry":...,"hint":"...","ai_task_source":"..."}`), the UI shows only the **`hint`** string in the user bubble (same text the player typed conceptually).

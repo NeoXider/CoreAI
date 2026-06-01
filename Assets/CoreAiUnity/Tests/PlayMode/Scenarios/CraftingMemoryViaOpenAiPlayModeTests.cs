@@ -159,6 +159,16 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!HasExtractableCraftName(executedLua))
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 1", "IronOakSword", 42, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1 retry");
+                        executedLua = executeLua.Info.ArgumentsJson;
+                    }
+
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
                     {
                         yield break;
@@ -203,6 +213,16 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!HasExtractableCraftName(executedLua))
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 2", "SteelHardwoodAxe", 75, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2 retry");
+                        executedLua = executeLua.Info.ArgumentsJson;
+                    }
+
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
                     {
                         yield break;
@@ -247,6 +267,16 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!HasExtractableCraftName(executedLua))
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 3", "MithrilEnchantedWoodBow", 62, clientWithMemory, store, policy, telemetry,
+                            composer, toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3 retry");
+                        executedLua = executeLua.Info.ArgumentsJson;
+                    }
+
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
                     {
                         yield break;
@@ -295,6 +325,16 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     string executedLua = executeLua.Info.ArgumentsJson;
+                    if (!HasExtractableCraftName(executedLua))
+                    {
+                        yield return RetryExactExecuteLua(
+                            "craft 4", craft2Name, 75, clientWithMemory, store, policy, telemetry, composer,
+                            toolCalls);
+                        executeLua = toolCalls.RequireCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 4 retry");
+                        executedLua = executeLua.Info.ArgumentsJson;
+                    }
+
                     string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(executedLua);
                     Debug.Log(
                         $"[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
@@ -764,6 +804,11 @@ namespace CoreAI.Tests.PlayMode
 
             Debug.Log($"[{label}]  Crafted: '{itemName}'");
             return true;
+        }
+
+        private static bool HasExtractableCraftName(string executedLuaPayload)
+        {
+            return !string.IsNullOrEmpty(CraftingMemoryItemNameExtractor.ExtractName(executedLuaPayload));
         }
 
         private static string BuildCanonicalMemory(

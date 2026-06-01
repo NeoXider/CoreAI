@@ -118,6 +118,13 @@ namespace CoreAI.Infrastructure.Llm
                         yield break;
                     }
                 }
+                else if (!primaryFailed)
+                {
+                    _logger.Warn(
+                        "[Fallback] Primary streaming completed without any chunks, falling back to secondary.",
+                        LogTag.Llm);
+                    primaryFailed = true;
+                }
             }
             finally
             {

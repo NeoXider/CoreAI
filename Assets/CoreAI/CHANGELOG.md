@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## [v2.6.1] - 2026-06-01
+
+### Lockstep patch with CoreAI Unity
+
+- Bumped `com.nexoider.coreai` to `2.6.1` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- Portable package metadata documents the WebGL streaming continuation fix; the runtime and verification changes for WebGL chat Stop/recovery live in `com.nexoider.coreaiunity`.
+
 ## [v2.6.0] - 2026-05-29
 
 ### WebGL streaming and Lua platform guard

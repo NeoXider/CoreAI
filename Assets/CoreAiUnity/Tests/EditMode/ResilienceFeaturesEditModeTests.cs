@@ -410,6 +410,27 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Fallback_PrimaryStreamingCompletesWithoutChunks_SecondaryStreamingIsCalled()
+        {
+            EmptyStreamingLlmClient primary = new();
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "test" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, fallback.FallbackCount);
+            Assert.AreEqual(1, secondary.StreamingCallCount);
+            Assert.AreEqual(2, chunks.Count);
+            Assert.AreEqual("secondary-stream", chunks[0].Text);
+            Assert.IsTrue(chunks[1].IsDone);
+        }
+
+        [Test]
         public void Fallback_Cancellation_DoesNotFallback()
         {
             CancellationTokenSource cts = new();
@@ -462,6 +483,52 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken ct = default)
             {
                 throw new NotImplementedException();
+            }
+        }
+
+        private sealed class EmptyStreamingLlmClient : ILlmClient
+        {
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "empty" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                await Task.Yield();
+                yield break;
+            }
+        }
+
+        private sealed class StreamingCountingLlmClient : ILlmClient
+        {
+            private readonly string _text;
+            public int StreamingCallCount { get; private set; }
+
+            public StreamingCountingLlmClient(string text)
+            {
+                _text = text;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = _text });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                StreamingCallCount++;
+                ct.ThrowIfCancellationRequested();
+                yield return new LlmStreamChunk { Text = _text };
+                await Task.Yield();
+                ct.ThrowIfCancellationRequested();
+                yield return new LlmStreamChunk { IsDone = true };
             }
         }
 

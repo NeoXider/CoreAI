@@ -6,6 +6,8 @@
 
 **Update (v2.6.0):** WebGL Player tests now cover JS-to-C# bridge round-trip, safe abort without an active fetch controller, and the explicit Lua unsupported path. A WebGL build should no longer fail with browser `Uncaught undefined` or IL2CPP `memory access out of bounds` from the stop/Lua paths fixed in this release.
 
+**Update (v2.6.x):** `CoreAiChatDemo` has a real-backend WebGL Player verification path for chat behavior: a first message proves visible streaming, a long second message proves `StopAgent()` cancels an active stream without browser exceptions, and a third message proves the panel can submit again after Stop. A very short third response may finish before a transient streaming label is observed; treat the non-empty final assistant response plus unlocked panel state as the recovery signal.
+
 **Update (v1.6.13):** new **`CoreAISettingsAsset`** instances default **`WebGlNativeStreaming`** to **`true`** (Resources presets aligned). When **`false`**, the player still uses **`UnityWebRequestOpenAiTransport`** (no incremental SSE).
 
 **Update (v1.6.0):** an optional **`.jslib`** + **`FetchSseOpenAiTransport`** path exists behind **`CoreAISettingsAsset.WebGlNativeStreaming`**. It uses browser **`fetch`** for incremental SSE; the default **`UnityWebRequestOpenAiTransport`** path still does **not** stream incrementally. **Editor / PlayMode** do not exercise the native plugin — verify in a **WebGL player** build.
@@ -129,6 +131,7 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 2. **Obsolete:** the old plan for **`ShouldUseStreamingForRole`** default **`false`** on WebGL only — transport choice is centralized in **`CoreAiChatService.IsStreamingEnabled`** + **`WebGlNativeStreaming`** instead.
 3. **Still valid:** keep **`UnityWebRequest`** fallback when **`WebGlNativeStreaming`** is **off**; validate CORS / credentials for your LLM host.
 4. **Verification (v2.6.0+):** run `CoreAiSseFetchWebGlBridgePlayModeTests` as WebGL Player tests before shipping WebGL transport changes.
+5. **Chat Stop verification (v2.6.x+):** run the real-backend `CoreAiChatDemo` WebGL Player test when changing chat streaming, cancellation, or HTTP transport code. Expected behavior: visible first-stream text, cancellable second stream, no browser main-loop exception, and a successful third response after Stop.
 
 ---
 

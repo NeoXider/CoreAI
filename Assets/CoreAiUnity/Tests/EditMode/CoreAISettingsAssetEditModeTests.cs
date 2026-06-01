@@ -69,6 +69,95 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void HasValidFallbackBackend_ShouldRequireEnabledAndConfiguredSecondaryBackend()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+
+            SetPrivateField(settings, "enableFallbackBackend", true);
+            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1/");
+            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
+            Assert.IsTrue(settings.HasValidFallbackBackend,
+                "Fallback should be valid only when enabled and both URL + model are configured");
+            Assert.AreEqual(
+                "https://openrouter.ai/api/v1",
+                settings.SecondaryApiBaseUrl,
+                "Secondary URL should be normalized by stripping trailing slash");
+
+            SetPrivateField(settings, "secondaryModelName", "   ");
+            Assert.IsFalse(settings.HasValidFallbackBackend,
+                "Fallback should be invalid when secondary model is missing");
+
+            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
+            SetPrivateField(settings, "secondaryApiBaseUrl", "  ");
+            Assert.IsFalse(settings.HasValidFallbackBackend,
+                "Fallback should be invalid when secondary URL is missing");
+
+            SetPrivateField(settings, "enableFallbackBackend", false);
+            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1");
+            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
+            Assert.IsFalse(settings.HasValidFallbackBackend,
+                "Fallback should be invalid when disabled even if URL+model are filled");
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void SecondaryApiBaseUrl_ShouldBeEmptyWhenUnset_AndReturnTrimmedValue()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+
+            Assert.AreEqual(string.Empty, settings.SecondaryApiBaseUrl);
+
+            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1/");
+            Assert.AreEqual("https://openrouter.ai/api/v1", settings.SecondaryApiBaseUrl);
+
+            SetPrivateField(settings, "secondaryApiBaseUrl", "   ");
+            Assert.AreEqual(string.Empty, settings.SecondaryApiBaseUrl);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ApiBaseUrl_ShouldDefaultToLocalhostAndTrimTrailingSlash()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+
+            Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
+
+            SetPrivateField(settings, "apiBaseUrl", "https://openrouter.ai/api/v1/");
+            Assert.AreEqual("https://openrouter.ai/api/v1", settings.ApiBaseUrl);
+
+            SetPrivateField(settings, "apiBaseUrl", "  ");
+            Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ModelName_ShouldFallbackToGgufForLocalModes_AndDefaultForNonLocalModes()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+
+            SetPrivateField(settings, "modelName", "   ");
+            SetPrivateField(settings, "ggufModelPath", "local-model.gguf");
+
+            // Direct local-mode path
+            SetPrivateField(settings, "executionMode", LlmExecutionMode.LocalModel);
+            Assert.AreEqual("local-model.gguf", settings.ModelName);
+
+            // Auto mode resolves to LocalModel when backend is LlmUnity
+            SetPrivateField(settings, "executionMode", LlmExecutionMode.Auto);
+            SetPrivateField(settings, "backendType", LlmBackendType.LlmUnity);
+            Assert.AreEqual("local-model.gguf", settings.ModelName);
+
+            // Auto + HTTP backend should not use local GGUF fallback
+            SetPrivateField(settings, "backendType", LlmBackendType.OpenAiHttp);
+            Assert.AreEqual("gpt-4o-mini", settings.ModelName);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
         public void EffectiveHttpRequestTimeoutSeconds_IsMinOfHttpAndOrchestratorCeiling()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
@@ -279,6 +368,15 @@ namespace CoreAI.Tests.EditMode
 
             CoreAISettingsAsset.ResetInstance();
             Object.DestroyImmediate(settings);
+        }
+
+        private static void SetPrivateField(CoreAISettingsAsset target, string fieldName, object value)
+        {
+            System.Reflection.FieldInfo fieldInfo = typeof(CoreAISettingsAsset).GetField(
+                fieldName,
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(fieldInfo, $"Expected private field '{fieldName}' exists on {nameof(CoreAISettingsAsset)}.");
+            fieldInfo.SetValue(target, value);
         }
     }
 }

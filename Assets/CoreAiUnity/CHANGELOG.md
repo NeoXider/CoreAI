@@ -2,6 +2,19 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.6.1] - 2026-06-01
+
+### WebGL chat streaming, Stop recovery, and settings diagnostics
+
+- Bumped `com.nexoider.coreaiunity` to `2.6.1` and kept the dependency aligned with `com.nexoider.coreai` `2.6.1`.
+- Added a real-backend WebGL Player verification path for `CoreAiChatDemo`: first message must show live streaming text, the second long streaming message must be cancellable with `Stop`, and a third message must still submit and receive a non-empty model response after cancellation.
+- Added deterministic PlayMode coverage for `CoreAiChatPanel.StopAgent()` so cancellation unlocks the panel, stops active streaming, and allows the next streaming request to run.
+- Hardened HTTP streaming fallback behavior so a primary backend that completes a streaming response without visible chunks can fall through to the configured secondary backend instead of producing an empty assistant turn.
+- Updated `CoreAISettingsAsset` connection testing: the test prompt now asks for an exact `OK` response with a larger token budget, and the inspector displays the result directly below the **Test Connection** button.
+- Documented the WebGL Stop verification flow and clarified that very short real-model replies can complete before tests observe a transient streaming label; recovery is verified by the final non-empty assistant response.
+
+#### Package **`2.6.1`** - dependency **`com.nexoider.coreai` `2.6.1`**.
+
 ## [2.6.0] - 2026-05-29
 
 ### WebGL SSE stop/done handling and Lua WebGL guard
@@ -12,6 +25,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Added WebGL Player coverage for JS-to-C# bridge round-trip, guarded abort with no active controller, and explicit Lua unsupported behavior on WebGL.
 - Disabled direct Lua PlayMode integration tests on WebGL while MoonSharp is unsupported there; Editor and non-WebGL player Lua paths remain covered.
 - Documented the temporary WebGL Lua limitation and the future restoration options: AOT-safe Lua runtime, trusted server-side execution, or a restricted command interpreter with WebGL Player tests.
+- Restored the full `CoreAISettingsAsset` custom inspector that exposes Essentials, Advanced foldouts, WebGL player settings, model helpers, and connection testing instead of falling back to the generic serialized field view.
+- Switched the restored settings inspector UI text to ASCII-only strings and added an explicit `Fallback Backend (secondary)` foldout for the secondary URL, API key, model, and enable toggle.
+- Added regression coverage for `CoreAISettingsAsset` URL/model normalization paths introduced by the restored settings inspector: HTTP base URL trim/default behavior and `ModelName` fallback in Auto/Local execution modes.
 - Removed stale Unity project warning debt from this repo by deleting an empty test asmdef and a missing PathTracing resource reference in URP global settings.
 
 #### Package **`2.6.0`** - dependency **`com.nexoider.coreai` `2.6.0`**.
@@ -23,6 +39,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Hardened `CoreAiSseFetch.jslib` so browser-side `open`, `chunk`, `done`, and `error` callbacks into C# are routed through guarded wrapper functions. A callback failure is now logged as a bridge warning instead of escaping as a browser `Uncaught undefined` / main-loop exception.
 - Cancelled browser `fetch` / `ReadableStream` paths no longer call the C# error callback for the expected `cancelled` reason, reducing noisy stop-button failures when a WebGL user interrupts generation before the model finishes.
 - Hardened `UnityMainThreadLlmAsyncMarshaler` Editor Play Mode detection for WebGL build-target test runs. Worker-thread tool invocations now refuse the Edit Mode inline path once runtime Play Mode has entered, even if the volatile editor mirror is still stale.
+- Restored the serialized `WorldRenderPipelineResources` entry in `UniversalRenderPipelineGlobalSettings.asset`, avoiding render-pipeline resource drift after WebGL settings changes.
 - Added `CoreAiSseFetchJslibEditModeTests` coverage to pin the safe-wrapper contract and guarded abort path.
 - Updated `CoreAISettingsAsset` resource/preset tests for committed blank API keys, keeping provider presets safe to publish without embedded secrets.
 - Updated WebGL streaming docs with the native bridge callback-safety note.

@@ -102,15 +102,26 @@ In **Auto** mode you can choose which backend to try first:
 | **LLMUnity First** ⭐ | LLMUnity → HTTP API → Offline | Local model primary, HTTP as fallback |
 | **HTTP First** | HTTP API → LLMUnity → Offline | HTTP API primary, local model as fallback |
 
+### Secondary fallback backend (optional)
+
+`CoreAISettingsAsset` also supports an optional **secondary HTTP-compatible fallback** for retryable failures:
+
+- Enable `Enable Fallback Backend` in **Fallback Backend (secondary)** (Advanced Settings).
+- Set both `Secondary Base URL` and `Secondary Model`.
+- `EnableFallbackBackend` + both values = valid secondary route.
+- `EnableFallbackBackend` without either value is treated as inactive fallback at runtime.
+
 ## 🔗 Test connection
 
 Click **🔗 Test Connection** in the Inspector. The system checks:
 
 **For HTTP API:**
 1. Skips `/models` for large APIs (OpenRouter, OpenAI)
-2. Sends a test chat request (`"Say OK"`)
+2. Sends a test chat request (`"Say exactly: OK"`)
 3. Parses the response and shows the result
 4. On error — shows hints (rate limit, auth, model, etc.)
+
+The result line is rendered directly under the **Test Connection** button so the latest status stays next to the action that produced it. The HTTP probe uses a small completion request with enough token budget for gateways that attach short reasoning or formatting metadata before the visible answer.
 
 **For LLMUnity:**
 1. LLMAgent presence on the scene

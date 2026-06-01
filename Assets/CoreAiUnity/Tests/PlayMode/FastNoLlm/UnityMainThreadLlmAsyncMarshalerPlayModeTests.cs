@@ -16,19 +16,16 @@ namespace CoreAI.Tests.PlayMode
     public sealed class UnityMainThreadLlmAsyncMarshalerPlayModeTests
     {
         /// <summary>
-        /// The true Unity main thread ID, captured in <see cref="SetUp"/> which
-        /// always runs on the main thread (NUnit runner guarantee in PlayMode).
-        /// We cannot rely on <c>Thread.CurrentThread.ManagedThreadId</c> inside
-        /// a coroutine body after <c>yield return</c> - some Unity versions
-        /// resume coroutines on worker threads.
+        /// The Unity player-loop main thread ID as registered by UniTask.
+        /// In WebGL / Player test runs NUnit setup can execute on the Editor-side
+        /// managed thread, while Unity continuations run on the player-loop thread.
         /// </summary>
         private int _unityMainThreadId;
 
         [SetUp]
         public void SetUp()
         {
-            // SetUp always runs on the main thread in Unity Test Runner.
-            _unityMainThreadId = Thread.CurrentThread.ManagedThreadId;
+            _unityMainThreadId = PlayerLoopHelper.MainThreadId;
         }
 
         [UnityTest]
