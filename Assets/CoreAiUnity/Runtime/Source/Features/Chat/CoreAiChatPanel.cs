@@ -44,6 +44,11 @@ namespace CoreAI.Chat
         [SerializeField]
         protected StyleSheet customStyleSheet;
 
+        [Header("UI Templates (optional)")]
+        [Tooltip("Optional message bubble template. If empty, CoreAiChatPanel creates the default bubble element in code.")]
+        [SerializeField]
+        protected VisualTreeAsset messageBubbleTemplate;
+
         // === UI Elements ===
         protected VisualElement Root;
         protected VisualElement ChatContainer;
@@ -662,6 +667,7 @@ namespace CoreAI.Chat
             TryAppendPersistedChatHistoryFromStore();
             if (GetMessageScrollChildCount() > 0)
             {
+                ScrollToBottom();
                 return;
             }
 
@@ -1641,40 +1647,86 @@ namespace CoreAI.Chat
         /// </summary>
         protected virtual VisualElement CreateMessageBubble(string text, bool isUser)
         {
-            VisualElement row = new();
-            row.AddToClassList("coreai-message-row");
-            row.AddToClassList(isUser ? "coreai-user-row" : "coreai-ai-row");
+            VisualElement row = CreateMessageBubbleRow(isUser);
+            VisualElement avatar = row.Q<VisualElement>("coreai-message-avatar");
+            VisualElement contentSlot = row.Q<VisualElement>("coreai-message-content-slot");
 
             if (!isUser)
             {
-                VisualElement avatar = new();
-                avatar.AddToClassList("coreai-avatar");
-                avatar.AddToClassList("coreai-ai-avatar");
-
-                if (config?.AiAvatarIcon != null)
-                {
-                    avatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
-                }
-
                 Label bubble = new(NormalizeAssistantDisplayText(text));
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
                 bubble.AddToClassList("coreai-ai-message");
 
-                row.Add(avatar);
-                row.Add(bubble);
+                ApplyAvatarSprite(avatar);
+                AddBubbleContent(row, contentSlot, bubble);
             }
             else
             {
+                avatar?.RemoveFromHierarchy();
+
                 Label bubble = new(text);
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
                 bubble.AddToClassList("coreai-user-message");
 
-                row.Add(bubble);
+                AddBubbleContent(row, contentSlot, bubble);
             }
 
             return row;
+        }
+
+        private VisualElement CreateMessageBubbleRow(bool isUser)
+        {
+            VisualElement row = null;
+            if (messageBubbleTemplate != null)
+            {
+                TemplateContainer container = messageBubbleTemplate.CloneTree();
+                row = container.Q<VisualElement>("coreai-message-row");
+                if (row != null)
+                {
+                    row.RemoveFromHierarchy();
+                }
+            }
+
+            if (row == null)
+            {
+                row = new CoreAiChatMessageBubbleElement();
+            }
+
+            row.RemoveFromClassList("coreai-user-row");
+            row.RemoveFromClassList("coreai-ai-row");
+            row.AddToClassList("coreai-message-row");
+            row.AddToClassList(isUser ? "coreai-user-row" : "coreai-ai-row");
+
+            if (row is CoreAiChatMessageBubbleElement bubble)
+            {
+                bubble.IsUser = isUser;
+            }
+
+            return row;
+        }
+
+        private void ApplyAvatarSprite(VisualElement avatar)
+        {
+            if (avatar == null || config?.AiAvatarIcon == null)
+            {
+                return;
+            }
+
+            avatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
+        }
+
+        private static void AddBubbleContent(VisualElement row, VisualElement contentSlot, VisualElement content)
+        {
+            if (contentSlot == null)
+            {
+                row.Add(content);
+                return;
+            }
+
+            contentSlot.Clear();
+            contentSlot.Add(content);
         }
 
         // ===================== UI Helpers =====================
@@ -2062,17 +2114,10 @@ namespace CoreAI.Chat
                 return;
             }
 
-            VisualElement row = new();
-            row.AddToClassList("coreai-message-row");
-            row.AddToClassList("coreai-ai-row");
-
-            VisualElement avatar = new();
-            avatar.AddToClassList("coreai-avatar");
-            avatar.AddToClassList("coreai-ai-avatar");
-            if (config?.AiAvatarIcon != null)
-            {
-                avatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
-            }
+            VisualElement templateRow = CreateMessageBubbleRow(false);
+            VisualElement avatar = templateRow.Q<VisualElement>("coreai-message-avatar");
+            VisualElement contentSlot = templateRow.Q<VisualElement>("coreai-message-content-slot");
+            ApplyAvatarSprite(avatar);
 
             _streamingLabel = new Label(string.Empty);
             _streamingLabel.style.whiteSpace = WhiteSpace.Normal;
@@ -2080,9 +2125,8 @@ namespace CoreAI.Chat
             _streamingLabel.AddToClassList("coreai-ai-message");
             _streamingLabel.AddToClassList("coreai-streaming-active");
 
-            row.Add(avatar);
-            row.Add(_streamingLabel);
-            MessageScroll.Add(row);
+            AddBubbleContent(templateRow, contentSlot, _streamingLabel);
+            MessageScroll.Add(templateRow);
             ScrollToBottom();
         }
 
@@ -2123,6 +2167,8 @@ namespace CoreAI.Chat
                 SnapScrollToBottom();
                 MessageScroll.schedule.Execute(SnapScrollToBottom);
                 MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(80);
+                MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(200);
+                MessageScroll.schedule.Execute(SnapScrollToBottom).StartingIn(500);
             });
         }
 
