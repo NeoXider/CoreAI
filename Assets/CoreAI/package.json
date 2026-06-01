@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. SkillSet self-service tool groups via read_skill + call_skill_tool proxy. Resilience limits and RateLimiterMetrics. v2.6.1: WebGL streaming continuation fix after first chunk. Unity integration ships in com.nexoider.coreaiunity.",
+  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. SkillSet self-service tool groups via read_skill + call_skill_tool proxy. Resilience limits and RateLimiterMetrics. v2.6.2: lockstep package release with Unity WebGL chat stop/streaming recovery fixes. Unity integration ships in com.nexoider.coreaiunity.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

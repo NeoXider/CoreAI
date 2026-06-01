@@ -2,18 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
-## [2.6.1] - 2026-06-01
+## [2.6.2] - 2026-06-01
 
 ### WebGL chat streaming, Stop recovery, and settings diagnostics
 
-- Bumped `com.nexoider.coreaiunity` to `2.6.1` and kept the dependency aligned with `com.nexoider.coreai` `2.6.1`.
+- Bumped `com.nexoider.coreaiunity` to `2.6.2` and kept the dependency aligned with `com.nexoider.coreai` `2.6.2`.
 - Added a real-backend WebGL Player verification path for `CoreAiChatDemo`: first message must show live streaming text, the second long streaming message must be cancellable with `Stop`, and a third message must still submit and receive a non-empty model response after cancellation.
 - Added deterministic PlayMode coverage for `CoreAiChatPanel.StopAgent()` so cancellation unlocks the panel, stops active streaming, and allows the next streaming request to run.
 - Hardened HTTP streaming fallback behavior so a primary backend that completes a streaming response without visible chunks can fall through to the configured secondary backend instead of producing an empty assistant turn.
 - Updated `CoreAISettingsAsset` connection testing: the test prompt now asks for an exact `OK` response with a larger token budget, and the inspector displays the result directly below the **Test Connection** button.
 - Documented the WebGL Stop verification flow and clarified that very short real-model replies can complete before tests observe a transient streaming label; recovery is verified by the final non-empty assistant response.
 
-#### Package **`2.6.1`** - dependency **`com.nexoider.coreai` `2.6.1`**.
+#### Package **`2.6.2`** - dependency **`com.nexoider.coreai` `2.6.2`**.
 
 ## [2.6.0] - 2026-05-29
 
