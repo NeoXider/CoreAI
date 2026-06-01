@@ -410,6 +410,22 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Fallback_PrimaryReturnsNonRetryableError_SecondaryNotCalled()
+        {
+            ErrorResultLlmClient primary = new(LlmErrorCode.InvalidRequest);
+            CountingLlmClient secondary = new("secondary");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            LlmCompletionResult result =
+                await fallback.CompleteAsync(new LlmCompletionRequest { AgentRoleId = "test" });
+
+            Assert.IsFalse(result.Ok);
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, result.ErrorCode);
+            Assert.AreEqual(0, fallback.FallbackCount, "Non-retryable errors should not trigger fallback.");
+            Assert.AreEqual(0, secondary.CallCount, "Secondary must not be called for non-retryable error.");
+        }
+
+        [Test]
         public async Task Fallback_PrimaryStreamingCompletesWithoutChunks_SecondaryStreamingIsCalled()
         {
             EmptyStreamingLlmClient primary = new();
@@ -428,6 +444,49 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, chunks.Count);
             Assert.AreEqual("secondary-stream", chunks[0].Text);
             Assert.IsTrue(chunks[1].IsDone);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryStreamingThrows_SecondaryStreamingIsCalled()
+        {
+            ThrowingStreamingLlmClient primary = new();
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "test" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(1, fallback.FallbackCount);
+            Assert.AreEqual(1, secondary.StreamingCallCount);
+            Assert.AreEqual(2, chunks.Count);
+            Assert.AreEqual("secondary-stream", chunks[0].Text);
+            Assert.IsTrue(chunks[1].IsDone);
+        }
+
+        [Test]
+        public async Task Fallback_PrimaryStreamingNonRetryableErrorChunk_IsNotFallbacked()
+        {
+            ErrorStreamingLlmClient primary = new(LlmErrorCode.InvalidRequest);
+            StreamingCountingLlmClient secondary = new("secondary-stream");
+            FallbackLlmClientDecorator fallback = new(primary, secondary);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in fallback.CompleteStreamingAsync(
+                               new LlmCompletionRequest { AgentRoleId = "test" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(0, fallback.FallbackCount);
+            Assert.AreEqual(0, secondary.StreamingCallCount);
+            Assert.AreEqual(1, chunks.Count, "Primary non-retryable error chunk should be preserved.");
+            Assert.AreEqual("primary-error", chunks[0].Error);
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, chunks[0].ErrorCode);
+            Assert.IsFalse(chunks[0].IsDone);
         }
 
         [Test]
@@ -566,6 +625,63 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken ct = default)
             {
                 throw new NotImplementedException();
+            }
+        }
+
+        private sealed class ThrowingStreamingLlmClient : ILlmClient
+        {
+            public int StreamingCallCount { get; private set; }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "streaming exception" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                StreamingCallCount++;
+                await Task.Yield();
+                throw new LlmClientException("primary stream fault", LlmErrorCode.ProviderError);
+#pragma warning disable CS0162
+                yield return default;
+#pragma warning restore CS0162
+            }
+        }
+
+        private sealed class ErrorStreamingLlmClient : ILlmClient
+        {
+            private readonly LlmErrorCode _code;
+            public int StreamingCallCount { get; private set; }
+
+            public ErrorStreamingLlmClient(LlmErrorCode code)
+            {
+                _code = code;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken ct = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "primary async error", ErrorCode = _code });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                StreamingCallCount++;
+                await Task.Yield();
+                ct.ThrowIfCancellationRequested();
+                yield return new LlmStreamChunk
+                {
+                    Text = string.Empty,
+                    Error = "primary-error",
+                    ErrorCode = _code
+                };
             }
         }
     }
