@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Crafting;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -608,6 +609,31 @@ namespace CoreAI.Tests.EditMode
             string json = result?.ToString() ?? "";
             Assert.IsTrue(json.Contains("\"Success\":true") || json.Contains("\"Success\": true"));
             Assert.IsTrue(json.Contains("\"IsCompatible\":true") || json.Contains("\"IsCompatible\": true"));
+        }
+
+        [Test]
+        public void CompatibilityTool_AIFunctionSchema_DefinesRequiredIngredientsProperty()
+        {
+            CompatibilityChecker checker = new();
+            CompatibilityLlmTool tool = new(checker);
+            AIFunction function = tool.CreateAIFunction();
+
+            JObject schema = JObject.Parse(function.JsonSchema.ToString());
+            JToken ingredientsProperty = schema["properties"]?["ingredients"];
+            Assert.IsNotNull(ingredientsProperty, "Required field 'ingredients' must also be declared in properties.");
+            Assert.AreEqual("array", ingredientsProperty["type"]?.ToString());
+
+            bool ingredientsIsRequired = false;
+            foreach (JToken required in schema["required"] ?? new JArray())
+            {
+                if (required?.ToString() == "ingredients")
+                {
+                    ingredientsIsRequired = true;
+                    break;
+                }
+            }
+
+            Assert.IsTrue(ingredientsIsRequired, "Tool schema should require ingredients.");
         }
 
         [Test]

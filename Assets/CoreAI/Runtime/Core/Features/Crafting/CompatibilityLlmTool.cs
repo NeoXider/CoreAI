@@ -41,13 +41,18 @@ namespace CoreAI.Crafting
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            Func<object, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string[], CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
                 Description = Description
             };
             return AIFunctionFactory.Create(func, options);
+        }
+
+        public Task<string> ExecuteAsync(string[] ingredients, CancellationToken cancellationToken = default)
+        {
+            return ExecuteAsync((object)ingredients, cancellationToken);
         }
 
         /// <summary>
