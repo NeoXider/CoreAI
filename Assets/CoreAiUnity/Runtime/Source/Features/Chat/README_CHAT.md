@@ -35,6 +35,8 @@ Configure in the Inspector:
 - **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
 - **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
+- **Enable Stop Generation** — when off, the send button is disabled while the AI is replying and never switches to `X`; Esc does not stop the active request.
+- **Show Clear Button** — when off, the header clear button is hidden. `CoreAiChatPanel.ClearChat(...)` remains available from code.
 - **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**). **Default window size (package template + new `CoreAiChatConfig` assets):** **650×910** logical px (~**+30%** vs the legacy **500×700**). Existing `.asset` files keep their serialized width/height until you change them in the Inspector.
 - **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
 - **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
@@ -219,7 +221,9 @@ chatPanel.SetRuntimeOptions(new CoreAiChatOptions
 {
     RoleId = "SmartChat",
     ShowToolCallsInChat = false,
-    EnableStreaming = true
+    EnableStreaming = true,
+    EnableStopGeneration = false,
+    ShowClearButton = false
 });
 
 chatPanel.ClearRuntimeOptions(); // fall back to assigned CoreAiChatConfig or built-in defaults
@@ -264,6 +268,8 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 
 ## Stopping generation (Stop) — since 0.22.0
 
+`CoreAiChatConfig.EnableStopGeneration` controls whether the player can stop an active AI turn from this UI. It is **on by default** for backward compatibility. When disabled, the send button keeps the normal `>` label, stays disabled while the request is running, does not receive `.coreai-chat-send-button-stop`, and Esc does not cancel the active request. Code can still call lower-level cancellation APIs if the host game owns that flow.
+
 Since **0.25.5** there is no separate “stop” button in the **header** — stop only via the send button and Esc (below).
 Since **0.25.6** the stop path is hardened for streaming and fast backends/stub: the button stays enabled while it shows `X`, busy state is set until the first `await`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
 
@@ -305,6 +311,8 @@ The **`C`** (Clear) button in the header (`coreai-chat-clear`) calls `ClearChat(
 
 - clears messages in the UI;
 - by default clears only chat history (`clearChatHistory: true`, `clearLongTermMemory: false`).
+
+`CoreAiChatConfig.ShowClearButton` controls only the visible header button. It is **on by default**. When disabled, the button is hidden from the panel, but the public `ClearChat(...)` methods below still work for code-driven resets, admin panels, scene transitions, or tests.
 
 The circular **FAB** also shows **C** as its icon when collapsed — that is the **open-chat** affordance (same letter, different control from the header clear button).
 

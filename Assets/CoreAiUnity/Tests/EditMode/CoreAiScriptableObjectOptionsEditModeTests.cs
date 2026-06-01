@@ -30,7 +30,9 @@ namespace CoreAI.Tests.EditMode
                     LoadPersistedChatOnStartup = false,
                     MaxPersistedMessagesForUi = 12,
                     EnableStreaming = false,
+                    EnableStopGeneration = false,
                     ShowToolCallsInChat = true,
+                    ShowClearButton = false,
                     TypingIndicatorText = "Thinking",
                     StreamingToolProgressHint = "Tool",
                     LongRequestHintFormat = "Wait {elapsed}",
@@ -51,6 +53,8 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual("RuntimeChat", options.RoleId);
                 Assert.AreEqual("Runtime title", options.HeaderTitle);
                 Assert.IsTrue(options.ShowToolCallsInChat);
+                Assert.IsFalse(options.EnableStopGeneration);
+                Assert.IsFalse(options.ShowClearButton);
                 Assert.IsTrue(options.UseFullscreenChat);
                 Assert.AreEqual(123, options.MaxMessageLength);
                 Assert.IsFalse(options.EnableOpenChatKeyboardShortcut);

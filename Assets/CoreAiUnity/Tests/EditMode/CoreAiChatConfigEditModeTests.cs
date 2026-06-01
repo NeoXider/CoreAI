@@ -37,6 +37,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(string.IsNullOrWhiteSpace(config.StreamingToolProgressHint),
                 "короткая подсказка при вызове инструмента / буфере не должна быть пустой по умолчанию");
             Assert.IsFalse(config.ShowToolCallsInChat, "по умолчанию tool-call строки в чате не показываем");
+            Assert.IsTrue(config.EnableStopGeneration, "по умолчанию пользователь может остановить генерацию");
+            Assert.IsTrue(config.ShowClearButton, "по умолчанию кнопка очистки доступна");
 
             Object.DestroyImmediate(config);
         }

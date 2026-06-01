@@ -81,6 +81,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void GetSendButtonPresentation_WhenBusyAndStopDisabled_ReturnsSendState()
+        {
+            Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(true, false));
+            Assert.AreEqual("Отправить сообщение", CoreAiChatPanel.GetSendButtonTooltip(true, false));
+        }
+
+        [Test]
         public void IsChatInputLocked_WhenStoppingOrClearing_ReturnsTrue()
         {
             Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(
@@ -144,6 +151,24 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
                 false,
                 true,
+                false,
+                false));
+        }
+
+        [Test]
+        public void ShouldSendButtonBeEnabled_WhenRequestIsRunningAndStopDisabled_ReturnsFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                true,
+                false,
+                false,
+                false,
+                false));
+
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
+                false,
+                true,
+                false,
                 false,
                 false));
         }

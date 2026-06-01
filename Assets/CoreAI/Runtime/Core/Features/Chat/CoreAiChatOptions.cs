@@ -12,7 +12,9 @@ namespace CoreAI.Chat
         bool LoadPersistedChatOnStartup { get; }
         int MaxPersistedMessagesForUi { get; }
         bool EnableStreaming { get; }
+        bool EnableStopGeneration { get; }
         bool ShowToolCallsInChat { get; }
+        bool ShowClearButton { get; }
         string TypingIndicatorText { get; }
         string StreamingToolProgressHint { get; }
         string LongRequestHintFormat { get; }
@@ -48,7 +50,9 @@ namespace CoreAI.Chat
         public bool LoadPersistedChatOnStartup { get; set; } = true;
         public int MaxPersistedMessagesForUi { get; set; }
         public bool EnableStreaming { get; set; } = true;
+        public bool EnableStopGeneration { get; set; } = true;
         public bool ShowToolCallsInChat { get; set; }
+        public bool ShowClearButton { get; set; } = true;
         public string TypingIndicatorText { get; set; } = "";
         public string StreamingToolProgressHint { get; set; } = DefaultStreamingToolProgressHint;
         public string LongRequestHintFormat { get; set; } = DefaultLongRequestHintFormat;
@@ -83,7 +87,9 @@ namespace CoreAI.Chat
                 LoadPersistedChatOnStartup = source.LoadPersistedChatOnStartup,
                 MaxPersistedMessagesForUi = source.MaxPersistedMessagesForUi,
                 EnableStreaming = source.EnableStreaming,
+                EnableStopGeneration = source.EnableStopGeneration,
                 ShowToolCallsInChat = source.ShowToolCallsInChat,
+                ShowClearButton = source.ShowClearButton,
                 TypingIndicatorText = source.TypingIndicatorText,
                 StreamingToolProgressHint = source.StreamingToolProgressHint,
                 LongRequestHintFormat = source.LongRequestHintFormat,

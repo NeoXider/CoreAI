@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## [v2.6.3] - 2026-06-01
+
+### Chat options parity with CoreAI Unity
+
+- Bumped `com.nexoider.coreai` to `2.6.3` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- Added portable chat options `EnableStopGeneration` and `ShowClearButton`. Unity consumes these through `CoreAiChatConfig` / `CoreAiChatPanel`; the portable package remains Unity-free.
+- Defaults preserve existing behavior: stop generation is enabled and the clear button is shown unless a host explicitly disables them.
 ## [v2.6.2] - 2026-06-01
 
 ### Lockstep patch with CoreAI Unity
@@ -1281,5 +1288,6 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
+
 
 

@@ -43,9 +43,17 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _enableStreaming = true;
 
+        [Tooltip("Allow the chat send button and Esc key to stop an active AI generation. When false, the send button stays disabled until the response finishes.")]
+        [SerializeField]
+        private bool _enableStopGeneration = true;
+
         [Tooltip("Show tool-call progress entries in chat when available.")]
         [SerializeField]
         private bool _showToolCallsInChat = false;
+
+        [Tooltip("Show the clear button in the chat header. ClearChat remains available from code when this is disabled.")]
+        [SerializeField]
+        private bool _showClearButton = true;
 
         [Header("UI - Typing Indicator")]
         [SerializeField]
@@ -115,7 +123,9 @@ namespace CoreAI.Chat
         public Sprite AiAvatarIcon => _aiAvatarIcon;
         public Sprite UserAvatarIcon => _userAvatarIcon;
         public bool EnableStreaming => _enableStreaming;
+        public bool EnableStopGeneration => _enableStopGeneration;
         public bool ShowToolCallsInChat => _showToolCallsInChat;
+        public bool ShowClearButton => _showClearButton;
         public string TypingIndicatorText => _typingIndicatorText;
         public string StreamingToolProgressHint => _streamingToolProgressHint ?? string.Empty;
         public string LongRequestHintFormat => _longRequestHintFormat ?? string.Empty;
@@ -149,7 +159,9 @@ namespace CoreAI.Chat
             _loadPersistedChatOnStartup = options.LoadPersistedChatOnStartup;
             _maxPersistedMessagesForUi = options.MaxPersistedMessagesForUi;
             _enableStreaming = options.EnableStreaming;
+            _enableStopGeneration = options.EnableStopGeneration;
             _showToolCallsInChat = options.ShowToolCallsInChat;
+            _showClearButton = options.ShowClearButton;
             _typingIndicatorText = options.TypingIndicatorText;
             _streamingToolProgressHint = options.StreamingToolProgressHint;
             _longRequestHintFormat = options.LongRequestHintFormat;

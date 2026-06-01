@@ -354,6 +354,7 @@ namespace CoreAI.Chat
                 TypingIndicator.style.display = DisplayStyle.None;
             }
 
+            ApplyClearButtonVisibility();
             UpdateSendButtonVisualState();
             ApplyShortcutTooltips();
         }
@@ -384,7 +385,18 @@ namespace CoreAI.Chat
 
 
 
+            ApplyClearButtonVisibility();
             ApplyShortcutTooltips();
+        }
+
+        private void ApplyClearButtonVisibility()
+        {
+            if (ClearButton == null)
+            {
+                return;
+            }
+
+            ClearButton.style.display = Options.ShowClearButton ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         /// <summary>
@@ -835,7 +847,10 @@ namespace CoreAI.Chat
                 MarkInputEventHandled(evt);
                 if (IsRequestInProgress())
                 {
-                    StopActiveGeneration();
+                    if (Options.EnableStopGeneration)
+                    {
+                        StopActiveGeneration();
+                    }
                 }
                 else
                 {
@@ -978,7 +993,10 @@ namespace CoreAI.Chat
                     {
                         if (IsRequestInProgress())
                         {
-                            StopActiveGeneration();
+                            if (Options.EnableStopGeneration)
+                            {
+                                StopActiveGeneration();
+                            }
                         }
                         else
                         {
@@ -1079,7 +1097,7 @@ namespace CoreAI.Chat
         {
             if (IsRequestInProgress())
             {
-                if (stopIfBusy)
+                if (stopIfBusy && Options.EnableStopGeneration)
                 {
                     StopActiveGeneration();
                 }
@@ -2011,11 +2029,17 @@ namespace CoreAI.Chat
             }
 
             bool isBusy = IsRequestInProgress();
-            SendButton.text = GetSendButtonText(isBusy);
-            SendButton.tooltip = GetSendButtonTooltip(isBusy);
-            SendButton.SetEnabled(ShouldSendButtonBeEnabled(_isSending, _isStreaming, _isStopping, _isClearing));
+            bool stopEnabled = Options.EnableStopGeneration;
+            SendButton.text = GetSendButtonText(isBusy, stopEnabled);
+            SendButton.tooltip = GetSendButtonTooltip(isBusy, stopEnabled);
+            SendButton.SetEnabled(ShouldSendButtonBeEnabled(
+                _isSending,
+                _isStreaming,
+                _isStopping,
+                _isClearing,
+                stopEnabled));
 
-            if (isBusy)
+            if (isBusy && stopEnabled)
             {
                 SendButton.AddToClassList(SendButtonStopClassName);
             }
@@ -2027,12 +2051,22 @@ namespace CoreAI.Chat
 
         internal static string GetSendButtonText(bool isBusy)
         {
-            return isBusy ? "X" : ">";
+            return GetSendButtonText(isBusy, true);
+        }
+
+        internal static string GetSendButtonText(bool isBusy, bool stopGenerationEnabled)
+        {
+            return isBusy && stopGenerationEnabled ? "X" : ">";
         }
 
         internal static string GetSendButtonTooltip(bool isBusy)
         {
-            return isBusy
+            return GetSendButtonTooltip(isBusy, true);
+        }
+
+        internal static string GetSendButtonTooltip(bool isBusy, bool stopGenerationEnabled)
+        {
+            return isBusy && stopGenerationEnabled
                 ? "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u044e (Esc)"
                 : "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435";
         }
@@ -2040,8 +2074,28 @@ namespace CoreAI.Chat
         internal static bool ShouldSendButtonBeEnabled(bool isSending, bool isStreaming, bool isStopping,
             bool isClearing)
         {
+            return ShouldSendButtonBeEnabled(isSending, isStreaming, isStopping, isClearing, true);
+        }
+
+        internal static bool ShouldSendButtonBeEnabled(
+            bool isSending,
+            bool isStreaming,
+            bool isStopping,
+            bool isClearing,
+            bool stopGenerationEnabled)
+        {
             // While a request is running the button is the stop control, so it must stay clickable.
-            return !isStopping && !isClearing;
+            if (isStopping || isClearing)
+            {
+                return false;
+            }
+
+            if (!stopGenerationEnabled && (isSending || isStreaming))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         public void ShowTypingIndicator()

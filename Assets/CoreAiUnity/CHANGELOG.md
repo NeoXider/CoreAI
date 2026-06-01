@@ -2,6 +2,19 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.6.3] - 2026-06-01
+
+### Chat UI authoring and host control toggles
+
+- Bumped `com.nexoider.coreaiunity` to `2.6.3` and kept the dependency aligned with `com.nexoider.coreai` `2.6.3`.
+- Added `CoreAiChatConfig.EnableStopGeneration` / `CoreAiChatOptions.EnableStopGeneration`. When disabled, active AI turns cannot be stopped from the chat UI: the send button stays as `>` and is disabled until the response completes, and Esc no longer cancels the request.
+- Added `CoreAiChatConfig.ShowClearButton` / `CoreAiChatOptions.ShowClearButton`. When disabled, the header clear button is physically hidden; `CoreAiChatPanel.ClearChat(...)` remains available for code-driven resets.
+- Added an authorable `CoreAiChatMessageBubble.uxml` and `CoreAiChatMessageBubbleElement` with `is-user`, `message-text`, and `avatar-sprite` attributes for UI Builder workflows. `CoreAiChatPanel.messageBubbleTemplate` is optional, so existing scenes keep working without assigning a template.
+- Reworked the default chat scrollbar USS to use the current official UI Toolkit selector chain (`.unity-scroll-view__vertical-scroller`, `.unity-scroller__slider`, `.unity-base-slider__tracker`, `.unity-base-slider__dragger`) and removed old shotgun selectors.
+- Fixed startup hydration scroll positioning so restored persisted chat sessions land on the newest messages after UI Toolkit layout settles.
+- Added EditMode coverage for chat config defaults, options round-tripping, disabled stop presentation, and disabled send button state while a request is running.
+
+#### Package **`2.6.3`** - dependency **`com.nexoider.coreai` `2.6.3`**.
 ## [2.6.2] - 2026-06-01
 
 ### WebGL chat streaming, Stop recovery, and settings diagnostics
@@ -2042,5 +2055,6 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.1.2] - earlier
 
 Baseline Unity host package. See git history.
+
 
 
