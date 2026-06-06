@@ -65,7 +65,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
             bool attackPressed = false;
 
 #if ENABLE_INPUT_SYSTEM
-            Keyboard kb = UnityEngine.InputSystem.Keyboard.current;
+            Keyboard kb = Keyboard.current;
             if (kb != null)
             {
                 if (kb.aKey.isPressed || kb.leftArrowKey.isPressed)
@@ -94,7 +94,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
                 }
             }
 
-            Mouse mouse = UnityEngine.InputSystem.Mouse.current;
+            Mouse mouse = Mouse.current;
             if (mouse != null)
             {
                 if (mouse.leftButton.wasPressedThisFrame)
@@ -133,7 +133,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
             foreach (Collider hit in hits)
             {
                 ArenaEnemyBrain enemy =
-                    hit.GetComponent<CoreAI.ExampleGame.ArenaCombat.Infrastructure.ArenaEnemyBrain>();
+                    hit.GetComponent<ArenaEnemyBrain>();
                 if (enemy != null)
                 {
                     enemy.TakeDamage(attackDamage);

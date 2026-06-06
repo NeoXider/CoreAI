@@ -104,7 +104,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
         private void AttackNearestEnemyFallback()
         {
             ArenaSurvivalSession session =
-                FindAnyObjectByType<CoreAI.ExampleGame.ArenaSurvival.Infrastructure.ArenaSurvivalSession>();
+                FindAnyObjectByType<ArenaSurvivalSession>();
             if (session == null)
             {
                 return;

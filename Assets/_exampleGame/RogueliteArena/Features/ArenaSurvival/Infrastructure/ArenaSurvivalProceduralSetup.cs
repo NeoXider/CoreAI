@@ -138,7 +138,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             session.RegisterPrimaryPlayer(player.transform, health);
 
             // Игра обновляет и хранит телеметрию в Core (SessionTelemetryCollector).
-            CoreAILifetimeScope scopeForTelemetry = GetComponentInParent<CoreAI.Composition.CoreAILifetimeScope>();
+            CoreAILifetimeScope scopeForTelemetry = GetComponentInParent<CoreAILifetimeScope>();
             SessionTelemetryCollector telemetryCollector = null;
             if (scopeForTelemetry != null &&
                 scopeForTelemetry.Container.TryResolve<ISessionTelemetryProvider>(out ISessionTelemetryProvider tp) &&

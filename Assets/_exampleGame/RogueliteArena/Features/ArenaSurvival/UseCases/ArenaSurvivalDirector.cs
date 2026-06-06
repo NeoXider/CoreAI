@@ -130,7 +130,7 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
                 // Multiplayer scaling: multiply by number of connected clients if Unity Netcode is active
                 int playersCount = 1;
-                Type nmType = System.Type.GetType("Unity.Netcode.NetworkManager, Unity.Netcode.Runtime");
+                Type nmType = Type.GetType("Unity.Netcode.NetworkManager, Unity.Netcode.Runtime");
                 if (nmType != null)
                 {
                     object singleton = nmType.GetProperty("Singleton",
