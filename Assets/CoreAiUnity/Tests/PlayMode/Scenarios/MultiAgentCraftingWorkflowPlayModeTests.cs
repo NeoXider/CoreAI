@@ -540,7 +540,8 @@ namespace CoreAI.Tests.PlayMode
                 _subscription.Dispose();
             }
 
-            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName, string label)
+            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName,
+                string label)
             {
                 LlmToolCallRecord record = _records
                     .Skip(startIndex)
@@ -553,7 +554,8 @@ namespace CoreAI.Tests.PlayMode
                 {
                     string seen = string.Join(", ", _records.Skip(startIndex)
                         .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
-                    Assert.Inconclusive($"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                    Assert.Inconclusive(
+                        $"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
                 }
 
                 return record;

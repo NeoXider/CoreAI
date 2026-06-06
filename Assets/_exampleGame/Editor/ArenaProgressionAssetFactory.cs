@@ -18,43 +18,51 @@ namespace CoreAI.ExampleGame.Editor
         {
             EnsureDir(Root);
 
-            var baseline = GetOrCreate<ArenaUnitBaselineConfig>($"{Root}/ArenaUnitBaseline.asset");
-            var persistence = GetOrCreate<ArenaPersistenceConfig>($"{Root}/ArenaPersistence.asset");
-            var runBalance = GetOrCreate<ArenaRunBalanceConfig>($"{Root}/ArenaRunBalance.asset");
-            var presentation = GetOrCreate<ArenaUpgradePresentationConfig>($"{Root}/ArenaUpgradePresentation.asset");
-            var sessionCurve = GetOrCreate<LevelCurveDefinition>($"{Root}/SessionLevelCurve.asset");
-            var metaCurve = GetOrCreate<LevelCurveDefinition>($"{Root}/MetaLevelCurve.asset");
+            ArenaUnitBaselineConfig baseline = GetOrCreate<ArenaUnitBaselineConfig>($"{Root}/ArenaUnitBaseline.asset");
+            ArenaPersistenceConfig persistence = GetOrCreate<ArenaPersistenceConfig>($"{Root}/ArenaPersistence.asset");
+            ArenaRunBalanceConfig runBalance = GetOrCreate<ArenaRunBalanceConfig>($"{Root}/ArenaRunBalance.asset");
+            ArenaUpgradePresentationConfig presentation =
+                GetOrCreate<ArenaUpgradePresentationConfig>($"{Root}/ArenaUpgradePresentation.asset");
+            LevelCurveDefinition sessionCurve = GetOrCreate<LevelCurveDefinition>($"{Root}/SessionLevelCurve.asset");
+            LevelCurveDefinition metaCurve = GetOrCreate<LevelCurveDefinition>($"{Root}/MetaLevelCurve.asset");
             FillLevelCurve(sessionCurve);
             FillLevelCurve(metaCurve);
             AssignCurves(runBalance, sessionCurve, metaCurve);
 
-            var rarity = GetOrCreate<ChanceData>($"{Root}/Chance_Rarity.asset");
+            ChanceData rarity = GetOrCreate<ChanceData>($"{Root}/Chance_Rarity.asset");
             FillRarity(rarity);
-            var catCr = GetOrCreate<ChanceData>($"{Root}/Chance_Category_CommonRare.asset");
+            ChanceData catCr = GetOrCreate<ChanceData>($"{Root}/Chance_Category_CommonRare.asset");
             FillCategoryCommonRare(catCr);
-            var catEpic = GetOrCreate<ChanceData>($"{Root}/Chance_Category_Epic.asset");
+            ChanceData catEpic = GetOrCreate<ChanceData>($"{Root}/Chance_Category_Epic.asset");
             FillCategoryEpic(catEpic);
-            var catLeg = GetOrCreate<ChanceData>($"{Root}/Chance_Category_Legendary.asset");
+            ChanceData catLeg = GetOrCreate<ChanceData>($"{Root}/Chance_Category_Legendary.asset");
             FillCategoryLegendary(catLeg);
 
-            var upHp = CreateUpgrade($"{Root}/Up_StatHp_Common.asset", "stat_hp", "HP+", "+10 макс. HP", ArenaUpgradeKind.StatHp,
+            ArenaUpgradeDefinition upHp = CreateUpgrade($"{Root}/Up_StatHp_Common.asset", "stat_hp", "HP+",
+                "+10 макс. HP", ArenaUpgradeKind.StatHp,
                 ArenaRarity.Common, 10f);
-            var upDmg = CreateUpgrade($"{Root}/Up_StatDmg_Rare.asset", "stat_dmg", "Урон+", "+5 урона", ArenaUpgradeKind.StatDamage,
+            ArenaUpgradeDefinition upDmg = CreateUpgrade($"{Root}/Up_StatDmg_Rare.asset", "stat_dmg", "Урон+",
+                "+5 урона", ArenaUpgradeKind.StatDamage,
                 ArenaRarity.Rare, 5f);
-            var upAspd = CreateUpgrade($"{Root}/Up_StatAspd_Epic.asset", "stat_aspd", "Скорость атаки", "Быстрее удары",
+            ArenaUpgradeDefinition upAspd = CreateUpgrade($"{Root}/Up_StatAspd_Epic.asset", "stat_aspd",
+                "Скорость атаки", "Быстрее удары",
                 ArenaUpgradeKind.StatAttackSpeed, ArenaRarity.Epic, 3f);
-            var upPassive = CreateUpgrade($"{Root}/Up_Passive_Epic.asset", "passive_slot", "Пассивный слот", "+1 слот",
+            ArenaUpgradeDefinition upPassive = CreateUpgrade($"{Root}/Up_Passive_Epic.asset", "passive_slot",
+                "Пассивный слот", "+1 слот",
                 ArenaUpgradeKind.PassiveSlotPlusOne, ArenaRarity.Epic, 0f);
-            var upChoices = CreateUpgrade($"{Root}/Up_Choices_Legendary.asset", "extra_choices", "Больше карт", "+1 карта выбора",
+            ArenaUpgradeDefinition upChoices = CreateUpgrade($"{Root}/Up_Choices_Legendary.asset", "extra_choices",
+                "Больше карт", "+1 карта выбора",
                 ArenaUpgradeKind.OfferExtraChoices, ArenaRarity.Legendary, 0f);
-            var upDouble = CreateUpgrade($"{Root}/Up_DoublePick_Legendary.asset", "double_pick", "Двойной выбор",
+            ArenaUpgradeDefinition upDouble = CreateUpgrade($"{Root}/Up_DoublePick_Legendary.asset", "double_pick",
+                "Двойной выбор",
                 "Два апгрейда на следующем экране", ArenaUpgradeKind.LegendaryDoublePickThisWave,
                 ArenaRarity.Legendary, 0f);
 
-            var statWeights = GetOrCreate<ChanceData>($"{Root}/Chance_StatUpgradePool.asset");
+            ChanceData statWeights = GetOrCreate<ChanceData>($"{Root}/Chance_StatUpgradePool.asset");
             FillStatWeights(statWeights, 3);
 
-            var content = GetOrCreate<ArenaProgressionContent>($"{Root}/ArenaProgressionContent.asset");
+            ArenaProgressionContent content =
+                GetOrCreate<ArenaProgressionContent>($"{Root}/ArenaProgressionContent.asset");
             AssignContent(content, runBalance, persistence, presentation, rarity, catCr, catEpic, catLeg, statWeights,
                 new[] { upHp, upDmg, upAspd, upPassive, upChoices, upDouble });
 
@@ -68,7 +76,7 @@ namespace CoreAI.ExampleGame.Editor
         {
             EnsureDir(ArenaRoot);
             const string path = ArenaRoot + "/ArenaVsWaveDifficulty.asset";
-            var a = AssetDatabase.LoadAssetAtPath<ArenaVsStyleWaveDifficulty>(path);
+            ArenaVsStyleWaveDifficulty a = AssetDatabase.LoadAssetAtPath<ArenaVsStyleWaveDifficulty>(path);
             if (a == null)
             {
                 a = ScriptableObject.CreateInstance<ArenaVsStyleWaveDifficulty>();
@@ -83,23 +91,32 @@ namespace CoreAI.ExampleGame.Editor
         private static void EnsureDir(string path)
         {
             if (AssetDatabase.IsValidFolder(path))
+            {
                 return;
-            var parts = path.Split('/');
-            var cur = parts[0];
+            }
+
+            string[] parts = path.Split('/');
+            string cur = parts[0];
             for (int i = 1; i < parts.Length; i++)
             {
-                var next = cur + "/" + parts[i];
+                string next = cur + "/" + parts[i];
                 if (!AssetDatabase.IsValidFolder(next))
+                {
                     AssetDatabase.CreateFolder(cur, parts[i]);
+                }
+
                 cur = next;
             }
         }
 
         private static T GetOrCreate<T>(string path) where T : ScriptableObject
         {
-            var a = AssetDatabase.LoadAssetAtPath<T>(path);
+            T a = AssetDatabase.LoadAssetAtPath<T>(path);
             if (a != null)
+            {
                 return a;
+            }
+
             a = ScriptableObject.CreateInstance<T>();
             AssetDatabase.CreateAsset(a, path);
             return a;
@@ -107,13 +124,14 @@ namespace CoreAI.ExampleGame.Editor
 
         private static void FillLevelCurve(LevelCurveDefinition curve)
         {
-            var so = new SerializedObject(curve);
-            var levels = so.FindProperty("_levels");
+            SerializedObject so = new(curve);
+            SerializedProperty levels = so.FindProperty("_levels");
             levels.ClearArray();
+
             void Add(int level, int reqXp)
             {
                 levels.InsertArrayElementAtIndex(levels.arraySize);
-                var el = levels.GetArrayElementAtIndex(levels.arraySize - 1);
+                SerializedProperty el = levels.GetArrayElementAtIndex(levels.arraySize - 1);
                 el.FindPropertyRelative("_level").intValue = level;
                 el.FindPropertyRelative("_requiredXp").intValue = reqXp;
             }
@@ -127,9 +145,10 @@ namespace CoreAI.ExampleGame.Editor
             EditorUtility.SetDirty(curve);
         }
 
-        private static void AssignCurves(ArenaRunBalanceConfig run, LevelCurveDefinition session, LevelCurveDefinition meta)
+        private static void AssignCurves(ArenaRunBalanceConfig run, LevelCurveDefinition session,
+            LevelCurveDefinition meta)
         {
-            var so = new SerializedObject(run);
+            SerializedObject so = new(run);
             so.FindProperty("sessionLevelCurve").objectReferenceValue = session;
             so.FindProperty("metaLevelCurve").objectReferenceValue = meta;
             so.ApplyModifiedPropertiesWithoutUndo();
@@ -139,7 +158,7 @@ namespace CoreAI.ExampleGame.Editor
         private static void FillRarity(ChanceData data)
         {
             data.ClearChances();
-            var m = data.Manager;
+            ChanceManager m = data.Manager;
             m.AddChance(50f);
             m.AddChance(30f);
             m.AddChance(15f);
@@ -150,7 +169,7 @@ namespace CoreAI.ExampleGame.Editor
         private static void FillCategoryCommonRare(ChanceData data)
         {
             data.ClearChances();
-            var m = data.Manager;
+            ChanceManager m = data.Manager;
             m.AddChance(1f);
             EditorUtility.SetDirty(data);
         }
@@ -158,7 +177,7 @@ namespace CoreAI.ExampleGame.Editor
         private static void FillCategoryEpic(ChanceData data)
         {
             data.ClearChances();
-            var m = data.Manager;
+            ChanceManager m = data.Manager;
             m.AddChance(70f);
             m.AddChance(30f);
             EditorUtility.SetDirty(data);
@@ -167,7 +186,7 @@ namespace CoreAI.ExampleGame.Editor
         private static void FillCategoryLegendary(ChanceData data)
         {
             data.ClearChances();
-            var m = data.Manager;
+            ChanceManager m = data.Manager;
             m.AddChance(50f);
             m.AddChance(25f);
             m.AddChance(25f);
@@ -177,17 +196,20 @@ namespace CoreAI.ExampleGame.Editor
         private static void FillStatWeights(ChanceData data, int count)
         {
             data.ClearChances();
-            var m = data.Manager;
+            ChanceManager m = data.Manager;
             for (int i = 0; i < count; i++)
+            {
                 m.AddChance(1f);
+            }
+
             EditorUtility.SetDirty(data);
         }
 
         private static ArenaUpgradeDefinition CreateUpgrade(string path, string id, string title, string desc,
             ArenaUpgradeKind kind, ArenaRarity rarity, float delta)
         {
-            var a = GetOrCreate<ArenaUpgradeDefinition>(path);
-            var so = new SerializedObject(a);
+            ArenaUpgradeDefinition a = GetOrCreate<ArenaUpgradeDefinition>(path);
+            SerializedObject so = new(a);
             so.FindProperty("id").stringValue = id;
             so.FindProperty("title").stringValue = title;
             so.FindProperty("description").stringValue = desc;
@@ -211,7 +233,7 @@ namespace CoreAI.ExampleGame.Editor
             ChanceData statW,
             ArenaUpgradeDefinition[] upgrades)
         {
-            var so = new SerializedObject(content);
+            SerializedObject so = new(content);
             so.FindProperty("runBalance").objectReferenceValue = runBalance;
             so.FindProperty("persistence").objectReferenceValue = persistence;
             so.FindProperty("presentation").objectReferenceValue = presentation;
@@ -220,7 +242,7 @@ namespace CoreAI.ExampleGame.Editor
             so.FindProperty("categoryEpic").objectReferenceValue = catEpic;
             so.FindProperty("categoryLegendary").objectReferenceValue = catLeg;
             so.FindProperty("statUpgradeWeights").objectReferenceValue = statW;
-            var list = so.FindProperty("upgrades");
+            SerializedProperty list = so.FindProperty("upgrades");
             list.ClearArray();
             for (int i = 0; i < upgrades.Length; i++)
             {

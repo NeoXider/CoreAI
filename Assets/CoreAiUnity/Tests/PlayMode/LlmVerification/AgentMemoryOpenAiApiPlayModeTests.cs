@@ -364,7 +364,8 @@ namespace CoreAI.Tests.PlayMode
                 }
                 catch (Exception e)
                 {
-                    Debug.LogWarning($"[AgentMemoryOpenAiApiPlayMode] Could not subscribe to LLM diagnostics: {e.Message}");
+                    Debug.LogWarning(
+                        $"[AgentMemoryOpenAiApiPlayMode] Could not subscribe to LLM diagnostics: {e.Message}");
                     return monitor;
                 }
             }

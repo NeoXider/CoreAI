@@ -7,43 +7,54 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     /// Vampire-Survivors-style pressure curve: the run gets harder overall while the
     /// sine component creates breathing-room waves instead of monotonic escalation.
     /// </summary>
-    [CreateAssetMenu(fileName = "ArenaVsWaveDifficulty", menuName = "CoreAI Example/Arena/VS-style Wave Difficulty", order = 30)]
+    [CreateAssetMenu(fileName = "ArenaVsWaveDifficulty", menuName = "CoreAI Example/Arena/VS-style Wave Difficulty",
+        order = 30)]
     public sealed class ArenaVsStyleWaveDifficulty : ScriptableObject, IArenaWaveDifficulty
     {
         [Header("База числа врагов (множитель к IArenaWaveSchedule / плану)")]
         [Tooltip("Амплитуда «лёгкой» волны: чуть меньше врагов в минимуме синуса.")]
-        [SerializeField] [Range(0f, 0.25f)] private float enemyCountBreathAmplitude = 0.1f;
+        [SerializeField]
+        [Range(0f, 0.25f)]
+        private float enemyCountBreathAmplitude = 0.1f;
 
-        [Tooltip("Период колебания в волнах (например 3.5 — паттерн сложнее-легче).")]
-        [SerializeField] [Min(0.5f)] private float enemyCountBreathPeriodWaves = 4f;
+        [Tooltip("Период колебания в волнах (например 3.5 — паттерн сложнее-легче).")] [SerializeField] [Min(0.5f)]
+        private float enemyCountBreathPeriodWaves = 4f;
 
         [SerializeField] private float enemyCountPhaseOffset;
 
-        [Header("Суммарный рост угрозы (HP / урон / скорость к концу рана)")]
-        [SerializeField] [Min(0.1f)] private float rampStart = 1f;
+        [Header("Суммарный рост угрозы (HP / урон / скорость к концу рана)")] [SerializeField] [Min(0.1f)]
+        private float rampStart = 1f;
 
         [SerializeField] [Min(0.1f)] private float rampEnd = 2.45f;
 
-        [Tooltip("Опционально: по оси X нормализованный прогресс 0..1 по волне, по Y множитель 0..1 к интерполяции rampStart→rampEnd. Пусто = SmoothStep.")]
-        [SerializeField] private AnimationCurve rampProgress01;
+        [Tooltip(
+            "Опционально: по оси X нормализованный прогресс 0..1 по волне, по Y множитель 0..1 к интерполяции rampStart→rampEnd. Пусто = SmoothStep.")]
+        [SerializeField]
+        private AnimationCurve rampProgress01;
 
         [Header("Локальные колебания статов (легче / жёстче волна)")]
         [Tooltip("Насколько сильно одна волна может быть мягче среднего по HP.")]
-        [SerializeField] [Range(0f, 0.35f)] private float statBreathAmplitude = 0.16f;
+        [SerializeField]
+        [Range(0f, 0.35f)]
+        private float statBreathAmplitude = 0.16f;
 
         [SerializeField] [Min(0.5f)] private float statBreathPeriodWaves = 3.25f;
 
         [SerializeField] private float statBreathPhaseOffset;
 
         [Tooltip("Урон колеблется слабее HP (меньше случайных ваншотов в «лёгкой» волне).")]
-        [SerializeField] [Range(0f, 1f)] private float damageBreathBlend = 0.4f;
+        [SerializeField]
+        [Range(0f, 1f)]
+        private float damageBreathBlend = 0.4f;
 
         [Header("Темп спавна")]
         [Tooltip("К последней волне интервал умножается на это (меньше — плотнее поток).")]
-        [SerializeField] [Range(0.35f, 1f)] private float spawnIntervalEndFactor = 0.62f;
+        [SerializeField]
+        [Range(0.35f, 1f)]
+        private float spawnIntervalEndFactor = 0.62f;
 
-        [Tooltip("В «жёстких» фазах синуса спавн чуть ускоряется.")]
-        [SerializeField] [Range(0f, 0.25f)] private float spawnBreathCoupling = 0.12f;
+        [Tooltip("В «жёстких» фазах синуса спавн чуть ускоряется.")] [SerializeField] [Range(0f, 0.25f)]
+        private float spawnBreathCoupling = 0.12f;
 
         public ArenaWaveDifficultySample Evaluate(int waveIndex1Based, int totalWavesInRun)
         {
@@ -57,15 +68,15 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
             float ramp = Mathf.Lerp(rampStart, rampEnd, alpha);
 
             float countOsc = 1f +
-                enemyCountBreathAmplitude *
-                Mathf.Sin((wave + enemyCountPhaseOffset) * 2f * Mathf.PI /
-                    Mathf.Max(0.5f, enemyCountBreathPeriodWaves));
+                             enemyCountBreathAmplitude *
+                             Mathf.Sin((wave + enemyCountPhaseOffset) * 2f * Mathf.PI /
+                                       Mathf.Max(0.5f, enemyCountBreathPeriodWaves));
             countOsc = Mathf.Max(0.82f, countOsc);
 
             float statOsc = 1f +
-                statBreathAmplitude *
-                Mathf.Sin((wave + statBreathPhaseOffset) * 2f * Mathf.PI /
-                    Mathf.Max(0.5f, statBreathPeriodWaves));
+                            statBreathAmplitude *
+                            Mathf.Sin((wave + statBreathPhaseOffset) * 2f * Mathf.PI /
+                                      Mathf.Max(0.5f, statBreathPeriodWaves));
             statOsc = Mathf.Clamp(statOsc, 1f - statBreathAmplitude, 1f + statBreathAmplitude);
 
             float hpMult = ramp * statOsc;

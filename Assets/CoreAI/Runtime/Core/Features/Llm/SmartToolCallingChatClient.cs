@@ -379,7 +379,8 @@ namespace CoreAI.Infrastructure.Llm
                         else
                         {
                             string truncated = remaining > 0
-                                ? tc.Text.Substring(0, remaining) + "\n...[response truncated at " + maxChars + " chars]"
+                                ? tc.Text.Substring(0, remaining) + "\n...[response truncated at " + maxChars +
+                                  " chars]"
                                 : "...[response truncated]";
                             m.Contents[i] = new MEAI.TextContent(truncated);
                             remaining = 0;

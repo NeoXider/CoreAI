@@ -34,7 +34,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Presenter
         public void OpenDraft(HashSet<string> excludeIds = null)
         {
             if (_view == null)
+            {
                 return;
+            }
+
             _chosenThisScreen.Clear();
             _team?.BeginDraftScreen();
             ShowNextRoll(excludeIds);
@@ -43,11 +46,13 @@ namespace CoreAI.ExampleGame.ArenaProgression.Presenter
         private void ShowNextRoll(HashSet<string> excludeIds)
         {
             _buffer.Clear();
-            var exclude = new HashSet<string>(_chosenThisScreen);
+            HashSet<string> exclude = new(_chosenThisScreen);
             if (excludeIds != null)
             {
-                foreach (var e in excludeIds)
+                foreach (string e in excludeIds)
+                {
                     exclude.Add(e);
+                }
             }
 
             _roll?.Execute(exclude, _buffer);
@@ -58,13 +63,16 @@ namespace CoreAI.ExampleGame.ArenaProgression.Presenter
         private void OnPlayerPicked(ArenaUpgradeOffer offer)
         {
             if (offer?.Definition == null)
+            {
                 return;
-            _apply?.Execute(offer, applyToCompanionToo: true);
+            }
+
+            _apply?.Execute(offer, true);
             _chosenThisScreen.Add(offer.Definition.Id);
             _team?.ConsumePick();
             if (_team != null && _team.PicksRemainingThisScreen > 0)
             {
-                ShowNextRoll(excludeIds: null);
+                ShowNextRoll(null);
                 return;
             }
 
@@ -75,17 +83,21 @@ namespace CoreAI.ExampleGame.ArenaProgression.Presenter
         {
             if (_companionBrain != null && _lastShown != null && _lastShown.Count > 0)
             {
-                var candidates = new List<ArenaUpgradeOffer>();
+                List<ArenaUpgradeOffer> candidates = new();
                 for (int i = 0; i < _lastShown.Count; i++)
                 {
-                    var o = _lastShown[i];
+                    ArenaUpgradeOffer o = _lastShown[i];
                     if (o?.Definition != null && !_chosenThisScreen.Contains(o.Definition.Id))
+                    {
                         candidates.Add(o);
+                    }
                 }
 
-                var pick = _companionBrain.Pick(candidates);
+                ArenaUpgradeOffer pick = _companionBrain.Pick(candidates);
                 if (pick != null)
-                    _apply?.Execute(pick, applyToCompanionToo: false);
+                {
+                    _apply?.Execute(pick, false);
+                }
             }
 
             _view?.Hide();

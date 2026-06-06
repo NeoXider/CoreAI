@@ -18,11 +18,16 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
         public void Execute(int amount)
         {
             if (_meta == null || amount <= 0)
+            {
                 return;
+            }
+
             _meta.AddMetaXp(amount);
             LevelCurveDefinition c = _balance?.MetaLevelCurve;
             if (c != null)
+            {
                 _meta.RecomputeMetaLevel(t => c.EvaluateLevel(t));
+            }
         }
     }
 }

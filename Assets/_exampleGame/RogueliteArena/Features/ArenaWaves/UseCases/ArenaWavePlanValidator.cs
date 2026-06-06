@@ -60,4 +60,3 @@ namespace CoreAI.ExampleGame.ArenaWaves.UseCases
         }
     }
 }
-

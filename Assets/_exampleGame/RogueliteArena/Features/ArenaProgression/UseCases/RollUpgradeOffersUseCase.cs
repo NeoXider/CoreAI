@@ -15,7 +15,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
             _roll = roll;
         }
 
-        public bool Execute(HashSet<string> excludeIds, List<ArenaUpgradeOffer> into) =>
-            _roll != null && _roll.TryRollOffers(_team, excludeIds, into);
+        public bool Execute(HashSet<string> excludeIds, List<ArenaUpgradeOffer> into)
+        {
+            return _roll != null && _roll.TryRollOffers(_team, excludeIds, into);
+        }
     }
 }

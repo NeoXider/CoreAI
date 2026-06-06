@@ -6,6 +6,7 @@ using CoreAI.ExampleGame.ArenaSurvival.Domain;
 using CoreAI.ExampleGame.ArenaSurvival.UseCases;
 using CoreAI.ExampleGame.ArenaSurvival.View;
 using System;
+using CoreAI.Composition;
 using CoreAI.ExampleGame.ArenaWaves.Infrastructure;
 using CoreAI.Session;
 using Unity.AI.Navigation;
@@ -27,12 +28,10 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         [SerializeField] private ArenaSimulationRole simulationRole = ArenaSimulationRole.AuthoritativeHost;
         [SerializeField] private ArenaDirectorSettings directorSettings;
 
-        [Tooltip("Если в сцене уже есть пол (Plane) с коллайдером — включите, чтобы не дублировать.")]
-        [SerializeField]
+        [Tooltip("Если в сцене уже есть пол (Plane) с коллайдером — включите, чтобы не дублировать.")] [SerializeField]
         private bool skipRuntimeFloor;
 
-        [Tooltip("Опционально: мировая позиция спавна игрока (пустой Transform на сцене).")]
-        [SerializeField]
+        [Tooltip("Опционально: мировая позиция спавна игрока (пустой Transform на сцене).")] [SerializeField]
         private Transform playerSpawnAnchor;
 
         [Header("AI (Creator)")]
@@ -40,22 +39,21 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         [SerializeField]
         private bool creatorPlansWaves = true;
 
-        [Header("Solo helper")]
-        [Tooltip("Если включено — добавить NPC помощника в команду (соло).")]
-        [SerializeField]
+        [Header("Solo helper")] [Tooltip("Если включено — добавить NPC помощника в команду (соло).")] [SerializeField]
         private bool spawnCompanionBot = true;
 
         [Header("NavMesh")]
-        [Tooltip("Автосоздание NavMeshSurface на полу и запекание (по умолчанию включено). Если данных нет — выполняется BuildNavMesh.")]
+        [Tooltip(
+            "Автосоздание NavMeshSurface на полу и запекание (по умолчанию включено). Если данных нет — выполняется BuildNavMesh.")]
         [SerializeField]
         private bool buildNavMeshAtRuntime = true;
 
-        [Tooltip("Перед запеканием временно отключить NavMeshAgent и CharacterController (игроки/боты), чтобы не ломать bake.")]
+        [Tooltip(
+            "Перед запеканием временно отключить NavMeshAgent и CharacterController (игроки/боты), чтобы не ломать bake.")]
         [SerializeField]
         private bool suspendAgentsDuringNavMeshBake = true;
 
-        [Tooltip("Всегда пересобирать NavMesh (дороже). Иначе — только если navMeshData пуст.")]
-        [SerializeField]
+        [Tooltip("Всегда пересобирать NavMesh (дороже). Иначе — только если navMeshData пуст.")] [SerializeField]
         private bool forceFullNavMeshRebuild;
 
         [Header("Отладка")]
@@ -68,12 +66,12 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         private ArenaWavePresetLibrary wavePresetLibrary;
 
         [Header("Progression (VS-style)")]
-        [Tooltip("Если заданы вместе с baseline — поднимается ArenaProgressionSessionHost, XP за килл, мета-сейв, Lua API.")]
+        [Tooltip(
+            "Если заданы вместе с baseline — поднимается ArenaProgressionSessionHost, XP за килл, мета-сейв, Lua API.")]
         [SerializeField]
         private ArenaProgressionContent arenaProgressionContent;
 
         [SerializeField] private ArenaUnitBaselineConfig arenaUnitBaselineConfig;
-
 
 
         private void Start()
@@ -83,17 +81,17 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
         private void Build()
         {
-            var root = new GameObject("ArenaGenerated");
+            GameObject root = new("ArenaGenerated");
             root.transform.SetParent(transform, false);
 
             NavMeshSurface navSurface = null;
 
             if (!skipRuntimeFloor)
             {
-                var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+                GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
                 floor.name = "Floor";
                 floor.transform.SetParent(root.transform, false);
-                var scale = arenaHalfSize / 5f;
+                float scale = arenaHalfSize / 5f;
                 floor.transform.localScale = new Vector3(scale, 1f, scale);
                 ApplyLitColor(floor.GetComponent<Renderer>(), new Color(0.22f, 0.28f, 0.22f));
                 if (buildNavMeshAtRuntime)
@@ -104,14 +102,17 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             }
             else if (buildNavMeshAtRuntime)
             {
-                navSurface = UnityEngine.Object.FindAnyObjectByType<NavMeshSurface>(FindObjectsInactive.Include);
+                navSurface = FindAnyObjectByType<NavMeshSurface>(FindObjectsInactive.Include);
             }
 
             if (buildNavMeshAtRuntime && navSurface != null)
             {
                 IDisposable suspend = null;
                 if (suspendAgentsDuringNavMeshBake)
+                {
                     suspend = ArenaNavMeshRuntimeBake.SuspendAgentsForNavMeshBake(true);
+                }
+
                 try
                 {
                     ArenaNavMeshRuntimeBake.EnsureNavMeshBuilt(navSurface, forceFullNavMeshRebuild);
@@ -122,21 +123,25 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                 }
             }
 
-            var sessionGo = new GameObject("ArenaSurvivalSession");
+            GameObject sessionGo = new("ArenaSurvivalSession");
             sessionGo.transform.SetParent(root.transform, false);
-            var session = sessionGo.AddComponent<ArenaSurvivalSession>();
+            ArenaSurvivalSession session = sessionGo.AddComponent<ArenaSurvivalSession>();
             session.SetRuntimeSimulationRole(simulationRole);
 
-            var player = CreatePlayer(root.transform);
+            GameObject player = CreatePlayer(root.transform);
             if (playerSpawnAnchor != null)
+            {
                 player.transform.position = playerSpawnAnchor.position;
-            var health = player.GetComponent<ArenaPlayerHealth>();
+            }
+
+            ArenaPlayerHealth health = player.GetComponent<ArenaPlayerHealth>();
             session.RegisterPrimaryPlayer(player.transform, health);
 
             // Игра обновляет и хранит телеметрию в Core (SessionTelemetryCollector).
-            var scopeForTelemetry = GetComponentInParent<CoreAI.Composition.CoreAILifetimeScope>();
+            CoreAILifetimeScope scopeForTelemetry = GetComponentInParent<CoreAI.Composition.CoreAILifetimeScope>();
             SessionTelemetryCollector telemetryCollector = null;
-            if (scopeForTelemetry != null && scopeForTelemetry.Container.TryResolve<ISessionTelemetryProvider>(out var tp) &&
+            if (scopeForTelemetry != null &&
+                scopeForTelemetry.Container.TryResolve<ISessionTelemetryProvider>(out ISessionTelemetryProvider tp) &&
                 tp is SessionTelemetryCollector sc)
             {
                 telemetryCollector = sc;
@@ -148,7 +153,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             health.Died += () =>
             {
                 if (!session.RunEnded)
+                {
                     session.EndRun(false);
+                }
             };
 
             health.Changed += (cur, max) =>
@@ -157,21 +164,19 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                 telemetryCollector?.SetTelemetry("player.hp.max", max);
             };
 
-            session.AliveEnemiesChanged += alive =>
-            {
-                telemetryCollector?.SetTelemetry("arena.alive_enemies", alive);
-            };
+            session.AliveEnemiesChanged += alive => { telemetryCollector?.SetTelemetry("arena.alive_enemies", alive); };
 
-            var cam = Camera.main;
+            Camera cam = Camera.main;
             if (cam != null)
             {
-                var follow = cam.gameObject.GetComponent<ArenaFollowCamera>() ?? cam.gameObject.AddComponent<ArenaFollowCamera>();
+                ArenaFollowCamera follow = cam.gameObject.GetComponent<ArenaFollowCamera>() ??
+                                           cam.gameObject.AddComponent<ArenaFollowCamera>();
                 follow.SetTarget(player.transform);
             }
 
-            var hudRoot = new GameObject("ArenaHUD");
+            GameObject hudRoot = new("ArenaHUD");
             hudRoot.transform.SetParent(root.transform, false);
-            var hud = hudRoot.AddComponent<ArenaSurvivalHud>();
+            ArenaSurvivalHud hud = hudRoot.AddComponent<ArenaSurvivalHud>();
 
             ArenaCompanionBot companionBot = null;
             if (spawnCompanionBot)
@@ -181,18 +186,18 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                 companionBot.Init(session);
             }
 
-            var enemyTemplate = CreateEnemyTemplate();
+            GameObject enemyTemplate = CreateEnemyTemplate();
             enemyTemplate.transform.SetParent(root.transform, false);
 
             ArenaCreatorWavePlanner planner = null;
             ArenaAuxLlmEveryNWaves auxLlm = null;
-            CoreAI.Ai.IAiOrchestrationService orchestration = null;
+            Ai.IAiOrchestrationService orchestration = null;
             if (creatorPlansWaves)
             {
-                var scope = scopeForTelemetry;
+                CoreAILifetimeScope scope = scopeForTelemetry;
                 if (scope != null)
                 {
-                    orchestration = scope.Container.Resolve<CoreAI.Ai.IAiOrchestrationService>();
+                    orchestration = scope.Container.Resolve<Ai.IAiOrchestrationService>();
                     planner = root.AddComponent<ArenaCreatorWavePlanner>();
                     planner.Init(orchestration, session, telemetryCollector);
                     auxLlm = root.AddComponent<ArenaAuxLlmEveryNWaves>();
@@ -200,14 +205,16 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                 }
             }
 
-            var taskBus = root.AddComponent<ArenaAiTaskBus>();
+            ArenaAiTaskBus taskBus = root.AddComponent<ArenaAiTaskBus>();
             if (scopeForTelemetry != null)
+            {
                 taskBus.Init(scopeForTelemetry, session, telemetryCollector, planner);
+            }
 
             ArenaProgressionSessionHost progressionHost = null;
             if (arenaProgressionContent != null && arenaUnitBaselineConfig != null)
             {
-                var progGo = new GameObject("ArenaProgression");
+                GameObject progGo = new("ArenaProgression");
                 progGo.transform.SetParent(root.transform, false);
                 progressionHost = progGo.AddComponent<ArenaProgressionSessionHost>();
                 progressionHost.Configure(
@@ -221,15 +228,15 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
             hud.Bind(session, health, planner, auxLlm, progressionHost?.Team, progressionHost?.SessionLevelCurve);
 
-            var dirGo = new GameObject("ArenaSurvivalDirector");
+            GameObject dirGo = new("ArenaSurvivalDirector");
             dirGo.transform.SetParent(root.transform, false);
-            var director = dirGo.AddComponent<ArenaSurvivalDirector>();
-            director.directorSettings = this.directorSettings;
+            ArenaSurvivalDirector director = dirGo.AddComponent<ArenaSurvivalDirector>();
+            director.directorSettings = directorSettings;
             director.Init(session, enemyTemplate, planner, orchestration);
 
             if (logOnStartRoles)
             {
-                var presetInfo = wavePresetLibrary != null
+                string presetInfo = wavePresetLibrary != null
                     ? $" Пресеты волн в ассете: {wavePresetLibrary.Presets.Count}."
                     : "";
                 Debug.Log(
@@ -242,23 +249,23 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
         private GameObject CreatePlayer(Transform parent)
         {
-            var go = new GameObject("Player");
+            GameObject go = new("Player");
             go.transform.SetParent(parent, false);
             go.transform.position = new Vector3(0f, 0f, 0f);
             go.tag = "Player";
 
-            var col = go.AddComponent<CapsuleCollider>();
+            CapsuleCollider col = go.AddComponent<CapsuleCollider>();
             col.height = 2f;
             col.radius = 0.42f;
             col.center = new Vector3(0f, 1f, 0f);
             col.enabled = false;
 
-            var cc = go.AddComponent<CharacterController>();
+            CharacterController cc = go.AddComponent<CharacterController>();
             cc.height = 2f;
             cc.radius = 0.42f;
             cc.center = new Vector3(0f, 1f, 0f);
 
-            var vis = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            GameObject vis = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             vis.name = "Vis";
             vis.transform.SetParent(go.transform, false);
             vis.transform.localPosition = new Vector3(0f, 1f, 0f);
@@ -266,16 +273,16 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             ApplyLitColor(vis.GetComponent<Renderer>(), new Color(0.35f, 0.55f, 0.95f));
 
             go.AddComponent<ArenaPlayerMotor>();
-            var hp = go.AddComponent<ArenaPlayerHealth>();
+            ArenaPlayerHealth hp = go.AddComponent<ArenaPlayerHealth>();
             go.AddComponent<ArenaPlayerMelee>();
             return go;
         }
 
         private GameObject CreateEnemyTemplate()
         {
-            var go = new GameObject("EnemyTemplate");
+            GameObject go = new("EnemyTemplate");
             go.SetActive(false);
-            var vis = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject vis = GameObject.CreatePrimitive(PrimitiveType.Cube);
             vis.name = "Vis";
             vis.transform.SetParent(go.transform, false);
             vis.transform.localPosition = new Vector3(0f, 0.6f, 0f);
@@ -283,12 +290,12 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             DestroyCollider(vis);
             ApplyLitColor(vis.GetComponent<Renderer>(), new Color(0.75f, 0.22f, 0.18f));
 
-            var box = go.AddComponent<BoxCollider>();
+            BoxCollider box = go.AddComponent<BoxCollider>();
             box.center = new Vector3(0f, 0.6f, 0f);
             box.size = new Vector3(0.8f, 1.2f, 0.8f);
 
             go.AddComponent<ArenaEnemyBrain>();
-            var nav = go.AddComponent<NavMeshAgent>();
+            NavMeshAgent nav = go.AddComponent<NavMeshAgent>();
             nav.height = 1.2f;
             nav.radius = 0.35f;
             nav.baseOffset = 0.6f;
@@ -297,53 +304,68 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
         private ArenaCompanionBot CreateCompanionBot(Transform parent)
         {
-            var go = new GameObject("CompanionBot");
+            GameObject go = new("CompanionBot");
             go.transform.SetParent(parent, false);
 
-            var cc = go.AddComponent<CharacterController>();
+            CharacterController cc = go.AddComponent<CharacterController>();
             cc.height = 2f;
             cc.radius = 0.42f;
             cc.center = new Vector3(0f, 1f, 0f);
 
-            var vis = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            GameObject vis = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             vis.name = "Vis";
             vis.transform.SetParent(go.transform, false);
             vis.transform.localPosition = new Vector3(0f, 1f, 0f);
             DestroyCollider(vis);
             ApplyLitColor(vis.GetComponent<Renderer>(), new Color(0.2f, 0.95f, 0.6f));
 
-            var bot = go.AddComponent<ArenaCompanionBot>();
+            ArenaCompanionBot bot = go.AddComponent<ArenaCompanionBot>();
             go.AddComponent<ArenaCompanionAiListener>();
             return bot;
         }
 
         private static void DestroyCollider(GameObject go)
         {
-            var c = go.GetComponent<Collider>();
+            Collider c = go.GetComponent<Collider>();
             if (c != null)
+            {
                 Destroy(c);
+            }
         }
 
         private static void ApplyLitColor(Renderer r, Color c)
         {
             if (r == null)
+            {
                 return;
-            var sh = Shader.Find("Universal Render Pipeline/Lit");
+            }
+
+            Shader sh = Shader.Find("Universal Render Pipeline/Lit");
             if (sh == null)
+            {
                 sh = Shader.Find("Standard");
-            var mat = new Material(sh);
+            }
+
+            Material mat = new(sh);
             if (sh.name.Contains("Universal") || sh.name.Contains("URP"))
+            {
                 mat.SetColor("_BaseColor", c);
+            }
             else
+            {
                 mat.color = c;
+            }
+
             r.sharedMaterial = mat;
         }
 
         private void Update()
         {
-            var kb = Keyboard.current;
+            Keyboard kb = Keyboard.current;
             if (kb != null && kb.rKey.wasPressedThisFrame)
+            {
                 SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            }
         }
     }
 }

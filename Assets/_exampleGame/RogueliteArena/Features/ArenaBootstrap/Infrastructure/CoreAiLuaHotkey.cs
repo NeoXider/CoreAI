@@ -13,17 +13,20 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
     {
         private void Update()
         {
-            var kb = Keyboard.current;
+            Keyboard kb = Keyboard.current;
             if (kb == null || !kb.f9Key.wasPressedThisFrame)
+            {
                 return;
-            var scope = GetComponentInParent<CoreAILifetimeScope>();
+            }
+
+            CoreAILifetimeScope scope = GetComponentInParent<CoreAILifetimeScope>();
             if (scope == null)
             {
                 Debug.LogWarning("[CoreAI.ExampleGame] CoreAILifetimeScope не найден в родителях.");
                 return;
             }
 
-            var orch = scope.Container.Resolve<IAiOrchestrationService>();
+            IAiOrchestrationService orch = scope.Container.Resolve<IAiOrchestrationService>();
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Programmer,

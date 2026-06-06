@@ -38,7 +38,8 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public LevelCurveDefinition SessionLevelCurve =>
             _content != null && _content.RunBalance != null ? _content.RunBalance.SessionLevelCurve : null;
 
-        public void Configure(ArenaProgressionContent content, ArenaUnitBaselineConfig baseline, int aliveTeamMembersForXp)
+        public void Configure(ArenaProgressionContent content, ArenaUnitBaselineConfig baseline,
+            int aliveTeamMembersForXp)
         {
             _content = content;
             _baseline = baseline;
@@ -55,11 +56,15 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public void Bootstrap()
         {
             if (_content == null || _baseline == null)
+            {
                 return;
+            }
 
-            var balance = _content.RunBalance;
+            ArenaRunBalanceConfig balance = _content.RunBalance;
             if (balance == null)
+            {
                 return;
+            }
 
             _meta = new ArenaMetaProgressionState();
             _team = new ArenaTeamProgressionState();
@@ -70,17 +75,17 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             _team.ConfigureStart(balance.StartChoiceCount);
 
             _combat = new ArenaRunCombatModel(_baseline, _playerHealth, _playerMelee, _companion);
-            var addSessionXp = new AddSessionKillXpUseCase(_team, balance);
+            AddSessionKillXpUseCase addSessionXp = new(_team, balance);
             ArenaProgressionRuntimeHub.AddSessionKillXp = addSessionXp;
             ArenaProgressionRuntimeHub.BaseXpPerKill = balance.BaseXpPerKill;
             ArenaProgressionRuntimeHub.AliveTeamMembersForXp = _teamMemberCount;
 
-            var rollService = new ArenaUpgradeRollService(_content);
-            var roll = new RollUpgradeOffersUseCase(_team, rollService);
-            var apply = new ApplySelectedUpgradeUseCase(_team, _combat, balance, onStatsChanged: null);
-            var addMetaXp = new AddMetaXpUseCase(_meta, balance);
+            ArenaUpgradeRollService rollService = new(_content);
+            RollUpgradeOffersUseCase roll = new(_team, rollService);
+            ApplySelectedUpgradeUseCase apply = new(_team, _combat, balance, null);
+            AddMetaXpUseCase addMetaXp = new(_meta, balance);
 
-            var brain = new HeuristicCompanionUpgradeBrain();
+            HeuristicCompanionUpgradeBrain brain = new();
             _presenter = new ArenaUpgradeDraftPresenter(_team, roll, apply, brain, draftView);
 
             _luaBindings = new ArenaProgressionLuaBindings(
@@ -96,7 +101,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             GameLuaBindingsExtensibility.Register(_luaBindings);
         }
 
-        public void OpenDraftDebug() => _presenter?.OpenDraft();
+        public void OpenDraftDebug()
+        {
+            _presenter?.OpenDraft();
+        }
 
         private void OnDestroy()
         {

@@ -32,13 +32,13 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             _companionBot = companionBot;
             if (baseline != null)
             {
-                var p = ArenaUnitRuntimeStats.FromBaseline(
+                ArenaUnitRuntimeStats p = ArenaUnitRuntimeStats.FromBaseline(
                     baseline.PlayerMaxHealth,
                     baseline.PlayerHpRegenPerSecond,
                     baseline.PlayerMeleeDamage,
                     baseline.PlayerAttackCooldown);
                 CopyFrom(ref p, _player);
-                var c = ArenaUnitRuntimeStats.FromBaseline(
+                ArenaUnitRuntimeStats c = ArenaUnitRuntimeStats.FromBaseline(
                     baseline.CompanionMaxHealth,
                     baseline.CompanionHpRegenPerSecond,
                     baseline.CompanionMeleeDamage,
@@ -61,7 +61,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public void ApplyUpgradeToPlayer(ArenaUpgradeDefinition def, float statMultiplier)
         {
             if (def == null)
+            {
                 return;
+            }
+
             ApplyKind(def, statMultiplier, _player);
             PushPlayer();
         }
@@ -69,7 +72,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public void ApplyUpgradeToCompanion(ArenaUpgradeDefinition def, float statMultiplier)
         {
             if (def == null)
+            {
                 return;
+            }
+
             ApplyKind(def, statMultiplier, _companion);
             PushCompanion();
         }
@@ -89,7 +95,8 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                     s.MeleeDamage = Mathf.Max(1f, s.MeleeDamage + d);
                     break;
                 case ArenaUpgradeKind.StatAttackSpeed:
-                    s.AttackCooldownSeconds = Mathf.Max(0.05f, s.AttackCooldownSeconds * (1f - 0.06f * def.StatDelta * m));
+                    s.AttackCooldownSeconds =
+                        Mathf.Max(0.05f, s.AttackCooldownSeconds * (1f - 0.06f * def.StatDelta * m));
                     break;
             }
         }

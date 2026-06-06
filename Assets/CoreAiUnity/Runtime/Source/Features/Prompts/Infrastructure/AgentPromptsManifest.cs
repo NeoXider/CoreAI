@@ -22,7 +22,8 @@ namespace CoreAI.Infrastructure.Prompts
             public TextAsset systemPrompt;
 
             /// <summary>User prompt template.</summary>
-            [Tooltip("User prompt template for the orchestrator. Supported placeholders: {wave}, {mode}, {party}, {hint}.")]
+            [Tooltip(
+                "User prompt template for the orchestrator. Supported placeholders: {wave}, {mode}, {party}, {hint}.")]
             public TextAsset userPromptTemplate;
 
             /// <summary>
@@ -33,12 +34,10 @@ namespace CoreAI.Infrastructure.Prompts
         }
 
         /// <summary>Role overrides.</summary>
-        [Header("Built-in Role Overrides")]
-        public List<Entry> roleOverrides = new();
+        [Header("Built-in Role Overrides")] public List<Entry> roleOverrides = new();
 
         /// <summary>Custom agents.</summary>
-        [Header("Custom Agents")]
-        public List<Entry> customAgents = new();
+        [Header("Custom Agents")] public List<Entry> customAgents = new();
 
         /// <summary>Enumerates all prompt manifest entries configured in this asset.</summary>
         public IEnumerable<Entry> EnumerateEntries()
@@ -59,6 +58,7 @@ namespace CoreAI.Infrastructure.Prompts
                 }
             }
         }
+
         /// <summary>
         /// Builds a Unity-free prompt snapshot by reading TextAsset contents.
         /// </summary>

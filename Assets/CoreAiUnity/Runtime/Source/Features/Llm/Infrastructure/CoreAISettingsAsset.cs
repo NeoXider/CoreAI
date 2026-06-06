@@ -91,7 +91,8 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Bearer/API key - required for hosted providers; empty for many local gateways.")] [SerializeField]
         private string apiKey = "";
 
-        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.).")] [SerializeField]
+        [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.).")]
+        [SerializeField]
         private string modelName = "gpt-4o-mini";
 
         [Tooltip(
@@ -343,7 +344,8 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Trace MEAI function-calling iterations / inner retries.")] [SerializeField]
         private bool logMeaiToolCallingSteps = true;
 
-        [Tooltip("Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need 60-180 seconds)..")]
+        [Tooltip(
+            "Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need 60-180 seconds)..")]
         [SerializeField]
         [Min(0f)]
         private float llmRequestTimeoutSeconds = 120f;

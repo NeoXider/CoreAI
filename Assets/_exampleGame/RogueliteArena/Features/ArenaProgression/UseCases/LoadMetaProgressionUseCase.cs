@@ -25,7 +25,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
             _gateway?.LoadInto(_meta);
             LevelCurveDefinition c = _balance?.MetaLevelCurve;
             if (c != null && _meta != null)
+            {
                 _meta.RecomputeMetaLevel(total => c.EvaluateLevel(total));
+            }
         }
     }
 }

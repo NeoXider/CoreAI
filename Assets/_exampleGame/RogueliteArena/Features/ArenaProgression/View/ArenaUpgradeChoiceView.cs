@@ -19,13 +19,20 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
             int n = offers != null ? offers.Count : 0;
             for (int i = 0; i < cardPool.Length; i++)
             {
-                var w = cardPool[i];
+                ArenaUpgradeCardWidget w = cardPool[i];
                 if (w == null)
+                {
                     continue;
+                }
+
                 if (i < n)
+                {
                     w.Bind(offers[i], presentation, OnCardPicked);
+                }
                 else
+                {
                     w.gameObject.SetActive(false);
+                }
             }
         }
 
@@ -34,14 +41,22 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
             _callback = null;
             gameObject.SetActive(false);
             if (cardPool == null)
+            {
                 return;
+            }
+
             for (int i = 0; i < cardPool.Length; i++)
             {
                 if (cardPool[i] != null)
+                {
                     cardPool[i].gameObject.SetActive(false);
+                }
             }
         }
 
-        private void OnCardPicked(ArenaUpgradeOffer offer) => _callback?.Invoke(offer);
+        private void OnCardPicked(ArenaUpgradeOffer offer)
+        {
+            _callback?.Invoke(offer);
+        }
     }
 }

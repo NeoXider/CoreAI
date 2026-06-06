@@ -8,8 +8,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     [CreateAssetMenu(menuName = "CoreAI Example/Arena Wave Preset Library", fileName = "ArenaWavePresetLibrary")]
     public sealed class ArenaWavePresetLibrary : ScriptableObject
     {
-        [SerializeField]
-        private List<ArenaWavePlan> presets = new List<ArenaWavePlan>();
+        [SerializeField] private List<ArenaWavePlan> presets = new();
 
         public IReadOnlyList<ArenaWavePlan> Presets => presets;
     }

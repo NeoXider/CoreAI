@@ -31,4 +31,3 @@ namespace CoreAI.ExampleGame.ArenaWaves.Domain
         public float spawnRadius = 17.5f;
     }
 }
-

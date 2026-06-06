@@ -21,8 +21,15 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
             _data = data;
             _onSelected = onSelected;
 
-            if (titleText != null) titleText.text = data.UpgradeName;
-            if (descriptionText != null) descriptionText.text = data.Description;
+            if (titleText != null)
+            {
+                titleText.text = data.UpgradeName;
+            }
+
+            if (descriptionText != null)
+            {
+                descriptionText.text = data.Description;
+            }
 
             cardButton.onClick.RemoveAllListeners();
             cardButton.onClick.AddListener(OnCardClicked);

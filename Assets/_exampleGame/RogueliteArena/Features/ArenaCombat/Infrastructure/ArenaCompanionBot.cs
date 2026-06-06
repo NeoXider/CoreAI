@@ -46,7 +46,10 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         /// <summary>Current stance after the most recent direct or AINpc-driven change.</summary>
         public CompanionCombatStance CurrentStance => _stance;
 
-        public void Init(IArenaSessionView session) => _session = session;
+        public void Init(IArenaSessionView session)
+        {
+            _session = session;
+        }
 
         /// <summary>
         /// Applies stance multipliers to speed, follow distance, and enemy search radius.
@@ -87,7 +90,10 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         public void ApplyFromCombatStats(IArenaCombatStats stats)
         {
             if (stats == null)
+            {
                 return;
+            }
+
             _attackDamageRuntime = Mathf.Max(1, Mathf.RoundToInt(stats.MeleeDamage));
             attackCooldown = Mathf.Max(0.05f, stats.AttackCooldownSeconds);
             _attackCooldownRuntime = attackCooldown;
@@ -98,20 +104,26 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             _attackDamageRuntime = attackDamage;
             _attackCooldownRuntime = attackCooldown;
             _cc = GetComponent<CharacterController>();
-            var vis = transform.Find("Vis");
+            Transform vis = transform.Find("Vis");
             if (vis != null)
+            {
                 _visRenderer = vis.GetComponent<Renderer>();
+            }
+
             _baseMoveSpeed = moveSpeed;
             _baseFollowDistance = followDistance;
             _baseEnemyAcquireRadius = enemyAcquireRadius;
-            ApplyCombatStance(CompanionCombatStance.Balanced, logChange: false);
+            ApplyCombatStance(CompanionCombatStance.Balanced, false);
         }
 
         private void ApplyStanceVisual(CompanionCombatStance stance)
         {
             if (_visRenderer == null)
+            {
                 return;
-            var c = stance switch
+            }
+
+            Color c = stance switch
             {
                 CompanionCombatStance.Aggressive => new Color(0.95f, 0.35f, 0.25f),
                 CompanionCombatStance.Defensive => new Color(0.35f, 0.55f, 0.95f),
@@ -123,50 +135,65 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private static void ApplyLitBaseColor(Renderer r, Color c)
         {
             if (r == null || r.sharedMaterial == null)
+            {
                 return;
-            var m = r.material;
+            }
+
+            Material m = r.material;
             if (m.HasProperty("_BaseColor"))
+            {
                 m.SetColor("_BaseColor", c);
+            }
             else
+            {
                 m.color = c;
+            }
         }
 
         private void Update()
         {
             if (_session == null || _session.PrimaryPlayerTransform == null)
+            {
                 return;
+            }
 
-            var targetPos = ChooseMoveTarget();
+            Vector3 targetPos = ChooseMoveTarget();
             MoveTowards(targetPos);
             TryAttack();
         }
 
         private Vector3 ChooseMoveTarget()
         {
-            var player = _session.PrimaryPlayerTransform;
-            var playerPos = player.position;
+            Transform player = _session.PrimaryPlayerTransform;
+            Vector3 playerPos = player.position;
 
             // Если рядом есть враг — стремимся к нему, иначе держимся рядом с игроком.
-            var enemy = FindNearestEnemy(playerPos);
+            ArenaEnemyBrain enemy = FindNearestEnemy(playerPos);
             if (enemy != null)
+            {
                 return enemy.transform.position;
+            }
 
-            var back = -player.forward;
+            Vector3 back = -player.forward;
             back.y = 0f;
             if (back.sqrMagnitude < 0.01f)
+            {
                 back = Vector3.back;
+            }
+
             back.Normalize();
             return playerPos + back * followDistance;
         }
 
         private ArenaEnemyBrain FindNearestEnemy(Vector3 from)
         {
-            var best = (ArenaEnemyBrain)null;
-            var bestD2 = enemyAcquireRadius * enemyAcquireRadius;
-            var all = Object.FindObjectsByType<ArenaEnemyBrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            foreach (var e in all)
+            ArenaEnemyBrain best = (ArenaEnemyBrain)null;
+            float bestD2 = enemyAcquireRadius * enemyAcquireRadius;
+            ArenaEnemyBrain[] all =
+                FindObjectsByType<ArenaEnemyBrain>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (ArenaEnemyBrain e in all)
             {
-                var d2 = (e.transform.position - from).sqrMagnitude;
+                float d2 = (e.transform.position - from).sqrMagnitude;
                 if (d2 < bestD2)
                 {
                     bestD2 = d2;
@@ -179,38 +206,48 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
 
         private void MoveTowards(Vector3 worldTarget)
         {
-            var pos = transform.position;
-            var delta = worldTarget - pos;
+            Vector3 pos = transform.position;
+            Vector3 delta = worldTarget - pos;
             delta.y = 0f;
-            var dir = delta.sqrMagnitude > 0.01f ? delta.normalized : Vector3.zero;
-            var move = dir * (moveSpeed * Time.deltaTime);
+            Vector3 dir = delta.sqrMagnitude > 0.01f ? delta.normalized : Vector3.zero;
+            Vector3 move = dir * (moveSpeed * Time.deltaTime);
 
             if (_cc.isGrounded && _vy < 0f)
+            {
                 _vy = -2f;
+            }
+
             _vy += gravity * Time.deltaTime;
             move.y = _vy * Time.deltaTime;
             _cc.Move(move);
 
             if (dir.sqrMagnitude > 0.01f)
+            {
                 transform.forward = dir;
+            }
         }
 
         private void TryAttack()
         {
             if (Time.time < _nextAttack)
+            {
                 return;
+            }
 
-            var enemy = FindNearestEnemy(transform.position);
+            ArenaEnemyBrain enemy = FindNearestEnemy(transform.position);
             if (enemy == null)
+            {
                 return;
+            }
 
-            var d = Vector3.Distance(transform.position, enemy.transform.position);
+            float d = Vector3.Distance(transform.position, enemy.transform.position);
             if (d > attackRange)
+            {
                 return;
+            }
 
             _nextAttack = Time.time + _attackCooldownRuntime;
             enemy.TakeDamage(_attackDamageRuntime);
         }
     }
 }
-

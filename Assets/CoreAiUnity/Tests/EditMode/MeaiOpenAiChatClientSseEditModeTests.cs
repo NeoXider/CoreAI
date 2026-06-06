@@ -248,7 +248,12 @@ namespace CoreAI.Tests.EditMode
             public override bool CanSeek => false;
             public override bool CanWrite => false;
             public override long Length => throw new NotSupportedException();
-            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
 
             public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
                 CancellationToken cancellationToken)
@@ -275,9 +280,20 @@ namespace CoreAI.Tests.EditMode
             {
             }
 
-            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value) => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
         }
 
         private sealed class ThrowsAfterPayloadStream : Stream
@@ -294,7 +310,12 @@ namespace CoreAI.Tests.EditMode
             public override bool CanSeek => false;
             public override bool CanWrite => false;
             public override long Length => _payload.Length;
-            public override long Position { get => _position; set => throw new NotSupportedException(); }
+
+            public override long Position
+            {
+                get => _position;
+                set => throw new NotSupportedException();
+            }
 
             public override Task<int> ReadAsync(byte[] buffer, int offset, int count,
                 CancellationToken cancellationToken)
@@ -319,9 +340,20 @@ namespace CoreAI.Tests.EditMode
             {
             }
 
-            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value) => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
         }
 
         private sealed class DoneSentinelSettings : IOpenAiHttpSettings

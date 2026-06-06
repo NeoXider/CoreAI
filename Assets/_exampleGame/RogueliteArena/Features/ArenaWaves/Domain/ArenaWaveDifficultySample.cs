@@ -9,6 +9,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Domain
         public float HpMultiplier { get; }
         public float DamageMultiplier { get; }
         public float MoveSpeedMultiplier { get; }
+
         /// <summary>Spawn interval multiplier; values below <c>1</c> spawn more often.</summary>
         public float SpawnIntervalMultiplier { get; }
 

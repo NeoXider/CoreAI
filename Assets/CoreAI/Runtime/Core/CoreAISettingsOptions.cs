@@ -15,8 +15,10 @@ namespace CoreAI
         public bool LogLlmLatency { get; set; } = true;
         public bool LogLlmConnectionErrors { get; set; } = true;
         public int ContextWindowTokens { get; set; } = 8192;
+
         public string UniversalSystemPromptPrefix { get; set; } =
             "Respond concisely and to the point. Avoid unnecessary verbosity.";
+
         public string ToolContractAdditionalInstructions { get; set; } = "";
         public float Temperature { get; set; } = 0.1f;
         public bool OverrideTemperature { get; set; }

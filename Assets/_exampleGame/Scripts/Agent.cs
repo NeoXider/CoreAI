@@ -7,20 +7,19 @@ public class Agent : MonoBehaviour
     private AgentConfig _agentWithTools;
     private AgentConfig _agentChatOnly;
 
-    [Header("Тестовые сообщения")]
-    [TextArea(2, 5)]
+    [Header("Тестовые сообщения")] [TextArea(2, 5)]
     public string MessageWithTools = "Привет! Запомни, что мой любимый цвет красный.";
 
-    [TextArea(2, 5)]
-    public string MessageChatOnly = "Сделай текст жирным: Я очень рад тебя видеть!";
-    
-    void Start()
+    [TextArea(2, 5)] public string MessageChatOnly = "Сделай текст жирным: Я очень рад тебя видеть!";
+
+    private void Start()
     {
         // 1. Агент с инструментами (проверяем, что может вызвать инструмент и вернуть чистый текст)
         _agentWithTools = new AgentBuilder("агент_инструменты")
             .WithMode(AgentMode.ToolsAndChat)
             .WithMemory()
-            .WithSystemPrompt("Ты помощник. Используй инструмент memory чтобы запоминать информацию по просьбе пользователя. Отвечай коротко и ясно.")
+            .WithSystemPrompt(
+                "Ты помощник. Используй инструмент memory чтобы запоминать информацию по просьбе пользователя. Отвечай коротко и ясно.")
             .Build();
 
         // 2. Агент без инструментов (чистый чат, проверяем запрет Markdown)

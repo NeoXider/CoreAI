@@ -18,8 +18,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public int HeuristicValueScore()
         {
             if (Definition == null)
+            {
                 return 0;
-            var k = Definition.Kind;
+            }
+
+            ArenaUpgradeKind k = Definition.Kind;
             return k switch
             {
                 ArenaUpgradeKind.StatDamage => 40,

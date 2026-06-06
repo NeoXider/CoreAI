@@ -25,10 +25,16 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private void Update()
         {
             if (_hpRegenPerSecond <= 0f || Current <= 0 || Current >= Max)
+            {
                 return;
-            var add = _hpRegenPerSecond * Time.deltaTime;
+            }
+
+            float add = _hpRegenPerSecond * Time.deltaTime;
             if (add <= 0f)
+            {
                 return;
+            }
+
             int n = Mathf.Min(Max, Mathf.FloorToInt(Current + add));
             if (n > Current)
             {
@@ -40,7 +46,10 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         public void ApplyFromCombatStats(IArenaCombatStats stats)
         {
             if (stats == null)
+            {
                 return;
+            }
+
             _hpRegenPerSecond = stats.HpRegenPerSecond;
             int newMax = Mathf.Max(1, Mathf.RoundToInt(stats.MaxHealth));
             int oldMax = Mathf.Max(1, Max);
@@ -53,11 +62,16 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         public void ApplyDamage(int amount)
         {
             if (amount <= 0 || Current <= 0)
+            {
                 return;
+            }
+
             Current = Mathf.Max(0, Current - amount);
             Changed?.Invoke(Current, Max);
             if (Current == 0)
+            {
                 Died?.Invoke();
+            }
         }
     }
 }

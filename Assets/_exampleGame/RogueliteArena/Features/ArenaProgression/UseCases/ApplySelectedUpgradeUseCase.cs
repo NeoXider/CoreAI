@@ -25,8 +25,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
         public void Execute(ArenaUpgradeOffer offer, bool applyToCompanionToo)
         {
             if (offer?.Definition == null || _team == null || _combat == null)
+            {
                 return;
-            var def = offer.Definition;
+            }
+
+            ArenaUpgradeDefinition def = offer.Definition;
             float m = offer.StatMultiplier;
             int cap = _balance != null ? _balance.MaxChoiceCount : 5;
 
@@ -44,7 +47,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
                 default:
                     _combat.ApplyUpgradeToPlayer(def, m);
                     if (applyToCompanionToo)
+                    {
                         _combat.ApplyUpgradeToCompanion(def, m);
+                    }
+
                     break;
             }
 

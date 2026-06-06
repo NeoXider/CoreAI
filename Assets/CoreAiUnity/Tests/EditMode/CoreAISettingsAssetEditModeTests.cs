@@ -328,7 +328,8 @@ namespace CoreAI.Tests.EditMode
         [TestCase("grok", "x-ai/grok-4.1-fast", true)]
         [TestCase("open", "nvidia/nemotron-3-super-120b-a12b:free", false)]
         [TestCase("minmaxFree", "minimax/minimax-m2.5:free", false)]
-        public void Preset_ShouldApplyProviderOverrides(string presetFile, string expectedModel, bool expectedLlmContextCompaction)
+        public void Preset_ShouldApplyProviderOverrides(string presetFile, string expectedModel,
+            bool expectedLlmContextCompaction)
         {
             Preset preset = LoadPreset(presetFile);
 
@@ -375,7 +376,8 @@ namespace CoreAI.Tests.EditMode
             System.Reflection.FieldInfo fieldInfo = typeof(CoreAISettingsAsset).GetField(
                 fieldName,
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            Assert.IsNotNull(fieldInfo, $"Expected private field '{fieldName}' exists on {nameof(CoreAISettingsAsset)}.");
+            Assert.IsNotNull(fieldInfo,
+                $"Expected private field '{fieldName}' exists on {nameof(CoreAISettingsAsset)}.");
             fieldInfo.SetValue(target, value);
         }
     }

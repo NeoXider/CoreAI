@@ -665,7 +665,8 @@ namespace CoreAI.Tests.EditMode
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
                 CancellationToken ct = default)
             {
-                return Task.FromResult(new LlmCompletionResult { Ok = false, Error = "primary async error", ErrorCode = _code });
+                return Task.FromResult(new LlmCompletionResult
+                    { Ok = false, Error = "primary async error", ErrorCode = _code });
             }
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(

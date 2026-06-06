@@ -13,7 +13,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
 
         public int GetEnemyCountForWave(int waveIndex1Based)
         {
-            var w = waveIndex1Based < 1 ? 1 : waveIndex1Based;
+            int w = waveIndex1Based < 1 ? 1 : waveIndex1Based;
             return baseEnemyCount + (w - 1) * extraPerWave;
         }
     }

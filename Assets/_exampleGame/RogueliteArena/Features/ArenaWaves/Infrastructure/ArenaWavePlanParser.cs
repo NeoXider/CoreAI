@@ -13,19 +13,29 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         {
             plan = null;
             if (string.IsNullOrWhiteSpace(raw))
+            {
                 return false;
+            }
 
-            if (!LlmStructuredPayloadSanitizer.TryPrepareJsonObject(raw, out var json) ||
+            if (!LlmStructuredPayloadSanitizer.TryPrepareJsonObject(raw, out string json) ||
                 string.IsNullOrWhiteSpace(json))
+            {
                 return false;
+            }
 
             try
             {
-                var env = JsonUtility.FromJson<ArenaWavePlanEnvelope>(json);
+                ArenaWavePlanEnvelope env = JsonUtility.FromJson<ArenaWavePlanEnvelope>(json);
                 if (env == null || !string.Equals(env.commandType, CommandType, StringComparison.Ordinal))
+                {
                     return false;
+                }
+
                 if (env.payload == null)
+                {
                     return false;
+                }
+
                 plan = env.payload;
                 return true;
             }
@@ -36,4 +46,3 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         }
     }
 }
-

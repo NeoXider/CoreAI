@@ -14,7 +14,7 @@ namespace CoreAI.Tests.EditMode
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             try
             {
-                var builder = new ContainerBuilder();
+                ContainerBuilder builder = new();
 
                 builder.RegisterWorldCommands(registry);
 

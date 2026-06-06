@@ -13,26 +13,33 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
     {
         public static IDisposable SuspendAgentsForNavMeshBake(bool disableCharacterControllers)
         {
-            var agents = UnityEngine.Object.FindObjectsByType<NavMeshAgent>(FindObjectsInactive.Include,
+            NavMeshAgent[] agents = UnityEngine.Object.FindObjectsByType<NavMeshAgent>(FindObjectsInactive.Include,
                 FindObjectsSortMode.None);
-            var agentStates = new List<(NavMeshAgent agent, bool enabled)>();
-            foreach (var a in agents)
+            List<(NavMeshAgent agent, bool enabled)> agentStates = new();
+            foreach (NavMeshAgent a in agents)
             {
                 if (a == null)
+                {
                     continue;
+                }
+
                 agentStates.Add((a, a.enabled));
                 a.enabled = false;
             }
 
-            var ccStates = new List<(CharacterController cc, bool enabled)>();
+            List<(CharacterController cc, bool enabled)> ccStates = new();
             if (disableCharacterControllers)
             {
-                var ccs = UnityEngine.Object.FindObjectsByType<CharacterController>(FindObjectsInactive.Include,
+                CharacterController[] ccs = UnityEngine.Object.FindObjectsByType<CharacterController>(
+                    FindObjectsInactive.Include,
                     FindObjectsSortMode.None);
-                foreach (var cc in ccs)
+                foreach (CharacterController cc in ccs)
                 {
                     if (cc == null)
+                    {
                         continue;
+                    }
+
                     ccStates.Add((cc, cc.enabled));
                     cc.enabled = false;
                 }
@@ -45,9 +52,14 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
         public static void EnsureNavMeshBuilt(NavMeshSurface surface, bool forceFullRebuild)
         {
             if (surface == null)
+            {
                 return;
+            }
+
             if (forceFullRebuild || surface.navMeshData == null)
+            {
                 surface.BuildNavMesh();
+            }
         }
 
         private sealed class Restore : IDisposable
@@ -55,7 +67,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
             private readonly List<(NavMeshAgent agent, bool enabled)> _agents;
             private readonly List<(CharacterController cc, bool enabled)> _cc;
 
-            public Restore(List<(NavMeshAgent agent, bool enabled)> agents, List<(CharacterController cc, bool enabled)> cc)
+            public Restore(List<(NavMeshAgent agent, bool enabled)> agents,
+                List<(CharacterController cc, bool enabled)> cc)
             {
                 _agents = agents;
                 _cc = cc;
@@ -63,16 +76,20 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
 
             public void Dispose()
             {
-                foreach (var (a, e) in _agents)
+                foreach ((NavMeshAgent a, bool e) in _agents)
                 {
                     if (a != null)
+                    {
                         a.enabled = e;
+                    }
                 }
 
-                foreach (var (c, e) in _cc)
+                foreach ((CharacterController c, bool e) in _cc)
                 {
                     if (c != null)
+                    {
                         c.enabled = e;
+                    }
                 }
             }
         }

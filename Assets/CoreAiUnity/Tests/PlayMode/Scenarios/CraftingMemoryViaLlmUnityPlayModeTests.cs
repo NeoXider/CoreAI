@@ -525,7 +525,8 @@ namespace CoreAI.Tests.PlayMode
             ToolCallCapture toolCalls)
         {
             string prompt = BuildExactExecuteLuaRetryPrompt(weaponName, quality);
-            Debug.LogWarning($"[CraftingMemory.LLMUnity] {label}: execute_lua was not completed; retrying with exact Lua-only tool prompt.");
+            Debug.LogWarning(
+                $"[CraftingMemory.LLMUnity] {label}: execute_lua was not completed; retrying with exact Lua-only tool prompt.");
             LogBeforeModelCall($"{label.ToUpperInvariant()} RETRY: exact execute_lua", prompt, store);
 
             ListSink retrySink = new();
@@ -756,7 +757,8 @@ namespace CoreAI.Tests.PlayMode
                 _subscription.Dispose();
             }
 
-            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName, string label)
+            public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName,
+                string label)
             {
                 LlmToolCallRecord record = _records
                     .Skip(startIndex)
@@ -769,7 +771,8 @@ namespace CoreAI.Tests.PlayMode
                 {
                     string seen = string.Join(", ", _records.Skip(startIndex)
                         .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
-                    Assert.Inconclusive($"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                    Assert.Inconclusive(
+                        $"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
                 }
 
                 return record;

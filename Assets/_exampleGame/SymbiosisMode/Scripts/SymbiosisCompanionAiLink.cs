@@ -19,15 +19,17 @@ namespace CoreAI.ExampleGame.SymbiosisMode
         private ILlmClient _llmClient;
         private CoreAILifetimeScope _scope;
 
-        [Header("Status")]
-        [SerializeField] private bool _toolsRegistered;
+        [Header("Status")] [SerializeField] private bool _toolsRegistered;
 
         private void Start()
         {
             _scope = FindAnyObjectByType<CoreAILifetimeScope>();
-            if (_scope == null) return;
+            if (_scope == null)
+            {
+                return;
+            }
 
-            if (_scope.Container.TryResolve(out _orchestrator) && 
+            if (_scope.Container.TryResolve(out _orchestrator) &&
                 _scope.Container.TryResolve(out _llmClient))
             {
                 RegisterTools();
@@ -36,21 +38,24 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void RegisterTools()
         {
-            if (_toolsRegistered) return;
+            if (_toolsRegistered)
+            {
+                return;
+            }
 
             // Используем DelegateLlmTool для автоматической генерации JSON-схемы из C# методов
-            var tools = new List<ILlmTool>
+            List<ILlmTool> tools = new()
             {
-                new DelegateLlmTool("skeleton_attack_nearest", 
-                    "Order a skeleton to attack the nearest enemy in range.", 
+                new DelegateLlmTool("skeleton_attack_nearest",
+                    "Order a skeleton to attack the nearest enemy in range.",
                     (Action<string>)AttackNearest),
-                
-                new DelegateLlmTool("skeleton_heal_ghost", 
-                    "Order a skeleton to channel its vampirism to heal the Ghost Player.", 
+
+                new DelegateLlmTool("skeleton_heal_ghost",
+                    "Order a skeleton to channel its vampirism to heal the Ghost Player.",
                     (Action<string, float>)HealGhostPlayer),
 
-                new DelegateLlmTool("skeleton_set_stance", 
-                    "Set the combat stance for a skeleton (aggressive, defensive, balanced).", 
+                new DelegateLlmTool("skeleton_set_stance",
+                    "Set the combat stance for a skeleton (aggressive, defensive, balanced).",
                     (Action<string, string>)SetStance)
             };
 
@@ -63,8 +68,11 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void AttackNearest(string skeletonName)
         {
-            var skeleton = FindSkeleton(skeletonName);
-            if (skeleton == null) return;
+            SymbiosisSkeletonCompanion skeleton = FindSkeleton(skeletonName);
+            if (skeleton == null)
+            {
+                return;
+            }
 
             // Trigger internal logic
             Debug.Log($"[AI Tool] Skeleton {skeletonName} ordered to attack nearest.");
@@ -73,8 +81,11 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void HealGhostPlayer(string skeletonName, float amount)
         {
-            var skeleton = FindSkeleton(skeletonName);
-            if (skeleton == null || skeleton.MyGhostOwner == null) return;
+            SymbiosisSkeletonCompanion skeleton = FindSkeleton(skeletonName);
+            if (skeleton == null || skeleton.MyGhostOwner == null)
+            {
+                return;
+            }
 
             Debug.Log($"[AI Tool] Skeleton {skeletonName} healing Ghost by {amount}.");
             skeleton.MyGhostOwner.HealFromSkeleton(amount);
@@ -82,8 +93,11 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void SetStance(string skeletonName, string stance)
         {
-            var skeleton = FindSkeleton(skeletonName);
-            if (skeleton == null) return;
+            SymbiosisSkeletonCompanion skeleton = FindSkeleton(skeletonName);
+            if (skeleton == null)
+            {
+                return;
+            }
 
             Debug.Log($"[AI Tool] Skeleton {skeletonName} stance set to: {stance}.");
             // skeleton.CurrentStance = stance; // To be implemented in companion if needed
@@ -91,9 +105,13 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private SymbiosisSkeletonCompanion FindSkeleton(string name)
         {
-            var skeletons = FindObjectsByType<SymbiosisSkeletonCompanion>(FindObjectsSortMode.None);
-            if (string.IsNullOrEmpty(name) || name == "any") return skeletons.FirstOrDefault();
-            
+            SymbiosisSkeletonCompanion[] skeletons =
+                FindObjectsByType<SymbiosisSkeletonCompanion>(FindObjectsSortMode.None);
+            if (string.IsNullOrEmpty(name) || name == "any")
+            {
+                return skeletons.FirstOrDefault();
+            }
+
             return skeletons.FirstOrDefault(s => s.name.Contains(name, StringComparison.OrdinalIgnoreCase));
         }
     }

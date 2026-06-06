@@ -9,22 +9,23 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
     /// </summary>
     public class SymbiosisUiMediator : MonoBehaviour
     {
-        [Header("UI References")]
-        public RectTransform HealthFill;
+        [Header("UI References")] public RectTransform HealthFill;
         public TextMeshProUGUI WaveText;
         public Image GhostColorIndicator;
 
-        [Header("Game References")]
-        private SymbiosisGhostPlayer _localGhost;
+        [Header("Game References")] private SymbiosisGhostPlayer _localGhost;
         private ArenaSurvival.Infrastructure.ArenaSurvivalSession _session;
 
         private float _maxFillWidth = 390f;
 
         private void Start()
         {
-            _session = Object.FindAnyObjectByType<ArenaSurvival.Infrastructure.ArenaSurvivalSession>();
-            if (HealthFill != null) _maxFillWidth = HealthFill.sizeDelta.x;
-            
+            _session = FindAnyObjectByType<ArenaSurvival.Infrastructure.ArenaSurvivalSession>();
+            if (HealthFill != null)
+            {
+                _maxFillWidth = HealthFill.sizeDelta.x;
+            }
+
             UpdateWaveText(1);
         }
 
@@ -33,7 +34,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
             // Ленивый поиск локального игрока, если еще не найден
             if (_localGhost == null)
             {
-                foreach (var ghost in Object.FindObjectsByType<SymbiosisGhostPlayer>(FindObjectsSortMode.None))
+                foreach (SymbiosisGhostPlayer ghost in
+                         FindObjectsByType<SymbiosisGhostPlayer>(FindObjectsSortMode.None))
                 {
                     if (ghost.IsOwner)
                     {
@@ -53,8 +55,11 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         private void UpdateHealthBar(float percent)
         {
-            if (HealthFill == null) return;
-            
+            if (HealthFill == null)
+            {
+                return;
+            }
+
             Vector2 size = HealthFill.sizeDelta;
             size.x = _maxFillWidth * percent;
             HealthFill.sizeDelta = size;

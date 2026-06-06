@@ -68,7 +68,8 @@ namespace CoreAI.Composition
             }
             else
             {
-                _logger.Info("AutoBootstrap is disabled; the orchestrator will not start the Creator agent automatically.",
+                _logger.Info(
+                    "AutoBootstrap is disabled; the orchestrator will not start the Creator agent automatically.",
                     LogTag.Composition);
             }
         }

@@ -10,17 +10,23 @@ namespace CoreAI.ExampleGame.ArenaWaves.UseCases
     /// </summary>
     public static class ArenaLocalWavePlanner
     {
-        public static ArenaWavePlan CreatePlan(int waveIndex1Based, IArenaSessionView session, IArenaWaveSchedule fallback)
+        public static ArenaWavePlan CreatePlan(int waveIndex1Based, IArenaSessionView session,
+            IArenaWaveSchedule fallback)
         {
-            var hp = session?.PrimaryPlayerHealth;
-            var hp01 = hp != null && hp.Max > 0 ? (float)hp.Current / hp.Max : 1f;
+            ArenaPlayerHealth hp = session?.PrimaryPlayerHealth;
+            float hp01 = hp != null && hp.Max > 0 ? (float)hp.Current / hp.Max : 1f;
 
             // Чем ниже HP — тем мягче волна.
-            var pressure = hp01 < 0.35f ? 0.7f : hp01 < 0.6f ? 0.9f : 1.1f;
+            float pressure = hp01 < 0.35f ? 0.7f : hp01 < 0.6f ? 0.9f : 1.1f;
 
-            var baseCount = fallback != null ? fallback.GetEnemyCountForWave(waveIndex1Based) : 2 + (waveIndex1Based - 1) * 2;
-            var count = (int)(baseCount * pressure);
-            if (count < 1) count = 1;
+            int baseCount = fallback != null
+                ? fallback.GetEnemyCountForWave(waveIndex1Based)
+                : 2 + (waveIndex1Based - 1) * 2;
+            int count = (int)(baseCount * pressure);
+            if (count < 1)
+            {
+                count = 1;
+            }
 
             return new ArenaWavePlan
             {
@@ -35,4 +41,3 @@ namespace CoreAI.ExampleGame.ArenaWaves.UseCases
         }
     }
 }
-

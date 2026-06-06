@@ -13,8 +13,7 @@ namespace CoreAI.Diagnostics
     /// </summary>
     public sealed class OrchestrationDashboard : MonoBehaviour
     {
-        [Header("Metrics Source")]
-        [Tooltip("Optional metrics source. If null, one is created on Start.")]
+        [Header("Metrics Source")] [Tooltip("Optional metrics source. If null, one is created on Start.")]
         private InMemoryAiOrchestrationMetrics _metrics;
 
         [Header("Display Settings")] [SerializeField]

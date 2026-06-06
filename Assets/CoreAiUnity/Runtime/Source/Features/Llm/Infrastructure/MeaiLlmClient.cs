@@ -36,7 +36,7 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// When the gateway sends one long <c>delta.content</c> per frame, fan out to the consumer so UI and
-/// Initializes a new instance of the current component.
+        /// Initializes a new instance of the current component.
         /// </summary>
         private const int LiveUiStreamMaxCharsPerChunk = 48;
 

@@ -368,7 +368,8 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CompleteStreamingAsync_TooManySuccessfulToolIterations_WithVisibleText_CompletesWithoutUserError()
+        public async Task
+            CompleteStreamingAsync_TooManySuccessfulToolIterations_WithVisibleText_CompletesWithoutUserError()
         {
             StreamingScriptedChatClient inner = new(
                 new[] { "Saved. ", MemoryToolJson("append", "loop-1") },

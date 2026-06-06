@@ -179,7 +179,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             // Show the right "essential connection" fields based on the active backend
-            bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+            bool isAuto = settings.BackendType == LlmBackendType.Auto ||
+                          settings.ExecutionMode == LlmExecutionMode.Auto;
             bool showHttpEssentials = isAuto || settings.UseHttpApi;
             bool showLlmUnityEssentials = isAuto || settings.ExecutionMode == LlmExecutionMode.LocalModel;
 
@@ -315,7 +316,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             if (_showHttpApi)
             {
                 // Auto mode can use this HTTP section as one of its routes.
-                bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+                bool isAuto = settings.BackendType == LlmBackendType.Auto ||
+                              settings.ExecutionMode == LlmExecutionMode.Auto;
                 bool isHttpMode = settings.UseHttpApi;
                 EditorGUI.BeginDisabledGroup(!isAuto && !isHttpMode);
 
@@ -359,7 +361,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             _showLlmUnity = EditorGUILayout.BeginFoldoutHeaderGroup(_showLlmUnity, "LLMUnity (local model)");
             if (_showLlmUnity)
             {
-                bool isAuto = settings.BackendType == LlmBackendType.Auto || settings.ExecutionMode == LlmExecutionMode.Auto;
+                bool isAuto = settings.BackendType == LlmBackendType.Auto ||
+                              settings.ExecutionMode == LlmExecutionMode.Auto;
                 EditorGUI.BeginDisabledGroup(!isAuto && settings.ExecutionMode != LlmExecutionMode.LocalModel);
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityAgentName"),
@@ -391,7 +394,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityKeepAlive"),
                     new GUIContent("Keep Alive", "Keep the local server warm between prompts."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("llmUnityMaxConcurrentChats"),
-                    new GUIContent("Max Concurrent Chats", "1 = serial chats; greater values allow parallel chat sessions."));
+                    new GUIContent("Max Concurrent Chats",
+                        "1 = serial chats; greater values allow parallel chat sessions."));
 
                 EditorGUI.EndDisabledGroup();
 
@@ -417,7 +421,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Enable history summarization",
                         "When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)."));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("conversationHistoryRecentTokenBudgetOverride"),
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("conversationHistoryRecentTokenBudgetOverride"),
                     new GUIContent(
                         "Recent history token budget override",
                         "0 = automatic from context window. When set, caps the verbatim tail to this many estimated tokens; older lines roll into the summary when summarization is on."));
@@ -500,7 +505,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             if (_showOffline)
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("offlineUseCustomResponse"),
-                    new GUIContent("Custom Response", "Return a fixed response instead of role-specific offline stubs."));
+                    new GUIContent("Custom Response",
+                        "Return a fixed response instead of role-specific offline stubs."));
 
                 if (settings.OfflineUseCustomResponse)
                 {
@@ -508,7 +514,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("offlineCustomResponse"),
                         new GUIContent("Response Text", "Assistant text returned for matched offline roles."));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("offlineCustomResponseRoles"),
-                        new GUIContent("Roles", "Comma-separated role ids. * = all roles. Example: Creator,Programmer."));
+                        new GUIContent("Roles",
+                            "Comma-separated role ids. * = all roles. Example: Creator,Programmer."));
                     EditorGUI.indentLevel--;
                 }
                 else
@@ -656,7 +663,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             int nextIndex = EditorGUILayout.Popup(
-                new GUIContent("Model Preset", "Quickly fill the Model field with a common OpenAI-compatible model id."),
+                new GUIContent("Model Preset",
+                    "Quickly fill the Model field with a common OpenAI-compatible model id."),
                 selectedIndex,
                 options);
             if (nextIndex > 0)
@@ -688,7 +696,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 "Assets/CoreAiUnity/Tests/CoreAI.Tests.asmdef",
                 "Assets/CoreAiUnity/Tests/PlayMode/LlmInfra/CoreAI.Tests.PlayMode.LlmInfra.asmdef",
                 "Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/CoreAI.Tests.PlayMode.LlmVerification.asmdef",
-                "Assets/CoreAiUnity/Tests/PlayMode/Scenarios/CoreAI.Tests.PlayMode.Scenarios.asmdef",
+                "Assets/CoreAiUnity/Tests/PlayMode/Scenarios/CoreAI.Tests.PlayMode.Scenarios.asmdef"
             };
 
             int changed = 0;
@@ -793,7 +801,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 string path = EditorUtility.OpenFilePanel("Select GGUF Model", "", "gguf");
                 if (!string.IsNullOrEmpty(path))
                 {
-                    ggufPathProp.stringValue = System.IO.Path.GetFileName(path);
+                    ggufPathProp.stringValue = Path.GetFileName(path);
                 }
             }
 
@@ -812,6 +820,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             {
                 ggufPathProp.stringValue = typed;
             }
+
             EditorGUI.indentLevel--;
 
             if (discoveredEntryCount == 0)
@@ -1037,7 +1046,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 req.uploadHandler = new UploadHandlerRaw(bodyRaw);
                 req.downloadHandler = new DownloadHandlerBuffer();
                 req.SetRequestHeader("Content-Type", "application/json");
-                req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName, OpenAiHttpConstants.HttpRefererUnityUrl);
+                req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName,
+                    OpenAiHttpConstants.HttpRefererUnityUrl);
                 req.SetRequestHeader("X-Title", "CoreAI");
 
                 if (!string.IsNullOrEmpty(settings.ApiKey))
@@ -1242,7 +1252,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
             }
 
             string modelPath = LLMManager.GetAssetPath(llm.model);
-            bool modelExists = !string.IsNullOrEmpty(modelPath) && System.IO.File.Exists(modelPath);
+            bool modelExists = !string.IsNullOrEmpty(modelPath) && File.Exists(modelPath);
 
             if (llm.started && !llm.failed)
             {
@@ -1306,7 +1316,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 if (llm != null && !string.IsNullOrWhiteSpace(llm.model))
                 {
                     string modelPath = LLMManager.GetAssetPath(llm.model);
-                    bool modelExists = !string.IsNullOrEmpty(modelPath) && System.IO.File.Exists(modelPath);
+                    bool modelExists = !string.IsNullOrEmpty(modelPath) && File.Exists(modelPath);
 
                     if (llm.started && !llm.failed)
                     {
@@ -1359,7 +1369,8 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         req.uploadHandler = new UploadHandlerRaw(bodyRaw);
                         req.downloadHandler = new DownloadHandlerBuffer();
                         req.SetRequestHeader("Content-Type", "application/json");
-                        req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName, OpenAiHttpConstants.HttpRefererUnityUrl);
+                        req.SetRequestHeader(OpenAiHttpConstants.HttpRefererHeaderName,
+                            OpenAiHttpConstants.HttpRefererUnityUrl);
                         req.SetRequestHeader("X-Title", "CoreAI");
 
                         if (!string.IsNullOrEmpty(settings.ApiKey))

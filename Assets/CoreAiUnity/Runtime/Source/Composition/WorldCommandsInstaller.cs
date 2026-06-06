@@ -23,7 +23,9 @@ namespace CoreAI.Composition
             CoreAiPrefabRegistryAsset worldPrefabRegistry)
         {
             CoreAiPrefabRegistryAsset registry =
-                worldPrefabRegistry != null ? worldPrefabRegistry : ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+                worldPrefabRegistry != null
+                    ? worldPrefabRegistry
+                    : ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
             builder.RegisterInstance<ICoreAiPrefabRegistry, CoreAiPrefabRegistryAsset>(registry);
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton)

@@ -9,11 +9,9 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     [RequireComponent(typeof(Collider))]
     public sealed class ArenaAiRoomEnterTrigger : MonoBehaviour
     {
-        [SerializeField]
-        private string roomId = "main";
+        [SerializeField] private string roomId = "main";
 
-        [Tooltip("Один раз за забег на этот коллайдер.")]
-        [SerializeField]
+        [Tooltip("Один раз за забег на этот коллайдер.")] [SerializeField]
         private bool fireOnce = true;
 
         private bool _fired;
@@ -21,10 +19,16 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private void OnTriggerEnter(Collider other)
         {
             if (!other.CompareTag("Player"))
+            {
                 return;
+            }
+
             if (fireOnce && _fired)
+            {
                 return;
-            var bus = FindAnyObjectByType<ArenaAiTaskBus>();
+            }
+
+            ArenaAiTaskBus bus = FindAnyObjectByType<ArenaAiTaskBus>();
             if (bus == null)
             {
                 Debug.LogWarning("[CoreAI.ExampleGame] ArenaAiRoomEnterTrigger: ArenaAiTaskBus не найден.");

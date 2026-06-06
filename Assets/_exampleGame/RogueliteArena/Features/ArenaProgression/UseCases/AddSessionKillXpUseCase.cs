@@ -18,7 +18,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
         public void Execute(int baseXpAmount, int aliveTeamMembers)
         {
             if (_team == null || _balance == null)
+            {
                 return;
+            }
+
             int xp = baseXpAmount;
             if (_balance.DivideXpByAliveTeamMembers)
             {
@@ -29,7 +32,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
             _team.AddSessionXp(xp);
             LevelCurveDefinition curve = _balance.SessionLevelCurve;
             if (curve != null)
+            {
                 _team.SetLevelFromCurve(curve.EvaluateLevel(_team.SessionTotalXp));
+            }
         }
     }
 }

@@ -11,8 +11,7 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
     {
         [SerializeField] private bool logOnStart = true;
 
-        [Tooltip("Если задан — волны и игрок создаются этим компонентом на сцене (рекомендуется).")]
-        [SerializeField]
+        [Tooltip("Если задан — волны и игрок создаются этим компонентом на сцене (рекомендуется).")] [SerializeField]
         private ArenaSurvivalProceduralSetup sceneArenaBootstrap;
 
         [Tooltip("Если нет sceneArenaBootstrap — создать ArenaSurvivalRoot с процедурной ареной при старте.")]
@@ -22,9 +21,14 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
         private void Awake()
         {
             if (gameObject.GetComponent<CoreAiLuaHotkey>() == null)
+            {
                 gameObject.AddComponent<CoreAiLuaHotkey>();
+            }
+
             if (gameObject.GetComponent<CoreAiArenaLlmHotkeys>() == null)
+            {
                 gameObject.AddComponent<CoreAiArenaLlmHotkeys>();
+            }
         }
 
         private void Start()
@@ -42,7 +46,7 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
 
             if (startWaveArenaPrototype)
             {
-                var root = new GameObject("ArenaSurvivalRoot");
+                GameObject root = new("ArenaSurvivalRoot");
                 root.transform.SetParent(transform, false);
                 root.AddComponent<ArenaSurvivalProceduralSetup>();
                 if (logOnStart)

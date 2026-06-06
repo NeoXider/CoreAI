@@ -8,13 +8,18 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
     {
         private ArenaProgressionSessionHost _host;
 
-        private void Awake() => _host = GetComponent<ArenaProgressionSessionHost>();
+        private void Awake()
+        {
+            _host = GetComponent<ArenaProgressionSessionHost>();
+        }
 
         private void Update()
         {
-            var kb = Keyboard.current;
+            Keyboard kb = Keyboard.current;
             if (kb != null && kb.lKey.wasPressedThisFrame)
+            {
                 _host?.OpenDraftDebug();
+            }
         }
     }
 }

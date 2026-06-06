@@ -27,8 +27,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public int MaxChoiceCount => maxChoiceCount;
         public float DraftTimeScale => draftTimeScale;
 
-        public float GetStatMultiplier(ArenaRarity rarity) =>
-            rarity switch
+        public float GetStatMultiplier(ArenaRarity rarity)
+        {
+            return rarity switch
             {
                 ArenaRarity.Common => commonStatMult,
                 ArenaRarity.Rare => rareStatMult,
@@ -36,5 +37,6 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 ArenaRarity.Legendary => legendaryStatMult,
                 _ => 1f
             };
+        }
     }
 }

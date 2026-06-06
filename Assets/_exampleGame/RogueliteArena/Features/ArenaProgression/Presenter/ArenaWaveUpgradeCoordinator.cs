@@ -13,12 +13,18 @@ namespace CoreAI.ExampleGame.ArenaProgression.Presenter
     {
         private ArenaUpgradeDraftPresenter _presenter;
 
-        public void Init(ArenaUpgradeDraftPresenter presenter) => _presenter = presenter;
+        public void Init(ArenaUpgradeDraftPresenter presenter)
+        {
+            _presenter = presenter;
+        }
 
         public IEnumerator RunWaveEndUpgradeFlowCoroutine()
         {
             if (_presenter == null)
+            {
                 yield break;
+            }
+
             _presenter.OpenDraft();
             yield break;
         }

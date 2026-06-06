@@ -10,9 +10,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     /// </summary>
     public sealed class ArenaAuxLlmEveryNWaves : MonoBehaviour
     {
-        [SerializeField]
-        [Min(1)]
-        private int everyNWaves = 3;
+        [SerializeField] [Min(1)] private int everyNWaves = 3;
 
         private IAiOrchestrationService _orchestrator;
         private ArenaSurvivalSession _session;
@@ -26,23 +24,36 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
             _orchestrator = orchestrator;
             _session = session;
             if (_session != null)
+            {
                 _session.CurrentWaveChanged += OnWave;
+            }
         }
 
         private void OnDestroy()
         {
             if (_session != null)
+            {
                 _session.CurrentWaveChanged -= OnWave;
+            }
         }
 
         private void OnWave(int wave)
         {
             if (_orchestrator == null || wave <= 0 || everyNWaves <= 0)
+            {
                 return;
+            }
+
             if (wave % everyNWaves != 0)
+            {
                 return;
+            }
+
             if (wave == _lastWaveTriggered)
+            {
                 return;
+            }
+
             _lastWaveTriggered = wave;
             StatusLine = $"Волна {wave}: запросы Analyzer + AINpc к LLM";
             _ = _orchestrator.RunTaskAsync(new AiTaskRequest

@@ -1,4 +1,5 @@
 using CoreAI.ExampleGame.ArenaProgression.Infrastructure;
+using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.ExampleGame.ArenaSurvival.Domain;
 using UnityEngine;
 using UnityEngine.AI;
@@ -45,7 +46,9 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             _contactDamageRuntime = Mathf.Max(1, Mathf.RoundToInt(contactDamage * Mathf.Max(0.01f, damageMult)));
             _moveSpeedRuntime = Mathf.Max(0.1f, moveSpeed * Mathf.Max(0.01f, moveSpeedMult));
             if (_nav != null)
+            {
                 _nav.speed = _moveSpeedRuntime;
+            }
         }
 
         private void OnEnable()
@@ -68,27 +71,44 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         private void Update()
         {
             if (_session == null || !_session.IsAuthoritativeSimulation)
+            {
                 return;
+            }
+
             if (_session.PrimaryPlayerTransform == null)
+            {
                 return;
-            var p = _session.PrimaryPlayerTransform.position;
-            var flat = new Vector3(p.x, transform.position.y, p.z);
+            }
+
+            Vector3 p = _session.PrimaryPlayerTransform.position;
+            Vector3 flat = new(p.x, transform.position.y, p.z);
             if (_nav != null && _nav.isOnNavMesh)
+            {
                 _nav.SetDestination(flat);
+            }
             else
             {
-                var dir = (flat - transform.position).normalized;
+                Vector3 dir = (flat - transform.position).normalized;
                 if (dir.sqrMagnitude > 0.01f)
+                {
                     transform.position += dir * (_moveSpeedRuntime * Time.deltaTime);
+                }
+
                 transform.forward = dir;
             }
 
             if (Time.time < _nextContact)
+            {
                 return;
-            var dist = Vector3.Distance(transform.position, flat);
+            }
+
+            float dist = Vector3.Distance(transform.position, flat);
             if (dist > 1.1f)
+            {
                 return;
-            var ph = _session.PrimaryPlayerHealth;
+            }
+
+            ArenaPlayerHealth ph = _session.PrimaryPlayerHealth;
             if (ph != null && ph.Current > 0)
             {
                 ph.ApplyDamage(_contactDamageRuntime);
@@ -99,12 +119,20 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
         public void TakeDamage(int amount)
         {
             if (_session == null || !_session.IsAuthoritativeSimulation)
+            {
                 return;
+            }
+
             if (amount <= 0 || _hp <= 0)
+            {
                 return;
+            }
+
             _hp -= amount;
             if (_hp <= 0)
+            {
                 Die();
+            }
         }
 
         private void Die()
@@ -112,9 +140,12 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             if (_session is { IsAuthoritativeSimulation: true })
             {
                 _session.NotifyEnemyDied();
-                var addXp = ArenaProgressionRuntimeHub.AddSessionKillXp;
+                IAddSessionKillXpUseCase addXp = ArenaProgressionRuntimeHub.AddSessionKillXp;
                 if (addXp != null)
-                    addXp.Execute(ArenaProgressionRuntimeHub.BaseXpPerKill, ArenaProgressionRuntimeHub.AliveTeamMembersForXp);
+                {
+                    addXp.Execute(ArenaProgressionRuntimeHub.BaseXpPerKill,
+                        ArenaProgressionRuntimeHub.AliveTeamMembersForXp);
+                }
             }
 
             Destroy(gameObject);

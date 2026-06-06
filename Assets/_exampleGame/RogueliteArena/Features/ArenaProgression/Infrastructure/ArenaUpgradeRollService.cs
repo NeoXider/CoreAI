@@ -16,28 +16,41 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             _content = content;
         }
 
-        public bool TryRollOffers(ArenaTeamProgressionState team, HashSet<string> excludeIds, List<ArenaUpgradeOffer> into)
+        public bool TryRollOffers(ArenaTeamProgressionState team, HashSet<string> excludeIds,
+            List<ArenaUpgradeOffer> into)
         {
             if (into == null || _content == null || _content.Upgrades == null || _content.Upgrades.Count == 0)
+            {
                 return false;
+            }
 
             into.Clear();
-            var balance = _content.RunBalance;
-            int count = team != null ? Mathf.Clamp(team.MaxChoicesOffered, 1, balance != null ? balance.MaxChoiceCount : 5) : 3;
+            ArenaRunBalanceConfig balance = _content.RunBalance;
+            int count = team != null
+                ? Mathf.Clamp(team.MaxChoicesOffered, 1, balance != null ? balance.MaxChoiceCount : 5)
+                : 3;
 
-            var pool = new List<ArenaUpgradeDefinition>();
+            List<ArenaUpgradeDefinition> pool = new();
             for (int i = 0; i < _content.Upgrades.Count; i++)
             {
-                var u = _content.Upgrades[i];
+                ArenaUpgradeDefinition u = _content.Upgrades[i];
                 if (u == null)
+                {
                     continue;
+                }
+
                 if (excludeIds != null && excludeIds.Contains(u.Id))
+                {
                     continue;
+                }
+
                 pool.Add(u);
             }
 
             if (pool.Count == 0)
+            {
                 return false;
+            }
 
             ChanceManager rarityCopy = null;
             if (_content.RarityRoll != null)
@@ -47,11 +60,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 _luck.Apply(rarityCopy, luck);
             }
 
-            var used = new HashSet<string>();
+            HashSet<string> used = new();
             for (int n = 0; n < count && pool.Count > 0; n++)
             {
                 int idx = Random.Range(0, pool.Count);
-                var def = pool[idx];
+                ArenaUpgradeDefinition def = pool[idx];
                 pool.RemoveAt(idx);
 
                 if (!used.Add(def.Id))
@@ -60,7 +73,7 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                     continue;
                 }
 
-                var rarity = RollRarity(def, rarityCopy);
+                ArenaRarity rarity = RollRarity(def, rarityCopy);
                 float mult = balance != null ? balance.GetStatMultiplier(rarity) : 1f;
                 into.Add(new ArenaUpgradeOffer(def, rarity, mult));
             }
@@ -71,18 +84,27 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         private static ArenaRarity RollRarity(ArenaUpgradeDefinition def, ChanceManager rarityCopy)
         {
             if (rarityCopy == null || rarityCopy.Count <= 0)
+            {
                 return def.Rarity;
+            }
+
             int id = rarityCopy.GetChanceId();
             return id >= 0 && id <= (int)ArenaRarity.Legendary ? (ArenaRarity)id : def.Rarity;
         }
 
         private static ChanceManager CloneManager(ChanceManager src)
         {
-            var dst = new ChanceManager();
+            ChanceManager dst = new();
             if (src == null)
+            {
                 return dst;
+            }
+
             for (int i = 0; i < src.Count; i++)
+            {
                 dst.AddChance(src.GetChanceValue(i));
+            }
+
             dst.Sanitize();
             return dst;
         }

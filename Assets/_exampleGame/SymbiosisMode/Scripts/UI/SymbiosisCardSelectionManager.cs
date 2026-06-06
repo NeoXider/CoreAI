@@ -7,8 +7,9 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 {
     public class SymbiosisCardSelectionManager : MonoBehaviour
     {
-        [Header("References")]
-        [SerializeField] private SymbiosisGameSettings gameSettings;
+        [Header("References")] [SerializeField]
+        private SymbiosisGameSettings gameSettings;
+
         [SerializeField] private GameObject cardsPanel;
         [SerializeField] private Transform cardsContainer;
         [SerializeField] private SymbiosisUpgradeCardUI cardPrefab;
@@ -46,7 +47,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         public void ShowCards()
         {
-            if (gameSettings == null || gameSettings.AvailableUpgrades == null || gameSettings.AvailableUpgrades.Length == 0)
+            if (gameSettings == null || gameSettings.AvailableUpgrades == null ||
+                gameSettings.AvailableUpgrades.Length == 0)
             {
                 Debug.LogWarning("[CardManager] No upgrades configured!");
                 return;
@@ -63,15 +65,15 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
             // Pick 3 random cards for now (or all if < 3)
             int count = Mathf.Min(3, gameSettings.AvailableUpgrades.Length);
-            List<SymbiosisUpgradeData> available = new List<SymbiosisUpgradeData>(gameSettings.AvailableUpgrades);
+            List<SymbiosisUpgradeData> available = new(gameSettings.AvailableUpgrades);
 
             for (int i = 0; i < count; i++)
             {
                 int r = Random.Range(0, available.Count);
-                var picked = available[r];
+                SymbiosisUpgradeData picked = available[r];
                 available.RemoveAt(r); // avoid duplicates if possible
 
-                var cardObj = Instantiate(cardPrefab, cardsContainer);
+                SymbiosisUpgradeCardUI cardObj = Instantiate(cardPrefab, cardsContainer);
                 cardObj.Setup(picked, OnCardSelected);
             }
         }
@@ -79,7 +81,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
         private void OnCardSelected(SymbiosisUpgradeData data)
         {
             Debug.Log($"[CardManager] Upgrade Selected: {data.UpgradeName}");
-            
+
             // Apply logic
             ApplyUpgrade(data);
 
@@ -90,19 +92,31 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         private void ApplyUpgrade(SymbiosisUpgradeData data)
         {
-            var p = FindAnyObjectByType<SymbiosisGhostPlayer>();
-            var s = FindAnyObjectByType<SymbiosisSkeletonCompanion>();
+            SymbiosisGhostPlayer p = FindAnyObjectByType<SymbiosisGhostPlayer>();
+            SymbiosisSkeletonCompanion s = FindAnyObjectByType<SymbiosisSkeletonCompanion>();
 
             switch (data.Type)
             {
                 case UpgradeType.MaxHealth:
-                    if (p != null) p.MaxHealth += data.Amount;
+                    if (p != null)
+                    {
+                        p.MaxHealth += data.Amount;
+                    }
+
                     break;
                 case UpgradeType.Damage:
-                    if (s != null) s.Damage += (int)data.Amount;
+                    if (s != null)
+                    {
+                        s.Damage += (int)data.Amount;
+                    }
+
                     break;
                 case UpgradeType.Speed:
-                    if (p != null) p.MoveSpeed += data.Amount;
+                    if (p != null)
+                    {
+                        p.MoveSpeed += data.Amount;
+                    }
+
                     break;
                 case UpgradeType.Vampirism:
                     // Currently unapplied directly, reserved for skeleton

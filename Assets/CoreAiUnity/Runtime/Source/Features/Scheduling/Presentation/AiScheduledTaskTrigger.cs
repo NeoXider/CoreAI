@@ -11,8 +11,7 @@ namespace CoreAI.Presentation
     /// </summary>
     public sealed class AiScheduledTaskTrigger : MonoBehaviour
     {
-        [Tooltip("Empty value resolves through GetComponentInParent or FindAnyObjectByType.")]
-        [SerializeField]
+        [Tooltip("Empty value resolves through GetComponentInParent or FindAnyObjectByType.")] [SerializeField]
         private CoreAILifetimeScope lifetimeScope;
 
         [SerializeField] private string agentRoleId = BuiltInAgentRoleIds.Creator;
@@ -23,8 +22,7 @@ namespace CoreAI.Presentation
 
         [SerializeField] private string cancellationScope = "";
 
-        [Tooltip("Source tag for logs and dashboard entries, for example scheduled_timer:my_id.")]
-        [SerializeField]
+        [Tooltip("Source tag for logs and dashboard entries, for example scheduled_timer:my_id.")] [SerializeField]
         private string sourceTag = "scheduled_timer";
 
         [Header("Timer")] [SerializeField] private bool timerEnabled = true;
@@ -88,7 +86,8 @@ namespace CoreAI.Presentation
 
             if (scope == null)
             {
-                log.LogWarning(GameLogFeature.Composition, "AiScheduledTaskTrigger: IAiOrchestrationService is not registered.");
+                log.LogWarning(GameLogFeature.Composition,
+                    "AiScheduledTaskTrigger: IAiOrchestrationService is not registered.");
                 return;
             }
 

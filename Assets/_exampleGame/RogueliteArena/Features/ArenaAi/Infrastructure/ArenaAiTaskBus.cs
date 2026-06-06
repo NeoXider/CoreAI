@@ -16,25 +16,20 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
     /// </summary>
     public sealed class ArenaAiTaskBus : MonoBehaviour
     {
-        [Header("События сессии")]
-        [SerializeField]
+        [Header("События сессии")] [SerializeField]
         private bool reactToWaveChanged = true;
 
-        [SerializeField]
-        private bool reactToLowPlayerHp = true;
+        [SerializeField] private bool reactToLowPlayerHp = true;
 
         [Tooltip("Доля текущего HP; ниже — одна задача AINpc на «кризис» (до восстановления выше hysteresis).")]
         [Range(0.05f, 0.9f)]
         [SerializeField]
         private float lowHpRatio = 0.28f;
 
-        [Tooltip("Снять блок кризиса, когда HP выше этой доли.")]
-        [Range(0.1f, 0.95f)]
-        [SerializeField]
+        [Tooltip("Снять блок кризиса, когда HP выше этой доли.")] [Range(0.1f, 0.95f)] [SerializeField]
         private float lowHpHysteresisRatio = 0.38f;
 
-        [SerializeField]
-        private bool reactToBossDefeated = true;
+        [SerializeField] private bool reactToBossDefeated = true;
 
         private CoreAILifetimeScope _scope;
         private ArenaSurvivalSession _session;
@@ -59,7 +54,10 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private void Start()
         {
             if (_session == null)
+            {
                 TryLazyBind();
+            }
+
             Subscribe();
         }
 
@@ -70,39 +68,60 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
 
         private void TryLazyBind()
         {
-            _scope ??= Object.FindAnyObjectByType<CoreAILifetimeScope>();
-            _session ??= Object.FindAnyObjectByType<ArenaSurvivalSession>();
-            _planner ??= Object.FindAnyObjectByType<ArenaCreatorWavePlanner>();
+            _scope ??= FindAnyObjectByType<CoreAILifetimeScope>();
+            _session ??= FindAnyObjectByType<ArenaSurvivalSession>();
+            _planner ??= FindAnyObjectByType<ArenaCreatorWavePlanner>();
             if (_scope != null && _telemetry == null &&
-                _scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp) &&
+                _scope.Container.TryResolve<ISessionTelemetryProvider>(out ISessionTelemetryProvider tp) &&
                 tp is SessionTelemetryCollector c)
+            {
                 _telemetry = c;
+            }
         }
 
         private void Subscribe()
         {
             if (_session == null)
+            {
                 return;
+            }
+
             _session.CurrentWaveChanged -= OnWaveChanged;
             _session.BossDefeated -= OnBossDefeated;
             if (_session.PrimaryPlayerHealth != null)
+            {
                 _session.PrimaryPlayerHealth.Changed -= OnPlayerHpChanged;
+            }
+
             if (reactToWaveChanged)
+            {
                 _session.CurrentWaveChanged += OnWaveChanged;
+            }
+
             if (reactToBossDefeated)
+            {
                 _session.BossDefeated += OnBossDefeated;
+            }
+
             if (reactToLowPlayerHp && _session.PrimaryPlayerHealth != null)
+            {
                 _session.PrimaryPlayerHealth.Changed += OnPlayerHpChanged;
+            }
         }
 
         private void Unsubscribe()
         {
             if (_session == null)
+            {
                 return;
+            }
+
             _session.CurrentWaveChanged -= OnWaveChanged;
             _session.BossDefeated -= OnBossDefeated;
             if (_session.PrimaryPlayerHealth != null)
+            {
                 _session.PrimaryPlayerHealth.Changed -= OnPlayerHpChanged;
+            }
         }
 
         private void OnWaveChanged(int wave)
@@ -115,9 +134,12 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private void OnBossDefeated()
         {
             _telemetry?.SetTelemetry("arena.ai.last_event", ArenaAiSourceTags.BossDefeated);
-            if (!TryResolveOrchestrator(out var orch))
+            if (!TryResolveOrchestrator(out IAiOrchestrationService orch))
+            {
                 return;
-            var wave = _session != null ? _session.CurrentWave : 0;
+            }
+
+            int wave = _session != null ? _session.CurrentWave : 0;
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Analyzer,
@@ -132,16 +154,22 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         private void OnPlayerHpChanged(int current, int max)
         {
             if (!reactToLowPlayerHp || max <= 0)
+            {
                 return;
-            var ratio = (float)current / max;
+            }
+
+            float ratio = (float)current / max;
             if (!_hpCrisisLatch && ratio <= lowHpRatio)
             {
                 _hpCrisisLatch = true;
                 _telemetry?.SetTelemetry("arena.ai.last_event", ArenaAiSourceTags.PlayerHpCritical);
-                if (!TryResolveOrchestrator(out var orch))
+                if (!TryResolveOrchestrator(out IAiOrchestrationService orch))
+                {
                     return;
-                var wave = _session != null ? _session.CurrentWave : 0;
-                var alive = _session != null ? _session.AliveEnemies : -1;
+                }
+
+                int wave = _session != null ? _session.CurrentWave : 0;
+                int alive = _session != null ? _session.AliveEnemies : -1;
                 _ = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.AiNpc,
@@ -154,18 +182,26 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
                 });
             }
             else if (_hpCrisisLatch && ratio >= lowHpHysteresisRatio)
+            {
                 _hpCrisisLatch = false;
+            }
         }
 
         /// <summary>Notifies the AI bus that the player entered a room trigger.</summary>
         public void NotifyRoomEntered(string roomId)
         {
             if (string.IsNullOrWhiteSpace(roomId))
+            {
                 roomId = "unnamed";
-            var tag = ArenaAiSourceTags.RoomEnteredPrefix + roomId.Trim();
+            }
+
+            string tag = ArenaAiSourceTags.RoomEnteredPrefix + roomId.Trim();
             _telemetry?.SetTelemetry("arena.ai.last_event", tag);
-            if (!TryResolveOrchestrator(out var orch))
+            if (!TryResolveOrchestrator(out IAiOrchestrationService orch))
+            {
                 return;
+            }
+
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.AiNpc,
@@ -180,12 +216,17 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         public void FireHotkeyCreatorWavePlan()
         {
             if (_scope == null)
+            {
                 TryLazyBind();
-            if (_planner == null)
-                _planner = Object.FindAnyObjectByType<ArenaCreatorWavePlanner>();
+            }
 
-            var session = _session ?? Object.FindAnyObjectByType<ArenaSurvivalSession>();
-            var wave = session != null ? Mathf.Max(1, session.CurrentWave) : 1;
+            if (_planner == null)
+            {
+                _planner = FindAnyObjectByType<ArenaCreatorWavePlanner>();
+            }
+
+            ArenaSurvivalSession session = _session ?? FindAnyObjectByType<ArenaSurvivalSession>();
+            int wave = session != null ? Mathf.Max(1, session.CurrentWave) : 1;
 
             if (_planner != null && !_planner.ForceLinearWavePlans)
             {
@@ -195,8 +236,11 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
                 return;
             }
 
-            if (!TryResolveOrchestrator(out var orch))
+            if (!TryResolveOrchestrator(out IAiOrchestrationService orch))
+            {
                 return;
+            }
+
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
@@ -218,11 +262,14 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         public void FireHotkeyCompanionNpc()
         {
             TryLazyBind();
-            if (!TryResolveOrchestrator(out var orch))
+            if (!TryResolveOrchestrator(out IAiOrchestrationService orch))
+            {
                 return;
-            var session = _session ?? Object.FindAnyObjectByType<ArenaSurvivalSession>();
-            var alive = session != null ? session.AliveEnemies : -1;
-            var wave = session != null ? session.CurrentWave : 0;
+            }
+
+            ArenaSurvivalSession session = _session ?? FindAnyObjectByType<ArenaSurvivalSession>();
+            int alive = session != null ? session.AliveEnemies : -1;
+            int wave = session != null ? session.CurrentWave : 0;
 
             _ = orch.RunTaskAsync(new AiTaskRequest
             {
@@ -245,9 +292,15 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
         {
             orch = null;
             if (_scope == null)
-                _scope = Object.FindAnyObjectByType<CoreAILifetimeScope>();
+            {
+                _scope = FindAnyObjectByType<CoreAILifetimeScope>();
+            }
+
             if (_scope == null)
+            {
                 return false;
+            }
+
             return _scope.Container.TryResolve(out orch);
         }
     }

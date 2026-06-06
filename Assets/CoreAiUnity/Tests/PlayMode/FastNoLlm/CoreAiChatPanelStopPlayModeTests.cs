@@ -193,7 +193,7 @@ namespace CoreAI.Tests.PlayMode
             go.SetActive(false);
 
             PanelHarness panel = go.AddComponent<PanelHarness>();
-            CoreAiChatConfig cfg = CreateChatConfig(streaming: true);
+            CoreAiChatConfig cfg = CreateChatConfig(true);
             CancelThenRecoverStreamingOrchestrator orchestrator = new();
             CoreAiChatService service = new(orchestrator);
             panel.AssignTest(cfg, service);

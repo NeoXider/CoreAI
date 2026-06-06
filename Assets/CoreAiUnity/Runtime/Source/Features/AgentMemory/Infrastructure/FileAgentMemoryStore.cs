@@ -135,7 +135,8 @@ namespace CoreAI.Infrastructure.AiMemory
                     if (p != null)
                     {
                         p.memory = "";
-                        p.lastSystemPrompt = ""; // Clear previous system prompt cache entry to avoid leaking across sessions.
+                        p.lastSystemPrompt =
+                            ""; // Clear previous system prompt cache entry to avoid leaking across sessions.
                         File.WriteAllText(path, JsonUtility.ToJson(p, true));
                         PersistFsForWebGl();
                     }

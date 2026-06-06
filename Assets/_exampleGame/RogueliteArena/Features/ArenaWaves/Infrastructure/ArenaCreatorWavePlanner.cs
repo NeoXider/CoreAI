@@ -17,8 +17,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
     /// </summary>
     public sealed class ArenaCreatorWavePlanner : MonoBehaviour
     {
-        [SerializeField]
-        private bool enabledInExample = true;
+        [SerializeField] private bool enabledInExample = true;
 
         [Tooltip("После стольких подряд невалидных ответов Creator переключаемся только на линейное расписание.")]
         [SerializeField]
@@ -32,7 +31,7 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         private int _pendingCreatorWave;
 
         /// <summary>Plans keyed by wave number; LLM responses may arrive after the director wait window.</summary>
-        private readonly Dictionary<int, ArenaWavePlan> _plansByWave = new Dictionary<int, ArenaWavePlan>();
+        private readonly Dictionary<int, ArenaWavePlan> _plansByWave = new();
 
         private int _invalidPlanStreak;
         private bool _forceLinear;
@@ -67,19 +66,24 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         public void RequestWavePlan(int waveIndex1Based, string sourceTag = null)
         {
             if (!enabledInExample || _forceLinear)
+            {
                 return;
+            }
+
             if (_orchestrator == null || _session == null)
+            {
                 return;
+            }
 
             _lastRequestedWave = waveIndex1Based;
             _pendingCreatorWave = waveIndex1Based;
 
-            var tag = string.IsNullOrWhiteSpace(sourceTag) ? ArenaAiSourceTags.DirectorWaveStart : sourceTag.Trim();
+            string tag = string.IsNullOrWhiteSpace(sourceTag) ? ArenaAiSourceTags.DirectorWaveStart : sourceTag.Trim();
             _telemetry?.SetTelemetry("arena.creator.request_wave", waveIndex1Based);
             _telemetry?.SetTelemetry("arena.creator.hint", $"arena_wave_plan wave={waveIndex1Based}");
             _telemetry?.SetTelemetry("arena.ai.source", tag);
 
-            var hint =
+            string hint =
                 $"arena_wave_plan wave={waveIndex1Based} context_version=1 " +
                 "Telemetry keys: arena.context.version, arena.wave, arena.alive_enemies, arena.kills_this_wave, " +
                 "player.hp.*, arena.wave_schedule.linear_enemy_count, arena.next_wave_index. " +
@@ -110,22 +114,31 @@ namespace CoreAI.ExampleGame.ArenaWaves.Infrastructure
         private void OnCommand(ApplyAiGameCommand cmd)
         {
             if (!enabledInExample || cmd == null)
+            {
                 return;
-            if (cmd.CommandTypeId != AiGameCommandTypeIds.Envelope)
-                return;
-            if (!string.Equals(cmd.SourceRoleId, BuiltInAgentRoleIds.Creator, StringComparison.Ordinal))
-                return;
+            }
 
-            if (!ArenaWavePlanParser.TryParse(cmd.JsonPayload, out var plan))
+            if (cmd.CommandTypeId != AiGameCommandTypeIds.Envelope)
+            {
+                return;
+            }
+
+            if (!string.Equals(cmd.SourceRoleId, BuiltInAgentRoleIds.Creator, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!ArenaWavePlanParser.TryParse(cmd.JsonPayload, out ArenaWavePlan plan))
             {
                 RegisterInvalidPlan("parse_failed");
                 return;
             }
 
-            var waveKey = plan.waveIndex1Based > 0 ? plan.waveIndex1Based : _lastRequestedWave;
-            if (!ArenaWavePlanValidator.TryValidate(plan, waveKey, out var fail))
+            int waveKey = plan.waveIndex1Based > 0 ? plan.waveIndex1Based : _lastRequestedWave;
+            if (!ArenaWavePlanValidator.TryValidate(plan, waveKey, out string fail))
             {
-                Debug.LogWarning($"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: план волны {waveKey} отклонён: {fail}");
+                Debug.LogWarning(
+                    $"[CoreAI.ExampleGame] ArenaCreatorWavePlanner: план волны {waveKey} отклонён: {fail}");
                 RegisterInvalidPlan(fail ?? "validate_failed");
                 return;
             }

@@ -3,7 +3,8 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    [CreateAssetMenu(fileName = "ArenaUpgradePresentation", menuName = "CoreAI Example/Arena/Upgrade Presentation", order = 21)]
+    [CreateAssetMenu(fileName = "ArenaUpgradePresentation", menuName = "CoreAI Example/Arena/Upgrade Presentation",
+        order = 21)]
     public sealed class ArenaUpgradePresentationConfig : ScriptableObject
     {
         [SerializeField] private Sprite frameCommon;
@@ -15,8 +16,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         [SerializeField] private Material materialEpic;
         [SerializeField] private Material materialLegendary;
 
-        public Sprite GetFrame(ArenaRarity r) =>
-            r switch
+        public Sprite GetFrame(ArenaRarity r)
+        {
+            return r switch
             {
                 ArenaRarity.Common => frameCommon,
                 ArenaRarity.Rare => frameRare,
@@ -24,9 +26,11 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 ArenaRarity.Legendary => frameLegendary,
                 _ => frameCommon
             };
+        }
 
-        public Material GetMaterial(ArenaRarity r) =>
-            r switch
+        public Material GetMaterial(ArenaRarity r)
+        {
+            return r switch
             {
                 ArenaRarity.Common => materialCommon,
                 ArenaRarity.Rare => materialRare,
@@ -34,5 +38,6 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 ArenaRarity.Legendary => materialLegendary,
                 _ => materialCommon
             };
+        }
     }
 }

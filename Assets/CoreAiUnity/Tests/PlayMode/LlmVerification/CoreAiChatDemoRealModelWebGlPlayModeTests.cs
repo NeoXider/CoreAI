@@ -86,7 +86,8 @@ namespace CoreAI.Tests.PlayMode
             yield return WaitForVisibleStreamingText(stopTask, panel, stopProbe, 90f, "cancellable real-model stream");
             if (stopTask.IsCompleted)
             {
-                Assert.Ignore($"{LogPrefix} Real model completed before Stop could cancel it; use a slower model or rerun.");
+                Assert.Ignore(
+                    $"{LogPrefix} Real model completed before Stop could cancel it; use a slower model or rerun.");
             }
 
             Label stoppedLabel = stopProbe.Label;
@@ -190,7 +191,8 @@ namespace CoreAI.Tests.PlayMode
 
             if (task.IsFaulted)
             {
-                Assert.Fail($"{LogPrefix} Task faulted during {operationName}: {task.Exception?.GetBaseException().Message}");
+                Assert.Fail(
+                    $"{LogPrefix} Task faulted during {operationName}: {task.Exception?.GetBaseException().Message}");
             }
         }
 

@@ -12,10 +12,13 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Domain
         int CurrentWave { get; }
         int AliveEnemies { get; }
         System.Collections.Generic.IReadOnlyCollection<ArenaEnemyBrain> ActiveEnemiesList { get; }
+
         /// <summary>Kills during the current wave; resets when a new wave starts.</summary>
         int KillsThisWave { get; }
+
         /// <summary>Total kills during the run.</summary>
         int TotalKillsRun { get; }
+
         bool RunEnded { get; }
         bool PlayerWon { get; }
     }
@@ -30,8 +33,10 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Domain
         void RegisterEnemy(ArenaEnemyBrain enemy);
         void UnregisterEnemy(ArenaEnemyBrain enemy);
         void ResetKillsThisWave();
+
         /// <summary>Call when a boss is defeated so the AI bus can react.</summary>
         void NotifyBossDefeated();
+
         void EndRun(bool playerWon);
     }
 }

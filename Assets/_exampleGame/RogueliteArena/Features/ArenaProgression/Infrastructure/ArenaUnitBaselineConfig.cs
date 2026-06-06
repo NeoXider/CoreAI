@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    [CreateAssetMenu(fileName = "ArenaUnitBaseline", menuName = "CoreAI Example/Arena/Unit Baseline Config", order = 10)]
+    [CreateAssetMenu(fileName = "ArenaUnitBaseline", menuName = "CoreAI Example/Arena/Unit Baseline Config",
+        order = 10)]
     public sealed class ArenaUnitBaselineConfig : ScriptableObject
     {
         [SerializeField] private float playerMaxHealth = 100f;

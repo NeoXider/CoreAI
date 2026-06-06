@@ -16,7 +16,9 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
         private void Start()
         {
             if (backgroundWindow != null)
+            {
                 _bgRadius = backgroundWindow.sizeDelta.x / 2f;
+            }
         }
 
         public void OnPointerDown(PointerEventData eventData)
@@ -26,22 +28,26 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (backgroundWindow == null || handle == null) return;
+            if (backgroundWindow == null || handle == null)
+            {
+                return;
+            }
 
             Vector2 position;
-            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(backgroundWindow, eventData.position, eventData.pressEventCamera, out position))
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(backgroundWindow, eventData.position,
+                    eventData.pressEventCamera, out position))
             {
                 // Find distance from visual center, regardless of pivot
-                Vector2 pivotOffset = new Vector2((0.5f - backgroundWindow.pivot.x) * backgroundWindow.rect.width, 
-                                                  (0.5f - backgroundWindow.pivot.y) * backgroundWindow.rect.height);
-                
+                Vector2 pivotOffset = new((0.5f - backgroundWindow.pivot.x) * backgroundWindow.rect.width,
+                    (0.5f - backgroundWindow.pivot.y) * backgroundWindow.rect.height);
+
                 position -= pivotOffset; // Center is now (0,0)
-                
-                position.x = (position.x / _bgRadius);
-                position.y = (position.y / _bgRadius);
+
+                position.x = position.x / _bgRadius;
+                position.y = position.y / _bgRadius;
 
                 InputVector = new Vector2(position.x, position.y);
-                InputVector = (InputVector.magnitude > 1.0f) ? InputVector.normalized : InputVector;
+                InputVector = InputVector.magnitude > 1.0f ? InputVector.normalized : InputVector;
 
                 // Move handle visually from the center
                 handle.localPosition = (Vector3)(InputVector * _bgRadius + pivotOffset);
@@ -53,8 +59,8 @@ namespace CoreAI.ExampleGame.SymbiosisMode.UI
             InputVector = Vector2.zero;
             if (handle != null && backgroundWindow != null)
             {
-                Vector2 pivotOffset = new Vector2((0.5f - backgroundWindow.pivot.x) * backgroundWindow.rect.width, 
-                                                  (0.5f - backgroundWindow.pivot.y) * backgroundWindow.rect.height);
+                Vector2 pivotOffset = new((0.5f - backgroundWindow.pivot.x) * backgroundWindow.rect.width,
+                    (0.5f - backgroundWindow.pivot.y) * backgroundWindow.rect.height);
                 handle.localPosition = (Vector3)pivotOffset;
             }
         }

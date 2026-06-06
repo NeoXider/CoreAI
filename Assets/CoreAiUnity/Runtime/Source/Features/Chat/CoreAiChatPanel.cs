@@ -45,7 +45,8 @@ namespace CoreAI.Chat
         protected StyleSheet customStyleSheet;
 
         [Header("UI Templates (optional)")]
-        [Tooltip("Optional message bubble template. If empty, CoreAiChatPanel creates the default bubble element in code.")]
+        [Tooltip(
+            "Optional message bubble template. If empty, CoreAiChatPanel creates the default bubble element in code.")]
         [SerializeField]
         protected VisualTreeAsset messageBubbleTemplate;
 
@@ -382,7 +383,6 @@ namespace CoreAI.Chat
             {
                 ApplyResponsiveSize(ChatContainer);
             }
-
 
 
             ApplyClearButtonVisibility();
@@ -809,7 +809,6 @@ namespace CoreAI.Chat
 
         private void OnInputKeyDown(KeyDownEvent evt)
         {
-
             // Resolve and cache required local values.
             bool isEnter =
                 evt.keyCode == KeyCode.Return ||
@@ -1924,7 +1923,8 @@ namespace CoreAI.Chat
                             _activeRequestCts = null;
                         }
 
-                        Debug.LogWarning($"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
+                        Debug.LogWarning(
+                            $"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
                     }
                 }
                 else if (ReferenceEquals(_activeRequestCts, activeRequestCts))
@@ -2116,7 +2116,8 @@ namespace CoreAI.Chat
             string baseText = Options.TypingIndicatorText ?? string.Empty;
             _typingAnimation = TypingIndicator.schedule.Execute(() =>
             {
-                _typingDotCount = _typingDotCount % 3 + 1; // Animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
+                _typingDotCount =
+                    _typingDotCount % 3 + 1; // Animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
                 if (TypingLabel == null)
                 {
                     return;

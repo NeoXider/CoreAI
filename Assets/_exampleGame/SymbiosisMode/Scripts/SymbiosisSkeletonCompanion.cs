@@ -1,6 +1,7 @@
 using Unity.Netcode;
 using UnityEngine;
 using CoreAI.ExampleGame.ArenaCombat.Infrastructure;
+using CoreAI.ExampleGame.ArenaSurvival.Infrastructure;
 
 namespace CoreAI.ExampleGame.SymbiosisMode
 {
@@ -14,17 +15,14 @@ namespace CoreAI.ExampleGame.SymbiosisMode
     [RequireComponent(typeof(NetworkObject))]
     public class SymbiosisSkeletonCompanion : NetworkBehaviour
     {
-        [Header("AI Settings")]
-        public CompanionAiMode SelectedAiMode = CompanionAiMode.Off;
+        [Header("AI Settings")] public CompanionAiMode SelectedAiMode = CompanionAiMode.Off;
 
-        [Header("Game Settings (SO)")]
-        [SerializeField] private Settings.SymbiosisGameSettings gameSettings;
+        [Header("Game Settings (SO)")] [SerializeField]
+        private Settings.SymbiosisGameSettings gameSettings;
 
-        [Header("References")]
-        public SymbiosisGhostPlayer MyGhostOwner;
-        
-        [Header("Stats")]
-        public float FollowRadius = 2f;
+        [Header("References")] public SymbiosisGhostPlayer MyGhostOwner;
+
+        [Header("Stats")] public float FollowRadius = 2f;
         public float FollowSpeed = 4f;
         public float VampirismRatio = 0.5f; // 50% of damage becomes heal
         public int Damage = 10;
@@ -54,7 +52,6 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         public override void OnNetworkSpawn()
         {
-            
             // Skeletons are server-simulated
             if (!IsServer)
             {
@@ -64,22 +61,30 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private static void ApplyLitColor(Renderer r, Color c)
         {
-            if (r == null) return;
-            var sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            var mat = new Material(sh);
+            if (r == null)
+            {
+                return;
+            }
+
+            Shader sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            Material mat = new(sh);
             mat.SetColor(sh.name.Contains("Universal") ? "_BaseColor" : "_Color", c);
             r.sharedMaterial = mat;
         }
 
-        void Update()
+        private void Update()
         {
-            if (!IsServer || MyGhostOwner == null) return;
+            if (!IsServer || MyGhostOwner == null)
+            {
+                return;
+            }
 
             // 1. Follow Owner logic
             float dist = Vector3.Distance(transform.position, MyGhostOwner.transform.position);
             if (dist > FollowRadius)
             {
-                transform.position = Vector3.MoveTowards(transform.position, MyGhostOwner.transform.position, FollowSpeed * Time.deltaTime);
+                transform.position = Vector3.MoveTowards(transform.position, MyGhostOwner.transform.position,
+                    FollowSpeed * Time.deltaTime);
             }
 
             // 2. Combat Logic
@@ -98,13 +103,17 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
         private void AttackNearestEnemyFallback()
         {
-            var session = Object.FindAnyObjectByType<CoreAI.ExampleGame.ArenaSurvival.Infrastructure.ArenaSurvivalSession>();
-            if (session == null) return;
+            ArenaSurvivalSession session =
+                FindAnyObjectByType<CoreAI.ExampleGame.ArenaSurvival.Infrastructure.ArenaSurvivalSession>();
+            if (session == null)
+            {
+                return;
+            }
 
             ArenaEnemyBrain nearestEnemy = null;
             float minDistance = AttackRange;
 
-            foreach(var enemy in session.ActiveEnemiesList)
+            foreach (ArenaEnemyBrain enemy in session.ActiveEnemiesList)
             {
                 float d = Vector3.Distance(transform.position, enemy.transform.position);
                 if (d < minDistance)
@@ -129,7 +138,7 @@ namespace CoreAI.ExampleGame.SymbiosisMode
 
             // Calculate heal 
             float healAmount = Damage * VampirismRatio;
-            
+
             // Ask player to heal
             MyGhostOwner.HealFromSkeleton(healAmount);
         }

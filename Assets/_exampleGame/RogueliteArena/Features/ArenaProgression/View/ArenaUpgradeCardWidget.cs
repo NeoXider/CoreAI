@@ -20,7 +20,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
         private void Awake()
         {
             if (button != null)
+            {
                 button.onClick.AddListener(OnClick);
+            }
         }
 
         public void Bind(
@@ -32,12 +34,21 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
             _onPick = onPick;
             gameObject.SetActive(offer != null);
             if (offer?.Definition == null)
+            {
                 return;
-            var def = offer.Definition;
+            }
+
+            ArenaUpgradeDefinition def = offer.Definition;
             if (titleText != null)
+            {
                 titleText.text = def.Title;
+            }
+
             if (descriptionText != null)
+            {
                 descriptionText.text = def.Description;
+            }
+
             if (iconImage != null)
             {
                 iconImage.sprite = def.Icon;
@@ -46,15 +57,23 @@ namespace CoreAI.ExampleGame.ArenaProgression.View
 
             if (presentation != null && frameImage != null)
             {
-                var sp = presentation.GetFrame(offer.RolledRarity);
+                Sprite sp = presentation.GetFrame(offer.RolledRarity);
                 if (sp != null)
+                {
                     frameImage.sprite = sp;
-                var mat = presentation.GetMaterial(offer.RolledRarity);
+                }
+
+                Material mat = presentation.GetMaterial(offer.RolledRarity);
                 if (mat != null)
+                {
                     frameImage.material = mat;
+                }
             }
         }
 
-        private void OnClick() => _onPick?.Invoke(_offer);
+        private void OnClick()
+        {
+            _onPick?.Invoke(_offer);
+        }
     }
 }

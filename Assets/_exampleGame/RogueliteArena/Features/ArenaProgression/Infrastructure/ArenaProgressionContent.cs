@@ -4,7 +4,8 @@ using UnityEngine;
 
 namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 {
-    [CreateAssetMenu(fileName = "ArenaProgressionContent", menuName = "CoreAI Example/Arena/Progression Content", order = 15)]
+    [CreateAssetMenu(fileName = "ArenaProgressionContent", menuName = "CoreAI Example/Arena/Progression Content",
+        order = 15)]
     public sealed class ArenaProgressionContent : ScriptableObject
     {
         [SerializeField] private ArenaRunBalanceConfig runBalance;

@@ -8,14 +8,20 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         public ArenaUpgradeOffer Pick(IReadOnlyList<ArenaUpgradeOffer> candidates)
         {
             if (candidates == null || candidates.Count == 0)
+            {
                 return null;
+            }
+
             ArenaUpgradeOffer best = null;
-            var bestScore = int.MinValue;
+            int bestScore = int.MinValue;
             for (int i = 0; i < candidates.Count; i++)
             {
-                var c = candidates[i];
+                ArenaUpgradeOffer c = candidates[i];
                 if (c?.Definition == null)
+                {
                     continue;
+                }
+
                 int s = c.HeuristicValueScore() + (int)c.RolledRarity * 5;
                 if (s > bestScore)
                 {

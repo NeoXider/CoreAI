@@ -14,6 +14,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.UseCases
             _gateway = gateway;
         }
 
-        public void Execute() => _gateway?.Save(_meta);
+        public void Execute()
+        {
+            _gateway?.Save(_meta);
+        }
     }
 }

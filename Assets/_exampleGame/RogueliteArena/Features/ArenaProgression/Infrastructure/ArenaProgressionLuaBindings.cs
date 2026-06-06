@@ -1,5 +1,6 @@
 using System;
 using CoreAI.Ai;
+using CoreAI.ExampleGame.ArenaProgression.Domain;
 using CoreAI.ExampleGame.ArenaProgression.UseCases;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
@@ -45,7 +46,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             {
                 int n = ToInt(v);
                 if (n <= 0)
+                {
                     return;
+                }
+
                 int alive = Mathf.Max(1, ArenaProgressionRuntimeHub.AliveTeamMembersForXp);
                 _addSessionKillXp?.Execute(n, alive);
             }));
@@ -54,7 +58,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
             {
                 int n = ToInt(v);
                 if (n > 0)
+                {
                     _addMetaXp?.Execute(n);
+                }
             }));
 
             registry.Register("arena_save_meta", (Action)(() => _saveMeta?.Execute()));
@@ -62,13 +68,16 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
 
             registry.Register("arena_apply_upgrade_id", (Action<object>)(idObj =>
             {
-                var id = idObj?.ToString();
+                string id = idObj?.ToString();
                 if (string.IsNullOrEmpty(id) || _content?.Upgrades == null || _balance == null)
+                {
                     return;
+                }
+
                 ArenaUpgradeDefinition def = null;
                 for (int i = 0; i < _content.Upgrades.Count; i++)
                 {
-                    var u = _content.Upgrades[i];
+                    ArenaUpgradeDefinition u = _content.Upgrades[i];
                     if (u != null && u.Id == id)
                     {
                         def = u;
@@ -77,11 +86,14 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
                 }
 
                 if (def == null)
+                {
                     return;
-                var rarity = def.Rarity;
+                }
+
+                ArenaRarity rarity = def.Rarity;
                 float mult = _balance.GetStatMultiplier(rarity);
-                var offer = new ArenaUpgradeOffer(def, rarity, mult);
-                _apply?.Execute(offer, applyToCompanionToo: true);
+                ArenaUpgradeOffer offer = new(def, rarity, mult);
+                _apply?.Execute(offer, true);
             }));
 
             registry.Register("arena_open_draft_debug", (Action)(() => _openDraftDebug?.Invoke()));
@@ -90,7 +102,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Infrastructure
         private static int ToInt(object v)
         {
             if (v == null)
+            {
                 return 0;
+            }
+
             try
             {
                 return Convert.ToInt32(v);

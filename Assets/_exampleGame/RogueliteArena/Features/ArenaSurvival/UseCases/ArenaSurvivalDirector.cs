@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using CoreAI.Ai;
 using CoreAI.Composition;
@@ -13,6 +14,7 @@ using UnityEngine;
 using UnityEngine.AI;
 using VContainer;
 using VContainer.Unity;
+using Random = UnityEngine.Random;
 
 namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 {
@@ -56,33 +58,46 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
             // Если ILlmClient = StubLlmClient — используем локальный планировщик (пример),
             // чтобы Core оставался игронезависимым.
-            var scope = LifetimeScope.Find<CoreAILifetimeScope>();
-            if (scope != null && scope.Container.TryResolve<ILlmClient>(out var llm))
+            LifetimeScope scope = LifetimeScope.Find<CoreAILifetimeScope>();
+            if (scope != null && scope.Container.TryResolve<ILlmClient>(out ILlmClient llm))
+            {
                 _useLocalCreator = LoggingLlmClientDecorator.Unwrap(llm) is StubLlmClient;
+            }
         }
 
         private void Start()
         {
             if (_started || _session == null || _enemyTemplate == null || _waveSchedule == null)
+            {
                 return;
+            }
+
             if (!_session.IsAuthoritativeSimulation)
+            {
                 return;
+            }
+
             _started = true;
             StartCoroutine(RunWaves());
         }
 
         private IEnumerator RunWaves()
         {
-            if (directorSettings == null) yield break;
+            if (directorSettings == null)
+            {
+                yield break;
+            }
 
             int wavesToWin = directorSettings.WavesToWin;
-            for (var wave = 1; wave <= wavesToWin; wave++)
+            for (int wave = 1; wave <= wavesToWin; wave++)
             {
                 if (_session.RunEnded)
+                {
                     yield break;
+                }
 
                 _session.ResetKillsThisWave();
-                var waveStartRt = Time.realtimeSinceStartup;
+                float waveStartRt = Time.realtimeSinceStartup;
                 PushWaveTelemetry(wave);
                 _session.SetCurrentWave(wave);
                 ArenaWavePlan plan = null;
@@ -93,35 +108,40 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                 else if (_creatorPlanner != null && !_creatorPlanner.ForceLinearWavePlans)
                 {
                     _creatorPlanner.RequestWavePlan(wave, ArenaAiSourceTags.DirectorWaveStart);
-                    var t = 0f;
+                    float t = 0f;
                     while (t < directorSettings.CreatorPlanWaitSeconds && !_session.RunEnded)
                     {
                         if (_creatorPlanner.TryConsumeLatestPlan(wave, out plan))
+                        {
                             break;
+                        }
+
                         t += Time.unscaledDeltaTime;
                         yield return null;
                     }
                 }
 
-                var vs = _waveDifficulty != null
+                ArenaWaveDifficultySample vs = _waveDifficulty != null
                     ? _waveDifficulty.Evaluate(wave, wavesToWin)
                     : ArenaWaveDifficultySample.Identity;
 
-                var count = plan != null ? plan.enemyCount : _waveSchedule.GetEnemyCountForWave(wave);
+                int count = plan != null ? plan.enemyCount : _waveSchedule.GetEnemyCountForWave(wave);
                 count = Mathf.Clamp(Mathf.RoundToInt(count * vs.EnemyCountMultiplier), 1, 500);
 
                 // Multiplayer scaling: multiply by number of connected clients if Unity Netcode is active
                 int playersCount = 1;
-                var nmType = System.Type.GetType("Unity.Netcode.NetworkManager, Unity.Netcode.Runtime");
+                Type nmType = System.Type.GetType("Unity.Netcode.NetworkManager, Unity.Netcode.Runtime");
                 if (nmType != null)
                 {
-                    var singleton = nmType.GetProperty("Singleton", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
+                    object singleton = nmType.GetProperty("Singleton",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
                     if (singleton != null)
                     {
                         bool isListening = (bool)(nmType.GetProperty("IsListening")?.GetValue(singleton) ?? false);
                         if (isListening)
                         {
-                            var connectedClientsIds = nmType.GetProperty("ConnectedClientsIds")?.GetValue(singleton) as System.Collections.ICollection;
+                            ICollection connectedClientsIds =
+                                nmType.GetProperty("ConnectedClientsIds")?.GetValue(singleton) as ICollection;
                             if (connectedClientsIds != null)
                             {
                                 playersCount = Mathf.Max(1, connectedClientsIds.Count);
@@ -129,25 +149,32 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                         }
                     }
                 }
+
                 count *= playersCount;
 
-                var hpMult = Mathf.Clamp((plan != null ? plan.enemyHpMult : 1f) * vs.HpMultiplier, 0.25f, 5f);
-                var dmgMult = Mathf.Clamp((plan != null ? plan.enemyDamageMult : 1f) * vs.DamageMultiplier, 0.25f, 5f);
-                var msMult = Mathf.Clamp((plan != null ? plan.enemyMoveSpeedMult : 1f) * vs.MoveSpeedMultiplier, 0.25f, 3f);
-                var interval = Mathf.Clamp(
-                    (plan != null ? plan.spawnIntervalSeconds : directorSettings.SpawnInterval) * vs.SpawnIntervalMultiplier,
+                float hpMult = Mathf.Clamp((plan != null ? plan.enemyHpMult : 1f) * vs.HpMultiplier, 0.25f, 5f);
+                float dmgMult = Mathf.Clamp((plan != null ? plan.enemyDamageMult : 1f) * vs.DamageMultiplier, 0.25f,
+                    5f);
+                float msMult = Mathf.Clamp((plan != null ? plan.enemyMoveSpeedMult : 1f) * vs.MoveSpeedMultiplier,
+                    0.25f, 3f);
+                float interval = Mathf.Clamp(
+                    (plan != null ? plan.spawnIntervalSeconds : directorSettings.SpawnInterval) *
+                    vs.SpawnIntervalMultiplier,
                     0.05f,
                     3f);
-                var radius = plan != null ? plan.spawnRadius : directorSettings.SpawnRadius;
-                for (var i = 0; i < count; i++)
+                float radius = plan != null ? plan.spawnRadius : directorSettings.SpawnRadius;
+                for (int i = 0; i < count; i++)
                 {
                     if (_session.RunEnded)
+                    {
                         yield break;
+                    }
+
                     SpawnOne(hpMult, dmgMult, msMult, radius);
                     yield return new WaitForSeconds(interval);
                 }
 
-                var preRequested = false;
+                bool preRequested = false;
                 while (_session.AliveEnemies > 0 && !_session.RunEnded)
                 {
                     if (!preRequested &&
@@ -165,20 +192,28 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
                 }
 
                 if (_session.RunEnded)
+                {
                     yield break;
+                }
+
                 PushLastWaveDurationTelemetry(Time.realtimeSinceStartup - waveStartRt);
                 TryRunPostWaveAnalyzer(wave);
                 yield return new WaitForSeconds(directorSettings.PauseBetweenWaves);
             }
 
             if (!_session.RunEnded)
+            {
                 _session.EndRun(true);
+            }
         }
 
         private void TryRunPostWaveAnalyzer(int completedWave)
         {
             if (!directorSettings.RunPostWaveAnalyzer || _useLocalCreator || _aiOrchestration == null)
+            {
                 return;
+            }
+
             _ = _aiOrchestration.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Analyzer,
@@ -194,13 +229,21 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
         private void PushWaveTelemetry(int wave)
         {
-            var scope = LifetimeScope.Find<CoreAILifetimeScope>();
+            LifetimeScope scope = LifetimeScope.Find<CoreAILifetimeScope>();
             if (scope == null)
+            {
                 return;
-            if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp))
+            }
+
+            if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out ISessionTelemetryProvider tp))
+            {
                 return;
+            }
+
             if (tp is not SessionTelemetryCollector collector)
+            {
                 return;
+            }
 
             collector.SetTelemetry("arena.context.version", "1");
             collector.SetTelemetry("wave", wave);
@@ -208,17 +251,22 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
             collector.SetTelemetry("arena.wave_schedule.linear_enemy_count", _waveSchedule.GetEnemyCountForWave(wave));
             if (_waveDifficulty != null)
             {
-                var vs = _waveDifficulty.Evaluate(wave, directorSettings.WavesToWin);
+                ArenaWaveDifficultySample vs = _waveDifficulty.Evaluate(wave, directorSettings.WavesToWin);
                 collector.SetTelemetry("arena.wave.vs.enemy_count_mult", vs.EnemyCountMultiplier);
                 collector.SetTelemetry("arena.wave.vs.hp_mult", vs.HpMultiplier);
                 collector.SetTelemetry("arena.wave.vs.dmg_mult", vs.DamageMultiplier);
                 collector.SetTelemetry("arena.wave.vs.move_mult", vs.MoveSpeedMultiplier);
                 collector.SetTelemetry("arena.wave.vs.spawn_interval_mult", vs.SpawnIntervalMultiplier);
             }
+
             if (wave < directorSettings.WavesToWin)
+            {
                 collector.SetTelemetry("arena.next_wave_index", wave + 1);
+            }
             else
+            {
                 collector.SetTelemetry("arena.next_wave_index", "");
+            }
 
             collector.SetTelemetry("arena.alive_enemies", _session.AliveEnemies);
             collector.SetTelemetry("arena.kills_this_wave", _session.KillsThisWave);
@@ -226,43 +274,52 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
             if (_session.PrimaryPlayerHealth != null)
             {
-                var h = _session.PrimaryPlayerHealth;
+                ArenaPlayerHealth h = _session.PrimaryPlayerHealth;
                 collector.SetTelemetry("player.hp.current", h.Current);
                 collector.SetTelemetry("player.hp.max", h.Max);
-                var pct = h.Max > 0 ? 100f * h.Current / h.Max : 0f;
+                float pct = h.Max > 0 ? 100f * h.Current / h.Max : 0f;
                 collector.SetTelemetry("player.hp.pct", pct);
             }
         }
 
         private void PushLastWaveDurationTelemetry(float seconds)
         {
-            var scope = LifetimeScope.Find<CoreAILifetimeScope>();
+            LifetimeScope scope = LifetimeScope.Find<CoreAILifetimeScope>();
             if (scope == null)
+            {
                 return;
-            if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out var tp))
+            }
+
+            if (!scope.Container.TryResolve<ISessionTelemetryProvider>(out ISessionTelemetryProvider tp))
+            {
                 return;
+            }
+
             if (tp is SessionTelemetryCollector collector)
-                collector.SetTelemetry("arena.last_wave_duration_sec", seconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            {
+                collector.SetTelemetry("arena.last_wave_duration_sec",
+                    seconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            }
         }
 
         private void SpawnOne(float hpMult, float dmgMult, float moveSpeedMult, float radius)
         {
-            var angle = Random.Range(0f, Mathf.PI * 2f);
-            var pos = new Vector3(Mathf.Cos(angle) * radius, 0.6f, Mathf.Sin(angle) * radius);
-            var e = Instantiate(_enemyTemplate, pos, Quaternion.identity);
-            var brain = e.GetComponent<ArenaEnemyBrain>();
+            float angle = Random.Range(0f, Mathf.PI * 2f);
+            Vector3 pos = new(Mathf.Cos(angle) * radius, 0.6f, Mathf.Sin(angle) * radius);
+            GameObject e = Instantiate(_enemyTemplate, pos, Quaternion.identity);
+            ArenaEnemyBrain brain = e.GetComponent<ArenaEnemyBrain>();
             if (brain != null)
             {
                 brain.Configure(_session);
                 brain.ApplyWaveStats(hpMult, dmgMult, moveSpeedMult);
             }
 
-            var agent = e.GetComponent<NavMeshAgent>();
-            var enableNav = false;
+            NavMeshAgent agent = e.GetComponent<NavMeshAgent>();
+            bool enableNav = false;
             if (agent != null)
             {
                 agent.enabled = false;
-                if (NavMesh.SamplePosition(pos, out var hit, 12f, NavMesh.AllAreas))
+                if (NavMesh.SamplePosition(pos, out NavMeshHit hit, 12f, NavMesh.AllAreas))
                 {
                     e.transform.position = hit.position;
                     enableNav = true;
@@ -271,7 +328,9 @@ namespace CoreAI.ExampleGame.ArenaSurvival.UseCases
 
             e.SetActive(true);
             if (agent != null && enableNav)
+            {
                 agent.enabled = true;
+            }
         }
     }
 }

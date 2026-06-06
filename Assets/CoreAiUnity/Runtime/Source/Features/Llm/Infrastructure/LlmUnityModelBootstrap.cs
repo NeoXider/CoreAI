@@ -46,7 +46,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(GameLogFeature.Llm, "LLMUnity: failed to assign GGUF path from settings: " + ex.Message);
+                    logger.LogWarning(GameLogFeature.Llm,
+                        "LLMUnity: failed to assign GGUF path from settings: " + ex.Message);
                     return false;
                 }
             }
@@ -216,7 +217,8 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                logger.LogWarning(GameLogFeature.Llm, "LLMUnity: failed to assign model from Model Manager: " + ex.Message);
+                logger.LogWarning(GameLogFeature.Llm,
+                    "LLMUnity: failed to assign model from Model Manager: " + ex.Message);
                 return false;
             }
 
@@ -225,7 +227,8 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            logger.LogInfo(GameLogFeature.Llm, "LLMUnity: model was empty; assigned model from Model Manager: " + llm.model);
+            logger.LogInfo(GameLogFeature.Llm,
+                "LLMUnity: model was empty; assigned model from Model Manager: " + llm.model);
             return true;
         }
 

@@ -25,10 +25,12 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
             UnlockedUpgradeIds.Clear();
             if (unlocked != null)
             {
-                foreach (var id in unlocked)
+                foreach (string id in unlocked)
                 {
                     if (!string.IsNullOrEmpty(id))
+                    {
                         UnlockedUpgradeIds.Add(id);
+                    }
                 }
             }
         }
@@ -36,7 +38,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         public void AddMetaXp(int amount)
         {
             if (amount <= 0)
+            {
                 return;
+            }
+
             MetaXp += amount;
         }
 
@@ -48,7 +53,9 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         public void Unlock(string upgradeId)
         {
             if (!string.IsNullOrEmpty(upgradeId))
+            {
                 UnlockedUpgradeIds.Add(upgradeId);
+            }
         }
     }
 
@@ -76,7 +83,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         public void SetLevelFromCurve(int level)
         {
             if (SessionLevel == level)
+            {
                 return;
+            }
+
             SessionLevel = level;
             SessionLevelChanged?.Invoke(level);
         }
@@ -84,7 +94,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
         public void AddSessionXp(int amount)
         {
             if (amount <= 0)
+            {
                 return;
+            }
+
             SessionTotalXp += amount;
             SessionXpChanged?.Invoke(SessionTotalXp, amount);
         }
@@ -94,7 +107,10 @@ namespace CoreAI.ExampleGame.ArenaProgression.Domain
             MaxChoicesOffered = Math.Min(cap, Math.Max(1, MaxChoicesOffered + delta));
         }
 
-        public void AddPassiveSlots(int delta) => PassiveSlotCount = Math.Max(0, PassiveSlotCount + delta);
+        public void AddPassiveSlots(int delta)
+        {
+            PassiveSlotCount = Math.Max(0, PassiveSlotCount + delta);
+        }
 
         public void BeginDraftScreen()
         {

@@ -16,30 +16,42 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
 
         private void Update()
         {
-            var kb = Keyboard.current;
+            Keyboard kb = Keyboard.current;
             if (kb == null)
+            {
                 return;
+            }
 
-            var scope = GetComponentInParent<CoreAILifetimeScope>();
+            CoreAILifetimeScope scope = GetComponentInParent<CoreAILifetimeScope>();
             if (scope == null)
+            {
                 return;
+            }
 
             if (kb.f1Key.wasPressedThisFrame)
             {
-                var bus = Object.FindAnyObjectByType<ArenaAiTaskBus>();
+                ArenaAiTaskBus bus = FindAnyObjectByType<ArenaAiTaskBus>();
                 if (bus != null)
+                {
                     bus.FireHotkeyCreatorWavePlan();
+                }
                 else
+                {
                     Debug.LogWarning("[CoreAI.ExampleGame] F1: ArenaAiTaskBus не найден (арена ещё не собрана?).");
+                }
             }
 
             if (kb.f2Key.wasPressedThisFrame)
             {
-                var bus = Object.FindAnyObjectByType<ArenaAiTaskBus>();
+                ArenaAiTaskBus bus = FindAnyObjectByType<ArenaAiTaskBus>();
                 if (bus != null)
+                {
                     bus.FireHotkeyCompanionNpc();
+                }
                 else
+                {
                     Debug.LogWarning("[CoreAI.ExampleGame] F2: ArenaAiTaskBus не найден.");
+                }
             }
         }
     }

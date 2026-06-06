@@ -69,7 +69,7 @@ namespace CoreAI.Tests.EditMode
         public void NotifyToolExecuted_SubscriberThrows_DoesNotPropagateException()
         {
             CoreAi.OnToolExecuted += (_, _, _, _) =>
-                throw new System.InvalidOperationException("Bad subscriber");
+                throw new InvalidOperationException("Bad subscriber");
             CoreAi.OnToolExecuted += (_, _, _, _) => { };
 
             // NotifyToolExecuted wraps in try/catch, should not throw
@@ -106,7 +106,7 @@ namespace CoreAI.Tests.EditMode
         {
             int callCount = 0;
             CoreAi.OnToolExecuted += (_, _, _, _) =>
-                throw new System.InvalidOperationException("Bad subscriber");
+                throw new InvalidOperationException("Bad subscriber");
             CoreAi.OnToolExecuted += (_, _, _, _) => callCount++;
 
             CoreAi.NotifyToolExecuted("Role", "tool_name", null, null);
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.EditMode
             CoreAi.NotifyToolCallFailed(new LlmToolCallFailed("trace", "Role", "tool", "{}", "boom", 3));
 
             List<LlmToolCallRecord> replayed = new();
-            using IDisposable sub = CoreAi.SubscribeToolCalls(replayed.Add, replayExisting: true);
+            using IDisposable sub = CoreAi.SubscribeToolCalls(replayed.Add, true);
 
             Assert.AreEqual(1, replayed.Count);
             Assert.AreEqual("failed", replayed[0].Status);

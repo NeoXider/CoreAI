@@ -178,7 +178,7 @@ namespace CoreAI.Tests.PlayMode
                 CancellationToken ct = default)
             {
                 CallCount++;
-                Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch sw = Stopwatch.StartNew();
                 LlmCompletionResult result = await _inner.CompleteAsync(request, ct);
                 sw.Stop();
                 TotalMs += sw.ElapsedMilliseconds;
