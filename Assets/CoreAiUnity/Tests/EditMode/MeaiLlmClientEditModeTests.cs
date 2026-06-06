@@ -367,6 +367,54 @@ namespace CoreAI.Tests.EditMode
                 $"Unexpected error: {last.Error}");
         }
 
+        [Test]
+        public async Task CompleteStreamingAsync_TooManySuccessfulToolIterations_WithVisibleText_CompletesWithoutUserError()
+        {
+            StreamingScriptedChatClient inner = new(
+                new[] { "Saved. ", MemoryToolJson("append", "loop-1") },
+                new[] { "Still saved. ", MemoryToolJson("append", "loop-2") },
+                new[] { "Progress saved. ", MemoryToolJson("append", "loop-3") },
+                new[] { "Summary saved. ", MemoryToolJson("append", "loop-4") },
+                new[] { "Done saved. ", MemoryToolJson("append", "loop-5") },
+                new[] { "Final saved. ", MemoryToolJson("append", "loop-6") });
+
+            StatefulMemoryStore memoryStore = new();
+            StubCoreSettings settings = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, settings, memoryStore);
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = "Teacher",
+                SystemPrompt = "You are test agent.",
+                UserPayload = "Save memory and summarize",
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+            };
+
+            List<string> texts = new();
+            LlmStreamChunk last = null;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+            {
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    texts.Add(chunk.Text);
+                }
+
+                last = chunk;
+            }
+
+            Assert.IsNotNull(last);
+            Assert.IsTrue(last.IsDone);
+            Assert.IsTrue(string.IsNullOrEmpty(last.Error), $"Unexpected user-visible error: {last.Error}");
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Success));
+            Assert.That(string.Concat(texts), Does.Contain("Saved."));
+        }
+
+        private static string MemoryToolJson(string action, string content)
+        {
+            return "{\"name\":\"memory\",\"arguments\":{\"action\":\"" + action +
+                   "\",\"content\":\"" + content + "\"}}";
+        }
+
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public bool TryLoad(string roleId, out AgentMemoryState state)

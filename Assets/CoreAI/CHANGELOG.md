@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## [v2.6.4] - 2026-06-06
+
+### Lockstep patch with CoreAI Unity
+
+- Bumped `com.nexoider.coreai` to `2.6.4` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- No portable runtime behavior change; the backend-managed authorization, streaming tool-loop completion, and chat collapse idempotency fixes live in `com.nexoider.coreaiunity`.
+
 ## [v2.6.3] - 2026-06-01
 
 ### Chat options parity with CoreAI Unity

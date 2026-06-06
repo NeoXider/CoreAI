@@ -40,7 +40,11 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentNullException(nameof(logger));
             }
 
-            _client = MeaiLlmClient.CreateHttp(settings, coreSettings, logger, memoryStore);
+            _client = MeaiLlmClient.CreateHttp(
+                new ServerManagedAuthorizationSettings(settings),
+                coreSettings,
+                logger,
+                memoryStore);
         }
 
         /// <inheritdoc />
@@ -63,6 +67,50 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             return _client.CompleteStreamingAsync(request, cancellationToken);
+        }
+
+        private sealed class ServerManagedAuthorizationSettings : IOpenAiHttpSettings
+        {
+            private readonly IOpenAiHttpSettings _inner;
+
+            public ServerManagedAuthorizationSettings(IOpenAiHttpSettings inner)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+
+            public string ApiBaseUrl => _inner.ApiBaseUrl;
+
+            public string ApiKey => _inner.ApiKey;
+
+            public string AuthorizationHeader
+            {
+                get
+                {
+                    string explicitHeader = _inner.AuthorizationHeader;
+                    if (!string.IsNullOrWhiteSpace(explicitHeader))
+                    {
+                        return explicitHeader.Trim();
+                    }
+
+                    return ServerManagedAuthorization.GetAuthorizationHeader();
+                }
+            }
+
+            public string Model => _inner.Model;
+
+            public float Temperature => _inner.Temperature;
+
+            public int RequestTimeoutSeconds => _inner.RequestTimeoutSeconds;
+
+            public int MaxTokens => _inner.MaxTokens;
+
+            public bool LogLlmInput => _inner.LogLlmInput;
+
+            public bool LogLlmOutput => _inner.LogLlmOutput;
+
+            public bool EnableHttpDebugLogging => _inner.EnableHttpDebugLogging;
+
+            public IRequestHeaderProvider HeaderProvider => _inner.HeaderProvider;
         }
     }
 }

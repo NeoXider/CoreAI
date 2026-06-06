@@ -254,6 +254,50 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ServerManagedLlmClient_ForwardsDynamicAuthorizationHeaderToHttpClient()
+        {
+            ServerManagedAuthorization.SetProvider(() => "Bearer runtime-token");
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                ServerManagedLlmClient client = new(
+                    new TestOpenAiHttpSettings(),
+                    settings,
+                    GameLoggerUnscopedFallback.Instance);
+
+                FieldInfo clientField = typeof(ServerManagedLlmClient).GetField(
+                    "_client",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(clientField);
+                object meaiClient = clientField.GetValue(client);
+                Assert.IsNotNull(meaiClient);
+
+                FieldInfo innerClientField = typeof(MeaiLlmClient).GetField(
+                    "_innerClient",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(innerClientField);
+                object innerClient = innerClientField.GetValue(meaiClient);
+                Assert.IsInstanceOf<MeaiOpenAiChatClient>(innerClient);
+
+                FieldInfo settingsField = typeof(MeaiOpenAiChatClient).GetField(
+                    "_settings",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(settingsField);
+                IOpenAiHttpSettings effectiveSettings =
+                    (IOpenAiHttpSettings)settingsField.GetValue(innerClient);
+
+                Assert.AreEqual("Bearer runtime-token", effectiveSettings.AuthorizationHeader);
+                ServerManagedAuthorization.SetProvider(() => "Bearer rotated-token");
+                Assert.AreEqual("Bearer rotated-token", effectiveSettings.AuthorizationHeader);
+            }
+            finally
+            {
+                ServerManagedAuthorization.ClearProvider();
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
         public void ScopedMemoryStore_IsolatesByScope()
         {
             InMemoryAgentMemoryStore inner = new();
@@ -288,6 +332,21 @@ namespace CoreAI.Tests.EditMode
                 Calls++;
                 return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
             }
+        }
+
+        private sealed class TestOpenAiHttpSettings : IOpenAiHttpSettings
+        {
+            public string ApiBaseUrl => "https://gateway.example.test/v1";
+            public string ApiKey => "";
+            public string AuthorizationHeader => "";
+            public string Model => "server-managed-model";
+            public float Temperature => 0.2f;
+            public int RequestTimeoutSeconds => 30;
+            public int MaxTokens => 512;
+            public bool LogLlmInput => false;
+            public bool LogLlmOutput => false;
+            public bool EnableHttpDebugLogging => false;
+            public IRequestHeaderProvider HeaderProvider => null;
         }
 
         private sealed class FixedScopeProvider : IAgentMemoryScopeProvider

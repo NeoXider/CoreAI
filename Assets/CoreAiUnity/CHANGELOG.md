@@ -2,6 +2,20 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.6.4] - 2026-06-06
+
+### Backend-managed streaming and chat reliability
+
+- Bumped `com.nexoider.coreaiunity` to `2.6.4` and kept the dependency aligned with `com.nexoider.coreai` `2.6.4`.
+- Fixed `ServerManagedLlmClient` so `ServerManagedApi` HTTP and streaming calls forward the dynamic `ServerManagedAuthorization` bearer header to backend proxy requests, including routed `LlmRoutingManifest` profiles.
+- Fixed streaming tool-loop completion so successful repeated tool calls that already emitted assistant text finish cleanly instead of showing `tool loop exceeded max iterations` in chat.
+- Fixed `CoreAiChatPanel.SetCollapsed` idempotency so setting the current collapse state does not notify override hooks again.
+- Documented that `ServerManagedApi` reads `ServerManagedAuthorization` for every HTTP and streaming request.
+- Added EditMode coverage for server-managed authorization forwarding and successful visible-text completion after repeated tool calls.
+- Added EditMode coverage for `CoreAiChatMessageBubbleElement` default, user, toggle, and null-text states.
+
+#### Package **`2.6.4`** - dependency **`com.nexoider.coreai` `2.6.4`**.
+
 ## [2.6.3] - 2026-06-01
 
 ### Chat UI authoring and host control toggles

@@ -46,6 +46,8 @@ For `ServerManagedApi`, keep provider keys on your backend. If the backend requi
 ServerManagedAuthorization.SetProvider(() => "Bearer " + authTokenStore.CurrentJwt);
 ```
 
+`ServerManagedLlmClient` reads this provider for every HTTP and streaming request in `ServerManagedApi`, including routed `LlmRoutingManifest` profiles.
+
 CoreAI maps backend responses such as `401`, `409 quota_exceeded`, `429`, and `5xx` into typed `LlmErrorCode` values so UI can show auth, quota, rate-limit, and backend-unavailable states without parsing provider strings.
 
 ### Preset-based setup (Resources)

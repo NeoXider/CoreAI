@@ -565,6 +565,7 @@ namespace CoreAI.Chat
         /// </summary>
         public void SetCollapsed(bool collapsed, bool persist = true)
         {
+            bool changed = IsCollapsed != collapsed;
             IsCollapsed = collapsed;
 
             if (ChatContainer != null)
@@ -599,7 +600,10 @@ namespace CoreAI.Chat
                 InputField?.schedule.Execute(FocusInputField);
             }
 
-            OnCollapsedStateChanged(collapsed);
+            if (changed)
+            {
+                OnCollapsedStateChanged(collapsed);
+            }
         }
 
         /// <summary>

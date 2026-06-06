@@ -407,6 +407,7 @@ namespace CoreAI.Infrastructure.Llm
 
             int maxToolIterations = Math.Max(1, _settings.MaxToolCallRetries + 1);
             int toolIteration = 0;
+            bool emittedAnyVisibleText = false;
 
             if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
             {
@@ -428,11 +429,25 @@ namespace CoreAI.Infrastructure.Llm
                 string streamModel = ResolveModelName();
                 if (toolIteration > maxToolIterations + 1)
                 {
+                    IReadOnlyList<LlmToolCallTrace> executedToolCalls = policy.ExecutedTraces.ToList();
+                    if (emittedAnyVisibleText && executedToolCalls.Any(t => t.Success))
+                    {
+                        _logger.LogWarning(GameLogFeature.Llm,
+                            "MeaiLlmClient: Streaming tool loop reached the iteration guard after successful tool calls and visible text; completing without surfacing an internal guard error.");
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Text = string.Empty,
+                            ExecutedToolCalls = executedToolCalls
+                        };
+                        yield break;
+                    }
+
                     yield return new LlmStreamChunk
                     {
                         IsDone = true,
                         Error = "tool loop exceeded max iterations",
-                        ExecutedToolCalls = policy.ExecutedTraces.ToList()
+                        ExecutedToolCalls = executedToolCalls
                     };
                     yield break;
                 }
@@ -535,6 +550,7 @@ namespace CoreAI.Infrastructure.Llm
                         foreach (string part in SplitForLiveUiStreaming(visible, LiveUiStreamMaxCharsPerChunk))
                         {
                             cancellationToken.ThrowIfCancellationRequested();
+                            emittedAnyVisibleText = true;
                             yield return new LlmStreamChunk { Text = part };
                         }
 
@@ -552,6 +568,7 @@ namespace CoreAI.Infrastructure.Llm
                             foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
                             {
                                 cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
                                 yield return new LlmStreamChunk { Text = part };
                             }
 
@@ -584,6 +601,7 @@ namespace CoreAI.Infrastructure.Llm
                         foreach (string part in SplitForLiveUiStreaming(tail, LiveUiStreamMaxCharsPerChunk))
                         {
                             cancellationToken.ThrowIfCancellationRequested();
+                            emittedAnyVisibleText = true;
                             yield return new LlmStreamChunk { Text = part };
                         }
 
@@ -601,6 +619,7 @@ namespace CoreAI.Infrastructure.Llm
                             foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
                             {
                                 cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
                                 yield return new LlmStreamChunk { Text = part };
                             }
 
@@ -645,6 +664,7 @@ namespace CoreAI.Infrastructure.Llm
                     // Emit any visible text that preceded the tool calls (skip if already streamed token-by-token).
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(visibleText))
                     {
+                        emittedAnyVisibleText = true;
                         yield return new LlmStreamChunk { Text = visibleText };
                     }
 
@@ -703,6 +723,7 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             if (!streamedVisibleToConsumer)
                             {
+                                emittedAnyVisibleText = true;
                                 yield return new LlmStreamChunk { Text = cleanedText };
                             }
                             else if (hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0)
@@ -715,6 +736,7 @@ namespace CoreAI.Infrastructure.Llm
                                                  LiveUiStreamMaxCharsPerChunk))
                                     {
                                         cancellationToken.ThrowIfCancellationRequested();
+                                        emittedAnyVisibleText = true;
                                         yield return new LlmStreamChunk { Text = part };
                                     }
                                 }
@@ -742,6 +764,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
                     {
+                        emittedAnyVisibleText = true;
                         yield return new LlmStreamChunk { Text = cleanedText };
                     }
                     else if (streamedVisibleToConsumer && hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0 &&
@@ -754,6 +777,7 @@ namespace CoreAI.Infrastructure.Llm
                             foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
                             {
                                 cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
                                 yield return new LlmStreamChunk { Text = part };
                             }
                         }
@@ -805,6 +829,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         if (!string.IsNullOrEmpty(sanitizedFull))
                         {
+                            emittedAnyVisibleText = true;
                             yield return new LlmStreamChunk { Text = sanitizedFull };
                         }
                     }
@@ -812,6 +837,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         foreach (string chunk in visibleChunks)
                         {
+                            emittedAnyVisibleText = true;
                             yield return new LlmStreamChunk { Text = chunk };
                         }
                     }
@@ -827,6 +853,7 @@ namespace CoreAI.Infrastructure.Llm
                             foreach (string part in SplitForLiveUiStreaming(restSan, LiveUiStreamMaxCharsPerChunk))
                             {
                                 cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
                                 yield return new LlmStreamChunk { Text = part };
                             }
                         }
