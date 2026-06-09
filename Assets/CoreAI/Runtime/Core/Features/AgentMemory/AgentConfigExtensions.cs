@@ -46,6 +46,8 @@ namespace CoreAI.Ai
                     "Orchestrator is null. Make sure CoreAILifetimeScope is initialized or pass orchestrator explicitly.");
             }
 
+            ValidateRoleRegistered(config);
+
             return orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = config.RoleId,
@@ -54,6 +56,21 @@ namespace CoreAI.Ai
                 CancellationScope =
                     config.RoleId // Automatically cancels previous in-flight call for same role, if still generating.
             }, cancellationToken);
+        }
+
+        private static void ValidateRoleRegistered(AgentConfig config)
+        {
+            if (string.IsNullOrWhiteSpace(config?.RoleId))
+            {
+                throw new InvalidOperationException("Role id is missing. Provide RoleId in AgentBuilder.");
+            }
+
+            AgentMemoryPolicy policy = CoreAIAgent.Policy;
+            if (policy == null || !policy.HasRole(config.RoleId))
+            {
+                throw new InvalidOperationException(
+                    $"Role '{config.RoleId}' is not registered in CoreAIAgent.Policy. Call config.ApplyToPolicy(CoreAIAgent.Policy) (or Use BuildDetached() + explicit ApplyToPolicy()).");
+            }
         }
 
         /// <summary>

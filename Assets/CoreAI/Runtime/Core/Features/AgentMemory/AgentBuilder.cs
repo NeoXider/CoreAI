@@ -327,6 +327,26 @@ namespace CoreAI.Ai
         /// </remarks>
         public AgentConfig Build()
         {
+            AgentConfig config = BuildDetached();
+
+            if (CoreAIAgent.Policy == null)
+            {
+                Log.Instance?.Warn("Build() skipped policy registration because CoreAIAgent.Policy is null. " +
+                                   "Use BuildDetached() for policy-free configuration tests, or initialize CoreAI runtime first.");
+            }
+            else
+            {
+                config.ApplyToPolicy(CoreAIAgent.Policy);
+            }
+
+            return config;
+        }
+
+        /// <summary>
+        /// Builds <see cref="AgentConfig"/> without mutating global runtime policy.
+        /// </summary>
+        public AgentConfig BuildDetached()
+        {
             int ctxTokens = _contextWindowTokens ??
                             _settings?.ContextWindowTokens ?? CoreAISettings.ContextWindowTokens;
 

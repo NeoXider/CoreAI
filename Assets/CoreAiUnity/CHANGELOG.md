@@ -2,6 +2,15 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [2.6.5] - 2026-06-10
+
+### Policy bootstrap safety
+
+- Added `CoreAi.SetResolver(Func<IAiOrchestrationService>)` for deterministic resolver injection in tests/CI.
+- Added `CoreAIFacade` and `CoreAi` runtime reset hooks on `SubsystemRegistration` to clear static state across Play Mode/domain transitions.
+- `AgentBuilder.Build()` now applies role config to `CoreAIAgent.Policy` by default; `BuildDetached()` introduced for detached config creation.
+- Added explicit role-registration fail-fast check in `AgentConfigExtensions.AskAsync(...)` so unregistered roles fail with `role not registered` instead of silently using fallback behavior.
+
 ## [2.6.4] - 2026-06-06
 
 ### Backend-managed streaming and chat reliability

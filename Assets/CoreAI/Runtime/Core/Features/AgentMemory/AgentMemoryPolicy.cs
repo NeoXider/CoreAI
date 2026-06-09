@@ -255,6 +255,25 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Returns <c>true</c> when the role has an explicit policy entry.
+        /// Use this to distinguish explicit registration from implicit defaulting.
+        /// </summary>
+        public bool HasRole(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return false;
+            }
+
+            roleId = roleId.Trim();
+
+            lock (_lock)
+            {
+                return _roleConfigs.ContainsKey(roleId);
+            }
+        }
+
+        /// <summary>
         /// Returns the effective role configuration, falling back to Creator defaults for empty role ids.
         /// </summary>
         public RoleMemoryConfig GetRoleConfig(string roleId)

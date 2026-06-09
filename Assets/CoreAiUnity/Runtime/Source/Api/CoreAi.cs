@@ -41,6 +41,7 @@ namespace CoreAI
         private static CoreAILifetimeScope? _scope;
         private static CoreAiChatService? _chatService;
         private static IAiOrchestrationService? _orchestrator;
+        private static Func<IAiOrchestrationService>? _orchestratorResolver;
         private static ICoreAISettings? _settings;
         private static readonly object ToolCallSyncRoot = new();
         private static readonly InMemoryLlmToolCallHistory ToolCallHistory = new(512);
@@ -59,7 +60,25 @@ namespace CoreAI
                 _scope = null;
                 _chatService = null;
                 _orchestrator = null;
+                _orchestratorResolver = null;
                 _settings = null;
+            }
+        }
+
+        /// <summary>
+        /// Overrides orchestrator resolver for tests/CI.
+        /// </summary>
+        public static void SetResolver(Func<IAiOrchestrationService> resolver)
+        {
+            if (resolver == null)
+            {
+                throw new ArgumentNullException(nameof(resolver));
+            }
+
+            lock (SyncRoot)
+            {
+                _orchestratorResolver = resolver;
+                _orchestrator = null;
             }
         }
 
@@ -500,13 +519,39 @@ namespace CoreAI
             orchestrator = null;
             settings = null;
 
+            if (_orchestratorResolver != null)
+            {
+                try
+                {
+                    orchestrator = _orchestratorResolver.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[CoreAi] Resolve orchestrator from custom resolver failed: {ex.Message}");
+                }
+            }
+
             if (_scope == null || _scope.Container == null)
             {
+                if (_orchestratorResolver != null && orchestrator != null)
+                {
+                    chatService = null;
+                    _orchestrator = orchestrator;
+                    return true;
+                }
+
                 _scope = UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
             }
 
             if (_scope == null || _scope.Container == null)
             {
+                if (_orchestratorResolver != null && orchestrator != null)
+                {
+                    chatService = null;
+                    _orchestrator = orchestrator;
+                    return true;
+                }
+
                 return false;
             }
 
@@ -534,7 +579,11 @@ namespace CoreAI
             }
 
             chatService = _chatService;
-            _orchestrator = orchestrator;
+            if (orchestrator != null)
+            {
+                _orchestrator = orchestrator;
+            }
+
             _settings = settings;
             return chatService != null || orchestrator != null;
         }
@@ -603,6 +652,12 @@ namespace CoreAI
             {
                 Interlocked.Exchange(ref _dispose, null)?.Invoke();
             }
+        }
+
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetForSubsystemRegistration()
+        {
+            Invalidate();
         }
     }
 }

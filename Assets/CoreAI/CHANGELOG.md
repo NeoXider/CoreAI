@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## [v2.6.5] - 2026-06-10
+
+### Policy registration and orchestration safety
+
+- Tightened `AgentBuilder` API so `Build()` now applies role config to `CoreAIAgent.Policy` by default; added `BuildDetached()` for detached construction without global side effects.
+- Added `AgentMemoryPolicy.HasRole(string roleId)` for explicit role-registration checks.
+- Added explicit role validation in `AgentConfigExtensions.AskAsync(...)` so unregistered roles fail fast with a clear `role not registered` error instead of implicit fallback behavior.
+
 ## [v2.6.4] - 2026-06-06
 
 ### Lockstep patch with CoreAI Unity

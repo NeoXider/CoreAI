@@ -70,5 +70,12 @@
             Policy = null;
             MemoryStore = null;
         }
+
+        [global::UnityEngine.RuntimeInitializeOnLoadMethod(
+            global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetForSubsystemRegistration()
+        {
+            Reset();
+        }
     }
 }

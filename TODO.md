@@ -1,66 +1,116 @@
-# TODO — CoreAI: Что не хватает для полной реализации архитектуры
-**Обновлено:** 2026-05-25 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.5.0**.
+# TODO — CoreAI: critical stability and implementation gaps
+
+**Обновлено:** 2026-06-10 | **Текущая версия (UPM):** `com.nexoider.coreai` и `com.nexoider.coreaiunity` — **2.5.0**.
 
 ---
 
-## 🔴 КРИТИЧНО — решить в ближайших версиях
+## 🔴 КРИТИЧЕСКИЕ (P1) — нужно закрывать в ближайших версиях
 
-> ✅ **Все критичные пункты закрыты.** См. архив ниже.
+### 1) Гигиена репозитория
 
-*Сейчас нет открытых критичных задач.*
+- [ ] **[P1] Очистить корень проекта от артефактов и зафиксировать .gitignore**
+  - Удалить из репозитория и добавить в `.gitignore`: `debug.log`, `memory.db`, `msp_server.log`, `replay_pid29472.log`, `TestRun_EditMode.log`, `UnityTest_EditMode.log`, файл `Remove-Item`, `\_coreai_placeholder_lines.txt`.
+  - Провести audit `git status`/`git ls-files` на предмет мусора перед релизом.
+
+### 2) Lua-песочница / DoS-устойчивость
+
+- [ ] **[P1] Ввести лимит активных корутин в `LuaCoroutineRunner`**
+  - Реализовать лимит (цель: `MaxActiveCoroutines = 64`) и отказ/очередь новых корутин при переполнении.
+- [ ] **[P1] Закрыть `LuaCoroutineHandle.Kill()`**
+  - Метод сейчас почти не останавливает корутину фактически; заменить пустой `try/catch`-магией на реальное завершение или гарантированную остановку.
+- [ ] **[P1] Добавить sandbox-escape тесты**
+  - Обязательные проверки: `string.dump`, `coroutine.close`, `collectgarbage("count")`, доступ к `_G` через `_ENV`.
+- [ ] **[P1] Добавить rate-limit на генерацию Lua-скриптов**
+  - `LuaAiEnvelopeProcessor`: защита от self-DOS/Programmer-loop при частой генерации скриптов.
+- [ ] **[P1] Устранить двойное подключение `InstructionLimitDebugger`**
+  - Проверить и устранить дублирующий `InstructionLimitDebugger`-hook в `SecureLuaEnvironment.CreateScript`.
+
+### 3) CoreAi / CoreAIAgent.Policy и runtime-state
+
+- [ ] **[P1] `Build()` должен регистрировать в policy по умолчанию**
+  - Сейчас конфигурация из `AgentConfigBuilder.Build()` не применяется без `ApplyToPolicy`.
+  - Требуется: `Build()` = auto-apply в policy; `BuildDetached()` для «чистого» конфигуратора.
+- [ ] **[P1] При отсутствии регистрации роли — fail fast в `Ask()`**
+  - Вместо fallback `"Blacksmith"` бросать понятную ошибку (`role not registered`) если роль не добавлена в policy.
+- [ ] **[P1] Сброс статических полей при Play Mode без domain reload**
+  - Добавить `[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]` очистку static-состояний `CoreAi`/`CoreAIAgent`.
+- [ ] **[P1] Поддержать замену resolver для тестов**
+  - Добавить `CoreAi.SetResolver(Func<IAiOrchestrationService>)` (или аналог) для подмены orchestrator в CI/тестах.
+
+### 4) `SmartToolCallingChatClient` / ретраи
+
+- [ ] **[P1] Логировать и считать `TryRepairToolName` (например, `MEMORY` → `memory`)**
+  - Добавить Warning-лог и метрику/счётчик в telemetry, чтобы видеть деградацию prompt-нейминга.
+- [ ] **[P1] Обезвредить feedback-циклы ретраев**
+  - После успешного retry удалять error-feedback из истории; сейчас мусор нарастает и провоцирует повторные ошибки.
+- [ ] **[P1] `TrimToolCallHistory` должен поддерживать инвариант assistant→tool-result**
+  - Никогда не оставлять `tool-result` без предшествующего `assistant` с `tool_call`, иначе OpenAI-совместимые API дают 400.
+
+### 5) HttpClient / сетевой lifecycle
+
+- [ ] **[P1] Проверить и зафиксировать reuse единого `HttpClient` на backend**
+  - Исключить per-request `HttpClient` (socket exhaustion), унифицировать lifecycle shared/ singleton factory.
+
+### 6) Память / I/O
+
+- [ ] **[P1] Атомарные JSON-записи в `FileConversationSummaryStore`**
+  - Заменить прямой `File.WriteAllText` на `.tmp + File.Replace` для crash-safe записи.
+- [ ] **[P1] Перенос `persistentDataPath` I/O off main thread**
+  - `Read/Write/Delete` в `Task.Run`, чтобы убрать возможные фризы на больших историях.
+
+### 7) API-дизайн (cleanup и эргономика)
+
+- [ ] **[P2] Дедупликация `ILlmTool`**
+  - Убрать дублирование `Name/Description` между `ILlmTool` и `CreateAIFunctions`; ввести `LlmToolBase` для генерации функции из свойств.
+- [ ] **[P2] Рефактор `merchant.Ask` callback API**
+  - Оставить единый `UniTask`-idiom как primary (`AskAsync`).
+  - Устаревший callback вынести в отдельный отдельный метод `AskWithCallback(...)`, не как перегрузку.
+- [ ] **[P2] Константы роли вместо magic strings**
+  - Обеспечить централизованные константы (`RoleId`/`BuiltInAgentRoleIds`) для `SmartChat`, `Blacksmith` и др.; убрать опечатки в рантайме.
+
+### 8) Runtime token/cost dashboard
+
+- [ ] **[P1] Добавить визуальный runtime overlay стоимости и токенов**
+  - Отдельный dev/QA overlay на базе `RateLimiterMetrics`: токены/запрос, `$ / сессия`, скользящее окно, средний throughput/latency.
 
 ---
 
-## 🟡 ВАЖНО — следующие версии
-
-*Все задачи из этого раздела были реализованы в v2.1.0–v2.3.0. Новые задачи будут добавлены по мере появления.*
-
----
-
-## 🔵 УЛУЧШЕНИЯ — когда будет время
+## 🟡 ВАЖНО — следующий цикл (P2/P3)
 
 ### Multi-Agent Orchestration (future)
 
-- [ ] Автоматизированный `MultiAgentWorkflow` — агенты сами вызывают pipeline суб-агентов (как в Claude Agent SDK).
-- [ ] Передача результатов между суб-агентами без главного потока (`tool_result`).
-- [ ] Условная логика вызова (если качество > 80, вызвать Programmer).
-- [ ] Параллельное исполнение задач несколькими агентами.
-- [ ] Тест: `MultiAgentWorkflowEndToEndTests`.
+- [ ] **[P2] Автоматизированный `MultiAgentWorkflow`**
+- [ ] **[P2] Передача результатов между суб-агентами через `tool_result`**
+- [ ] **[P2] Пороговое ветвление задач (если качество ниже порога — эскалация)**
+- [ ] **[P2] Параллельное исполнение подзадач несколькими агентами**
+- [ ] **[P2] Тест: `MultiAgentWorkflowEndToEndTests`**
 
 ### CraftingTool
 
-- [ ] Специализированная функция для расчёта крафта для CoreMechanicAI.
+- [ ] **[P2] Специализированная функция расчёта крафта для CoreMechanicAI**
 
 ### Lua Runtime улучшения
 
-- [ ] **[CRITICAL] Песочница Lua — приоритет на безопасность и DoS-устойчивость**
-  - [ ] **LuaCoroutineRunner без лимита активных корутин** (`MaxActiveCoroutines = 64` не внедрён).
-  - [ ] **LuaCoroutineHandle.Kill() не прекращает корутину фактически**: внутри пустые `try/catch`, только `_disposed = true`.
-  - [ ] **Нет sandbox escape-тестов**: покрыть `string.dump`, `coroutine.close`, `collectgarbage("count")`, `_G` через `_ENV`.
-  - [ ] **Нет rate-limit на генерацию Lua-скриптов** в `LuaAiEnvelopeProcessor` (защита от Programer-loop/DoS).
-  - [ ] **Double-hook в `SecureLuaEnvironment.CreateScript`**: дважды цепляется `InstructionLimitDebugger`.
-- [ ] **Lua coroutine limit** — `LuaCoroutineRunner` нет лимита на количество корутин. `MaxActiveCoroutines = 64` с отклонением сверх лимита.
-- [ ] **Lua async-API** — из Lua нельзя дождаться async-операций C#. Желательно: `LuaAsyncBridge` с `await_task(task_id)` через Promise-семантику.
-- [ ] **Lua script rate limit** — Programmer может зациклить создание скриптов. Sliding-window limiter на `LuaAiEnvelopeProcessor`.
-- [ ] **Repair loop на CoreMechanicAI** — ошибки Lua у CoreMechanicAI нужно направлять в Programmer.
+- [ ] **[P2] Lua async-API для ожидания C# task**
+  - `LuaAsyncBridge` + `await_task(task_id)` (Promise-семантика).
+- [ ] **[P2] CoreMechanicAI repair loop**
+  - Автоперенаправление ошибок Lua на Programmer через workflow.
 
-### Sandbox чистка
+### Идеи (под вопросом)
 
-### Runtime cost/token dashboard
-
-- [ ] **Cost/token overlay в рантайме** — добавить UI overlay (dev/QA): отображение `tokens/request`, `$/session`, скользящее окно в метриках `RateLimiterMetrics`.
-
-
-- [ ] **`LuaCoroutineHandle.Kill()`** — сейчас внутри пустые `try {} catch {}`, только `_disposed = true`. Либо удалить мёртвый код, либо реально прервать через `ScriptRuntimeException`.
-- [ ] **`SecureLuaEnvironment.CreateScript`** — дважды цепляет `InstructionLimitDebugger`. Рефакторинг: вынести attach/detach целиком в `LuaExecutionGuard`.
-- [ ] **Sandbox escape тесты** — `string.dump`, `coroutine.close`, `collectgarbage("count")` как timing-oracle, `_G` через `_ENV`. Suite: `LuaSandboxEscapeTests`.
+- [ ] **[Idea] Voice pipeline для NPC (STT → Agent → TTS)**
+  - Локальный `whisper`, голосовой ввод/вывод как killer-фича.
+- [ ] **[Idea] Визуальный `AgentBuilder` в редакторе**
+  - Построение промптов/агентов UI-редактором без написания кода.
+- [ ] **[Idea] Streaming-emotions / function-driven анимации**
+  - Возврат эмоций/жестов вместе с текстом для пайплайна анимации.
 
 ---
 
-## 📚 Документация — недостающие файлы
+## 📚 Документация — закрытые задачи
 
-- [x] **`LUA_SANDBOX_SECURITY.md`** — что вырезано, какие защиты есть (steps / timeout), известные векторы атак, best practices для `LuaApiRegistry`.
-- [x] **`TOOL_CALLING_BEST_PRACTICES.md`** — как делать идемпотентные тулы, когда ставить `AllowDuplicates=true`, как правильно возвращать ошибки, как использовать SkillSet для организации.
+- [x] **`LUA_SANDBOX_SECURITY.md`** — список защит, known vectors, шаги hardening, best practices.
+- [x] **`TOOL_CALLING_BEST_PRACTICES.md`** — идемпотентность тулов, ошибки, skill set usage.
 
 ---
 
@@ -71,61 +121,62 @@
 
 ### v2.3.0 — Dual-Backend with Auto-Fallback (2026-05-08)
 - [x] **FallbackLlmClientDecorator** — primary fail → auto-retry на secondary. Streaming fallback.
-- [x] **CoreAISettingsAsset** — 🔄 Fallback Backend секция: `enableFallbackBackend`, `secondaryApiBaseUrl`, `secondaryApiKey`, `secondaryModelName`.
-- [x] **LlmPipelineInstaller** — auto-wiring: при `HasValidFallbackBackend` primary оборачивается в `FallbackLlmClientDecorator`.
+- [x] **CoreAISettingsAsset** — fallback backend секция: `enableFallbackBackend`, `secondaryApiBaseUrl`, `secondaryApiKey`, `secondaryModelName`.
+- [x] **LlmPipelineInstaller** — auto-wiring на fallback при валидной конфигурации.
 - [x] **5 EditMode тестов** — primary OK, primary fail, retryable error, cancellation, counter.
-- [x] Changelogs, package.json (2.3.0), READMEs, TODO обновлены.
+- [x] Changelogs, package.json (2.3.0), README, TODO обновлены.
 
 ### v2.2.0 — Tool History Truncation & Rate Metrics (2026-05-08)
-- [x] **MaxToolCallHistoryMessages** (default 20) — `SmartToolCallingChatClient.TrimToolCallHistory()` удаляет старые пары Assistant+Tool.
-- [x] **RateLimiterMetrics** struct — `MaxRequestsPerWindow`, `WindowSeconds`, `AcceptedInWindow`, `TotalRejected`.
-- [x] **IInGameLlmChatService.GetRateLimiterMetrics()** — доступ к метрикам из UI/Dashboard.
+- [x] **MaxToolCallHistoryMessages** (default 20) — `SmartToolCallingChatClient.TrimToolCallHistory()`.
+- [x] **RateLimiterMetrics** struct — лимиты и counters.
+- [x] **IInGameLlmChatService.GetRateLimiterMetrics()** — API для UI/Dashboard.
 - [x] **InGameLlmChatService** — `_totalRejected` счётчик отклонённых запросов.
-- [x] **CoreAISettingsAsset** — `maxToolCallHistoryMessages` в Inspector 🛡️ Resilience & Safety.
-- [x] **maxConsecutiveErrors** — подтверждено, что глобальный retry через `ToolExecutionPolicy` покрывает все сценарии. Per-tool retry не нужен.
+- [x] **CoreAISettingsAsset** — `maxToolCallHistoryMessages` в Inspector (Resilience).
+- [x] **`maxConsecutiveErrors`** — подтверждено global retry через `ToolExecutionPolicy`.
 - [x] Changelogs, package.json (2.2.0), TODO обновлены.
 
 ### v2.1.0 — Production Resilience (2026-05-08)
-- [x] **MaxToolResultChars** (default 8000) — soft-truncation в `ToolExecutionPolicy`, `[…truncated]` суффикс.
-- [x] **DefaultToolTimeoutMs** (default 30000) — linked `CancellationTokenSource` в `ToolExecutionPolicy.ExecuteSingleAsync`.
-- [x] **MaxResponseChars** (default 0/выкл) — truncation в `SmartToolCallingChatClient`.
-- [x] **MaxToolCallRoundtrips** (default 10) — loop guard в `SmartToolCallingChatClient`.
-- [x] **ICoreAISettings** — 4 новых свойства с дефолтами.
-- [x] **CoreAISettingsAsset** — Inspector foldout 🛡️ Resilience & Safety с тултипами.
-- [x] **ResilienceFeaturesEditModeTests** — 8 тестов (truncation, timeout, roundtrips).
-- [x] Anti-thinking prompt instructions в PlayMode тестах для Qwen3.5.
+- [x] **MaxToolResultChars** (default 8000) — soft-truncation.
+- [x] **DefaultToolTimeoutMs** (default 30000) — cancelable tool execution.
+- [x] **MaxResponseChars** (default 0/выкл) — truncation ответов.
+- [x] **MaxToolCallRoundtrips** (default 10) — guardrail в retry loop.
+- [x] **ICoreAISettings** — новые свойства, defaults.
+- [x] **CoreAISettingsAsset** — Inspector UI для устойчивости.
+- [x] **ResilienceFeaturesEditModeTests** — 8 тестов.
+- [x] Anti-thinking prompt instructions для PlayMode тестов на Qwen3.5.
 - [x] Changelogs, READMEs, AGENT_BUILDER.md обновлены.
 
 ### v2.1.0 — Self-Service Skills (2026-05-08)
-- [x] **Self-service skill pattern** — модель сама вызывает `read_skill(name)` для загрузки инструкций по требованию (паттерн Cursor `read_file`).
-- [x] **SkillSet API** — добавлен `Description` (короткое описание для каталога), `BuildCatalog()` для лёгкого каталога в промпте.
-- [x] **ReadSkillLlmTool** — мета-тул `read_skill`, автоматически регистрируется при `WithSkill()`. Case-insensitive, fuzzy matching.
-- [x] **SkillRuntimeContextProvider** — инъектирует каталог (не полные инструкции) в system prompt.
-- [x] **AgentMemoryPolicy.AddToolForRole()** — добавление одного тула к роли.
-- [x] **SkillSetAsset** (CoreAiUnity) — ScriptableObject для удобного создания скиллов через Inspector (TextAsset + inline инструкции).
-- [x] **EditMode тесты** — конструкторы, каталог, read_skill (known/unknown/case-insensitive), AgentBuilder интеграция.
-- [x] **PlayMode тесты** — FastNoLlm (каталог в промпте, read_skill зарегистрирован, AllowedToolNames совместимость), LLM реальный тест.
-- [x] Обновлены `AGENT_BUILDER.md`, benchmark тесты.
-- [x] Аудит готовых библиотек: Semantic Kernel (❌ .NET 8+), LLMTornado (❌ .NET 8+), MEAI (✅ уже используется).
+- [x] **Self-service skill pattern** — `read_skill(name)`.
+- [x] **SkillSet API** — описание + каталог и инъекция в system prompt.
+- [x] **ReadSkillLlmTool** — мета-тул `read_skill` с fuzzy matching.
+- [x] **SkillRuntimeContextProvider** — инъект каталога в системный промпт.
+- [x] **AgentMemoryPolicy.AddToolForRole()** — регистрация доп. tool к роли.
+- [x] **SkillSetAsset** — ScriptableObject для редактора.
+- [x] **EditMode тесты** — конструкторы, каталог, read_skill, AgentBuilder интеграция.
+- [x] **PlayMode тесты** — FastNoLlm + real LLM path.
+- [x] Обновлён `AGENT_BUILDER.md`.
+- [x] benchmark тесты.
+- [x] Тех-аудит сторонних библиотек.
 
 ### v2.0.0 — SkillSet Manual Mode (2026-05-08)
-- [x] **SkillSet** — именованные группы инструментов с промпт-инструкциями (паттерн Semantic Kernel KernelPlugin).
-- [x] **AgentBuilder.WithSkill / WithSkills** — fluent API регистрации скиллов.
-- [x] **SkillSet.FromFile / FromTextContent** — загрузка инструкций из файлов и TextAsset.
+- [x] **SkillSet** — именованные группы инструментов.
+- [x] **AgentBuilder.WithSkill / WithSkills** — fluent регистрация.
+- [x] **SkillSet.FromFile / FromTextContent** — загрузка инструкций.
 
-### v1.6.0+ — WebGL SSE streaming
-- [x] **fetch-SSE / jslib** — `CoreAiSseFetch.jslib`, `FetchSseOpenAiTransport`, `WebGlNativeStreaming` (по умолчанию **вкл** с v1.6.13).
-- [x] **STREAMING_ARCHITECTURE.md** — полное описание pipeline.
+### v1.6.0+ — Streaming & Tools
+- [x] **fetch-SSE / jslib** — WebGL streaming transport.
+- [x] **STREAMING_ARCHITECTURE.md** — описание pipeline.
 
-### v1.5.x — Архитектура и аудит
-- [x] Замена статического `CoreAISettings` на DI-интерфейс `ICoreAISettings`.
-- [x] Метрики оркестрации → `InMemoryAiOrchestrationMetrics`.
+### v1.5.x — Архитектура и устойчивость
+- [x] DI `CoreAISettings`.
+- [x] Метрики оркестрации `InMemoryAiOrchestrationMetrics`.
 - [x] Dashboard (`OrchestrationDashboard`, F9).
-- [x] Версионирование промптов → `IPromptVersionRegistry`.
+- [x] Версионирование промптов.
 - [x] Rate limiting для `InGameLlmChatService`.
-- [x] `ARCH-1..9` аудит (thread safety, lock consolidation, BUG-1..8).
-- [x] `SmartToolCallingChatClient` — определение успеха через `JObject.Parse`.
-- [x] `InGameLlmChatService._lock` — разделён на `_rateLock` и `_historyLock`.
+- [x] `ARCH-1..9` аудит.
+- [x] `SmartToolCallingChatClient` — robust tool parsing.
+- [x] Разделение locks в `InGameLlmChatService`.
 - [x] `InMemoryAiOrchestrationMetrics` — bounded storage MaxRoles=256.
 
 ### v0.20.x — Streaming & Tools
@@ -133,8 +184,7 @@
 - [x] Streaming config hierarchy (3 слоя).
 - [x] Universal Chat Module.
 - [x] `ThinkBlockStreamFilter`.
-- [x] `SmartToolCallingChatClient` — дубликаты, бесконечные петли.
-- [x] Robust Tool Parsing — JSON fence, `<think>` теги.
+- [x] Robust Tool Parsing (`JSON` fence, `<think>` теги).
 
 ### WorldCommand Executor
 - [x] Анимации, звуки, UI, физика, валидация.
@@ -162,8 +212,4 @@
 - [x] Removed generated no-op comments from CoreAI Unity source.
 
 </details>
-### Идеи (под вопросом)
 
-- [ ] **STT > Agent > TTS (killer for NPC)** — добавить голосовой пайплайн: локальный whisper + вывод речи для NPC.
-- [ ] **AgentBuilder visual editor в редакторе** — удобный визуальный билдер промптов/агентов вместо кода, чтобы расширить аудиторию для не-программистов и геймдизайнеров.
-- [ ] **Streaming-emotions / function-driven анимации** — агент возвращает не только текст, но и эмоцию/жест для аниматора (например, радость, удивление, уверенность).
