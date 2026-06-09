@@ -63,6 +63,16 @@ sysinfo.txt
 *.unitypackage
 *.app
 
+# Repository hygiene artifacts (CI/editor/runtime logs and temp placeholders)
+debug.log
+memory.db
+msp_server.log
+replay_pid*.log
+TestRun_*.log
+UnityTest_*.log
+Remove-Item
+_coreai_placeholder_lines.txt
+
 # Crashlytics generated file
 crashlytics-build.properties
 

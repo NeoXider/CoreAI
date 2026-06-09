@@ -33,12 +33,23 @@
 
 ### Lua Runtime СѓР»СѓС‡С€РµРЅРёСЏ
 
+- [ ] **[CRITICAL] РџРµСЃРѕС‡РЅРёС†Р° Lua вЂ” РїСЂРёРѕСЂРёС‚РµС‚ РЅР° Р±РµР·РѕРїР°СЃРЅРѕСЃС‚СЊ Рё DoS-СѓСЃС‚РѕР№С‡РёРІРѕСЃС‚СЊ**
+  - [ ] **LuaCoroutineRunner Р±РµР· Р»РёРјРёС‚Р° Р°РєС‚РёРІРЅС‹С… РєРѕСЂСѓС‚РёРЅ** (`MaxActiveCoroutines = 64` РЅРµ РІРЅРµРґСЂС‘РЅ).
+  - [ ] **LuaCoroutineHandle.Kill() РЅРµ РїСЂРµРєСЂР°С‰Р°РµС‚ РєРѕСЂСѓС‚РёРЅСѓ С„Р°РєС‚РёС‡РµСЃРєРё**: РІРЅСѓС‚СЂРё РїСѓСЃС‚С‹Рµ `try/catch`, С‚РѕР»СЊРєРѕ `_disposed = true`.
+  - [ ] **РќРµС‚ sandbox escape-С‚РµСЃС‚РѕРІ**: РїРѕРєСЂС‹С‚СЊ `string.dump`, `coroutine.close`, `collectgarbage("count")`, `_G` С‡РµСЂРµР· `_ENV`.
+  - [ ] **РќРµС‚ rate-limit РЅР° РіРµРЅРµСЂР°С†РёСЋ Lua-СЃРєСЂРёРїС‚РѕРІ** РІ `LuaAiEnvelopeProcessor` (Р·Р°С‰РёС‚Р° РѕС‚ Programer-loop/DoS).
+  - [ ] **Double-hook РІ `SecureLuaEnvironment.CreateScript`**: РґРІР°Р¶РґС‹ С†РµРїР»СЏРµС‚СЃСЏ `InstructionLimitDebugger`.
 - [ ] **Lua coroutine limit** вЂ” `LuaCoroutineRunner` РЅРµС‚ Р»РёРјРёС‚Р° РЅР° РєРѕР»РёС‡РµСЃС‚РІРѕ РєРѕСЂСѓС‚РёРЅ. `MaxActiveCoroutines = 64` СЃ РѕС‚РєР»РѕРЅРµРЅРёРµРј СЃРІРµСЂС… Р»РёРјРёС‚Р°.
 - [ ] **Lua async-API** вЂ” РёР· Lua РЅРµР»СЊР·СЏ РґРѕР¶РґР°С‚СЊСЃСЏ async-РѕРїРµСЂР°С†РёР№ C#. Р–РµР»Р°С‚РµР»СЊРЅРѕ: `LuaAsyncBridge` СЃ `await_task(task_id)` С‡РµСЂРµР· Promise-СЃРµРјР°РЅС‚РёРєСѓ.
 - [ ] **Lua script rate limit** вЂ” Programmer РјРѕР¶РµС‚ Р·Р°С†РёРєР»РёС‚СЊ СЃРѕР·РґР°РЅРёРµ СЃРєСЂРёРїС‚РѕРІ. Sliding-window limiter РЅР° `LuaAiEnvelopeProcessor`.
 - [ ] **Repair loop РЅР° CoreMechanicAI** вЂ” РѕС€РёР±РєРё Lua Сѓ CoreMechanicAI РЅСѓР¶РЅРѕ РЅР°РїСЂР°РІР»СЏС‚СЊ РІ Programmer.
 
 ### Sandbox С‡РёСЃС‚РєР°
+
+### Runtime cost/token dashboard
+
+- [ ] **Cost/token overlay в рантайме** — добавить UI overlay (dev/QA): отображение `tokens/request`, `$/session`, метрики скользящего окна на основе `RateLimiterMetrics`.
+
 
 - [ ] **`LuaCoroutineHandle.Kill()`** вЂ” СЃРµР№С‡Р°СЃ РІРЅСѓС‚СЂРё РїСѓСЃС‚С‹Рµ `try {} catch {}`, С‚РѕР»СЊРєРѕ `_disposed = true`. Р›РёР±Рѕ СѓРґР°Р»РёС‚СЊ РјС‘СЂС‚РІС‹Р№ РєРѕРґ, Р»РёР±Рѕ СЂРµР°Р»СЊРЅРѕ РїСЂРµСЂРІР°С‚СЊ С‡РµСЂРµР· `ScriptRuntimeException`.
 - [ ] **`SecureLuaEnvironment.CreateScript`** вЂ” РґРІР°Р¶РґС‹ С†РµРїР»СЏРµС‚ `InstructionLimitDebugger`. Р РµС„Р°РєС‚РѕСЂРёРЅРі: РІС‹РЅРµСЃС‚Рё attach/detach С†РµР»РёРєРѕРј РІ `LuaExecutionGuard`.
@@ -151,3 +162,8 @@
 - [x] Removed generated no-op comments from CoreAI Unity source.
 
 </details>
+### Идеи (под вопросом)
+
+- [ ] **STT > Agent > TTS (killer for NPC)** — добавить голосовой контур: локальный режим через `whisper` и связка с NPC.
+- [ ] **AgentBuilder visual editor в редакторе** — визуальный билдер/редактор промптов и агентов вместо ручного кодирования.
+- [ ] **Streaming-emotions / function-driven анимации** — агент возвращает не только текст, но и эмоциональный тэг/маркеры для аниматора (жесты, интонация, выражение).
