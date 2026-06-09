@@ -1,4 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using CoreAI.Ai;
 using NUnit.Framework;
 using CoreAI;
 
@@ -65,6 +70,37 @@ namespace CoreAI.Tests.EditMode
         public void TryGetOrchestrator_WithoutLifetimeScope_ReturnsFalse()
         {
             Assert.IsFalse(CoreAi.TryGetOrchestrator(out _));
+        }
+
+        [Test]
+        public void SetResolver_OverridesOrchestratorResolution_ForTesting()
+        {
+            TestStubOrchestrator resolverOrchestrator = new();
+            CoreAi.SetResolver(() => resolverOrchestrator);
+
+            IAiOrchestrationService resolved = CoreAi.GetOrchestrator();
+
+            Assert.AreSame(resolverOrchestrator, resolved);
+        }
+
+        private sealed class TestStubOrchestrator : IAiOrchestrationService
+        {
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(string.Empty);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(
+                AiTaskRequest task,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                yield return new LlmStreamChunk { IsDone = true };
+                await Task.CompletedTask;
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+            }
         }
     }
 }

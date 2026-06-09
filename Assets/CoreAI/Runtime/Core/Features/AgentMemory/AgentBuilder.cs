@@ -316,25 +316,20 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Builds the <see cref="AgentConfig"/>. Emits non-fatal warnings via <see cref="Log.Instance"/>
-        /// for likely misconfigurations (empty system prompt, tool-using mode without tools, compaction
-        /// disabled while requested, and similar host setup issues).
+        /// Builds the <see cref="AgentConfig"/> and applies it to the current global
+        /// <see cref="CoreAIAgent.Policy"/> when available.
+        /// Set <see cref="SuppressBuildWarnings"/> to <c>true</c> to silence validation
+        /// (e.g. for tests that intentionally build minimal agents). Use <see cref="ValidateOnBuild"/>
+        /// for the full set of issue codes if you want to assert on them in your own checks.
         /// </summary>
         /// <remarks>
-        /// Set <see cref="SuppressBuildWarnings"/> to <c>true</c> to silence validation (e.g. for tests
-        /// that intentionally build minimal agents). Use <see cref="ValidateOnBuild"/> for the full set
-        /// of issue codes if you want to assert on them in your own checks.
+        /// Use <see cref="BuildDetached()"/> for policy-free, test-only construction.
         /// </remarks>
         public AgentConfig Build()
         {
             AgentConfig config = BuildDetached();
 
-            if (CoreAIAgent.Policy == null)
-            {
-                Log.Instance?.Warn("Build() skipped policy registration because CoreAIAgent.Policy is null. " +
-                                   "Use BuildDetached() for policy-free configuration tests, or initialize CoreAI runtime first.");
-            }
-            else
+            if (CoreAIAgent.Policy != null)
             {
                 config.ApplyToPolicy(CoreAIAgent.Policy);
             }

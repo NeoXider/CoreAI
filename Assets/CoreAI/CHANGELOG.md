@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## [Unreleased]
+
+### Core policy registration safety
+
+- `AgentBuilder.Build()` now applies role configuration to `CoreAIAgent.Policy` when policy is already initialized.
+- Added `BuildDetached()` safety for policy-free construction; it does not mutate global policy by default.
+- Added `AgentConfigExtensions` fail-fast coverage for unregistered roles (`InvalidOperationException` instead of implicit behavior).
+- Added `CoreAi.SetResolver` edit-mode coverage for orchestrator override.
 ## [v2.6.5] - 2026-06-10
 
 ### Policy registration and orchestration safety
@@ -1303,6 +1311,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
+
 
 
 

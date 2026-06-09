@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using NUnit.Framework;
@@ -19,12 +20,59 @@ namespace CoreAI.Tests.EditMode
         {
             _savedUniversalPrefix = CoreAISettings.UniversalSystemPromptPrefix;
             CoreAISettings.UniversalSystemPromptPrefix = string.Empty;
+            CoreAIAgent.Reset();
         }
 
         [TearDown]
         public void TearDown()
         {
             CoreAISettings.UniversalSystemPromptPrefix = _savedUniversalPrefix;
+            CoreAIAgent.Reset();
+        }
+
+        [Test]
+        public void Build_AppliesToPolicyByDefault_WhenPolicyIsRegistered()
+        {
+            AgentMemoryPolicy policy = new();
+            CoreAIAgent.Initialize(null, policy, null);
+
+            AgentConfig config = new AgentBuilder("PolicyAwareAgent")
+                .WithSystemPrompt("You are a test agent.")
+                .WithMemory()
+                .Build();
+
+            Assert.IsTrue(policy.HasRole("PolicyAwareAgent"),
+                "Build() should register role config on CoreAIAgent.Policy when it exists.");
+            Assert.AreEqual(1, policy.GetToolsForRole("PolicyAwareAgent").Count);
+            Assert.AreEqual("memory", config.Tools[0].Name);
+        }
+
+        [Test]
+        public void BuildDetached_DoesNotMutateGlobalPolicy()
+        {
+            AgentMemoryPolicy policy = new();
+            CoreAIAgent.Initialize(null, policy, null);
+
+            _ = new AgentBuilder("DetachedAgent")
+                .WithSystemPrompt("You are a test agent.")
+                .WithMemory()
+                .BuildDetached();
+
+            Assert.IsFalse(policy.HasRole("DetachedAgent"),
+                "BuildDetached() should not add role config to CoreAIAgent.Policy.");
+        }
+
+        [Test]
+        public async Task AskAsync_Fails_WhenRoleNotRegistered()
+        {
+            CoreAIAgent.Reset();
+            AgentConfig config = new AgentBuilder("UnregisteredAgent")
+                .WithSystemPrompt("You are unregistered.")
+                .BuildDetached();
+
+            InvalidOperationException ex = Assert.ThrowsAsync<InvalidOperationException>(() =>
+                config.AskAsync("Hello"));
+            StringAssert.Contains("not registered", ex.Message);
         }
 
         [Test]
