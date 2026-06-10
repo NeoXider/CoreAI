@@ -64,6 +64,11 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.ChatMessage> messages = chatMessages.ToList();
             int iteration = 0;
 
+            // Assistant/Tool message pairs from iterations where *every* tool call failed.
+            // They exist only as error feedback so the model can retry; once a later iteration
+            // succeeds they are obsolete and removed from history to stop wasting tokens.
+            List<MEAI.ChatMessage> pendingErrorFeedback = new();
+
             // Fresh policy per top-level request so duplicates reset between independent calls
             ToolExecutionPolicy policy = new(_logger, _settings, _originalTools,
                 _allowDuplicateToolCalls, _roleId, _maxConsecutiveErrors, _traceId,
@@ -187,8 +192,30 @@ namespace CoreAI.Infrastructure.Llm
                         assistantContents.Add(new MEAI.TextContent(cleanedAssistantText));
                     }
 
-                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantContents));
-                    messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    MEAI.ChatMessage assistantTurn = new(MEAI.ChatRole.Assistant, assistantContents);
+                    MEAI.ChatMessage toolTurn = new(MEAI.ChatRole.Tool, batch.Results);
+                    messages.Add(assistantTurn);
+                    messages.Add(toolTurn);
+
+                    // === Error-feedback lifecycle ===
+                    // Track all-failed iterations as removable error feedback; once an iteration
+                    // succeeds, drop the obsolete failed pairs (whole Assistant+Tool pairs, so
+                    // tool-call / tool-result pairing stays OpenAI-valid).
+                    if (batch.AllFailed)
+                    {
+                        pendingErrorFeedback.Add(assistantTurn);
+                        pendingErrorFeedback.Add(toolTurn);
+                    }
+                    else if (!batch.AnyFailed && pendingErrorFeedback.Count > 0)
+                    {
+                        int removedFeedback = RemoveResolvedErrorFeedback(messages, pendingErrorFeedback);
+                        if (removedFeedback > 0 && _settings.LogMeaiToolCallingSteps)
+                        {
+                            _logger.Info(
+                                $"[SmartToolCall] Iteration {iteration}: removed {removedFeedback} obsolete error-feedback message(s) after successful retry.",
+                                LogTag.Llm);
+                        }
+                    }
 
                     // === Tool call history truncation ===
                     // Prevent unbounded message growth during long tool-calling loops.
@@ -492,6 +519,31 @@ namespace CoreAI.Infrastructure.Llm
                     $"[SmartToolCall] Trimmed {removed} old tool call message(s), keeping {messages.Count} total.",
                     LogTag.Llm);
             }
+        }
+
+        /// <summary>
+        /// Removes obsolete error-feedback messages (tracked failed Assistant tool-call turns and
+        /// their paired Tool result turns) from <paramref name="messages"/> after a successful retry.
+        /// Removal is by reference and always covers the full Assistant+Tool pair, so the remaining
+        /// history keeps every tool-call message paired with its tool-result message (OpenAI-valid).
+        /// Entries already trimmed by the general history trim are skipped silently.
+        /// Clears <paramref name="feedbackMessages"/> and returns how many messages were removed.
+        /// </summary>
+        internal static int RemoveResolvedErrorFeedback(
+            List<MEAI.ChatMessage> messages,
+            List<MEAI.ChatMessage> feedbackMessages)
+        {
+            int removed = 0;
+            foreach (MEAI.ChatMessage feedback in feedbackMessages)
+            {
+                if (messages.Remove(feedback))
+                {
+                    removed++;
+                }
+            }
+
+            feedbackMessages.Clear();
+            return removed;
         }
 
         private static bool HasFunctionCallContent(MEAI.ChatMessage message)

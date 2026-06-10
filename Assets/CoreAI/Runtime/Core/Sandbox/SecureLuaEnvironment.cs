@@ -110,6 +110,24 @@ namespace CoreAI.Sandbox
             Remove("io");
             Remove("os");
             Remove("debug");
+
+            // collectgarbage is a timing/heap oracle even when stubbed; deny it entirely.
+            Remove("collectgarbage");
+
+            // string.dump exposes bytecode of functions (information leak / deserialization vector).
+            // The shared string metatable __index points at this same table, so removing it here
+            // also blocks ('').dump-style access through the string metatable.
+            DynValue stringLib = g.Get("string");
+            if (stringLib.Type == DataType.Table)
+            {
+                try
+                {
+                    stringLib.Table["dump"] = DynValue.Nil;
+                }
+                catch
+                {
+                }
+            }
         }
     }
 }

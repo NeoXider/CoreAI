@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
 using CoreAI.Logging;
@@ -53,49 +55,146 @@ namespace CoreAI.Infrastructure.AiMemory
         private readonly Dictionary<string, List<ConversationEntry>> _transcripts = new();
         private readonly ILog _log;
 
+        /// <summary>
+        /// Serializes all file and in-memory cache access for this store instance so the async
+        /// thread-pool offloads cannot race the synchronous (main-thread) interface methods.
+        /// SemaphoreSlim is not reentrant, so the gate is acquired only in public entry points;
+        /// private *Core helpers assume the gate is already held.
+        /// </summary>
+        private readonly SemaphoreSlim _gate = new(1, 1);
+
         /// <summary>Creates a file-backed agent memory store under CoreAI persistent data.</summary>
-        public FileAgentMemoryStore(ILog log = null)
+        /// <param name="log">Optional logger.</param>
+        /// <param name="rootDirectory">
+        /// Optional override for the storage directory (used by tests); defaults to the CoreAI
+        /// agent-memory folder under <see cref="Application.persistentDataPath"/>.
+        /// </param>
+        public FileAgentMemoryStore(ILog log = null, string rootDirectory = null)
         {
-            _dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.AgentMemory);
+            _dir = !string.IsNullOrWhiteSpace(rootDirectory)
+                ? rootDirectory.Trim()
+                : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
+                    CoreAiPersistentPaths.AgentMemory);
             _log = log;
+        }
+
+        /// <summary>
+        /// Runs file I/O on the thread pool so large reads/writes do not stall the Unity main thread.
+        /// On WebGL (no threads) the work runs inline instead.
+        /// </summary>
+        private static Task RunOffThread(Action action)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            action();
+            return Task.CompletedTask;
+#else
+            return Task.Run(action);
+#endif
+        }
+
+        /// <inheritdoc cref="RunOffThread(Action)"/>
+        private static Task<T> RunOffThread<T>(Func<T> func)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return Task.FromResult(func());
+#else
+            return Task.Run(func);
+#endif
         }
 
         /// <inheritdoc />
         public bool TryLoad(string roleId, out AgentMemoryState state)
         {
-            state = null;
+            _gate.Wait();
+            try
+            {
+                state = TryLoadCore(roleId);
+                return state != null;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="TryLoad"/> that performs the file read on the thread pool.
+        /// Returns the loaded state, or <c>null</c> when no memory exists for the role.
+        /// </summary>
+        public async Task<AgentMemoryState> TryLoadAsync(string roleId)
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                return await RunOffThread(() => TryLoadCore(roleId)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private AgentMemoryState TryLoadCore(string roleId)
+        {
             try
             {
                 string path = GetPath(roleId);
                 if (!File.Exists(path))
                 {
-                    return false;
+                    return null;
                 }
 
                 string json = File.ReadAllText(path);
                 Persisted p = JsonUtility.FromJson<Persisted>(json);
                 if (p == null)
                 {
-                    return false;
+                    return null;
                 }
 
-                state = new AgentMemoryState
+                return new AgentMemoryState
                 {
                     LastSystemPrompt = p.lastSystemPrompt ?? "",
                     Memory = p.memory ?? ""
                 };
-                return true;
             }
             catch (Exception ex)
             {
                 _log?.Error($"[FileAgentMemoryStore] Failed to load memory for {roleId}: {ex.Message}");
-                return false;
+                return null;
             }
         }
 
         /// <inheritdoc />
         public void Save(string roleId, AgentMemoryState state)
+        {
+            _gate.Wait();
+            try
+            {
+                SaveCore(roleId, state);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="Save"/> that performs the atomic file write on the thread pool.
+        /// </summary>
+        public async Task SaveAsync(string roleId, AgentMemoryState state)
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => SaveCore(roleId, state)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void SaveCore(string roleId, AgentMemoryState state)
         {
             try
             {
@@ -125,6 +224,35 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void Clear(string roleId)
         {
+            _gate.Wait();
+            try
+            {
+                ClearCore(roleId);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="Clear"/> that performs the file rewrite on the thread pool.
+        /// </summary>
+        public async Task ClearAsync(string roleId)
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => ClearCore(roleId)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void ClearCore(string roleId)
+        {
             try
             {
                 string path = GetPath(roleId);
@@ -150,6 +278,35 @@ namespace CoreAI.Infrastructure.AiMemory
 
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
+        {
+            _gate.Wait();
+            try
+            {
+                ClearChatHistoryCore(roleId);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="ClearChatHistory"/> that performs the file rewrite on the thread pool.
+        /// </summary>
+        public async Task ClearChatHistoryAsync(string roleId)
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => ClearChatHistoryCore(roleId)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void ClearChatHistoryCore(string roleId)
         {
             if (_ephemeralHistory.ContainsKey(roleId))
             {
@@ -387,6 +544,43 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
+            _gate.Wait();
+            try
+            {
+                AppendChatMessageCore(roleId, role, content, persistToDisk);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="AppendChatMessage"/> that performs the load/persist file I/O
+        /// on the thread pool.
+        /// </summary>
+        public async Task AppendChatMessageAsync(string roleId, string role, string content,
+            bool persistToDisk = true)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => AppendChatMessageCore(roleId, role, content, persistToDisk))
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void AppendChatMessageCore(string roleId, string role, string content, bool persistToDisk)
+        {
             EnsureHistoryLoaded(roleId);
 
             ChatMessage newMsg = new()
@@ -420,6 +614,43 @@ namespace CoreAI.Infrastructure.AiMemory
                 return;
             }
 
+            _gate.Wait();
+            try
+            {
+                AppendTranscriptEntryCore(roleId, entry, persistToDisk);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="AppendTranscriptEntry"/> that performs the load/persist file I/O
+        /// on the thread pool.
+        /// </summary>
+        public async Task AppendTranscriptEntryAsync(string roleId, ConversationEntry entry,
+            bool persistToDisk = true)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => AppendTranscriptEntryCore(roleId, entry, persistToDisk))
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void AppendTranscriptEntryCore(string roleId, ConversationEntry entry, bool persistToDisk)
+        {
             EnsureHistoryLoaded(roleId);
             _transcripts[roleId].Add(entry);
 
@@ -432,14 +663,22 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public IReadOnlyList<ConversationEntry> GetTranscriptEntries(string roleId, int maxEntries)
         {
-            EnsureHistoryLoaded(roleId);
-            if (!_transcripts.TryGetValue(roleId, out List<ConversationEntry> list) || list.Count == 0)
+            _gate.Wait();
+            try
             {
-                return Array.Empty<ConversationEntry>();
-            }
+                EnsureHistoryLoaded(roleId);
+                if (!_transcripts.TryGetValue(roleId, out List<ConversationEntry> list) || list.Count == 0)
+                {
+                    return Array.Empty<ConversationEntry>();
+                }
 
-            int n = maxEntries > 0 ? Math.Min(maxEntries, list.Count) : list.Count;
-            return list.Skip(list.Count - n).ToList();
+                int n = maxEntries > 0 ? Math.Min(maxEntries, list.Count) : list.Count;
+                return list.Skip(list.Count - n).ToList();
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         /// <summary>
@@ -447,15 +686,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            EnsureHistoryLoaded(roleId);
-
-            List<ChatMessage> list = _ephemeralHistory[roleId];
-            if (maxMessages > 0 && list.Count > maxMessages)
+            _gate.Wait();
+            try
             {
-                return list.Skip(list.Count - maxMessages).ToArray();
-            }
+                EnsureHistoryLoaded(roleId);
 
-            return list.ToArray();
+                List<ChatMessage> list = _ephemeralHistory[roleId];
+                if (maxMessages > 0 && list.Count > maxMessages)
+                {
+                    return list.Skip(list.Count - maxMessages).ToArray();
+                }
+
+                return list.ToArray();
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         #endregion

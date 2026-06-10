@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## [v3.1.0] - 2026-06-10
+
+### Reliability
+
+- **Retry backoff now uses full jitter.** `LoggingLlmClientDecorator` retry delays are drawn uniformly from `[0, base]` where base is the previous exponential `min(2 * 2^attempt, 30)` seconds, so fleets of agents no longer retry in lockstep after a mass 429 (thundering-herd fix). Explicit `Retry-After` headers still take precedence. Delay computation is exposed as `ComputeBackoffBase` / `ComputeBackoffDelay` for testability.
+- **Tool-name repair metric.** `ToolExecutionPolicy.ToolNameRepairCount` (process-wide, `Interlocked`) counts casing repairs performed by `TryRepairToolName`, making systemic prompt degradation observable; `ResetToolNameRepairCount()` for test/session resets.
+- **Retry error-feedback reclaimed from history.** After a fully-failed tool-call batch is retried successfully, `SmartToolCallingChatClient` removes the obsolete error-feedback message pairs (assistant tool-call + tool result, removed as whole pairs so the history stays OpenAI-valid) instead of letting them consume tokens until the general trim. Partially-failed batches are kept, since their successful results may still inform the model.
+
+### Lua sandbox
+
+- **Two escape vectors closed.** `StripRiskyGlobals` now also removes `string.dump` (MoonSharp implements it — compiled-bytecode leak; nilling it in the shared string table also blocks `('x'):dump()`) and `collectgarbage` (heap/timing oracle stub).
+- New escape-vector EditMode tests: `string.dump` (direct and via string metatable), `coroutine.close`, `collectgarbage`, `getmetatable('')`, `rawget`/`_G` bypass attempts.
+
+### Agent memory
+
+- **Off-main-thread async I/O.** `FileConversationSummaryStore` gains `LoadSummaryAsync` / `SaveSummaryAsync` / `ClearSummaryAsync` that run file I/O on the thread pool, serialized with the sync paths via a per-store `SemaphoreSlim`. Atomic tmp-file write semantics unchanged; `ConfigureAwait(false)` throughout; WebGL falls back to inline execution (no threads).
+
+### Diagnostics
+
+- New `TokenBudgetCalculator` (pure, testable) backing the Unity-side token-budget overlay: tokens/request, optional $/session from configurable per-1K prices, rolling-window request-load aggregation.
+
 ## [v3.0.0] - 2026-06-10
 
 ### Major — Lua/MoonSharp is now an optional module

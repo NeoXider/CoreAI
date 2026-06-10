@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Logging;
 using Newtonsoft.Json;
 
@@ -17,6 +19,12 @@ namespace CoreAI.Ai
 
         private readonly string _dir;
         private readonly ILog _log;
+
+        /// <summary>
+        /// Serializes file access for this store instance so the async thread-pool offloads cannot
+        /// race the synchronous interface methods. Acquired only in public entry points (not reentrant).
+        /// </summary>
+        private readonly SemaphoreSlim _gate = new(1, 1);
 
         private sealed class PersistedDto
         {
@@ -37,6 +45,30 @@ namespace CoreAI.Ai
             _log = log;
         }
 
+        /// <summary>
+        /// Runs file I/O on the thread pool so it does not stall the caller's (Unity main) thread.
+        /// On WebGL (no threads) the work runs inline instead.
+        /// </summary>
+        private static Task RunOffThread(Action action)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            action();
+            return Task.CompletedTask;
+#else
+            return Task.Run(action);
+#endif
+        }
+
+        /// <inheritdoc cref="RunOffThread(Action)"/>
+        private static Task<T> RunOffThread<T>(Func<T> func)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return Task.FromResult(func());
+#else
+            return Task.Run(func);
+#endif
+        }
+
         /// <inheritdoc />
         public string LoadSummary(string roleId)
         {
@@ -45,6 +77,40 @@ namespace CoreAI.Ai
                 return "";
             }
 
+            _gate.Wait();
+            try
+            {
+                return LoadSummaryCore(roleId);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="LoadSummary"/> that performs the file read on the thread pool.
+        /// </summary>
+        public async Task<string> LoadSummaryAsync(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return "";
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                return await RunOffThread(() => LoadSummaryCore(roleId)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private string LoadSummaryCore(string roleId)
+        {
             try
             {
                 string path = GetPath(roleId);
@@ -72,6 +138,40 @@ namespace CoreAI.Ai
                 return;
             }
 
+            _gate.Wait();
+            try
+            {
+                SaveSummaryCore(roleId, summary);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="SaveSummary"/> that performs the atomic file write on the thread pool.
+        /// </summary>
+        public async Task SaveSummaryAsync(string roleId, string summary)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => SaveSummaryCore(roleId, summary)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void SaveSummaryCore(string roleId, string summary)
+        {
             try
             {
                 EnsureDir();
@@ -93,6 +193,40 @@ namespace CoreAI.Ai
                 return;
             }
 
+            _gate.Wait();
+            try
+            {
+                ClearSummaryCore(roleId);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Async variant of <see cref="ClearSummary"/> that performs the file delete on the thread pool.
+        /// </summary>
+        public async Task ClearSummaryAsync(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await RunOffThread(() => ClearSummaryCore(roleId)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private void ClearSummaryCore(string roleId)
+        {
             try
             {
                 string path = GetPath(roleId);

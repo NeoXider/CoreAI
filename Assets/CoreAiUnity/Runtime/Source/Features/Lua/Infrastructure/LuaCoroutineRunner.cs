@@ -11,14 +11,38 @@ namespace CoreAI.Infrastructure.Lua
     /// </summary>
     public sealed class LuaCoroutineRunner : MonoBehaviour
     {
+        /// <summary>Default cap on simultaneously registered coroutine handles.</summary>
+        public const int DefaultMaxActiveCoroutines = 64;
+
         private readonly List<LuaCoroutineHandle> _handles = new();
         private readonly List<LuaCoroutineHandle> _toRemove = new();
+        private int _maxActiveCoroutines = DefaultMaxActiveCoroutines;
 
         /// <summary>Number of coroutine handles currently managed by this runner.</summary>
         public int ActiveCount => _handles.Count;
 
         /// <summary>
+        /// Maximum number of coroutine handles this runner accepts at once.
+        /// Registrations beyond the limit are rejected so runaway scripts cannot spam coroutines.
+        /// </summary>
+        public int MaxActiveCoroutines
+        {
+            get => _maxActiveCoroutines;
+            set
+            {
+                if (value <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value),
+                        "MaxActiveCoroutines must be greater than zero.");
+                }
+
+                _maxActiveCoroutines = value;
+            }
+        }
+
+        /// <summary>
         /// Adds a coroutine handle to the frame update loop.
+        /// Throws <see cref="InvalidOperationException"/> when <see cref="MaxActiveCoroutines"/> is exceeded.
         /// </summary>
         public void Register(LuaCoroutineHandle handle)
         {
@@ -27,7 +51,33 @@ namespace CoreAI.Infrastructure.Lua
                 throw new ArgumentNullException(nameof(handle));
             }
 
+            if (_handles.Count >= _maxActiveCoroutines)
+            {
+                // Free slots held by already-finished coroutines before rejecting.
+                PruneDeadHandles();
+            }
+
+            if (_handles.Count >= _maxActiveCoroutines)
+            {
+                Debug.LogError(
+                    $"[LuaCoroutineRunner] Coroutine limit reached ({_maxActiveCoroutines}); registration rejected.");
+                throw new InvalidOperationException(
+                    $"LuaCoroutineRunner limit of {_maxActiveCoroutines} active coroutines reached. " +
+                    "Registration rejected.");
+            }
+
             _handles.Add(handle);
+        }
+
+        private void PruneDeadHandles()
+        {
+            for (int i = _handles.Count - 1; i >= 0; i--)
+            {
+                if (!_handles[i].IsAlive)
+                {
+                    _handles.RemoveAt(i);
+                }
+            }
         }
 
         /// <summary>

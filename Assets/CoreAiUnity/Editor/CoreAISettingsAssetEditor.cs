@@ -559,6 +559,16 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent("MEAI Debug Logging"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("logOrchestrationMetrics"),
                     new GUIContent("Log Orchestration Metrics"));
+
+                EditorGUILayout.Space(4);
+
+                EditorGUILayout.LabelField("Token budget overlay", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("inputTokenPricePer1KUsd"),
+                    new GUIContent("Input $ / 1K Tokens",
+                        "USD price per 1K prompt tokens for the token-budget overlay. 0 = unset (tokens only)."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("outputTokenPricePer1KUsd"),
+                    new GUIContent("Output $ / 1K Tokens",
+                        "USD price per 1K completion tokens for the token-budget overlay. 0 = unset (tokens only)."));
             }
 
             EditorGUILayout.EndFoldoutHeaderGroup();

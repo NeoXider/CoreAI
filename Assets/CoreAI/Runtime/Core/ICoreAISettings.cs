@@ -166,6 +166,18 @@ namespace CoreAI
         int MaxToolCallRoundtrips => 10;
 
         /// <summary>
+        /// USD price per 1K prompt/input tokens for the token-budget overlay cost estimate.
+        /// Default 0 = pricing unset; the overlay shows token counts only.
+        /// </summary>
+        float InputTokenPricePer1KUsd => 0f;
+
+        /// <summary>
+        /// USD price per 1K completion/output tokens for the token-budget overlay cost estimate.
+        /// Default 0 = pricing unset; the overlay shows token counts only.
+        /// </summary>
+        float OutputTokenPricePer1KUsd => 0f;
+
+        /// <summary>
         /// Maximum number of tool call message pairs (assistant + tool result) to keep in the
         /// MEAI message list during a single request's tool-calling loop in <see cref="SmartToolCallingChatClient"/>.
         /// When the count exceeds this limit, the oldest tool call pair is removed to prevent unbounded growth.

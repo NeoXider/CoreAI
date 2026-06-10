@@ -273,10 +273,44 @@ namespace CoreAI.Infrastructure.Llm
             return result;
         }
 
-        /// <summary>Computes the retry backoff delay for a zero-based retry attempt.</summary>
-        internal static int ComputeBackoff(int attempt)
+        // .NET Standard 2.0 has no Random.Shared; System.Random is not thread-safe,
+        // so guard the shared instance with a lock.
+        private static readonly Random BackoffRandom = new();
+        private static readonly object BackoffRandomLock = new();
+
+        /// <summary>
+        /// Deterministic exponential base delay (seconds) for a zero-based retry attempt:
+        /// <c>min(2 * 2^attempt, MaxRetryCapSeconds)</c>.
+        /// </summary>
+        internal static int ComputeBackoffBase(int attempt)
         {
             return (int)Math.Min(2 * Math.Pow(2, attempt), MaxRetryCapSeconds);
+        }
+
+        /// <summary>
+        /// "Full jitter" retry backoff: uniform random delay in <c>[0, base]</c> where base is the
+        /// exponential value from <see cref="ComputeBackoffBase"/>. Randomizing the whole window
+        /// de-synchronizes clients that all hit a 429/5xx at the same moment (thundering herd).
+        /// Pass <c>null</c> for <paramref name="random"/> to get the deterministic base delay.
+        /// </summary>
+        internal static int ComputeBackoffDelay(int attempt, Random random)
+        {
+            int baseDelay = ComputeBackoffBase(attempt);
+            if (random == null)
+            {
+                return baseDelay;
+            }
+
+            return random.Next(0, baseDelay + 1);
+        }
+
+        /// <summary>Computes the jittered retry backoff delay for a zero-based retry attempt.</summary>
+        internal static int ComputeBackoff(int attempt)
+        {
+            lock (BackoffRandomLock)
+            {
+                return ComputeBackoffDelay(attempt, BackoffRandom);
+            }
         }
 
         /// <summary>

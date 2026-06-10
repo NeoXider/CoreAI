@@ -553,32 +553,27 @@ namespace CoreAI.Tests.EditMode
         // ==================== ComputeBackoff (LoggingLlmClientDecorator) ====================
 
         [Test]
-        public void ComputeBackoff_ZeroAttempt_Returns2s()
+        public void ComputeBackoff_ZeroAttempt_WithinJitterWindow()
         {
-            // Access via reflection since it's private static
-            MethodInfo method = typeof(LoggingLlmClientDecorator)
-                .GetMethod("ComputeBackoff",
-                    BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.IsNotNull(method, "ComputeBackoff should exist");
-
-            int val = (int)method.Invoke(null, new object[] { 0 });
-            Assert.AreEqual(2, val, "attempt=0: 2 * 2^0 = 2s");
+            // ComputeBackoff is full-jitter: uniform [0, base]; base for attempt=0 is 2s.
+            int val = LoggingLlmClientDecorator.ComputeBackoffDelay(0, new Random(1234));
+            Assert.GreaterOrEqual(val, 0, "attempt=0: jittered delay must be >= 0");
+            Assert.LessOrEqual(val, 2, "attempt=0: jittered delay must be <= base 2s");
         }
 
         [Test]
         public void ComputeBackoff_ExponentialCurve_CappedAt30()
         {
-            MethodInfo method = typeof(LoggingLlmClientDecorator)
-                .GetMethod("ComputeBackoff",
-                    BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.IsNotNull(method);
-
-            // attempt 0 → 2*2^0=2, attempt 1 → 4, attempt 2 → 8, attempt 3 → 16, attempt 4 → 30 (capped)
+            // Deterministic base curve: attempt 0 → 2, 1 → 4, 2 → 8, 3 → 16, then capped at 30.
             int[] expected = { 2, 4, 8, 16, 30, 30, 30 };
             for (int i = 0; i < expected.Length; i++)
             {
-                int val = (int)method.Invoke(null, new object[] { i });
-                Assert.AreEqual(expected[i], val, $"attempt={i} should give {expected[i]}s");
+                Assert.AreEqual(expected[i], LoggingLlmClientDecorator.ComputeBackoffBase(i),
+                    $"attempt={i} base should give {expected[i]}s");
+
+                int jittered = LoggingLlmClientDecorator.ComputeBackoffDelay(i, new Random(42 + i));
+                Assert.GreaterOrEqual(jittered, 0, $"attempt={i}: jittered delay must be >= 0");
+                Assert.LessOrEqual(jittered, expected[i], $"attempt={i}: jittered delay must be <= base");
             }
         }
         // ==================== v1.5.4: IsToolResultSuccess (BUG-5) ====================

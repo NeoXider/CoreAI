@@ -23,7 +23,7 @@ namespace CoreAI.Tests.EditMode
             {
                 if (go != null)
                 {
-                    UnityEngine.Object.DestroyImmediate(go);
+                    global::UnityEngine.Object.DestroyImmediate(go);
                 }
             }
 

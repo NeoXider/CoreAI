@@ -685,6 +685,270 @@ namespace CoreAI.Tests.EditMode
                 };
             }
         }
+
+        // ==================== Retry Backoff Jitter (v3.x) ====================
+
+        [Test]
+        public void BackoffJitter_DelayWithinBaseBounds()
+        {
+            Random random = new(12345);
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                int baseDelay = LoggingLlmClientDecorator.ComputeBackoffBase(attempt);
+                for (int i = 0; i < 200; i++)
+                {
+                    int delay = LoggingLlmClientDecorator.ComputeBackoffDelay(attempt, random);
+                    Assert.That(delay, Is.GreaterThanOrEqualTo(0),
+                        $"attempt={attempt}: jittered delay must be >= 0");
+                    Assert.That(delay, Is.LessThanOrEqualTo(baseDelay),
+                        $"attempt={attempt}: jittered delay must be <= base ({baseDelay}s)");
+                }
+            }
+        }
+
+        [Test]
+        public void BackoffJitter_BaseGrowsMonotonicallyAndIsCapped()
+        {
+            int previous = 0;
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                int baseDelay = LoggingLlmClientDecorator.ComputeBackoffBase(attempt);
+                Assert.That(baseDelay, Is.GreaterThanOrEqualTo(previous),
+                    $"Base delay must grow monotonically (attempt {attempt})");
+                Assert.That(baseDelay, Is.LessThanOrEqualTo(30), "Base delay must respect the 30s cap");
+                previous = baseDelay;
+            }
+
+            Assert.AreEqual(2, LoggingLlmClientDecorator.ComputeBackoffBase(0));
+            Assert.AreEqual(4, LoggingLlmClientDecorator.ComputeBackoffBase(1));
+            Assert.AreEqual(30, LoggingLlmClientDecorator.ComputeBackoffBase(10), "Large attempts hit the cap");
+        }
+
+        [Test]
+        public void BackoffJitter_NullRandom_ReturnsDeterministicBase()
+        {
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                Assert.AreEqual(
+                    LoggingLlmClientDecorator.ComputeBackoffBase(attempt),
+                    LoggingLlmClientDecorator.ComputeBackoffDelay(attempt, null));
+            }
+        }
+
+        // ==================== Tool Name Repair Counter (v3.x) ====================
+
+        private sealed class StubLlmTool : ILlmTool
+        {
+            public StubLlmTool(string name)
+            {
+                Name = name;
+            }
+
+            public string Name { get; }
+            public string Description => "stub tool";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+        }
+
+        [Test]
+        public void ToolNameRepair_CasingRepair_IncrementsCounter()
+        {
+            ToolExecutionPolicy.ResetToolNameRepairCount();
+            ResilienceSettings settings = new();
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { new StubLlmTool("craft_item") }, true, "test", 3);
+
+            MEAI.FunctionCallContent repaired =
+                policy.TryRepairToolName(new MEAI.FunctionCallContent("c1", "Craft_Item"));
+
+            Assert.IsNotNull(repaired);
+            Assert.AreEqual("craft_item", repaired.Name);
+            Assert.AreEqual(1, ToolExecutionPolicy.ToolNameRepairCount, "Repair should increment counter");
+
+            policy.TryRepairToolName(new MEAI.FunctionCallContent("c2", "CRAFT_ITEM"));
+            Assert.AreEqual(2, ToolExecutionPolicy.ToolNameRepairCount, "Each repair increments counter");
+
+            ToolExecutionPolicy.ResetToolNameRepairCount();
+            Assert.AreEqual(0, ToolExecutionPolicy.ToolNameRepairCount, "Reset should zero the counter");
+        }
+
+        [Test]
+        public void ToolNameRepair_ExactOrUnknownName_DoesNotIncrementCounter()
+        {
+            ToolExecutionPolicy.ResetToolNameRepairCount();
+            ResilienceSettings settings = new();
+            ToolExecutionPolicy policy = new(NullLog.Instance, settings,
+                new List<ILlmTool> { new StubLlmTool("craft_item") }, true, "test", 3);
+
+            // Exact match: no repair needed
+            MEAI.FunctionCallContent exact =
+                policy.TryRepairToolName(new MEAI.FunctionCallContent("c1", "craft_item"));
+            Assert.IsNotNull(exact);
+            Assert.AreEqual(0, ToolExecutionPolicy.ToolNameRepairCount);
+
+            // Genuinely unknown: no repair possible
+            MEAI.FunctionCallContent unknown =
+                policy.TryRepairToolName(new MEAI.FunctionCallContent("c2", "no_such_tool"));
+            Assert.IsNull(unknown);
+            Assert.AreEqual(0, ToolExecutionPolicy.ToolNameRepairCount);
+        }
+
+        // ==================== Error-Feedback Lifecycle (v3.x) ====================
+
+        private sealed class ScriptedChatClient : MEAI.IChatClient
+        {
+            private readonly Queue<Func<MEAI.ChatResponse>> _script;
+
+            public ScriptedChatClient(params Func<MEAI.ChatResponse>[] script)
+            {
+                _script = new Queue<Func<MEAI.ChatResponse>>(script);
+            }
+
+            /// <summary>Snapshot of the message list observed on each inner call.</summary>
+            public List<List<MEAI.ChatMessage>> ObservedMessages { get; } = new();
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                ObservedMessages.Add(new List<MEAI.ChatMessage>(messages));
+                return Task.FromResult(_script.Dequeue()());
+            }
+
+            public IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotImplementedException();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private static MEAI.ChatResponse AssistantToolCallResponse(string callId, string toolName)
+        {
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { new MEAI.FunctionCallContent(callId, toolName) }));
+        }
+
+        private static void AssertToolCallPairingValid(List<MEAI.ChatMessage> messages)
+        {
+            for (int i = 0; i < messages.Count; i++)
+            {
+                bool hasCall = false;
+                foreach (object c in messages[i].Contents)
+                {
+                    if (c is MEAI.FunctionCallContent)
+                    {
+                        hasCall = true;
+                    }
+                }
+
+                if (hasCall)
+                {
+                    Assert.That(i + 1, Is.LessThan(messages.Count),
+                        "Assistant tool-call message must be followed by a Tool result message");
+                    Assert.AreEqual(MEAI.ChatRole.Tool, messages[i + 1].Role,
+                        "Assistant tool-call message must be immediately followed by a Tool message");
+                }
+
+                if (messages[i].Role == MEAI.ChatRole.Tool)
+                {
+                    Assert.That(i, Is.GreaterThan(0));
+                    bool prevHasCall = false;
+                    foreach (object c in messages[i - 1].Contents)
+                    {
+                        if (c is MEAI.FunctionCallContent)
+                        {
+                            prevHasCall = true;
+                        }
+                    }
+
+                    Assert.IsTrue(prevHasCall,
+                        "Tool result message must be preceded by an assistant tool-call message");
+                }
+            }
+        }
+
+        [Test]
+        public async Task ErrorFeedback_RemovedAfterSuccessfulRetry_HistoryStaysPaired()
+        {
+            ResilienceSettings settings = new();
+            // fail_tool returns a structured failure; ok_tool succeeds.
+            Func<string> failFunc = () => "{\"success\":false,\"error\":\"boom\"}";
+            Func<string> okFunc = () => "ok";
+            MEAI.ChatOptions opts = MakeChatOptions(("fail_tool", failFunc), ("ok_tool", okFunc));
+
+            ScriptedChatClient inner = new(
+                () => AssistantToolCallResponse("call_fail_1", "fail_tool"),
+                () => AssistantToolCallResponse("call_ok_1", "ok_tool"),
+                () => new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "done")));
+
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true, new List<ILlmTool>(), "test", 3);
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(
+                new List<MEAI.ChatMessage> { new(MEAI.ChatRole.User, "hi") }, opts);
+
+            Assert.AreEqual("done", response.Text);
+            Assert.AreEqual(3, inner.ObservedMessages.Count);
+
+            // 2nd inner call still sees the error feedback (so the model can retry)
+            List<MEAI.ChatMessage> duringRetry = inner.ObservedMessages[1];
+            Assert.IsTrue(duringRetry.Exists(m => m.Role == MEAI.ChatRole.Tool),
+                "Error feedback must be present while retrying");
+
+            // 3rd inner call: failed pair removed after the successful retry
+            List<MEAI.ChatMessage> afterRetry = inner.ObservedMessages[2];
+            foreach (MEAI.ChatMessage m in afterRetry)
+            {
+                foreach (object c in m.Contents)
+                {
+                    if (c is MEAI.FunctionCallContent fcc)
+                    {
+                        Assert.AreNotEqual("fail_tool", fcc.Name,
+                            "Failed tool-call message should be removed after successful retry");
+                    }
+                }
+            }
+
+            // Exactly one tool-call pair (the successful one) remains, and pairing is valid.
+            int toolMsgCount = afterRetry.FindAll(m => m.Role == MEAI.ChatRole.Tool).Count;
+            Assert.AreEqual(1, toolMsgCount, "Only the successful tool pair should remain");
+            AssertToolCallPairingValid(afterRetry);
+
+            // Original user message is untouched.
+            Assert.AreEqual(MEAI.ChatRole.User, afterRetry[0].Role);
+        }
+
+        [Test]
+        public void RemoveResolvedErrorFeedback_AlreadyTrimmedEntries_AreSkipped()
+        {
+            MEAI.ChatMessage user = new(MEAI.ChatRole.User, "hi");
+            MEAI.ChatMessage failedAssistant = new(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { new MEAI.FunctionCallContent("c1", "fail_tool") });
+            MEAI.ChatMessage failedTool = new(MEAI.ChatRole.Tool,
+                new List<MEAI.AIContent> { new MEAI.FunctionResultContent("c1", "Error: boom") });
+
+            // failedAssistant was already removed by general history trim; only failedTool remains.
+            List<MEAI.ChatMessage> messages = new() { user, failedTool };
+            List<MEAI.ChatMessage> pending = new() { failedAssistant, failedTool };
+
+            int removed = SmartToolCallingChatClient.RemoveResolvedErrorFeedback(messages, pending);
+
+            Assert.AreEqual(1, removed, "Only the message still present should count as removed");
+            Assert.AreEqual(0, pending.Count, "Pending list must be cleared");
+            CollectionAssert.AreEqual(new List<MEAI.ChatMessage> { user }, messages);
+        }
     }
 }
 #endif

@@ -7,7 +7,7 @@
   - [x] Удалить из репозитория и добавить в `.gitignore`: `debug.log`, `memory.db`, `msp_server.log`, `replay_pid29472.log`, `TestRun_EditMode.log`, `UnityTest_EditMode.log` — файлы отсутствуют, в `.gitignore`, не трекаются.
   - [x] Убрать ошибочный файл `Remove-Item` (артефакт PowerShell) — отсутствует.
   - [x] Убрать placeholder-файлы `_coreai_placeholder_lines.txt` — отсутствует.
-  - [ ] Прописать pre-commit/pre-push проверку на отсутствие мусорных файлов и рецидивов `.meta`/логов в корне (хука пока нет).
+  - [x] Прописать pre-commit/pre-push проверку на отсутствие мусорных файлов и рецидивов `.meta`/логов в корне — `hooks/pre-commit` (POSIX sh), активация `git config core.hooksPath hooks`, описано в `CONTRIBUTING.md` (v3.1.0).
 
 ## [P0] Lua как опциональный модуль — ГОТОВО (v3.0.0)
 - [x] **Lua-песочница опциональна через define `COREAI_NO_LUA`** (зеркало существующего `COREAI_NO_LLM`, а не отдельный asmdef — консистентно с проектом и ниже риск).
@@ -31,10 +31,10 @@
 ## [P1] Lua-песочница (security / stability)
 - [ ] **LuaCoroutineRunner — лимит активных корутин**
   Лимита нет, `Register()` растёт неограниченно.
-  - [ ] Реализовать `MaxActiveCoroutines = 64` и hard-stop при превышении.
+  - [x] Реализовать `MaxActiveCoroutines = 64` и hard-stop при превышении — `Register()` чистит мёртвые handles и бросает `InvalidOperationException` при переполнении; слоты освобождаются сразу (v3.1.0).
 - [ ] **Sandbox escape-тесты**
   Покрыты `io/os/debug/load/require` и `_G`, но не векторы ниже.
-  - [ ] Добавить тесты: `string.dump`, `coroutine.close`, `collectgarbage` (timing oracle), обходы `_G`/`_ENV`.
+  - [x] Добавить тесты: `string.dump`, `coroutine.close`, `collectgarbage` (timing oracle), обходы `_G`/`_ENV` — заодно закрыты реальные дыры: `string.dump` и `collectgarbage` теперь вырезаются в `StripRiskyGlobals` (v3.1.0).
   - [ ] Зафиксировать coverage в CI для проверки неизменности изоляции.
 - [ ] **Генерация Lua-скриптов**
   - [ ] Добавить rate-limit на генерацию скриптов и защиту от runaway-циклов (задача Programmers/LLM).
@@ -43,19 +43,19 @@
 ## [P1] SmartToolCallingChatClient / ретраи
 - [ ] **TryRepairToolName — метрика ремонтов**
   `ToolExecutionPolicy.cs:177-184` — только `Warn`, счётчика нет.
-  - [ ] Добавить инкремент метрики/счётчика (`ToolCallRepairCount` в `RateLimiterMetrics` или трейс), чтобы ловить системную деградацию промпта.
+  - [x] Добавить инкремент метрики/счётчика — `ToolExecutionPolicy.ToolNameRepairCount` (Interlocked, process-wide) + `ResetToolNameRepairCount()`; в `RateLimiterMetrics` не встраивался (снимок rate-limiter без доступа к policy) (v3.1.0).
 - [ ] **Жизненный цикл retry-feedback**
   Error-feedback не удаляется после успешного ретрая — остаётся в history до общего trim.
-  - [ ] После успешного ретрая удалять error-feedback из history.
+  - [x] После успешного ретрая удалять error-feedback из history — пары assistant tool-call + tool-result полностью провальных батчей удаляются целиком после успешной итерации; частично успешные сохраняются (v3.1.0).
 - [x] ~~**TrimToolCallHistory — OpenAI-совместимость**~~ — проверено: trim удаляет tool-related сообщения интерлив-парами (assistant tool-call + tool-result), история остаётся валидной.
 
 ## [P1] Надёжность / устойчивость
 - [ ] **Backoff без jitter — thundering herd**
   `LoggingLlmClientDecorator.cs:277-280` — детерминированный `2*2^attempt`, без рандомизации.
-  - [ ] Добавить jitter (full/equal jitter), чтобы агенты не ретраили синхронно при массовом 429.
+  - [x] Добавить jitter — full jitter `[0, min(2*2^attempt, 30)]`, `Retry-After` в приоритете; `ComputeBackoffBase`/`ComputeBackoffDelay` тестируемы (v3.1.0).
 - [ ] **Off-main-thread I/O**
   `FileAgentMemoryStore.cs` — все чтения/записи синхронны на main thread (фриз кадра при большой памяти).
-  - [ ] Перенести I/O в background-поток (`Task.Run`/await) в async-методах.
+  - [x] Перенести I/O в background-поток — интерфейсы синхронны, добавлены `*Async`-методы на `FileAgentMemoryStore` и `FileConversationSummaryStore` (`Task.Run` + per-store `SemaphoreSlim`, атомарная запись сохранена, WebGL inline) (v3.1.0).
 
 ## [P1] CoreAi / CoreAIAgent / Policy runtime-state
 - [x] ~~**Build/policy-init contract**~~ — `Build()` применяется к `CoreAIAgent.Policy` (`AgentBuilder.cs:328-338`), `BuildDetached()` — чистый режим без мутации (`:343`).
@@ -64,11 +64,11 @@
 - [x] ~~**Тестируемость / SetResolver**~~ — `CoreAi.SetResolver(Func<IAiOrchestrationService>)` есть в `CoreAi.cs:71`.
 
 ## [P1] Диагностика бюджета токенов в рантайме
-- [~] `RateLimiterMetrics` существует и отдаётся через `IInGameLlmChatService.GetRateLimiterMetrics()`, но overlay/UI ещё нет.
-  - [ ] Overlay: текущая стоимость токенов и `tokens/request`.
-  - [ ] Стоимость сессии (`$/session`).
-  - [ ] Скользящее окно/индикатор нагрузки запросов и лимитов.
-  - [ ] Проверка UI-доступности в редакторе и в Play Mode.
+- [x] `RateLimiterMetrics` отдаётся через `IInGameLlmChatService.GetRateLimiterMetrics()`; overlay реализован (v3.1.0).
+  - [x] Overlay: текущая стоимость токенов и `tokens/request` — `CoreAiTokenBudgetOverlay` (IMGUI, хоткей F10) поверх `TokenBudgetCalculator`.
+  - [x] Стоимость сессии (`$/session`) — конфигурируемые цены за 1K токенов; при 0 показываются только токены.
+  - [x] Скользящее окно/индикатор нагрузки запросов и лимитов.
+  - [ ] Проверка UI-доступности в редакторе и в Play Mode — вручную пользователем (логика покрыта EditMode-тестами `TokenBudgetCalculator`).
 
 ## [P2] API-дизайн
 - [x] ~~**ILlmTool — дублирование Name/Description**~~ — есть `LlmToolBase` (`ILlmTool.cs:45-68`) с `JsonParams(...)`-хелпером.

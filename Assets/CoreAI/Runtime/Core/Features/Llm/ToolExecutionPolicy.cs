@@ -32,6 +32,8 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IToolCallEventPublisher _eventPublisher;
         private readonly IToolExecutionNotifier _notifier;
 
+        private static long _toolNameRepairCount;
+
         private int _consecutiveErrors;
         private readonly HashSet<string> _executedSignatures = new();
         private readonly List<LlmToolCallTrace> _executedTraces = new();
@@ -56,6 +58,21 @@ namespace CoreAI.Infrastructure.Llm
             _maxConsecutiveErrors = Math.Max(1, maxConsecutiveErrors);
             _eventPublisher = eventPublisher ?? NullToolCallEventPublisher.Instance;
             _notifier = notifier ?? NullToolExecutionNotifier.Instance;
+        }
+
+        /// <summary>
+        /// Process-wide count of tool calls whose name had to be repaired by
+        /// <see cref="TryRepairToolName"/> (e.g. wrong casing emitted by the model).
+        /// A steadily climbing value signals systemic prompt degradation: the model is no longer
+        /// reproducing exact tool names. Diagnostics only — surface it on dashboards alongside
+        /// <see cref="RateLimiterMetrics"/>. Reset with <see cref="ResetToolNameRepairCount"/>.
+        /// </summary>
+        public static long ToolNameRepairCount => Interlocked.Read(ref _toolNameRepairCount);
+
+        /// <summary>Resets <see cref="ToolNameRepairCount"/> to zero (tests / diagnostics sessions).</summary>
+        public static void ResetToolNameRepairCount()
+        {
+            Interlocked.Exchange(ref _toolNameRepairCount, 0);
         }
 
         /// <summary>Current consecutive error count (for diagnostics/testing).</summary>
@@ -174,6 +191,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (match != null)
             {
+                Interlocked.Increment(ref _toolNameRepairCount);
                 _logger.Warn(
                     $"[ToolPolicy] Repaired tool name casing: '{fc.Name}' -> '{match.Name}'", LogTag.Llm);
                 return new MEAI.FunctionCallContent(fc.CallId, match.Name, fc.Arguments);
@@ -461,13 +479,15 @@ namespace CoreAI.Infrastructure.Llm
                 return new BatchToolCallResult
                 {
                     Results = duplicateResults.Cast<MEAI.AIContent>().ToList(),
-                    AnyFailed = true
+                    AnyFailed = true,
+                    AllFailed = true
                 };
             }
 
             // 2. Execute each tool call
             List<MEAI.AIContent> results = new();
             bool anyFailed = false;
+            bool allFailed = true;
 
             foreach (MEAI.FunctionCallContent fc in toolCalls)
             {
@@ -476,6 +496,10 @@ namespace CoreAI.Infrastructure.Llm
                 if (!r.Succeeded)
                 {
                     anyFailed = true;
+                }
+                else
+                {
+                    allFailed = false;
                 }
             }
 
@@ -489,7 +513,12 @@ namespace CoreAI.Infrastructure.Llm
                 RecordFailure();
             }
 
-            return new BatchToolCallResult { Results = results, AnyFailed = anyFailed };
+            return new BatchToolCallResult
+            {
+                Results = results,
+                AnyFailed = anyFailed,
+                AllFailed = anyFailed && allFailed
+            };
         }
 
         /// <summary>Record that all tools in the current iteration succeeded.</summary>
@@ -540,6 +569,13 @@ namespace CoreAI.Infrastructure.Llm
         {
             public List<MEAI.AIContent> Results;
             public bool AnyFailed;
+
+            /// <summary>
+            /// True when every tool call in the batch failed (including duplicate-suppressed batches).
+            /// Used by <see cref="SmartToolCallingChatClient"/> to mark the iteration's messages as
+            /// pure error feedback that can be dropped from history once a later retry succeeds.
+            /// </summary>
+            public bool AllFailed;
         }
 
         /// <summary>

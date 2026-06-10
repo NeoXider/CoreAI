@@ -1,0 +1,65 @@
+#!/bin/sh
+# Pre-commit guard: blocks known junk files from being committed to the repo root.
+# Enable with: git config core.hooksPath hooks
+# POSIX sh only (runs under Git for Windows bash).
+
+bad=""
+
+# Staged files (added/copied/modified/renamed), one per line.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+[ -z "$staged" ] && exit 0
+
+is_root_junk() {
+    # $1 = root-level file name (no slash)
+    case "$1" in
+        debug.log|memory.db|msp_server.log|Remove-Item|_coreai_placeholder_lines.txt) return 0 ;;
+        replay_pid*.log|TestRun_*.log|UnityTest_*.log) return 0 ;;
+        *.log|*.db) return 0 ;;
+    esac
+    return 1
+}
+
+IFS='
+'
+for f in $staged; do
+    case "$f" in
+        */*) continue ;;  # only guard the repo root
+    esac
+
+    if is_root_junk "$f"; then
+        bad="$bad
+  $f"
+        continue
+    fi
+
+    # Orphan root-level .meta: staged *.meta whose companion file/folder
+    # neither exists on disk nor is staged in this commit.
+    case "$f" in
+        *.meta)
+            base=${f%.meta}
+            if [ ! -e "$base" ]; then
+                found=0
+                for s in $staged; do
+                    [ "$s" = "$base" ] && found=1 && break
+                done
+                if [ $found -eq 0 ]; then
+                    bad="$bad
+  $f (orphan .meta: no matching '$base')"
+                fi
+            fi
+            ;;
+    esac
+done
+unset IFS
+
+if [ -n "$bad" ]; then
+    echo "pre-commit: rejected. Junk files staged in the repo root:" >&2
+    echo "$bad" >&2
+    echo "" >&2
+    echo "Unstage them with: git restore --staged <file>" >&2
+    echo "(Root-level *.log, *.db, known junk names, and orphan .meta files are blocked.)" >&2
+    exit 1
+fi
+
+exit 0

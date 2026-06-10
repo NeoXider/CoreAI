@@ -164,7 +164,8 @@ namespace CoreAI.Composition
         /// </summary>
         internal static void RegisterAgentMemoryStore(IContainerBuilder builder)
         {
-            builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
+            // Lambda registration: the ctor's optional string rootDirectory must not be constructor-injected.
+            builder.Register(_ => new FileAgentMemoryStore(), Lifetime.Singleton)
                 .As<IAgentMemoryStore>()
                 .As<IConversationTranscriptStore>();
         }

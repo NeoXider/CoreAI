@@ -356,6 +356,17 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Emit orchestrator timing / counters to the Unity log.")] [SerializeField]
         private bool logOrchestrationMetrics = false;
 
+        [Header("Token Budget Diagnostics")]
+        [Tooltip("USD price per 1K prompt/input tokens for the token-budget overlay. 0 = unset (tokens only).")]
+        [SerializeField]
+        [Min(0f)]
+        private float inputTokenPricePer1KUsd = 0f;
+
+        [Tooltip("USD price per 1K completion/output tokens for the token-budget overlay. 0 = unset (tokens only).")]
+        [SerializeField]
+        [Min(0f)]
+        private float outputTokenPricePer1KUsd = 0f;
+
         #endregion
 
         #region Properties
@@ -663,6 +674,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <inheritdoc />
         public bool LogMeaiToolCallingSteps => logMeaiToolCallingSteps;
+
+        /// <inheritdoc cref="ICoreAISettings.InputTokenPricePer1KUsd"/>
+        public float InputTokenPricePer1KUsd => inputTokenPricePer1KUsd < 0f ? 0f : inputTokenPricePer1KUsd;
+
+        /// <inheritdoc cref="ICoreAISettings.OutputTokenPricePer1KUsd"/>
+        public float OutputTokenPricePer1KUsd => outputTokenPricePer1KUsd < 0f ? 0f : outputTokenPricePer1KUsd;
 
         #endregion
 

@@ -46,7 +46,7 @@ namespace CoreAI.Tests.EditMode
                     true,
                     true);
 
-                builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
+                builder.Register(_ => new FileAgentMemoryStore(), Lifetime.Singleton)
                     .As<IAgentMemoryStore>()
                     .As<IConversationTranscriptStore>();
 
@@ -90,7 +90,7 @@ namespace CoreAI.Tests.EditMode
                     true,
                     false);
 
-                builder.Register<FileAgentMemoryStore>(Lifetime.Singleton)
+                builder.Register(_ => new FileAgentMemoryStore(), Lifetime.Singleton)
                     .As<IAgentMemoryStore>()
                     .As<IConversationTranscriptStore>();
 

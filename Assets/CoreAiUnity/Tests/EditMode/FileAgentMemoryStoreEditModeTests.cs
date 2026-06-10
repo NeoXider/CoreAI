@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.AiMemory;
@@ -95,6 +97,119 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsTrue(store2.TryLoad(_roleId, out AgentMemoryState mem));
             Assert.IsTrue(string.IsNullOrEmpty(mem.Memory), "Memory field should be empty after Clear()");
+        }
+
+        [Serializable]
+        private sealed class PersistedProbe
+        {
+            public string lastSystemPrompt;
+            public string memory;
+        }
+
+        private static string CreateTempRoot()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "CoreAITestAgentMem_" + Path.GetRandomFileName());
+            Directory.CreateDirectory(root);
+            return root;
+        }
+
+        private static void DeleteTempRoot(string root)
+        {
+            try { Directory.Delete(root, true); } catch { /* best effort */ }
+        }
+
+        [Test]
+        public void SaveAsync_Then_TryLoadAsync_RoundTrips_WrittenData()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                store.SaveAsync(_roleId, new AgentMemoryState
+                {
+                    Memory = "ASYNC_FACT:dragon_slain",
+                    LastSystemPrompt = "npc"
+                }).GetAwaiter().GetResult();
+
+                AgentMemoryState loaded = store.TryLoadAsync(_roleId).GetAwaiter().GetResult();
+                Assert.IsNotNull(loaded, "TryLoadAsync should return the state written by SaveAsync");
+                Assert.AreEqual("ASYNC_FACT:dragon_slain", loaded.Memory);
+                Assert.AreEqual("npc", loaded.LastSystemPrompt);
+
+                // Sync path reads what the async path wrote.
+                Assert.IsTrue(store.TryLoad(_roleId, out AgentMemoryState syncLoaded));
+                Assert.AreEqual("ASYNC_FACT:dragon_slain", syncLoaded.Memory);
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void SaveAsync_ConcurrentWrites_FinalFileIsValidJsonOfOneWrite()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                const int writers = 24;
+                string[] values = Enumerable.Range(0, writers).Select(i => $"memory_payload_{i}").ToArray();
+
+                Task[] tasks = values
+                    .Select(v => Task.Run(() => store.SaveAsync(_roleId,
+                        new AgentMemoryState { Memory = v, LastSystemPrompt = "p_" + v })))
+                    .ToArray();
+                Task.WaitAll(tasks);
+
+                string safeName = string.Join("_", _roleId.Split(Path.GetInvalidFileNameChars()));
+                string path = Path.Combine(root, $"{safeName}.json");
+                Assert.IsTrue(File.Exists(path), "Memory file should exist after concurrent writes");
+                Assert.IsFalse(File.Exists(path + ".tmp"), "No leftover tmp file after atomic writes");
+
+                string json = File.ReadAllText(path);
+                PersistedProbe probe = JsonUtility.FromJson<PersistedProbe>(json);
+                Assert.IsNotNull(probe, "Final file must be valid JSON");
+                Assert.That(values, Does.Contain(probe.memory),
+                    "Final memory must be exactly one of the concurrently written values");
+                Assert.AreEqual("p_" + probe.memory, probe.lastSystemPrompt,
+                    "Memory and prompt must come from the same (non-torn) write");
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
+        public void AppendChatMessageAsync_ConcurrentAppends_AllMessagesSurvive()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+                const int writers = 16;
+
+                Task[] tasks = Enumerable.Range(0, writers)
+                    .Select(i => Task.Run(() => store.AppendChatMessageAsync(_roleId, "user", $"msg_{i}", true)))
+                    .ToArray();
+                Task.WaitAll(tasks);
+
+                // Fresh store instance forces a reload from disk.
+                FileAgentMemoryStore store2 = new(null, root);
+                ChatMessage[] history = store2.GetChatHistory(_roleId);
+                Assert.AreEqual(writers, history.Length,
+                    "All concurrently appended chat messages must be persisted");
+                for (int i = 0; i < writers; i++)
+                {
+                    string expected = $"msg_{i}";
+                    Assert.IsTrue(history.Any(m => m.Content == expected), $"Missing {expected}");
+                }
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
         }
     }
 }

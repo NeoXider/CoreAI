@@ -108,6 +108,133 @@ namespace CoreAI.Tests.EditMode
                 $"Обнаружена утечка рискованных глобалов: {v.String}");
         }
 
+        // ===================== Escape vectors (string.dump / coroutine.close / collectgarbage / _G) =====================
+
+        /// <summary>Returns true when the expression is unreachable: evaluates to nil or raises a Lua error.</summary>
+        private static bool VectorIsBlocked(Script script, string luaExpression)
+        {
+            try
+            {
+                DynValue v = script.DoString("return " + luaExpression);
+                return v.IsNil();
+            }
+            catch (ScriptRuntimeException)
+            {
+                return true;
+            }
+            catch (SyntaxErrorException)
+            {
+                return true;
+            }
+        }
+
+        [Test]
+        public void EscapeVector_StringDump_Blocked()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.IsTrue(VectorIsBlocked(script, "string.dump"),
+                "string.dump должен быть вырезан (утечка байткода)");
+            Assert.IsTrue(VectorIsBlocked(script, "string.dump(function() end)"),
+                "вызов string.dump должен падать");
+        }
+
+        [Test]
+        public void EscapeVector_StringDump_NotReachableViaStringMetatable()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.IsTrue(VectorIsBlocked(script, "('x').dump"),
+                "string.dump не должен быть доступен через метатаблицу строк");
+        }
+
+        [Test]
+        public void EscapeVector_CoroutineClose_AbsentOrHarmless()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            DynValue close = script.DoString("return coroutine.close");
+            if (close.IsNil())
+            {
+                Assert.Pass("coroutine.close отсутствует в MoonSharp — вектор закрыт");
+            }
+
+            // Если реализован — закрытие корутины не должно ронять хост или давать доступ к окружению.
+            try
+            {
+                DynValue v = script.DoString(
+                    "local co = coroutine.create(function() coroutine.yield() end)\n" +
+                    "return coroutine.close(co)");
+                Assert.AreNotEqual(DataType.Table, v.Type,
+                    "coroutine.close не должен возвращать таблицы (потенциальная утечка окружения)");
+            }
+            catch (ScriptRuntimeException)
+            {
+                // Ошибка Lua — допустимое (безопасное) поведение.
+            }
+        }
+
+        [Test]
+        public void EscapeVector_CollectGarbage_Blocked()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.IsTrue(VectorIsBlocked(script, "collectgarbage"),
+                "collectgarbage должен быть вырезан (timing/heap oracle)");
+            Assert.IsTrue(VectorIsBlocked(script, "collectgarbage('count')"),
+                "вызов collectgarbage должен падать");
+        }
+
+        [Test]
+        public void EscapeVector_GetMetatableOfString_Blocked()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.IsTrue(VectorIsBlocked(script, "getmetatable('')"),
+                "getmetatable('') не должен отдавать метатаблицу строк (доступ к __index)");
+            Assert.IsTrue(VectorIsBlocked(script, "getmetatable('') and getmetatable('').__index"),
+                "__index метатаблицы строк недоступен");
+        }
+
+        [Test]
+        public void EscapeVector_RawgetTricks_Blocked()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.IsTrue(VectorIsBlocked(script, "rawget(_G or {}, 'os')"),
+                "rawget(_G, 'os') не должен возвращать os");
+            Assert.IsTrue(VectorIsBlocked(script, "rawget(_G or {}, 'io')"),
+                "rawget(_G, 'io') не должен возвращать io");
+            Assert.IsTrue(VectorIsBlocked(script, "rawget(_G or {}, 'load')"),
+                "rawget(_G, 'load') не должен возвращать load");
+        }
+
+        [Test]
+        public void EscapeVector_GlobalsViaUnderscoreG_Blocked()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            DynValue v = script.DoString(
+                "local g = _G or _ENV\n" +
+                "if g == nil then return '' end\n" +
+                "local leaks = {}\n" +
+                "for _, name in ipairs({'os','io','debug','load','loadfile','dofile','collectgarbage'}) do\n" +
+                "    if g[name] ~= nil then leaks[#leaks+1] = name end\n" +
+                "    local sd = g['string']\n" +
+                "    if sd ~= nil and sd.dump ~= nil then leaks[#leaks+1] = 'string.dump' end\n" +
+                "end\n" +
+                "return table.concat(leaks, ',')");
+            Assert.AreEqual(string.Empty, v.IsNil() ? string.Empty : v.String,
+                $"Доступ через _G/_ENV не должен возвращать рискованные глобалы: {v}");
+        }
+
         // ===================== Coroutine sandbox =====================
 
         [Test]

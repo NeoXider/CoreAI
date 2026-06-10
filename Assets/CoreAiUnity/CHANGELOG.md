@@ -2,6 +2,20 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [3.1.0] - 2026-06-10
+
+### Reliability hardening + diagnostics overlay
+
+- Bumped `com.nexoider.coreaiunity` to `3.1.0` and aligned the dependency on `com.nexoider.coreai` `3.1.0`.
+- **`LuaCoroutineRunner` — active-coroutine cap.** New `MaxActiveCoroutines` (default 64); `Register()` prunes dead handles and hard-stops with `InvalidOperationException` + error log when the cap is reached, so LLM-generated scripts can no longer spam unbounded coroutines. Completed/killed coroutines free their slot immediately (previously cleanup only happened in `Update()`).
+- **`FileAgentMemoryStore` — off-main-thread async I/O.** New `TryLoadAsync` / `SaveAsync` / `ClearAsync` / `ClearChatHistoryAsync` / `AppendChatMessageAsync` / `AppendTranscriptEntryAsync` run file I/O on the thread pool, serialized with the sync paths via a per-store `SemaphoreSlim` (no frame freeze on large agent memory). Atomic tmp-file writes unchanged; WebGL runs inline (no threads). New optional `rootDirectory` ctor parameter for testability.
+- **Token-budget overlay.** New `CoreAiTokenBudgetOverlay` (IMGUI, F10 toggle by default) showing current token usage, tokens/request, optional $/session from configurable per-1K prices, and a rolling-window request-load indicator on top of `IInGameLlmChatService.GetRateLimiterMetrics()`. Works in Editor and Play Mode; degrades gracefully when no service is available.
+- Core `3.1.0` ships retry-backoff full jitter, the `ToolNameRepairCount` metric, retry error-feedback history reclamation, async I/O for `FileConversationSummaryStore`, and two closed Lua sandbox escape vectors (`string.dump`, `collectgarbage`) — see the core changelog.
+- New EditMode coverage: backoff jitter bounds, repair-counter increments, error-feedback removal with valid pairing, coroutine-limit behavior, sandbox escape vectors, concurrent async store writes, token-budget calculator.
+- Repository: versioned `hooks/pre-commit` guard against junk files in the repo root (logs, `*.db`, orphan root `.meta`); enable with `git config core.hooksPath hooks` (see `CONTRIBUTING.md`).
+
+#### Package **`3.1.0`** - dependency **`com.nexoider.coreai` `3.1.0`**.
+
 ## [3.0.0] - 2026-06-10
 
 ### Major — optional Lua module + core reliability hardening
