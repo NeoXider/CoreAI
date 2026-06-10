@@ -429,14 +429,22 @@ Unity Package Manager does not transitively pull every Git dependency for you.
 
 ```json
     "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
-    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
     "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
     "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
-    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
 ```
 
-*(After saving the file, Unity will automatically download VContainer, MoonSharp, UniTask, MessagePipe, and LLMUnity).*
+**Optional modules (since v3.0.0)** — CoreAI compiles without them and enables the features automatically when the package is detected:
+
+```json
+    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
+    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
+```
+
+| Optional package | Unlocks | Skip it if |
+|------------------|---------|------------|
+| **LLMUnity** (`ai.undream.llm`) | Local GGUF models on-device | You only use an OpenAI-compatible HTTP API |
+| **MoonSharp** (`org.moonsharp.moonsharp`) | Lua sandbox & AI-written gameplay scripts | You don't need Lua scripting |
 
 ### 3. Install CoreAI packages (Git URL)
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**

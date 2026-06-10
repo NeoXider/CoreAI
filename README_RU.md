@@ -370,14 +370,22 @@ Unity Package Manager сам не подтягивает все транзити
 
 ```json
     "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
-    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
     "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe",
     "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
-    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
 ```
 
-*(После сохранения файла Unity сама скачает все нужные библиотеки: VContainer, MoonSharp, UniTask, MessagePipe и LLMUnity)*
+**Опциональные модули (с v3.0.0)** — CoreAI компилируется без них, а при появлении пакета фича включается автоматически:
+
+```json
+    "ai.undream.llm": "https://github.com/undreamai/LLMUnity.git",
+    "org.moonsharp.moonsharp": "https://github.com/moonsharp-devs/moonsharp.git?path=/interpreter#upm/beta/v3.0",
+```
+
+| Опциональный пакет | Что даёт | Можно пропустить, если |
+|--------------------|----------|------------------------|
+| **LLMUnity** (`ai.undream.llm`) | Локальные GGUF-модели на устройстве | Используешь только OpenAI-совместимый HTTP API |
+| **MoonSharp** (`org.moonsharp.moonsharp`) | Lua-песочница и скрипты, которые пишет AI | Lua-скриптинг не нужен |
 
 ### 3. Пакеты CoreAI через Git URL
 **Unity Editor →** Window → Package Manager → `+` → **Add package from git URL…**
