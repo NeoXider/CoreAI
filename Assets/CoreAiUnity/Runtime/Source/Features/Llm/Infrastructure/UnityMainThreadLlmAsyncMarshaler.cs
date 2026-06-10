@@ -179,9 +179,6 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // Not confirmed Play (mirror != 1): inline on the pool. Treat unknown (-1) like Edit idle so
-            // SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on the main thread) never deadlock.
-            // Stale 0 while Play is mitigated by RuntimeInitialize primers + first-frame mirror updates.
             if (Volatile.Read(ref _editorRuntimePlayModeEntered) == 1)
             {
                 return false;
@@ -192,7 +189,12 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
-            return Volatile.Read(ref _editorMirrorIsPlaying) != 1;
+            // Inline only on explicit Edit idle (0). Unknown (-1) must marshal: a Play Mode domain whose
+            // primers raced this pool-thread call would otherwise run the tool body on the pool. Any real
+            // Edit session primes the mirror to 0 via [InitializeOnLoad]/EditorApplication.update long
+            // before a tool body runs, so SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on
+            // the main thread) still take the inline path and never deadlock.
+            return Volatile.Read(ref _editorMirrorIsPlaying) == 0;
         }
 
         private static bool IsEditorPlayingOrWillEnterPlayMode()
