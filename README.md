@@ -601,9 +601,18 @@ Run EditMode first in CI; PlayMode is optional and needs a backend (env vars for
 
 **Author:** [Neoxider](https://github.com/NeoXider)  
 **Ecosystem:** [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools)  
-**License:** [PolyForm Noncommercial 1.0.0](LICENSE) (commercial use — separate license)
+**License:** [LICENSE](LICENSE)
 
 **Contact:** neoxider@gmail.com | [GitHub Issues](https://github.com/NeoXider/CoreAI/issues)
+
+### 💖 Support the project
+
+CoreAI is free for non-commercial use and developed in spare time. If it saves you hours of work:
+
+- ⭐ **Star the repo** — the cheapest way to help it grow
+- 💖 **[Sponsor on GitHub](https://github.com/sponsors/NeoXider)** — fund development of new features
+- 💼 **Need it in a commercial game?** A separate commercial license is available — write to neoxider@gmail.com
+- 🛠️ **Priority support / custom integration** — also via email
 
 ---
 
