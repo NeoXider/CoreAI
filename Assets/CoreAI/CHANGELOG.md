@@ -1,13 +1,35 @@
 ﻿# Changelog
 
-## [Unreleased]
+## [v3.0.0] - 2026-06-10
 
-### Core policy registration safety
+### Major — Lua/MoonSharp is now an optional module
 
-- `AgentBuilder.Build()` now applies role configuration to `CoreAIAgent.Policy` when policy is already initialized.
-- Added `BuildDetached()` safety for policy-free construction; it does not mutate global policy by default.
-- Added `AgentConfigExtensions` fail-fast coverage for unregistered roles (`InvalidOperationException` instead of implicit behavior).
-- Added `CoreAi.SetResolver` edit-mode coverage for orchestrator override.
+- **`COREAI_NO_LUA` scripting define.** Defining `COREAI_NO_LUA` compiles the entire Lua sandbox out of both `CoreAI.Core` and `CoreAI.Source`, exactly mirroring the existing `COREAI_NO_LLM` opt-out convention. Core orchestration, LLM, chat, and agent memory build and run with no MoonSharp usage; with the define set you may also remove the `org.moonsharp.moonsharp` package.
+- Whole-file guarded under `#if !COREAI_NO_LUA`: `SecureLuaEnvironment`, `LuaCoroutineHandle`, `LuaApiRegistry`, `LuaExecutionGuard`, `InstructionLimitDebugger`, `LuaAiEnvelopeProcessor` (Core) and `LuaCoroutineRunner` (Source).
+- **Graceful no-op when disabled.** `CorePortableInstaller` and `WorldCommandsInstaller` skip Lua registrations under the define; `WorldCommandsInstaller` falls back to the Core-side `CoreDefaultLuaRuntimeBindings` / `NullLuaExecutionObserver` so the DI graph still resolves. `AiGameCommandRouter`'s `LuaAiEnvelopeProcessor` dependency is compiled out (no longer a hard constructor dependency) so command routing degrades to world-command execution only.
+- Lua/MoonSharp EditMode and PlayMode tests are guarded so both build configurations compile. Verified: default build (Lua on) and `COREAI_NO_LUA` build both compile with zero errors.
+
+### Reliability hardening (code audit follow-up)
+
+- **`HttpClientOpenAiTransport` — socket-exhaustion fix.** Replaced per-request `new HttpClient` (disposed every call, sockets stuck in `TIME_WAIT`) with shared `Lazy<HttpClient>` instances over an `HttpClientHandler`. Per-request timeouts are now enforced via a linked `CancellationTokenSource` instead of mutating the shared client's `Timeout`; streaming no longer disposes the shared client. (`HttpClientHandler` is used rather than `SocketsHttpHandler` so the transport stays valid on Unity's .NET Standard 2.0 profile.)
+- **Crash-safe atomic JSON writes.** `FileAgentMemoryStore` (4 write sites) and `FileConversationSummaryStore` now write to a `.tmp` file and `File.Replace`/`File.Move` into place, so a crash mid-write can no longer corrupt agent memory or conversation summaries.
+- **`LuaCoroutineHandle.Kill()` — real termination.** Replaced the empty `try/catch` (which only set `_disposed`) with a forced yield via MoonSharp `Coroutine.AutoYieldCounter`, plus typed exception handling; `_disposed` guarantees the coroutine is no longer resumable.
+
+### Fixes
+
+- **`CoreAIFacade` portable-Core regression.** Removed a `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` (`UnityEngine`) attribute that had been added to the UnityEngine-free `CoreAI.Core` assembly and broke its compilation. The Play Mode / domain-reload static reset of `CoreAIAgent` now lives in the Unity layer (`CoreAi.Invalidate()` calls `CoreAIAgent.Reset()`).
+- **`AgentConfigExtensions.AskAsync` validation order.** Role-registration validation now runs *before* the orchestrator-null check, so an unregistered role reports the clear `role not registered` error regardless of whether the orchestrator is initialized yet (the 2.6.5 fail-fast test previously never compiled and so never caught this).
+- Timeout now surfaces as `OperationCanceledException` without an inner `TimeoutException` (HTTP transport change above).
+
+### Core policy registration safety (carried from 2.6.5 dev)
+
+- `AgentBuilder.Build()` applies role configuration to `CoreAIAgent.Policy` when policy is already initialized; `BuildDetached()` for policy-free construction.
+- `AgentConfigExtensions` fail-fast coverage for unregistered roles; `CoreAi.SetResolver` edit-mode coverage.
+
+### Semver
+
+- **Major bump to `3.0.0`** (lockstep with `com.nexoider.coreaiunity` `3.0.0`): Lua becoming an optional, compile-out module is a structural change to how the packages are consumed.
+
 ## [v2.6.5] - 2026-06-10
 
 ### Policy registration and orchestration safety

@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using MoonSharp.Interpreter;
 
@@ -59,9 +60,29 @@ namespace CoreAI.Sandbox
             {
                 try
                 {
+                    // MoonSharp's Coroutine type does not expose a public ForceKill/Dispose
+                    // that transitions the underlying Processor state to Dead. The only
+                    // public way to influence a suspended coroutine's lifecycle is via
+                    // AutoYieldCounter, which forces the VM to yield back to the caller
+                    // on its next instruction instead of continuing to run. Setting it to
+                    // a minimal value ensures that if anything resumes this coroutine
+                    // again before _disposed is observed, it yields immediately rather
+                    // than performing further work. The actual termination guarantee for
+                    // this handle comes from _disposed: once set, Resume() throws
+                    // ObjectDisposedException and IsAlive reports false, so the coroutine
+                    // can never be resumed again through this handle and is left to be
+                    // garbage collected with the rest of the script state.
+                    _coroutine.Coroutine.AutoYieldCounter = 1;
                 }
-                catch
+                catch (ScriptRuntimeException)
                 {
+                    // Coroutine was already in a state (e.g. Dead) where touching its
+                    // internals raises a script-level error; nothing left to terminate.
+                }
+                catch (InvalidOperationException)
+                {
+                    // Coroutine type does not support this operation (e.g. CLR callback
+                    // coroutines); nothing left to terminate.
                 }
             }
 
@@ -69,3 +90,4 @@ namespace CoreAI.Sandbox
         }
     }
 }
+#endif

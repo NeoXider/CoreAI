@@ -30,6 +30,7 @@ namespace CoreAI.Composition
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton)
                 .As<IDataOverlayPayloadValidator>();
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
@@ -39,6 +40,12 @@ namespace CoreAI.Composition
                 .As<ILuaExecutionObserver>();
             builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton,
                 "CoreAI_LuaCoroutineRunner");
+#else
+            builder.Register<CoreAI.Ai.CoreDefaultLuaRuntimeBindings>(Lifetime.Singleton)
+                .As<CoreAI.Ai.IGameLuaRuntimeBindings>();
+            builder.Register<CoreAI.Ai.NullLuaExecutionObserver>(Lifetime.Singleton)
+                .As<CoreAI.Ai.ILuaExecutionObserver>();
+#endif
             builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
 

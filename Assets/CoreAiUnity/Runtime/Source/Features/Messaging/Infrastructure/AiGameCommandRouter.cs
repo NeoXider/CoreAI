@@ -19,7 +19,9 @@ namespace CoreAI.Infrastructure.Messaging
 
         private readonly ISubscriber<ApplyAiGameCommand> _subscriber;
         private readonly IGameLogger _logger;
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
         private readonly LuaAiEnvelopeProcessor _luaProcessor;
+#endif
         private readonly ICoreAiWorldCommandExecutor _worldExecutor;
         private IDisposable _subscription;
         private volatile bool _disposed;
@@ -28,12 +30,16 @@ namespace CoreAI.Infrastructure.Messaging
         public AiGameCommandRouter(
             ISubscriber<ApplyAiGameCommand> subscriber,
             IGameLogger logger,
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             LuaAiEnvelopeProcessor luaProcessor,
+#endif
             ICoreAiWorldCommandExecutor worldExecutor)
         {
             _subscriber = subscriber;
             _logger = logger;
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             _luaProcessor = luaProcessor;
+#endif
             _worldExecutor = worldExecutor;
         }
 
@@ -57,7 +63,9 @@ namespace CoreAI.Infrastructure.Messaging
 
                     try
                     {
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
                         _luaProcessor.Process(captured);
+#endif
                         _worldExecutor?.TryExecute(captured);
                         CommandReceived?.Invoke(captured);
                         string pay = captured.JsonPayload ?? "";

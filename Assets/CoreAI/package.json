@@ -1,9 +1,9 @@
 {
   "name": "com.nexoider.coreai",
-  "version": "2.6.4",
+  "version": "3.0.0",
   "displayName": "CoreAI",
   "unity": "6000.0",
-  "description": "Portable CoreAI.Core (no UnityEngine): orchestration, Lua sandbox, ILlmClient contracts, AgentBuilder, CoreAISettings. SkillSet self-service tool groups via read_skill + call_skill_tool proxy. Resilience limits and RateLimiterMetrics. v2.6.4: lockstep release for Unity backend proxy streaming and chat reliability fixes. Unity integration ships in com.nexoider.coreaiunity.",
+  "description": "Portable C# core for CoreAI — LLM agents that call your game code. Orchestration, function-calling tools, agent memory, AgentBuilder, SkillSet, and production resilience (retries, timeouts, rate limits), with no UnityEngine dependency. LLM and Lua are optional modules (COREAI_NO_LLM / COREAI_NO_LUA), so the core compiles without them — install only what your game uses. Unity integration ships in com.nexoider.coreaiunity.",
   "author": {
     "name": "NeoXider",
     "url": "https://github.com/NeoXider/CoreAI"

@@ -40,13 +40,16 @@ namespace CoreAI.Ai
             int priority = 0,
             CancellationToken cancellationToken = default)
         {
+            // Validate the agent config (role registration) before infrastructure state so an
+            // unregistered role fails with a clear "not registered" message regardless of whether
+            // the orchestrator happens to be initialized yet.
+            ValidateRoleRegistered(config);
+
             if (orchestrator == null)
             {
                 throw new InvalidOperationException(
                     "Orchestrator is null. Make sure CoreAILifetimeScope is initialized or pass orchestrator explicitly.");
             }
-
-            ValidateRoleRegistered(config);
 
             return orchestrator.RunTaskAsync(new AiTaskRequest
             {

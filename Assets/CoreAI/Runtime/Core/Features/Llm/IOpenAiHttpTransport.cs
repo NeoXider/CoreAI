@@ -75,6 +75,18 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Transfers ownership of <paramref name="stream"/> and <paramref name="response"/>, but does not take
+        /// ownership of any <see cref="HttpClient"/> (used when the transport reuses a shared, long-lived client
+        /// that must not be disposed per-request).
+        /// </summary>
+        internal OpenAiHttpSseOpenResult WithStreamResponse(Stream? stream, HttpResponseMessage? response)
+        {
+            _stream = stream;
+            _responseDispose = response;
+            return this;
+        }
+
+        /// <summary>
         /// Transfers ownership of <paramref name="stream"/> only, with no HttpClient/HttpResponseMessage.
         /// Used by transports that bypass <c>System.Net.Http</c> (browser <c>fetch</c> bridge in WebGL).
         /// </summary>

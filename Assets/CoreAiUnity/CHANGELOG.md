@@ -2,6 +2,18 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [3.0.0] - 2026-06-10
+
+### Major — optional Lua module + core reliability hardening
+
+- Bumped `com.nexoider.coreaiunity` to `3.0.0` and aligned the dependency on `com.nexoider.coreai` `3.0.0`.
+- **Lua/MoonSharp is now an optional module via the `COREAI_NO_LUA` scripting define** (mirrors the existing `COREAI_NO_LLM` opt-out). With the define set, `LuaCoroutineRunner` and all Lua registrations in `CorePortableInstaller` / `WorldCommandsInstaller` are compiled out, `AiGameCommandRouter` drops its `LuaAiEnvelopeProcessor` dependency, and the DI graph falls back to `CoreDefaultLuaRuntimeBindings` / `NullLuaExecutionObserver`. Both build configurations compile with zero errors.
+- Core audit follow-up shipping in `com.nexoider.coreai` `3.0.0`: shared `HttpClient` over an `HttpClientHandler` (socket-exhaustion fix, valid on .NET Standard 2.0), crash-safe atomic JSON writes for `FileAgentMemoryStore` / `FileConversationSummaryStore`, and real `LuaCoroutineHandle.Kill()` termination.
+- Fixed a portable-Core regression where a `[RuntimeInitializeOnLoadMethod]` (`UnityEngine`) attribute had been added to the UnityEngine-free `CoreAI.Core`; the Play Mode static reset of `CoreAIAgent` now runs from the Unity layer via `CoreAi.Invalidate()`.
+- Fixed `AgentConfigExtensions.AskAsync` so role-registration validation runs before the orchestrator-null check (unregistered roles now report `role not registered` consistently).
+
+#### Package **`3.0.0`** - dependency **`com.nexoider.coreai` `3.0.0`**.
+
 ## [2.6.5] - 2026-06-10
 
 ### Policy bootstrap safety

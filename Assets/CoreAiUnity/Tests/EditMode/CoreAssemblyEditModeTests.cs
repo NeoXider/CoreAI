@@ -3,7 +3,9 @@ using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Sandbox;
 using CoreAI.Session;
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using MoonSharp.Interpreter;
+#endif
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -71,6 +73,7 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("\"hint\":\"h\"", u);
         }
 
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
         [Test]
         public void SecureLuaEnvironment_AllowsWhitelistedApi()
         {
@@ -106,5 +109,6 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(isStepLimit || isTimeout,
                 $"Expected step limit or timeout, but got: {ex.Message}");
         }
+#endif
     }
 }

@@ -77,7 +77,7 @@ namespace CoreAI.Ai
                 EnsureDir();
                 PersistedDto dto = new() { Summary = summary ?? "" };
                 string json = JsonConvert.SerializeObject(dto, JsonSettings);
-                File.WriteAllText(GetPath(roleId), json);
+                AtomicWriteAllText(GetPath(roleId), json);
             }
             catch (Exception ex)
             {
@@ -118,6 +118,43 @@ namespace CoreAI.Ai
             if (!Directory.Exists(_dir))
             {
                 Directory.CreateDirectory(_dir);
+            }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="contents"/> to <paramref name="path"/> atomically by writing to a temp
+        /// file first and then swapping it into place, so a crash mid-write cannot corrupt the existing file.
+        /// </summary>
+        private static void AtomicWriteAllText(string path, string contents)
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string tmpPath = path + ".tmp";
+            File.WriteAllText(tmpPath, contents);
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Replace(tmpPath, path, null);
+                }
+                else
+                {
+                    File.Move(tmpPath, path);
+                }
+            }
+            catch
+            {
+                if (File.Exists(tmpPath))
+                {
+                    try { File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+                }
+
+                throw;
             }
         }
     }

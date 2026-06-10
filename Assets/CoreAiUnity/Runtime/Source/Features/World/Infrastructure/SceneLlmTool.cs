@@ -206,9 +206,11 @@ namespace CoreAI.Ai
 
         private async Task<string> SetTransformAsync(
             int instanceId,
-            float? px, float? py, float? pz,
-            float? rx, float? ry, float? rz,
-            float? sx, float? sy, float? sz,
+            // Default values mark these optional in the MEAI function schema so the model (and callers)
+            // can pass only the coordinates they want to change; missing values leave the axis untouched.
+            float? px = null, float? py = null, float? pz = null,
+            float? rx = null, float? ry = null, float? rz = null,
+            float? sx = null, float? sy = null, float? sz = null,
             CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);

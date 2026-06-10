@@ -21,18 +21,47 @@ namespace CoreAI.Infrastructure.Llm
 
         public bool SupportsSseStreaming => true;
 
+        /// <summary>
+        /// Shared <see cref="HttpClient"/> for non-streaming requests. A single instance is reused across
+        /// requests to avoid per-request socket exhaustion (a fresh <see cref="HttpClient"/> per call leaves
+        /// sockets in <c>TIME_WAIT</c> and exhausts ephemeral ports under load). Per-request timeouts are
+        /// enforced via a linked <see cref="CancellationTokenSource"/> instead of mutating
+        /// <see cref="HttpClient.Timeout"/> (which is not thread-safe to change after first use).
+        /// </summary>
+        private static readonly Lazy<HttpClient> s_boundedClient = new(CreateSharedHttpClient);
+
+        /// <summary>
+        /// Shared <see cref="HttpClient"/> for SSE streaming requests. Streams are typically long-lived, so
+        /// the client timeout is disabled and stall detection is left to the caller via cancellation.
+        /// </summary>
+        private static readonly Lazy<HttpClient> s_streamingClient = new(CreateSharedHttpClient);
+
+        private static HttpClient CreateSharedHttpClient()
+        {
+            // HttpClientHandler is available on .NET Standard 2.0 (Unity's default Mono/IL2CPP profile);
+            // SocketsHttpHandler is .NET Standard 2.1+. Connection pooling is handled by the runtime's
+            // ServicePoint layer; the key fix is reusing one HttpClient instead of creating one per request.
+            HttpClientHandler handler = new();
+
+            return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        }
+
         public async Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
             int sec = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
-            using HttpClient client = CreateBoundedHttpClient(sec);
+            HttpClient client = GetBoundedHttpClient();
+
+            using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(sec));
+            using CancellationTokenSource linkedCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
             using HttpRequestMessage httpRequest = new(HttpMethod.Post, request.Url);
             httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
             ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
 
             using HttpResponseMessage response =
-                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, cancellationToken);
+                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, linkedCts.Token);
             string bodyText = await response.Content.ReadAsStringAsync();
 
             return new OpenAiHttpPostResult
@@ -46,46 +75,37 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
-            int stallBudget = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
-            HttpClient client = CreateStreamingHttpClient(stallBudget);
-            try
+            HttpClient client = GetStreamingHttpClient();
+
+            using HttpRequestMessage httpRequest = new(HttpMethod.Post, request.Url);
+            httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
+            ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
+
+            HttpResponseMessage response =
+                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            int statusCode = (int)response.StatusCode;
+            IReadOnlyDictionary<string, IEnumerable<string>> headers = CopyHeaders(response);
+
+            if (!response.IsSuccessStatusCode)
             {
-                using HttpRequestMessage httpRequest = new(HttpMethod.Post, request.Url);
-                httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
-                ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
-
-                HttpResponseMessage response =
-                    await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-                int statusCode = (int)response.StatusCode;
-                IReadOnlyDictionary<string, IEnumerable<string>> headers = CopyHeaders(response);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    string errBody = await response.Content.ReadAsStringAsync();
-                    response.Dispose();
-                    client.Dispose();
-                    return new OpenAiHttpSseOpenResult
-                    {
-                        StatusCode = statusCode,
-                        ErrorBodyText = errBody ?? "",
-                        ResponseHeaders = headers
-                    };
-                }
-
-                Stream stream = await response.Content.ReadAsStreamAsync();
+                string errBody = await response.Content.ReadAsStringAsync();
+                response.Dispose();
                 return new OpenAiHttpSseOpenResult
                 {
                     StatusCode = statusCode,
-                    ErrorBodyText = "",
+                    ErrorBodyText = errBody ?? "",
                     ResponseHeaders = headers
-                }.WithStreamResponseAndClient(stream, response, client);
+                };
             }
-            catch
+
+            Stream stream = await response.Content.ReadAsStreamAsync();
+            return new OpenAiHttpSseOpenResult
             {
-                client.Dispose();
-                throw;
-            }
+                StatusCode = statusCode,
+                ErrorBodyText = "",
+                ResponseHeaders = headers
+            }.WithStreamResponse(stream, response);
         }
 
         private static void ApplyHeaders(HttpRequestMessage httpRequest,
@@ -131,7 +151,7 @@ namespace CoreAI.Infrastructure.Llm
             return d;
         }
 
-        private static HttpClient CreateBoundedHttpClient(int transportTimeoutSec)
+        private static HttpClient GetBoundedHttpClient()
         {
 #if UNITY_EDITOR
             if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
@@ -139,11 +159,10 @@ namespace CoreAI.Infrastructure.Llm
                 return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
             }
 #endif
-            int sec = transportTimeoutSec <= 0 ? 120 : transportTimeoutSec;
-            return new HttpClient { Timeout = TimeSpan.FromSeconds(sec) };
+            return s_boundedClient.Value;
         }
 
-        private static HttpClient CreateStreamingHttpClient(int stallBudgetSeconds)
+        private static HttpClient GetStreamingHttpClient()
         {
 #if UNITY_EDITOR
             if (MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory != null)
@@ -151,8 +170,7 @@ namespace CoreAI.Infrastructure.Llm
                 return MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory();
             }
 #endif
-            _ = stallBudgetSeconds;
-            return new HttpClient { Timeout = TimeSpan.FromHours(24) };
+            return s_streamingClient.Value;
         }
     }
 }

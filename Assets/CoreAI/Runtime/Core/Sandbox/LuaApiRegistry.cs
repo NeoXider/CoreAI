@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
 using MoonSharp.Interpreter;
@@ -53,3 +54,4 @@ namespace CoreAI.Sandbox
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
@@ -501,3 +502,4 @@ namespace CoreAI.Tests.EditMode.LuaFormulas
         }
     }
 }
+#endif

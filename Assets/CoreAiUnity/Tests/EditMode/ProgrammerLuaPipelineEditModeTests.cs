@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Ai;
 using CoreAI.Sandbox;
 using MoonSharp.Interpreter;
@@ -39,3 +40,4 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+#endif

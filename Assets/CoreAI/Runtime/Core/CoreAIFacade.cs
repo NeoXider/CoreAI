@@ -63,19 +63,20 @@
             MemoryStore = memoryStore;
         }
 
-        /// <summary>Clears the global CoreAI facade registrations.</summary>
+        /// <summary>
+        /// Clears the global CoreAI facade registrations.
+        /// </summary>
+        /// <remarks>
+        /// CoreAI.Core is portable (no <c>UnityEngine</c> reference), so the Unity-specific
+        /// <c>[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]</c> reset hook that
+        /// clears this state across Play Mode / domain transitions lives in the Unity layer
+        /// (<c>CoreAi.Invalidate()</c> in <c>com.nexoider.coreaiunity</c>), which calls this method.
+        /// </remarks>
         public static void Reset()
         {
             Orchestrator = null;
             Policy = null;
             MemoryStore = null;
-        }
-
-        [global::UnityEngine.RuntimeInitializeOnLoadMethod(
-            global::UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetForSubsystemRegistration()
-        {
-            Reset();
         }
     }
 }

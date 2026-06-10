@@ -2,33 +2,52 @@
   <img src="Images/header_concept_2.png" alt="CoreAI Banner" width="100%">
 </p>
 
-# <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — AI-агенты в Unity
+# <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI — LLM-агенты, которые играют в вашу игру
+
+**CoreAI — это Unity-фреймворк для NPC и агентов на LLM, которые вызывают код вашей игры:** function calling, инструменты, постоянная память и Lua в рантайме — на **локальной модели 4 ГБ** или любом **OpenAI-совместимом API**. Без облачных ключей и скриптовых деревьев диалогов.
 
 *Читать на других языках: [English](README.md), [Русский](README_RU.md).*
 
-> ### 🎬 Представьте
-> Игрок подходит к кузнецу-NPC и пишет: _«Есть огненные мечи?»_. Кузнец **вызывает ваш код инвентаря**, ничего не находит, и **отвечает по роли**: _«Огненных клинков нет, но могу выковать, если принесёшь Кристалл Огня.»_ Игрок крафтит — **Programmer-агент пишет Lua**, **CoreMechanic считает статы**, и уникальный _Меч Пламени_ падает в инвентарь. Всё в рантайме, стримингом токен за токеном в чат-пузырь, на **локальной модели 4 ГБ**. Без облачных ключей. Без скриптовых деревьев диалогов. **Это CoreAI.**
-
-**Одно хранилище, два пакета:** портативное ядро C# и Unity-слой с DI, панелью чата и тестами. Хотите *демо за пять минут* — или *многошаговый пайплайн с инструментами и Lua* — используются одни и те же кирпичики.
-
-- 🧠 **Агенты, которые вызывают ваш код** — не просто генерация текста, а реальный function calling с ретраем, авто-ремонтом и памятью.
-- 🛡️ **Самовосстанавливающаяся устойчивость** — `TryRepairToolName` автоматически чинит регистр имён инструментов; HTTP retry читает `Retry-After` заголовки с экспоненциальным backoff.
-- 🌊 **Стриминг, переживший разорванные теги** — stateful SSE-аккумуляция собирает фрагментированные `<think>` блоки и tool calls.
-- 💬 **Чат-панель в один клик** — `CoreAI → Setup → Create Chat Demo Scene` → Play.
-- ⚡ **Одна строка из любого скрипта** — `await CoreAi.AskAsync("…")` — без DI-бойлерплейта.
-- 🧭 **LLM-режимы под разные production-сценарии** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
-- 🗜️ **Длинный чат без «переполнения»** — бюджет токенов на историю, блок **`## Conversation Summary`**, опциональная LLM-свёртка (в духе Kilocode) и переключатели **по ролям**: `AgentBuilder.WithLlmContextCompaction(...)` и глобальный флаг на **`CoreAISettings`**.
-- 🎯 **Self-Service Skills** — группируй инструменты по доменам (крафт, бой, торговля). Модель видит только 2 мета-инструмента (`read_skill` + `call_skill_tool`), а не сотни тулов. Экономия токенов ~91%.
-- 🛡️ **Production-устойчивость** — `MaxToolResultChars` (обрезка больших результатов), `DefaultToolTimeoutMs` (таймаут на тул), `MaxResponseChars` (лимит ответа), `MaxToolCallRoundtrips` (защита от зацикливания), `MaxToolCallHistoryMessages` (обрезка истории). `RateLimiterMetrics` диагностика. Всё в Inspector.
-- 🔄 **Dual-backend с автопереключением** — настрой secondary HTTP backend в Inspector. При ошибке primary запрос автоматически уходит на secondary (`FallbackLlmClientDecorator`). Идеально для локальная модель + облачный fallback.
-
-> 🚀 **Проверено на малых моделях:** полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF. Облачные API не обязательны.
-
-**Версия:** см. [`Assets/CoreAiUnity/package.json`](Assets/CoreAiUnity/package.json) и [`Assets/CoreAI/package.json`](Assets/CoreAI/package.json) (одинаковый semver). **Стриминг WebGL:** **`WebGlNativeStreaming`** (fetch + jslib) — [`STREAMING_ARCHITECTURE.md`](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md). **Сборка WebGL:** [`WEBGL_BUILD_TROUBLESHOOTING.md`](Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
-
-[![EditMode tests](https://img.shields.io/badge/EditMode-extensive%20suite-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![EditMode tests](https://img.shields.io/badge/EditMode-911%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
+[![Runs on](https://img.shields.io/badge/работает%20на-локальной%204B%20GGUF%20или%20любом%20OpenAI%20API-blue)](#-рекомендуемые-модели)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
+
+> ### 🎬 Представьте
+> Игрок подходит к кузнецу-NPC и пишет: _«Есть огненные мечи?»_. Кузнец **вызывает ваш код инвентаря**, ничего не находит, и **отвечает по роли**: _«Огненных клинков нет, но могу выковать, если принесёшь Кристалл Огня.»_ Игрок крафтит — **Programmer-агент пишет Lua**, **CoreMechanic считает статы**, и уникальный _Меч Пламени_ падает в инвентарь. Всё в рантайме, стримингом токен за токеном в чат-пузырь, на локальной модели. **Это CoreAI.**
+
+### Зачем CoreAI?
+
+Демок «LLM в игре» полно; сложно именно **довести до релиза**. CoreAI — это недостающий production-слой между чат-окном и геймплеем: модель не просто говорит — она **вызывает ваш C# и Lua**, а фреймворк берёт на себя суровую реальность малых локальных моделей (неверный регистр имён тулов, разорванный стриминг, зацикливание, rate limits, переполнение контекста), чтобы игра не ломалась.
+
+- 🆓 **Работает из коробки и масштабируется в production** — одна строка `await CoreAi.AskAsync("…")` для первой фичи; полный `AgentBuilder` + оркестратор + маршрутизация по ролям, когда нужно.
+- 🧩 **Не тянет тяжёлых обязательных зависимостей** — LLM и Lua это **опциональные модули** (`COREAI_NO_LLM` / `COREAI_NO_LUA`, авто-детект по установленным пакетам). Ставьте только то, что использует игра.
+- 🛡️ **Заточен под малые локальные модели** — авто-чинит регистр имён тулов, ретраит с обратной связью, переживает разрывы `<think>`, ограничивает «убегающую» генерацию. Полный набор PlayMode-тестов проходит на локальной **Qwen3.5-4B** GGUF.
+
+### Для кого это?
+
+| Вы… | Начните с | Время до первого результата |
+|-----|-----------|------------------------------|
+| 🟢 **Новичок / прототип** | `CoreAI → Setup → Create Chat Demo Scene` → Play, либо `await CoreAi.AskAsync("…")` | ~5 мин |
+| 🔵 **Делаете реальную игру** | `AgentBuilder` + инструменты + `IAiOrchestrationService`, маршрутизация LLM по ролям | растёт вместе с вами |
+
+> 🚀 **Старт за 30 секунд:** установка (ниже) → `CoreAI → Setup → Create Chat Demo Scene` → **Play** → пишите. См. [Быстрый старт](#-быстрый-старт).
+
+<details>
+<summary><b>Полный список возможностей</b></summary>
+
+- 🧠 **Агенты, вызывающие ваш код** — реальный function calling с ретраем, авто-ремонтом и памятью.
+- 🛡️ **Самовосстановление** — `TryRepairToolName` чинит регистр имён тулов; HTTP retry читает `Retry-After` с экспоненциальным backoff.
+- 🌊 **Стриминг, переживший разорванные теги** — stateful SSE-аккумуляция собирает фрагментированные `<think>` блоки и tool calls.
+- 🧭 **LLM-режимы под production** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi` или смешанная маршрутизация по ролям.
+- 🗜️ **Длинный чат без переполнения** — бюджет токенов, `## Conversation Summary`, опциональная LLM-свёртка, переключатели по ролям.
+- 🎯 **Self-Service Skills** — группировка тулов по доменам; модель видит 2 мета-инструмента (`read_skill` + `call_skill_tool`) вместо сотен (~91% экономии токенов).
+- 🛡️ **Production-защита** — обрезка результатов, таймаут на тул, лимит ответа, защита от зацикливания, обрезка истории, `RateLimiterMetrics` — всё в Inspector.
+- 🔄 **Dual-backend с автопереключением** — при ошибке primary запрос уходит на secondary. Идеально для «локальная модель + облачный fallback».
+
+</details>
+
+**Версия:** `version` в [core `package.json`](Assets/CoreAI/package.json) и [Unity `package.json`](Assets/CoreAiUnity/package.json) (одинаковый semver). **Заметки:** [Unity changelog](Assets/CoreAiUnity/CHANGELOG.md) · [Core changelog](Assets/CoreAI/CHANGELOG.md).
 
 ---
 

@@ -113,7 +113,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 p.memory = state.Memory;
 
                 string newJson = JsonUtility.ToJson(p, true);
-                File.WriteAllText(path, newJson);
+                AtomicWriteAllText(path, newJson);
                 PersistFsForWebGl();
             }
             catch (Exception ex)
@@ -137,7 +137,7 @@ namespace CoreAI.Infrastructure.AiMemory
                         p.memory = "";
                         p.lastSystemPrompt =
                             ""; // Clear previous system prompt cache entry to avoid leaking across sessions.
-                        File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                        AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
                         PersistFsForWebGl();
                     }
                 }
@@ -175,7 +175,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     {
                         p.chatHistoryJson = "";
                         p.transcriptEntriesJson = "";
-                        File.WriteAllText(path, JsonUtility.ToJson(p, true));
+                        AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
                         PersistFsForWebGl();
                     }
                 }
@@ -198,6 +198,43 @@ namespace CoreAI.Infrastructure.AiMemory
             if (!Directory.Exists(_dir))
             {
                 Directory.CreateDirectory(_dir);
+            }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="contents"/> to <paramref name="path"/> atomically by writing to a temp
+        /// file first and then swapping it into place, so a crash mid-write cannot corrupt the existing file.
+        /// </summary>
+        private static void AtomicWriteAllText(string path, string contents)
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string tmpPath = path + ".tmp";
+            File.WriteAllText(tmpPath, contents);
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Replace(tmpPath, path, null);
+                }
+                else
+                {
+                    File.Move(tmpPath, path);
+                }
+            }
+            catch
+            {
+                if (File.Exists(tmpPath))
+                {
+                    try { File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+                }
+
+                throw;
             }
         }
 
@@ -331,7 +368,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 p.transcriptEntriesJson = JsonConvert.SerializeObject(tlist, TranscriptJson);
 
                 string finalJson = JsonUtility.ToJson(p, true);
-                File.WriteAllText(path, finalJson);
+                AtomicWriteAllText(path, finalJson);
                 PersistFsForWebGl();
             }
             catch (Exception ex)

@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System.Collections.Generic;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
@@ -56,3 +57,4 @@ namespace CoreAI.Tests.EditMode
         }
     }
 }
+#endif

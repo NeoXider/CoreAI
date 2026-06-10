@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -781,3 +782,4 @@ namespace CoreAI.Tests.PlayMode
     }
 #endif
 }
+#endif

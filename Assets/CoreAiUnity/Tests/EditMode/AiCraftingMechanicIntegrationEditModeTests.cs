@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -1144,3 +1145,4 @@ namespace CoreAI.Tests.EditMode.Integration
         #endregion
     }
 }
+#endif

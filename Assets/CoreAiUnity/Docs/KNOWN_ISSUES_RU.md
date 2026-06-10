@@ -43,6 +43,7 @@ Recommended follow-up:
 - Keep WebGL gameplay on non-Lua tools or server-managed actions for now.
 - Restore WebGL Lua only through an AOT-safe Lua runtime, trusted server-side execution, or a restricted command interpreter.
 - Add or extend WebGL Player tests before enabling any replacement Lua path.
+- Since v3.0.0 you can also compile Lua out entirely with the `COREAI_NO_LUA` scripting define (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md) — useful for WebGL or any build that does not need scripting.
 
 ## Warning handling policy
 

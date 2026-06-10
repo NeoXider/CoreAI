@@ -61,6 +61,7 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
         private sealed class TestLuaExecutor : LuaTool.ILuaExecutor
         {
             private readonly IAiGameCommandSink _sink;
@@ -107,6 +108,7 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
         }
+#endif
 
         private sealed class ListSink : IAiGameCommandSink
         {
@@ -358,6 +360,7 @@ namespace CoreAI.Tests.PlayMode
         ///   tool call   Lua     .
         ///  : LLMUnity  HTTP API.
         /// </summary>
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
         [UnityTest]
         [Timeout(600000)]
         public IEnumerator AllToolCalls_ExecuteLuaTool_Programmer()
@@ -465,6 +468,7 @@ namespace CoreAI.Tests.PlayMode
                 handle.Dispose();
             }
         }
+#endif
 
         private static AiOrchestrator CreateOrchestrator(
             ILlmClient client,

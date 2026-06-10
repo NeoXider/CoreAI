@@ -25,6 +25,28 @@ CoreAI treats Lua as untrusted gameplay logic:
 The sandbox is a defense layer, not a permission system for sensitive server-side
 operations.
 
+## Optional Module (`COREAI_NO_LUA`, since v3.0.0)
+
+Lua is an **optional module**. Defining the scripting symbol `COREAI_NO_LUA`
+(Project Settings → Player → Scripting Define Symbols) compiles the entire
+MoonSharp-based sandbox out of `CoreAI.Core` and `CoreAI.Source`, mirroring the
+existing `COREAI_NO_LLM` opt-out. The core (orchestration, LLM, chat, agent
+memory) builds and runs with no MoonSharp usage, and with the define set you may
+also remove the `org.moonsharp.moonsharp` package from `Packages/manifest.json`.
+
+When `COREAI_NO_LUA` is set:
+
+- `SecureLuaEnvironment`, `LuaCoroutineHandle`, `LuaApiRegistry`,
+  `LuaExecutionGuard`, `InstructionLimitDebugger`, `LuaAiEnvelopeProcessor` (Core)
+  and `LuaCoroutineRunner` (Source) are removed from the build.
+- `CorePortableInstaller` / `WorldCommandsInstaller` skip Lua registrations and
+  fall back to the Core no-ops `CoreDefaultLuaRuntimeBindings` /
+  `NullLuaExecutionObserver`, so the DI graph still resolves.
+- `AiGameCommandRouter` drops its `LuaAiEnvelopeProcessor` dependency; AI command
+  routing degrades to world-command execution only.
+
+Default builds (symbol unset) keep Lua enabled and behave exactly as before.
+
 ## Platform Support
 
 Runtime Lua execution is currently supported in the Editor and non-WebGL player

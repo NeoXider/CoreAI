@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
@@ -364,3 +365,4 @@ namespace CoreAI.Tests.EditMode.LuaFormulas
         }
     }
 }
+#endif

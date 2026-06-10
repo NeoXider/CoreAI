@@ -17,6 +17,12 @@
   ],
   "autoReferenced": true,
   "defineConstraints": [],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "org.moonsharp.moonsharp",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_MOONSHARP"
+    }
+  ],
   "noEngineReferences": true
 }

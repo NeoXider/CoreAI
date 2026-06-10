@@ -63,6 +63,10 @@ namespace CoreAI
                 _orchestratorResolver = null;
                 _settings = null;
             }
+
+            // CoreAI.Core is UnityEngine-free, so its static facade state is reset here
+            // (this runs on SubsystemRegistration) to survive Enter Play Mode without Domain Reload.
+            CoreAIAgent.Reset();
         }
 
         /// <summary>
