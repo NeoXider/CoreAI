@@ -5,7 +5,9 @@ using CoreAI.Authority;
 using CoreAI.Config;
 using CoreAI.Messaging;
 using CoreAI.Session;
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Sandbox;
+#endif
 using VContainer;
 
 namespace CoreAI.Composition

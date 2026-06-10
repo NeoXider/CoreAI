@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+using System;
 using CoreAI.Ai;
 using CoreAI.Messaging;
 using CoreAI.Sandbox;
@@ -127,3 +128,4 @@ namespace CoreAI.Infrastructure.World
         }
     }
 }
+#endif
