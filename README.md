@@ -13,6 +13,16 @@
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI%20API-blue)](#-recommended-models)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
 
+<sub>
+<a href="#-quick-start">Quick Start</a>&nbsp;&nbsp;•&nbsp;
+<a href="#-what-coreai-can-do">Features</a>&nbsp;&nbsp;•&nbsp;
+<a href="#-three-ways-in-ui--coreai--agents">Three ways in</a>&nbsp;&nbsp;•&nbsp;
+<a href="#-recommended-models">Models</a>&nbsp;&nbsp;•&nbsp;
+<a href="#%EF%B8%8F-architecture">Architecture</a>&nbsp;&nbsp;•&nbsp;
+<a href="#-documentation">Docs</a>&nbsp;&nbsp;•&nbsp;
+<a href="#-tests">Tests</a>
+</sub>
+
 > ### 🎬 Imagine this
 > A player walks up to a blacksmith NPC and types _"Got any fire swords?"_. The NPC **calls your inventory code**, finds nothing, then **replies in-character**: _"Fresh out of fire blades, but I can forge one if you bring me a Fire Crystal."_ The player crafts it — the **Programmer agent writes Lua**, the **CoreMechanic agent rolls stats**, and a unique _Flame Sword_ lands in their inventory. All at runtime, streaming token-by-token into a chat bubble, on a local model. **That's CoreAI.**
 
@@ -33,19 +43,19 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 > 🚀 **30-second start:** install (below) → `CoreAI → Setup → Create Chat Demo Scene` → press **Play** → type. Jump to [Quick Start](#-quick-start).
 
-<details>
-<summary><b>Full feature list</b></summary>
+### ⚡ At a glance
 
-- 🧠 **Agents that call your code** — real function calling with tool retry, auto-repair, and memory.
-- 🛡️ **Self-healing resilience** — `TryRepairToolName` auto-fixes tool name casing; HTTP retry reads `Retry-After` with exponential backoff.
-- 🌊 **Streaming that survives split tags** — stateful SSE accumulation handles fragmented `<think>` blocks and tool calls across chunks.
-- 🧭 **LLM modes for production** — `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, or mixed per-role routing profiles.
-- 🗜️ **Smart long-chat context** — token-budget-aware history, rolling `## Conversation Summary`, optional auxiliary-LLM compaction, per-role toggles.
-- 🎯 **Self-Service Skills** — group tools by domain; the model sees only 2 meta-tools (`read_skill` + `call_skill_tool`) instead of hundreds (~91% token savings).
-- 🛡️ **Production guardrails** — tool-result truncation, per-tool timeout, runaway cap, loop guard, context trim, `RateLimiterMetrics` — all in the Inspector.
-- 🔄 **Dual-backend auto-fallback** — primary HTTP backend fails → retry on a secondary automatically. Perfect for local model + cloud fallback.
+- 🧠 **Agents that call your code** — real function calling with tool retry, auto-repair, and memory
+- 🏠 **Local-first** — full PlayMode suite passes on a 4 GB GGUF; no data leaves the player's machine
+- 💬 **Drop-in chat UI** — one menu click creates a working streaming chat scene
+- 🎯 **Self-Service Skills** — the model sees 2 meta-tools instead of hundreds (~91% token savings)
+- 🌊 **Streaming that survives reality** — split `<think>` tags, fragmented tool calls, SSE chunking
+- 🗜️ **Long chats that don't explode** — token budget, rolling summaries, optional smart compaction
+- 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, rate-limit metrics — in the Inspector
+- 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
+- 🧩 **Optional modules** — no MoonSharp? No LLMUnity? Still compiles; features light up when packages appear
 
-</details>
+⭐ **If CoreAI saves you time — [star the repo](https://github.com/NeoXider/CoreAI)!** It's the main way other Unity devs find it.
 
 **Releases:** `version` in [core `package.json`](Assets/CoreAI/package.json) and [Unity `package.json`](Assets/CoreAiUnity/package.json) (same semver). **Notes:** [Unity changelog](Assets/CoreAiUnity/CHANGELOG.md) · [Core changelog](Assets/CoreAI/CHANGELOG.md).
 
