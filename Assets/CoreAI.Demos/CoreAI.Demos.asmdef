@@ -1,0 +1,24 @@
+{
+  "name": "CoreAI.Demos",
+  "rootNamespace": "CoreAI.Demos",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "VContainer"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "org.moonsharp.moonsharp",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_MOONSHARP"
+    }
+  ],
+  "noEngineReferences": false
+}

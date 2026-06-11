@@ -36,7 +36,7 @@ For teams who **wire the core into their own game** or **extend this repository*
 
 **Verification:** compile with `dotnet build` on generated `*.csproj` (Unity/Rider) or build from the IDE; **NUnit Edit Mode / Play Mode** — in **Unity Test Runner** (`Window → General → Test Runner`). The source of truth for scenarios involving `UnityEngine` and test assets is Test Runner, not bare `dotnet test` without Unity.
 
-**Rule:** title gameplay logic should not “leak” into Core unless necessary. New **game** APIs for Lua go through **`IGameLuaRuntimeBindings`** in Source (or in the game assembly), not by editing the sandbox outside the whitelist.
+**Rule:** title gameplay logic should not “leak” into Core unless necessary. New **game** APIs for Lua go through **`IGameLuaRuntimeBindings`** / **`GameLuaBindingsExtensibility`** in Source (or in the game assembly), not by editing the sandbox outside the whitelist. Guide: [LUA_BEST_PRACTICES_RU.md](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md).
 
 ---
 

@@ -16,6 +16,20 @@ namespace CoreAI.Ai
 #endif
     }
 
+    /// <summary>
+    /// Optional extension of <see cref="IGameLuaRuntimeBindings"/> for hosts that need
+    /// per-consumer capability scoping (e.g. <see cref="LuaModRuntime"/> loading a read-only mod
+    /// from a full-capability aggregator). Implementations must only register binding groups
+    /// included in the requested tier.
+    /// </summary>
+    public interface ICapabilityScopedLuaBindings
+    {
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+        /// <summary>Registers only the Lua APIs allowed by <paramref name="capabilities"/>.</summary>
+        void RegisterGameplayApis(LuaApiRegistry registry, LuaCapabilities capabilities);
+#endif
+    }
+
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
     /// <summary>Registers the default CoreAI Lua runtime APIs.</summary>
     public sealed class CoreDefaultLuaRuntimeBindings : IGameLuaRuntimeBindings

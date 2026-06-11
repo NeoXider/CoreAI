@@ -1,5 +1,6 @@
 ﻿using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Logging;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -100,7 +101,8 @@ namespace CoreAI.Presentation.PlayerChat
             catch (System.Exception ex)
             {
                 AppendLine("[error] " + ex.Message);
-                Debug.LogError($"[InGameChatPanel] Exception in OnSendClicked: {ex}");
+                GameLoggerUnscopedFallback.Instance.LogError(GameLogFeature.Core,
+                    $"[InGameChatPanel] Exception in OnSendClicked: {ex}");
             }
         }
 

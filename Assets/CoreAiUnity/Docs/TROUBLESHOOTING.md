@@ -182,18 +182,26 @@ For large models (9B+) or weaker hardware you may need 120–300 seconds.
 
 **Cause:** Lua tries to call a function that is not in the whitelist API.
 
-**Fix:** Add the function to `IGameLuaRuntimeBindings`:
+**Fix:** Register via `GameLuaBindingsExtensibility` (recommended) or implement `IGameLuaRuntimeBindings`:
+
 ```csharp
-public class MyGameBindings : IGameLuaRuntimeBindings
+public sealed class MyGameBindings : IGameLuaRuntimeBindings
 {
-    public void RegisterBindings(Script script)
+    public void RegisterGameplayApis(LuaApiRegistry registry)
     {
-        script.Globals["custom_function"] = (Action<string>)(msg => {
-            Debug.Log($"Custom: {msg}");
-        });
+        registry.Register("custom_function", new Action<string>(msg =>
+        {
+            GameLoggerUnscopedFallback.Instance.LogInfo(
+                GameLogFeature.Core, $"Custom: {msg}");
+        }));
     }
 }
+
+// Before scene load / early bootstrap:
+GameLuaBindingsExtensibility.Register(new MyGameBindings(), LuaCapabilities.Gameplay);
 ```
+
+See [LUA_BEST_PRACTICES_RU.md](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md) for capability gating and anti-patterns.
 
 Or state in the Programmer prompt which functions are available:
 ```

@@ -1,7 +1,7 @@
 using System;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
 using MessagePipe;
-using UnityEngine;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -30,7 +30,8 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishStarted failed: {ex.Message}");
+                GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.MessagePipe,
+                    $"[MessagePipeToolCallEventPublisher] PublishStarted failed: {ex}");
             }
         }
 
@@ -51,7 +52,8 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishCompleted failed: {ex.Message}");
+                GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.MessagePipe,
+                    $"[MessagePipeToolCallEventPublisher] PublishCompleted failed: {ex}");
             }
         }
 
@@ -72,7 +74,8 @@ namespace CoreAI.Infrastructure.Llm
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[MessagePipeToolCallEventPublisher] PublishFailed failed: {ex.Message}");
+                GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.MessagePipe,
+                    $"[MessagePipeToolCallEventPublisher] PublishFailed failed: {ex}");
             }
         }
     }

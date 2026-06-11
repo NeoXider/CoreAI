@@ -24,6 +24,13 @@ namespace CoreAI.Ai
         /// <summary>Redefining game logic slots (formulas, loot tables) and mod hooks.</summary>
         LogicOverride = 1 << 3,
 
+        /// <summary>
+        /// Full Unity scene access via reflection (GameObject/components). Opt-in only — not part of
+        /// <see cref="All"/>; hosts must grant explicitly (inspector or per-mod load).
+        /// </summary>
+        Full = 1 << 4,
+
+        /// <summary>All standard tiers except <see cref="Full"/> (backward-compatible default).</summary>
         All = Read | Gameplay | WorldEdit | LogicOverride
     }
 }

@@ -29,8 +29,9 @@ namespace CoreAI.Ai
     /// <item><c>mod_id()</c> — the mod's own id.</item>
     /// </list>
     /// The host (Unity layer) calls <see cref="Tick"/> once per frame; every handler call runs
-    /// under a per-call instruction/time guard, and a mod accumulating
-    /// <see cref="MaxErrorsBeforeUnload"/> failures is unloaded automatically.
+    /// under a per-call instruction/time guard, and a mod failing
+    /// <see cref="MaxErrorsBeforeUnload"/> times in a row (the counter resets on a successful
+    /// call) is unloaded automatically.
     /// </summary>
     public sealed class LuaModRuntime
     {
@@ -57,6 +58,7 @@ namespace CoreAI.Ai
         {
             public string Id = "";
             public Script Script;
+            public string Source = "";
             public LuaCapabilities Caps;
             public readonly Dictionary<string, List<Closure>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
@@ -73,6 +75,7 @@ namespace CoreAI.Ai
         private readonly IGameLuaRuntimeBindings _gameBindings;
         private readonly ILuaModStore _store;
         private readonly ILog _log;
+        private readonly List<Mod> _tickScratch = new();
 
         /// <summary>
         /// Raised when a mod calls <c>events_emit(name, payload)</c>: (modId, eventName, payload).
@@ -127,6 +130,26 @@ namespace CoreAI.Ai
             return result;
         }
 
+        /// <summary>
+        /// Returns the Lua source of a loaded mod (the exact chunk passed to
+        /// <see cref="LoadMod"/>/<see cref="ReloadMod"/>), so agents and tooling can inspect and
+        /// rewrite their own mods. False when no mod with this id is loaded.
+        /// </summary>
+        public bool TryGetModSource(string id, out string source)
+        {
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(Normalize(id), out Mod mod))
+                {
+                    source = mod.Source;
+                    return true;
+                }
+            }
+
+            source = "";
+            return false;
+        }
+
         /// <summary>True when a mod with this id is currently loaded.</summary>
         public bool IsLoaded(string id)
         {
@@ -167,23 +190,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            Mod mod = new()
-            {
-                Id = modId,
-                Caps = capabilities,
-                LoadedAtUtc = DateTime.UtcNow
-            };
-
-            LuaApiRegistry registry = new();
-            _gameBindings?.RegisterGameplayApis(registry);
-            RegisterModApis(registry, mod);
-
-            Script script = _env.CreateScript(registry);
-            mod.Script = script;
-
-            // Run the chunk: hook registration happens here. Errors propagate to the caller and
-            // the mod is never added, so a failed load leaves no handlers behind.
-            _env.RunChunk(script, luaCode);
+            Mod mod = BuildMod(modId, luaCode, capabilities);
 
             lock (_gate)
             {
@@ -196,6 +203,57 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
+        }
+
+        /// <summary>
+        /// Creates the sandboxed script with capability-scoped game bindings plus mod APIs and
+        /// runs the chunk (hook registration happens there). Errors propagate to the caller and
+        /// the mod is never added, so a failed build leaves no handlers behind.
+        /// </summary>
+        private Mod BuildMod(string modId, string luaCode, LuaCapabilities capabilities)
+        {
+            Mod mod = new()
+            {
+                Id = modId,
+                Source = luaCode,
+                Caps = capabilities,
+                LoadedAtUtc = DateTime.UtcNow
+            };
+
+            LuaApiRegistry registry = new();
+            RegisterGameBindings(registry, capabilities);
+            RegisterModApis(registry, mod);
+
+            Script script = _env.CreateScript(registry);
+            mod.Script = script;
+            _env.RunChunk(script, luaCode);
+            return mod;
+        }
+
+        private void RegisterGameBindings(LuaApiRegistry registry, LuaCapabilities capabilities)
+        {
+            if (_gameBindings == null || capabilities == LuaCapabilities.None)
+            {
+                return;
+            }
+
+            if (_gameBindings is ICapabilityScopedLuaBindings scoped)
+            {
+                scoped.RegisterGameplayApis(registry, capabilities);
+                return;
+            }
+
+            if (capabilities == LuaCapabilities.All)
+            {
+                _gameBindings.RegisterGameplayApis(registry);
+                return;
+            }
+
+            // Fail closed: a non-scoped binding set cannot be trimmed to the requested tier, so a
+            // restricted mod gets no game APIs at all instead of silently getting everything.
+            _log?.Warn(
+                $"[LuaModRuntime] Game bindings ({_gameBindings.GetType().Name}) do not implement " +
+                $"ICapabilityScopedLuaBindings; mod requested '{capabilities}' — game APIs withheld.");
         }
 
         /// <summary>Unloads a mod and drops its handlers/timers/queued events.</summary>
@@ -214,10 +272,18 @@ namespace CoreAI.Ai
             return true;
         }
 
-        /// <summary>Replaces a loaded mod with new code, keeping its capability tier.</summary>
+        /// <summary>
+        /// Replaces a loaded mod with new code, keeping its capability tier. The new chunk is
+        /// built and run first; if it fails, the old mod stays loaded and untouched.
+        /// </summary>
         public void ReloadMod(string id, string luaCode)
         {
             string modId = Normalize(id);
+            if (string.IsNullOrWhiteSpace(luaCode))
+            {
+                throw new ArgumentException("Mod code is required.", nameof(luaCode));
+            }
+
             LuaCapabilities caps;
             lock (_gate)
             {
@@ -229,8 +295,14 @@ namespace CoreAI.Ai
                 caps = existing.Caps;
             }
 
-            UnloadMod(modId);
-            LoadMod(modId, luaCode, caps);
+            Mod replacement = BuildMod(modId, luaCode, caps);
+
+            lock (_gate)
+            {
+                _mods[modId] = replacement;
+            }
+
+            _log?.Info($"[LuaModRuntime] Mod '{modId}' reloaded (caps={caps}).");
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
@@ -262,7 +334,6 @@ namespace CoreAI.Ai
                 return;
             }
 
-            Mod[] mods;
             lock (_gate)
             {
                 if (_mods.Count == 0)
@@ -270,12 +341,16 @@ namespace CoreAI.Ai
                     return;
                 }
 
-                mods = new Mod[_mods.Count];
-                _mods.Values.CopyTo(mods, 0);
+                _tickScratch.Clear();
+                foreach (Mod mod in _mods.Values)
+                {
+                    _tickScratch.Add(mod);
+                }
             }
 
-            foreach (Mod mod in mods)
+            for (int i = 0; i < _tickScratch.Count; i++)
             {
+                Mod mod = _tickScratch[i];
                 TickTimers(mod, deltaSeconds);
                 DispatchPendingEvents(mod);
 
@@ -328,6 +403,11 @@ namespace CoreAI.Ai
 
                 foreach (Closure fn in handlers)
                 {
+                    if (dispatched >= DefaultMaxEventsDispatchedPerTick)
+                    {
+                        return;
+                    }
+
                     InvokeGuarded(mod, fn, evt.Key, evt.Value);
                     dispatched++;
                 }
@@ -346,6 +426,10 @@ namespace CoreAI.Ai
                 }
 
                 _handlerGuard.Execute(owner, DynValue.FromObject(owner, fn), dynArgs);
+
+                // "MaxErrorsBeforeUnload failures in a row": a successful call forgives past
+                // errors, so rare sporadic failures over a long lifetime do not unload the mod.
+                mod.ErrorCount = 0;
             }
             catch (Exception ex)
             {

@@ -11,7 +11,7 @@ namespace CoreAI.Infrastructure.Lua
     /// so a restricted script physically lacks the disallowed functions (default: all tiers,
     /// preserving historical behavior).
     /// </summary>
-    public sealed class AggregatingGameLuaRuntimeBindings : IGameLuaRuntimeBindings
+    public sealed class AggregatingGameLuaRuntimeBindings : IGameLuaRuntimeBindings, ICapabilityScopedLuaBindings
     {
         private readonly IGameLogger _logger;
         private readonly CoreAiVersioningLuaRuntimeBindings _versioning;
@@ -19,6 +19,7 @@ namespace CoreAI.Infrastructure.Lua
         private readonly LuaTimeBindings _time;
         private readonly World.CoreAiWorldQueryLuaBindings _worldQuery;
         private readonly LuaLogicSlots _logicSlots;
+        private readonly CoreAiFullUnityLuaRuntimeBindings _full;
         private readonly LuaCapabilities _capabilities;
 
         public AggregatingGameLuaRuntimeBindings(
@@ -28,6 +29,7 @@ namespace CoreAI.Infrastructure.Lua
             LuaTimeBindings time = null,
             World.CoreAiWorldQueryLuaBindings worldQuery = null,
             LuaLogicSlots logicSlots = null,
+            CoreAiFullUnityLuaRuntimeBindings full = null,
             LuaCapabilities capabilities = LuaCapabilities.All)
         {
             _logger = logger;
@@ -36,6 +38,7 @@ namespace CoreAI.Infrastructure.Lua
             _time = time ?? new LuaTimeBindings();
             _worldQuery = worldQuery;
             _logicSlots = logicSlots;
+            _full = full;
             _capabilities = capabilities;
         }
 
@@ -44,29 +47,45 @@ namespace CoreAI.Infrastructure.Lua
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
         {
-            if ((_capabilities & LuaCapabilities.Read) != 0)
+            RegisterGameplayApis(registry, _capabilities);
+        }
+
+        /// <summary>
+        /// Registers only the binding groups allowed by the intersection of this aggregator's
+        /// tier and the requested tier (a consumer can narrow, never widen, the granted surface).
+        /// </summary>
+        public void RegisterGameplayApis(LuaApiRegistry registry, LuaCapabilities capabilities)
+        {
+            LuaCapabilities effective = _capabilities & capabilities;
+
+            if ((effective & LuaCapabilities.Read) != 0)
             {
                 new LoggingLuaRuntimeBindings(_logger).RegisterGameplayApis(registry);
                 _versioning.RegisterGameplayApis(registry);
                 _worldQuery?.RegisterGameplayApis(registry);
             }
 
-            if ((_capabilities & LuaCapabilities.WorldEdit) != 0)
+            if ((effective & LuaCapabilities.WorldEdit) != 0)
             {
                 _world?.RegisterGameplayApis(registry);
             }
 
-            if ((_capabilities & LuaCapabilities.Gameplay) != 0)
+            if ((effective & LuaCapabilities.Gameplay) != 0)
             {
                 _time.RegisterTimeApis(registry);
             }
 
-            if ((_capabilities & LuaCapabilities.LogicOverride) != 0)
+            if ((effective & LuaCapabilities.LogicOverride) != 0)
             {
                 _logicSlots?.RegisterApis(registry);
             }
 
-            GameLuaBindingsExtensibility.RegisterAll(registry);
+            if ((effective & LuaCapabilities.Full) != 0)
+            {
+                _full?.RegisterGameplayApis(registry);
+            }
+
+            GameLuaBindingsExtensibility.RegisterAll(registry, effective);
         }
     }
 }

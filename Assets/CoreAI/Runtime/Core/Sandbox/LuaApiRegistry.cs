@@ -24,32 +24,21 @@ namespace CoreAI.Sandbox
             return _apis.TryGetValue(name, out callback);
         }
 
-        /// <summary>Exposes all registered Lua API callbacks on the script global table.</summary>
+        /// <summary>True when <paramref name="name"/> is registered (tests / introspection).</summary>
+        public bool Contains(string name)
+        {
+            return _apis.ContainsKey(name);
+        }
+
+        /// <summary>
+        /// Exposes registered callbacks on the script global table. MoonSharp converts CLR
+        /// delegates to Lua functions with typed marshalling — no manual DynamicInvoke layer.
+        /// </summary>
         public void ApplyToGlobals(Table globals)
         {
             foreach (KeyValuePair<string, Delegate> kv in _apis)
             {
-                Delegate inner = kv.Value;
-                string key = kv.Key;
-                globals[key] = DynValue.NewCallback((ctx, args) =>
-                {
-                    try
-                    {
-                        DynValue[] arr = args.GetArray();
-                        object[] clr = new object[arr.Length];
-                        for (int i = 0; i < arr.Length; i++)
-                        {
-                            clr[i] = arr[i].ToObject();
-                        }
-
-                        object result = inner.DynamicInvoke(clr);
-                        return DynValue.FromObject(ctx.GetScript(), result);
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new ScriptRuntimeException($"api '{key}': {ex.InnerException?.Message ?? ex.Message}");
-                    }
-                }, key);
+                globals[kv.Key] = kv.Value;
             }
         }
     }

@@ -128,6 +128,10 @@ namespace CoreAI.Infrastructure.World
 #if UNITY_EDITOR
         private void OnValidate()
         {
+            // Entries changed in the editor (Inspector or SerializedObject patch): the lookup
+            // cache may already be built on this instance and must be rebuilt on next resolve.
+            _built = false;
+
             if (entries == null)
             {
                 return;

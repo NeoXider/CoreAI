@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -38,6 +39,9 @@ namespace CoreAI.Chat
 
         private static readonly CoreAiChatOptions DefaultOptions = CoreAiChatOptions.CreateDefault();
         private ICoreAiChatOptions _runtimeOptions;
+
+        /// <summary>Project game logger (shared fallback when no scoped logger is available).</summary>
+        protected static IGameLogger Logger => GameLoggerUnscopedFallback.Instance;
 
         [Header("Custom USS (optional)")]
         [Tooltip("Optional stylesheet layered on top of the default theme. Leave empty to use the standard style.")]
@@ -216,7 +220,8 @@ namespace CoreAI.Chat
             UIDocument uiDoc = GetComponent<UIDocument>();
             if (uiDoc == null)
             {
-                Debug.LogError("[CoreAiChatPanel] UIDocument component not found on this GameObject!");
+                Logger.LogError(GameLogFeature.Core,
+                    "[CoreAiChatPanel] UIDocument component not found on this GameObject!");
                 return;
             }
 
@@ -665,7 +670,7 @@ namespace CoreAI.Chat
             _chatService = CoreAiChatService.TryCreateFromScene();
             if (_chatService == null)
             {
-                Debug.LogWarning(
+                Logger.LogWarning(GameLogFeature.Core,
                     "[CoreAiChatPanel] CoreAiChatService not available (no CoreAILifetimeScope on scene?).");
             }
         }
@@ -802,7 +807,8 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[CoreAiChatPanel] Send/stop button handler failed: {ex.Message}");
+                Logger.LogError(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Send/stop button handler failed: {ex}");
                 ResetBusyStateWithoutCancellation();
             }
         }
@@ -1050,7 +1056,7 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] BusyStateChanged handler error: {ex}");
             }
         }
 
@@ -1077,7 +1083,7 @@ namespace CoreAI.Chat
             }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
+                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] ToolRoundStarted handler error: {ex}");
             }
         }
 
@@ -1167,7 +1173,8 @@ namespace CoreAI.Chat
 
             if (IsActionInProgress())
             {
-                Debug.LogWarning("[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (chat busy).");
+                Logger.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatPanel] SubmitMessageFromExternalAsync: ignored (chat busy).");
                 return null;
             }
 
@@ -1237,7 +1244,7 @@ namespace CoreAI.Chat
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Debug.LogError($"[CoreAiChatPanel] SendToAI: {ex.Message}");
+                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] SendToAI: {ex}");
             }
         }
 
@@ -1324,7 +1331,7 @@ namespace CoreAI.Chat
             {
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
                 FinishStreaming();
-                Debug.LogError($"[CoreAiChatPanel] Error: {ex.Message}");
+                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Error: {ex}");
                 AddMessage(Options.ErrorMessagePrefix + ex.Message, false);
                 return null;
             }
@@ -1336,7 +1343,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatPanel] RunAgentTurnAsync finally: SwitchToMainThread: {ex.Message}");
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] RunAgentTurnAsync finally: SwitchToMainThread: {ex.Message}");
                 }
 
                 FinishStreaming();
@@ -1421,7 +1429,7 @@ namespace CoreAI.Chat
                     TimeSpan gap = DateTime.UtcNow - lastChunkAt;
                     if (gap.TotalSeconds > StreamGapWarnSeconds)
                     {
-                        Debug.Log(
+                        Logger.LogInfo(GameLogFeature.Core,
                             $"[CoreAiChatPanel] Stream gap {gap.TotalSeconds:F1}s before chunk: " +
                             $"BufferedNoToolBinding={chunk.BufferedStreamingNoToolBinding}, " +
                             $"ToolHint={chunk.BufferedStreamingUseToolProgressHint}, " +
@@ -1518,7 +1526,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatPanel] SendStreamingAsync finally: SwitchToMainThread: {ex.Message}");
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] SendStreamingAsync finally: SwitchToMainThread: {ex.Message}");
                 }
 
                 FinishStreaming();
@@ -1567,7 +1576,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatPanel] SendNonStreamingAsync finally: UI thread hop: {ex.Message}");
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] SendNonStreamingAsync finally: UI thread hop: {ex.Message}");
                 }
 
                 HideTypingIndicator();
@@ -1899,7 +1909,7 @@ namespace CoreAI.Chat
                     }
                     catch (Exception chatServiceEx)
                     {
-                        Debug.LogWarning(
+                        Logger.LogWarning(GameLogFeature.Core,
                             $"[CoreAiChatPanel] StopAgent fallback failed. CoreAi: {coreAiEx.Message}; ChatService: {chatServiceEx.Message}");
                     }
                 }
@@ -1923,7 +1933,7 @@ namespace CoreAI.Chat
                             _activeRequestCts = null;
                         }
 
-                        Debug.LogWarning(
+                        Logger.LogWarning(GameLogFeature.Core,
                             $"[CoreAiChatPanel] StopActiveGeneration: request cancel failed: {cancelEx.Message}");
                     }
                 }
@@ -1974,7 +1984,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception cancelEx)
                 {
-                    Debug.LogWarning($"[CoreAiChatPanel] {context}: root cancel failed: {cancelEx.Message}");
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] {context}: root cancel failed: {cancelEx.Message}");
                 }
 
                 try
@@ -1983,7 +1994,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception disposeEx)
                 {
-                    Debug.LogWarning($"[CoreAiChatPanel] {context}: root dispose failed: {disposeEx.Message}");
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] {context}: root dispose failed: {disposeEx.Message}");
                 }
             }
 

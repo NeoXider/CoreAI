@@ -39,6 +39,14 @@ namespace CoreAI.Composition
         [SerializeField]
         private CoreAiPrefabRegistryAsset worldPrefabRegistry;
 
+        [Tooltip("Scene names Lua may load via coreai_world_load_scene. Empty = any Build Settings scene (legacy).")]
+        [SerializeField]
+        private string[] luaAllowedScenes = System.Array.Empty<string>();
+
+        [Tooltip("When enabled, Lua with Full capability can access arbitrary GameObjects/components via reflection.")]
+        [SerializeField]
+        private bool enableFullLuaAccess;
+
         [Header("Network / AI authority")]
         [Tooltip("Controls where LLM and orchestration execution is allowed.")]
         [SerializeField]
@@ -90,7 +98,7 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            builder.RegisterWorldCommands(worldPrefabRegistry);
+            builder.RegisterWorldCommands(worldPrefabRegistry, luaAllowedScenes, enableFullLuaAccess);
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 

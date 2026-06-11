@@ -1,5 +1,47 @@
 ﻿# Changelog
 
+## [4.0.0] - 2026-06-12
+
+Major release: Lua as a second game language (production-ready), capability tiers, Full opt-in mode, LLM mod tools, demo scenes, and performance hardening.
+
+### Breaking / API
+
+- **`LuaCapabilities.All` no longer includes `Full`.** Full reflection access requires explicit `LuaCapabilities.Full` (host opt-in via `CoreAILifetimeScope.enableFullLuaAccess` or per-mod caps).
+- **`ICapabilityScopedLuaBindings`** — binding providers can gate APIs by capability tier; `AggregatingGameLuaRuntimeBindings` implements it.
+- **`GameLuaBindingsExtensibility.Register(bindings, requiredCapabilities)`** — extensions declare minimum capability flags.
+- **`CoreAiPrefabRegistryAsset.OnValidate`** — invalidates internal prefab cache when edited (fixes stale MCP/asset patches).
+
+### Lua runtime & security
+
+- **`LuaLogicSlots`**, **`LuaModRuntime`** (atomic reload, consecutive error budget, capability-scoped game APIs).
+- **`LuaModsLlmTool` (`manage_mods`)** — list/get_source/load/reload/unload; `LuaModRuntime.TryGetModSource`.
+- **`GameLuaToolExecutor` + DI** — `execute_lua` / `manage_mods` registered for built-in **Programmer** role in `WorldCommandsInstaller`.
+- **`CoreAiFullUnityLuaRuntimeBindings`** — Full-tier `unity_*` reflection APIs (allow-all; planned blacklist documented).
+- Scene whitelist: **`luaAllowedScenes`** on `CoreAILifetimeScope` → `coreai_world_load_scene`.
+- Sandbox: rate limits, output caps, capability fail-closed for restricted mods.
+
+### World commands
+
+- **`ICoreAiCustomWorldCommandHandler`** + `CoreAiWorldCommandExecutor.RegisterCustomHandler` — extend world actions from game code.
+- **`set_color`** uses **`MaterialPropertyBlock`** (fixes material instance leak).
+
+### Demos (`Assets/CoreAI.Demos/`)
+
+- LuaMods, WorldCommands, Skills, LiveMechanics (LLM + chat), FullAccess (Full mode + chat).
+
+### Performance
+
+- `LuaModRuntime.Tick` — reusable mod list scratch buffer (no per-frame array alloc).
+- See **`Docs/PERF_REVIEW_2026-06-12_RU.md`**.
+
+### Diagnostics
+
+- CoreAiUnity runtime: direct `Debug.*` replaced with **`IGameLogger` / `GameLoggerUnscopedFallback`** (`CoreAi.cs`, chat panels, `LuaCoroutineRunner.SetLogger`, etc.).
+
+### Docs
+
+- `LUA_GAME_API.md`, `LUA_ACCESS_MODES_AUDIT_RU.md`, demo READMEs, perf review.
+
 ## [Unreleased]
 
 ### Lua as a second game language (`Docs/LUA_GAME_API.md`)

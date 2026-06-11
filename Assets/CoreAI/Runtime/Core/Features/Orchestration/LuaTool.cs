@@ -96,7 +96,7 @@ namespace CoreAI.Ai
             {
                 if (_settings.LogToolCallResults)
                 {
-                    _logger.Error($"[Tool Call] execute_lua: FAILED - {ex.Message}");
+                    _logger.Error($"[Tool Call] execute_lua: FAILED - {ex}");
                 }
 
                 return SerializeResult(new LuaResult

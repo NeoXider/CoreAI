@@ -66,19 +66,27 @@ namespace CoreAI.Sandbox
 
             _debugger.Reset(_budgetPerResume, 500);
 
-            try
+            _lastResult = _coroutine.Coroutine.Resume();
+            _consumedSteps += _debugger.Steps;
+
+            // MoonSharp preemptive yield (AutoYieldCounter, e.g. set in Kill): host must
+            // resume with no args until a real result — see moonsharp.org/coroutines.html.
+            while (_lastResult.Type == DataType.YieldRequest && IsAlive && !_disposed)
             {
-                _lastResult = _coroutine.Coroutine.Resume();
-            }
-            finally
-            {
-                _consumedSteps += _debugger.Steps;
                 if (_consumedSteps >= _totalLifetimeSteps)
                 {
-                    // Lifetime budget exhausted: kill the handle so the coroutine can never be
-                    // resumed again (IsAlive turns false, the runner reaps it on its next tick).
                     Kill();
+                    break;
                 }
+
+                _debugger.Reset(_budgetPerResume, 500);
+                _lastResult = _coroutine.Coroutine.Resume();
+                _consumedSteps += _debugger.Steps;
+            }
+
+            if (_consumedSteps >= _totalLifetimeSteps)
+            {
+                Kill();
             }
 
             return _lastResult;

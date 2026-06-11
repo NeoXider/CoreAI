@@ -78,6 +78,8 @@ public class MyNpcScript : MonoBehaviour
 }
 ```
 
+> The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
+
 ## 4. Play and Verify
 
 1. Attach your script to any GameObject in the `_mainCoreAI` scene.

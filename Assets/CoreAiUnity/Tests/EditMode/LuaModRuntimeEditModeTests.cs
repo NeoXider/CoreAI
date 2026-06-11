@@ -183,6 +183,112 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(runtime.IsLoaded("m"));
             Assert.AreEqual("new", store.Get("m", "value"));
         }
+
+        [Test]
+        public void LuaModRuntime_ReloadMod_BadNewCode_KeepsOldModWorking()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            runtime.LoadMod("m", @"
+                hooks_on('set', function()
+                    store_set('value', 'old')
+                end)");
+
+            Assert.Throws<ScriptRuntimeException>(() => runtime.ReloadMod("m", "error('broken')"));
+
+            Assert.IsTrue(runtime.IsLoaded("m"));
+            runtime.EmitEvent("set", "");
+            runtime.Tick(0);
+            Assert.AreEqual("old", store.Get("m", "value"));
+        }
+
+        [Test]
+        public void LuaModRuntime_SuccessfulHandlerCall_ResetsErrorCount()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            runtime.LoadMod("m", @"
+                hooks_on('bad', function() error('boom') end)
+                hooks_on('good', function() store_set('ok', '1') end)");
+
+            // Just below the unload threshold, then one success: the counter must reset, so the
+            // same amount of sporadic failures again must not unload the mod.
+            for (int i = 0; i < LuaModRuntime.MaxErrorsBeforeUnload - 1; i++)
+            {
+                runtime.EmitEvent("bad", "");
+                runtime.Tick(0);
+            }
+
+            runtime.EmitEvent("good", "");
+            runtime.Tick(0);
+            Assert.AreEqual("1", store.Get("m", "ok"));
+
+            for (int i = 0; i < LuaModRuntime.MaxErrorsBeforeUnload - 1; i++)
+            {
+                runtime.EmitEvent("bad", "");
+                runtime.Tick(0);
+            }
+
+            Assert.IsTrue(runtime.IsLoaded("m"));
+        }
+
+        private sealed class ScopedBindingsStub : IGameLuaRuntimeBindings, ICapabilityScopedLuaBindings
+        {
+            public void RegisterGameplayApis(CoreAI.Sandbox.LuaApiRegistry registry)
+            {
+                RegisterGameplayApis(registry, LuaCapabilities.All);
+            }
+
+            public void RegisterGameplayApis(
+                CoreAI.Sandbox.LuaApiRegistry registry,
+                LuaCapabilities capabilities)
+            {
+                if ((capabilities & LuaCapabilities.Read) != 0)
+                {
+                    registry.Register("stub_read", new Func<double>(() => 1d));
+                }
+
+                if ((capabilities & LuaCapabilities.WorldEdit) != 0)
+                {
+                    registry.Register("stub_edit", new Func<double>(() => 2d));
+                }
+            }
+        }
+
+        private sealed class UnscopedBindingsStub : IGameLuaRuntimeBindings
+        {
+            public void RegisterGameplayApis(CoreAI.Sandbox.LuaApiRegistry registry)
+            {
+                registry.Register("stub_edit", new Func<double>(() => 2d));
+            }
+        }
+
+        [Test]
+        public void LuaModRuntime_LoadMod_ReadCapability_DoesNotExposeWorldEditApi()
+        {
+            LuaModRuntime runtime = new(new ScopedBindingsStub());
+
+            runtime.LoadMod("reader", "local v = stub_read()", LuaCapabilities.Read);
+            Assert.IsTrue(runtime.IsLoaded("reader"));
+
+            // World-edit binding must be physically absent for a read-only mod.
+            Assert.Throws<ScriptRuntimeException>(() =>
+                runtime.LoadMod("writer", "stub_edit()", LuaCapabilities.Read));
+        }
+
+        [Test]
+        public void LuaModRuntime_LoadMod_RestrictedModWithUnscopedBindings_FailsClosed()
+        {
+            LuaModRuntime runtime = new(new UnscopedBindingsStub());
+
+            // Unscoped bindings cannot be trimmed, so a restricted mod must get no game APIs.
+            Assert.Throws<ScriptRuntimeException>(() =>
+                runtime.LoadMod("m", "stub_edit()", LuaCapabilities.Read));
+
+            // Full capabilities keep historical behavior.
+            runtime.LoadMod("full", "stub_edit()", LuaCapabilities.All);
+            Assert.IsTrue(runtime.IsLoaded("full"));
+        }
     }
 }
 #endif

@@ -2,6 +2,27 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [4.0.0] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned with portable core Lua v4.
+
+### Added
+
+- **`CoreAiFullUnityLuaRuntimeBindings`** — Full-tier `unity_*` reflection APIs; wired through capability gating and `enableFullLuaAccess` on `CoreAILifetimeScope`.
+- **`GameLuaToolExecutor`** — production `execute_lua` backend; Programmer role gets `execute_lua` + `manage_mods` via `WorldCommandsInstaller`.
+- **`ICoreAiCustomWorldCommandHandler`** — extend `CoreAiWorldCommandExecutor` from game code.
+- Demo scenes under **`Assets/CoreAI.Demos/`** (LuaMods, WorldCommands, Skills, LiveMechanics, FullAccess).
+- **`luaAllowedScenes`** whitelist on `CoreAILifetimeScope`.
+
+### Changed / fixed
+
+- **`set_color`** — `MaterialPropertyBlock` instead of `renderer.material` (perf leak fix).
+- **`AggregatingGameLuaRuntimeBindings`** — capability-scoped registration incl. Full tier.
+- Runtime logging: **`IGameLogger`** replaces direct `Debug.*` in chat/Lua/API paths.
+- **`LuaModRuntime.Tick`** perf: reusable scratch list.
+
+See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIEW_2026-06-12_RU.md`**.
+
 ## [Unreleased]
 
 ### Lua as a second game language (Unity host)

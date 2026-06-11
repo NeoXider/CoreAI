@@ -448,6 +448,8 @@ storyteller.AskWithCallback("The player defeated the dragon boss",
     (narration) => ShowCinematicText(narration));
 ```
 
+> The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
+
 ### Result
 
 ```

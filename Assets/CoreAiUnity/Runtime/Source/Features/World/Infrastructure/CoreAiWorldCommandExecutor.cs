@@ -14,11 +14,24 @@ namespace CoreAI.Infrastructure.World
     {
         private readonly IGameLogger _logger;
         private readonly ICoreAiPrefabRegistry _prefabRegistry;
+        private readonly List<ICoreAiCustomWorldCommandHandler> _customHandlers = new();
+        private MaterialPropertyBlock _sharedColorMpb;
 
         public CoreAiWorldCommandExecutor(IGameLogger logger, ICoreAiPrefabRegistry prefabRegistry = null)
         {
             _logger = logger;
             _prefabRegistry = prefabRegistry;
+        }
+
+        /// <summary>Registers a game-specific world-command handler (see <see cref="ICoreAiCustomWorldCommandHandler"/>).</summary>
+        public void RegisterCustomHandler(ICoreAiCustomWorldCommandHandler handler)
+        {
+            if (handler == null || _customHandlers.Contains(handler))
+            {
+                return;
+            }
+
+            _customHandlers.Add(handler);
         }
 
         public bool TryExecute(ApplyAiGameCommand cmd)
@@ -94,6 +107,15 @@ namespace CoreAI.Infrastructure.World
                 case "set_velocity":
                     return TrySetVelocity(env);
                 default:
+                    for (int i = 0; i < _customHandlers.Count; i++)
+                    {
+                        ICoreAiCustomWorldCommandHandler handler = _customHandlers[i];
+                        if (handler != null && handler.CanHandle(env.action) && handler.TryExecute(env))
+                        {
+                            return true;
+                        }
+                    }
+
                     _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] unknown action '{env.action}'");
                     return false;
             }
@@ -453,6 +475,13 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
+            if (float.IsNaN(env.floatValue) || float.IsInfinity(env.floatValue))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_scale: non-finite scale rejected (name='{env.targetName}')");
+                return false;
+            }
+
             float scale = Mathf.Clamp(env.floatValue, 0.01f, 100f);
             go.transform.localScale = Vector3.one * scale;
             return true;
@@ -477,9 +506,17 @@ namespace CoreAI.Infrastructure.World
 
             int changed = 0;
             Renderer[] renderers = go.GetComponents<Renderer>();
+            if (_sharedColorMpb == null)
+            {
+                _sharedColorMpb = new MaterialPropertyBlock();
+            }
+
             foreach (Renderer renderer in renderers)
             {
-                renderer.material.color = color;
+                renderer.GetPropertyBlock(_sharedColorMpb);
+                _sharedColorMpb.SetColor("_Color", color);
+                _sharedColorMpb.SetColor("_BaseColor", color);
+                renderer.SetPropertyBlock(_sharedColorMpb);
                 changed++;
             }
 

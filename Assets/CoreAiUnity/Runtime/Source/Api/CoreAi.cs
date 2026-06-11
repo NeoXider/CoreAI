@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Chat;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
 using UnityEngine;
 
@@ -46,6 +47,13 @@ namespace CoreAI
         private static readonly object ToolCallSyncRoot = new();
         private static readonly InMemoryLlmToolCallHistory ToolCallHistory = new(512);
         private static event Action<LlmToolCallRecord>? OnToolCallRecord;
+
+        // Static facade: no DI scope is guaranteed here, so route through the shared fallback
+        // game logger instead of UnityEngine.Debug (keeps feature filtering and sink routing).
+        private static void LogFacadeWarning(string message)
+        {
+            GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core, message);
+        }
 
         /// <summary>True when CoreAI services resolved successfully.</summary>
         public static bool IsReady => TryResolve(out _, out _, out _);
@@ -387,7 +395,7 @@ namespace CoreAI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAi] OnToolExecuted handler error: {ex.Message}");
+                    LogFacadeWarning($"[CoreAi] OnToolExecuted handler error: {ex.Message}");
                 }
             }
         }
@@ -468,7 +476,7 @@ namespace CoreAI
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
+                        LogFacadeWarning($"[CoreAi] ClearContext memory resolve: {ex.Message}");
                     }
                 }
             }
@@ -531,7 +539,7 @@ namespace CoreAI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAi] Resolve orchestrator from custom resolver failed: {ex.Message}");
+                    LogFacadeWarning($"[CoreAi] Resolve orchestrator from custom resolver failed: {ex.Message}");
                 }
             }
 
@@ -565,7 +573,7 @@ namespace CoreAI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[CoreAi] Resolve IAiOrchestrationService: {ex.Message}");
+                LogFacadeWarning($"[CoreAi] Resolve IAiOrchestrationService: {ex.Message}");
             }
 
             try
@@ -574,7 +582,7 @@ namespace CoreAI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[CoreAi] Resolve ICoreAISettings: {ex.Message}");
+                LogFacadeWarning($"[CoreAi] Resolve ICoreAISettings: {ex.Message}");
             }
 
             if (_chatService == null)
@@ -619,7 +627,7 @@ namespace CoreAI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[CoreAi] Tool-call subscriber error: {ex.Message}");
+                LogFacadeWarning($"[CoreAi] Tool-call subscriber error: {ex.Message}");
             }
         }
 
@@ -638,7 +646,7 @@ namespace CoreAI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAi] {eventName} handler error: {ex.Message}");
+                    LogFacadeWarning($"[CoreAi] {eventName} handler error: {ex.Message}");
                 }
             }
         }

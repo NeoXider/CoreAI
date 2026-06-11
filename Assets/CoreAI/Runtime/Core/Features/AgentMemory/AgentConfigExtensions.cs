@@ -81,6 +81,10 @@ namespace CoreAI.Ai
         /// <paramref name="onDone"/> with the final response. The primary idiom is
         /// <see cref="AskAsync(AgentConfig, string, int, CancellationToken)"/> — use this overload
         /// only from callback-style call sites (UnityEvents, legacy code) where awaiting is awkward.
+        /// The callback is marshaled to the caller's <see cref="SynchronizationContext"/> when one
+        /// exists, for example the Unity main thread; when called from a thread without a
+        /// <see cref="SynchronizationContext"/>, the callback may be invoked on a background thread,
+        /// and the caller must not touch UnityEngine APIs in that case.
         /// Errors are logged, not thrown.
         /// </summary>
         /// <param name="config">Agent configuration produced by <see cref="AgentBuilder.Build"/>.</param>

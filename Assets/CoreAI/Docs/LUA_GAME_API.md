@@ -5,22 +5,34 @@ Lua-скрипты (конверты от LLM и долгоживущие мод
 см. [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) при этом не ослабляется — растёт только
 поверхность биндингов, и каждая группа закрыта capability-уровнем.
 
+**Lua — опциональный модуль:** define `COREAI_NO_LUA` или удалите пакет MoonSharp — CoreAI
+собирается без Lua (stub-биндинги в DI). См. [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md).
+
+**Лучшие практики и антипаттерны:** [LUA_BEST_PRACTICES_RU.md](LUA_BEST_PRACTICES_RU.md).  
+**MoonSharp — что нативно, что своё:** [MOONSHARP_NATIVE_APIS_RU.md](MOONSHARP_NATIVE_APIS_RU.md).  
+**Режимы доступа (Read → Full):** [LUA_ACCESS_MODES_AUDIT_RU.md](LUA_ACCESS_MODES_AUDIT_RU.md).
+
 Все биндинги выполняются на главном потоке Unity.
 
 ## Capability-уровни
 
-`LuaCapabilities` (flags): `Read`, `Gameplay`, `WorldEdit`, `LogicOverride`, `All`.
+`LuaCapabilities` (flags): `Read`, `Gameplay`, `WorldEdit`, `LogicOverride`, `Full`, `All`.
+
 `AggregatingGameLuaRuntimeBindings` регистрирует группу функций только если её уровень выдан —
 у скрипта с уровнем `Read` функций редактирования мира физически нет в глобалах.
-По умолчанию (DI) выдаётся `All` — историческое поведение. Чтобы ограничить, создайте
-агрегатор с нужным уровнем и передайте его в `LuaModRuntime` / envelope-pipeline.
+По умолчанию (DI) выдаётся `All` (без `Full`) — историческое поведение. Full включается
+явно: **Enable Full Lua Access** на `CoreAILifetimeScope` или per-mod при `LoadMod`.
+
+Per-mod: `LuaModRuntime.LoadMod(id, code, caps)` передаёт caps в
+`ICapabilityScopedLuaBindings` — restricted-мод **не может** расширить tier хоста.
 
 | Уровень | Что открывает |
 |---|---|
 | `Read` | `log_*`, версии, `coreai_world_exists/pos/find/list_prefabs/raycast` |
 | `Gameplay` | `time_*` (включая `time_set_scale`) |
 | `WorldEdit` | `coreai_world_spawn/move/destroy/...`, батчи, транзакции, `set_props`, `parent` |
-| `LogicOverride` | `logic_define/reset/list` |
+| `LogicOverride` | `logic_define/reset/list`, mod APIs (`hooks_*`, `store_*`, `events_emit`) |
+| `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, … (reflection, opt-in) |
 
 ## Этап 1 — чтение мира (query-API)
 
@@ -114,3 +126,58 @@ Undo уже применённых команд нет (см. TODO).
 Шина — внутри `LuaModRuntime`: `events_emit` доставляется всем остальным модам (на следующем
 `Tick`) и в C#-событие `ModEventEmitted`; игра шлёт модам через `EmitEvent`. Подписка из игры —
 напрямую на DI-синглтон `LuaModRuntime` (адаптер в MessagePipe при желании пишется в одну строку).
+
+## LLM-инструменты (роль Programmer)
+
+| Tool | Назначение |
+|---|---|
+| `execute_lua` | One-shot Lua в песочнице (те же биндинги и лимиты, что envelope-pipeline) |
+| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload` для `LuaModRuntime` |
+
+`manage_mods` не даёт модели расширить capability tier — tier задаёт хост при регистрации тула.
+Read-only introspection: `LuaModsLlmTool(..., allowModManagement: false)`.
+
+## Full-режим (`unity_*`)
+
+Opt-in через **Enable Full Lua Access** на `CoreAILifetimeScope` или `LoadMod(..., caps | Full)`.
+Политика **allow-all** (blacklist типов — Planned, см. аудит).
+
+```lua
+local id = unity_find("Boss")
+unity_set_position(id, 0, 2, 0)
+local comps = unity_list_components(id)
+unity_set_member(id, "MeshRenderer", "material.color", "#ff0000")
+```
+
+Демо: `Assets/CoreAI.Demos/FullAccess/`. Для production предпочтительнее точечные биндинги
+или будущая миграция на MoonSharp `UserData.RegisterType` (см. MOONSHARP_NATIVE_APIS_RU.md).
+
+## Конфигурация хоста (Unity)
+
+На `CoreAILifetimeScope`:
+
+| Поле | Эффект |
+|---|---|
+| `worldPrefabRegistry` | Whitelist prefab-id для spawn |
+| `luaAllowedScenes` | Whitelist имён сцен для `coreai_world_load_scene` (пусто = любая из Build Settings) |
+| `enableFullLuaAccess` | Добавляет `Full` к capability агрегатора |
+
+## Расширение API игры
+
+### Свои Lua-функции
+
+`GameLuaBindingsExtensibility.Register(bindings, requiredCapabilities)` до старта сцены.
+Примеры — [LUA_BEST_PRACTICES_RU.md § Расширение](LUA_BEST_PRACTICES_RU.md).
+
+### Свои world-команды (без правки CoreAI)
+
+`CoreAiWorldCommandExecutor.RegisterCustomHandler(ICoreAiCustomWorldCommandHandler)` —
+action попадает в тот же конвейер, что LLM/Lua world-команды. Пример в LUA_BEST_PRACTICES_RU.md.
+
+## Связанные документы
+
+- [LUA_BEST_PRACTICES_RU.md](LUA_BEST_PRACTICES_RU.md) — как делать / как **не** делать
+- [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) — безопасность и чеклисты
+- [MOONSHARP_NATIVE_APIS_RU.md](MOONSHARP_NATIVE_APIS_RU.md) — нативные API MoonSharp
+- [LUA_ACCESS_MODES_AUDIT_RU.md](LUA_ACCESS_MODES_AUDIT_RU.md) — режимы доступа
+- Демо: `Assets/CoreAI.Demos/README.md`

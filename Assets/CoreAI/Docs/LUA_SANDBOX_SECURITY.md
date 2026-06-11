@@ -229,3 +229,9 @@ Lua binding:
 - Which inputs can be hostile or malformed?
 - What happens on timeout, cancellation, scene unload, or reset?
 - What compact error should the LLM receive when the action is denied?
+
+## Related docs
+
+- [MOONSHARP_NATIVE_APIS_RU.md](MOONSHARP_NATIVE_APIS_RU.md) — which MoonSharp/Lua features CoreAI uses natively vs custom wrappers.
+- [LUA_BEST_PRACTICES_RU.md](LUA_BEST_PRACTICES_RU.md) — integration do's and don'ts.
+- [LUA_GAME_API.md](LUA_GAME_API.md) — game API reference.

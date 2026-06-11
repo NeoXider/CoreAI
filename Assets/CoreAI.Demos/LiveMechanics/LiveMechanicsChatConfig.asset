@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6bf7c4d9f7c7f0849b6928c3defa31b7, type: 3}
+  m_Name: LiveMechanicsChatConfig
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Chat.CoreAiChatConfig
+  _roleId: Programmer
+  _headerTitle: Game Master AI (Programmer)
+  _welcomeMessage: 'Ask me to create or change game mechanics. I write Lua live:
+    damage_formula, attack_interval, loot_formula, spawns...'
+  _loadPersistedChatOnStartup: 0
+  _maxPersistedMessagesForUi: 50
+  _aiAvatarIcon: {fileID: 0}
+  _userAvatarIcon: {fileID: 0}
+  _enableStreaming: 1
+  _enableStopGeneration: 1
+  _showToolCallsInChat: 1
+  _showClearButton: 1
+  _typingIndicatorText: 
+  _streamingToolProgressHint: Processing...
+  _longRequestHintFormat: Response is still being generated... ~{elapsed}s
+  _useFullscreenChat: 0
+  _chatWidth: 650
+  _chatHeight: 910
+  _sendOnShiftEnter: 0
+  _maxMessageLength: 2000
+  _enableOpenChatKeyboardShortcut: 1
+  _openChatHotkey: 99
+  _enableEscapeChatShortcuts: 1
+  _errorMessagePrefix: 'Error: '
+  _timeoutMessage: Timeout.
+  _noResponseMessage: Could not get a response. Try again.

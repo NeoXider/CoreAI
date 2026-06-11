@@ -45,7 +45,9 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton);
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             builder.Register<LuaAiEnvelopeProcessor>(Lifetime.Singleton);
-            builder.Register<LuaGenerationRateLimiter>(Lifetime.Singleton);
+            // Factory lambda: VContainer cannot resolve the optional int/double constructor
+            // parameters, so construct with the limiter's own defaults.
+            builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
 #endif
 
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();

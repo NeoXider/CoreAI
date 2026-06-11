@@ -1,0 +1,14 @@
+-- Damage tuner: a Lua mod (LuaCapabilities: Read | LogicOverride) that
+-- redefines the game's declared "damage_formula" logic slot at load time.
+-- The game keeps calling its C# default until this override is installed,
+-- and falls back to it again when the override is reset.
+
+logic_define("damage_formula", function(atk, def)
+    local dmg = atk * 2.0 - def * 0.5
+    if dmg < 1 then
+        dmg = 1
+    end
+    return dmg
+end)
+
+report("[damage_tuner] damage_formula overridden: atk * 2.0 - def * 0.5")

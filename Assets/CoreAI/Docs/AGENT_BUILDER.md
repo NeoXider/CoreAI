@@ -246,6 +246,7 @@ merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response
 ```
 
 > 💡 Both use the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. `AskWithCallback` is for callback-style call sites (UI buttons, UnityEvents); the old `Ask(...)` is an `[Obsolete]` alias of it.
+> The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
 
 **🔴 Advanced — full control:**
 
@@ -951,6 +952,7 @@ async Task AskMerchant(string playerMessage)
 | `AskAsync(orch, message)` | 🔴 Async with explicit orchestrator | `await merchant.AskAsync(orch, "Hi")` |
 
 > 💡 The primary idiom is awaitable `AskAsync`; `AskWithCallback` exists for callback-style call sites (UnityEvents, legacy code). The old `Ask(message, onDone?)` still compiles but is `[Obsolete]`.
+> The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
 
 ### RoleId (typed role identifiers)
 

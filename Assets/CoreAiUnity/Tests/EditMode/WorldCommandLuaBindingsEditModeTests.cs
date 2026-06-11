@@ -291,7 +291,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Lua_coreai_world_begin_AlreadyActive_Throws()
+        public void Lua_coreai_world_begin_AfterStaleTransaction_DiscardsBufferAndStartsFresh()
         {
             ListSink sink = new();
             LuaApiRegistry reg = new();
@@ -299,7 +299,58 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "coreai_world_begin(); coreai_world_begin()"));
+            // Simulates a script that died between begin() and commit: the buffered command must
+            // not survive into (or block) the next transaction on the shared bindings instance.
+            env.RunChunk(script, @"
+                coreai_world_begin()
+                coreai_world_spawn('enemy.basic', 'stale', 1, 2, 3)");
+
+            DynValue committed = env.RunChunk(script, @"
+                coreai_world_begin()
+                coreai_world_spawn('enemy.basic', 'fresh', 4, 5, 6)
+                return coreai_world_commit()");
+
+            Assert.AreEqual(1, (int)committed.Number);
+            Assert.AreEqual(1, sink.Items.Count);
+            AssertSpawnEnvelope(sink.Items[0], "enemy.basic", "fresh");
+        }
+
+        [Test]
+        public void AbortTransaction_DropsBufferedCommands()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            CoreAiWorldLuaRuntimeBindings bindings = new(sink);
+            bindings.RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, @"
+                coreai_world_begin()
+                coreai_world_spawn('enemy.basic', 'e1', 1, 2, 3)");
+
+            bindings.AbortTransaction();
+
+            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "coreai_world_commit()"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_set_props_NonFiniteOrOutOfRangeScale_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 0/0 })"));
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1/0 })"));
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1000000 })"));
+            Assert.AreEqual(0, sink.Items.Count);
         }
 
         [Test]

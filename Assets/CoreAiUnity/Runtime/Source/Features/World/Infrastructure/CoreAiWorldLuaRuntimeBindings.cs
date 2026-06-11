@@ -23,6 +23,12 @@ namespace CoreAI.Infrastructure.World
         /// <summary>Maximum world commands accepted by batch helpers.</summary>
         public const int MaxBatchSize = 100;
 
+        /// <summary>Accepted <c>set_props.scale</c> range (mirrors the executor's clamp).</summary>
+        public const double MinScale = 0.01d;
+
+        /// <summary>Accepted <c>set_props.scale</c> range (mirrors the executor's clamp).</summary>
+        public const double MaxScale = 100d;
+
         private const int MaxTransactionBuffer = 256;
 
         private readonly IAiGameCommandSink _sink;
@@ -78,6 +84,16 @@ namespace CoreAI.Infrastructure.World
             }
 
             return new Vector3(fx, fy, fz);
+        }
+
+        /// <summary>
+        /// Discards any unfinished transaction. Hosts can call this after a script run fails to
+        /// guarantee no stale buffered commands survive into the next script.
+        /// </summary>
+        public void AbortTransaction()
+        {
+            _txBuffer.Clear();
+            _txActive = false;
         }
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
@@ -189,7 +205,15 @@ namespace CoreAI.Infrastructure.World
                                     throw new ArgumentException("scale must be a number.");
                                 }
 
-                                Publish(CoreAiWorldCommandEnvelope.SetScale(name, (float)pair.Value.Number));
+                                double scale = pair.Value.Number;
+                                if (double.IsNaN(scale) || double.IsInfinity(scale) ||
+                                    scale < MinScale || scale > MaxScale)
+                                {
+                                    throw new ArgumentException(
+                                        $"scale must be finite and within [{MinScale}; {MaxScale}].");
+                                }
+
+                                Publish(CoreAiWorldCommandEnvelope.SetScale(name, (float)scale));
                                 break;
                             case "color":
                                 if (pair.Value.Type != MoonSharp.Interpreter.DataType.String)
@@ -302,11 +326,9 @@ namespace CoreAI.Infrastructure.World
 
             registry.Register("coreai_world_begin", new Action(() =>
             {
-                if (_txActive)
-                {
-                    throw new InvalidOperationException("transaction already active.");
-                }
-
+                // A previous script may have died between begin() and commit/rollback (error,
+                // instruction budget). The bindings instance is shared, so a stale transaction
+                // must not lock out every later script: discard it and start fresh.
                 _txActive = true;
                 _txBuffer.Clear();
             }));

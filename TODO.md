@@ -1,10 +1,19 @@
 # TODO
 
-> Обновлено 2026-06-11. Всё выполненное удалено (история — в `CHANGELOG.md` обоих пакетов и git-логе). Здесь только открытые задачи.
+> Обновлено 2026-06-12. Всё выполненное удалено (история — в `CHANGELOG.md` обоих пакетов и git-логе). Здесь только открытые задачи.
+
+## v4.0.0 (2026-06-12) — сделано
+
+- [x] Демо-сцены `Assets/CoreAI.Demos/` (LuaMods, WorldCommands, Skills, LiveMechanics, FullAccess).
+- [x] LLM `manage_mods` + `execute_lua` для Programmer (DI в `WorldCommandsInstaller`).
+- [x] Full-режим (`LuaCapabilities.Full`, `CoreAiFullUnityLuaRuntimeBindings`, opt-in на scope).
+- [x] Whitelist сцен `luaAllowedScenes` на `CoreAILifetimeScope`.
+- [x] `ICoreAiCustomWorldCommandHandler` для расширения world-команд из игры.
+- [x] Perf: `set_color` через MPB; `LuaModRuntime.Tick` без alloc массива/кадр — см. `Docs/PERF_REVIEW_2026-06-12_RU.md`.
 
 ## Инфраструктура
 - [ ] **Настроить секреты GameCI в GitHub** (`UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`) — без них workflow `.github/workflows/ci.yml` (матрица moonsharp / no-lua) не запустится.
-- [ ] **GitHub Release / tag для v3.2.0** после пуша.
+- [ ] **GitHub Release / tag для v4.0.0** после пуша.
 
 ## [P1] Из аудита 2026-06-11 (детали: `Docs/AUDIT_2026-06-11_RU.md`)
 
@@ -36,9 +45,7 @@
 - Отдельно: проверить вызовы `Task.Run` вне стора.
 
 ## [P1] Демо-сцены
-- Нужны отдельные демо-сцены помимо чата: Lua-механики, MCP-механики, скиллы.
-- Размещать в отдельной папке, например `Assets/CoreAI.Demos/`, НЕ внутри `Assets/CoreAI` и НЕ внутри `Assets/CoreAiUnity`.
-- Каждая демо-сцена должна быть самодостаточна: сцена + минимальные скрипты + README.
+- [x] Отдельные демо в `Assets/CoreAI.Demos/` (см. README там).
 
 ## [P1] Lua как полноценный второй язык игры
 
@@ -55,6 +62,8 @@
 - Остатки:
   - [ ] Undo уже применённых команд (инверсные команды для spawn/move; «ИИ испортил уровень»).
   - [ ] Capability-уровень из конфига роли ИИ (сейчас задаётся кодом при создании агрегатора/LoadMod); опциональное подтверждение игрока для опасных уровней.
+  - [ ] **Full-mode blacklist** (`IFullLuaAccessBlacklistPolicy`) — deny-list типов/членов (см. `LUA_ACCESS_MODES_AUDIT_RU.md` Planned).
+  - [ ] **GameObject.Find cache** для world/Lua query (см. `PERF_REVIEW_2026-06-12_RU.md`).
   - [ ] Мост `ModEventEmitted` → MessagePipe (сейчас прямая C#-подписка на DI-синглтон).
   - [ ] Бюджет команд на тик для модов (сейчас бюджеты на вызов хендлера + лимиты хендлеров/таймеров).
 

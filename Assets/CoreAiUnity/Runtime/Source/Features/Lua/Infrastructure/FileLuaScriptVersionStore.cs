@@ -143,7 +143,7 @@ namespace CoreAI.Infrastructure.Lua
                 {
                     _logger.LogWarning(
                         GameLogFeature.Core,
-                        $"Lua script versions load failed, starting empty: {ex.Message}");
+                        $"Lua script versions load failed, starting empty: {ex}");
                     _memory.ClearAll();
                 }
             }
@@ -189,7 +189,7 @@ namespace CoreAI.Infrastructure.Lua
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(GameLogFeature.Core, $"Lua script versions save failed: {ex.Message}");
+                    _logger.LogError(GameLogFeature.Core, $"Lua script versions save failed: {ex}");
                 }
             }
         }

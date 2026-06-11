@@ -64,7 +64,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatService] Resolve AgentMemoryPolicy: {ex.Message}");
+                    GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve AgentMemoryPolicy: {ex.Message}");
                 }
 
                 try
@@ -73,7 +74,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatService] Resolve ICoreAISettings: {ex.Message}");
+                    GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve ICoreAISettings: {ex.Message}");
                 }
 
                 try
@@ -82,7 +84,8 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatService] Resolve IAgentMemoryStore: {ex.Message}");
+                    GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve IAgentMemoryStore: {ex.Message}");
                 }
 
                 try
@@ -91,14 +94,16 @@ namespace CoreAI.Chat
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[CoreAiChatService] Resolve IGameLogger: {ex.Message}");
+                    GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve IGameLogger: {ex.Message}");
                 }
 
                 return new CoreAiChatService(orchestrator, policy, settings, memStore, logger);
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[CoreAiChatService] Failed to create from scene: {ex.Message}");
+                GameLoggerUnscopedFallback.Instance.LogError(GameLogFeature.Core,
+                    $"[CoreAiChatService] Failed to create from scene: {ex}");
                 return null;
             }
         }
@@ -329,14 +334,8 @@ namespace CoreAI.Chat
                 "(fetch + ReadableStream via CoreAiSseFetch.jslib). While it is off, UnityWebRequest buffers the full " +
                 "response and this service uses non-streaming mode; streaming markers are absent and " +
                 "the reply appears all at once.";
-            if (_logger != null)
-            {
-                _logger.LogWarning(GameLogFeature.Core, "[CoreAiChatService] " + body);
-            }
-            else
-            {
-                Debug.LogWarning("[CoreAI] [Chat] " + body);
-            }
+            (_logger ?? GameLoggerUnscopedFallback.Instance)
+                .LogWarning(GameLogFeature.Core, "[CoreAiChatService] " + body);
         }
 #endif
 

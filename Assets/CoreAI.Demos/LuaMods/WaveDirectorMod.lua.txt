@@ -1,0 +1,28 @@
+-- Wave director: a persistent Lua mod (LuaCapabilities: Read | WorldEdit).
+-- Reacts to the game's "wave_started" event, spawns a wave of enemies in a
+-- single transaction, persists the wave counter in the per-mod store, and
+-- periodically recolors the Boss via the world-command pipeline.
+
+hooks_on("wave_started", function(evt, payload)
+    local wave = (tonumber(store_get("wave")) or 0) + 1
+    store_set("wave", tostring(wave))
+
+    local count = 2 + wave
+    coreai_world_begin()
+    for i = 1, count do
+        local x = (i - (count + 1) / 2) * 1.6
+        coreai_world_spawn("enemy.basic", "wave" .. wave .. "_enemy" .. i, x, 1.5, 8)
+    end
+    coreai_world_commit()
+
+    events_emit("wave_spawned", tostring(count))
+    report("[wave_director] wave " .. wave .. ": spawned " .. count .. " enemies")
+end)
+
+hooks_every(4.0, function()
+    if coreai_world_exists("Boss") then
+        local colors = { "#ff3300", "#ffaa00", "#33ccff", "#aa66ff" }
+        local wave = tonumber(store_get("wave")) or 0
+        coreai_world_set_props("Boss", { color = colors[(wave % 4) + 1] })
+    end
+end)

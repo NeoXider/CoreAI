@@ -240,6 +240,8 @@ merchant.AskWithCallback("Show me swords", (response) => {
 });
 ```
 
+> The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
+
 ---
 
 ## 6. Verifying the result
