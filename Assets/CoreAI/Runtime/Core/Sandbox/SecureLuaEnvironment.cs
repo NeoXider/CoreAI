@@ -119,6 +119,10 @@ namespace CoreAI.Sandbox
             Remove("os");
             Remove("debug");
 
+            // Preset_HardSandbox still leaves a 'package' table behind; it is useless without
+            // require/loadfile but its loaders/paths shape is an information channel — deny it.
+            Remove("package");
+
             // collectgarbage is a timing/heap oracle even when stubbed; deny it entirely.
             Remove("collectgarbage");
 

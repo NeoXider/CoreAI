@@ -44,17 +44,19 @@
 
 > Цель: Lua должен уметь менять мир и логику механик во время игры, а не только дергать 8 write-only команд (`CoreAiWorldLuaRuntimeBindings`). Песочница и `StripRiskyGlobals` не ослабляются — растёт только поверхность биндингов. Этапы упорядочены по ценности/стоимости, каждый ценен сам по себе.
 
-- [ ] **Этап 1 — чтение мира (query-API)**. Сейчас API write-only, ИИ строит вслепую.
-  - [ ] `world.find(tag)`, `world.exists(name)`, `world.pos(name)`, `world.list_prefabs()`, `world.raycast(...)`.
-  - [ ] `world.set_props(name, {scale=..., color=...})` — по curated-whitelist свойств, без сырого reflection.
-- [ ] **Этап 2 — логические слоты (изменение механик)**. Обобщить паттерн LuaFormula: игра объявляет именованные слоты (`damage_formula`, `loot_table`, `spawn_director`, `price_curve`), вызывает Lua-функцию если зарегистрирована, иначе C#-дефолт. `logic.define(name, fn)` / `logic.reset(name)`. Игра контролирует, какие точки переопределяемы.
-- [ ] **Этап 3 — персистентный рантайм (LuaModRuntime)**. Долгоживущие скрипты-моды вместо одноразовых конвертов.
-  - [ ] Реестр загруженных модов, load/unload/reload, бюджет инструкций на тик (поверх `InstructionLimitDebugger`/`LuaCoroutineRunner`).
-  - [ ] `hooks.on(event, fn)`, `hooks.every(seconds, fn)` — тик из Unity-слоя.
-  - [ ] `store.set/get` — персистентный k/v на мод.
-- [ ] **Этап 4 — уровневые примитивы**. Пакетные операции, чтобы генерация уровня не упиралась в rate-limit: `world.spawn_batch{...}`, `world.grid(prefab, x0,z0,x1,z1)`, `world.parent(child, parent)`; транзакции `world.begin()/commit()` с откатом (undo для «ИИ испортил уровень»).
-- [ ] **Этап 5 — события**. `events.emit/on` — мост к MessagePipe; моды общаются с игрой и между собой.
-- [ ] **Безопасность (сквозное)**: capability-уровни на мод (`read` / `gameplay` / `world_edit` / `logic_override`), уровень задаётся ролью ИИ из конфига; бюджет команд на тик; для опасных уровней — опциональное подтверждение игрока.
+> Реализовано (2026-06-12, см. `Assets/CoreAI/Docs/LUA_GAME_API.md`): этапы 1–5 + capability-уровни. Ниже — остатки.
+
+- [x] **Этап 1 — чтение мира (query-API)**: `coreai_world_exists/pos/find/list_prefabs/raycast` (`CoreAiWorldQueryLuaBindings`), `coreai_world_set_props` (whitelist: scale, color).
+- [x] **Этап 2 — логические слоты**: `LuaLogicSlots` (`logic_define/reset/list`, `TryInvokeNumber/Bool/String` с fail-open и C#-дефолтом).
+- [x] **Этап 3 — LuaModRuntime**: load/unload/reload, `hooks_on`/`hooks_every`, `store_set/get` (`FileLuaModStore`), пер-вызовные бюджеты, авто-выгрузка после 8 ошибок, `LuaModRuntimeTicker`.
+- [x] **Этап 4 — уровневые примитивы**: `spawn_batch`/`grid`/`parent` + транзакции `begin/commit/rollback` (буфер до 256).
+- [x] **Этап 5 — события**: `events_emit` / `hooks_on` между модами + `ModEventEmitted`/`EmitEvent` для игры.
+- [x] **Capability-уровни**: `LuaCapabilities` + гейтинг групп биндингов в `AggregatingGameLuaRuntimeBindings`.
+- Остатки:
+  - [ ] Undo уже применённых команд (инверсные команды для spawn/move; «ИИ испортил уровень»).
+  - [ ] Capability-уровень из конфига роли ИИ (сейчас задаётся кодом при создании агрегатора/LoadMod); опциональное подтверждение игрока для опасных уровней.
+  - [ ] Мост `ModEventEmitted` → MessagePipe (сейчас прямая C#-подписка на DI-синглтон).
+  - [ ] Бюджет команд на тик для модов (сейчас бюджеты на вызов хендлера + лимиты хендлеров/таймеров).
 
 ## [P2] Идеи (под вопросом, для последующей оценки)
 - [ ] **STT → Agent → TTS pipeline для NPC** — локальный whisper, локальный TTS, потоковая передача эмоций/интонаций для анимаций.

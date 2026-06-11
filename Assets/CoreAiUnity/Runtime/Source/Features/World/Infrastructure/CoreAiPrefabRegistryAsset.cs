@@ -13,10 +13,19 @@ namespace CoreAI.Infrastructure.World
     }
 
     /// <summary>
+    /// Unity-side prefab catalog contract for read-only prefab key enumeration.
+    /// </summary>
+    public interface ICoreAiPrefabCatalog
+    {
+        /// <summary>Lists distinct prefab keys available for read-only discovery.</summary>
+        System.Collections.Generic.IReadOnlyList<string> ListPrefabKeys();
+    }
+
+    /// <summary>
     /// Stores prefab lookup entries used by CoreAI world command execution.
     /// </summary>
     [CreateAssetMenu(menuName = "CoreAI/World/Prefab Registry", fileName = "CoreAiPrefabRegistry")]
-    public sealed class CoreAiPrefabRegistryAsset : ScriptableObject, ICoreAiPrefabRegistry
+    public sealed class CoreAiPrefabRegistryAsset : ScriptableObject, ICoreAiPrefabRegistry, ICoreAiPrefabCatalog
     {
         [Serializable]
         public sealed class Entry
@@ -57,6 +66,33 @@ namespace CoreAI.Infrastructure.World
             }
 
             return false;
+        }
+
+        /// <inheritdoc />
+        public System.Collections.Generic.IReadOnlyList<string> ListPrefabKeys()
+        {
+            EnsureBuilt();
+            HashSet<string> keys = new(StringComparer.Ordinal);
+            List<string> result = new();
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Entry entry = entries[i];
+                if (entry == null || entry.Prefab == null)
+                {
+                    continue;
+                }
+
+                string key = !string.IsNullOrWhiteSpace(entry.Name) ? entry.Name.Trim() : entry.Key?.Trim();
+                if (string.IsNullOrEmpty(key) || !keys.Add(key))
+                {
+                    continue;
+                }
+
+                result.Add(key);
+            }
+
+            return result;
         }
 
         private void EnsureBuilt()

@@ -2,8 +2,16 @@
 
 ## [Unreleased]
 
+### Lua as a second game language (`Docs/LUA_GAME_API.md`)
+
+- **`LuaCapabilities`** — capability tiers (`Read` / `Gameplay` / `WorldEdit` / `LogicOverride`); binding groups are only registered for granted tiers, so restricted scripts physically lack the functions.
+- **`LuaLogicSlots`** — game-declared overridable decision points: scripts install overrides via `logic_define(name, fn)` / `logic_reset` / `logic_list`; the game calls `TryInvokeNumber/Bool/String` with C# fallback. Fail-open: a throwing or over-budget override (200 ms / 200k steps) is removed automatically.
+- **`LuaModRuntime`** — persistent runtime for long-lived Lua mods: `hooks_on(event, fn)`, `hooks_every(seconds, fn)`, `events_emit(name, payload)`, `store_set/get` (via `ILuaModStore`), `mod_id()`; per-handler guards (100 ms / 100k steps), per-mod limits (64 handlers, 16 timers, 256 queued events), auto-unload after 8 handler errors; `LoadMod/UnloadMod/ReloadMod/EmitEvent/Tick`, `ModEventEmitted` event for the game side.
+- **`ILuaModStore`** — persistent per-mod string k/v contract backing `store_set/get`.
+
 ### Lua sandbox hardening
 
+- **`package` global removed.** `Preset_HardSandbox` leaves an inert `package` table behind; `StripRiskyGlobals` now nils it (found by the new regression test).
 - **Capped `string.rep`.** The sandbox replaces `string.rep` with a capped implementation (`SecureLuaEnvironment.MaxStringRepLength = 1_000_000` chars) — single-instruction allocation bombs now fail with a script error before allocating.
 - **Coroutine total lifetime budget.** `LuaCoroutineHandle` tracks consumed instruction steps across resumes (`DefaultTotalLifetimeSteps = 1_000_000`) and kills the handle when the budget is exhausted, so infinite-yield coroutines are no longer immortal.
 - **Output/error caps in `LuaAiEnvelopeProcessor`.** Result summaries are truncated to 4,000 chars; error messages are normalized (newlines stripped) and truncated to 500 chars before entering payload/repair prompts.

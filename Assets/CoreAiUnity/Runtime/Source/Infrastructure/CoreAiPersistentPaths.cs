@@ -8,6 +8,7 @@ namespace CoreAI.Infrastructure
         public const string RootFolderName = "CoreAI";
         public const string ConversationSummaries = "ConversationSummaries";
         public const string AgentMemory = "AgentMemory";
+        public const string LuaMods = "LuaMods";
         public const string LuaScriptVersions = "LuaScriptVersions";
         public const string DataOverlayVersions = "DataOverlayVersions";
     }

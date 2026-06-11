@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Lua as a second game language (Unity host)
+
+- **`CoreAiWorldQueryLuaBindings`** — read API for Lua: `coreai_world_exists/pos/find/list_prefabs/raycast` (main-thread, applied-state snapshot, find capped at 100 results); `ICoreAiPrefabCatalog.ListPrefabKeys()` on `CoreAiPrefabRegistryAsset`.
+- **Level primitives & transactions** in `CoreAiWorldLuaRuntimeBindings`: `coreai_world_spawn_batch` (≤ 100), `coreai_world_grid` (≤ 100 cells, step ≥ 0.5), `coreai_world_parent`, `coreai_world_set_props` (whitelist: `scale`, `color`); `coreai_world_begin/commit/rollback` buffer commands (≤ 256, overflow auto-rolls back).
+- **Executor actions**: `parent`, `set_scale` (clamped 0.01–100), `set_color` (HTML color onto Renderer materials and UI Graphics).
+- **`FileLuaModStore`** — persistent per-mod k/v under `persistentDataPath/CoreAI/LuaMods` (≤ 256 keys/mod, ≤ 64 KB/value, atomic writes, collision-proof filenames); **`LuaModRuntimeTicker`** drives `LuaModRuntime.Tick` each frame; DI wiring in `WorldCommandsInstaller`.
+- **`AggregatingGameLuaRuntimeBindings`** gates binding groups by `LuaCapabilities` (default `All` preserves historical behavior) and registers query bindings + `LuaLogicSlots`.
+
 ### Lua and world hardening
 
 - `string.rep` now uses a capped implementation in `SecureLuaEnvironment` (`MaxStringRepLength = 1_000_000`) and throws on oversized repetitions.

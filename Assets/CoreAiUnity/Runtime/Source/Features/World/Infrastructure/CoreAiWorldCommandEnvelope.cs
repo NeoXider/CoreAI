@@ -91,6 +91,36 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
+        public static CoreAiWorldCommandEnvelope Parent(string childName, string parentName)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "parent",
+                targetName = childName ?? "",
+                stringValue = parentName ?? ""
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetScale(string targetName, float uniformScale)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_scale",
+                targetName = targetName ?? "",
+                floatValue = uniformScale
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetColor(string targetName, string htmlColor)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_color",
+                targetName = targetName ?? "",
+                stringValue = htmlColor ?? ""
+            };
+        }
+
         public static CoreAiWorldCommandEnvelope PlayAnimation(string targetName, string animationName)
         {
             return new CoreAiWorldCommandEnvelope

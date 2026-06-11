@@ -139,6 +139,236 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1f, envelope.floatValue);
         }
 
+        [Test]
+        public void Lua_coreai_world_spawn_batch_TableEntries_PublishesSpawnCommands()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            DynValue result = env.RunChunk(script, @"
+                return coreai_world_spawn_batch({
+                    { prefab = 'enemy.basic', name = 'e1', x = 1, y = 2, z = 3 },
+                    { prefab = 'enemy.elite', name = 'e2', x = 4, y = 5, z = 6 },
+                    { prefab = 'pickup.coin', name = 'c1', x = 7, y = 8, z = 9 },
+                })");
+
+            Assert.AreEqual(3, (int)result.Number);
+            Assert.AreEqual(3, sink.Items.Count);
+            AssertSpawnEnvelope(sink.Items[0], "enemy.basic", "e1");
+            AssertSpawnEnvelope(sink.Items[1], "enemy.elite", "e2");
+            AssertSpawnEnvelope(sink.Items[2], "pickup.coin", "c1");
+        }
+
+        [Test]
+        public void Lua_coreai_world_spawn_batch_MoreThanMaximum_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, @"
+                local entries = {}
+                for i = 1, 101 do
+                    entries[i] = { prefab = 'cell', name = 'cell_' .. i, x = i, y = 0, z = 0 }
+                end
+                coreai_world_spawn_batch(entries)"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_grid_ValidGrid_PublishesNineNamedSpawns()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            DynValue result = env.RunChunk(script, "return coreai_world_grid('p','cell',0,0,2,2,1,0)");
+
+            Assert.AreEqual(9, (int)result.Number);
+            Assert.AreEqual(9, sink.Items.Count);
+            for (int ix = 0; ix < 3; ix++)
+            {
+                for (int iz = 0; iz < 3; iz++)
+                {
+                    int index = ix * 3 + iz;
+                    CoreAiWorldCommandEnvelope envelope = EnvelopeAt(sink, index);
+                    Assert.AreEqual("spawn", envelope.action);
+                    Assert.AreEqual("p", envelope.prefabKeyOrName);
+                    Assert.AreEqual($"cell_{ix}_{iz}", envelope.targetName);
+                    Assert.AreEqual(ix, envelope.x);
+                    Assert.AreEqual(0, envelope.y);
+                    Assert.AreEqual(iz, envelope.z);
+                }
+            }
+        }
+
+        [Test]
+        public void Lua_coreai_world_grid_StepBelowMinimum_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_grid('p','cell',0,0,2,2,0.1,0)"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_grid_TooLarge_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_grid('p','cell',0,0,10,10,1,0)"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_transaction_Commit_PublishesBufferedCommand()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, @"
+                coreai_world_begin()
+                coreai_world_spawn('enemy.basic', 'e1', 1, 2, 3)");
+            Assert.AreEqual(0, sink.Items.Count);
+
+            DynValue result = env.RunChunk(script, "return coreai_world_commit()");
+
+            Assert.AreEqual(1, (int)result.Number);
+            Assert.AreEqual(1, sink.Items.Count);
+            AssertSpawnEnvelope(sink.Items[0], "enemy.basic", "e1");
+        }
+
+        [Test]
+        public void Lua_coreai_world_transaction_Rollback_DropsBufferedCommand()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, @"
+                coreai_world_begin()
+                coreai_world_spawn('enemy.basic', 'e1', 1, 2, 3)");
+            Assert.AreEqual(0, sink.Items.Count);
+
+            DynValue result = env.RunChunk(script, "return coreai_world_rollback()");
+
+            Assert.AreEqual(1, (int)result.Number);
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_commit_WithoutBegin_Throws()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "coreai_world_commit()"));
+        }
+
+        [Test]
+        public void Lua_coreai_world_begin_AlreadyActive_Throws()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "coreai_world_begin(); coreai_world_begin()"));
+        }
+
+        [Test]
+        public void Lua_coreai_world_set_props_ScaleAndColor_PublishesSetScaleThenSetColor()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, "coreai_world_set_props('hero', { scale = 2, color = '#ff0000' })");
+
+            Assert.AreEqual(2, sink.Items.Count);
+            CoreAiWorldCommandEnvelope scale = EnvelopeAt(sink, 0);
+            Assert.AreEqual("set_scale", scale.action);
+            Assert.AreEqual("hero", scale.targetName);
+            Assert.AreEqual(2f, scale.floatValue);
+            CoreAiWorldCommandEnvelope color = EnvelopeAt(sink, 1);
+            Assert.AreEqual("set_color", color.action);
+            Assert.AreEqual("hero", color.targetName);
+            Assert.AreEqual("#ff0000", color.stringValue);
+        }
+
+        [Test]
+        public void Lua_coreai_world_set_props_UnknownKey_Throws()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(
+                () => env.RunChunk(script, "coreai_world_set_props('hero', { speed = 3 })"));
+        }
+
+        [Test]
+        public void Lua_coreai_world_parent_ChildAndParent_PublishesParentEnvelope()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, "coreai_world_parent('child', 'parent')");
+
+            Assert.AreEqual(1, sink.Items.Count);
+            CoreAiWorldCommandEnvelope envelope = EnvelopeAt(sink, 0);
+            Assert.AreEqual("parent", envelope.action);
+            Assert.AreEqual("child", envelope.targetName);
+            Assert.AreEqual("parent", envelope.stringValue);
+        }
+
+        private static void AssertSpawnEnvelope(ApplyAiGameCommand command, string prefab, string name)
+        {
+            Assert.AreEqual(WorldCommand, command.CommandTypeId);
+            CoreAiWorldCommandEnvelope envelope = JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(command.JsonPayload);
+            Assert.AreEqual("spawn", envelope.action);
+            Assert.AreEqual(prefab, envelope.prefabKeyOrName);
+            Assert.AreEqual(name, envelope.targetName);
+        }
+
+        private static CoreAiWorldCommandEnvelope EnvelopeAt(ListSink sink, int index)
+        {
+            return JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[index].JsonPayload);
+        }
+
     }
 }
 #endif

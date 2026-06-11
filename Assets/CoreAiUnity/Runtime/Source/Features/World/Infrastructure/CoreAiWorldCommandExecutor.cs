@@ -61,6 +61,12 @@ namespace CoreAI.Infrastructure.World
                     return TryDestroy(env);
                 case "set_active":
                     return TrySetActive(env);
+                case "parent":
+                    return TryParent(env);
+                case "set_scale":
+                    return TrySetScale(env);
+                case "set_color":
+                    return TrySetColor(env);
                 case "load_scene":
                     return TryLoadScene(env);
                 case "reload_scene":
@@ -407,6 +413,123 @@ namespace CoreAI.Infrastructure.World
             }
 
             go.SetActive(env.boolValue != 0);
+            return true;
+        }
+
+        private bool TryParent(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject child))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] parent: child not found (name='{env.targetName}')");
+                return false;
+            }
+
+            string parentName = (env.stringValue ?? "").Trim();
+            if (string.IsNullOrEmpty(parentName) ||
+                parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                child.transform.SetParent(null, true);
+                return true;
+            }
+
+            if (!ResolveObject(parentName, out GameObject parent))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] parent: parent not found (name='{env.stringValue}')");
+                return false;
+            }
+
+            child.transform.SetParent(parent.transform, true);
+            return true;
+        }
+
+        private bool TrySetScale(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_scale: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            float scale = Mathf.Clamp(env.floatValue, 0.01f, 100f);
+            go.transform.localScale = Vector3.one * scale;
+            return true;
+        }
+
+        private bool TrySetColor(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_color: object not found (name='{env.targetName}')");
+                return false;
+            }
+
+            string colorText = NormalizeHtmlColor(env.stringValue);
+            if (!ColorUtility.TryParseHtmlString(colorText, out Color color))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_color: invalid html color '{env.stringValue}'");
+                return false;
+            }
+
+            int changed = 0;
+            Renderer[] renderers = go.GetComponents<Renderer>();
+            foreach (Renderer renderer in renderers)
+            {
+                renderer.material.color = color;
+                changed++;
+            }
+
+            UnityEngine.UI.Graphic[] graphics = go.GetComponents<UnityEngine.UI.Graphic>();
+            foreach (UnityEngine.UI.Graphic graphic in graphics)
+            {
+                graphic.color = color;
+                changed++;
+            }
+
+            if (changed == 0)
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_color: no Renderer or Graphic on '{go.name}'");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string NormalizeHtmlColor(string htmlColor)
+        {
+            string value = (htmlColor ?? "").Trim();
+            if (value.Length > 0 && value[0] != '#' && IsHexColorLength(value.Length) && IsHexColor(value))
+            {
+                return "#" + value;
+            }
+
+            return value;
+        }
+
+        private static bool IsHexColorLength(int length)
+        {
+            return length == 3 || length == 6 || length == 8;
+        }
+
+        private static bool IsHexColor(string value)
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                bool hex = c >= '0' && c <= '9' ||
+                           c >= 'a' && c <= 'f' ||
+                           c >= 'A' && c <= 'F';
+                if (!hex)
+                {
+                    return false;
+                }
+            }
+
             return true;
         }
 

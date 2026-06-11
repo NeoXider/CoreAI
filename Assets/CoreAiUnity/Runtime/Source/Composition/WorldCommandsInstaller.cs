@@ -34,12 +34,34 @@ namespace CoreAI.Composition
             builder.Register<CoreAiVersioningLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldLuaRuntimeBindings>(Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
-            builder.Register<AggregatingGameLuaRuntimeBindings>(Lifetime.Singleton)
+            builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
+            // Factory registration: the ctor's optional budget parameters (int/long defaults)
+            // are not resolvable by VContainer.
+            builder.Register(c => new CoreAI.Ai.LuaLogicSlots(c.Resolve<CoreAI.Logging.ILog>()),
+                Lifetime.Singleton);
+            // Factory registration: the ctor's optional LuaCapabilities parameter (enum default)
+            // is not resolvable by VContainer.
+            builder.Register(c => new AggregatingGameLuaRuntimeBindings(
+                    c.Resolve<CoreAI.Infrastructure.Logging.IGameLogger>(),
+                    c.Resolve<CoreAiVersioningLuaRuntimeBindings>(),
+                    c.Resolve<CoreAiWorldLuaRuntimeBindings>(),
+                    c.Resolve<LuaTimeBindings>(),
+                    c.Resolve<CoreAiWorldQueryLuaBindings>(),
+                    c.Resolve<CoreAI.Ai.LuaLogicSlots>()), Lifetime.Singleton)
                 .As<IGameLuaRuntimeBindings>();
             builder.Register<LoggingLuaExecutionObserver>(Lifetime.Singleton)
                 .As<ILuaExecutionObserver>();
             builder.RegisterComponentOnNewGameObject<LuaCoroutineRunner>(Lifetime.Singleton,
                 "CoreAI_LuaCoroutineRunner");
+
+            // Persistent mod runtime: long-lived Lua mods with hooks/timers/events + per-mod store.
+            builder.Register(c => new FileLuaModStore(), Lifetime.Singleton)
+                .As<CoreAI.Ai.ILuaModStore>();
+            builder.Register(c => new CoreAI.Ai.LuaModRuntime(
+                    c.Resolve<IGameLuaRuntimeBindings>(),
+                    c.Resolve<CoreAI.Ai.ILuaModStore>()),
+                Lifetime.Singleton);
+            builder.RegisterEntryPoint<LuaModRuntimeTicker>();
 #else
             builder.Register<CoreAI.Ai.CoreDefaultLuaRuntimeBindings>(Lifetime.Singleton)
                 .As<CoreAI.Ai.IGameLuaRuntimeBindings>();

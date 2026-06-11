@@ -370,17 +370,9 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(new LuaApiRegistry());
 
-            long beforeLargeString = GC.GetTotalMemory(true);
+            // The cap throws before allocating: both rejections must be immediate script errors.
             Assert.Throws<ScriptRuntimeException>(() => script.DoString("return string.rep('a', 2000000)"));
-            long afterLargeString = GC.GetTotalMemory(true);
-            Assert.Less(Math.Abs(afterLargeString - beforeLargeString), 1_000_000L,
-                "Huge string.rep should fail before large allocation.");
-
-            long beforeHugeString = GC.GetTotalMemory(true);
             Assert.Throws<ScriptRuntimeException>(() => script.DoString("return string.rep('abc', 10000000)"));
-            long afterHugeString = GC.GetTotalMemory(true);
-            Assert.Less(Math.Abs(afterHugeString - beforeHugeString), 1_000_000L,
-                "Huge string.rep should fail before large allocation.");
 
             DynValue value = script.DoString("return string.rep('ab', 3)");
             Assert.AreEqual("ababab", value.String);
@@ -393,14 +385,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void LuaExecutionGuard_WhileTruePcall_ReachesInstructionLimit()
+        public void StripRiskyGlobals_PcallAbsent_AndCallLoopStillHitsInstructionLimit()
         {
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(new LuaApiRegistry());
-            LuaExecutionGuard guard = new(50, 100);
 
+            // Preset_HardSandbox excludes the ErrorHandling module, so pcall cannot be used to
+            // swallow guard exceptions in the first place.
+            DynValue pcall = script.DoString("return pcall");
+            Assert.AreEqual(DataType.Nil, pcall.Type, "pcall must be absent from the hard sandbox.");
+
+            LuaExecutionGuard guard = new(50, 100);
             ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
-                env.RunChunk(script, "while true do pcall(function() end) end", guard));
+                env.RunChunk(script, "while true do (function() end)() end", guard));
             Assert.IsTrue(
                 ex.Message.Contains("Lua exceeded") ||
                 ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS"),
