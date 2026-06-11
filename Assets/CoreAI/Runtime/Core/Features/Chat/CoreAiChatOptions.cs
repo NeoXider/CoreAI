@@ -35,7 +35,7 @@ namespace CoreAI.Chat
     /// </summary>
     public sealed class CoreAiChatOptions : ICoreAiChatOptions
     {
-        public const string DefaultRoleId = "SmartChat";
+        public const string DefaultRoleId = Ai.BuiltInAgentRoleIds.SmartChat;
         public const string DefaultHeaderTitle = "AI Chat";
         public const string DefaultWelcomeMessage = "Hello! How can I help?";
         public const string DefaultStreamingToolProgressHint = "Processing...";

@@ -444,7 +444,7 @@ var storyteller = new AgentBuilder("Storyteller")
 storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Usage:
-storyteller.Ask("The player defeated the dragon boss",
+storyteller.AskWithCallback("The player defeated the dragon boss",
     (narration) => ShowCinematicText(narration));
 ```
 

@@ -1,3 +1,4 @@
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -182,5 +183,46 @@ namespace CoreAI.Tests.EditMode
                 CoreAISettings.ResetOverrides();
             }
         }
+
+        [Test]
+        public void Processor_RateLimitSaturated_DropsEnvelopeAndSkipsRepair()
+        {
+            ListSink sink = new();
+            CapturingBindings bindings = new();
+            SpyOrchestrator spy = new();
+            LuaAiEnvelopeProcessor proc = new(
+                new SecureLuaEnvironment(),
+                bindings,
+                sink,
+                () => spy,
+                new NullLuaExecutionObserver(),
+                new MemoryLuaScriptVersionStore(),
+                rateLimiter: new LuaGenerationRateLimiter(maxPerWindow: 1, windowSeconds: 3600));
+
+            // First envelope consumes the only slot in the window.
+            proc.Process(new ApplyAiGameCommand
+            {
+                CommandTypeId = Envelope,
+                JsonPayload = "```lua\nreport('first')\n```",
+                SourceRoleId = BuiltInAgentRoleIds.Programmer
+            });
+            Assert.AreEqual(LuaExecutionSucceeded, sink.Items[0].CommandTypeId);
+
+            // Second envelope is rejected: failure published, no execution, no repair scheduled.
+            proc.Process(new ApplyAiGameCommand
+            {
+                CommandTypeId = Envelope,
+                JsonPayload = "```lua\nbad_call()\n```",
+                SourceRoleId = BuiltInAgentRoleIds.Programmer
+            });
+
+            Assert.AreEqual(2, sink.Items.Count);
+            Assert.AreEqual(LuaExecutionFailed, sink.Items[1].CommandTypeId);
+            StringAssert.Contains("rate limit", sink.Items[1].JsonPayload);
+            Assert.AreEqual(1, bindings.Reports.Count, "Дропнутый конверт не должен исполняться");
+            Assert.AreEqual(0, spy.RunCount, "Дропнутый конверт не должен планировать ремонт");
+            Assert.AreEqual(1, proc.RateLimiter.TotalRejected);
+        }
     }
 }
+#endif

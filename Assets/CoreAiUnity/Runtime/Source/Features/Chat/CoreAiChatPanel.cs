@@ -717,7 +717,7 @@ namespace CoreAI.Chat
                 return;
             }
 
-            string roleId = options.RoleId ?? "SmartChat";
+            string roleId = options.RoleId ?? CoreAI.Ai.BuiltInAgentRoleIds.SmartChat;
             int max = options.MaxPersistedMessagesForUi;
             bool ok = _chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max);
             if (!ok)
@@ -1269,7 +1269,7 @@ namespace CoreAI.Chat
                 return null;
             }
 
-            string roleId = Options.RoleId ?? "SmartChat";
+            string roleId = Options.RoleId ?? CoreAI.Ai.BuiltInAgentRoleIds.SmartChat;
             // can compare values across awaits to detect "a newer turn is already in flight".
             Interlocked.Increment(ref _currentTurnGeneration);
             _toolRoundIterationInTurn = 1;
@@ -1794,7 +1794,7 @@ namespace CoreAI.Chat
             object? result)
         {
             ICoreAiChatOptions options = Options;
-            string panelRole = string.IsNullOrEmpty(options.RoleId) ? "SmartChat" : options.RoleId;
+            string panelRole = string.IsNullOrEmpty(options.RoleId) ? CoreAI.Ai.BuiltInAgentRoleIds.SmartChat : options.RoleId;
             // listeners want the name regardless of whether the bubble is rendered.
             if (string.Equals(roleId, panelRole, StringComparison.Ordinal))
             {
@@ -1883,7 +1883,7 @@ namespace CoreAI.Chat
             try
             {
                 _stopRequestedByUser = true;
-                string roleId = Options.RoleId ?? "SmartChat";
+                string roleId = Options.RoleId ?? CoreAI.Ai.BuiltInAgentRoleIds.SmartChat;
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
                 // Cancel orchestrator tasks first
@@ -2298,7 +2298,7 @@ namespace CoreAI.Chat
                     MessageScroll.Clear();
                 }
 
-                string roleId = Options.RoleId ?? "SmartChat";
+                string roleId = Options.RoleId ?? CoreAI.Ai.BuiltInAgentRoleIds.SmartChat;
 
                 // Wrap the following block with exception-safe behavior.
                 try

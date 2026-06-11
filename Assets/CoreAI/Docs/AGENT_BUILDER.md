@@ -227,13 +227,13 @@ In the Inspector, choose **LLM Backend**:
 
 ```csharp
 // One line! No await, no container.
-merchant.Ask("Show me your swords");
+merchant.AskWithCallback("Show me your swords");
 
 // With a callback when done (receives the text response):
-merchant.Ask("Show me your swords", (response) => Debug.Log(response));
+merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response));
 ```
 
-> 💡 `Ask` uses the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. Ideal for UI buttons, events, and `MonoBehaviour`.
+> 💡 `AskWithCallback` uses the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. Ideal for UI buttons, events, and `MonoBehaviour`.
 
 **🟡 Async — `AskAsync` (with await):**
 
@@ -271,8 +271,8 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 ```
 
 > 🛡️ **Built-in spam protection (call cancellation):**
-> Both methods (`Ask` and `AskAsync`) automatically pass `CancellationScope = Agent.RoleId` to the orchestrator.
-> That means **if you call `merchant.Ask()` again while the first request is still generating, the old request is forcibly stopped (Cancelled)** and the new one runs. This saves CPU and tokens on double-clicks or message spam to the same NPC.
+> Both methods (`AskWithCallback` and `AskAsync`) automatically pass `CancellationScope = Agent.RoleId` to the orchestrator.
+> That means **if you call `merchant.AskWithCallback()` again while the first request is still generating, the old request is forcibly stopped (Cancelled)** and the new one runs. This saves CPU and tokens on double-clicks or message spam to the same NPC.
 
 ---
 
@@ -297,7 +297,7 @@ Remember what the player bought using memory.")
 blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
 
 // 3. Invoke (one line!)
-blacksmith.Ask("What do you have?");
+blacksmith.AskWithCallback("What do you have?");
 ```
 
 ### Recipe 2: Storyteller (chat only, no tools)
@@ -314,7 +314,7 @@ var storyteller = new AgentBuilder("Storyteller")
 storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Fire-and-forget with callback (logs the response):
-storyteller.Ask("Tell me a story", (s) => Debug.Log(s));
+storyteller.AskWithCallback("Tell me a story", (s) => Debug.Log(s));
 ```
 
 ### Recipe 3: Guard (fires an action on trigger)
@@ -368,7 +368,7 @@ var master = new AgentBuilder("GameMaster")
 master.ApplyToPolicy(CoreAIAgent.Policy);
 
 // In-game the player complains it's too hard...
-master.Ask("Players say the game is hard. Multiply damage in calculate_damage() by 5!");
+master.AskWithCallback("Players say the game is hard. Multiply damage in calculate_damage() by 5!");
 
 // The model will call execute_lua ("function calculate_damage() return 50 end")
 // and from the next frame your game damage becomes 50!
@@ -946,9 +946,23 @@ async Task AskMerchant(string playerMessage)
 | Method | Description | Example |
 |-------|----------|--------|
 | `ApplyToPolicy(policy)` | Register agent in policy | `merchant.ApplyToPolicy(CoreAIAgent.Policy)` |
-| `Ask(message, onDone?)` | 🟢 Fire-and-forget, optional `Action<string>` | `merchant.Ask("Hi", (s) => print(s))` |
+| `AskWithCallback(message, onDone?)` | 🟢 Fire-and-forget convenience, optional `Action<string>` | `merchant.AskWithCallback("Hi", (s) => print(s))` |
 | `AskAsync(message)` | 🟡 Async (returns `Task<string>`) | `await merchant.AskAsync("Hi")` |
 | `AskAsync(orch, message)` | 🔴 Async with explicit orchestrator | `await merchant.AskAsync(orch, "Hi")` |
+
+> 💡 The primary idiom is awaitable `AskAsync`; `AskWithCallback` exists for callback-style call sites (UnityEvents, legacy code). The old `Ask(message, onDone?)` still compiles but is `[Obsolete]`.
+
+### RoleId (typed role identifiers)
+
+Roles are plain strings under the hood, but instead of magic literals use the `RoleId` struct or `BuiltInAgentRoleIds` constants. `RoleId` converts implicitly to/from `string`, so it works everywhere a role string is expected:
+
+```csharp
+var merchant = new AgentBuilder(RoleId.Merchant) ... ;   // built-in role
+var custom   = new AgentBuilder(new RoleId("Blacksmith")) ... ; // custom role
+await CoreAi.AskAsync("Hi", roleId: RoleId.SmartChat);
+```
+
+Built-in statics: `RoleId.Creator`, `RoleId.Analyzer`, `RoleId.Programmer`, `RoleId.AiNpc`, `RoleId.CoreMechanic`, `RoleId.PlainChat`, `RoleId.SmartChat`, `RoleId.Merchant`. `roleId.IsBuiltIn` tells whether the id matches a built-in role.
 
 ### CoreAI (static facade)
 

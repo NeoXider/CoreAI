@@ -93,7 +93,7 @@ namespace CoreAI
         /// <remarks>Use <c>await</c> only; blocking the Unity main thread via <c>.Result</c>/<c>.Wait()</c> risks deadlocks with MEAI marshaling.</remarks>
         public static async Task<string?> AskAsync(
             string userMessage,
-            string roleId = "SmartChat",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -105,7 +105,7 @@ namespace CoreAI
         /// </summary>
         public static async IAsyncEnumerable<string> StreamAsync(
             string userMessage,
-            string roleId = "SmartChat",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -134,7 +134,7 @@ namespace CoreAI
         /// </summary>
         public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
             string userMessage,
-            string roleId = "SmartChat",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
@@ -162,7 +162,7 @@ namespace CoreAI
         /// </summary>
         public static Task<string?> SmartAskAsync(
             string userMessage,
-            string roleId = "SmartChat",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
             Action<string>? onChunk = null,
             bool? uiStreamingOverride = null,
             CancellationToken cancellationToken = default)

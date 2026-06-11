@@ -2,6 +2,15 @@
 
 ## [v3.2.0] - 2026-06-11
 
+### API design
+
+- **`RoleId`** — strongly-typed agent role identifier (`readonly struct`, ordinal equality, `IsBuiltIn`, statics for all built-in roles like `RoleId.SmartChat`). Implicitly convertible to/from `string`, so it works with every existing API (`AgentBuilder`, `AiTaskRequest.RoleId`, `CoreAi.AskAsync`) without overloads. Inline `"SmartChat"` literals in the runtime replaced with `BuiltInAgentRoleIds.SmartChat`.
+- **`AskWithCallback` replaces `Ask` as the fire-and-forget convenience.** The primary idiom is awaitable `AskAsync`; the callback overload is now explicitly named `AskWithCallback(message, onDone?, priority)`. The old `Ask(...)` remains as an `[Obsolete]` alias.
+
+### Lua sandbox
+
+- **Generation rate limit (runaway-loop guard).** New `LuaGenerationRateLimiter` (sliding window, default 20/60 s, injectable clock/limits, `maxPerWindow <= 0` disables) wired into `LuaAiEnvelopeProcessor`: both envelope executions and scheduled Programmer repair generations consume slots. A saturated window fails the envelope with a `Lua rate limit exceeded` message and skips repair scheduling, so a failing script cannot spin a generate→fail→repair loop against the LLM. Per-script instruction/time budgets (`InstructionLimitDebugger`) unchanged.
+
 ### Diagnostics
 
 - **`TokenBudgetTextFormatter`** — pure (UnityEngine-free) text layer extracted from the Unity token-budget overlay: `FormatTokens` / `FormatCost` / `FormatLoad` (+ `nearLimit` flag) render the same diagnostic strings for any UI (IMGUI overlay, custom UGUI panels, logs). Covered by new EditMode tests.

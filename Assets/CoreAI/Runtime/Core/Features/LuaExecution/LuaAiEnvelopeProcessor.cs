@@ -15,6 +15,8 @@ namespace CoreAI.Ai
         /// <summary>Default max lua repair retries.</summary>
         public const int DefaultMaxLuaRepairRetries = 3; // Matches CoreAISettings.MaxLuaRepairRetries compatibility.
 
+        private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+
         private readonly SecureLuaEnvironment _sandbox;
         private readonly IGameLuaRuntimeBindings _bindings;
         private readonly IAiGameCommandSink _sink;
@@ -22,6 +24,7 @@ namespace CoreAI.Ai
         private readonly ILuaExecutionObserver _observer;
         private readonly ILuaScriptVersionStore _luaScriptVersions;
         private readonly ICoreAISettings _settings;
+        private readonly LuaGenerationRateLimiter _rateLimiter;
 
         public LuaAiEnvelopeProcessor(
             SecureLuaEnvironment sandbox,
@@ -30,7 +33,8 @@ namespace CoreAI.Ai
             Func<IAiOrchestrationService> resolveOrchestrator,
             ILuaExecutionObserver observer,
             ILuaScriptVersionStore luaScriptVersions,
-            ICoreAISettings settings = null)
+            ICoreAISettings settings = null,
+            LuaGenerationRateLimiter rateLimiter = null)
         {
             _sandbox = sandbox ?? throw new ArgumentNullException(nameof(sandbox));
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
@@ -39,7 +43,11 @@ namespace CoreAI.Ai
             _observer = observer ?? throw new ArgumentNullException(nameof(observer));
             _luaScriptVersions = luaScriptVersions ?? new NullLuaScriptVersionStore();
             _settings = settings;
+            _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
         }
+
+        /// <summary>Rate limiter guarding envelope executions and repair generations.</summary>
+        public LuaGenerationRateLimiter RateLimiter => _rateLimiter;
 
         /// <summary>Processes an AI game command and dispatches any embedded Lua work.</summary>
         public void Process(ApplyAiGameCommand cmd)
@@ -59,6 +67,17 @@ namespace CoreAI.Ai
                 string msg = "CoreAI Lua execution is disabled on this platform.";
                 PublishLuaFailure(cmd, msg);
                 _observer.OnLuaFailure(msg);
+                return;
+            }
+
+            if (!_rateLimiter.TryAcquire(Clock.Elapsed.TotalSeconds))
+            {
+                // Runaway-loop guard: a failing script (or spamming agent) cannot saturate the
+                // sandbox/LLM with executions; the failure is reported without scheduling a repair.
+                string limitMsg =
+                    $"CoreAI Lua rate limit exceeded ({_rateLimiter.MaxPerWindow} per {_rateLimiter.WindowSeconds:0}s); envelope dropped.";
+                PublishLuaFailure(cmd, limitMsg);
+                _observer.OnLuaFailure(limitMsg);
                 return;
             }
 
@@ -122,6 +141,13 @@ namespace CoreAI.Ai
         private void ScheduleProgrammerRepair(ApplyAiGameCommand cmd, string failedLua, string error,
             int nextGeneration)
         {
+            if (!_rateLimiter.TryAcquire(Clock.Elapsed.TotalSeconds))
+            {
+                _observer.OnLuaFailure(
+                    $"repair schedule skipped: Lua generation rate limit exceeded ({_rateLimiter.MaxPerWindow} per {_rateLimiter.WindowSeconds:0}s).");
+                return;
+            }
+
             try
             {
                 _ = _resolveOrchestrator().RunTaskAsync(new AiTaskRequest

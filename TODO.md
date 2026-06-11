@@ -15,7 +15,7 @@
   - [x] `CorePortableInstaller` / `WorldCommandsInstaller` — Lua-регистрации под define; иначе fallback `CoreDefaultLuaRuntimeBindings` / `NullLuaExecutionObserver`.
   - [x] `AiGameCommandRouter` — зависимость `LuaAiEnvelopeProcessor` компилируется прочь под define (не hard-зависимость DI).
   - [x] Lua EditMode/PlayMode тесты обёрнуты; обе конфигурации компилируются с 0 ошибок (проверено в Unity).
-  - [ ] (опц.) CI-матрица: сборка с пакетом MoonSharp и без него; документировать удаление `org.moonsharp.moonsharp` из `manifest.json` при `COREAI_NO_LUA`.
+  - [x] (опц.) CI-матрица: `.github/workflows/ci.yml` — EditMode-тесты с MoonSharp и в `no-lua`-конфигурации (пакет удаляется из manifest/lock, `COREAI_NO_LUA` добавляется во все платформы); удаление `org.moonsharp.moonsharp` задокументировано в `LUA_SANDBOX_SECURITY.md` (v3.2.0). Требуются секреты GameCI (`UNITY_LICENSE`/`UNITY_EMAIL`/`UNITY_PASSWORD`).
 
 ## [P1] КРИТИЧЕСКИЕ баги (из аудита) — ГОТОВО, проверено в Unity (0 ошибок компиляции, EditMode 910/914)
 - [x] **HttpClient создаётся per-request — socket exhaustion** — shared `Lazy<HttpClient>` поверх `HttpClientHandler` (НЕ `SocketsHttpHandler` — тот требует .NET Std 2.1, проект на 2.0), per-request таймаут через linked `CancellationTokenSource`. `HttpClientOpenAiTransport.cs`.
@@ -35,9 +35,9 @@
 - [ ] **Sandbox escape-тесты**
   Покрыты `io/os/debug/load/require` и `_G`, но не векторы ниже.
   - [x] Добавить тесты: `string.dump`, `coroutine.close`, `collectgarbage` (timing oracle), обходы `_G`/`_ENV` — заодно закрыты реальные дыры: `string.dump` и `collectgarbage` теперь вырезаются в `StripRiskyGlobals` (v3.1.0).
-  - [ ] Зафиксировать coverage в CI для проверки неизменности изоляции.
-- [ ] **Генерация Lua-скриптов**
-  - [ ] Добавить rate-limit на генерацию скриптов и защиту от runaway-циклов (задача Programmers/LLM).
+  - [x] Зафиксировать coverage в CI — moonsharp-нога CI падает, если фикстура `SecureLuaSandboxEditModeTests` не исполнилась в результатах EditMode (v3.2.0).
+- [x] **Генерация Lua-скриптов**
+  - [x] Rate-limit и защита от runaway-циклов — `LuaGenerationRateLimiter` (sliding window, по умолчанию 20/60с) в `LuaAiEnvelopeProcessor`: слоты тратят и исполнение конвертов, и планирование Programmer-ремонтов; при насыщении конверт падает без ремонта (v3.2.0). Per-script лимиты (инструкции/таймаут) уже были в `InstructionLimitDebugger`.
 - [x] ~~**Двойное присоединение `InstructionLimitDebugger`**~~ — проверено: в `SecureLuaEnvironment` debugger создаётся и аттачится один раз и в `CreateScript`, и в `CreateCoroutine`; экземпляр, переданный в `LuaCoroutineHandle`, совпадает с активным на скрипте.
 
 ## [P1] SmartToolCallingChatClient / ретраи
@@ -69,15 +69,14 @@
   - [x] Стоимость сессии (`$/session`) — конфигурируемые цены за 1K токенов; при 0 показываются только токены.
   - [x] Скользящее окно/индикатор нагрузки запросов и лимитов.
   - [x] UGUI-вариант для своего Canvas — `CoreAiTokenBudgetUiView` (v3.2.0): `UnityEvent<string>`-выходы привязываются к своим TMP_Text/Text в инспекторе, хоткей отключается (`KeyCode.None`); общий `TokenBudgetRuntimeSource` + чистый `TokenBudgetTextFormatter` (EditMode-тесты).
-  - [ ] Проверка UI-доступности в редакторе и в Play Mode — вручную пользователем (логика покрыта EditMode-тестами `TokenBudgetCalculator` / `TokenBudgetTextFormatter`).
+  - [x] Проверка UI-доступности в редакторе и в Play Mode — проверено в игре (F10 открывает панель, секции Tokens/Cost/Request Load корректны); логика покрыта EditMode-тестами `TokenBudgetCalculator` / `TokenBudgetTextFormatter`.
 
 ## [P2] API-дизайн
 - [x] ~~**ILlmTool — дублирование Name/Description**~~ — есть `LlmToolBase` (`ILlmTool.cs:45-68`) с `JsonParams(...)`-хелпером.
-- [ ] **merchant.Ask callback**
-  - [ ] Убрать callback-перегрузку как primary-idiom; оставить `AskWithCallback(...)` как convenience, основной путь — `UniTask`.
-- [ ] **Магические строки ролей**
-  Есть `BuiltInAgentRoleIds`, но строго типизированного `RoleId` нет — роли передаются как `string`.
-  - [ ] Ввести `RoleId`-структуру/константы; убрать inline string literals (`SmartChat`, `Blacksmith` и др.).
+- [x] **merchant.Ask callback**
+  - [x] Основной путь — awaitable `AskAsync`; fire-and-forget вынесен в `AskWithCallback(...)` (convenience), старый `Ask(...)` помечен `[Obsolete]` как alias (v3.2.0). Доки/примеры переведены.
+- [x] **Магические строки ролей**
+  - [x] Введена структура `RoleId` (implicit string-конверсии, статики built-in ролей, ordinal-равенство); inline-литералы `"SmartChat"` в рантайме заменены на `BuiltInAgentRoleIds.SmartChat` (v3.2.0).
 
 ## [P2] Идеи (под вопросом, для последующей оценки)
 - [ ] **STT → Agent → TTS pipeline для NPC** — локальный whisper, локальный TTS, потоковая передача эмоций/интонаций для анимаций.

@@ -77,20 +77,34 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Starts a fire-and-forget prompt through the global orchestrator and invokes
-        /// <paramref name="onDone"/> with the final response.
+        /// Convenience fire-and-forget prompt through the global orchestrator; invokes
+        /// <paramref name="onDone"/> with the final response. The primary idiom is
+        /// <see cref="AskAsync(AgentConfig, string, int, CancellationToken)"/> — use this overload
+        /// only from callback-style call sites (UnityEvents, legacy code) where awaiting is awkward.
+        /// Errors are logged, not thrown.
         /// </summary>
         /// <param name="config">Agent configuration produced by <see cref="AgentBuilder.Build"/>.</param>
         /// <param name="message">User or gameplay prompt to send to the agent.</param>
         /// <param name="onDone">Optional callback invoked after a successful response.</param>
         /// <param name="priority">Queue priority forwarded to <see cref="AiTaskRequest.Priority"/>.</param>
-        public static void Ask(
+        public static void AskWithCallback(
             this AgentConfig config,
             string message,
             Action<string> onDone = null,
             int priority = 0)
         {
             _ = RunAskFireAndForgetAsync(config, message, onDone, priority);
+        }
+
+        /// <summary>Legacy alias of <see cref="AskWithCallback"/>.</summary>
+        [Obsolete("Use AskAsync (primary, awaitable) or AskWithCallback (fire-and-forget convenience).")]
+        public static void Ask(
+            this AgentConfig config,
+            string message,
+            Action<string> onDone = null,
+            int priority = 0)
+        {
+            AskWithCallback(config, message, onDone, priority);
         }
 
         private static async Task RunAskFireAndForgetAsync(

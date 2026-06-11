@@ -69,7 +69,7 @@ var blacksmith = new AgentBuilder("Blacksmith")
     .Build();
 
 blacksmith.ApplyToPolicy(CoreAIAgent.Policy);
-await blacksmith.Ask("Show me your swords");
+await blacksmith.AskAsync("Show me your swords");
 ```
 
 **Long chats:** turn on **`WithChatHistory()`** — older turns collapse into **`## Conversation Summary`** under a **`HistoryTokenBudget`**. Optionally enable **`Enable LLM Context Compaction`** on [**`CoreAISettings`**](Docs/COREAI_SETTINGS.md) for auxiliary summarizer calls; use **`AgentBuilder.WithLlmContextCompaction(false)`** for tool-heavy coding agents.

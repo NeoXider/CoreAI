@@ -171,7 +171,7 @@ var storyteller = new AgentBuilder("Storyteller")
     .Build();
 
 storyteller.ApplyToPolicy(CoreAIAgent.Policy);
-await storyteller.Ask("Tell me about the ruins to the east.");
+await storyteller.AskAsync("Tell me about the ruins to the east.");
 ```
 
 Full reference: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md).

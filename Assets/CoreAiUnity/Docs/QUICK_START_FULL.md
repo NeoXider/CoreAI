@@ -235,7 +235,7 @@ var merchant = new AgentBuilder("Merchant")
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Send a message:
-merchant.Ask("Show me swords", (response) => {
+merchant.AskWithCallback("Show me swords", (response) => {
     Debug.Log($"Merchant: {response}");
 });
 ```

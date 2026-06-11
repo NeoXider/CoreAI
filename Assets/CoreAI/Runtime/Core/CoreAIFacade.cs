@@ -10,10 +10,10 @@
     ///     .WithMemory()
     ///     .Build();
     /// merchant.ApplyToPolicy(CoreAIAgent.Policy);
-    /// merchant.Ask("Show me your swords");
-    /// // Async:
+    /// // Primary (awaitable):
     /// await merchant.AskAsync("Show me your swords");
-    /// merchant.Ask("Show me your swords", onDone: () => Debug.Log("Done!"));
+    /// // Fire-and-forget convenience:
+    /// merchant.AskWithCallback("Show me your swords", response => Debug.Log(response));
     /// </code>
     /// </example>
     public static class CoreAIAgent

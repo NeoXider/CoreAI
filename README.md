@@ -115,13 +115,13 @@ var merchant = new AgentBuilder("Blacksmith")
 merchant.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Ask* uses CoreAIAgent.Orchestrator (same startup wiring). Needs Play + CoreAILifetimeScope on scene.
-merchant.Ask("Show me your swords");
-merchant.Ask("Show me your swords", (response) => Debug.Log(response));
+merchant.AskWithCallback("Show me your swords");
+merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response));
 ```
 
 - **`Build()`** — returns `AgentConfig` (role id, tools, prompts, mode). Still unknown to the runtime until registered.
 - **`ApplyToPolicy(CoreAIAgent.Policy)`** — writes into the live `AgentMemoryPolicy` so **`RunTask` / tool routing** can find this role's tools and merged prompts. Without it, `"Blacksmith"` is just a string the model never gets the right stack for.
-- **`Ask` / `AskAsync`** — thin wrappers over **`CoreAIAgent.Orchestrator`** → `AiTaskRequest` with `RoleId` from the config. Same idea as resolving `IAiOrchestrationService` from DI — see [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
+- **`AskWithCallback` / `AskAsync`** — thin wrappers over **`CoreAIAgent.Orchestrator`** → `AiTaskRequest` with `RoleId` from the config. Same idea as resolving `IAiOrchestrationService` from DI — see [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md).
 
 **3 Agent Modes:** 🛒 ToolsAndChat · 🤖 ToolsOnly · 💬 ChatOnly
 

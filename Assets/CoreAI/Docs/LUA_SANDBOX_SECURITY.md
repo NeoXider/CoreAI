@@ -47,6 +47,31 @@ When `COREAI_NO_LUA` is set:
 
 Default builds (symbol unset) keep Lua enabled and behave exactly as before.
 
+### CI matrix
+
+`.github/workflows/ci.yml` runs EditMode tests in both configurations on every
+push/PR: the default project with MoonSharp, and a `no-lua` job that deletes
+`org.moonsharp.moonsharp` from `Packages/manifest.json`/`packages-lock.json` and
+appends `COREAI_NO_LUA` to every platform's Scripting Define Symbols before
+compiling — exactly the opt-out procedure described above. The MoonSharp job
+additionally asserts that the `SecureLuaSandboxEditModeTests` escape-test
+fixture actually executed, so isolation coverage cannot silently drop out of
+the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
+`UNITY_EMAIL`, `UNITY_PASSWORD`) configured in the repository.
+
+## Generation Rate Limit
+
+LLM-driven Lua generation is rate-limited end to end. Besides the per-script
+instruction/time guards (`InstructionLimitDebugger`, see below), the envelope
+pipeline applies a sliding-window limiter (`LuaGenerationRateLimiter`, default
+20 per 60 s) in `LuaAiEnvelopeProcessor`: both envelope executions and
+scheduled Programmer repair generations consume slots. When the window is
+saturated, the envelope fails with a `Lua rate limit exceeded` message and no
+repair task is scheduled, so a failing script cannot spin a runaway
+generate→fail→repair loop against the LLM. Pass a custom
+`LuaGenerationRateLimiter` to the `LuaAiEnvelopeProcessor` constructor to tune
+or disable (`maxPerWindow <= 0`) the limit.
+
 ## Platform Support
 
 Runtime Lua execution is currently supported in the Editor and non-WebGL player

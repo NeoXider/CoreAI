@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  editmode-tests:
+    name: EditMode (${{ matrix.lua }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both Lua configurations must stay green: the default project with MoonSharp,
+        # and the COREAI_NO_LUA build with the MoonSharp package removed entirely.
+        lua: [moonsharp, no-lua]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Strip MoonSharp + define COREAI_NO_LUA
+        if: matrix.lua == 'no-lua'
+        run: |
+          # Remove the optional MoonSharp package (documented opt-out in
+          # Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) so this job proves the
+          # project compiles without it.
+          sed -i '/org\.moonsharp\.moonsharp/d' Packages/manifest.json
+          python3 - <<'EOF'
+          import json
+          with open('Packages/packages-lock.json', encoding='utf-8') as f:
+              lock = json.load(f)
+          lock['dependencies'].pop('org.moonsharp.moonsharp', None)
+          with open('Packages/packages-lock.json', 'w', encoding='utf-8') as f:
+              json.dump(lock, f, indent=2)
+          EOF
+          # Append the define to every per-platform scriptingDefineSymbols entry.
+          sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LUA/' ProjectSettings/ProjectSettings.asset
+          grep -n 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset | head -3
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: library-${{ matrix.lua }}-${{ hashFiles('Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            library-${{ matrix.lua }}-
+
+      - name: Run EditMode tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          testMode: editmode
+          artifactsPath: artifacts-${{ matrix.lua }}
+          checkName: EditMode results (${{ matrix.lua }})
+
+      - name: Enforce Lua sandbox escape-test coverage
+        if: matrix.lua == 'moonsharp'
+        run: |
+          # The sandbox isolation suite must actually have run — a green build with
+          # 0 executed escape tests (filter typo, asmdef regression, define drift)
+          # must fail, not pass silently.
+          count=$(grep -o 'SecureLuaSandboxEditModeTests' artifacts-moonsharp/editmode-results.xml | wc -l)
+          echo "SecureLuaSandboxEditModeTests occurrences in results: $count"
+          if [ "$count" -lt 10 ]; then
+            echo "::error::Lua sandbox escape tests did not run (expected the SecureLuaSandboxEditModeTests fixture in EditMode results)."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.lua }}
+          path: artifacts-${{ matrix.lua }}

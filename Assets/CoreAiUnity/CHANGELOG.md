@@ -10,6 +10,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **`TokenBudgetRuntimeSource`** — shared runtime data source (scope discovery, `LlmUsageReported` subscription, `TokenBudgetCalculator`) now backs both the IMGUI overlay and the UGUI view; text rendering moved to the core `TokenBudgetTextFormatter`.
 - **`CoreAiTokenBudgetOverlay`** — hotkey can now be disabled by setting the toggle key to `None`; `ShowOverlay` / `ToggleKey` exposed as public properties for code control. Rendering unchanged.
 
+### API design & CI
+
+- Core `3.2.0` ships the typed `RoleId` struct, `AskWithCallback` (callback `Ask` is now an `[Obsolete]` alias of the awaitable-first API), and the Lua generation rate limiter — see the core changelog. Docs and samples updated to `AskAsync` / `AskWithCallback`.
+- **CI matrix (GitHub Actions).** `.github/workflows/ci.yml` runs EditMode tests both with MoonSharp and in a `no-lua` job (package removed from `manifest.json`/`packages-lock.json`, `COREAI_NO_LUA` appended to all platform defines). The MoonSharp job fails if the `SecureLuaSandboxEditModeTests` escape suite did not execute, locking sandbox-isolation coverage. Lua-dependent test files that were missing `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` guards are now wrapped, so the project compiles without MoonSharp.
+- New EditMode coverage: `RoleId` (conversions, equality, flow into string APIs), `AskWithCallback`/obsolete alias, `LuaGenerationRateLimiter` (window math) and envelope-processor rate-limit behavior.
+
 #### Package **`3.2.0`** - dependency **`com.nexoider.coreai` `3.2.0`**.
 
 ## [3.1.0] - 2026-06-10

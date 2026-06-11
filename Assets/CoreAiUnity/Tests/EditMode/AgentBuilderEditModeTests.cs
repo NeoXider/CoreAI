@@ -77,6 +77,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void AskWithCallback_DoesNotThrow_AndLegacyAskIsObsolete()
+        {
+            CoreAIAgent.Reset();
+            AgentConfig config = new AgentBuilder("CallbackAgent")
+                .WithSystemPrompt("You are a callback agent.")
+                .BuildDetached();
+
+            // Fire-and-forget convenience must never throw into the caller; failures are logged.
+            // Silence the logger so the expected "not registered" error does not trip Unity's
+            // log assertions in EditMode.
+            Logging.ILog savedLog = Logging.Log.Instance;
+            Logging.Log.Instance = Logging.NullLog.Instance;
+            try
+            {
+                Assert.DoesNotThrow(() => config.AskWithCallback("Hello", _ => { }));
+            }
+            finally
+            {
+                Logging.Log.Instance = savedLog;
+            }
+
+            var askMethod = typeof(AgentConfigExtensions).GetMethod(nameof(AgentConfigExtensions.Ask));
+            Assert.IsNotNull(askMethod);
+            Assert.IsTrue(askMethod.IsDefined(typeof(ObsoleteAttribute), inherit: false),
+                "Ask(callback) is a legacy alias and must carry [Obsolete] pointing to AskAsync/AskWithCallback.");
+        }
+
+        [Test]
         public void Builder_CreatesBasicAgent_WithDefaults()
         {
             AgentConfig config = new AgentBuilder("TestAgent")
