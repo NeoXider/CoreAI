@@ -13,11 +13,60 @@ namespace CoreAI.Infrastructure.World
     /// </summary>
     public sealed class CoreAiWorldLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
-        private readonly IAiGameCommandSink _sink;
+        /// <summary>Coordinates beyond this magnitude are rejected (NaN/Infinity always are).</summary>
+        public const double MaxCoordinate = 100_000d;
 
-        public CoreAiWorldLuaRuntimeBindings(IAiGameCommandSink sink)
+        private readonly IAiGameCommandSink _sink;
+        private readonly System.Collections.Generic.HashSet<string> _allowedScenes;
+
+        /// <param name="sink">Command sink that marshals world commands to the main thread.</param>
+        /// <param name="allowedScenes">
+        /// Optional whitelist for <c>coreai_world_load_scene</c>. When null or empty any scene from
+        /// Build Settings stays loadable (legacy behavior); otherwise only listed names pass.
+        /// </param>
+        public CoreAiWorldLuaRuntimeBindings(
+            IAiGameCommandSink sink,
+            System.Collections.Generic.IEnumerable<string> allowedScenes = null)
         {
             _sink = sink;
+            if (allowedScenes != null)
+            {
+                var set = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string scene in allowedScenes)
+                {
+                    if (!string.IsNullOrWhiteSpace(scene))
+                    {
+                        set.Add(scene.Trim());
+                    }
+                }
+
+                _allowedScenes = set.Count > 0 ? set : null;
+            }
+        }
+
+        private static bool TryValidateCoordinate(double v, out float f)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v) || v < -MaxCoordinate || v > MaxCoordinate)
+            {
+                f = 0f;
+                return false;
+            }
+
+            f = (float)v;
+            return true;
+        }
+
+        private static Vector3 ValidatePosition(double x, double y, double z)
+        {
+            if (!TryValidateCoordinate(x, out float fx) ||
+                !TryValidateCoordinate(y, out float fy) ||
+                !TryValidateCoordinate(z, out float fz))
+            {
+                throw new ArgumentException(
+                    $"world position must be finite and within ±{MaxCoordinate:0} per axis.");
+            }
+
+            return new Vector3(fx, fy, fz);
         }
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
@@ -32,7 +81,7 @@ namespace CoreAI.Infrastructure.World
                         return "";
                     }
 
-                    Publish(CoreAiWorldCommandEnvelope.Spawn(key, name, new Vector3((float)x, (float)y, (float)z)));
+                    Publish(CoreAiWorldCommandEnvelope.Spawn(key, name, ValidatePosition(x, y, z)));
                     return name;
                 }));
 
@@ -44,7 +93,7 @@ namespace CoreAI.Infrastructure.World
                     return;
                 }
 
-                Publish(CoreAiWorldCommandEnvelope.Move(name, new Vector3((float)x, (float)y, (float)z)));
+                Publish(CoreAiWorldCommandEnvelope.Move(name, ValidatePosition(x, y, z)));
             }));
 
             registry.Register("coreai_world_destroy", new Action<string>(targetName =>
@@ -64,6 +113,11 @@ namespace CoreAI.Infrastructure.World
                 if (string.IsNullOrEmpty(scene))
                 {
                     return;
+                }
+
+                if (_allowedScenes != null && !_allowedScenes.Contains(scene))
+                {
+                    throw new ArgumentException($"scene '{scene}' is not in the allowed scene list.");
                 }
 
                 Publish(CoreAiWorldCommandEnvelope.LoadScene(scene));
@@ -105,7 +159,8 @@ namespace CoreAI.Infrastructure.World
                         return;
                     }
 
-                    Publish(CoreAiWorldCommandEnvelope.PlaySound(name, clip, (float)volume));
+                    float vol = double.IsNaN(volume) ? 1f : Mathf.Clamp01((float)volume);
+                    Publish(CoreAiWorldCommandEnvelope.PlaySound(name, clip, vol));
                 }));
         }
 

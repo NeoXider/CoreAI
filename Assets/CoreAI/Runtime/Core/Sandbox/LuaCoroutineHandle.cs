@@ -8,24 +8,34 @@ namespace CoreAI.Sandbox
     {
         public const int DefaultBudgetPerResume = 10_000;
 
+        /// <summary>
+        /// Default cap on instruction steps a coroutine may consume across all resumes.
+        /// Without it an infinite yield loop lives forever, burning the per-resume budget every frame.
+        /// </summary>
+        public const long DefaultTotalLifetimeSteps = 1_000_000;
+
         private readonly Script _script;
         private readonly DynValue _coroutine;
         private readonly InstructionLimitDebugger _debugger;
         private readonly int _budgetPerResume;
+        private readonly long _totalLifetimeSteps;
 
         private bool _disposed;
         private DynValue _lastResult;
+        private long _consumedSteps;
 
         internal LuaCoroutineHandle(
             Script script,
             DynValue coroutine,
             InstructionLimitDebugger debugger,
-            int budgetPerResume = DefaultBudgetPerResume)
+            int budgetPerResume = DefaultBudgetPerResume,
+            long totalLifetimeSteps = DefaultTotalLifetimeSteps)
         {
             _script = script ?? throw new ArgumentNullException(nameof(script));
             _coroutine = coroutine ?? throw new ArgumentNullException(nameof(coroutine));
             _debugger = debugger ?? throw new ArgumentNullException(nameof(debugger));
             _budgetPerResume = budgetPerResume > 0 ? budgetPerResume : DefaultBudgetPerResume;
+            _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
         }
 
         public bool IsAlive =>
@@ -35,6 +45,12 @@ namespace CoreAI.Sandbox
         public CoroutineState State => _coroutine.Coroutine.State;
 
         public DynValue LastResult => _lastResult;
+
+        /// <summary>Instruction steps consumed across all resumes so far.</summary>
+        public long ConsumedSteps => _consumedSteps;
+
+        /// <summary>Cap on instruction steps across the whole coroutine lifetime.</summary>
+        public long TotalLifetimeSteps => _totalLifetimeSteps;
 
         public DynValue Resume()
         {
@@ -50,7 +66,21 @@ namespace CoreAI.Sandbox
 
             _debugger.Reset(_budgetPerResume, 500);
 
-            _lastResult = _coroutine.Coroutine.Resume();
+            try
+            {
+                _lastResult = _coroutine.Coroutine.Resume();
+            }
+            finally
+            {
+                _consumedSteps += _debugger.Steps;
+                if (_consumedSteps >= _totalLifetimeSteps)
+                {
+                    // Lifetime budget exhausted: kill the handle so the coroutine can never be
+                    // resumed again (IsAlive turns false, the runner reaps it on its next tick).
+                    Kill();
+                }
+            }
+
             return _lastResult;
         }
 

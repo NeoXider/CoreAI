@@ -15,6 +15,12 @@ namespace CoreAI.Ai
         /// <summary>Default max lua repair retries.</summary>
         public const int DefaultMaxLuaRepairRetries = 3; // Matches CoreAISettings.MaxLuaRepairRetries compatibility.
 
+        /// <summary>Cap on the success payload built from the script result (`ToPrintString`).</summary>
+        public const int MaxResultSummaryLength = 4_000;
+
+        /// <summary>Cap on error text published in failure payloads and repair prompts.</summary>
+        public const int MaxErrorMessageLength = 500;
+
         private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
 
         private readonly SecureLuaEnvironment _sandbox;
@@ -87,7 +93,7 @@ namespace CoreAI.Ai
                 _bindings.RegisterGameplayApis(registry);
                 Script script = _sandbox.CreateScript(registry);
                 DynValue result = _sandbox.RunChunk(script, lua);
-                string summary = result.ToPrintString();
+                string summary = Truncate(result.ToPrintString(), MaxResultSummaryLength);
                 if (!string.IsNullOrWhiteSpace(cmd.LuaScriptVersionKey))
                 {
                     _luaScriptVersions.RecordSuccessfulExecution(cmd.LuaScriptVersionKey.Trim(), lua);
@@ -109,7 +115,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                string msg = ex is InterpreterException ie ? ie.Message : ex.Message;
+                string msg = NormalizeError(ex is InterpreterException ie ? ie.Message : ex.Message);
                 PublishLuaFailure(cmd, msg);
                 _observer.OnLuaFailure(msg);
 
@@ -121,6 +127,24 @@ namespace CoreAI.Ai
                     ScheduleProgrammerRepair(cmd, lua, msg, next);
                 }
             }
+        }
+
+        private static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            {
+                return value ?? "";
+            }
+
+            return value.Substring(0, maxLength) + " …(truncated)";
+        }
+
+        // Error text travels into payloads and repair prompts; collapse newlines so host exception
+        // messages (stack fragments, file paths) cannot inject multi-line content, and cap length.
+        private static string NormalizeError(string message)
+        {
+            string flat = (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            return Truncate(flat, MaxErrorMessageLength);
         }
 
         private void PublishLuaFailure(ApplyAiGameCommand cmd, string message)

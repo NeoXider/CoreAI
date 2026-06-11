@@ -10,7 +10,7 @@ namespace CoreAI.Ai
     /// <summary>
     /// Persists per-role conversation summaries under a host-provided directory (portable filesystem).
     /// </summary>
-    public sealed class FileConversationSummaryStore : IConversationSummaryStore
+    public sealed class FileConversationSummaryStore : IConversationSummaryStore, IDisposable
     {
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
@@ -125,7 +125,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Load failed for {roleId}: {ex.Message}");
+                _log?.Error($"[FileConversationSummaryStore] Load failed for {roleId}: {ex}");
                 return "";
             }
         }
@@ -181,7 +181,7 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Save failed for {roleId}: {ex.Message}");
+                _log?.Error($"[FileConversationSummaryStore] Save failed for {roleId}: {ex}");
             }
         }
 
@@ -237,14 +237,41 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileConversationSummaryStore] Clear failed for {roleId}: {ex.Message}");
+                _log?.Error($"[FileConversationSummaryStore] Clear failed for {roleId}: {ex}");
             }
+        }
+
+        /// <summary>Releases the internal file-access semaphore.</summary>
+        public void Dispose()
+        {
+            _gate.Dispose();
         }
 
         private string GetPath(string roleId)
         {
+            return Path.Combine(_dir, $"{SanitizedFileStem(roleId)}.json");
+        }
+
+        /// <summary>
+        /// Maps a raw role id to a unique file stem. Invalid filename characters are replaced, and
+        /// when the replacement changed anything a short hash of the raw id is appended so distinct
+        /// ids like "A/B" and "A_B" cannot collide on the same file.
+        /// </summary>
+        internal static string SanitizedFileStem(string roleId)
+        {
             string safe = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            return Path.Combine(_dir, $"{safe}.json");
+            if (string.Equals(safe, roleId, StringComparison.Ordinal))
+            {
+                return safe;
+            }
+
+            uint hash = 2166136261u;
+            foreach (char c in roleId)
+            {
+                hash = (hash ^ c) * 16777619u;
+            }
+
+            return $"{safe}_{hash:x8}";
         }
 
         private void EnsureDir()

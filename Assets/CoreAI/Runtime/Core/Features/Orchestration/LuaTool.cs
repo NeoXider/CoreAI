@@ -12,16 +12,24 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class LuaTool
     {
+        private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+
         private readonly ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
+        private readonly LuaGenerationRateLimiter _rateLimiter;
 
-        public LuaTool(ILuaExecutor executor, ICoreAISettings settings, ILog logger)
+        public LuaTool(ILuaExecutor executor, ICoreAISettings settings, ILog logger,
+            LuaGenerationRateLimiter rateLimiter = null)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
         }
+
+        /// <summary>Rate limiter shared with (or mirroring) the envelope pipeline.</summary>
+        public LuaGenerationRateLimiter RateLimiter => _rateLimiter;
 
         /// <summary>Builds the MEAI tool surface for <c>execute_lua</c>.</summary>
         public AIFunction CreateAIFunction()
@@ -45,6 +53,18 @@ namespace CoreAI.Ai
             if (string.IsNullOrEmpty(code))
             {
                 return SerializeResult(new LuaResult { Success = false, Error = "Lua code is required" });
+            }
+
+            if (!_rateLimiter.TryAcquire(Clock.Elapsed.TotalSeconds))
+            {
+                string limitError =
+                    $"Lua rate limit exceeded ({_rateLimiter.MaxPerWindow} per {_rateLimiter.WindowSeconds:0}s); call rejected.";
+                if (_settings.LogToolCallResults)
+                {
+                    _logger.Warn($"[Tool Call] execute_lua: {limitError}");
+                }
+
+                return SerializeResult(new LuaResult { Success = false, Error = limitError });
             }
 
             if (_settings.LogToolCalls)

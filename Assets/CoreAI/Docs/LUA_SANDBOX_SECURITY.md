@@ -61,16 +61,32 @@ the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
 
 ## Generation Rate Limit
 
-LLM-driven Lua generation is rate-limited end to end. Besides the per-script
-instruction/time guards (`InstructionLimitDebugger`, see below), the envelope
-pipeline applies a sliding-window limiter (`LuaGenerationRateLimiter`, default
-20 per 60 s) in `LuaAiEnvelopeProcessor`: both envelope executions and
-scheduled Programmer repair generations consume slots. When the window is
-saturated, the envelope fails with a `Lua rate limit exceeded` message and no
-repair task is scheduled, so a failing script cannot spin a runaway
-generate→fail→repair loop against the LLM. Pass a custom
-`LuaGenerationRateLimiter` to the `LuaAiEnvelopeProcessor` constructor to tune
-or disable (`maxPerWindow <= 0`) the limit.
+Lua generation is constrained at multiple stages:
+
+- `LuaAiEnvelopeProcessor` enforces a sliding-window limiter (`LuaGenerationRateLimiter`, default 20 per 60 s) for envelope runs and scheduled Programmer repair generations.
+- `LuaTool`/`execute_lua` also enforces rate limiting in the tool path. The
+  envelope and `execute_lua` share a limiter when the same limiter is injected,
+  so a busy model or repair loop is blocked consistently across both layers.
+
+`LuaGenerationRateLimiter` is default-on. `maxPerWindow <= 0` still disables it.
+
+When the limiter is saturated, the envelope fails with `Lua rate limit exceeded` and repair is skipped, so a failing script cannot spin a runaway generate→fail→repair loop against the LLM.
+
+## Additional hardening (current implementation)
+
+- `string.rep` is now capped via a replaced implementation in `SecureLuaEnvironment`.
+  `SecureLuaEnvironment.MaxStringRepLength` is `1_000_000`; attempts that exceed this
+  limit fail fast with an explicit error.
+- Coroutine abuse has a total-lifetime budget through `LuaCoroutineHandle`.
+  `LuaCoroutineHandle.DefaultTotalLifetimeSteps` is `1_000_000` across all resumes
+  for one handle, and the handle is forcibly killed when exceeded.
+- `LuaAiEnvelopeProcessor` normalizes and truncates results:
+  result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
+- `coreai_world_load_scene` supports an optional scene whitelist check.
+- World bindings validate coordinate inputs before touching state:
+  coordinates must be finite and `abs(value) <= 100000`.
+- `time_set_scale` validates input: `NaN`/`Infinity` are rejected and valid scales are clamped to `[0, 10]`.
+- `play_sound` clamps volume to `[0, 1]`.
 
 ## Platform Support
 
@@ -171,6 +187,11 @@ Maintain EditMode tests for attempts to:
 - Call host bindings with invalid ids, extreme numbers, NaN/Infinity, or oversized
   strings.
 - Reuse stale object handles after scene reload or despawn.
+- `string.rep` repeat-capping behavior (`MaxStringRepLength`) and malformed `package` access checks.
+- `pcall` loop recursion and unbounded call-stack behavior.
+- Coroutines that exceed total lifetime budgets.
+- World binding validations for NaN/Infinity and coordinate bounds (`|value| <= 100000`).
+- Rate-limit behavior for `execute_lua` and repair-generation lockout.
 
 ## Error Handling
 

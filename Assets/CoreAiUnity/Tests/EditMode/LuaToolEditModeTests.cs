@@ -113,6 +113,34 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(parsed.Success);
         }
 
+        [Test]
+        public async Task ExecuteAsync_RateLimiterRejectsWhenWindowFull()
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult
+            {
+                Success = true,
+                Output = "ok"
+            });
+            LuaGenerationRateLimiter limiter = new(2, 1d);
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog(), limiter);
+
+            LuaTool.LuaResult first = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                await tool.ExecuteAsync("print('a')"));
+            Assert.IsTrue(first.Success);
+
+            LuaTool.LuaResult second = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                await tool.ExecuteAsync("print('b')"));
+            Assert.IsTrue(second.Success);
+
+            LuaTool.LuaResult third = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                await tool.ExecuteAsync("print('c')"));
+            Assert.IsFalse(third.Success);
+            Assert.IsNotNull(third.Error);
+            StringAssert.Contains("rate limit", third.Error);
+
+            Assert.AreEqual(2, executor.CallCount);
+        }
+
         // ===================== CreateAIFunction =====================
 
         [Test]

@@ -1,7 +1,9 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
+using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
 using MoonSharp.Interpreter;
+using UnityEngine;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -350,6 +352,124 @@ namespace CoreAI.Tests.EditMode
 
             // LoadString даёт chunk (функцию), а DynValue.NewNumber — не функцию.
             Assert.Throws<ArgumentException>(() => guard.Execute(script, DynValue.NewNumber(1)));
+        }
+
+        [Test]
+        public void StripRiskyGlobals_PackageNil()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            DynValue val = script.DoString("return package");
+            Assert.AreEqual(DataType.Nil, val.Type, "package must be removed from the sandbox globals.");
+        }
+
+        [Test]
+        public void EscapeVector_StringRep_StringCapAndMethodForm_WithSeparatorWorks()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            long beforeLargeString = GC.GetTotalMemory(true);
+            Assert.Throws<ScriptRuntimeException>(() => script.DoString("return string.rep('a', 2000000)"));
+            long afterLargeString = GC.GetTotalMemory(true);
+            Assert.Less(Math.Abs(afterLargeString - beforeLargeString), 1_000_000L,
+                "Huge string.rep should fail before large allocation.");
+
+            long beforeHugeString = GC.GetTotalMemory(true);
+            Assert.Throws<ScriptRuntimeException>(() => script.DoString("return string.rep('abc', 10000000)"));
+            long afterHugeString = GC.GetTotalMemory(true);
+            Assert.Less(Math.Abs(afterHugeString - beforeHugeString), 1_000_000L,
+                "Huge string.rep should fail before large allocation.");
+
+            DynValue value = script.DoString("return string.rep('ab', 3)");
+            Assert.AreEqual("ababab", value.String);
+
+            value = script.DoString("return ('ab'):rep(3)");
+            Assert.AreEqual("ababab", value.String);
+
+            value = script.DoString("return ('ab'):rep(3, '-')");
+            Assert.AreEqual("ab-ab-ab", value.String);
+        }
+
+        [Test]
+        public void LuaExecutionGuard_WhileTruePcall_ReachesInstructionLimit()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+            LuaExecutionGuard guard = new(50, 100);
+
+            ScriptRuntimeException ex = Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "while true do pcall(function() end) end", guard));
+            Assert.IsTrue(
+                ex.Message.Contains("Lua exceeded") ||
+                ex.Message.Contains("EXCEEDED_HARD_LIMIT_STEPS"),
+                $"Expected hard limit message, got: {ex.Message}");
+        }
+
+        [Test]
+        public void LuaExecutionGuard_DeepRecursion_ThrowsScriptError()
+        {
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(new LuaApiRegistry());
+
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "local function f(n) return f(n + 1) end\nreturn f(0)"));
+        }
+
+        [Test]
+        public void CreateCoroutine_LifetimeBudget_EnforcedAfterResumes()
+        {
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
+
+            LuaCoroutineHandle handle = env.CreateCoroutine(
+                reg,
+                "while true do coroutine.yield() end",
+                10000,
+                2);
+
+            int resumes = 0;
+            while (handle.IsAlive && resumes < 10)
+            {
+                handle.Resume();
+                resumes++;
+            }
+
+            Assert.IsFalse(handle.IsAlive, "Coroutine should be auto-killed once lifetime budget is exhausted.");
+            Assert.GreaterOrEqual(resumes, 1);
+            Assert.Less(resumes, 10);
+        }
+
+        [Test]
+        public void LuaTimeBindings_TimeSetScale_NaNThrows()
+        {
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
+            new LuaTimeBindings().RegisterTimeApis(reg);
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() => env.RunChunk(script, "time_set_scale(0/0)"));
+        }
+
+        [Test]
+        public void LuaTimeBindings_TimeSetScale_ClampsToMax()
+        {
+            float originalScale = Time.timeScale;
+            SecureLuaEnvironment env = new();
+            LuaApiRegistry reg = new();
+            new LuaTimeBindings().RegisterTimeApis(reg);
+            Script script = env.CreateScript(reg);
+
+            try
+            {
+                env.RunChunk(script, "time_set_scale(9999)");
+                Assert.AreEqual(10f, Time.timeScale);
+            }
+            finally
+            {
+                Time.timeScale = originalScale;
+            }
         }
     }
 }

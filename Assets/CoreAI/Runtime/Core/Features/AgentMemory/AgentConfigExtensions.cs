@@ -93,7 +93,10 @@ namespace CoreAI.Ai
             Action<string> onDone = null,
             int priority = 0)
         {
-            _ = RunAskFireAndForgetAsync(config, message, onDone, priority);
+            // Capture the caller's synchronization context (Unity main thread when called from it)
+            // so onDone is safe to use with Unity APIs; without it the continuation after
+            // ConfigureAwait(false) may land on a thread-pool thread.
+            _ = RunAskFireAndForgetAsync(config, message, onDone, priority, SynchronizationContext.Current);
         }
 
         /// <summary>Legacy alias of <see cref="AskWithCallback"/>.</summary>
@@ -111,16 +114,29 @@ namespace CoreAI.Ai
             AgentConfig config,
             string message,
             Action<string> onDone,
-            int priority)
+            int priority,
+            SynchronizationContext callbackContext)
         {
             try
             {
                 string result = await AskAsync(config, message, priority).ConfigureAwait(false);
-                onDone?.Invoke(result);
+                if (onDone == null)
+                {
+                    return;
+                }
+
+                if (callbackContext != null)
+                {
+                    callbackContext.Post(state => onDone((string)state), result);
+                }
+                else
+                {
+                    onDone(result);
+                }
             }
             catch (Exception ex)
             {
-                Log.Instance.Error($"Ask() failed for agent '{config.RoleId}': {ex.Message}", LogTag.Llm);
+                Log.Instance.Error($"AskWithCallback failed for agent '{config.RoleId}': {ex}", LogTag.Llm);
             }
         }
 

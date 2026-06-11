@@ -57,7 +57,7 @@ namespace CoreAI.Composition
 
             if (llm.started)
             {
-                _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
+                _logger.LogInfo(GameLogFeature.Llm, "LLMUnity autostart: server already started, nothing to do.");
                 return;
             }
 
@@ -68,7 +68,7 @@ namespace CoreAI.Composition
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    "LLMUnity: autostart status changed." + ex.Message);
+                    $"LLMUnity autostart: agent.Start() threw — {ex}");
             }
 
             WarmupAsync(llm).Forget();
@@ -83,7 +83,7 @@ namespace CoreAI.Composition
                 if (Time.realtimeSinceStartup - start > timeout)
                 {
                     _logger.LogWarning(GameLogFeature.Llm,
-                        $"LLMUnity: autostart status changed.");
+                        $"LLMUnity autostart: warmup timed out after {timeout:0.#}s (server not started yet).");
                     return;
                 }
 
@@ -92,11 +92,11 @@ namespace CoreAI.Composition
 
             if (llm.failed)
             {
-                _logger.LogWarning(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
+                _logger.LogWarning(GameLogFeature.Llm, "LLMUnity autostart: server reported failure during startup.");
                 return;
             }
 
-            _logger.LogInfo(GameLogFeature.Llm, "LLMUnity: autostart status changed.");
+            _logger.LogInfo(GameLogFeature.Llm, "LLMUnity autostart: server started successfully.");
         }
     }
 }

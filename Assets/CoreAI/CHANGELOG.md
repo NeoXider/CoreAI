@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## [Unreleased]
+
+### Lua sandbox hardening
+
+- **Capped `string.rep`.** The sandbox replaces `string.rep` with a capped implementation (`SecureLuaEnvironment.MaxStringRepLength = 1_000_000` chars) — single-instruction allocation bombs now fail with a script error before allocating.
+- **Coroutine total lifetime budget.** `LuaCoroutineHandle` tracks consumed instruction steps across resumes (`DefaultTotalLifetimeSteps = 1_000_000`) and kills the handle when the budget is exhausted, so infinite-yield coroutines are no longer immortal.
+- **Output/error caps in `LuaAiEnvelopeProcessor`.** Result summaries are truncated to 4,000 chars; error messages are normalized (newlines stripped) and truncated to 500 chars before entering payload/repair prompts.
+- **`execute_lua` rate-limited by default.** `LuaTool` now enforces a `LuaGenerationRateLimiter` (default-on; inject a shared instance via `LuaTool`/`LuaLlmTool` constructors to share one window with the envelope pipeline). Saturation returns a `Lua rate limit exceeded` result.
+
+### Reliability
+
+- **`AskWithCallback` marshals `onDone` to the caller's `SynchronizationContext`** (Unity main thread when called from it) instead of an arbitrary thread-pool thread.
+- **Full-exception logging.** Catch blocks in `AgentConfigExtensions` and `FileConversationSummaryStore` now log the full exception (`{ex}`) instead of `ex.Message`.
+- **`FileConversationSummaryStore` implements `IDisposable`** (disposes its `SemaphoreSlim` gate) and uses collision-proof sanitized filenames (FNV-1a hash suffix when sanitization changes the role id, so `A/B` and `A_B` cannot collide).
+
 ## [v3.2.0] - 2026-06-11
 
 ### API design

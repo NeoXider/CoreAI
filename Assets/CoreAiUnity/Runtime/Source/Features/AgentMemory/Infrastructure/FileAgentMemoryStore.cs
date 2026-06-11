@@ -23,7 +23,7 @@ namespace CoreAI.Infrastructure.AiMemory
     /// The jslib runs <c>FS.syncfs</c> single-flight (<b>v1.7.2+</b>) so rapid successive writes do not overlap syncs.
     /// </para>
     /// </summary>
-    public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore
+    public sealed class FileAgentMemoryStore : IAgentMemoryStore, IConversationTranscriptStore, IDisposable
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")]
@@ -159,7 +159,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to load memory for {roleId}: {ex.Message}");
+                _log?.Error($"[FileAgentMemoryStore] Failed to load memory for {roleId}: {ex}");
                 return null;
             }
         }
@@ -217,7 +217,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to save memory for {roleId}: {ex.Message}");
+                _log?.Error($"[FileAgentMemoryStore] Failed to save memory for {roleId}: {ex}");
             }
         }
 
@@ -272,7 +272,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to clear memory for {roleId}: {ex.Message}");
+                _log?.Error($"[FileAgentMemoryStore] Failed to clear memory for {roleId}: {ex}");
             }
         }
 
@@ -339,15 +339,43 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to clear chat history for {roleId}: {ex.Message}");
+                _log?.Error($"[FileAgentMemoryStore] Failed to clear chat history for {roleId}: {ex}");
             }
         }
 
         private string GetPath(string roleId)
         {
-            // Resolve and cache required local values.
-            string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            return Path.Combine(_dir, $"{safeName}.json");
+            return Path.Combine(_dir, $"{SanitizedFileStem(roleId)}.json");
+        }
+
+        /// <summary>
+        /// Releases the internal file-access semaphore.
+        /// </summary>
+        public void Dispose()
+        {
+            _gate.Dispose();
+        }
+
+        /// <summary>
+        /// Maps a raw role id to a unique file stem. Invalid filename characters are replaced, and
+        /// when the replacement changed anything a short hash of the raw id is appended so distinct
+        /// ids like "A/B" and "A_B" cannot collide on the same file.
+        /// </summary>
+        private static string SanitizedFileStem(string roleId)
+        {
+            string safe = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
+            if (string.Equals(safe, roleId, StringComparison.Ordinal))
+            {
+                return safe;
+            }
+
+            uint hash = 2166136261u;
+            foreach (char c in roleId)
+            {
+                hash = (hash ^ c) * 16777619u;
+            }
+
+            return $"{safe}_{hash:x8}";
         }
 
         private void EnsureDir()
@@ -464,7 +492,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     }
                     catch (Exception tex)
                     {
-                        _log?.Error($"[FileAgentMemoryStore] Transcript JSON for {roleId}: {tex.Message}");
+                        _log?.Error($"[FileAgentMemoryStore] Transcript JSON for {roleId}: {tex}");
                     }
                 }
 
@@ -476,7 +504,7 @@ namespace CoreAI.Infrastructure.AiMemory
             catch (Exception ex)
             {
                 _log?.Error(
-                    $"[FileAgentMemoryStore] Failed to read chat history from disk for {roleId}: {ex.Message}");
+                    $"[FileAgentMemoryStore] Failed to read chat history from disk for {roleId}: {ex}");
             }
         }
 
@@ -530,7 +558,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             catch (Exception ex)
             {
-                _log?.Error($"[FileAgentMemoryStore] Failed to persist JSON for {roleId}: {ex.Message}");
+                _log?.Error($"[FileAgentMemoryStore] Failed to persist JSON for {roleId}: {ex}");
             }
         }
 

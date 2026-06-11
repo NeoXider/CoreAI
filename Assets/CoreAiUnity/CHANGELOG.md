@@ -2,6 +2,31 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [Unreleased]
+
+### Lua and world hardening
+
+- `string.rep` now uses a capped implementation in `SecureLuaEnvironment` (`MaxStringRepLength = 1_000_000`) and throws on oversized repetitions.
+- `LuaCoroutineHandle` enforces `DefaultTotalLifetimeSteps = 1_000_000` across resumes and kills over-budget handles.
+- `LuaAiEnvelopeProcessor` truncates result summaries to 4,000 chars and normalizes/truncates error messages to 500 chars.
+- `LuaTool` / `execute_lua` now rate-limits by default through an injectable `LuaGenerationRateLimiter` with shared limiter injection where applicable.
+- World and time bindings now validate numeric inputs:
+  `time_set_scale` rejects `NaN`/`Infinity` and clamps to `[0,10]`,
+  `play_sound` clamps to `[0,1]`,
+  coordinates are finite and bounded before command execution.
+- `coreai_world_load_scene` supports optional scene whitelist validation.
+
+### Autostart / callbacks / observability
+
+- `LlmUnityAutostartEntryPoint` emits distinct autostart state logs (startup status, warmup, failure state, started/stopped lifecycle).
+- `AskWithCallback` marshals callback invocation to the caller `SynchronizationContext`.
+- Error handling now logs full `Exception` data in ask/store/entry-point paths.
+
+### File stores and lifecycle
+
+- File stores now implement `IDisposable` (`FileConversationSummaryStore`, `FileAgentMemoryStore`) and use collision-safe sanitized filename handling.
+- CLI/CI hardening now checks Lua define injection/removal behavior, skips secret checks on PR-only flows, and passes `githubToken` to check-run creation where available.
+
 ## [3.2.0] - 2026-06-11
 
 ### Token budget on your own Canvas (UGUI)

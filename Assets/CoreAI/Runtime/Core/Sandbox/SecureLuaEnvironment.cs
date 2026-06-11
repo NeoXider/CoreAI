@@ -15,6 +15,13 @@ namespace CoreAI.Sandbox
         /// <summary>Maximum instruction budget for one-shot Lua script execution.</summary>
         public const int OneShotHardLimitSteps = 500_000;
 
+        /// <summary>
+        /// Maximum length of a string that <c>string.rep</c> may build. Building a huge string is a
+        /// single VM instruction, so the instruction-limit debugger cannot interrupt it; the cap is
+        /// enforced before allocation instead.
+        /// </summary>
+        public const int MaxStringRepLength = 1_000_000;
+
         /// <summary>Whether the embedded MoonSharp sandbox is safe to instantiate on this player.</summary>
         public static bool IsSupported
         {
@@ -60,7 +67,8 @@ namespace CoreAI.Sandbox
         public LuaCoroutineHandle CreateCoroutine(
             LuaApiRegistry registry,
             string luaCode,
-            int budgetPerResume = LuaCoroutineHandle.DefaultBudgetPerResume)
+            int budgetPerResume = LuaCoroutineHandle.DefaultBudgetPerResume,
+            long totalLifetimeSteps = LuaCoroutineHandle.DefaultTotalLifetimeSteps)
         {
             ThrowIfUnsupported();
 
@@ -75,7 +83,7 @@ namespace CoreAI.Sandbox
             DynValue fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_coroutine");
             DynValue coroutine = script.CreateCoroutine(fn);
 
-            return new LuaCoroutineHandle(script, coroutine, debugger, budgetPerResume);
+            return new LuaCoroutineHandle(script, coroutine, debugger, budgetPerResume, totalLifetimeSteps);
         }
 
         private static void ThrowIfUnsupported()
@@ -123,11 +131,48 @@ namespace CoreAI.Sandbox
                 try
                 {
                     stringLib.Table["dump"] = DynValue.Nil;
+                    stringLib.Table["rep"] = DynValue.NewCallback(CappedStringRep, "rep");
                 }
                 catch
                 {
                 }
             }
+        }
+
+        // string.rep replacement: identical semantics (s, n[, sep]) but refuses to build strings
+        // longer than MaxStringRepLength. Replacing it in the string library table also covers
+        // method-style calls (('a'):rep(n)) because the shared string metatable __index points here.
+        private static DynValue CappedStringRep(ScriptExecutionContext ctx, CallbackArguments args)
+        {
+            string s = args.AsType(0, "rep", DataType.String, false).String;
+            double countRaw = args.AsType(1, "rep", DataType.Number, false).Number;
+            string sep = args.Count >= 3 && args[2].Type == DataType.String ? args[2].String : "";
+
+            if (double.IsNaN(countRaw) || countRaw < 1)
+            {
+                return DynValue.NewString("");
+            }
+
+            long count = countRaw > MaxStringRepLength ? MaxStringRepLength + 1L : (long)countRaw;
+            long total = s.Length * count + sep.Length * (count - 1);
+            if (total > MaxStringRepLength)
+            {
+                throw new ScriptRuntimeException(
+                    $"SecureLuaEnvironment: string.rep result would exceed {MaxStringRepLength} chars.");
+            }
+
+            System.Text.StringBuilder sb = new((int)total);
+            for (long i = 0; i < count; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(sep);
+                }
+
+                sb.Append(s);
+            }
+
+            return DynValue.NewString(sb.ToString());
         }
     }
 }

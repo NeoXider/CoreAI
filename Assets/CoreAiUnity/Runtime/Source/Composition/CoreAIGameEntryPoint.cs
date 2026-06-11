@@ -110,7 +110,7 @@ namespace CoreAI.Composition
             }
             catch (Exception ex)
             {
-                _logger.Error($"Ai bootstrap: {ex.Message}", LogTag.Composition);
+                _logger.Error($"Ai bootstrap: {ex}", LogTag.Composition);
             }
         }
     }

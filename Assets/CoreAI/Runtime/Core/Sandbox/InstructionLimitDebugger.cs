@@ -23,6 +23,9 @@ namespace CoreAI.Sandbox
             Reset(maxSteps, timeoutMs);
         }
 
+        /// <summary>Instruction steps consumed since the last <see cref="Reset"/>.</summary>
+        public long Steps => System.Threading.Interlocked.Read(ref _steps);
+
         public void Reset(long maxSteps, int timeoutMs)
         {
             _maxSteps = maxSteps < 1 ? 1 : maxSteps;

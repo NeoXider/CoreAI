@@ -12,12 +12,17 @@ namespace CoreAI.Ai
         private readonly LuaTool.ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
+        private readonly LuaGenerationRateLimiter _rateLimiter;
 
-        public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, ILog logger)
+        public LuaLlmTool(LuaTool.ILuaExecutor executor, ICoreAISettings settings, ILog logger,
+            LuaGenerationRateLimiter rateLimiter = null)
         {
             _executor = executor;
             _settings = settings;
             _logger = logger;
+            // Owned here (not in CreateAIFunction) so the sliding window survives repeated
+            // AIFunction creation; pass the envelope pipeline's limiter to share one budget.
+            _rateLimiter = rateLimiter ?? new LuaGenerationRateLimiter();
         }
 
         /// <inheritdoc />
@@ -46,7 +51,7 @@ namespace CoreAI.Ai
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            LuaTool tool = new(_executor, _settings, _logger);
+            LuaTool tool = new(_executor, _settings, _logger, _rateLimiter);
             return tool.CreateAIFunction();
         }
     }

@@ -9,19 +9,36 @@
 ## [P1] Из аудита 2026-06-11 (детали: `Docs/AUDIT_2026-06-11_RU.md`)
 
 ### Lua / песочница
-- [ ] Кап на `string.rep` (аллокационная бомба в одну VM-инструкцию — `InstructionLimitDebugger` не успевает) — `SecureLuaEnvironment.StripRiskyGlobals`.
-- [ ] `LuaTool`/`execute_lua` идёт мимо `LuaGenerationRateLimiter` — прокинуть лимитер или задокументировать; поправить «rate-limited end to end» в `LUA_SANDBOX_SECURITY.md`.
-- [ ] Суммарный бюджет жизни корутины (total steps across resumes) в `LuaCoroutineHandle` — бесконечная yield-корутина сейчас бессмертна.
-- [ ] Валидация чисел в world-биндингах (NaN/Inf/диапазон, кап громкости), whitelist сцен для `coreai_world_load_scene`, кап/удаление `time_set_scale`.
-- [ ] Кап `ToPrintString()` и нормализация текстов ошибок перед publish в payload/repair-промпт (`LuaAiEnvelopeProcessor`).
-- [ ] Тесты по списку «Known Attack Vectors»: rep-бомба, глубокая рекурсия, `pcall`-поглощение лимитов, NaN-аргументы биндингов, регресс на `package`.
+- [x] Кап на `string.rep` (аллокационная бомба в одну VM-инструкцию — `InstructionLimitDebugger` не успевает) — `SecureLuaEnvironment.StripRiskyGlobals`.
+- [x] `LuaTool`/`execute_lua` идёт мимо `LuaGenerationRateLimiter` — прокинуть лимитер или задокументировать; поправить «rate-limited end to end» в `LUA_SANDBOX_SECURITY.md`.
+- [x] Суммарный бюджет жизни корутины (total steps across resumes) в `LuaCoroutineHandle` — бесконечная yield-корутина сейчас бессмертна.
+- [x] Валидация чисел в world-биндингах (NaN/Inf/диапазон, кап громкости), whitelist сцен для `coreai_world_load_scene`, кап/удаление `time_set_scale`.
+- [x] Кап `ToPrintString()` и нормализация текстов ошибок перед publish в payload/repair-промпт (`LuaAiEnvelopeProcessor`).
+- [x] Тесты по списку «Known Attack Vectors»: rep-бомба, глубокая рекурсия, `pcall`-поглощение лимитов, NaN-аргументы биндингов, регресс на `package`.
 
 ### Общее
-- [ ] `LlmUnityAutostartEntryPoint` — развести 4 исхода на 4 разных лог-сообщения.
-- [ ] `AskWithCallback`: маршалить `onDone` на main thread или явно задокументировать «может прийти не на main thread».
-- [ ] Логировать исключения целиком (`ex`), а не `ex.Message` (системно по catch-блокам).
-- [ ] CI: fail при отсутствии `COREAI_NO_LUA` после sed; skip-условие для PR из форков (нет секретов); рассмотреть `githubToken` для check-run.
-- [ ] `IDisposable` для `FileAgentMemoryStore`/`FileConversationSummaryStore` (dispose `SemaphoreSlim`); коллизии имён файлов после санитизации roleId.
+- [x] `LlmUnityAutostartEntryPoint` — развести 4 исхода на 4 разных лог-сообщения.
+- [x] `AskWithCallback`: маршалить `onDone` на main thread или явно задокументировать «может прийти не на main thread».
+- [x] Логировать исключения целиком (`ex`), а не `ex.Message` (системно по catch-блокам).
+- [x] CI: fail при отсутствии `COREAI_NO_LUA` после sed; skip-условие для PR из форков (нет секретов); рассмотреть `githubToken` для check-run.
+- [x] `IDisposable` для `FileAgentMemoryStore`/`FileConversationSummaryStore` (dispose `SemaphoreSlim`); коллизии имён файлов после санитизации roleId.
+
+
+## [P2] WebGL: Lua в веб-сборке (исследование)
+- `SecureLuaEnvironment.IsSupported` returns `false` в WebGL-плеере (define-ветка `UNITY_WEBGL` и не `UNITY_EDITOR`) — MoonSharp-сэндбокс полностью отключен в WebGL.
+- `LuaAiEnvelopeProcessor` уже публикует `"Lua execution is disabled on this platform"`.
+- Файловые сторы и транспорт имеют WebGL-ветки (`inline` I/O + `IDBFS` sync).
+- Исследовать:
+  - совместимость MoonSharp с IL2CPP/AOT в WebGL (интерпретатор не требует JIT — вероятно достаточно снять define-gate и добавить `link.xml` против code stripping);
+  - стоимость по размеру сборки, производительность интерпретатора в WASM;
+  - лимиты инструкций/таймауты без потоков;
+  - альтернативы — Lua-CSharp / wasm-lua.
+- Отдельно: проверить вызовы `Task.Run` вне стора.
+
+## [P1] Демо-сцены
+- Нужны отдельные демо-сцены помимо чата: Lua-механики, MCP-механики, скиллы.
+- Размещать в отдельной папке, например `Assets/CoreAI.Demos/`, НЕ внутри `Assets/CoreAI` и НЕ внутри `Assets/CoreAiUnity`.
+- Каждая демо-сцена должна быть самодостаточна: сцена + минимальные скрипты + README.
 
 ## [P1] Lua как полноценный второй язык игры
 

@@ -19,6 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check UNITY_LICENSE availability for this run
+        id: unity-license-check
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
+            echo "::notice::Skipping EditMode tests because UNITY_LICENSE is unavailable (forked PRs do not receive repository secrets)."
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Strip MoonSharp + define COREAI_NO_LUA
         if: matrix.lua == 'no-lua'
         run: |
@@ -36,7 +47,7 @@ jobs:
           EOF
           # Append the define to every per-platform scriptingDefineSymbols entry.
           sed -i 's/: DOTWEEN$/: DOTWEEN;COREAI_NO_LUA/' ProjectSettings/ProjectSettings.asset
-          grep -n 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset | head -3
+          grep -q 'COREAI_NO_LUA' ProjectSettings/ProjectSettings.asset || { echo 'COREAI_NO_LUA injection failed'; exit 1; }
 
       - uses: actions/cache@v4
         with:
@@ -46,6 +57,7 @@ jobs:
             library-${{ matrix.lua }}-
 
       - name: Run EditMode tests
+        if: steps.unity-license-check.outputs.run_tests == 'true'
         uses: game-ci/unity-test-runner@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -55,9 +67,10 @@ jobs:
           testMode: editmode
           artifactsPath: artifacts-${{ matrix.lua }}
           checkName: EditMode results (${{ matrix.lua }})
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce Lua sandbox escape-test coverage
-        if: matrix.lua == 'moonsharp'
+        if: matrix.lua == 'moonsharp' && steps.unity-license-check.outputs.run_tests == 'true'
         run: |
           # The sandbox isolation suite must actually have run — a green build with
           # 0 executed escape tests (filter typo, asmdef regression, define drift)
@@ -70,7 +83,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.unity-license-check.outputs.run_tests == 'true'
         with:
           name: test-results-${{ matrix.lua }}
           path: artifacts-${{ matrix.lua }}
