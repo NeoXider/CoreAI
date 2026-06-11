@@ -1,9 +1,4 @@
-using System;
-using System.Text;
 using CoreAI.Ai;
-using CoreAI.Composition;
-using CoreAI.Messaging;
-using MessagePipe;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM && COREAI_HAS_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -15,8 +10,9 @@ namespace CoreAI.Diagnostics
     /// IMGUI overlay with runtime token-budget diagnostics: last-request and session token counts,
     /// estimated session cost (when prices are configured on <see cref="CoreAISettingsAsset"/>),
     /// and a rolling-window request-load indicator against the chat-service rate limiter.
-    /// Toggle via the inspector flag or the hotkey (default F10). Works in Editor Play Mode and players;
-    /// outside Play Mode it renders a "no service" panel.
+    /// Toggle via the inspector flag or the hotkey (default F10, <see cref="KeyCode.None"/> disables it).
+    /// Works in Editor Play Mode and players; outside Play Mode it renders a "no service" panel.
+    /// For a game-styled UI on your own Canvas, use <see cref="CoreAiTokenBudgetUiView"/> instead.
     /// </summary>
     [ExecuteAlways]
     public sealed class CoreAiTokenBudgetOverlay : MonoBehaviour
@@ -24,21 +20,13 @@ namespace CoreAI.Diagnostics
         [Header("Display Settings")] [Tooltip("Show or hide the overlay window.")] [SerializeField]
         private bool _showOverlay = true;
 
-        [Tooltip("Hotkey that toggles the overlay at runtime.")] [SerializeField]
+        [Tooltip("Hotkey that toggles the overlay at runtime. Set to None to disable the hotkey.")] [SerializeField]
         private KeyCode _toggleKey = KeyCode.F10;
 
         [Tooltip("Rolling window length in seconds for the request-load indicator.")] [SerializeField] [Min(1f)]
         private float _rollingWindowSeconds = 60f;
 
-        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
-
-        private TokenBudgetCalculator _calculator;
-        private CoreAILifetimeScope _scope;
-        private IInGameLlmChatService _chatService;
-        private ICoreAISettings _settings;
-        private IDisposable _usageSubscription;
-        private bool _resolved;
-        private float _nextResolveAttempt;
+        private TokenBudgetRuntimeSource _source;
 
         private Rect _windowRect = new(10, 300, 380, 260);
         private GUIStyle _headerStyle;
@@ -47,17 +35,36 @@ namespace CoreAI.Diagnostics
         private bool _stylesInitialized;
 
         /// <summary>Aggregator behind the overlay; exposed for host code and tests.</summary>
-        public TokenBudgetCalculator Calculator => _calculator;
+        public TokenBudgetCalculator Calculator => GetOrCreateSource().Calculator;
+
+        /// <summary>Show or hide the overlay window from code.</summary>
+        public bool ShowOverlay
+        {
+            get => _showOverlay;
+            set => _showOverlay = value;
+        }
+
+        /// <summary>Toggle hotkey; <see cref="KeyCode.None"/> disables it.</summary>
+        public KeyCode ToggleKey
+        {
+            get => _toggleKey;
+            set => _toggleKey = value;
+        }
 
         private void Awake()
         {
-            _calculator = new TokenBudgetCalculator(_rollingWindowSeconds);
+            GetOrCreateSource();
         }
 
         private void OnDestroy()
         {
-            _usageSubscription?.Dispose();
-            _usageSubscription = null;
+            _source?.Dispose();
+            _source = null;
+        }
+
+        private TokenBudgetRuntimeSource GetOrCreateSource()
+        {
+            return _source ??= new TokenBudgetRuntimeSource(_rollingWindowSeconds);
         }
 
         private void Update()
@@ -72,78 +79,15 @@ namespace CoreAI.Diagnostics
                 _showOverlay = !_showOverlay;
             }
 
-            if (!_resolved && Time.realtimeSinceStartup >= _nextResolveAttempt)
-            {
-                _nextResolveAttempt = Time.realtimeSinceStartup + 1f;
-                TryResolveServices();
-            }
-        }
-
-        /// <summary>
-        /// Resolves CoreAI services from the scene <see cref="CoreAILifetimeScope"/>; safe to retry.
-        /// </summary>
-        private void TryResolveServices()
-        {
-            if (_scope == null)
-            {
-                _scope = FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
-            }
-
-            if (_scope == null || _scope.Container == null)
-            {
-                return;
-            }
-
-            try
-            {
-                _chatService = (IInGameLlmChatService)_scope.Container.Resolve(typeof(IInGameLlmChatService));
-            }
-            catch (Exception)
-            {
-                _chatService = null;
-            }
-
-            try
-            {
-                _settings = (ICoreAISettings)_scope.Container.Resolve(typeof(ICoreAISettings));
-            }
-            catch (Exception)
-            {
-                _settings = null;
-            }
-
-            if (_usageSubscription == null)
-            {
-                try
-                {
-                    ISubscriber<LlmUsageReported> usage =
-                        (ISubscriber<LlmUsageReported>)_scope.Container.Resolve(typeof(ISubscriber<LlmUsageReported>));
-                    _usageSubscription = usage.Subscribe(OnUsageReported);
-                }
-                catch (Exception)
-                {
-                    _usageSubscription = null;
-                }
-            }
-
-            _resolved = _chatService != null || _settings != null || _usageSubscription != null;
-        }
-
-        /// <summary>
-        /// Records a usage event into the calculator. May be invoked off the main thread,
-        /// so it only touches the thread-safe calculator and the stopwatch clock.
-        /// </summary>
-        private void OnUsageReported(LlmUsageReported usage)
-        {
-            _calculator?.RecordUsage(
-                usage.PromptTokens,
-                usage.CompletionTokens,
-                usage.TotalTokens,
-                _clock.Elapsed.TotalSeconds);
+            GetOrCreateSource().TickResolve();
         }
 
         private bool IsToggleKeyPressedThisFrame()
         {
+            if (_toggleKey == KeyCode.None)
+            {
+                return false;
+            }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(_toggleKey))
             {
@@ -236,12 +180,9 @@ namespace CoreAI.Diagnostics
 
         private void DrawWindow(int id)
         {
-            if (_calculator == null)
-            {
-                _calculator = new TokenBudgetCalculator(_rollingWindowSeconds);
-            }
+            TokenBudgetRuntimeSource source = GetOrCreateSource();
 
-            if (!Application.isPlaying || (!_resolved && _usageSubscription == null))
+            if (!Application.isPlaying || !source.IsResolved)
             {
                 GUILayout.Label("no service", _alertStyle);
                 GUILayout.Label(
@@ -253,77 +194,30 @@ namespace CoreAI.Diagnostics
                 return;
             }
 
-            double now = _clock.Elapsed.TotalSeconds;
+            TokenBudgetCalculator calc = source.Calculator;
+            double now = source.NowSeconds;
 
             GUILayout.Label("Tokens", _headerStyle);
-            StringBuilder sb = new();
-            sb.AppendLine(
-                $"  Last request: {FmtTok(_calculator.LastPromptTokens)} in / {FmtTok(_calculator.LastCompletionTokens)} out / {FmtTok(_calculator.LastTotalTokens)} total");
-            sb.AppendLine(
-                $"  Session: {_calculator.TotalPromptTokens} in / {_calculator.TotalCompletionTokens} out / {_calculator.TotalTokens} total");
-            sb.AppendLine(
-                $"  Requests: {_calculator.TotalRequests} (with usage: {_calculator.RequestsWithUsage}) | avg {_calculator.AverageTokensPerRequest:F0} tok/req");
-            GUILayout.Label(sb.ToString().TrimEnd(), _valueStyle);
+            GUILayout.Label(Indent(TokenBudgetTextFormatter.FormatTokens(calc)), _valueStyle);
 
             GUILayout.Label("Cost", _headerStyle);
-            double inPrice = _settings?.InputTokenPricePer1KUsd ?? 0f;
-            double outPrice = _settings?.OutputTokenPricePer1KUsd ?? 0f;
-            if (TokenBudgetCalculator.HasPricing(inPrice, outPrice))
-            {
-                double sessionCost = _calculator.EstimateSessionCostUsd(inPrice, outPrice);
-                double lastCost = TokenBudgetCalculator.ComputeCostUsd(
-                    Math.Max(_calculator.LastPromptTokens, 0),
-                    Math.Max(_calculator.LastCompletionTokens, 0),
-                    inPrice, outPrice);
-                GUILayout.Label(
-                    $"  Session: ${sessionCost:F4} | last request: ${lastCost:F4}\n" +
-                    $"  (in ${inPrice:F4}/1K, out ${outPrice:F4}/1K)", _valueStyle);
-            }
-            else
-            {
-                GUILayout.Label("  Prices not set (CoreAISettings > Debug > Token budget overlay)", _valueStyle);
-            }
+            double inPrice = source.Settings?.InputTokenPricePer1KUsd ?? 0f;
+            double outPrice = source.Settings?.OutputTokenPricePer1KUsd ?? 0f;
+            GUILayout.Label(Indent(TokenBudgetTextFormatter.FormatCost(calc, inPrice, outPrice)), _valueStyle);
 
             GUILayout.Label("Request Load", _headerStyle);
-            int requestsInWindow = _calculator.GetRequestsInWindow(now);
-            long tokensInWindow = _calculator.GetTokensInWindow(now);
-            RateLimiterMetrics rate = _chatService?.GetRateLimiterMetrics() ?? default;
-            if (rate.MaxRequestsPerWindow > 0)
-            {
-                bool nearLimit = rate.AcceptedInWindow >= rate.MaxRequestsPerWindow;
-                GUILayout.Label(
-                    $"  Chat limiter: {rate.AcceptedInWindow}/{rate.MaxRequestsPerWindow} per {rate.WindowSeconds}s {Bar(rate.AcceptedInWindow, rate.MaxRequestsPerWindow)}\n" +
-                    $"  Rejected total: {rate.TotalRejected}",
-                    nearLimit ? _alertStyle : _valueStyle);
-            }
-            else
-            {
-                GUILayout.Label("  Chat limiter: n/a (no IInGameLlmChatService / limit off)", _valueStyle);
-            }
-
-            GUILayout.Label(
-                $"  All LLM usage: {requestsInWindow} req / {tokensInWindow} tok in last {(int)_calculator.WindowSeconds}s",
-                _valueStyle);
+            RateLimiterMetrics rate = source.ChatService?.GetRateLimiterMetrics() ?? default;
+            string loadText = TokenBudgetTextFormatter.FormatLoad(calc, rate, now, out bool nearLimit);
+            GUILayout.Label(Indent(loadText), nearLimit ? _alertStyle : _valueStyle);
 
             GUILayout.Label($"\n[{_toggleKey}] toggle  |  drag to move", _valueStyle);
             GUI.DragWindow();
         }
 
-        /// <summary>Renders a 10-segment text load bar, e.g. <c>[###.......]</c>.</summary>
-        private static string Bar(int value, int max)
+        /// <summary>Prefixes every line with two spaces to match the section headers.</summary>
+        private static string Indent(string text)
         {
-            if (max <= 0)
-            {
-                return "";
-            }
-
-            int filled = Mathf.Clamp(Mathf.RoundToInt(value / (float)max * 10f), 0, 10);
-            return "[" + new string('#', filled) + new string('.', 10 - filled) + "]";
-        }
-
-        private static string FmtTok(int value)
-        {
-            return value < 0 ? "-" : value.ToString();
+            return string.IsNullOrEmpty(text) ? text : "  " + text.Replace("\n", "\n  ");
         }
     }
 }

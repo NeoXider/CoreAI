@@ -68,7 +68,8 @@
   - [x] Overlay: текущая стоимость токенов и `tokens/request` — `CoreAiTokenBudgetOverlay` (IMGUI, хоткей F10) поверх `TokenBudgetCalculator`.
   - [x] Стоимость сессии (`$/session`) — конфигурируемые цены за 1K токенов; при 0 показываются только токены.
   - [x] Скользящее окно/индикатор нагрузки запросов и лимитов.
-  - [ ] Проверка UI-доступности в редакторе и в Play Mode — вручную пользователем (логика покрыта EditMode-тестами `TokenBudgetCalculator`).
+  - [x] UGUI-вариант для своего Canvas — `CoreAiTokenBudgetUiView` (v3.2.0): `UnityEvent<string>`-выходы привязываются к своим TMP_Text/Text в инспекторе, хоткей отключается (`KeyCode.None`); общий `TokenBudgetRuntimeSource` + чистый `TokenBudgetTextFormatter` (EditMode-тесты).
+  - [ ] Проверка UI-доступности в редакторе и в Play Mode — вручную пользователем (логика покрыта EditMode-тестами `TokenBudgetCalculator` / `TokenBudgetTextFormatter`).
 
 ## [P2] API-дизайн
 - [x] ~~**ILlmTool — дублирование Name/Description**~~ — есть `LlmToolBase` (`ILlmTool.cs:45-68`) с `JsonParams(...)`-хелпером.

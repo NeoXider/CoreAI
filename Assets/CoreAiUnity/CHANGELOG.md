@@ -2,6 +2,16 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [3.2.0] - 2026-06-11
+
+### Token budget on your own Canvas (UGUI)
+
+- **`CoreAiTokenBudgetUiView`** — new component for game-styled UIs: instead of drawing anything, it periodically pushes formatted text through `UnityEvent<string>` outputs (`OnTokensTextChanged` / `OnCostTextChanged` / `OnLoadTextChanged`) that you bind in the inspector to your own `TMP_Text.text` / `Text.text` on any Canvas. State outputs `OnNearLimitChanged` (rate-limiter saturation, for alert colors) and `OnServiceAvailableChanged` (CoreAI scope found) fire on change. No hotkey, no IMGUI — show/hide with your own UI logic. `Source` / `Calculator` are exposed for fully code-driven UIs.
+- **`TokenBudgetRuntimeSource`** — shared runtime data source (scope discovery, `LlmUsageReported` subscription, `TokenBudgetCalculator`) now backs both the IMGUI overlay and the UGUI view; text rendering moved to the core `TokenBudgetTextFormatter`.
+- **`CoreAiTokenBudgetOverlay`** — hotkey can now be disabled by setting the toggle key to `None`; `ShowOverlay` / `ToggleKey` exposed as public properties for code control. Rendering unchanged.
+
+#### Package **`3.2.0`** - dependency **`com.nexoider.coreai` `3.2.0`**.
+
 ## [3.1.0] - 2026-06-10
 
 ### Reliability hardening + diagnostics overlay

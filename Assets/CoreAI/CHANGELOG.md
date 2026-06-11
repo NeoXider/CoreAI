@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## [v3.2.0] - 2026-06-11
+
+### Diagnostics
+
+- **`TokenBudgetTextFormatter`** — pure (UnityEngine-free) text layer extracted from the Unity token-budget overlay: `FormatTokens` / `FormatCost` / `FormatLoad` (+ `nearLimit` flag) render the same diagnostic strings for any UI (IMGUI overlay, custom UGUI panels, logs). Covered by new EditMode tests.
+
 ## [v3.1.0] - 2026-06-10
 
 ### Reliability
