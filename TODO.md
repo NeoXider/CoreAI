@@ -6,6 +6,23 @@
 - [ ] **Настроить секреты GameCI в GitHub** (`UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`) — без них workflow `.github/workflows/ci.yml` (матрица moonsharp / no-lua) не запустится.
 - [ ] **GitHub Release / tag для v3.2.0** после пуша.
 
+## [P1] Из аудита 2026-06-11 (детали: `Docs/AUDIT_2026-06-11_RU.md`)
+
+### Lua / песочница
+- [ ] Кап на `string.rep` (аллокационная бомба в одну VM-инструкцию — `InstructionLimitDebugger` не успевает) — `SecureLuaEnvironment.StripRiskyGlobals`.
+- [ ] `LuaTool`/`execute_lua` идёт мимо `LuaGenerationRateLimiter` — прокинуть лимитер или задокументировать; поправить «rate-limited end to end» в `LUA_SANDBOX_SECURITY.md`.
+- [ ] Суммарный бюджет жизни корутины (total steps across resumes) в `LuaCoroutineHandle` — бесконечная yield-корутина сейчас бессмертна.
+- [ ] Валидация чисел в world-биндингах (NaN/Inf/диапазон, кап громкости), whitelist сцен для `coreai_world_load_scene`, кап/удаление `time_set_scale`.
+- [ ] Кап `ToPrintString()` и нормализация текстов ошибок перед publish в payload/repair-промпт (`LuaAiEnvelopeProcessor`).
+- [ ] Тесты по списку «Known Attack Vectors»: rep-бомба, глубокая рекурсия, `pcall`-поглощение лимитов, NaN-аргументы биндингов, регресс на `package`.
+
+### Общее
+- [ ] `LlmUnityAutostartEntryPoint` — развести 4 исхода на 4 разных лог-сообщения.
+- [ ] `AskWithCallback`: маршалить `onDone` на main thread или явно задокументировать «может прийти не на main thread».
+- [ ] Логировать исключения целиком (`ex`), а не `ex.Message` (системно по catch-блокам).
+- [ ] CI: fail при отсутствии `COREAI_NO_LUA` после sed; skip-условие для PR из форков (нет секретов); рассмотреть `githubToken` для check-run.
+- [ ] `IDisposable` для `FileAgentMemoryStore`/`FileConversationSummaryStore` (dispose `SemaphoreSlim`); коллизии имён файлов после санитизации roleId.
+
 ## [P1] Lua как полноценный второй язык игры
 
 > Цель: Lua должен уметь менять мир и логику механик во время игры, а не только дергать 8 write-only команд (`CoreAiWorldLuaRuntimeBindings`). Песочница и `StripRiskyGlobals` не ослабляются — растёт только поверхность биндингов. Этапы упорядочены по ценности/стоимости, каждый ценен сам по себе.
