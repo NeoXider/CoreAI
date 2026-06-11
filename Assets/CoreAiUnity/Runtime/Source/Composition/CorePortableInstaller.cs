@@ -45,6 +45,7 @@ namespace CoreAI.Composition
             }, Lifetime.Singleton);
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             builder.Register<LuaAiEnvelopeProcessor>(Lifetime.Singleton);
+            builder.Register<LuaGenerationRateLimiter>(Lifetime.Singleton);
 #endif
 
             builder.Register<SessionTelemetryCollector>(Lifetime.Singleton).As<ISessionTelemetryProvider>();

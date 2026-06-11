@@ -40,13 +40,36 @@ namespace CoreAI.Infrastructure.Llm
         /// Last <see cref="Application.isPlaying"/> observed alongside the scripted Unity main thread
         /// (<see cref="Thread.ManagedThreadId"/>) (<c>-1</c> = not yet mirrored).
         /// </summary>
-        private static volatile int _editorMirrorIsPlaying = -1;
+        private static int _editorMirrorIsPlaying = -1;
 
-        private static volatile int _editorMirroredUnityMainManagedThreadId = -1;
+        private static int _editorMirroredUnityMainManagedThreadId = -1;
 
-        private static volatile int _editorRuntimePlayModeEntered;
+        private static int _editorRuntimePlayModeEntered;
 
         private static int _editorMirrorHooked;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void RegisterEditorPlayModeMirrorForRuntime()
+        {
+            MarkEditorRuntimePlayModeEntered();
+            EnsureEditorIsPlayingMirrorHook();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void PrimeEditorPlayModeMirrorBeforeSceneLoad()
+        {
+            MarkEditorRuntimePlayModeEntered();
+            EnsureEditorIsPlayingMirrorHook();
+            UpdateEditorIsPlayingMirrorFromEditorState();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void PrimeEditorPlayModeMirrorAfterSceneLoad()
+        {
+            MarkEditorRuntimePlayModeEntered();
+            EnsureEditorIsPlayingMirrorHook();
+            UpdateEditorIsPlayingMirrorFromEditorState();
+        }
 
         [InitializeOnLoad]
         private static class EditorIsPlayingMirrorEditorInitializer
@@ -184,6 +207,11 @@ namespace CoreAI.Infrastructure.Llm
                 return false;
             }
 
+            if (TryProbeApplicationIsPlayingOnCurrentThread())
+            {
+                return false;
+            }
+
             if (IsEditorPlayingOrWillEnterPlayMode())
             {
                 return false;
@@ -195,6 +223,25 @@ namespace CoreAI.Infrastructure.Llm
             // before a tool body runs, so SmartToolCallingChatClientEditModeTests (Task.Run + .Wait on
             // the main thread) still take the inline path and never deadlock.
             return Volatile.Read(ref _editorMirrorIsPlaying) == 0;
+        }
+
+        private static bool TryProbeApplicationIsPlayingOnCurrentThread()
+        {
+            try
+            {
+                bool isPlaying = Application.isPlaying;
+                Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
+                if (isPlaying)
+                {
+                    Volatile.Write(ref _editorRuntimePlayModeEntered, 1);
+                }
+
+                return isPlaying;
+            }
+            catch (Exception ex) when (IsUnhandledIsPlayingProbeFailure(ex))
+            {
+                return false;
+            }
         }
 
         private static bool IsEditorPlayingOrWillEnterPlayMode()
