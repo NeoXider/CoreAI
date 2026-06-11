@@ -50,3 +50,13 @@ Recommended follow-up:
 - New compile errors block merges.
 - New warnings must not be hidden inside accepted warning debt.
 - If a warning is accepted debt, document the reason, owner, and follow-up plan here.
+
+## CAIU001 ConfigureAwait warnings in CoreAiUnity
+
+Symptom: the bundled Roslyn analyzer reports `CAIU001: Do not use ConfigureAwait(false) in CoreAiUnity` for async file I/O in `FileAgentMemoryStore` and related stores.
+
+Cause: the async store paths intentionally run on the thread pool and never touch UnityEngine APIs after the await, so `ConfigureAwait(false)` is correct there; the analyzer flags it assembly-wide by design.
+
+Impact: warning debt only; not a runtime regression.
+
+Recommended follow-up: suppress per-file/per-call with a justification comment, or teach the analyzer to allow thread-pool-only code paths.

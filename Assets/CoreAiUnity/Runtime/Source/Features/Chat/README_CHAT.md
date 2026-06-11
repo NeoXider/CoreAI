@@ -2,14 +2,14 @@
 
 Built-in AI chat for any Unity game. Works out of the box with UI Toolkit.
 
-Regardless of UI, you can call the LLM from any script via the static **`CoreAi`** facade — see [COREAI_SINGLETON_API.md](../../../Docs/COREAI_SINGLETON_API.md) (cheat sheet, beginner FAQ, tips for experienced developers).
+Regardless of UI, you can call the LLM from any script via the static **`CoreAi`** facade — see [COREAI_SINGLETON_API.md](../../../../Docs/COREAI_SINGLETON_API.md) (cheat sheet, beginner FAQ, tips for experienced developers).
 
 **Sending in two modes**
 
 - **Chat panel** — the player types in the field and presses the button or **Enter**. **Shift+Enter** inserts a newline by default; legacy Shift+Enter-to-send is still available through `CoreAiChatConfig`.
 - **Code without the panel** — “send” = `CoreAi.AskAsync("...")` / `CoreAi.StreamAsync` with the same text. Under the hood it uses the same `CoreAiChatService` as the panel while there is a single `CoreAILifetimeScope` in the scene.
 
-The “UI vs code” table is in [COREAI_SINGLETON_API](../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
+The “UI vs code” table is in [COREAI_SINGLETON_API](../../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
 
 ## Example (Play Mode + Console)
 
@@ -530,7 +530,7 @@ await foreach (var chunk in CoreAi.OrchestrateStreamAsync(
 }
 ```
 
-Details: [`COREAI_SINGLETON_API.md`](../../../Docs/COREAI_SINGLETON_API.md).
+Details: [`COREAI_SINGLETON_API.md`](../../../../Docs/COREAI_SINGLETON_API.md).
 
 ### Option 2 — direct service access
 

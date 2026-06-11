@@ -53,7 +53,7 @@
 - 🎯 **Self-Service Skills** — модель видит 2 мета-инструмента вместо сотен (~91% экономии токенов)
 - 🌊 **Стриминг, переживающий реальность** — разорванные `<think>`, фрагментированные tool calls, SSE-чанки
 - 🗜️ **Длинные чаты без взрыва контекста** — бюджет токенов, скользящие сводки, опциональная «умная» свёртка
-- 🛡️ **Production-защита** — таймаут на тул, лимит генерации, защита от зацикливания, метрики rate limit — в Inspector
+- 🛡️ **Production-защита** — таймаут на тул, лимит генерации, защита от зацикливания, rate-limit Lua-генерации, метрики + оверлей бюджета токенов (F10)
 - 🔄 **Dual-backend fallback** — сначала локальная модель, облачный API как автоматический запасной (или наоборот)
 - 🧩 **Опциональные модули** — нет MoonSharp? Нет LLMUnity? Всё равно компилируется; фичи включаются при появлении пакетов
 
@@ -496,7 +496,7 @@ Blacksmith: "Добро пожаловать, путник! Вот моё луч
 
 ## 📚 Документация
 
-**Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**; портативный пакет `CoreAI` — тоже. Разбор токенов/таймаутов MEAI: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (EN). Старые ссылки на русский файл ведут на редирект: [`MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md). Корневой README_RU — навигатор по-русски; за деталями — по ссылкам на англоязычные гайды.
+**Язык:** подробные Markdown-гайды в [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) и [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) ведутся на **английском**; портативный пакет `CoreAI` — тоже. Разбор токенов/таймаутов MEAI: [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) (EN). Корневой README_RU — навигатор по-русски; за деталями — по ссылкам на англоязычные гайды.
 
 Сначала: **[Docs/README.md](Docs/README.md)** — общий вход по документации репозитория.
 По Unity-пакету: **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — от новичка до архитектуры.

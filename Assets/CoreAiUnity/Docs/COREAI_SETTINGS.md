@@ -328,6 +328,17 @@ offlineCustomResponseRoles: "*"
 | **MEAI Debug Logging** | Verbose Microsoft.Extensions.AI logs |
 | **HTTP Debug Logging** | Raw HTTP request/response |
 | **Log Orchestration Metrics** | Orchestrator metrics in the log |
+| **Input Token Price Per 1K (USD)** | Optional price used by the token-budget UI to estimate $/session (0 = tokens only) |
+| **Output Token Price Per 1K (USD)** | Same for completion tokens |
+
+### 📊 Token budget overlay (runtime diagnostics)
+
+Since **3.1.0** you can watch live token usage, $/session estimates (from the prices above), and request-load/rate-limiter saturation in Editor and Play Mode:
+
+- **`CoreAiTokenBudgetOverlay`** — drop-in IMGUI overlay, toggled with **F10** by default; set the toggle key to `None` to disable the hotkey and drive `ShowOverlay` from code.
+- **`CoreAiTokenBudgetUiView`** (since **3.2.0**) — for your own Canvas: binds formatted text through `UnityEvent<string>` outputs to any `TMP_Text`/`Text`, plus `OnNearLimitChanged` / `OnServiceAvailableChanged` state events. No IMGUI, fits any game UI.
+
+Both share `TokenBudgetRuntimeSource` (data) and the core `TokenBudgetTextFormatter` (text), covered by EditMode tests.
 
 ---
 

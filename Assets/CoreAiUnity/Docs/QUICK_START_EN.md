@@ -91,4 +91,4 @@ public class MyNpcScript : MonoBehaviour
 
 Build agents with tools (like inventory, game commands) and understand agent modes:
 
-👉 **[Agent Builder Guide](../../CoreAI/Docs/AGENT_BUILDER_EN.md)** (Contains 4 copy-paste recipes!)
+👉 **[Agent Builder Guide](../../CoreAI/Docs/AGENT_BUILDER.md)** (Contains 4 copy-paste recipes!)

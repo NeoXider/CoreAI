@@ -66,5 +66,4 @@ MEAI → `AIFunction` details: [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md). R
 ## 6. See also
 
 - [README.md](README.md) — index of everything under `Assets/CoreAI/Docs`
-- [`MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md`](MEAI_TOKENS_FACT_VS_ESTIMATE_RU.md) — short Russian redirect (legacy links only)
 - Tests: `MeaiOpenAiChatClientHttpEditModeTests` (`stream_options` / `include_usage` in JSON), `CoreAISettingsAssetEditModeTests` (`EffectiveHttpRequestTimeoutSeconds`), `RoutingLlmClientEditModeTests`, `CoreAiChatServiceEditModeTests`

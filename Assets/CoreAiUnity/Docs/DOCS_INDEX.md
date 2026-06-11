@@ -28,7 +28,9 @@ Package manifests:
 | Document | Purpose |
 |---|---|
 | [QUICK_START.md](QUICK_START.md) | Minimal path from install to Play Mode chat. |
+| [QUICK_START_EN.md](QUICK_START_EN.md) | Compact English quick start (agent in 10 minutes). |
 | [QUICK_START_FULL.md](QUICK_START_FULL.md) | Longer walkthrough with LM Studio and first command. |
+| [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
@@ -77,8 +79,9 @@ Package manifests:
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Code map, request pipeline, extension points, PR checklist. |
 | [DGF_SPEC.md](DGF_SPEC.md) | Normative spec for DI, threading, authority, and main-thread rules. |
 | [COMMAND_FLOW_DIAGRAM.md](COMMAND_FLOW_DIAGRAM.md) | Diagram of how a command travels through the system. |
-| [CODE_AUDIT_AND_FOLLOWUPS.md](CODE_AUDIT_AND_FOLLOWUPS.md) | Older manual audit notes and follow-up context. |
 | [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md) | Multiplayer AI authority and replication notes. |
+| [SCRIPTABLE_OBJECTS.md](SCRIPTABLE_OBJECTS.md) | ScriptableObject assets used by the package and their roles. |
+| [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 
 ## Tests
@@ -87,6 +90,7 @@ Package manifests:
 |---|---|
 | [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Play Mode test layout and backend requirements. |
 | [../Tests/PlayMode/Scenarios/CraftingMemory_README.md](../Tests/PlayMode/Scenarios/CraftingMemory_README.md) | Crafting memory workflow scenario. |
+| [TESTING_TOOL_CALLING.md](TESTING_TOOL_CALLING.md) | How to run and extend tool-calling tests. |
 | `ThinkBlockStreamFilterEditModeTests` | Streaming `<think>` filter and split-tag cases. |
 | `SecureLuaSandboxEditModeTests` | Lua sandbox escape coverage. |
 | `SmartToolCallingChatClientEditModeTests` | Duplicate detection, missing tools, exceptions, retry behavior. |
@@ -107,3 +111,11 @@ Package manifests:
 ## Roadmap
 
 Live backlog and recently closed documentation debt: [../../../TODO.md](../../../TODO.md).
+
+## Russian Notes
+
+| Document | Purpose |
+|---|---|
+| [DOCS_INDEX_RU.md](DOCS_INDEX_RU.md) | Russian version of this index. |
+| [KNOWN_ISSUES_RU.md](KNOWN_ISSUES_RU.md) | Accepted warning debt and known project-level issues. |
+| [RELEASE_CHECKLIST_RU.md](RELEASE_CHECKLIST_RU.md) | Pre-commit/pre-release checklist for both packages. |

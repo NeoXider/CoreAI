@@ -108,4 +108,3 @@ Applies to **`Assets/CoreAI`** (portable) and **`Assets/CoreAiUnity/Runtime`** u
 - **Other `//` comments:** Avoid narrative `//` comments in production runtime code. Prefer **`///`** on APIs, **`// HACK:`** where the codebase must preserve a subtle invariant, or no comment if the code is clear. **`Tests`** (`Assets/*/Tests`) may retain richer comments for Arrange/Assert clarity.
 - **`*` fenced regions** (`#region`) are optional; keep **English** labels if used.
 
-See [`CODE_AUDIT_AND_FOLLOWUPS.md`](CODE_AUDIT_AND_FOLLOWUPS.md) for backlog files and spotted logic/doc issues tracked during cleanup.

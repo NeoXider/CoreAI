@@ -35,7 +35,6 @@ Use these paths when you have a concrete task:
 
 | Document | Purpose |
 |---|---|
-| [MODULE_AND_PROJECT_AUDIT_RU_2026-05-25.md](MODULE_AND_PROJECT_AUDIT_RU_2026-05-25.md) | Module/project audit and follow-up priorities. |
 | [TODO.md](../TODO.md) | Live backlog, completed archive, and remaining feature-level debt. |
 | [TODO/MultiAgent_Orchestration_v2.0.md](../TODO/MultiAgent_Orchestration_v2.0.md) | Multi-agent orchestration plan. |
 

@@ -52,7 +52,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 - 🎯 **Self-Service Skills** — the model sees 2 meta-tools instead of hundreds (~91% token savings)
 - 🌊 **Streaming that survives reality** — split `<think>` tags, fragmented tool calls, SSE chunking
 - 🗜️ **Long chats that don't explode** — token budget, rolling summaries, optional smart compaction
-- 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, rate-limit metrics — in the Inspector
+- 🛡️ **Production guardrails** — per-tool timeout, runaway cap, loop guard, Lua generation rate limit, rate-limit metrics + F10 token-budget overlay
 - 🔄 **Dual-backend fallback** — local model first, cloud API as automatic backup (or the reverse)
 - 🧩 **Optional modules** — no MoonSharp? No LLMUnity? Still compiles; features light up when packages appear
 

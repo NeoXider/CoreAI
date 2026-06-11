@@ -214,7 +214,7 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
 
 - **Goals:** demo and test builds, CI without Ollama, smaller distribution, “host without GPU / without downloaded weights,” store policies “no network calls to LLM.”
 - **Implementation direction (not a commitment of current code):**
-  - DI registration of **`ILlmClient`** as a **stub** (`NullLlmClient` / `HeuristicLlmClient`) yielding **deterministic** or **tabular** responses per role (fallback from ScriptableObject / seed).
+  - DI registration of **`ILlmClient`** as a **stub** (the shipped `StubLlmClient`, or a custom heuristic client) yielding **deterministic** or **tabular** responses per role (fallback from ScriptableObject / seed).
   - Optional compile symbol (**Scripting Define**) **`COREAI_NO_LLM`** — manual opt-out for **full** LLM disable (HTTP + LLMUnity). Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via `versionDefines` in asmdef when package `ai.undream.llm` is present — code depending on LLMUnity types compiles only when present.
   - Orchestrator in “no LLM” mode **shall not fail:** tasks map to heuristics or are marked “skipped” with logging; **MessagePipe** and game logic remain operational.
   - NGO clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is not a neural net but a stub/designer data.
