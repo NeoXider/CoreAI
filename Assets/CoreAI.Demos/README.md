@@ -9,7 +9,7 @@
 | [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | Конвейер AI-команд: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (тот же путь, что у LLM-агентов и Lua-биндингов) | Нет |
 | [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: каталог скиллов, `read_skill` / `call_skill_tool`, агент-«гейммастер» с крафтом и боем | Да |
 | [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **Реальная LLM через чат меняет механики на лету**: роль Programmer пишет Lua → `execute_lua`-пайплайн → logic slots / `LuaModRuntime` / world-команды | Да |
-| [FullAccess](FullAccess/README.md) | `FullAccess/FullAccessDemo.unity` | **Full-режим**: reflection-доступ к GameObject/компонентам (`unity_*` APIs), opt-in на `CoreAILifetimeScope` | Да |
+| [FullAccess](FullAccess/README.md) | *(сцена в TODO)* | Full-tier `unity_*` reflection (opt-in), controller + README | Да |
 
 ## Общие требования
 

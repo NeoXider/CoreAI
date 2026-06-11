@@ -27,7 +27,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Demos (`Assets/CoreAI.Demos/`)
 
-- LuaMods, WorldCommands, Skills, LiveMechanics (LLM + chat), FullAccess (Full mode + chat).
+- LuaMods, WorldCommands, Skills, LiveMechanics (LLM + chat). FullAccess: controller + README only (scene — TODO).
 
 ### Performance
 
@@ -40,7 +40,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Docs
 
-- `LUA_GAME_API.md`, `LUA_ACCESS_MODES_AUDIT_RU.md`, demo READMEs, perf review.
+- `LUA_GAME_API.md`, `LUA_BEST_PRACTICES_RU.md`, `MOONSHARP_NATIVE_APIS_RU.md`, `LUA_ACCESS_MODES_AUDIT_RU.md`, demo READMEs, perf review.
 
 ## [Unreleased]
 

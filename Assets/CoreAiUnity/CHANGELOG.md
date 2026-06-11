@@ -11,7 +11,7 @@ Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned wi
 - **`CoreAiFullUnityLuaRuntimeBindings`** — Full-tier `unity_*` reflection APIs; wired through capability gating and `enableFullLuaAccess` on `CoreAILifetimeScope`.
 - **`GameLuaToolExecutor`** — production `execute_lua` backend; Programmer role gets `execute_lua` + `manage_mods` via `WorldCommandsInstaller`.
 - **`ICoreAiCustomWorldCommandHandler`** — extend `CoreAiWorldCommandExecutor` from game code.
-- Demo scenes under **`Assets/CoreAI.Demos/`** (LuaMods, WorldCommands, Skills, LiveMechanics, FullAccess).
+- Demo scenes under **`Assets/CoreAI.Demos/`** (LuaMods, WorldCommands, Skills, LiveMechanics). FullAccess: bindings + README; **`.unity` scene pending** (see repo `TODO.md`).
 - **`luaAllowedScenes`** whitelist on `CoreAILifetimeScope`.
 
 ### Changed / fixed
