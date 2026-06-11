@@ -1,6 +1,6 @@
 # CoreAI — Live Full Access Demo
 
-Сцена: `Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity`
+> **Статус:** controller и этот README готовы; сцена `FullAccessDemo.unity` — в [TODO.md](../../TODO.md) (секция Full-режим).
 
 Демонстрирует **Full-режим** (`LuaCapabilities.Full`): LLM через роль Programmer может
 обращаться к произвольным `GameObject` и компонентам сцены через reflection-биндинги
