@@ -2,7 +2,7 @@
 
 **Role catalog, placement, models:** [AI_AGENT_ROLES.md](../AI_AGENT_ROLES.md).
 
-**Prompts and built-in IDs in code:** [DEVELOPER_GUIDE.md §5](../DEVELOPER_GUIDE.md); constants **`BuiltInAgentRoleIds`**; tests **`AgentRolesAndPromptsTests`**.
+**Prompts and built-in IDs in code:** [DEVELOPER_GUIDE.md §5](../DEVELOPER_GUIDE.md); constants **`BuiltInAgentRoleIds`**; tests **`AgentRolesAndPromptsTests`**. Since core **3.2.0** there is also a typed **`RoleId`** struct (implicit `string` conversions, statics like `RoleId.SmartChat`) — prefer it over inline role-string literals.
 
 **Practice:** new roles — stable string id, system prompt in **`Resources/AgentPrompts/System/<Id>.txt`** or in the manifest (**Create → CoreAI → Agent Prompts Manifest**).
 

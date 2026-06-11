@@ -8,7 +8,8 @@
 
 *Читать на других языках: [English](README.md), [Русский](README_RU.md).*
 
-[![EditMode tests](https://img.shields.io/badge/EditMode-911%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
+[![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
+[![EditMode tests](https://img.shields.io/badge/EditMode-967%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/работает%20на-локальной%204B%20GGUF%20или%20любом%20OpenAI%20API-blue)](#-рекомендуемые-модели)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)

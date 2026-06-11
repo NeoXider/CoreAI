@@ -271,7 +271,7 @@ By default, per-role streaming override is enabled for roles with tools (`AgentM
 ## 5. Prompts and roles
 
 - **System prompt chain:** manifest (optional) → **`Resources/AgentPrompts/System/<RoleId>.txt`** → built-in fallback (**`BuiltInAgentSystemPromptTexts`**).
-- **Built-in roles:** see **`BuiltInAgentRoleIds`** and **`AgentRolesAndPromptsTests`**.
+- **Built-in roles:** see **`BuiltInAgentRoleIds`** and **`AgentRolesAndPromptsTests`**. Since core **3.2.0**: typed **`RoleId`** struct (implicit `string` conversions, `RoleId.SmartChat` etc.) — prefer it over inline role-string literals.
 - **Custom agents:** use **`AgentBuilder`** to create agents with unique tools. See [AGENT_BUILDER.md](AGENT_BUILDER.md).
 - **User payload:** default JSON like `{"telemetry":{...},"hint":"..."}` from **`GameSessionSnapshot.Telemetry`**; Lua repair adds **`lua_repair_generation`**, **`lua_error`**, **`fix_this_lua`** (**`AiPromptComposer`**).
 - **Runtime context:** register `IAiPromptContextProvider` implementations to append per-request context such as current quest, lesson slot, learner profile, or objective under `## Runtime Context`.

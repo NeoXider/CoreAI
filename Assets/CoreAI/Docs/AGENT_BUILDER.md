@@ -223,19 +223,7 @@ In the Inspector, choose **LLM Backend**:
 
 ### 3. Invoke the agent
 
-**🟢 Simplest — `Ask` (fire-and-forget, no async):**
-
-```csharp
-// One line! No await, no container.
-merchant.AskWithCallback("Show me your swords");
-
-// With a callback when done (receives the text response):
-merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response));
-```
-
-> 💡 `AskWithCallback` uses the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. Ideal for UI buttons, events, and `MonoBehaviour`.
-
-**🟡 Async — `AskAsync` (with await):**
+**🟢 Primary — `AskAsync` (await):**
 
 ```csharp
 // Returns the model's text response:
@@ -246,6 +234,18 @@ Debug.Log(response);
 var orch = container.Resolve<IAiOrchestrationService>();
 string response2 = await merchant.AskAsync(orch, "Show me your swords");
 ```
+
+**🟡 Convenience — `AskWithCallback` (fire-and-forget, no async):**
+
+```csharp
+// One line! No await, no container. Errors are logged, not thrown.
+merchant.AskWithCallback("Show me your swords");
+
+// With a callback when done (receives the text response):
+merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response));
+```
+
+> 💡 Both use the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. `AskWithCallback` is for callback-style call sites (UI buttons, UnityEvents); the old `Ask(...)` is an `[Obsolete]` alias of it.
 
 **🔴 Advanced — full control:**
 

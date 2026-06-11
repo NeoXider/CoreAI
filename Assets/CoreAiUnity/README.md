@@ -20,7 +20,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 | | |
 |---|--|
-| **CoreAi** | Static `Ask` / `Stream` / orchestration — section below |
+| **CoreAi** | Static `AskAsync` / `Stream` / orchestration — section below |
 | **Agent** | `AgentBuilder`, tools, memory, **self-service skills** |
 | **Chat** | One-click demo + `CoreAiChatPanel` |
 | **Streaming** | HTTP / LLMUnity, filters, cancel |

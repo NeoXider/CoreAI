@@ -81,7 +81,7 @@ Ensure the **active** scene has a GameObject with **`CoreAILifetimeScope`**. Aft
 
 **How is `AskAsync` different from `OrchestrateAsync`?**  
 - `AskAsync` — **chat**: prompt + role history, text answer.  
-- `OrchestrateAsync` — **game task**: session snapshot, roles like Creator, publishing a **JSON command** to the game bus. For “talk to NPC” you usually use `Ask` / `Stream`.
+- `OrchestrateAsync` — **game task**: session snapshot, roles like Creator, publishing a **JSON command** to the game bus. For “talk to NPC” you usually use `AskAsync` / `Stream`.
 
 **Never on the Unity main thread:** `CoreAi.AskAsync(...).Result`, `.GetAwaiter().GetResult()`, or `.Wait()` — the LLM stack uses **player loop** / **`ToolInvocationMarshaler`** / **HTTP** paths that can deadlock if the managed main thread blocks while a thread-pool continuation waits for **main** (**v1.5.14:** tool marshaling skips **`SwitchToMainThread`** in **Edit Mode !isPlaying** specifically to keep **Test Runner / tooling** safe — still avoid blocking **main** in gameplay). Use **`await`** (e.g. **`async void`** / **UniTask** on UI events).
 
