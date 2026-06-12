@@ -33,15 +33,19 @@ namespace CoreAI.Ai
 
         /// <inheritdoc />
         public string Description =>
-            "Execute Lua code to perform game actions, create items, modify state, report events. " +
-            "Use functions like create_item(), report(), add(), etc. available in the Lua environment.";
+            "Execute sandboxed Lua code using only globals exposed by the current game. " +
+            "For game-rule changes, call logic_list() when unsure, then use " +
+            "logic_define('slot_name', function(...) return value end); for example " +
+            "logic_define('loot_formula', function(bossMaxHp) return 1000 end). " +
+            "Use report(message) to describe the applied change. Do not invent helper globals; " +
+            "only call APIs listed by the prompt/tool contract or discovered from the environment.";
 
         /// <inheritdoc />
         public string ParametersSchema =>
             "{" +
             "  \"type\": \"object\"," +
             "  \"properties\": {" +
-            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Use create_item(name, type, quality) and report(message) functions.\" }" +
+            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
             "  }," +
             "  \"required\": [\"code\"]" +
             "}";

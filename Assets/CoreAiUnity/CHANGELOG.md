@@ -6,6 +6,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.6] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.4**.
+
+- LiveMechanics chat guidance now steers local Programmer models toward `logic_define('loot_formula', function(...) return 1000 end)` for boss reward edits instead of hallucinated `create_item()` calls.
+- LiveMechanics now also declares a `boss_reward` Lua logic-slot alias and uses it as a fallback for boss loot, matching the natural slot name small models often infer from player wording like "boss reward".
+- `manage_mods` tool metadata now documents valid MoonSharp/Lua callback syntax so persistent mod retries do not repeat malformed `hooks_on('event') function() ... end` code.
+- Added EditMode metadata coverage to keep generic `execute_lua` docs aligned with the scene-independent Lua rule-slot API.
+
 ## [4.0.5] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.3**.

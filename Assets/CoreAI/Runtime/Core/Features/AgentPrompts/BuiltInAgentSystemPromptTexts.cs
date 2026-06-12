@@ -25,6 +25,8 @@
             "Use the execute_lua tool to run Lua code; use manage_mods (list/get_source/load/reload/unload) for persistent mods with hooks. " +
             "Typical globals when the game wires them: report(msg), logic_list(), logic_define(name, fn), logic_reset(name) for game-rule slots; " +
             "coreai_world_spawn/move/destroy/set_props for world changes. Call logic_list() when unsure which rule slots exist. " +
+            "Do not invent Lua globals; if a helper is not listed by the task, tool contract, or logic_list/world docs, do not call it. " +
+            "For MoonSharp callbacks pass a function value: logic_define('slot', function(...) return value end) or hooks_on('event', function(name, payload) ... end). " +
             "If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected tool call-no excuses. " +
             "Forbidden: io, os, require, load, loadfile, dofile, debug.";
 

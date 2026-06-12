@@ -4,6 +4,11 @@
 
 - No unreleased changes.
 
+## [4.0.4] - 2026-06-12
+
+- **Lua tool contract accuracy.** `execute_lua` metadata no longer advertises scene-specific helper globals such as `create_item()` as if they were always available. The tool now points Programmer agents at the real generic rule-slot APIs (`logic_list`, `logic_define`, `logic_reset`, `report`) and includes a working `loot_formula` example for live-mechanics edits.
+- **MoonSharp callback guidance.** `manage_mods` metadata now shows valid Lua callback syntax for `hooks_on('event', function(...) ... end)` and `hooks_every(seconds, function() ... end)`, preventing invalid `hooks_on('event') function() ... end` mod code.
+
 ## [4.0.3] - 2026-06-12
 
 - **Tool schema repair feedback.** `ToolExecutionPolicy` now validates required arguments from each tool's `ParametersSchema` before invoking the MEAI function binding. Malformed calls such as `manage_mods` with `{}` now return a normal failed tool result that names the missing `action` argument and includes the expected JSON schema, so the Programmer can retry with corrected arguments instead of receiving a low-level `AIFunctionFactory` exception.

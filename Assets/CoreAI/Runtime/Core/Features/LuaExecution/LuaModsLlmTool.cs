@@ -66,13 +66,16 @@ namespace CoreAI.Ai
             "Manage persistent Lua mods (long-lived scripts with hooks_on/hooks_every handlers). " +
             "Actions: list (all loaded mods), get_source (read a mod's Lua code), " +
             "load (install new mod), reload (replace a mod's code keeping its permissions), " +
-            "unload (remove a mod). Use get_source before reload to edit existing behavior.";
+            "unload (remove a mod). Use get_source before reload to edit existing behavior. " +
+            "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
+            "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end.";
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
             ("action", "string", true, "One of: list, get_source, load, reload, unload"),
             ("mod_id", "string", false, "Mod id (required for get_source, load, reload, unload)"),
-            ("code", "string", false, "Lua source for load/reload")
+            ("code", "string", false,
+                "Lua source for load/reload. Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end).")
         );
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>

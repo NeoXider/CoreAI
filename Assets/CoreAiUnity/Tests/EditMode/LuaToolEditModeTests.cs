@@ -190,8 +190,14 @@ namespace CoreAI.Tests.EditMode
                 "execute_lua должен разрешать дубликаты (несколько последовательных Lua блоков — нормальный use case)");
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.Description));
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.ParametersSchema));
+            StringAssert.Contains("logic_define", wrapper.Description,
+                "execute_lua should advertise the runtime rule-slot API used by LiveMechanics.");
+            StringAssert.DoesNotContain("create_item", wrapper.Description,
+                "The generic execute_lua metadata must not advertise helper globals that many scenes do not provide.");
             StringAssert.Contains("\"code\"", wrapper.ParametersSchema,
                 "JSON schema должна описывать параметр code");
+            StringAssert.Contains("logic_define", wrapper.ParametersSchema,
+                "The code parameter schema should steer local models toward declared rule slots.");
         }
 
         // ===================== Helpers =====================

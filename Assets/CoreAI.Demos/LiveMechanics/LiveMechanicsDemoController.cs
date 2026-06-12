@@ -26,6 +26,9 @@ namespace CoreAI.Demos
         /// <summary>Slot: gold per defeated boss, args (bossMaxHp) → number.</summary>
         public const string LootSlot = "loot_formula";
 
+        /// <summary>Natural-language alias for <see cref="LootSlot"/> used by small local models.</summary>
+        public const string BossRewardSlot = "boss_reward";
+
         private const double HeroAttack = 25d;
         private const double BossDefense = 10d;
         private const double BossMaxHp = 200d;
@@ -63,6 +66,7 @@ namespace CoreAI.Demos
             _slots.DeclareSlot(DamageSlot);
             _slots.DeclareSlot(AttackIntervalSlot);
             _slots.DeclareSlot(LootSlot);
+            _slots.DeclareSlot(BossRewardSlot);
             _status = "Press C to open the chat and ask the AI to change the rules.";
             Log("Battle started. Default rules: damage = atk - def, attack every 2s, loot = 10 gold.");
         }
@@ -107,7 +111,9 @@ namespace CoreAI.Demos
                 return;
             }
 
-            double loot = _slots.TryInvokeNumber(LootSlot, out double l, BossMaxHp) ? l : 10d;
+            double loot = _slots.TryInvokeNumber(LootSlot, out double l, BossMaxHp)
+                ? l
+                : (_slots.TryInvokeNumber(BossRewardSlot, out double aliasLoot, BossMaxHp) ? aliasLoot : 10d);
             loot = System.Math.Max(0d, loot);
             _gold += loot;
             _bossesDefeated++;
@@ -147,6 +153,7 @@ namespace CoreAI.Demos
             DrawSlotRow(DamageSlot, "atk=25, def=10");
             DrawSlotRow(AttackIntervalSlot, "()");
             DrawSlotRow(LootSlot, "bossMaxHp=200");
+            DrawSlotRow(BossRewardSlot, "bossMaxHp=200");
             if (!string.IsNullOrEmpty(_slots.LastError))
             {
                 GUILayout.Label($"Last Lua error: {_slots.LastError}", RichLabel());
