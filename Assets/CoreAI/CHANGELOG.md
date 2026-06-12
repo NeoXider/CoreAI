@@ -4,6 +4,10 @@
 
 - No unreleased changes.
 
+## [4.0.8] - 2026-06-12
+
+- **Lua mod host persistence hooks.** `LuaModRuntime` now raises `ModSourceLoaded` after successful `LoadMod`/`ReloadMod` and `ModSourceUnloaded` after `UnloadMod`, including automatic unloads. The runtime still does not autoload arbitrary mod source by itself; hosts and demo scenes can now persist their selected mod set without coupling that policy into the generic Lua runtime.
+
 ## [4.0.7] - 2026-06-12
 
 - **Release sync.** `com.nexoider.coreai` is bumped to `4.0.7` so portable CoreAI and `com.nexoider.coreaiunity` remain version-aligned. Unity-side LiveMechanics persistence and docs changes are listed in the Unity package changelog.

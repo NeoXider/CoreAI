@@ -185,6 +185,29 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_LoadReloadUnload_RaisesSourceLifecycleEvents()
+        {
+            LuaModRuntime runtime = new();
+            List<string> events = new();
+            runtime.ModSourceLoaded += (id, source, caps) =>
+                events.Add($"load:{id}:{source}:{caps}");
+            runtime.ModSourceUnloaded += id => events.Add($"unload:{id}");
+
+            runtime.LoadMod("m", "local a = 1", LuaCapabilities.Read);
+            runtime.ReloadMod("m", "local b = 2");
+            runtime.UnloadMod("m");
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "load:m:local a = 1:Read",
+                    "load:m:local b = 2:Read",
+                    "unload:m"
+                },
+                events);
+        }
+
+        [Test]
         public void LuaModRuntime_ReloadMod_BadNewCode_KeepsOldModWorking()
         {
             MemoryStore store = new();

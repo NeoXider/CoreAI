@@ -6,6 +6,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.8] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.8**.
+
+- Added `Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`, a copy of LiveMechanics focused on chat-driven `manage_mods` workflows.
+- Added `LiveMechanicsModsChatPersistenceController`, a scene-level host policy that persists successful Lua mod `load`/`reload` sources and removes them from autoload on `unload`.
+- The new mods-chat scene autoloads saved mod sources on the next scene start after the base LiveMechanics slots are declared, so mods can safely call `logic_define`.
+- Demo docs now distinguish the generic LiveMechanics rule-edit scene from the mods-chat copy where loaded mod sources are saved and restored.
+
 ## [4.0.7] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.7**.

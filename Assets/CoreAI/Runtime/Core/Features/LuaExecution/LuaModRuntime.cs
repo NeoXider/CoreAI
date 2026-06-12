@@ -83,6 +83,17 @@ namespace CoreAI.Ai
         /// </summary>
         public event Action<string, string, string> ModEventEmitted;
 
+        /// <summary>
+        /// Raised after a mod source is successfully loaded or reloaded: (modId, source, caps).
+        /// Hosts can use this to persist their selected autoload mod set.
+        /// </summary>
+        public event Action<string, string, LuaCapabilities> ModSourceLoaded;
+
+        /// <summary>
+        /// Raised after a mod is unloaded, including automatic unloads after repeated errors.
+        /// </summary>
+        public event Action<string> ModSourceUnloaded;
+
         /// <summary>True when the Lua sandbox is available on this platform.</summary>
         public static bool IsSupported => SecureLuaEnvironment.IsSupported;
 
@@ -203,6 +214,7 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
+            ModSourceLoaded?.Invoke(modId, luaCode, capabilities);
         }
 
         /// <summary>
@@ -269,6 +281,7 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' unloaded.");
+            ModSourceUnloaded?.Invoke(modId);
             return true;
         }
 
@@ -303,6 +316,7 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' reloaded (caps={caps}).");
+            ModSourceLoaded?.Invoke(modId, luaCode, caps);
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>

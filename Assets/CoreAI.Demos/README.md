@@ -21,3 +21,10 @@
 
 > Сцены и ассеты демо собраны через MCP for Unity (см. `Assets/CoreAiUnity/Docs/DGF_SPEC.md`, §11) —
 > тот же канал редакторной автоматизации, которым агент запускает тесты этого репозитория.
+
+## LiveMechanicsMods
+
+- README: `LiveMechanicsMods/README.md`
+- Scene: `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`
+- Purpose: LiveMechanics copy for chat-driven `manage_mods`: load/reload/unload Lua mods,
+  persist loaded mod sources, and autoload them on next scene start.

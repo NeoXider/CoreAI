@@ -67,3 +67,10 @@ Hosts that want mods to autoload should load/reload their selected mod sources o
 Код модели исполняется только в `SecureLuaEnvironment` (sandbox MoonSharp: без io/os/файлов,
 лимиты инструкций/памяти). Возможности ограничиваются `LuaCapabilities`; в демо у роли
 Programmer полный набор (`All`) намеренно — это и есть демонстрация «AI-геймдизайнера».
+
+## Mods-chat copy
+
+For the same battle loop with chat-driven mod source autoload, use
+`Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`. That copied scene adds a
+small host persistence component: successful `manage_mods load` / `reload` sources are saved, and
+`unload` removes the mod from that scene's autoload set.
