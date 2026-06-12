@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## [Unreleased]
+
+- No unreleased changes.
+
+## [4.0.1] - 2026-06-12
+
+- **Chat source history for tool roles.** `AiOrchestrator` now enables short-term chat history for requests with `SourceTag = "Chat"` even when the target role defaults to history-off (for example `Programmer`). The global role policy is not mutated and disk persistence stays off unless the role explicitly enables it, so non-chat Lua/repair tasks remain isolated while chat panels keep session instructions such as response language.
+
 ## [4.0.0] - 2026-06-12
 
 Major release: Lua as a second game language (production-ready), capability tiers, Full opt-in mode, LLM mod tools, demo scenes, and performance hardening.
@@ -42,10 +50,6 @@ Major release: Lua as a second game language (production-ready), capability tier
 ### Docs
 
 - `LUA_GAME_API.md`, `LUA_BEST_PRACTICES_RU.md`, `MOONSHARP_NATIVE_APIS_RU.md`, `LUA_ACCESS_MODES_AUDIT_RU.md`, demo READMEs, perf review.
-
-## [Unreleased]
-
-- **Chat source history for tool roles.** `AiOrchestrator` now enables short-term chat history for requests with `SourceTag = "Chat"` even when the target role defaults to history-off (for example `Programmer`). The global role policy is not mutated and disk persistence stays off unless the role explicitly enables it, so non-chat Lua/repair tasks remain isolated while chat panels keep session instructions such as response language.
 
 ## [v3.2.0] - 2026-06-11
 

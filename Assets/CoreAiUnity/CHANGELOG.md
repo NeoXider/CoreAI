@@ -2,6 +2,16 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
 
+## [Unreleased]
+
+- No unreleased changes.
+
+## [4.0.1] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.1**.
+
+- Chat panels using tool-oriented roles such as `Programmer` now keep short-term session context through the orchestrator when sending `SourceTag = "Chat"`. This fixes follow-up instructions like "answer in Russian" being dropped on the next turn, without enabling persisted chat history or LLM compaction for normal Programmer/Lua tasks.
+
 ## [4.0.0] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned with portable core Lua v4.
@@ -24,10 +34,6 @@ Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned wi
 - Lua callback exception expectations were aligned with MoonSharp script-error semantics after `LuaApiRegistry` normalized host validation failures.
 
 See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIEW_2026-06-12_RU.md`**.
-
-## [Unreleased]
-
-- Chat panels using tool-oriented roles such as `Programmer` now keep short-term session context through the orchestrator when sending `SourceTag = "Chat"`. This fixes follow-up instructions like "answer in Russian" being dropped on the next turn, without enabling persisted chat history or LLM compaction for normal Programmer/Lua tasks.
 
 ## [3.2.0] - 2026-06-11
 
@@ -2147,4 +2153,3 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.1.2] - earlier
 
 Baseline Unity host package. See git history.
-
