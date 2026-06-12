@@ -102,9 +102,10 @@ namespace CoreAI.Infrastructure.Llm
         /// Record a synthetic trace entry for a tool call that was not actually invoked
         /// (e.g., text-extracted JSON when no AIFunction is bound, or duplicate suppressed).
         /// </summary>
-        public void RecordSyntheticTrace(string toolName, bool success, double durationMs, string source)
+        public void RecordSyntheticTrace(string toolName, bool success, double durationMs, string source,
+            string detail = "")
         {
-            _executedTraces.Add(new LlmToolCallTrace(toolName, success, durationMs, source));
+            _executedTraces.Add(new LlmToolCallTrace(toolName, success, durationMs, source, detail));
         }
 
         /// <summary>
@@ -153,9 +154,9 @@ namespace CoreAI.Infrastructure.Llm
                 List<MEAI.FunctionResultContent> errs = new();
                 foreach (MEAI.FunctionCallContent fc in toolCalls)
                 {
-                    _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate"));
-                    errs.Add(new MEAI.FunctionResultContent(fc.CallId,
-                        $"Duplicate tool call '{fc.Name}' with same arguments - skipped."));
+                    string duplicate = $"Duplicate tool call '{fc.Name}' with same arguments - skipped.";
+                    _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "duplicate", duplicate));
+                    errs.Add(new MEAI.FunctionResultContent(fc.CallId, duplicate));
                 }
 
                 return errs;
@@ -217,12 +218,13 @@ namespace CoreAI.Infrastructure.Llm
             if (repairedFc == null)
             {
                 // Name not found even after case-insensitive search
-                RecordSyntheticTrace(fc.Name ?? "", false, 0d, "unknown-tool");
+                string unknown =
+                    $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]";
+                RecordSyntheticTrace(fc.Name ?? "", false, 0d, "unknown-tool", unknown);
                 LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found (no repair match)");
                 return new ToolCallResult
                 {
-                    Result = new MEAI.FunctionResultContent(fc.CallId,
-                        $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _originalTools.Select(t => t.Name))}]"),
+                    Result = new MEAI.FunctionResultContent(fc.CallId, unknown),
                     Succeeded = false
                 };
             }
@@ -234,12 +236,13 @@ namespace CoreAI.Infrastructure.Llm
 
             if (aiFunc == null)
             {
-                _eventPublisher.PublishFailed(BuildInfo(fc), $"Tool '{fc.Name}' not found", 0d);
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "missing"));
-                LogCallLine(fc, false, 0d, $"Tool '{fc.Name}' not found");
+                string missing = $"Tool '{fc.Name}' not found";
+                _eventPublisher.PublishFailed(BuildInfo(fc), missing, 0d);
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "missing", missing));
+                LogCallLine(fc, false, 0d, missing);
                 return new ToolCallResult
                 {
-                    Result = new MEAI.FunctionResultContent(fc.CallId, $"Tool '{fc.Name}' not found"),
+                    Result = new MEAI.FunctionResultContent(fc.CallId, missing),
                     Succeeded = false
                 };
             }
@@ -298,7 +301,7 @@ namespace CoreAI.Infrastructure.Llm
                         _logger.Warn($"[ToolPolicy] Timeout: {timeoutMsg}", LogTag.Llm);
                         _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
                         _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
-                            "timeout"));
+                            "timeout", timeoutMsg));
                         LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, timeoutMsg);
                         return new ToolCallResult
                         {
@@ -350,7 +353,8 @@ namespace CoreAI.Infrastructure.Llm
                     _eventPublisher.PublishFailed(info, SafeResultJson(resultText), elapsedMs);
                 }
 
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native"));
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
+                    succeeded ? "" : resultText));
                 LogCallLine(fc, succeeded, elapsedMs, resultText);
 
                 // Notify subscribers
@@ -374,7 +378,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {ex.Message}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), ex.Message, 0d);
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native"));
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", ex.Message));
                 LogCallLine(fc, false, 0d, $"threw: {ex.Message}");
                 return new ToolCallResult
                 {

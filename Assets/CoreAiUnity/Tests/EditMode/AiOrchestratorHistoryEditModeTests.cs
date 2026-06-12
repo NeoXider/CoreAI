@@ -43,6 +43,45 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class ToolOnlyWhitespaceLlmClient : ILlmClient
+        {
+            private static readonly LlmToolCallTrace[] Traces =
+            {
+                new(
+                    "manage_mods",
+                    false,
+                    12d,
+                    "native",
+                    "{\"success\":false,\"message\":\"manage_mods 'load' failed: attempt to index a function value\"}")
+            };
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = " \n ",
+                    ExecutedToolCalls = Traces
+                });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Text = " \n ",
+                    ExecutedToolCalls = Traces
+                };
+                await Task.CompletedTask;
+            }
+        }
+
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public List<Ai.ChatMessage> FakeHistory { get; set; } = new();
@@ -150,6 +189,75 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNull(llm.LastRequest.ChatHistory);
             Assert.AreEqual(0, memory.Appended.Count);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ToolOnlyWhitespaceResult_ReturnsToolFailureInsteadOfEmptyValidation()
+        {
+            ToolOnlyWhitespaceLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings);
+
+            string result = await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = "сделай награду за босса",
+                SourceTag = "Chat"
+            });
+
+            StringAssert.Contains("Tool call failed: manage_mods", result);
+            StringAssert.Contains("attempt to index a function value", result);
+            Assert.That(result, Does.Not.Contain("structured validation failed"));
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_ToolOnlyWhitespaceResult_StreamsToolFailureInsteadOfEmptyValidation()
+        {
+            ToolOnlyWhitespaceLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, new CompositeRoleStructuredResponsePolicy(), null, settings);
+
+            string text = "";
+            List<string> errors = new();
+            bool sawDone = false;
+            bool sawFallbackBeforeDone = false;
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(new AiTaskRequest
+                           {
+                               RoleId = BuiltInAgentRoleIds.Programmer,
+                               Hint = "сделай награду за босса",
+                               SourceTag = "Chat"
+                           }))
+            {
+                text += chunk.Text ?? "";
+                if (!sawDone && (chunk.Text ?? "").Contains("Tool call failed: manage_mods"))
+                {
+                    sawFallbackBeforeDone = true;
+                }
+
+                if (chunk.IsDone)
+                {
+                    sawDone = true;
+                }
+
+                if (!string.IsNullOrEmpty(chunk.Error))
+                {
+                    errors.Add(chunk.Error);
+                }
+            }
+
+            Assert.AreEqual(0, errors.Count, string.Join("\n", errors));
+            Assert.IsTrue(sawDone, "Streaming should still emit a terminal chunk after the fallback text.");
+            Assert.IsTrue(sawFallbackBeforeDone, "Fallback text must arrive before IsDone for collect helpers.");
+            StringAssert.Contains("Tool call failed: manage_mods", text);
+            StringAssert.Contains("attempt to index a function value", text);
         }
 
         private sealed class TestSink : IAiGameCommandSink

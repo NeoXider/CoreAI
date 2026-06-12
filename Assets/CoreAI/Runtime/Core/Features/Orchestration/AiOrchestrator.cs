@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Authority;
 using CoreAI.Messaging;
 using CoreAI.Session;
+using Newtonsoft.Json.Linq;
 using static CoreAI.Messaging.AiGameCommandTypeIds;
 
 namespace CoreAI.Ai
@@ -241,9 +242,15 @@ namespace CoreAI.Ai
                             sw.Elapsed.TotalMilliseconds);
                     }
 
-                    if (result != null && result.Ok && !string.IsNullOrEmpty(result.Content))
+                    if (result != null && result.Ok)
                     {
-                        break;
+                        string toolOnlyContent =
+                            ResolveToolOnlyCompletionContent(result.Content, result.ExecutedToolCalls);
+                        if (!string.IsNullOrEmpty(toolOnlyContent))
+                        {
+                            result.Content = toolOnlyContent;
+                            break;
+                        }
                     }
 
                     if (contextCompactionApplied)
@@ -369,6 +376,8 @@ namespace CoreAI.Ai
             StringBuilder accumulated = new();
             int chunkCount = 0;
             string terminalError = null;
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
+            LlmStreamChunk pendingToolOnlyTerminalChunk = null;
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
@@ -451,6 +460,22 @@ namespace CoreAI.Ai
                         terminalError = current.Error;
                     }
 
+                    if (current?.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
+                    {
+                        executedToolCalls = current.ExecutedToolCalls;
+                    }
+
+                    if (current != null &&
+                        current.IsDone &&
+                        string.IsNullOrEmpty(current.Error) &&
+                        string.IsNullOrWhiteSpace(current.Text) &&
+                        current.ExecutedToolCalls != null &&
+                        current.ExecutedToolCalls.Count > 0)
+                    {
+                        pendingToolOnlyTerminalChunk = current;
+                        continue;
+                    }
+
                     yield return current;
                 }
             }
@@ -475,6 +500,17 @@ namespace CoreAI.Ai
             }
 
             string content = accumulated.ToString();
+            bool synthesizedToolOnlyContent = string.IsNullOrWhiteSpace(content);
+            string toolOnlyContent = ResolveToolOnlyCompletionContent(content, executedToolCalls);
+            if (!string.IsNullOrEmpty(toolOnlyContent))
+            {
+                content = toolOnlyContent;
+                if (synthesizedToolOnlyContent)
+                {
+                    yield return new LlmStreamChunk { Text = content };
+                }
+            }
+
             if (string.IsNullOrEmpty(terminalError) && !string.IsNullOrEmpty(content))
             {
                 if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
@@ -494,6 +530,12 @@ namespace CoreAI.Ai
             else if (!string.IsNullOrEmpty(terminalError))
             {
                 RecordTrace(bundle, null, null, terminalError);
+            }
+
+            if (pendingToolOnlyTerminalChunk != null)
+            {
+                pendingToolOnlyTerminalChunk.Text = "";
+                yield return pendingToolOnlyTerminalChunk;
             }
         }
 
@@ -856,6 +898,81 @@ namespace CoreAI.Ai
         private static bool IsChatSourceRequest(AiTaskRequest task)
         {
             return string.Equals(task?.SourceTag?.Trim(), "Chat", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveToolOnlyCompletionContent(
+            string content,
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls)
+        {
+            if (!string.IsNullOrWhiteSpace(content) ||
+                executedToolCalls == null ||
+                executedToolCalls.Count == 0)
+            {
+                return string.IsNullOrWhiteSpace(content) ? null : content;
+            }
+
+            List<string> failed = new();
+            List<string> succeeded = new();
+            for (int i = 0; i < executedToolCalls.Count; i++)
+            {
+                LlmToolCallTrace trace = executedToolCalls[i];
+                string name = string.IsNullOrWhiteSpace(trace.Name) ? "tool" : trace.Name.Trim();
+                if (trace.Success)
+                {
+                    if (!succeeded.Contains(name))
+                    {
+                        succeeded.Add(name);
+                    }
+
+                    continue;
+                }
+
+                string detail = ExtractToolTraceMessage(trace.Detail);
+                failed.Add(string.IsNullOrWhiteSpace(detail)
+                    ? name
+                    : $"{name}: {detail}");
+            }
+
+            if (failed.Count > 0)
+            {
+                return failed.Count == 1
+                    ? "Tool call failed: " + failed[0]
+                    : "Tool calls failed: " + string.Join("; ", failed);
+            }
+
+            return succeeded.Count == 1
+                ? "Tool call completed: " + succeeded[0] + "."
+                : "Tool calls completed: " + string.Join(", ", succeeded) + ".";
+        }
+
+        private static string ExtractToolTraceMessage(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                return "";
+            }
+
+            string trimmed = detail.Trim();
+            try
+            {
+                JObject json = JObject.Parse(trimmed);
+                JToken token = json["message"] ?? json["Message"] ?? json["error"] ?? json["Error"];
+                if (token != null)
+                {
+                    string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        return message.Trim();
+                    }
+                }
+            }
+            catch
+            {
+                // Plain-text tool results are expected.
+            }
+
+            const int maxChars = 240;
+            return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
         }
 
         /// <summary>

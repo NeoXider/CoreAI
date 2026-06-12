@@ -6,6 +6,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.2] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.2**.
+
+- Chat/PlayMode regression coverage added for `Programmer` tool-only failure turns. When `manage_mods` or another tool fails and the model returns only whitespace after the tool call, the chat now shows the real tool failure instead of the misleading structured-validation message `Response is empty or whitespace`.
+
 ## [4.0.1] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.1**.

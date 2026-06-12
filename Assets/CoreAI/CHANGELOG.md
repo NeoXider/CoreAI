@@ -4,6 +4,11 @@
 
 - No unreleased changes.
 
+## [4.0.2] - 2026-06-12
+
+- **Tool-only chat failure fallback.** `AiOrchestrator` now preserves terminal `ExecutedToolCalls` from streaming completions and turns empty tool-only responses into an explicit tool status message. Failed `Programmer` tool turns now surface the real tool error, for example `manage_mods 'load' failed: attempt to index a function value`, instead of running structured validation and showing `Response is empty or whitespace`.
+- **Tool trace diagnostics.** `LlmToolCallTrace` now carries a short `Detail` string for failed native, missing, unknown, duplicate, and timeout tool calls so UI fallbacks and logs can report the actual failure cause.
+
 ## [4.0.1] - 2026-06-12
 
 - **Chat source history for tool roles.** `AiOrchestrator` now enables short-term chat history for requests with `SourceTag = "Chat"` even when the target role defaults to history-off (for example `Programmer`). The global role policy is not mutated and disk persistence stays off unless the role explicitly enables it, so non-chat Lua/repair tasks remain isolated while chat panels keep session instructions such as response language.

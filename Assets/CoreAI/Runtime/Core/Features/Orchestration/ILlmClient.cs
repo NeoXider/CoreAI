@@ -181,12 +181,13 @@ namespace CoreAI.Ai
     public readonly struct LlmToolCallTrace
     {
         /// <summary>Constructs a trace entry for one observed tool call.</summary>
-        public LlmToolCallTrace(string name, bool success, double durationMs, string source)
+        public LlmToolCallTrace(string name, bool success, double durationMs, string source, string detail = "")
         {
             Name = name ?? "";
             Success = success;
             DurationMs = durationMs;
             Source = source ?? "";
+            Detail = detail ?? "";
         }
 
         /// <summary>Tool name (matches <see cref="ILlmTool.Name"/>).</summary>
@@ -200,6 +201,9 @@ namespace CoreAI.Ai
 
         /// <summary>How this call was discovered: <c>native</c> (FunctionCallContent), <c>text</c> (extracted JSON), or <c>duplicate</c> / <c>missing</c>.</summary>
         public string Source { get; }
+
+        /// <summary>Short result or failure detail for UI fallback and diagnostics.</summary>
+        public string Detail { get; }
     }
 
     /// <summary>Model completion: text, error state, optional usage.</summary>
@@ -356,7 +360,8 @@ namespace CoreAI.Ai
                 PromptTokens = result.PromptTokens,
                 CompletionTokens = result.CompletionTokens,
                 TotalTokens = result.TotalTokens,
-                Model = result.Model
+                Model = result.Model,
+                ExecutedToolCalls = result.ExecutedToolCalls
             };
         }
     }
