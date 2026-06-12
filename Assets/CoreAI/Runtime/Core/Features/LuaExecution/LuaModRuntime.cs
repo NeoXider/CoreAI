@@ -90,9 +90,10 @@ namespace CoreAI.Ai
         public event Action<string, string, LuaCapabilities> ModSourceLoaded;
 
         /// <summary>
-        /// Raised after a mod is unloaded, including automatic unloads after repeated errors.
+        /// Raised after a mod is unloaded, including automatic unloads after repeated errors:
+        /// (modId, source, caps).
         /// </summary>
-        public event Action<string> ModSourceUnloaded;
+        public event Action<string, string, LuaCapabilities> ModSourceUnloaded;
 
         /// <summary>True when the Lua sandbox is available on this platform.</summary>
         public static bool IsSupported => SecureLuaEnvironment.IsSupported;
@@ -272,16 +273,22 @@ namespace CoreAI.Ai
         public bool UnloadMod(string id)
         {
             string modId = Normalize(id);
+            string source;
+            LuaCapabilities caps;
             lock (_gate)
             {
-                if (!_mods.Remove(modId))
+                if (!_mods.TryGetValue(modId, out Mod mod))
                 {
                     return false;
                 }
+
+                source = mod.Source;
+                caps = mod.Caps;
+                _mods.Remove(modId);
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' unloaded.");
-            ModSourceUnloaded?.Invoke(modId);
+            ModSourceUnloaded?.Invoke(modId, source, caps);
             return true;
         }
 

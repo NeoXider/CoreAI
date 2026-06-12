@@ -6,6 +6,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.1.0] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.1.0**.
+
+- Added `WaveAutoBattlerModsDemo.unity`: a hero-vs-waves auto-battler where waves scale upward, the hero levels up, and Lua mods can change real combat slots (`hero_damage`, `hero_regen`, `enemy_count`, `enemy_hp`, `enemy_damage`, `wave_reward`) and react to battle events.
+- Upgraded `LiveMechanicsModsChatPersistenceController` into an F10-style mod manager: active mods, saved/unloaded mods, metadata display from Lua comments (`-- name:` / `-- description:`), deactivate with `X`, activate saved mods, and forget saved sources.
+- Added `ChatPromptButtonsController` and prompt buttons to both LiveMechanics mods and Wave Auto-Battler scenes so users can insert ready prompts for creating and modifying mods.
+- `manage_mods unload` in demo scenes now behaves like deactivation: the source remains in the saved/unloaded list and can be activated again from the panel.
+
 ## [4.0.8] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.8**.

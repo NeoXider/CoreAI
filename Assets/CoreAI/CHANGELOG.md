@@ -4,6 +4,11 @@
 
 - No unreleased changes.
 
+## [4.1.0] - 2026-06-12
+
+- **Lua mod lifecycle metadata for host managers.** `LuaModRuntime.ModSourceUnloaded` now reports the unloaded source and capability tier, allowing host UIs to move a mod from active to saved/inactive state without losing source code.
+- **Release sync.** `com.nexoider.coreai` is bumped to `4.1.0` so the portable core and Unity package stay version-aligned for the new wave auto-battler mod-management demo.
+
 ## [4.0.8] - 2026-06-12
 
 - **Lua mod host persistence hooks.** `LuaModRuntime` now raises `ModSourceLoaded` after successful `LoadMod`/`ReloadMod` and `ModSourceUnloaded` after `UnloadMod`, including automatic unloads. The runtime still does not autoload arbitrary mod source by itself; hosts and demo scenes can now persist their selected mod set without coupling that policy into the generic Lua runtime.

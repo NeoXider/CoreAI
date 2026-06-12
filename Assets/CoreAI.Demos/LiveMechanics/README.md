@@ -72,5 +72,7 @@ Programmer полный набор (`All`) намеренно — это и ес
 
 For the same battle loop with chat-driven mod source autoload, use
 `Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`. That copied scene adds a
-small host persistence component: successful `manage_mods load` / `reload` sources are saved, and
-`unload` removes the mod from that scene's autoload set.
+host mod manager: successful `manage_mods load` / `reload` sources are saved, `F10` opens the
+active/saved mod panel, `X` deactivates a mod, and saved inactive mods can be activated again.
+The same folder also contains `WaveAutoBattlerModsDemo.unity`, a fuller hero-vs-waves demo where
+mods change real combat slots instead of only the boss-rule sandbox.
