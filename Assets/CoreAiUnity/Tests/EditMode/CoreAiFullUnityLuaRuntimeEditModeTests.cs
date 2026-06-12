@@ -16,7 +16,7 @@ namespace CoreAI.Tests.EditMode
             LuaApiRegistry registry = new();
             new AggregatingGameLuaRuntimeBindings(
                     GameLoggerUnscopedFallback.Instance,
-                    new CoreAiVersioningLuaRuntimeBindings(),
+                    new CoreAiVersioningLuaRuntimeBindings(null, null),
                     null,
                     full: new CoreAiFullUnityLuaRuntimeBindings(),
                     capabilities: LuaCapabilities.Read)
@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode
             LuaApiRegistry registry = new();
             new AggregatingGameLuaRuntimeBindings(
                     GameLoggerUnscopedFallback.Instance,
-                    new CoreAiVersioningLuaRuntimeBindings(),
+                    new CoreAiVersioningLuaRuntimeBindings(null, null),
                     null,
                     full: new CoreAiFullUnityLuaRuntimeBindings(),
                     capabilities: LuaCapabilities.All | LuaCapabilities.Full)

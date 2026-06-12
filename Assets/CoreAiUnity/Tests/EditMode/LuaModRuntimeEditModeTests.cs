@@ -106,7 +106,7 @@ namespace CoreAI.Tests.EditMode
         {
             LuaModRuntime runtime = new();
 
-            Assert.Throws<ScriptRuntimeException>(() =>
+            Assert.Throws<ArgumentException>(() =>
                 runtime.LoadMod("m", "hooks_every(0.01, function() end)"));
             Assert.IsFalse(runtime.IsLoaded("m"));
         }

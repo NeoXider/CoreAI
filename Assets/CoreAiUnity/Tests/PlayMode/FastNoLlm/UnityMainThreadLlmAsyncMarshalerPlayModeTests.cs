@@ -31,6 +31,12 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         public IEnumerator AfterSwitchToThreadPool_InvokeAsync_RunsDelegateOnUnityMainManagedThread()
         {
+            if (Application.isBatchMode)
+            {
+                Assert.Ignore("WaitForEndOfFrame is not invoked in batchmode; run this test in the Editor Test Runner.");
+                yield break;
+            }
+
             // The marshaler uses a volatile mirror of Application.isPlaying updated via
             // Application.onBeforeRender. We need to wait enough frames for both:
             // (a) Application.isPlaying to be true, and

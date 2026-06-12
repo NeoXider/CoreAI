@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
+using CoreAI.Sandbox;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using Newtonsoft.Json.Linq;
@@ -167,6 +169,7 @@ namespace CoreAI.Tests.EditMode
                 builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
                 builder.RegisterInstance<ICoreAISettings>(_settings);
                 builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+                builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
 
                 builder.RegisterWorldCommands(registry);
 
