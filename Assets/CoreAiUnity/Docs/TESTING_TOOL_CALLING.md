@@ -33,6 +33,7 @@ Filter by **assembly** in Test Runner; folder map: **`Tests/PlayMode/README.md`*
 **PlayMode** — Test Runner → PlayMode tab:
 
 - `ToolCallStreamingParityPlayModeTests` ← stream + non-stream parity in a player frame
+- `MultiAgentCraftingWorkflowPlayModeTests` ← live multi-agent workflow; Programmer now retries with `ForcedToolMode.RequireSpecific("execute_lua")` when a local model stops after the memory tool.
 - `MerchantWithToolCallingPlayModeTests` (real LLM, set `COREAI_PLAYMODE_LLM_BACKEND`)
 - `AllToolCallsPlayModeTests` (real LLM, broader coverage)
 

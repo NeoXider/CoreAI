@@ -130,7 +130,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
+                Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, ResolveUnityMainManagedThreadId());
                 bool isPlaying = Application.isPlaying;
                 Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
                 if (isPlaying)
@@ -147,7 +147,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, Thread.CurrentThread.ManagedThreadId);
+                Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, ResolveUnityMainManagedThreadId());
                 bool isPlaying = EditorApplication.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode;
                 Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
                 if (isPlaying)
@@ -158,6 +158,12 @@ namespace CoreAI.Infrastructure.Llm
             catch
             {
             }
+        }
+
+        private static int ResolveUnityMainManagedThreadId()
+        {
+            int playerLoopMainId = PlayerLoopHelper.MainThreadId;
+            return playerLoopMainId > 0 ? playerLoopMainId : Thread.CurrentThread.ManagedThreadId;
         }
 
         private static void UpdateEditorPlayModeStateMirror(PlayModeStateChange state)
@@ -178,6 +184,18 @@ namespace CoreAI.Infrastructure.Llm
         {
             Volatile.Write(ref _editorRuntimePlayModeEntered, 1);
             Volatile.Write(ref _editorMirrorIsPlaying, 1);
+        }
+
+        /// <summary>
+        /// Refreshes the editor play-state mirror from a known Unity thread. Test Runner suites can
+        /// transition between PlayMode fixtures without a domain reload, so a previous callback may
+        /// leave the mirror in an Edit-idle state even though <see cref="Application.isPlaying"/> is
+        /// already true for the current player loop.
+        /// </summary>
+        public static void RefreshEditorPlayModeMirrorForCurrentThread()
+        {
+            EnsureEditorIsPlayingMirrorHook();
+            UpdateEditorIsPlayingMirror();
         }
 
         /// <summary>

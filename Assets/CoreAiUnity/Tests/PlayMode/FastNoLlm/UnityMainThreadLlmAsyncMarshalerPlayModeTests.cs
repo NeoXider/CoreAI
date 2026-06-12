@@ -50,6 +50,9 @@ namespace CoreAI.Tests.PlayMode
             yield return new WaitForEndOfFrame();
 
             Assert.IsTrue(Application.isPlaying, "Test must run in Play Mode");
+#if UNITY_EDITOR
+            UnityMainThreadLlmAsyncMarshaler.RefreshEditorPlayModeMirrorForCurrentThread();
+#endif
 
             int mainThreadId = _unityMainThreadId;
             TaskCompletionSource<int> tcs = new();

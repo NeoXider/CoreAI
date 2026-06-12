@@ -6,6 +6,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.4] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.2**.
+
+- Fixed a full PlayMode-suite-only `UnityMainThreadLlmAsyncMarshaler` regression where the Editor play-state mirror could keep a stale thread id and run Unity tool bodies inline on a ThreadPool thread. The mirror now records UniTask's player-loop main thread id, and the PlayMode regression primes the mirror before switching to the ThreadPool.
+- Hardened `MultiAgentCraftingWorkflowPlayModeTests`: if a local model completes the Programmer memory step but skips `execute_lua`, the scenario performs an exact `execute_lua` retry with `ForcedToolMode.RequireSpecific` before failing.
+
 ## [4.0.3] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.2**.

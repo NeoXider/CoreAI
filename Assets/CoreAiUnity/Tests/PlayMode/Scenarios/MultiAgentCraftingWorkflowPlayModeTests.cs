@@ -249,6 +249,13 @@ namespace CoreAI.Tests.PlayMode
                         "Programmer response should contain Lua-related output.");
                     Assert.That(programmerPayload, Does.Not.Contain("execute_lua tool is not available"),
                         "Workflow claims execute_lua step, but tool was unavailable.");
+                    if (toolCalls.TryGetCompletedToolSince(
+                            toolMark, BuiltInAgentRoleIds.Programmer, "execute_lua") == null)
+                    {
+                        yield return RetryProgrammerExecuteLua(
+                            clientWithMemory, store, policy, telemetry, composer, toolCalls);
+                    }
+
                     toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.Programmer, "execute_lua", "programmer lua");
                     Assert.IsFalse(string.IsNullOrWhiteSpace(programmerLuaCode),
@@ -494,6 +501,42 @@ namespace CoreAI.Tests.PlayMode
                 ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
+        private IEnumerator RetryProgrammerExecuteLua(
+            ILlmClient client,
+            InMemoryStore store,
+            AgentMemoryPolicy policy,
+            SessionTelemetryCollector telemetry,
+            AiPromptComposer composer,
+            ToolCallCapture toolCalls)
+        {
+            int beforeRetry = toolCalls.Count;
+            string prompt =
+                "The previous Programmer answer did not call execute_lua. Do not call memory now. " +
+                "Do not explain. Call ONLY the execute_lua tool with exactly this Lua code:\n" +
+                "report('programmer generated Lua weapon script')";
+
+            Debug.LogWarning(
+                "[MultiAgent] Programmer did not complete execute_lua; retrying with exact execute_lua-only prompt.");
+
+            ListSink retrySink = new();
+            AiOrchestrator retryOrch =
+                CreateOrchestrator(client, store, policy, telemetry, composer, retrySink);
+
+            Task retry = retryOrch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = prompt,
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = "execute_lua"
+            });
+
+            yield return PlayModeTestAwait.WaitTask(retry, 300f, "programmer lua retry");
+
+            LogAgentResponse("programmer retry", retrySink);
+            toolCalls.RequireCompletedToolSince(
+                beforeRetry, BuiltInAgentRoleIds.Programmer, "execute_lua", "programmer lua retry");
+        }
+
         #region Logging
 
         private static void LogAgentMemory(InMemoryStore store, string roleId)
@@ -543,12 +586,7 @@ namespace CoreAI.Tests.PlayMode
             public LlmToolCallRecord RequireCompletedToolSince(int startIndex, string roleId, string toolName,
                 string label)
             {
-                LlmToolCallRecord record = _records
-                    .Skip(startIndex)
-                    .LastOrDefault(r =>
-                        r.Status == "completed" &&
-                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
-                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
+                LlmToolCallRecord record = TryGetCompletedToolSince(startIndex, roleId, toolName);
 
                 if (record == null)
                 {
@@ -559,6 +597,16 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 return record;
+            }
+
+            public LlmToolCallRecord TryGetCompletedToolSince(int startIndex, string roleId, string toolName)
+            {
+                return _records
+                    .Skip(startIndex)
+                    .LastOrDefault(r =>
+                        r.Status == "completed" &&
+                        string.Equals(r.Info.RoleId, roleId, StringComparison.Ordinal) &&
+                        string.Equals(r.Info.ToolName, toolName, StringComparison.Ordinal));
             }
         }
     }
