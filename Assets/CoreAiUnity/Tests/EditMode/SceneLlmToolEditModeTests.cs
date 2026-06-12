@@ -14,7 +14,7 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class SceneLlmToolEditModeTests
     {
-        private readonly List<GameObject> _createdObjects = new List<GameObject>();
+        private readonly List<GameObject> _createdObjects = new();
 
         [TearDown]
         public void TearDown()
@@ -23,7 +23,7 @@ namespace CoreAI.Tests.EditMode
             {
                 if (go != null)
                 {
-                    global::UnityEngine.Object.DestroyImmediate(go);
+                    UnityEngine.Object.DestroyImmediate(go);
                 }
             }
 
@@ -35,7 +35,7 @@ namespace CoreAI.Tests.EditMode
         {
             string prefix = Guid.NewGuid().ToString("N");
             GameObject activeMatch = SpawnGameObject($"{prefix}_target_active");
-            SpawnGameObject($"{prefix}_target_inactive", active: false);
+            SpawnGameObject($"{prefix}_target_inactive", false);
             SpawnGameObject($"{prefix}_other");
 
             SceneLlmTool tool = new();

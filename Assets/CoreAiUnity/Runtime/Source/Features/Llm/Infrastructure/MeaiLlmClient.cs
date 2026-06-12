@@ -927,7 +927,8 @@ namespace CoreAI.Infrastructure.Llm
 
             if (!found)
             {
-                return "The previous tool call failed. Inspect the tool error, fix the arguments or code, and retry with a corrected tool call. Do not return an empty response.";
+                return
+                    "The previous tool call failed. Inspect the tool error, fix the arguments or code, and retry with a corrected tool call. Do not return an empty response.";
             }
 
             string name = string.IsNullOrWhiteSpace(failed.Name) ? "tool" : failed.Name.Trim();

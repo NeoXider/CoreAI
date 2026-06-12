@@ -48,7 +48,7 @@ namespace CoreAI.Infrastructure.World
             _sink = sink;
             if (allowedScenes != null)
             {
-                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> set = new(StringComparer.OrdinalIgnoreCase);
                 foreach (string scene in allowedScenes)
                 {
                     if (!string.IsNullOrWhiteSpace(scene))
@@ -269,60 +269,60 @@ namespace CoreAI.Infrastructure.World
                 }));
 
             registry.Register("coreai_world_grid",
-                new Func<string, string, double, double, double, double, double, double, int>(
-                    (prefabKey, namePrefix, x0, z0, x1, z1, step, y) =>
+                new Func<string, string, double, double, double, double, double, double, int>((prefabKey, namePrefix,
+                    x0, z0, x1, z1, step, y) =>
+                {
+                    string prefab = (prefabKey ?? "").Trim();
+                    string prefix = (namePrefix ?? "").Trim();
+                    if (string.IsNullOrEmpty(prefab) || string.IsNullOrEmpty(prefix))
                     {
-                        string prefab = (prefabKey ?? "").Trim();
-                        string prefix = (namePrefix ?? "").Trim();
-                        if (string.IsNullOrEmpty(prefab) || string.IsNullOrEmpty(prefix))
+                        return 0;
+                    }
+
+                    if (double.IsNaN(step) || double.IsInfinity(step) || step < 0.5d)
+                    {
+                        throw new ArgumentException("grid step must be finite and at least 0.5.");
+                    }
+
+                    if (x1 < x0 || z1 < z0)
+                    {
+                        throw new ArgumentException(
+                            "grid end coordinates must be greater than or equal to start coordinates.");
+                    }
+
+                    ValidatePosition(x0, y, z0);
+                    ValidatePosition(x1, y, z1);
+
+                    int xCount = (int)Math.Floor((x1 - x0) / step) + 1;
+                    int zCount = (int)Math.Floor((z1 - z0) / step) + 1;
+                    int total = xCount * zCount;
+                    if (total > MaxBatchSize)
+                    {
+                        throw new ArgumentException($"grid exceeds maximum of {MaxBatchSize} cells.");
+                    }
+
+                    List<CoreAiWorldCommandEnvelope> commands = new();
+                    for (int ix = 0; ix < xCount; ix++)
+                    {
+                        for (int iz = 0; iz < zCount; iz++)
                         {
-                            return 0;
+                            double x = x0 + ix * step;
+                            double z = z0 + iz * step;
+                            string name = $"{prefix}_{ix}_{iz}";
+                            commands.Add(CoreAiWorldCommandEnvelope.Spawn(
+                                prefab,
+                                name,
+                                ValidatePosition(x, y, z)));
                         }
+                    }
 
-                        if (double.IsNaN(step) || double.IsInfinity(step) || step < 0.5d)
-                        {
-                            throw new ArgumentException("grid step must be finite and at least 0.5.");
-                        }
+                    for (int i = 0; i < commands.Count; i++)
+                    {
+                        Publish(commands[i]);
+                    }
 
-                        if (x1 < x0 || z1 < z0)
-                        {
-                            throw new ArgumentException(
-                                "grid end coordinates must be greater than or equal to start coordinates.");
-                        }
-
-                        ValidatePosition(x0, y, z0);
-                        ValidatePosition(x1, y, z1);
-
-                        int xCount = (int)Math.Floor((x1 - x0) / step) + 1;
-                        int zCount = (int)Math.Floor((z1 - z0) / step) + 1;
-                        int total = xCount * zCount;
-                        if (total > MaxBatchSize)
-                        {
-                            throw new ArgumentException($"grid exceeds maximum of {MaxBatchSize} cells.");
-                        }
-
-                        List<CoreAiWorldCommandEnvelope> commands = new();
-                        for (int ix = 0; ix < xCount; ix++)
-                        {
-                            for (int iz = 0; iz < zCount; iz++)
-                            {
-                                double x = x0 + ix * step;
-                                double z = z0 + iz * step;
-                                string name = $"{prefix}_{ix}_{iz}";
-                                commands.Add(CoreAiWorldCommandEnvelope.Spawn(
-                                    prefab,
-                                    name,
-                                    ValidatePosition(x, y, z)));
-                            }
-                        }
-
-                        for (int i = 0; i < commands.Count; i++)
-                        {
-                            Publish(commands[i]);
-                        }
-
-                        return commands.Count;
-                    }));
+                    return commands.Count;
+                }));
 
             registry.Register("coreai_world_begin", new Action(() =>
             {

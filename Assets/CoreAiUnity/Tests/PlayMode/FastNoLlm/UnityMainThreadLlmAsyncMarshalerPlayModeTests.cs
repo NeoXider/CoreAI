@@ -33,7 +33,8 @@ namespace CoreAI.Tests.PlayMode
         {
             if (Application.isBatchMode)
             {
-                Assert.Ignore("WaitForEndOfFrame is not invoked in batchmode; run this test in the Editor Test Runner.");
+                Assert.Ignore(
+                    "WaitForEndOfFrame is not invoked in batchmode; run this test in the Editor Test Runner.");
                 yield break;
             }
 

@@ -9,7 +9,7 @@ namespace CoreAI.Chat
     public class CoreAiChatConfig : ScriptableObject, ICoreAiChatOptions
     {
         [Header("Agent")] [Tooltip("Agent role id used for prompt routing and chat history.")] [SerializeField]
-        private string _roleId = CoreAI.Ai.BuiltInAgentRoleIds.SmartChat;
+        private string _roleId = Ai.BuiltInAgentRoleIds.SmartChat;
 
         [Header("UI - Header")] [SerializeField]
         private string _headerTitle = "AI Chat";

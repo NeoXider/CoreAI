@@ -34,8 +34,8 @@ namespace CoreAI.Demos
         private const double BossMaxHp = 200d;
         private const int MaxLogLines = 12;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
-        [SerializeField] private CoreAILifetimeScope coreAiScope;
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        private CoreAILifetimeScope coreAiScope;
 
         private LuaLogicSlots _slots;
         private LuaModRuntime _mods;
@@ -104,7 +104,8 @@ namespace CoreAI.Demos
 
             dmg = System.Math.Max(0d, dmg);
             _bossHp -= dmg;
-            Log($"Hero hits Boss for {dmg:0.#} ({(overridden ? "Lua rule" : "C# rule")}). Boss HP: {System.Math.Max(0d, _bossHp):0.#}");
+            Log(
+                $"Hero hits Boss for {dmg:0.#} ({(overridden ? "Lua rule" : "C# rule")}). Boss HP: {System.Math.Max(0d, _bossHp):0.#}");
 
             if (_bossHp > 0d)
             {
@@ -113,7 +114,9 @@ namespace CoreAI.Demos
 
             double loot = _slots.TryInvokeNumber(LootSlot, out double l, BossMaxHp)
                 ? l
-                : (_slots.TryInvokeNumber(BossRewardSlot, out double aliasLoot, BossMaxHp) ? aliasLoot : 10d);
+                : _slots.TryInvokeNumber(BossRewardSlot, out double aliasLoot, BossMaxHp)
+                    ? aliasLoot
+                    : 10d;
             loot = System.Math.Max(0d, loot);
             _gold += loot;
             _bossesDefeated++;

@@ -115,7 +115,14 @@ namespace CoreAI.Tests.EditMode
 
         private static void DeleteTempRoot(string root)
         {
-            try { Directory.Delete(root, true); } catch { /* best effort */ }
+            try
+            {
+                Directory.Delete(root, true);
+            }
+            catch
+            {
+                /* best effort */
+            }
         }
 
         [Test]

@@ -75,7 +75,8 @@ namespace CoreAI.Demos
             _inventory["iron_ingot"]--;
             _inventory["wood"]--;
             _crafted.Add(item);
-            return $"Crafted '{item}'. Materials left: iron_ingot x{_inventory["iron_ingot"]}, wood x{_inventory["wood"]}.";
+            return
+                $"Crafted '{item}'. Materials left: iron_ingot x{_inventory["iron_ingot"]}, wood x{_inventory["wood"]}.";
         }
 
         private string Attack(int damage)

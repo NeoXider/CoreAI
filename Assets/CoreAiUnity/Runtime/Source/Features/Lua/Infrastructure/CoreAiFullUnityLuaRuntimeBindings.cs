@@ -349,7 +349,7 @@ namespace CoreAI.Infrastructure.Lua
 
             if (targetType.IsEnum && value.Type == DataType.String)
             {
-                return Enum.Parse(targetType, value.String, ignoreCase: true);
+                return Enum.Parse(targetType, value.String, true);
             }
 
             if (targetType == typeof(Vector3) && value.Type == DataType.Table)

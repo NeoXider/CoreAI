@@ -94,39 +94,39 @@ namespace CoreAI.Infrastructure.World
             }));
 
             registry.Register("coreai_world_raycast",
-                new Func<double, double, double, double, double, double, double, object>(
-                    (ox, oy, oz, dx, dy, dz, maxDistance) =>
+                new Func<double, double, double, double, double, double, double, object>((ox, oy, oz, dx, dy, dz,
+                    maxDistance) =>
+                {
+                    if (!IsFinite(ox) || !IsFinite(oy) || !IsFinite(oz) ||
+                        !IsFinite(dx) || !IsFinite(dy) || !IsFinite(dz) ||
+                        !IsFinite(maxDistance))
                     {
-                        if (!IsFinite(ox) || !IsFinite(oy) || !IsFinite(oz) ||
-                            !IsFinite(dx) || !IsFinite(dy) || !IsFinite(dz) ||
-                            !IsFinite(maxDistance))
-                        {
-                            throw new ArgumentException("raycast: arguments must be finite.");
-                        }
+                        throw new ArgumentException("raycast: arguments must be finite.");
+                    }
 
-                        Vector3 direction = new(ToFiniteFloat(dx), ToFiniteFloat(dy), ToFiniteFloat(dz));
-                        if (direction == Vector3.zero)
-                        {
-                            throw new ArgumentException("raycast: direction must be non-zero.");
-                        }
+                    Vector3 direction = new(ToFiniteFloat(dx), ToFiniteFloat(dy), ToFiniteFloat(dz));
+                    if (direction == Vector3.zero)
+                    {
+                        throw new ArgumentException("raycast: direction must be non-zero.");
+                    }
 
-                        Vector3 origin = new(ToFiniteFloat(ox), ToFiniteFloat(oy), ToFiniteFloat(oz));
-                        float distance = (float)Math.Min(Math.Max(maxDistance, 0.0001d), 1000d);
-                        if (!Physics.Raycast(origin, direction.normalized, out RaycastHit hit, distance))
-                        {
-                            return null;
-                        }
+                    Vector3 origin = new(ToFiniteFloat(ox), ToFiniteFloat(oy), ToFiniteFloat(oz));
+                    float distance = (float)Math.Min(Math.Max(maxDistance, 0.0001d), 1000d);
+                    if (!Physics.Raycast(origin, direction.normalized, out RaycastHit hit, distance))
+                    {
+                        return null;
+                    }
 
-                        Vector3 point = hit.point;
-                        return new Dictionary<string, object>
-                        {
-                            { "name", hit.collider.gameObject.name },
-                            { "x", (double)point.x },
-                            { "y", (double)point.y },
-                            { "z", (double)point.z },
-                            { "distance", (double)hit.distance }
-                        };
-                    }));
+                    Vector3 point = hit.point;
+                    return new Dictionary<string, object>
+                    {
+                        { "name", hit.collider.gameObject.name },
+                        { "x", (double)point.x },
+                        { "y", (double)point.y },
+                        { "z", (double)point.z },
+                        { "distance", (double)hit.distance }
+                    };
+                }));
         }
 
         private static void CollectObjectsRecursive(GameObject parent, string searchPattern, List<object> results)

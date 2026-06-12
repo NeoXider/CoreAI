@@ -18,7 +18,7 @@ namespace CoreAI.Infrastructure.World
     public interface ICoreAiPrefabCatalog
     {
         /// <summary>Lists distinct prefab keys available for read-only discovery.</summary>
-        System.Collections.Generic.IReadOnlyList<string> ListPrefabKeys();
+        IReadOnlyList<string> ListPrefabKeys();
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <inheritdoc />
-        public System.Collections.Generic.IReadOnlyList<string> ListPrefabKeys()
+        public IReadOnlyList<string> ListPrefabKeys()
         {
             EnsureBuilt();
             HashSet<string> keys = new(StringComparer.Ordinal);

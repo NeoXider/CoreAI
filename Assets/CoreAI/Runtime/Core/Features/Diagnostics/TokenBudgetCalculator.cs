@@ -10,9 +10,9 @@ namespace CoreAI.Diagnostics
     /// </summary>
     public sealed class TokenBudgetCalculator
     {
-        private readonly object _sync = new object();
+        private readonly object _sync = new();
         private readonly double _windowSeconds;
-        private readonly Queue<(double Timestamp, long Tokens)> _window = new Queue<(double, long)>();
+        private readonly Queue<(double Timestamp, long Tokens)> _window = new();
 
         /// <param name="windowSeconds">Rolling window length in seconds (default 60).</param>
         public TokenBudgetCalculator(double windowSeconds = 60d)

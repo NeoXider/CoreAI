@@ -278,11 +278,11 @@ namespace CoreAI.Infrastructure.Llm
                     Dictionary<string, object> normalized = new(fc.Arguments);
                     foreach (string key in new List<string>(normalized.Keys))
                     {
-                        if (normalized[key] is Newtonsoft.Json.Linq.JObject jo)
+                        if (normalized[key] is JObject jo)
                         {
                             normalized[key] = jo.ToString(Formatting.None);
                         }
-                        else if (normalized[key] is Newtonsoft.Json.Linq.JArray ja)
+                        else if (normalized[key] is JArray ja)
                         {
                             normalized[key] = ja.ToString(Formatting.None);
                         }
@@ -726,10 +726,10 @@ namespace CoreAI.Infrastructure.Llm
             // Attempt structured JSON parse for reliable detection.
             try
             {
-                Newtonsoft.Json.Linq.JObject json = Newtonsoft.Json.Linq.JObject.Parse(resultText);
-                Newtonsoft.Json.Linq.JToken token =
+                JObject json = JObject.Parse(resultText);
+                JToken token =
                     json["Success"] ?? json["success"] ?? json["SUCCESS"];
-                if (token != null && token.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+                if (token != null && token.Type == JTokenType.Boolean)
                 {
                     return (bool)token;
                 }

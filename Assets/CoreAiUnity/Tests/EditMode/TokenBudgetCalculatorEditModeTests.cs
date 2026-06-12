@@ -15,8 +15,8 @@ namespace CoreAI.Tests.EditMode
         {
             TokenBudgetCalculator calc = new();
 
-            calc.RecordUsage(100, 50, 150, timestampSeconds: 0d);
-            calc.RecordUsage(200, 100, 300, timestampSeconds: 1d);
+            calc.RecordUsage(100, 50, 150, 0d);
+            calc.RecordUsage(200, 100, 300, 1d);
 
             Assert.AreEqual(2, calc.TotalRequests);
             Assert.AreEqual(2, calc.RequestsWithUsage);
@@ -34,7 +34,7 @@ namespace CoreAI.Tests.EditMode
         {
             TokenBudgetCalculator calc = new();
 
-            calc.RecordUsage(80, 20, null, timestampSeconds: 0d);
+            calc.RecordUsage(80, 20, null, 0d);
 
             Assert.AreEqual(100, calc.TotalTokens);
             Assert.AreEqual(100, calc.LastTotalTokens);
@@ -45,7 +45,7 @@ namespace CoreAI.Tests.EditMode
         {
             TokenBudgetCalculator calc = new();
 
-            calc.RecordUsage(null, null, 120, timestampSeconds: 0d);
+            calc.RecordUsage(null, null, 120, 0d);
 
             Assert.AreEqual(1, calc.RequestsWithUsage);
             Assert.AreEqual(120, calc.TotalPromptTokens);
@@ -59,7 +59,7 @@ namespace CoreAI.Tests.EditMode
         {
             TokenBudgetCalculator calc = new();
 
-            calc.RecordUsage(null, null, null, timestampSeconds: 0d);
+            calc.RecordUsage(null, null, null, 0d);
 
             Assert.AreEqual(1, calc.TotalRequests);
             Assert.AreEqual(0, calc.RequestsWithUsage);
@@ -72,11 +72,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RollingWindow_ExpiresOldEntries()
         {
-            TokenBudgetCalculator calc = new(windowSeconds: 60d);
+            TokenBudgetCalculator calc = new(60d);
 
-            calc.RecordUsage(10, 10, 20, timestampSeconds: 0d);
-            calc.RecordUsage(10, 10, 20, timestampSeconds: 30d);
-            calc.RecordUsage(10, 10, 20, timestampSeconds: 70d);
+            calc.RecordUsage(10, 10, 20, 0d);
+            calc.RecordUsage(10, 10, 20, 30d);
+            calc.RecordUsage(10, 10, 20, 70d);
 
             Assert.AreEqual(2, calc.GetRequestsInWindow(80d), "entry at t=0 is outside [20..80]");
             Assert.AreEqual(40, calc.GetTokensInWindow(80d));
@@ -104,8 +104,8 @@ namespace CoreAI.Tests.EditMode
         public void EstimateSessionCostUsd_MatchesAccumulatedTokens()
         {
             TokenBudgetCalculator calc = new();
-            calc.RecordUsage(1000, 500, 1500, timestampSeconds: 0d);
-            calc.RecordUsage(1000, 500, 1500, timestampSeconds: 1d);
+            calc.RecordUsage(1000, 500, 1500, 0d);
+            calc.RecordUsage(1000, 500, 1500, 1d);
 
             double cost = calc.EstimateSessionCostUsd(0.25d, 0.75d);
 
@@ -126,7 +126,7 @@ namespace CoreAI.Tests.EditMode
         public void Reset_ClearsCountersAndWindow()
         {
             TokenBudgetCalculator calc = new();
-            calc.RecordUsage(100, 100, 200, timestampSeconds: 0d);
+            calc.RecordUsage(100, 100, 200, 0d);
 
             calc.Reset();
 

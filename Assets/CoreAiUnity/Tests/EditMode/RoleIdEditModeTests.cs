@@ -66,10 +66,10 @@ namespace CoreAI.Tests.EditMode
         public void RoleId_FlowsIntoStringBasedApis()
         {
             // The whole point: existing string-based APIs accept RoleId without overloads.
-            var builder = new AgentBuilder(RoleId.Merchant);
+            AgentBuilder builder = new(RoleId.Merchant);
             Assert.IsNotNull(builder);
 
-            var request = new AiTaskRequest { RoleId = RoleId.SmartChat };
+            AiTaskRequest request = new() { RoleId = RoleId.SmartChat };
             Assert.AreEqual("SmartChat", request.RoleId);
         }
     }

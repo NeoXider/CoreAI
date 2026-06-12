@@ -15,8 +15,8 @@ namespace CoreAI.Demos
     /// </summary>
     public sealed class WorldCommandsDemoController : MonoBehaviour
     {
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
-        [SerializeField] private CoreAILifetimeScope coreAiScope;
+        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
+        private CoreAILifetimeScope coreAiScope;
 
         private IAiGameCommandSink _sink;
         private string _status = "";

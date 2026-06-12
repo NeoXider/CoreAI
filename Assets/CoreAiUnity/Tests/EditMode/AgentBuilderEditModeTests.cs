@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -98,9 +99,9 @@ namespace CoreAI.Tests.EditMode
                 Logging.Log.Instance = savedLog;
             }
 
-            var askMethod = typeof(AgentConfigExtensions).GetMethod(nameof(AgentConfigExtensions.Ask));
+            MethodInfo askMethod = typeof(AgentConfigExtensions).GetMethod(nameof(AgentConfigExtensions.Ask));
             Assert.IsNotNull(askMethod);
-            Assert.IsTrue(askMethod.IsDefined(typeof(ObsoleteAttribute), inherit: false),
+            Assert.IsTrue(askMethod.IsDefined(typeof(ObsoleteAttribute), false),
                 "Ask(callback) is a legacy alias and must carry [Obsolete] pointing to AskAsync/AskWithCallback.");
         }
 

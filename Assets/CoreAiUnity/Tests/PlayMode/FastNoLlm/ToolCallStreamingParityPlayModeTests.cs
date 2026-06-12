@@ -205,7 +205,8 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                Assert.AreEqual(2, tool.CallCount, "The failed tool call should be retried after the empty model turn.");
+                Assert.AreEqual(2, tool.CallCount,
+                    "The failed tool call should be retried after the empty model turn.");
                 Assert.AreEqual(4, inner.StreamCalls, "Expected fail call, empty turn, corrected call, final prose.");
                 Assert.IsTrue(inner.UserMessages.Any(m =>
                         m.Contains("attempt to index a function value") &&

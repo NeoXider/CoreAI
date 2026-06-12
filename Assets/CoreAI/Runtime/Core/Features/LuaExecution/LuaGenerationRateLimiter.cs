@@ -43,7 +43,13 @@ namespace CoreAI.Ai
         /// <summary>Total acquisitions rejected since construction.</summary>
         public long TotalRejected
         {
-            get { lock (_gate) { return _totalRejected; } }
+            get
+            {
+                lock (_gate)
+                {
+                    return _totalRejected;
+                }
+            }
         }
 
         /// <summary>Accepted acquisitions still inside the window as of <paramref name="nowSeconds"/>.</summary>

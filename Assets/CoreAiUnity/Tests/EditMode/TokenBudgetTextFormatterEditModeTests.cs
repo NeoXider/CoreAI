@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode
         public void FormatTokens_RendersLastSessionAndRequestLines()
         {
             TokenBudgetCalculator calc = new();
-            calc.RecordUsage(100, 50, 150, timestampSeconds: 0d);
+            calc.RecordUsage(100, 50, 150, 0d);
 
             string text = TokenBudgetTextFormatter.FormatTokens(calc);
 
@@ -28,7 +28,7 @@ namespace CoreAI.Tests.EditMode
         public void FormatTokens_UnknownCounts_RenderAsDash()
         {
             TokenBudgetCalculator calc = new();
-            calc.RecordUsage(null, null, null, timestampSeconds: 0d);
+            calc.RecordUsage(null, null, null, 0d);
 
             string text = TokenBudgetTextFormatter.FormatTokens(calc);
 
@@ -55,7 +55,7 @@ namespace CoreAI.Tests.EditMode
         public void FormatCost_WithPricing_RendersSessionAndLastCost()
         {
             TokenBudgetCalculator calc = new();
-            calc.RecordUsage(2000, 1000, 3000, timestampSeconds: 0d);
+            calc.RecordUsage(2000, 1000, 3000, 0d);
 
             string text = TokenBudgetTextFormatter.FormatCost(calc, 0.5d, 1.5d);
 

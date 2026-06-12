@@ -15,27 +15,32 @@ namespace CoreAI.Diagnostics
     {
         [Header("Update")]
         [Tooltip("How often the text outputs are refreshed, in seconds.")]
-        [SerializeField] [Min(0.05f)] private float _updateInterval = 0.25f;
+        [SerializeField]
+        [Min(0.05f)]
+        private float _updateInterval = 0.25f;
 
-        [Tooltip("Rolling window length in seconds for the request-load indicator.")]
-        [SerializeField] [Min(1f)] private float _rollingWindowSeconds = 60f;
+        [Tooltip("Rolling window length in seconds for the request-load indicator.")] [SerializeField] [Min(1f)]
+        private float _rollingWindowSeconds = 60f;
 
         [Header("Text Outputs (bind to your UI)")]
         [Tooltip("Token lines: last request / session totals / request counts.")]
-        [SerializeField] private UnityEvent<string> _onTokensTextChanged = new();
+        [SerializeField]
+        private UnityEvent<string> _onTokensTextChanged = new();
 
-        [Tooltip("Cost lines, or a hint when prices are not configured in CoreAISettings.")]
-        [SerializeField] private UnityEvent<string> _onCostTextChanged = new();
+        [Tooltip("Cost lines, or a hint when prices are not configured in CoreAISettings.")] [SerializeField]
+        private UnityEvent<string> _onCostTextChanged = new();
 
-        [Tooltip("Rate-limiter and rolling-window load lines.")]
-        [SerializeField] private UnityEvent<string> _onLoadTextChanged = new();
+        [Tooltip("Rate-limiter and rolling-window load lines.")] [SerializeField]
+        private UnityEvent<string> _onLoadTextChanged = new();
 
         [Header("State Outputs")]
         [Tooltip("Fires with true when the chat rate-limiter window saturates, false when it recovers.")]
-        [SerializeField] private UnityEvent<bool> _onNearLimitChanged = new();
+        [SerializeField]
+        private UnityEvent<bool> _onNearLimitChanged = new();
 
         [Tooltip("Fires with true once CoreAI services are found, false while still waiting for the scope.")]
-        [SerializeField] private UnityEvent<bool> _onServiceAvailableChanged = new();
+        [SerializeField]
+        private UnityEvent<bool> _onServiceAvailableChanged = new();
 
         private TokenBudgetRuntimeSource _source;
         private float _nextRefreshTime;

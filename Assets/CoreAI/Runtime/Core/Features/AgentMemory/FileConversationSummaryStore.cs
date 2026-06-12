@@ -312,7 +312,14 @@ namespace CoreAI.Ai
             {
                 if (File.Exists(tmpPath))
                 {
-                    try { File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+                    try
+                    {
+                        File.Delete(tmpPath);
+                    }
+                    catch
+                    {
+                        /* best-effort cleanup */
+                    }
                 }
 
                 throw;

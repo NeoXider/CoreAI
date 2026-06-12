@@ -106,7 +106,7 @@ namespace CoreAI.Tests.EditMode
         {
             LuaModRuntime runtime = new();
 
-            Assert.Throws<MoonSharp.Interpreter.ScriptRuntimeException>(() =>
+            Assert.Throws<ScriptRuntimeException>(() =>
                 runtime.LoadMod("m", "hooks_every(0.01, function() end)"));
             Assert.IsFalse(runtime.IsLoaded("m"));
         }
@@ -234,13 +234,13 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class ScopedBindingsStub : IGameLuaRuntimeBindings, ICapabilityScopedLuaBindings
         {
-            public void RegisterGameplayApis(CoreAI.Sandbox.LuaApiRegistry registry)
+            public void RegisterGameplayApis(Sandbox.LuaApiRegistry registry)
             {
                 RegisterGameplayApis(registry, LuaCapabilities.All);
             }
 
             public void RegisterGameplayApis(
-                CoreAI.Sandbox.LuaApiRegistry registry,
+                Sandbox.LuaApiRegistry registry,
                 LuaCapabilities capabilities)
             {
                 if ((capabilities & LuaCapabilities.Read) != 0)
@@ -257,7 +257,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class UnscopedBindingsStub : IGameLuaRuntimeBindings
         {
-            public void RegisterGameplayApis(CoreAI.Sandbox.LuaApiRegistry registry)
+            public void RegisterGameplayApis(Sandbox.LuaApiRegistry registry)
             {
                 registry.Register("stub_edit", new Func<double>(() => 2d));
             }

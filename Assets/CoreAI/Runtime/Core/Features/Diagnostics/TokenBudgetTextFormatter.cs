@@ -21,7 +21,8 @@ namespace CoreAI.Diagnostics
             return
                 $"Last request: {FormatTokenCount(calc.LastPromptTokens)} in / {FormatTokenCount(calc.LastCompletionTokens)} out / {FormatTokenCount(calc.LastTotalTokens)} total\n" +
                 $"Session: {calc.TotalPromptTokens} in / {calc.TotalCompletionTokens} out / {calc.TotalTokens} total\n" +
-                Invariant($"Requests: {calc.TotalRequests} (with usage: {calc.RequestsWithUsage}) | avg {calc.AverageTokensPerRequest:F0} tok/req");
+                Invariant(
+                    $"Requests: {calc.TotalRequests} (with usage: {calc.RequestsWithUsage}) | avg {calc.AverageTokensPerRequest:F0} tok/req");
         }
 
         /// <summary>

@@ -73,8 +73,8 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, $"coreai_world_spawn('enemy.basic', 'e1', {x}, {y}, {z})"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, $"coreai_world_spawn('enemy.basic', 'e1', {x}, {y}, {z})"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 
@@ -95,8 +95,8 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, $"coreai_world_move('e1', {x}, {y}, {z})"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, $"coreai_world_move('e1', {x}, {y}, {z})"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 
@@ -114,7 +114,8 @@ namespace CoreAI.Tests.EditMode
 
             env.RunChunk(script, "coreai_world_load_scene('allowed_scene')");
             Assert.AreEqual(1, sink.Items.Count);
-            CoreAiWorldCommandEnvelope envelope = JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[0].JsonPayload);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[0].JsonPayload);
             Assert.AreEqual(WorldCommand, sink.Items[0].CommandTypeId);
             Assert.AreEqual("load_scene", envelope.action);
             Assert.AreEqual("allowed_scene", envelope.sceneName);
@@ -132,7 +133,8 @@ namespace CoreAI.Tests.EditMode
             env.RunChunk(script, "coreai_world_play_sound('hero', 'laser', 0/0)");
             Assert.AreEqual(1, sink.Items.Count);
 
-            CoreAiWorldCommandEnvelope envelope = JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[0].JsonPayload);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[0].JsonPayload);
             Assert.AreEqual("play_sound", envelope.action);
             Assert.AreEqual("hero", envelope.targetName);
             Assert.AreEqual("laser", envelope.stringValue);
@@ -218,8 +220,8 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_grid('p','cell',0,0,2,2,0.1,0)"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_grid('p','cell',0,0,2,2,0.1,0)"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 
@@ -232,8 +234,8 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_grid('p','cell',0,0,10,10,1,0)"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_grid('p','cell',0,0,10,10,1,0)"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 
@@ -344,12 +346,12 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 0/0 })"));
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1/0 })"));
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1000000 })"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_set_props('hero', { scale = 0/0 })"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1/0 })"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_set_props('hero', { scale = 1000000 })"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 
@@ -384,8 +386,8 @@ namespace CoreAI.Tests.EditMode
             SecureLuaEnvironment env = new();
             Script script = env.CreateScript(reg);
 
-            Assert.Throws<ScriptRuntimeException>(
-                () => env.RunChunk(script, "coreai_world_set_props('hero', { speed = 3 })"));
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_set_props('hero', { speed = 3 })"));
         }
 
         [Test]
@@ -419,7 +421,6 @@ namespace CoreAI.Tests.EditMode
         {
             return JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(sink.Items[index].JsonPayload);
         }
-
     }
 }
 #endif

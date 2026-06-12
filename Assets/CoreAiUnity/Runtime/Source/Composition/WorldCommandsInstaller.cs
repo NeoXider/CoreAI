@@ -48,7 +48,7 @@ namespace CoreAI.Composition
             // Factory registration: the ctor's optional scene whitelist is supplied by the host
             // (e.g. CoreAILifetimeScope inspector), not resolvable by VContainer.
             builder.Register(c => new CoreAiWorldLuaRuntimeBindings(
-                    c.Resolve<CoreAI.Messaging.IAiGameCommandSink>(),
+                    c.Resolve<Messaging.IAiGameCommandSink>(),
                     allowedLuaScenes),
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
@@ -59,17 +59,17 @@ namespace CoreAI.Composition
                 : LuaCapabilities.All;
             // Factory registration: the ctor's optional budget parameters (int/long defaults)
             // are not resolvable by VContainer.
-            builder.Register(c => new CoreAI.Ai.LuaLogicSlots(c.Resolve<CoreAI.Logging.ILog>()),
+            builder.Register(c => new LuaLogicSlots(c.Resolve<Logging.ILog>()),
                 Lifetime.Singleton);
             // Factory registration: the ctor's optional LuaCapabilities parameter (enum default)
             // is not resolvable by VContainer.
             builder.Register(c => new AggregatingGameLuaRuntimeBindings(
-                    c.Resolve<CoreAI.Infrastructure.Logging.IGameLogger>(),
+                    c.Resolve<IGameLogger>(),
                     c.Resolve<CoreAiVersioningLuaRuntimeBindings>(),
                     c.Resolve<CoreAiWorldLuaRuntimeBindings>(),
                     c.Resolve<LuaTimeBindings>(),
                     c.Resolve<CoreAiWorldQueryLuaBindings>(),
-                    c.Resolve<CoreAI.Ai.LuaLogicSlots>(),
+                    c.Resolve<LuaLogicSlots>(),
                     c.Resolve<CoreAiFullUnityLuaRuntimeBindings>(),
                     scriptCapabilities), Lifetime.Singleton)
                 .As<IGameLuaRuntimeBindings>();
@@ -80,10 +80,10 @@ namespace CoreAI.Composition
 
             // Persistent mod runtime: long-lived Lua mods with hooks/timers/events + per-mod store.
             builder.Register(c => new FileLuaModStore(), Lifetime.Singleton)
-                .As<CoreAI.Ai.ILuaModStore>();
-            builder.Register(c => new CoreAI.Ai.LuaModRuntime(
+                .As<ILuaModStore>();
+            builder.Register(c => new LuaModRuntime(
                     c.Resolve<IGameLuaRuntimeBindings>(),
-                    c.Resolve<CoreAI.Ai.ILuaModStore>()),
+                    c.Resolve<ILuaModStore>()),
                 Lifetime.Singleton);
             builder.RegisterEntryPoint<LuaModRuntimeTicker>();
 
@@ -91,20 +91,20 @@ namespace CoreAI.Composition
             // game bindings as the Lua envelope pipeline, exposed as execute_lua + manage_mods
             // tools. Hosts that attach their own tools per role override via AgentMemoryPolicy.
             builder.Register<GameLuaToolExecutor>(Lifetime.Singleton)
-                .As<CoreAI.Ai.LuaTool.ILuaExecutor>();
+                .As<LuaTool.ILuaExecutor>();
             builder.RegisterBuildCallback(container =>
             {
                 try
                 {
                     AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
                     ICoreAISettings settings = container.Resolve<ICoreAISettings>();
-                    CoreAI.Logging.ILog log = container.Resolve<CoreAI.Logging.ILog>();
+                    Logging.ILog log = container.Resolve<Logging.ILog>();
                     LuaGenerationRateLimiter limiter = container.Resolve<LuaGenerationRateLimiter>();
 
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaLlmTool(container.Resolve<CoreAI.Ai.LuaTool.ILuaExecutor>(), settings, log, limiter));
+                        new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaModsLlmTool(container.Resolve<CoreAI.Ai.LuaModRuntime>(), settings, log));
+                        new LuaModsLlmTool(container.Resolve<LuaModRuntime>(), settings, log));
                 }
                 catch (VContainerException)
                 {

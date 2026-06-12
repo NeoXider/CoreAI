@@ -59,23 +59,46 @@ namespace CoreAI.Ai
         /// <summary>Merchant.</summary>
         public static RoleId Merchant => new(BuiltInAgentRoleIds.Merchant);
 
-        public static implicit operator string(RoleId roleId) => roleId.Value;
+        public static implicit operator string(RoleId roleId)
+        {
+            return roleId.Value;
+        }
 
         // Implicit conversions must not throw: a null/empty string maps to default(RoleId)
         // (IsEmpty == true) and is rejected later by the existing role validation.
-        public static implicit operator RoleId(string value) =>
-            string.IsNullOrWhiteSpace(value) ? default : new RoleId(value);
+        public static implicit operator RoleId(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? default : new RoleId(value);
+        }
 
-        public bool Equals(RoleId other) => string.Equals(Value, other.Value, StringComparison.Ordinal);
+        public bool Equals(RoleId other)
+        {
+            return string.Equals(Value, other.Value, StringComparison.Ordinal);
+        }
 
-        public override bool Equals(object obj) => obj is RoleId other && Equals(other);
+        public override bool Equals(object obj)
+        {
+            return obj is RoleId other && Equals(other);
+        }
 
-        public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Value);
+        public override int GetHashCode()
+        {
+            return StringComparer.Ordinal.GetHashCode(Value);
+        }
 
-        public override string ToString() => Value;
+        public override string ToString()
+        {
+            return Value;
+        }
 
-        public static bool operator ==(RoleId left, RoleId right) => left.Equals(right);
+        public static bool operator ==(RoleId left, RoleId right)
+        {
+            return left.Equals(right);
+        }
 
-        public static bool operator !=(RoleId left, RoleId right) => !left.Equals(right);
+        public static bool operator !=(RoleId left, RoleId right)
+        {
+            return !left.Equals(right);
+        }
     }
 }

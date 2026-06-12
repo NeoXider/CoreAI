@@ -58,7 +58,14 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
-                try { Directory.Delete(root, true); } catch { /* best effort */ }
+                try
+                {
+                    Directory.Delete(root, true);
+                }
+                catch
+                {
+                    /* best effort */
+                }
             }
         }
 
@@ -91,7 +98,14 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
-                try { Directory.Delete(root, true); } catch { /* best effort */ }
+                try
+                {
+                    Directory.Delete(root, true);
+                }
+                catch
+                {
+                    /* best effort */
+                }
             }
         }
     }

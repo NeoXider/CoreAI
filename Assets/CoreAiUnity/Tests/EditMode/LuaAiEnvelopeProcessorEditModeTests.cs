@@ -197,7 +197,7 @@ namespace CoreAI.Tests.EditMode
                 () => spy,
                 new NullLuaExecutionObserver(),
                 new MemoryLuaScriptVersionStore(),
-                rateLimiter: new LuaGenerationRateLimiter(maxPerWindow: 1, windowSeconds: 3600));
+                rateLimiter: new LuaGenerationRateLimiter(1, 3600));
 
             // First envelope consumes the only slot in the window.
             proc.Process(new ApplyAiGameCommand

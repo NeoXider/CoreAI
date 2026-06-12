@@ -12,7 +12,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryAcquire_AllowsUpToMaxPerWindow_ThenRejects()
         {
-            var limiter = new LuaGenerationRateLimiter(maxPerWindow: 3, windowSeconds: 60);
+            LuaGenerationRateLimiter limiter = new(3, 60);
 
             Assert.IsTrue(limiter.TryAcquire(0));
             Assert.IsTrue(limiter.TryAcquire(1));
@@ -25,7 +25,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryAcquire_SlidingWindow_FreesSlotsAfterWindowElapses()
         {
-            var limiter = new LuaGenerationRateLimiter(maxPerWindow: 2, windowSeconds: 10);
+            LuaGenerationRateLimiter limiter = new(2, 10);
 
             Assert.IsTrue(limiter.TryAcquire(0));
             Assert.IsTrue(limiter.TryAcquire(5));
@@ -42,7 +42,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void TryAcquire_NonPositiveMax_DisablesLimit()
         {
-            var limiter = new LuaGenerationRateLimiter(maxPerWindow: 0, windowSeconds: 1);
+            LuaGenerationRateLimiter limiter = new(0, 1);
 
             for (int i = 0; i < 100; i++)
             {
@@ -55,7 +55,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Constructor_NonPositiveWindow_FallsBackToDefault()
         {
-            var limiter = new LuaGenerationRateLimiter(maxPerWindow: 1, windowSeconds: -5);
+            LuaGenerationRateLimiter limiter = new(1, -5);
             Assert.AreEqual(LuaGenerationRateLimiter.DefaultWindowSeconds, limiter.WindowSeconds);
         }
     }
