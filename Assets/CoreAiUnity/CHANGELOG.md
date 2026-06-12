@@ -6,6 +6,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.5] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.3**.
+
+- Demo/chat tool recovery now handles malformed `manage_mods` calls before MEAI invocation. Missing required arguments such as `action` are returned to the model as schema-aware tool failures, enabling the configured Programmer retry loop to repair the call instead of repeatedly surfacing `The arguments dictionary is missing a value for the required parameter 'action'`.
+- Added EditMode coverage for required tool-argument validation and schema repair feedback.
+
 ## [4.0.4] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.2**.

@@ -4,6 +4,10 @@
 
 - No unreleased changes.
 
+## [4.0.3] - 2026-06-12
+
+- **Tool schema repair feedback.** `ToolExecutionPolicy` now validates required arguments from each tool's `ParametersSchema` before invoking the MEAI function binding. Malformed calls such as `manage_mods` with `{}` now return a normal failed tool result that names the missing `action` argument and includes the expected JSON schema, so the Programmer can retry with corrected arguments instead of receiving a low-level `AIFunctionFactory` exception.
+
 ## [4.0.2] - 2026-06-12
 
 - **Tool-only chat failure fallback.** `AiOrchestrator` now preserves terminal `ExecutedToolCalls` from streaming completions and turns empty tool-only responses into an explicit tool status message. Failed `Programmer` tool turns now surface the real tool error, for example `manage_mods 'load' failed: attempt to index a function value`, instead of running structured validation and showing `Response is empty or whitespace`.

@@ -11,6 +11,7 @@ using CoreAI.Logging;
 using CoreAI.Messaging;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -252,6 +253,23 @@ namespace CoreAI.Infrastructure.Llm
                 LlmToolCallInfo info = BuildInfo(fc);
                 _eventPublisher.PublishStarted(info);
                 Stopwatch sw = Stopwatch.StartNew();
+
+                string validationError = ValidateRequiredArguments(fc);
+                if (!string.IsNullOrEmpty(validationError))
+                {
+                    sw.Stop();
+                    _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {validationError}", LogTag.Llm);
+                    _eventPublisher.PublishFailed(info, validationError, sw.Elapsed.TotalMilliseconds);
+                    _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
+                        "schema-validation", validationError));
+                    LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, validationError);
+                    return new ToolCallResult
+                    {
+                        Result = new MEAI.FunctionResultContent(fc.CallId, validationError),
+                        Succeeded = false
+                    };
+                }
+
                 MEAI.AIFunctionArguments args = null;
                 if (fc.Arguments != null)
                 {
@@ -386,6 +404,111 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = false
                 };
             }
+        }
+
+        private string ValidateRequiredArguments(MEAI.FunctionCallContent fc)
+        {
+            ILlmTool tool = _originalTools.FirstOrDefault(t =>
+                string.Equals(t.Name, fc?.Name, StringComparison.Ordinal));
+            if (tool == null || string.IsNullOrWhiteSpace(tool.ParametersSchema) ||
+                tool.ParametersSchema.Trim() == "{}")
+            {
+                return "";
+            }
+
+            List<string> required = ReadRequiredParameters(tool.ParametersSchema);
+            if (required.Count == 0)
+            {
+                return "";
+            }
+
+            List<string> missing = new();
+            foreach (string name in required)
+            {
+                if (fc?.Arguments == null || !fc.Arguments.TryGetValue(name, out object value) ||
+                    IsMissingArgumentValue(value))
+                {
+                    missing.Add(name);
+                }
+            }
+
+            if (missing.Count == 0)
+            {
+                return "";
+            }
+
+            string schema = CompactSchema(tool.ParametersSchema, 1200);
+            return
+                $"Error: Tool '{tool.Name}' is missing required argument(s): {string.Join(", ", missing)}. " +
+                $"Retry the same tool call with JSON arguments matching this schema: {schema}";
+        }
+
+        private static List<string> ReadRequiredParameters(string schema)
+        {
+            try
+            {
+                JObject root = JObject.Parse(schema);
+                JArray required = root["required"] as JArray;
+                if (required == null)
+                {
+                    return new List<string>();
+                }
+
+                List<string> result = new();
+                foreach (JToken token in required)
+                {
+                    string value = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        result.Add(value.Trim());
+                    }
+                }
+
+                return result;
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        private static bool IsMissingArgumentValue(object value)
+        {
+            if (value == null)
+            {
+                return true;
+            }
+
+            if (value is string text)
+            {
+                return string.IsNullOrWhiteSpace(text);
+            }
+
+            if (value is JValue jValue)
+            {
+                if (jValue.Type == JTokenType.Null || jValue.Type == JTokenType.Undefined)
+                {
+                    return true;
+                }
+
+                if (jValue.Type == JTokenType.String)
+                {
+                    return string.IsNullOrWhiteSpace(jValue.Value<string>());
+                }
+            }
+
+            return false;
+        }
+
+        private static string CompactSchema(string schema, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(schema))
+            {
+                return "{}";
+            }
+
+            string compact = schema.Trim().Replace("\r", "").Replace("\n", "");
+            return compact.Length <= maxChars ? compact : compact.Substring(0, maxChars) + "...";
         }
 
         /// <summary>

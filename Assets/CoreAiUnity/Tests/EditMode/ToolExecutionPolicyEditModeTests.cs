@@ -93,7 +93,7 @@ namespace CoreAI.Tests.EditMode
         {
             public string Name { get; set; } = "test_tool";
             public string Description => "Test tool";
-            public string ParametersSchema => "{}";
+            public string ParametersSchema { get; set; } = "{}";
             public bool AllowDuplicates { get; set; } = false;
         }
 
@@ -375,6 +375,41 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("memory", trace.Name);
             Assert.IsFalse(trace.Success);
             Assert.AreEqual("missing", trace.Source);
+        }
+
+        [Test]
+        public async Task ExecuteSingle_MissingRequiredArgument_ReturnsSchemaRepairError()
+        {
+            const string schema =
+                "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"description\":\"One of: list, load\"}},\"required\":[\"action\"]}";
+
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>
+                {
+                    new StubTool
+                    {
+                        Name = "manage_mods",
+                        ParametersSchema = schema
+                    }
+                },
+                false, "test", 3);
+
+            Func<string, string> func = action => $"action={action}";
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(func,
+                new MEAI.AIFunctionFactoryOptions { Name = "manage_mods", Description = "Manage mods" }));
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                MakeToolCall("manage_mods", new Dictionary<string, object?>()),
+                opts,
+                CancellationToken.None);
+
+            string text = result.Result.Result.ToString();
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.Contains("missing required argument(s): action", text);
+            StringAssert.Contains("Retry the same tool call with JSON arguments matching this schema", text);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
         }
 
         [Test]
