@@ -1429,7 +1429,7 @@ namespace CoreAI.Chat
                     TimeSpan gap = DateTime.UtcNow - lastChunkAt;
                     if (gap.TotalSeconds > StreamGapWarnSeconds)
                     {
-                        Logger.LogInfo(GameLogFeature.Core,
+                        Logger.LogWarning(GameLogFeature.Core,
                             $"[CoreAiChatPanel] Stream gap {gap.TotalSeconds:F1}s before chunk: " +
                             $"BufferedNoToolBinding={chunk.BufferedStreamingNoToolBinding}, " +
                             $"ToolHint={chunk.BufferedStreamingUseToolProgressHint}, " +

@@ -76,7 +76,8 @@ namespace CoreAI.Tests.EditMode
             _runner.Register(CreateYieldingCoroutine());
 
             UnityEngine.TestTools.LogAssert.Expect(LogType.Error,
-                "[LuaCoroutineRunner] Coroutine limit reached (2); registration rejected.");
+                new System.Text.RegularExpressions.Regex(
+                    @".*\[LuaCoroutineRunner\] Coroutine limit reached \(2\); registration rejected\."));
             Assert.Throws<InvalidOperationException>(() => _runner.Register(CreateYieldingCoroutine()));
             Assert.AreEqual(2, _runner.ActiveCount, "Отклонённая регистрация не должна менять ActiveCount");
         }

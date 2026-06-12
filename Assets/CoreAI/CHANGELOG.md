@@ -19,6 +19,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 - **`CoreAiFullUnityLuaRuntimeBindings`** — Full-tier `unity_*` reflection APIs (allow-all; planned blacklist documented).
 - Scene whitelist: **`luaAllowedScenes`** on `CoreAILifetimeScope` → `coreai_world_load_scene`.
 - Sandbox: rate limits, output caps, capability fail-closed for restricted mods.
+- `LuaApiRegistry` now exposes callbacks through MoonSharp `CallbackFunction` wrappers, so host validation failures surface to Lua as `ScriptRuntimeException` instead of leaking raw CLR exceptions.
 
 ### World commands
 
@@ -44,26 +45,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ## [Unreleased]
 
-### Lua as a second game language (`Docs/LUA_GAME_API.md`)
-
-- **`LuaCapabilities`** — capability tiers (`Read` / `Gameplay` / `WorldEdit` / `LogicOverride`); binding groups are only registered for granted tiers, so restricted scripts physically lack the functions.
-- **`LuaLogicSlots`** — game-declared overridable decision points: scripts install overrides via `logic_define(name, fn)` / `logic_reset` / `logic_list`; the game calls `TryInvokeNumber/Bool/String` with C# fallback. Fail-open: a throwing or over-budget override (200 ms / 200k steps) is removed automatically.
-- **`LuaModRuntime`** — persistent runtime for long-lived Lua mods: `hooks_on(event, fn)`, `hooks_every(seconds, fn)`, `events_emit(name, payload)`, `store_set/get` (via `ILuaModStore`), `mod_id()`; per-handler guards (100 ms / 100k steps), per-mod limits (64 handlers, 16 timers, 256 queued events), auto-unload after 8 handler errors; `LoadMod/UnloadMod/ReloadMod/EmitEvent/Tick`, `ModEventEmitted` event for the game side.
-- **`ILuaModStore`** — persistent per-mod string k/v contract backing `store_set/get`.
-
-### Lua sandbox hardening
-
-- **`package` global removed.** `Preset_HardSandbox` leaves an inert `package` table behind; `StripRiskyGlobals` now nils it (found by the new regression test).
-- **Capped `string.rep`.** The sandbox replaces `string.rep` with a capped implementation (`SecureLuaEnvironment.MaxStringRepLength = 1_000_000` chars) — single-instruction allocation bombs now fail with a script error before allocating.
-- **Coroutine total lifetime budget.** `LuaCoroutineHandle` tracks consumed instruction steps across resumes (`DefaultTotalLifetimeSteps = 1_000_000`) and kills the handle when the budget is exhausted, so infinite-yield coroutines are no longer immortal.
-- **Output/error caps in `LuaAiEnvelopeProcessor`.** Result summaries are truncated to 4,000 chars; error messages are normalized (newlines stripped) and truncated to 500 chars before entering payload/repair prompts.
-- **`execute_lua` rate-limited by default.** `LuaTool` now enforces a `LuaGenerationRateLimiter` (default-on; inject a shared instance via `LuaTool`/`LuaLlmTool` constructors to share one window with the envelope pipeline). Saturation returns a `Lua rate limit exceeded` result.
-
-### Reliability
-
-- **`AskWithCallback` marshals `onDone` to the caller's `SynchronizationContext`** (Unity main thread when called from it) instead of an arbitrary thread-pool thread.
-- **Full-exception logging.** Catch blocks in `AgentConfigExtensions` and `FileConversationSummaryStore` now log the full exception (`{ex}`) instead of `ex.Message`.
-- **`FileConversationSummaryStore` implements `IDisposable`** (disposes its `SemaphoreSlim` gate) and uses collision-proof sanitized filenames (FNV-1a hash suffix when sanitization changes the role id, so `A/B` and `A_B` cannot collide).
+- No unreleased changes.
 
 ## [v3.2.0] - 2026-06-11
 

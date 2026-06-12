@@ -20,41 +20,14 @@ Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned wi
 - **`AggregatingGameLuaRuntimeBindings`** — capability-scoped registration incl. Full tier.
 - Runtime logging: **`IGameLogger`** replaces direct `Debug.*` in chat/Lua/API paths.
 - **`LuaModRuntime.Tick`** perf: reusable scratch list.
+- Stream-gap diagnostics now log at warning level so the default `IGameLogger` filtering does not hide long streaming stalls.
+- Lua callback exception expectations were aligned with MoonSharp script-error semantics after `LuaApiRegistry` normalized host validation failures.
 
 See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIEW_2026-06-12_RU.md`**.
 
 ## [Unreleased]
 
-### Lua as a second game language (Unity host)
-
-- **`CoreAiWorldQueryLuaBindings`** — read API for Lua: `coreai_world_exists/pos/find/list_prefabs/raycast` (main-thread, applied-state snapshot, find capped at 100 results); `ICoreAiPrefabCatalog.ListPrefabKeys()` on `CoreAiPrefabRegistryAsset`.
-- **Level primitives & transactions** in `CoreAiWorldLuaRuntimeBindings`: `coreai_world_spawn_batch` (≤ 100), `coreai_world_grid` (≤ 100 cells, step ≥ 0.5), `coreai_world_parent`, `coreai_world_set_props` (whitelist: `scale`, `color`); `coreai_world_begin/commit/rollback` buffer commands (≤ 256, overflow auto-rolls back).
-- **Executor actions**: `parent`, `set_scale` (clamped 0.01–100), `set_color` (HTML color onto Renderer materials and UI Graphics).
-- **`FileLuaModStore`** — persistent per-mod k/v under `persistentDataPath/CoreAI/LuaMods` (≤ 256 keys/mod, ≤ 64 KB/value, atomic writes, collision-proof filenames); **`LuaModRuntimeTicker`** drives `LuaModRuntime.Tick` each frame; DI wiring in `WorldCommandsInstaller`.
-- **`AggregatingGameLuaRuntimeBindings`** gates binding groups by `LuaCapabilities` (default `All` preserves historical behavior) and registers query bindings + `LuaLogicSlots`.
-
-### Lua and world hardening
-
-- `string.rep` now uses a capped implementation in `SecureLuaEnvironment` (`MaxStringRepLength = 1_000_000`) and throws on oversized repetitions.
-- `LuaCoroutineHandle` enforces `DefaultTotalLifetimeSteps = 1_000_000` across resumes and kills over-budget handles.
-- `LuaAiEnvelopeProcessor` truncates result summaries to 4,000 chars and normalizes/truncates error messages to 500 chars.
-- `LuaTool` / `execute_lua` now rate-limits by default through an injectable `LuaGenerationRateLimiter` with shared limiter injection where applicable.
-- World and time bindings now validate numeric inputs:
-  `time_set_scale` rejects `NaN`/`Infinity` and clamps to `[0,10]`,
-  `play_sound` clamps to `[0,1]`,
-  coordinates are finite and bounded before command execution.
-- `coreai_world_load_scene` supports optional scene whitelist validation.
-
-### Autostart / callbacks / observability
-
-- `LlmUnityAutostartEntryPoint` emits distinct autostart state logs (startup status, warmup, failure state, started/stopped lifecycle).
-- `AskWithCallback` marshals callback invocation to the caller `SynchronizationContext`.
-- Error handling now logs full `Exception` data in ask/store/entry-point paths.
-
-### File stores and lifecycle
-
-- File stores now implement `IDisposable` (`FileConversationSummaryStore`, `FileAgentMemoryStore`) and use collision-safe sanitized filename handling.
-- CLI/CI hardening now checks Lua define injection/removal behavior, skips secret checks on PR-only flows, and passes `githubToken` to check-run creation where available.
+- No unreleased changes.
 
 ## [3.2.0] - 2026-06-11
 
@@ -2174,6 +2147,5 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.1.2] - earlier
 
 Baseline Unity host package. See git history.
-
 
 

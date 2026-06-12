@@ -1,6 +1,7 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using MoonSharp.Interpreter;
 
 namespace CoreAI.Sandbox
@@ -38,8 +39,42 @@ namespace CoreAI.Sandbox
         {
             foreach (KeyValuePair<string, Delegate> kv in _apis)
             {
-                globals[kv.Key] = kv.Value;
+                string name = kv.Key;
+                Delegate callback = kv.Value;
+                CallbackFunction moonSharpCallback = null;
+
+                globals[name] = DynValue.NewCallback((ctx, args) =>
+                {
+                    try
+                    {
+                        moonSharpCallback ??= CallbackFunction.FromDelegate(ctx.GetScript(), callback);
+                        return moonSharpCallback.Invoke(ctx, args.GetArray(), args.IsMethodCall);
+                    }
+                    catch (InterpreterException)
+                    {
+                        throw;
+                    }
+                    catch (TargetInvocationException ex) when (ex.InnerException != null)
+                    {
+                        throw ToScriptRuntimeException(name, ex.InnerException);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw ToScriptRuntimeException(name, ex);
+                    }
+                }, name);
             }
+        }
+
+        private static ScriptRuntimeException ToScriptRuntimeException(string name, Exception ex)
+        {
+            string message = ex.Message;
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                message = ex.GetType().Name;
+            }
+
+            return new ScriptRuntimeException($"{name}: {message}");
         }
     }
 }

@@ -82,6 +82,7 @@ When the limiter is saturated, the envelope fails with `Lua rate limit exceeded`
   for one handle, and the handle is forcibly killed when exceeded.
 - `LuaAiEnvelopeProcessor` normalizes and truncates results:
   result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** before entering the payload/repair path.
+- `LuaApiRegistry` wraps host callbacks through MoonSharp `CallbackFunction` and converts non-MoonSharp host validation exceptions into `ScriptRuntimeException`, so Lua callers see script errors instead of raw CLR exception types.
 - `coreai_world_load_scene` supports an optional scene whitelist check.
 - World bindings validate coordinate inputs before touching state:
   coordinates must be finite and `abs(value) <= 100000`.

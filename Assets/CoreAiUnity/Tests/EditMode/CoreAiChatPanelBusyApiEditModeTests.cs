@@ -227,7 +227,7 @@ namespace CoreAI.Tests.EditMode
         {
             using PanelCtx ctx = NewPanel();
             LogAssert.Expect(
-                LogType.Log,
+                LogType.Warning,
                 new System.Text.RegularExpressions.Regex(@".*\[CoreAiChatPanel\] Stream gap .* before chunk: .*"));
 
             ctx.Panel.ChatService = new CoreAiChatService(
