@@ -46,7 +46,7 @@ namespace CoreAI.Tests.EditMode
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public List<Ai.ChatMessage> FakeHistory { get; set; } = new();
-            public List<(string Role, string Content)> Appended { get; } = new();
+            public List<(string Role, string Content, bool Persist)> Appended { get; } = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {
@@ -68,7 +68,7 @@ namespace CoreAI.Tests.EditMode
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
-                Appended.Add((role, content));
+                Appended.Add((role, content, persistToDisk));
             }
 
             public Ai.ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
@@ -81,6 +81,75 @@ namespace CoreAI.Tests.EditMode
 
                 return FakeHistory.ToArray();
             }
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ChatSource_EnablesShortTermHistory_ForProgrammer()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage
+            {
+                Role = "user",
+                Content = "{\"hint\":\"отвечай на русском\",\"ai_task_source\":\"Chat\"}"
+            });
+            memory.FakeHistory.Add(new Ai.ChatMessage
+            {
+                Role = "assistant",
+                Content = "Понял, буду отвечать на русском языке."
+            });
+
+            AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = "какие моды есть",
+                SourceTag = "Chat"
+            });
+
+            Assert.IsFalse(policy.GetRoleConfig(BuiltInAgentRoleIds.Programmer).WithChatHistory,
+                "Chat source should not mutate the global Programmer role policy.");
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Assert.AreEqual(2, llm.LastRequest.ChatHistory.Count);
+            StringAssert.Contains("отвечай на русском", llm.LastRequest.ChatHistory[0].Text);
+            Assert.AreEqual(2, memory.Appended.Count);
+            Assert.IsFalse(memory.Appended[0].Persist,
+                "Programmer chat history is session context unless the role explicitly enables persistence.");
+            Assert.IsFalse(memory.Appended[1].Persist);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_NonChatSource_KeepsProgrammerHistoryDisabled()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new();
+            memory.FakeHistory.Add(new Ai.ChatMessage
+            {
+                Role = "user",
+                Content = "prior chat"
+            });
+
+            AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = "run lua"
+            });
+
+            Assert.IsNull(llm.LastRequest.ChatHistory);
+            Assert.AreEqual(0, memory.Appended.Count);
         }
 
         private sealed class TestSink : IAiGameCommandSink

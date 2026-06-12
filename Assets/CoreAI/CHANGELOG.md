@@ -45,7 +45,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ## [Unreleased]
 
-- No unreleased changes.
+- **Chat source history for tool roles.** `AiOrchestrator` now enables short-term chat history for requests with `SourceTag = "Chat"` even when the target role defaults to history-off (for example `Programmer`). The global role policy is not mutated and disk persistence stays off unless the role explicitly enables it, so non-chat Lua/repair tasks remain isolated while chat panels keep session instructions such as response language.
 
 ## [v3.2.0] - 2026-06-11
 

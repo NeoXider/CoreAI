@@ -85,9 +85,27 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        private sealed class CaptureLlm : ILlmClient
+        {
+            public LlmCompletionRequest LastRequest { get; private set; }
+
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                System.Threading.CancellationToken ct = default)
+            {
+                LastRequest = request;
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "ok" });
+            }
+        }
+
         private sealed class Mem : IAgentMemoryStore
         {
             public readonly List<ChatMessage> Rows = new();
+            public readonly List<(string Role, string Content, bool Persist)> Appended = new();
 
             public bool TryLoad(string roleId, out AgentMemoryState s)
             {
@@ -109,6 +127,7 @@ namespace CoreAI.Tests.PlayMode
 
             public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
             {
+                Appended.Add((role, content, persistToDisk));
             }
 
             public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
@@ -194,6 +213,54 @@ namespace CoreAI.Tests.PlayMode
                     Content = $"{i}: ".PadRight(36, '-')
                 });
             }
+        }
+
+        [UnityTest]
+        public IEnumerator Orchestrator_PlayMode_ChatSource_EnablesProgrammerShortTermHistory()
+        {
+            StubSet settings = new();
+            CaptureLlm llm = new();
+            Mem mem = new();
+            mem.Rows.Add(new ChatMessage
+            {
+                Role = "user",
+                Content = "{\"hint\":\"отвечай на русском\",\"ai_task_source\":\"Chat\"}"
+            });
+            mem.Rows.Add(new ChatMessage
+            {
+                Role = "assistant",
+                Content = "Понял, буду отвечать на русском языке."
+            });
+
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool(BuiltInAgentRoleIds.Programmer);
+            policy.SetToolsForRole(BuiltInAgentRoleIds.Programmer, Array.Empty<ILlmTool>());
+            AiOrchestrator orchestrator = new(
+                new SoloAuthorityHost(),
+                llm,
+                new Sink(),
+                new Telemetry(),
+                new AiPromptComposer(new PromptSys(), new PromptUsr(), null, null, policy, settings),
+                mem,
+                policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings);
+
+            Task task = orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = "какие моды есть",
+                SourceTag = "Chat"
+            });
+            yield return PlayModeTestAwait.WaitTask(task, 60f, "programmer chat history");
+
+            Assert.IsNotNull(llm.LastRequest?.ChatHistory);
+            Assert.AreEqual(2, llm.LastRequest.ChatHistory.Count);
+            StringAssert.Contains("отвечай на русском", llm.LastRequest.ChatHistory[0].Text);
+            Assert.AreEqual(2, mem.Appended.Count);
+            Assert.IsFalse(mem.Appended[0].Persist);
+            Assert.IsFalse(mem.Appended[1].Persist);
         }
 
         [UnityTest]

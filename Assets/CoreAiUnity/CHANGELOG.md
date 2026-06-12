@@ -27,7 +27,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 
 ## [Unreleased]
 
-- No unreleased changes.
+- Chat panels using tool-oriented roles such as `Programmer` now keep short-term session context through the orchestrator when sending `SourceTag = "Chat"`. This fixes follow-up instructions like "answer in Russian" being dropped on the next turn, without enabling persisted chat history or LLM compaction for normal Programmer/Lua tasks.
 
 ## [3.2.0] - 2026-06-11
 
@@ -2147,5 +2147,4 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.1.2] - earlier
 
 Baseline Unity host package. See git history.
-
 

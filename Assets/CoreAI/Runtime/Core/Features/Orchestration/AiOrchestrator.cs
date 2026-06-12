@@ -105,6 +105,7 @@ namespace CoreAI.Ai
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
+            roleConfig = ResolveRoleConfigForRequest(roleConfig, task);
 
             int contextWindowTokens = roleConfig.ContextTokens > 0
                 ? roleConfig.ContextTokens
@@ -836,6 +837,25 @@ namespace CoreAI.Ai
             }
 
             return null;
+        }
+
+        private static AgentMemoryPolicy.RoleMemoryConfig ResolveRoleConfigForRequest(
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+            AiTaskRequest task)
+        {
+            if (!IsChatSourceRequest(task) || roleConfig.WithChatHistory)
+            {
+                return roleConfig;
+            }
+
+            roleConfig.WithChatHistory = true;
+            roleConfig.PersistChatHistory = false;
+            return roleConfig;
+        }
+
+        private static bool IsChatSourceRequest(AiTaskRequest task)
+        {
+            return string.Equals(task?.SourceTag?.Trim(), "Chat", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

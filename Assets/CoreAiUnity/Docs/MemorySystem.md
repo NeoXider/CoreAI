@@ -171,6 +171,8 @@ These are **default policy choices**, not hard limits. The key distinction:
 
 **Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` defaults `WithChatHistory` to **false** and **`PersistChatHistory` to false** unless you pass `true` (for example **`PlainChat`** / **`SmartChat`** entries in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). That keeps agent roles on MemoryTool-only defaults without implying disk chat persistence.
 
+**Chat UI exception:** orchestrator requests with `SourceTag = "Chat"` get short-term chat history for the current role even if that role normally defaults to `WithChatHistory = false`. This is session context only unless the role policy already enables persistence. It lets a `CoreAiChatPanel` using `Programmer` remember immediate dialogue instructions such as the user's response language, while direct Programmer Lua/repair tasks still run without raw chat history.
+
 Recommended opt-ins:
 
 ```csharp
