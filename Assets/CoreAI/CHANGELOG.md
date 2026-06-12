@@ -4,6 +4,10 @@
 
 - No unreleased changes.
 
+## [4.0.7] - 2026-06-12
+
+- **Release sync.** `com.nexoider.coreai` is bumped to `4.0.7` so portable CoreAI and `com.nexoider.coreaiunity` remain version-aligned. Unity-side LiveMechanics persistence and docs changes are listed in the Unity package changelog.
+
 ## [4.0.4] - 2026-06-12
 
 - **Lua tool contract accuracy.** `execute_lua` metadata no longer advertises scene-specific helper globals such as `create_item()` as if they were always available. The tool now points Programmer agents at the real generic rule-slot APIs (`logic_list`, `logic_define`, `logic_reset`, `report`) and includes a working `loot_formula` example for live-mechanics edits.

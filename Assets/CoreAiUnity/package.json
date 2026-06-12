@@ -9,6 +9,6 @@
     "url": "https://github.com/NeoXider/CoreAI"
   },
   "dependencies": {
-    "com.nexoider.coreai": "4.0.4"
+    "com.nexoider.coreai": "4.0.7"
   }
 }
