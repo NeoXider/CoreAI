@@ -421,6 +421,8 @@ namespace CoreAI.Infrastructure.Llm
             ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
                 _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
+            string? pendingFailedToolRetryInstruction = null;
+            int emptyResponsesAfterToolFailure = 0;
 
             while (true)
             {
@@ -641,6 +643,20 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 string visibleText = iterationVisible.ToString();
+                if (string.IsNullOrWhiteSpace(visibleText) &&
+                    nativeToolCalls.Count == 0 &&
+                    !string.IsNullOrWhiteSpace(pendingFailedToolRetryInstruction) &&
+                    emptyResponsesAfterToolFailure < Math.Max(1, _settings.MaxToolCallRetries))
+                {
+                    emptyResponsesAfterToolFailure++;
+                    chatMessages.Add(new MEAI.ChatMessage(
+                        MEAI.ChatRole.User,
+                        pendingFailedToolRetryInstruction));
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        "MeaiLlmClient: Streaming model returned an empty response after a failed tool call; " +
+                        $"feeding explicit tool-error retry instruction ({emptyResponsesAfterToolFailure}/{Math.Max(1, _settings.MaxToolCallRetries)}).");
+                    continue;
+                }
 
                 // === Path 1: Native tool calls from SSE delta.tool_calls ===
                 if (nativeToolCalls.Count > 0 && aiTools.Count > 0)
@@ -680,6 +696,13 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(nativeToolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    pendingFailedToolRetryInstruction = batch.AllFailed
+                        ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
+                        : null;
+                    if (!batch.AnyFailed)
+                    {
+                        emptyResponsesAfterToolFailure = 0;
+                    }
 
                     if (policy.IsMaxErrorsReached)
                     {
@@ -805,6 +828,13 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    pendingFailedToolRetryInstruction = batch.AllFailed
+                        ? BuildFailedToolRetryInstruction(policy.ExecutedTraces)
+                        : null;
+                    if (!batch.AnyFailed)
+                    {
+                        emptyResponsesAfterToolFailure = 0;
+                    }
 
                     if (policy.IsMaxErrorsReached)
                     {
@@ -876,6 +906,65 @@ namespace CoreAI.Infrastructure.Llm
                     $"MeaiLlmClient: Streaming completed ({chunkCount} raw deltas, raw length={visibleText.Length}, sanitized length={emittedLen}, streamed live={streamedVisibleToConsumer})");
                 yield break;
             }
+        }
+
+        private static string BuildFailedToolRetryInstruction(IReadOnlyList<LlmToolCallTrace> traces)
+        {
+            LlmToolCallTrace failed = default;
+            bool found = false;
+            if (traces != null)
+            {
+                for (int i = traces.Count - 1; i >= 0; i--)
+                {
+                    if (!traces[i].Success)
+                    {
+                        failed = traces[i];
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found)
+            {
+                return "The previous tool call failed. Inspect the tool error, fix the arguments or code, and retry with a corrected tool call. Do not return an empty response.";
+            }
+
+            string name = string.IsNullOrWhiteSpace(failed.Name) ? "tool" : failed.Name.Trim();
+            string detail = ExtractToolTraceMessage(failed.Detail);
+            return string.IsNullOrWhiteSpace(detail)
+                ? $"The previous `{name}` tool call failed. Fix the arguments or code and retry with a corrected tool call. Do not return an empty response."
+                : $"The previous `{name}` tool call failed with this error: {detail}. Fix the arguments or code and retry with a corrected tool call. Do not return an empty response.";
+        }
+
+        private static string ExtractToolTraceMessage(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                return "";
+            }
+
+            string trimmed = detail.Trim();
+            try
+            {
+                JObject json = JObject.Parse(trimmed);
+                JToken token = json["message"] ?? json["Message"] ?? json["error"] ?? json["Error"];
+                if (token != null)
+                {
+                    string message = token.Type == JTokenType.String ? token.Value<string>() : token.ToString();
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        return message.Trim();
+                    }
+                }
+            }
+            catch
+            {
+                // Tool details may be plain text.
+            }
+
+            const int maxChars = 240;
+            return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
         }
 
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails usage, string model)

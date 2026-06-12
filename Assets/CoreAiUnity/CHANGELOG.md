@@ -6,6 +6,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.3] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.2**.
+
+- Streaming tool-call recovery now feeds an explicit retry instruction back to the model when a tool call fails and the next model turn is empty/whitespace. This keeps `Programmer` in the correction loop for failed Lua/mod tool calls instead of ending the chat with only a fallback diagnostic.
+- Added PlayMode coverage for the failed-tool -> empty-model-turn -> corrected-tool retry flow.
+
 ## [4.0.2] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.2**.

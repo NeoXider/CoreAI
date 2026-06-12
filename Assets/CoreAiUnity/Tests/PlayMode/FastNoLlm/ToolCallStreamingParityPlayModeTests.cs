@@ -158,6 +158,67 @@ namespace CoreAI.Tests.PlayMode
             });
         }
 
+        [UnityTest]
+        public IEnumerator Streaming_FailedToolThenEmptyModelTurn_FeedsRetryInstructionAndRecovers()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+                SpyLogger spy = new();
+                Log.Instance = spy;
+
+                CapturingScriptedStreamClient inner = new(
+                    new[]
+                    {
+                        "{\"name\":\"manage_mods\",\"arguments\":{\"action\":\"load\",\"code\":\"broken\"}}"
+                    },
+                    new[] { " \n " },
+                    new[]
+                    {
+                        "{\"name\":\"manage_mods\",\"arguments\":{\"action\":\"load\",\"code\":\"fixed\"}}"
+                    },
+                    new[] { "Recovered." });
+
+                FlakyManageModsTool tool = new();
+                MeaiLlmClient client = new(inner, spy, settings, new InMemoryMemoryStore());
+                LlmCompletionRequest request = new()
+                {
+                    AgentRoleId = BuiltInAgentRoleIds.Programmer,
+                    SystemPrompt = "x",
+                    UserPayload = "make boss reward",
+                    TraceId = "play-stream-retry-after-empty",
+                    Tools = new List<ILlmTool> { tool }
+                };
+
+                string visible = "";
+                LlmStreamChunk lastChunk = null;
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+                {
+                    if (!string.IsNullOrEmpty(chunk.Text))
+                    {
+                        visible += chunk.Text;
+                    }
+
+                    if (chunk.IsDone)
+                    {
+                        lastChunk = chunk;
+                    }
+                }
+
+                Assert.AreEqual(2, tool.CallCount, "The failed tool call should be retried after the empty model turn.");
+                Assert.AreEqual(4, inner.StreamCalls, "Expected fail call, empty turn, corrected call, final prose.");
+                Assert.IsTrue(inner.UserMessages.Any(m =>
+                        m.Contains("attempt to index a function value") &&
+                        m.Contains("retry with a corrected tool call")),
+                    "The model should receive explicit retry feedback after returning whitespace.");
+                StringAssert.Contains("Recovered.", visible);
+                Assert.IsNotNull(lastChunk);
+                Assert.That(lastChunk!.ExecutedToolCalls.Count, Is.GreaterThanOrEqualTo(2));
+                Assert.IsTrue(lastChunk.ExecutedToolCalls.Any(t => t.Name == "manage_mods" && !t.Success));
+                Assert.IsTrue(lastChunk.ExecutedToolCalls.Any(t => t.Name == "manage_mods" && t.Success));
+            });
+        }
+
         // ------------ Helpers ------------
 
         private static MEAI.ChatResponse MakeTextResponse(string text)
@@ -240,6 +301,77 @@ namespace CoreAI.Tests.PlayMode
 
             public void Dispose()
             {
+            }
+        }
+
+        private sealed class CapturingScriptedStreamClient : MEAI.IChatClient
+        {
+            private readonly Queue<string[]> _scripts;
+            public readonly List<string> UserMessages = new();
+            public int StreamCalls { get; private set; }
+
+            public CapturingScriptedStreamClient(params string[][] scripts)
+            {
+                _scripts = new Queue<string[]>(scripts);
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chat,
+                MEAI.ChatOptions o = null, CancellationToken ct = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chat, MEAI.ChatOptions o = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken ct = default)
+            {
+                StreamCalls++;
+                UserMessages.AddRange(chat.Where(m => m.Role == MEAI.ChatRole.User).Select(m => m.Text ?? ""));
+                if (_scripts.Count == 0)
+                {
+                    yield break;
+                }
+
+                foreach (string s in _scripts.Dequeue())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, s);
+                    await Task.Yield();
+                }
+            }
+
+            public object GetService(Type t, object key = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private sealed class FlakyManageModsTool : ILlmTool, IAIFunctionLlmTool
+        {
+            public int CallCount { get; private set; }
+            public string Name => "manage_mods";
+            public string Description => "Test manage_mods tool.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                Func<string, string, string> fn = (action, code) =>
+                {
+                    CallCount++;
+                    return code == "fixed"
+                        ? "{\"success\":true,\"message\":\"loaded\"}"
+                        : "{\"success\":false,\"message\":\"manage_mods 'load' failed: attempt to index a function value\"}";
+                };
+                return MEAI.AIFunctionFactory.Create(
+                    fn,
+                    Name,
+                    Description);
             }
         }
 
