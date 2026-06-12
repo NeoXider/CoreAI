@@ -97,6 +97,12 @@ log_info(mod_id())
 мод; очередь событий ≤ 256 (старые вытесняются); 8 ошибок подряд — мод выгружается сам.
 Хранилище — `FileLuaModStore` (`persistentDataPath/CoreAI/LuaMods`, ≤ 256 ключей, значение ≤ 64 КБ).
 
+Persistence boundary: `FileLuaModStore` persists per-mod `store_set` / `store_get` string values.
+It does not automatically persist or autoload the set of currently loaded mod source chunks; hosts
+that want mod autoload should persist selected mod sources separately and call `LoadMod` / `ReloadMod`
+during startup. One-shot `execute_lua` rule-slot edits can be persisted by the host with
+`ILuaScriptVersionStore`; the LiveMechanics demo does this for its own known slots.
+
 ## Этап 4 — уровневые примитивы и транзакции
 
 Батчи не упираются в rate-limit `execute_lua` — один вызов публикует до 100 команд:

@@ -21,6 +21,13 @@ namespace CoreAI.Infrastructure.Lua
         private readonly IGameLuaRuntimeBindings _bindings;
         private readonly ILuaExecutionObserver _observer;
 
+        /// <summary>
+        /// Raised after <c>execute_lua</c> successfully runs a chunk. Scene demos can subscribe to
+        /// persist their own game-specific Lua changes without making the generic executor own
+        /// scene policy.
+        /// </summary>
+        public static event Action<string> LuaExecutedSuccessfully;
+
         public GameLuaToolExecutor(
             SecureLuaEnvironment sandbox,
             IGameLuaRuntimeBindings bindings,
@@ -51,6 +58,7 @@ namespace CoreAI.Infrastructure.Lua
                 DynValue result = _sandbox.RunChunk(script, code);
                 string summary = Truncate(result.ToPrintString(), LuaAiEnvelopeProcessor.MaxResultSummaryLength);
                 _observer.OnLuaSuccess(summary);
+                LuaExecutedSuccessfully?.Invoke(code ?? "");
                 return Task.FromResult(new LuaTool.LuaResult { Success = true, Output = summary });
             }
             catch (Exception ex)

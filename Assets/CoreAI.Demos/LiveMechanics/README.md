@@ -51,6 +51,17 @@
 Подсказка модели, если она не знает API: в промпте можно прямо назвать функции —
 `logic_define(name, fn)`, `logic_reset(name)`, `logic_list()`, `report(msg)`.
 
+## Persistence
+
+LiveMechanics persists successful chat-driven `execute_lua` rule changes for its known logic slots
+(`damage_formula`, `attack_interval`, `loot_formula`, `boss_reward`) through
+`ILuaScriptVersionStore` under `persistentDataPath/CoreAI/LuaScriptVersions`. When the scene starts
+again, it reapplies the saved Lua chunk before the battle loop continues.
+
+`manage_mods` and `LuaModRuntime` are separate: `store_set` / `store_get` values inside a mod are
+file-backed by `FileLuaModStore`, but the loaded mod source list is not auto-restored by this demo.
+Hosts that want mods to autoload should load/reload their selected mod sources on startup.
+
 ## Безопасность
 
 Код модели исполняется только в `SecureLuaEnvironment` (sandbox MoonSharp: без io/os/файлов,

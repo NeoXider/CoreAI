@@ -6,6 +6,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - No unreleased changes.
 
+## [4.0.7] - 2026-06-12
+
+Depends on **`com.nexoider.coreai` 4.0.4**.
+
+- LiveMechanics now persists successful `execute_lua` rule-slot edits that touch its known slots (`damage_formula`, `attack_interval`, `loot_formula`, `boss_reward`) through `ILuaScriptVersionStore` and reapplies the saved Lua on scene start.
+- `GameLuaToolExecutor` now raises a successful-code notification so scene demos can persist scene-specific Lua policy without making the generic executor own scene state.
+- Docs clarify the current Lua mod persistence boundary: `store_set` / `store_get` data is file-backed, while loaded mod source/autoload is still explicit host policy rather than automatic `LuaModRuntime` behavior.
+
 ## [4.0.6] - 2026-06-12
 
 Depends on **`com.nexoider.coreai` 4.0.4**.

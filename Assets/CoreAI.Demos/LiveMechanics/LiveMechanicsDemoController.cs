@@ -3,6 +3,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Infrastructure.Lua;
 using VContainer;
 #endif
 
@@ -33,12 +34,15 @@ namespace CoreAI.Demos
         private const double BossDefense = 10d;
         private const double BossMaxHp = 200d;
         private const int MaxLogLines = 12;
+        private const string PersistedRulesKey = "demo.live_mechanics.rules";
 
         [Tooltip("Scene CoreAI scope. Auto-found when left empty.")] [SerializeField]
         private CoreAILifetimeScope coreAiScope;
 
         private LuaLogicSlots _slots;
         private LuaModRuntime _mods;
+        private ILuaScriptVersionStore _versions;
+        private LuaTool.ILuaExecutor _luaExecutor;
         private readonly List<string> _battleLog = new();
         private double _bossHp = BossMaxHp;
         private double _gold;
@@ -63,12 +67,21 @@ namespace CoreAI.Demos
 
             _slots = coreAiScope.Container.Resolve<LuaLogicSlots>();
             _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
+            _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
+            _luaExecutor = coreAiScope.Container.Resolve<LuaTool.ILuaExecutor>();
             _slots.DeclareSlot(DamageSlot);
             _slots.DeclareSlot(AttackIntervalSlot);
             _slots.DeclareSlot(LootSlot);
             _slots.DeclareSlot(BossRewardSlot);
+            LoadPersistedRules();
+            GameLuaToolExecutor.LuaExecutedSuccessfully += OnLuaExecutedSuccessfully;
             _status = "Press C to open the chat and ask the AI to change the rules.";
             Log("Battle started. Default rules: damage = atk - def, attack every 2s, loot = 10 gold.");
+        }
+
+        private void OnDestroy()
+        {
+            GameLuaToolExecutor.LuaExecutedSuccessfully -= OnLuaExecutedSuccessfully;
         }
 
         private void Update()
@@ -131,6 +144,53 @@ namespace CoreAI.Demos
             {
                 _battleLog.RemoveAt(0);
             }
+        }
+
+        private void LoadPersistedRules()
+        {
+            if (_versions == null || _luaExecutor == null ||
+                !_versions.TryGetSnapshot(PersistedRulesKey, out LuaScriptVersionRecord record) ||
+                string.IsNullOrWhiteSpace(record.CurrentLua))
+            {
+                return;
+            }
+
+            LuaTool.LuaResult result = _luaExecutor
+                .ExecuteAsync(record.CurrentLua, System.Threading.CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            if (result.Success)
+            {
+                Log("Loaded saved Lua rule overrides.");
+                return;
+            }
+
+            Debug.LogWarning($"[LiveMechanicsDemo] Saved Lua rules failed to load: {result.Error}");
+        }
+
+        private void OnLuaExecutedSuccessfully(string code)
+        {
+            if (_versions == null || !ContainsLiveMechanicsRuleChange(code))
+            {
+                return;
+            }
+
+            _versions.SeedOriginal(PersistedRulesKey, "", false);
+            _versions.RecordSuccessfulExecution(PersistedRulesKey, code ?? "");
+            Log("Saved Lua rule overrides.");
+        }
+
+        private static bool ContainsLiveMechanicsRuleChange(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code) || code.IndexOf("logic_define", System.StringComparison.Ordinal) < 0)
+            {
+                return false;
+            }
+
+            return code.IndexOf(DamageSlot, System.StringComparison.Ordinal) >= 0 ||
+                   code.IndexOf(AttackIntervalSlot, System.StringComparison.Ordinal) >= 0 ||
+                   code.IndexOf(LootSlot, System.StringComparison.Ordinal) >= 0 ||
+                   code.IndexOf(BossRewardSlot, System.StringComparison.Ordinal) >= 0;
         }
 
         private void OnGUI()
