@@ -170,4 +170,38 @@ namespace CoreAI.Ai
             return state;
         }
     }
+
+    /// <summary>Builds the Programmer task used to repair a failing active Lua mod.</summary>
+    public static class LuaModAutoRepairTaskFactory
+    {
+        public static AiTaskRequest CreateProgrammerRepairTask(
+            string modId,
+            string source,
+            string error,
+            int attempt,
+            string modVersionKeyPrefix = "",
+            string sourceTag = "lua_mod_auto_repair")
+        {
+            string id = (modId ?? "").Trim();
+            string hint =
+                $"The Lua mod '{id}' is throwing at runtime and must be fixed. The broken source is in " +
+                "fix_this_lua and the error is in lua_error. Fix the bug, then re-apply the corrected Lua under " +
+                $"the same id: call manage_mods reload mod_id='{id}' if it is still loaded, otherwise " +
+                $"manage_mods load mod_id='{id}' (run manage_mods list first if unsure). " +
+                "Keep the mod's original intent and id; do not create a new mod id.";
+
+            return new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = hint,
+                LuaRepairGeneration = attempt,
+                LuaRepairPreviousCode = source ?? "",
+                LuaRepairErrorMessage = error ?? "",
+                SourceTag = string.IsNullOrWhiteSpace(sourceTag) ? "lua_mod_auto_repair" : sourceTag.Trim(),
+                LuaScriptVersionKey = string.IsNullOrWhiteSpace(modVersionKeyPrefix)
+                    ? ""
+                    : modVersionKeyPrefix.Trim() + id
+            };
+        }
+    }
 }

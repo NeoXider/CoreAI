@@ -124,5 +124,30 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LuaModAutoRepairDecision.GaveUp, policy.Evaluate("m", 1, 0d, out _));
             Assert.AreEqual(LuaModAutoRepairDecision.Skip, policy.Evaluate("m", 2, 1d, out _));
         }
+
+        [Test]
+        public void CreateProgrammerRepairTask_CarriesModErrorSourceAndVersionContext()
+        {
+            AiTaskRequest task = LuaModAutoRepairTaskFactory.CreateProgrammerRepairTask(
+                "broken_mod",
+                "hooks_every(1, function() error('boom') end)",
+                "attempt to index nil",
+                2,
+                "demo.live_mechanics.mods_chat.mod.",
+                "demo_auto_repair");
+
+            Assert.AreEqual(BuiltInAgentRoleIds.Programmer, task.RoleId);
+            Assert.AreEqual(2, task.LuaRepairGeneration);
+            Assert.AreEqual("hooks_every(1, function() error('boom') end)", task.LuaRepairPreviousCode);
+            Assert.AreEqual("attempt to index nil", task.LuaRepairErrorMessage);
+            Assert.AreEqual("demo_auto_repair", task.SourceTag);
+            Assert.AreEqual("demo.live_mechanics.mods_chat.mod.broken_mod", task.LuaScriptVersionKey);
+            StringAssert.Contains("broken_mod", task.Hint);
+            StringAssert.Contains("fix_this_lua", task.Hint);
+            StringAssert.Contains("lua_error", task.Hint);
+            StringAssert.Contains("manage_mods reload", task.Hint);
+            StringAssert.Contains("manage_mods load", task.Hint);
+            StringAssert.Contains("do not create a new mod id", task.Hint);
+        }
     }
 }

@@ -154,25 +154,14 @@ namespace CoreAI.Presentation
         {
             try
             {
-                string hint =
-                    $"The Lua mod '{modId}' is throwing at runtime and must be fixed. The broken source is in " +
-                    "fix_this_lua and the error is in lua_error. Fix the bug, then re-apply the corrected Lua under " +
-                    $"the same id: call manage_mods reload mod_id='{modId}' if it is still loaded, otherwise " +
-                    $"manage_mods load mod_id='{modId}' (run manage_mods list first if unsure). " +
-                    "Keep the mod's original intent and id; do not create a new mod id.";
-
-                await _orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Programmer,
-                    Hint = hint,
-                    LuaRepairGeneration = attempt,
-                    LuaRepairPreviousCode = source ?? "",
-                    LuaRepairErrorMessage = error ?? "",
-                    SourceTag = sourceTag,
-                    LuaScriptVersionKey = string.IsNullOrWhiteSpace(modVersionKeyPrefix)
-                        ? ""
-                        : modVersionKeyPrefix.Trim() + modId
-                });
+                AiTaskRequest task = LuaModAutoRepairTaskFactory.CreateProgrammerRepairTask(
+                    modId,
+                    source,
+                    error,
+                    attempt,
+                    modVersionKeyPrefix,
+                    sourceTag);
+                await _orchestrator.RunTaskAsync(task);
             }
             catch (Exception ex)
             {
