@@ -415,7 +415,12 @@ namespace CoreAI.Demos
         {
             if (go != null && go.TryGetComponent(out Renderer renderer))
             {
-                renderer.sharedMaterial = new Material(Shader.Find("Standard")) { color = color };
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit") ??
+                                Shader.Find("Standard") ??
+                                Shader.Find("Unlit/Color");
+                Material material = shader != null ? new Material(shader) : new Material(renderer.sharedMaterial);
+                material.color = color;
+                renderer.sharedMaterial = material;
             }
         }
 
