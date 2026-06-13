@@ -47,6 +47,10 @@ namespace CoreAI.Composition
         [SerializeField]
         private bool enableFullLuaAccess;
 
+        [Tooltip("When enabled, Full-tier Lua reflection can access non-public members.")]
+        [SerializeField]
+        private bool enableFullLuaPrivateAccess;
+
         [Header("Network / AI authority")]
         [Tooltip("Controls where LLM and orchestration execution is allowed.")]
         [SerializeField]
@@ -98,7 +102,11 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
-            builder.RegisterWorldCommands(worldPrefabRegistry, luaAllowedScenes, enableFullLuaAccess);
+            builder.RegisterWorldCommands(
+                worldPrefabRegistry,
+                luaAllowedScenes,
+                enableFullLuaAccess,
+                enableFullLuaPrivateAccess);
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
 

@@ -1,49 +1,52 @@
-# TODO
+﻿# TODO
 
-> Обновлено 2026-06-12. Выполненное v4.0.0 — в `CHANGELOG.md` (оба пакета) и git-логе. Здесь только открытые задачи.
+> Updated 2026-06-12. Completed v4.0.0 work is in `CHANGELOG.md` (both packages) and the git log. This file lists only open tasks.
 
-## v4.0.0 — сделано (2026-06-12)
+## v4.0.0 - done (2026-06-12)
 
-- [x] Lua как второй язык: этапы 1–5, capability tiers, `manage_mods`, sandbox/audit fixes.
-- [x] Демо `Assets/CoreAI.Demos/`: LuaMods, WorldCommands, Skills, LiveMechanics (+ LLM чат).
-- [x] `ICoreAiCustomWorldCommandHandler`, whitelist сцен, perf (MPB `set_color`, `LuaModRuntime.Tick` scratch).
-- [x] Документация: `LUA_GAME_API`, `LUA_BEST_PRACTICES_RU`, `MOONSHARP_NATIVE_APIS_RU`, `LUA_ACCESS_MODES_AUDIT_RU`, `PERF_REVIEW_2026-06-12_RU`.
-- [x] Версия **4.0.0** в `com.nexoider.coreai` / `com.nexoider.coreaiunity`.
-- [x] `IGameLogger` вместо `Debug.*` в CoreAiUnity Runtime.
+- [x] Lua as a second language: phases 1-5, capability tiers, `manage_mods`, sandbox/audit fixes.
+- [x] Demo `Assets/CoreAI.Demos/`: LuaMods, WorldCommands, Skills, LiveMechanics (+ LLM chat).
+- [x] `ICoreAiCustomWorldCommandHandler`, scene whitelist, perf (MPB `set_color`, `LuaModRuntime.Tick` scratch).
+- [x] Documentation: `LUA_GAME_API`, `LUA_BEST_PRACTICES_RU`, `MOONSHARP_NATIVE_APIS_RU`, `LUA_ACCESS_MODES_AUDIT_RU`, `PERF_REVIEW_2026-06-12_RU`.
+- [x] Version **4.0.0** in `com.nexoider.coreai` / `com.nexoider.coreaiunity`.
+- [x] `IGameLogger` instead of `Debug.*` in CoreAiUnity Runtime.
 
-## [P1] Full-режим — начат, не завершён
+## [P1] Full mode
 
-> Сейчас есть: `LuaCapabilities.Full`, reflection-биндинги `CoreAiFullUnityLuaRuntimeBindings` (`unity_*`), opt-in `enableFullLuaAccess`, EditMode-тесты, аудит `LUA_ACCESS_MODES_AUDIT_RU.md`, README + controller в `FullAccess/` (без `.unity` сцены).
+> Currently available: `LuaCapabilities.Full`, reflection bindings `CoreAiFullUnityLuaRuntimeBindings` (`unity_*`), opt-in `enableFullLuaAccess`, audit `LUA_ACCESS_MODES_AUDIT_RU.md`.
 
-- [ ] **Демо-сцена** `FullAccess/FullAccessDemo.unity` (чат + scope с Full + TargetCube).
-- [ ] **PlayMode-тесты** Full: `unity_find` / `unity_set_position` на объекте в сцене.
-- [ ] **Миграция на MoonSharp `UserData.RegisterType`** вместо reflection на горячем пути (см. `MOONSHARP_NATIVE_APIS_RU.md`).
-- [ ] **Blacklist** типов/членов для Full (идея в аудите, Planned — не реализовывать до отдельной задачи, но задокументировать API `IFullLuaAccessBlacklistPolicy` при внедрении).
+- [x] **Demo scene** `FullAccess/FullAccessDemo.unity` (chat + scope with Full + auto-`TargetCube`, prompt buttons move/grow/inspect).
+- [x] **PlayMode tests** Full: `unity_find` / `unity_set_position` on a scene object.
+- [x] **Member visibility:** public-by-default, non-public is opt-in (`enableFullLuaPrivateAccess` / ctor `allowNonPublicMembers`) + EditMode tests.
+- [ ] **Migration to MoonSharp `UserData.RegisterType`** - *audit conclusion 2026-06-13:* reflection cannot be removed completely without losing allow-all semantics (addressing a member by string = reflection; `UserData` in Reflection mode does the same). `LazyOptimized` breaks on IL2CPP (no JIT), and hardwiring is impossible for types that are not known in advance. The current cached reflection is the most AOT-portable option and is not on a hot path (admin/debug tier). Migration would provide more idiomatic syntax, not performance; not a priority.
+- [ ] **Blacklist** types/members for Full (idea from the audit, Planned - do not implement until a separate task, but document the `IFullLuaAccessBlacklistPolicy` API when introducing it).
 
-## Инфраструктура
+## Infrastructure
 
-- [ ] **Секреты GameCI** (`UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`) — без них CI matrix moonsharp / no-lua не запустится.
-- [ ] **GitHub Release / tag v4.0.0** после пуша.
+- [ ] **GameCI secrets** (`UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`) - without them the CI matrix moonsharp / no-lua will not run.
+- [ ] **GitHub Release / tag v4.0.0** after push.
 
-## [P1] Lua — остатки (не блокируют v4)
+## [P1] Lua - remaining work (does not block v4)
 
-- [ ] Undo применённых world-команд (инверсные команды spawn/move).
-- [ ] Capability tier из конфига роли ИИ + опциональное подтверждение игрока для опасных уровней.
-- [ ] Мост `ModEventEmitted` → MessagePipe.
-- [ ] Бюджет world-команд на тик для модов.
+- [ ] Undo applied world commands (inverse spawn/move commands).
+- [ ] Capability tier from AI role config + optional player confirmation for dangerous levels.
+- [ ] Bridge `ModEventEmitted` -> MessagePipe.
+- [ ] World-command budget per tick for mods.
+- [ ] **Lua skill by access mode.** Create an agent-facing Lua guide/skill that routes tasks to the right API surface: Safe/Logic (`logic_define`, `report`), Mods (`manage_mods`, `hooks_on`, `hooks_every`, `store_get/set`), WorldEdit (`coreai_world_*`), and Full (`unity_*`). It must explicitly forbid hallucinated APIs such as `game.enemies`, `game.create`, `game.destroy` unless a host game registers them.
+- [ ] **Reusable file-backed Lua mods.** Design a portable mod package layout for games, e.g. `Mods/<mod_id>/manifest.json` + `main.lua`, with `id`, `name`, `description`, `version`, `capabilities`, `entry`, `author`, and `active`. The runtime/panel should load, activate/deactivate, reload, and forget mods from files instead of only `ILuaScriptVersionStore`.
 
-## [P2] WebGL: Lua в веб-сборке (исследование)
+## [P2] WebGL: Lua in the web build (research)
 
-- `SecureLuaEnvironment.IsSupported` = false в WebGL player; исследовать MoonSharp+IL2CPP, размер, лимиты без потоков.
+- `SecureLuaEnvironment.IsSupported` = false in WebGL player; investigate MoonSharp+IL2CPP, size, and no-thread limits.
 
-## [P2] Идеи
+## [P2] Ideas
 
-- [ ] STT → Agent → TTS для NPC.
-- [ ] Визуальный билдер AgentBuilder в редакторе.
-- [ ] Streaming-emotions / function-driven анимации.
+- [ ] STT -> Agent -> TTS for NPCs.
+- [ ] Visual AgentBuilder in the editor.
+- [ ] Streaming emotions / function-driven animations.
 
-## Медиа / продвижение
+## Media / promotion
 
-- [ ] GIF-демки для README (`DEMO_RECORDING_GUIDE.md`).
-- [ ] Публикация в OpenUPM.
-- [ ] Ссылка Boosty в `FUNDING.yml`.
+- [ ] GIF demos for README (`DEMO_RECORDING_GUIDE.md`).
+- [ ] Publish to OpenUPM.
+- [ ] Boosty link in `FUNDING.yml`.

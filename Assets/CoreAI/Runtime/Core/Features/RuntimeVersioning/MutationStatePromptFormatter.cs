@@ -65,7 +65,7 @@ namespace CoreAI.Ai
                 return "";
             }
 
-            return s.Length <= MaxChars ? s : s.Substring(0, MaxChars) + "\n…";
+            return s.Length <= MaxChars ? s : s.Substring(0, MaxChars) + "\n...";
         }
     }
 }

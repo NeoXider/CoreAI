@@ -53,7 +53,7 @@ namespace CoreAI.Ai
                 return s;
             }
 
-            return s.Substring(0, MaxLuaChars) + "\n…";
+            return s.Substring(0, MaxLuaChars) + "\n...";
         }
     }
 }

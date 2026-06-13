@@ -83,7 +83,7 @@ namespace CoreAI.Infrastructure.Llm
                 : $"{_backendLabel}->{request.RoutingProfileId.Trim()}";
 
             _logger.Info(
-                $"LLM ▶ traceId={trace} role={role} backend={backendLine}\n" +
+                $"LLM > traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({system.Length} chars): {Preview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} chars): {Preview(user, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(system, user, request.Tools)}", LogTag.Llm);
@@ -115,7 +115,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
                     _logger.Warn(
-                        $"LLM ↺ traceId={trace} role={role} | {httpEx.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s",
+                        $"LLM ~ traceId={trace} role={role} | {httpEx.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s",
                         LogTag.Llm);
 #if UNITY_WEBGL && !UNITY_EDITOR
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
@@ -145,7 +145,7 @@ namespace CoreAI.Infrastructure.Llm
                     sw.Stop();
                     string msg = $"{httpEx.ErrorCode} after {_maxHttpRetryAttempts} retries: {httpEx.Message}";
                     _logger.Warn(
-                        $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
+                        $"LLM x traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
                     return new LlmCompletionResult { Ok = false, Error = msg };
                 }
             }
@@ -162,7 +162,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     int waitSec = httpWait > 0 ? Math.Min(httpWait, MaxRetryCapSeconds) : ComputeBackoff(attempt);
                     _logger.Warn(
-                        $"LLM ↺ traceId={trace} role={role} | {result.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)",
+                        $"LLM ~ traceId={trace} role={role} | {result.ErrorCode} - retry {attempt + 1}/{_maxHttpRetryAttempts} after {waitSec}s (failed completion)",
                         LogTag.Llm);
 #if UNITY_WEBGL && !UNITY_EDITOR
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken);
@@ -231,7 +231,7 @@ namespace CoreAI.Infrastructure.Llm
                     sw.Stop();
                     string msg = $"{result.ErrorCode} after {_maxHttpRetryAttempts} retries: {result.Error}";
                     _logger.Warn(
-                        $"LLM ✖ traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
+                        $"LLM x traceId={trace} role={role} backend={backendLine} | {msg}", LogTag.Llm);
                     return new LlmCompletionResult
                     {
                         Ok = false,
@@ -250,7 +250,7 @@ namespace CoreAI.Infrastructure.Llm
             if (result == null)
             {
                 _logger.Warn(
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | result is null",
+                    $"LLM x traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | result is null",
                     LogTag.Llm);
                 return new LlmCompletionResult { Ok = false, Error = "null result" };
             }
@@ -258,7 +258,7 @@ namespace CoreAI.Infrastructure.Llm
             if (!result.Ok)
             {
                 _logger.Warn(
-                    $"LLM ✖ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(no text)"}",
+                    $"LLM x traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {result.Error ?? "(no text)"}",
                     LogTag.Llm);
                 return result;
             }
@@ -267,7 +267,7 @@ namespace CoreAI.Infrastructure.Llm
             string tokLine = FormatTokenLine(result, wallMs, content.Length, system, user, request.Tools);
             string toolsLine = FormatExecutedTools(result.ExecutedToolCalls);
             _logger.Info(
-                $"LLM ◀ traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
+                $"LLM < traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} | {tokLine}{toolsLine}\n" +
                 $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
 
             return result;
@@ -390,7 +390,7 @@ namespace CoreAI.Infrastructure.Llm
             IReadOnlyList<ILlmTool> streamTools = request.Tools;
 
             _logger.Info(
-                $"LLM ▶ (stream) traceId={trace} role={role} backend={backendLine}\n" +
+                $"LLM > (stream) traceId={trace} role={role} backend={backendLine}\n" +
                 $"  system ({streamSystem.Length} chars): {Preview(request.SystemPrompt, SystemPreviewChars)}\n" +
                 $"  user ({streamUser.Length} chars): {Preview(request.UserPayload, UserPreviewChars)}\n" +
                 $"  {FormatPromptBudgetLine(streamSystem, streamUser, streamTools)}", LogTag.Llm);
@@ -418,7 +418,7 @@ namespace CoreAI.Infrastructure.Llm
                 sw.Stop();
                 initError = ex.Message;
                 _logger.Warn(
-                    $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
+                    $"LLM x (stream) traceId={trace} role={role} backend={backendLine} wallMs={sw.Elapsed.TotalMilliseconds:F0} | init failed: {ex.Message}",
                     LogTag.Llm);
             }
 
@@ -545,13 +545,13 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(terminalError))
                 {
                     _logger.Warn(
-                        $"LLM ✖ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}",
+                        $"LLM x (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {terminalError}{toolsLine}",
                         LogTag.Llm);
                 }
                 else
                 {
                     _logger.Info(
-                        $"LLM ◀ (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
+                        $"LLM < (stream) traceId={trace} role={role} backend={backendLine} wallMs={wallMs:F0} chunks={chunkCount} | {tokLine}{toolsLine}\n" +
                         $"  content ({content.Length} chars): {Preview(content, ResponsePreviewChars)}", LogTag.Llm);
                 }
             }
@@ -609,14 +609,14 @@ namespace CoreAI.Infrastructure.Llm
         {
             string budgetSuffix = " | " + FormatPromptBudgetLine(systemPrompt ?? "", userPayload ?? "", tools);
             string outWordsPart = outChars > 0
-                ? $" | outWords≈{CountWords(result.Content ?? "")}"
+                ? $" | outWords~{CountWords(result.Content ?? "")}"
                 : "";
 
             if (result.CompletionTokens.HasValue && wallMs > 1)
             {
                 double tps = result.CompletionTokens.Value / (wallMs / 1000.0);
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out≈{tps:F1} tok/s (completion){outWordsPart}{budgetSuffix}";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out~{tps:F1} tok/s (completion){outWordsPart}{budgetSuffix}";
             }
 
             if (result.TotalTokens.HasValue)
@@ -684,11 +684,11 @@ namespace CoreAI.Infrastructure.Llm
             int sysTokFromParts = coreTok + memTok;
             int sysTokWhole = EstimateTokensRough(systemPrompt);
             return
-                $"promptBudget systemSplit chars total={sysChars} core={coreChars} memory={memChars} toolsDef≈{toolsChars}({toolCount} tools) " +
-                $"| system estTok≈{sysTokWhole} (core≈{coreTok} mem≈{memTok} toolsDef≈{toolsTok}; partsSum≈{sysTokFromParts + toolsTok}) " +
-                $"| system words≈{coreWords + memWords + toolsWords} (core≈{coreWords} mem≈{memWords} tools≈{toolsWords}) " +
-                $"| chat chars={chatChars} estTok≈{chatTok} words≈{chatWords} " +
-                $"[estTok=⌈chars/4⌉; toolsDef≈tool definition size]";
+                $"promptBudget systemSplit chars total={sysChars} core={coreChars} memory={memChars} toolsDef~{toolsChars}({toolCount} tools) " +
+                $"| system estTok~{sysTokWhole} (core~{coreTok} mem~{memTok} toolsDef~{toolsTok}; partsSum~{sysTokFromParts + toolsTok}) " +
+                $"| system words~{coreWords + memWords + toolsWords} (core~{coreWords} mem~{memWords} tools~{toolsWords}) " +
+                $"| chat chars={chatChars} estTok~{chatTok} words~{chatWords} " +
+                $"[estTok=ceil(chars/4); toolsDef~tool definition size]";
         }
 
         /// <summary>

@@ -71,6 +71,159 @@ unity_set_position(id, 5, 6, 7)
                 Object.DestroyImmediate(cube);
             }
         }
+
+        [Test]
+        public void FullBindings_SearchDescribeAndHierarchyApis_ReturnSceneObjectMetadata()
+        {
+            GameObject parent = new("FullLuaParent");
+            GameObject child = new("FullLuaChild");
+            child.tag = "Player";
+            child.AddComponent<ForgeMemberProbe>();
+            child.transform.SetParent(parent.transform, false);
+            child.transform.position = new Vector3(1f, 2f, 3f);
+
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+
+                MoonSharp.Interpreter.DynValue result = env.RunChunk(script, @"
+local by_name = unity_find_all('FullLuaChild', 10)
+local by_tag = unity_find_by_tag('Player', 1)
+local by_component = unity_find_by_component('CoreAI.Tests.EditMode.ForgeMemberProbe', 10)
+local parent_id = unity_find('FullLuaParent')
+local children = unity_get_children(parent_id)
+local desc = unity_describe_object(by_name[1].id)
+return by_name[1].name == 'FullLuaChild'
+    and by_name[1].path == 'FullLuaParent/FullLuaChild'
+    and #by_tag == 1
+    and by_component[1].name == 'FullLuaChild'
+    and children[1].name == 'FullLuaChild'
+    and desc.parent == 'FullLuaParent'
+    and desc.child_count == 0
+    and desc.transform.position.x == 1
+");
+
+                Assert.IsTrue(result.Boolean);
+            }
+            finally
+            {
+                if (parent != null)
+                {
+                    Object.DestroyImmediate(parent);
+                }
+            }
+        }
+
+        [Test]
+        public void FullBindings_TransformMutationApis_UpdateSceneObject()
+        {
+            GameObject parent = new("FullLuaNewParent");
+            GameObject child = new("FullLuaMovable");
+
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+
+                env.RunChunk(script, @"
+local child = unity_find('FullLuaMovable')
+local parent = unity_find('FullLuaNewParent')
+assert(child ~= 0 and parent ~= 0, 'find failed')
+assert(unity_set_position(child, 4, 5, 6), 'set position')
+assert(unity_set_rotation_euler(child, 10, 20, 30), 'set rotation')
+assert(unity_set_scale(child, 2, 3, 4), 'set scale')
+assert(unity_parent(child, parent, true), 'set parent')
+local t = unity_get_transform(child)
+return t.position.x == 4 and t.scale.z == 4
+");
+
+                Assert.AreSame(parent.transform, child.transform.parent);
+                Assert.AreEqual(4f, child.transform.position.x, 0.01f);
+                Assert.AreEqual(20f, child.transform.eulerAngles.y, 0.01f);
+                Assert.AreEqual(4f, child.transform.localScale.z, 0.01f);
+            }
+            finally
+            {
+                if (parent != null)
+                {
+                    Object.DestroyImmediate(parent);
+                }
+
+                if (child != null)
+                {
+                    Object.DestroyImmediate(child);
+                }
+            }
+        }
+
+        [Test]
+        public void FullBindings_PublicOnly_ByDefault_HidesNonPublicMembers()
+        {
+            GameObject probe = new("ForgeProbeGo");
+            probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = probe.GetInstanceID();
+
+                MoonSharp.Interpreter.DynValue publicValue = env.RunChunk(script,
+                    $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'publicValue')");
+                Assert.AreEqual(7d, publicValue.Number, 0.001d);
+
+                Assert.Catch(
+                    () => env.RunChunk(script,
+                        $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'secretValue')"),
+                    "Public-only Full bindings must not expose private members.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+
+        [Test]
+        public void FullBindings_NonPublicOptIn_ExposesPrivateMembers()
+        {
+            GameObject probe = new("ForgeProbeGo");
+            probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings(null, allowNonPublicMembers: true)
+                    .RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = probe.GetInstanceID();
+
+                MoonSharp.Interpreter.DynValue secret = env.RunChunk(script,
+                    $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'secretValue')");
+                Assert.AreEqual(11d, secret.Number, 0.001d);
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
+    }
+
+    /// <summary>Probe component with one public and one private field for Full-tier visibility tests.</summary>
+    public sealed class ForgeMemberProbe : MonoBehaviour
+    {
+        public int publicValue = 7;
+        private int secretValue = 11;
+
+        public int RevealSecret()
+        {
+            return secretValue;
+        }
     }
 }
 #endif

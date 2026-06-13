@@ -1,10 +1,10 @@
-# 🏗️ Tool architecture: engine-agnostic pattern
+# рџЏ—пёЏ Tool architecture: engine-agnostic pattern
 
 **Version:** v2.0.0 | **Date:** 2026-05-08
 
-> 💡 **v2.0+ — SkillSet:** Tools can now be grouped into named **skills** with per-skill prompt instructions. See [AGENT_BUILDER.md — Skills](AGENT_BUILDER.md#skills-v20) for the higher-level orchestration pattern built on top of this tool architecture.
+> рџ’Ў **v2.0+ вЂ” SkillSet:** Tools can now be grouped into named **skills** with per-skill prompt instructions. See [AGENT_BUILDER.md вЂ” Skills](AGENT_BUILDER.md#skills-v20) for the higher-level orchestration pattern built on top of this tool architecture.
 
-## 📋 Overview
+## рџ“‹ Overview
 
 CoreAI uses a **two-level architecture** for tools:
 
@@ -14,23 +14,23 @@ CoreAI uses a **two-level architecture** for tools:
 | **Engine-specific** | CoreAI | CoreAiUnity | WorldCommand, Audio, UI |
 
 **Engine-agnostic tools** do not depend on the engine; implementation stays in CoreAI:
-- ✅ `MemoryTool` — stores a string; works on any engine
-- ✅ `LuaTool` — MoonSharp interpreter; engine-independent
+- вњ… `MemoryTool` вЂ” stores a string; works on any engine
+- вњ… `LuaTool` вЂ” MoonSharp interpreter; engine-independent
 
 **Engine-specific tools** depend on the engine; implementation lives in CoreAiUnity:
-- ✅ `WorldTool` — uses `GameObject`, `SceneManager` (Unity)
-- ⏳ `AudioTool` — `AudioSource`, `AudioClip` (Unity)
-- ⏳ `UITool` — `Canvas`, UI Elements (Unity)
-- ⏳ `PhysicsTool` — `Rigidbody`, `Collider` (Unity)
+- вњ… `WorldTool` вЂ” uses `GameObject`, `SceneManager` (Unity)
+- вЏі `AudioTool` вЂ” `AudioSource`, `AudioClip` (Unity)
+- вЏі `UITool` вЂ” `Canvas`, UI Elements (Unity)
+- вЏі `PhysicsTool` вЂ” `Rigidbody`, `Collider` (Unity)
 
 This pattern enables:
-- ✅ **Engine-independent core** — CoreAI works with any engine
-- ✅ **Easier porting** — new engines implement the same interfaces
-- ✅ **Unified API** — the LLM invokes tools the same way on all platforms
+- вњ… **Engine-independent core** вЂ” CoreAI works with any engine
+- вњ… **Easier porting** вЂ” new engines implement the same interfaces
+- вњ… **Unified API** вЂ” the LLM invokes tools the same way on all platforms
 
 ---
 
-## 🎯 Pattern: abstract tool → engine implementation
+## рџЋЇ Pattern: abstract tool в†’ engine implementation
 
 ### 1. Abstract interface (in CoreAI)
 
@@ -157,9 +157,9 @@ namespace CoreAI.Infrastructure.World
         public bool TryExecute(string command)
         {
             // Parse JSON and run Unity-specific operations
-            // spawn → Instantiate()
-            // move → transform.position = ...
-            // destroy → Object.Destroy()
+            // spawn в†’ Instantiate()
+            // move в†’ transform.position = ...
+            // destroy в†’ Object.Destroy()
         }
     }
 }
@@ -167,28 +167,28 @@ namespace CoreAI.Infrastructure.World
 
 ---
 
-## 📁 File layout
+## рџ“Ѓ File layout
 
 ```
 CoreAI/                          # Engine-agnostic core
-└── Runtime/Core/Features/
-    ├── Llm/
-    │   ├── ILlmTool.cs          # Base ILlmTool interface
-    │   └── LlmToolBase.cs       # Base class with JsonParams()
-    └── World/
-        └── IWorldCommandExecutor.cs  # Abstract interface
+в””в”Ђв”Ђ Runtime/Core/Features/
+    в”њв”Ђв”Ђ Llm/
+    в”‚   в”њв”Ђв”Ђ ILlmTool.cs          # Base ILlmTool interface
+    в”‚   в””в”Ђв”Ђ LlmToolBase.cs       # Base class with JsonParams()
+    в””в”Ђв”Ђ World/
+        в””в”Ђв”Ђ IWorldCommandExecutor.cs  # Abstract interface
 
 CoreAiUnity/                     # Unity-specific implementation
-└── Runtime/Source/Features/
-    └── World/
-        ├── WorldTool.cs              # MEAI AIFunction
-        ├── WorldLlmTool.cs           # ILlmTool wrapper
-        └── CoreAiWorldCommandExecutor.cs  # Executor
+в””в”Ђв”Ђ Runtime/Source/Features/
+    в””в”Ђв”Ђ World/
+        в”њв”Ђв”Ђ WorldTool.cs              # MEAI AIFunction
+        в”њв”Ђв”Ђ WorldLlmTool.cs           # ILlmTool wrapper
+        в””в”Ђв”Ђ CoreAiWorldCommandExecutor.cs  # Executor
 ```
 
 ---
 
-## 🔧 How to add a new tool
+## рџ”§ How to add a new tool
 
 ### Step 1: Define an abstract interface (in CoreAI)
 
@@ -271,7 +271,7 @@ case AudioLlmTool at:
 
 ---
 
-## 🎮 Example for another engine (Unreal Engine)
+## рџЋ® Example for another engine (Unreal Engine)
 
 ```cpp
 // CoreAI-Unreal/Source/World/UnrealWorldCommandExecutor.h
@@ -288,73 +288,73 @@ public:
     virtual bool TryExecute(const FString& Command) override
     {
         // Unreal-specific logic
-        // spawn → GetWorld()->SpawnActor()
-        // move → Actor->SetActorLocation()
-        // destroy → Actor->Destroy()
+        // spawn в†’ GetWorld()->SpawnActor()
+        // move в†’ Actor->SetActorLocation()
+        // destroy в†’ Actor->Destroy()
     }
 };
 ```
 
 ---
 
-## 📋 Existing tools
+## рџ“‹ Existing tools
 
 | Tool | Type | Abstraction (CoreAI) | Implementation |
 |------------|-----|---------------------|------------|
-| **Memory** | Engine-agnostic | `MemoryLlmTool` | `MemoryTool` (in CoreAI) ✅ |
-| **Lua** | Engine-agnostic | `LuaLlmTool` | `LuaTool` (in CoreAI) ✅ |
+| **Memory** | Engine-agnostic | `MemoryLlmTool` | `MemoryTool` (in CoreAI) вњ… |
+| **Lua** | Engine-agnostic | `LuaLlmTool` | `LuaTool` (in CoreAI) вњ… |
 | **Inventory** | Engine-specific | `InventoryLlmTool` | `InventoryTool` (CoreAiUnity) |
 | **GameConfig** | Engine-specific | `GameConfigLlmTool` | `GameConfigTool` (CoreAiUnity) |
-| **WorldCommand** | Engine-specific | `IWorldCommandExecutor` (CoreAI) | `WorldTool`, `WorldLlmTool`, `CoreAiWorldCommandExecutor` (CoreAiUnity) ✅ |
-| **Audio** | Engine-specific | ⏳ `IAudioController` (CoreAI) | ⏳ TODO (Unity: AudioSource) |
-| **UI** | Engine-specific | ⏳ `IUIController` (CoreAI) | ⏳ TODO (Unity: Canvas/UI) |
-| **Physics** | Engine-specific | ⏳ `IPhysicsController` (CoreAI) | ⏳ TODO (Unity: Rigidbody) |
+| **WorldCommand** | Engine-specific | `IWorldCommandExecutor` (CoreAI) | `WorldTool`, `WorldLlmTool`, `CoreAiWorldCommandExecutor` (CoreAiUnity) вњ… |
+| **Audio** | Engine-specific | вЏі `IAudioController` (CoreAI) | вЏі TODO (Unity: AudioSource) |
+| **UI** | Engine-specific | вЏі `IUIController` (CoreAI) | вЏі TODO (Unity: Canvas/UI) |
+| **Physics** | Engine-specific | вЏі `IPhysicsController` (CoreAI) | вЏі TODO (Unity: Rigidbody) |
 
 ### Why Memory and Lua live in CoreAI?
 
 **MemoryTool** stores a string in `IAgentMemoryStore`. That means:
-- ✅ No dependency on `UnityEngine`
-- ✅ Works on any engine (simple key-value store)
-- ✅ Same logic on all platforms
+- вњ… No dependency on `UnityEngine`
+- вњ… Works on any engine (simple key-value store)
+- вњ… Same logic on all platforms
 
 **LuaTool** uses the MoonSharp interpreter. That means:
-- ✅ Pure .NET, no `UnityEngine`
-- ✅ Same engine-agnostic binding model where MoonSharp is supported
-- ✅ Engine-specific bindings can be added later
+- вњ… Pure .NET, no `UnityEngine`
+- вњ… Same engine-agnostic binding model where MoonSharp is supported
+- вњ… Engine-specific bindings can be added later
 
 WebGL player builds currently disable the MoonSharp path explicitly through
 `SecureLuaEnvironment.IsSupported == false`. See
 [`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support and
 future WebGL restoration options.
 
-### Why is WorldCommand’s abstraction in CoreAI?
+### Why is WorldCommandвЂ™s abstraction in CoreAI?
 
 **IWorldCommandExecutor** is an abstract interface in CoreAI:
-- ✅ Defines the contract for every engine
-- ✅ No dependency on `UnityEngine`
-- ✅ Implemented in CoreAiUnity for Unity
+- вњ… Defines the contract for every engine
+- вњ… No dependency on `UnityEngine`
+- вњ… Implemented in CoreAiUnity for Unity
 
 **WorldTool / WorldLlmTool** live in CoreAiUnity because:
-- ❌ They depend on `UnityEngine` to build `AIFunction`
-- ❌ They know Unity-specific types (`CoreAiWorldCommandEnvelope`)
-- ✅ They still use `IWorldCommandExecutor` from CoreAI
+- вќЊ They depend on `UnityEngine` to build `AIFunction`
+- вќЊ They know Unity-specific types (`CoreAiWorldCommandEnvelope`)
+- вњ… They still use `IWorldCommandExecutor` from CoreAI
 
 ---
 
-## 🎯 Benefits of the pattern
+## рџЋЇ Benefits of the pattern
 
-1. **Portability** — new engine = implement interfaces only
-2. **Testability** — core tests with mocks
-3. **Flexibility** — each engine can differ internally; the API stays the same
-4. **Documentation** — the interface is the contract for all engines
-5. **Compatibility** — LLM prompts work on any engine
+1. **Portability** вЂ” new engine = implement interfaces only
+2. **Testability** вЂ” core tests with mocks
+3. **Flexibility** вЂ” each engine can differ internally; the API stays the same
+4. **Documentation** вЂ” the interface is the contract for all engines
+5. **Compatibility** вЂ” LLM prompts work on any engine
 
 ---
 
-## 📚 References
+## рџ“љ References
 
-- [README.md](README.md) — portable CoreAI documentation index
-- [TOOL_CALL_SPEC.md](../../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) — tool calling specification
-- [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) — MEAI pipeline architecture
-- [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) — HTTP usage, streaming `include_usage`, timeouts
-- [AGENT_BUILDER.md](AGENT_BUILDER.md) — building agents with tools
+- [README.md](README.md) вЂ” portable CoreAI documentation index
+- [TOOL_CALL_SPEC.md](../../CoreAiUnity/Docs/TOOL_CALL_SPEC.md) вЂ” tool calling specification
+- [MEAI_TOOL_CALLING.md](MEAI_TOOL_CALLING.md) вЂ” MEAI pipeline architecture
+- [MEAI_TOKENS_FACT_VS_ESTIMATE.md](MEAI_TOKENS_FACT_VS_ESTIMATE.md) вЂ” HTTP usage, streaming `include_usage`, timeouts
+- [AGENT_BUILDER.md](AGENT_BUILDER.md) вЂ” building agents with tools

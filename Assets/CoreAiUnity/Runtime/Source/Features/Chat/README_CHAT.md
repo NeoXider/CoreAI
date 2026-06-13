@@ -1,4 +1,4 @@
-﻿# 🗨️ CoreAI Universal Chat Module
+# 🗨️ CoreAI Universal Chat Module
 
 Built-in AI chat for any Unity game. Works out of the box with UI Toolkit.
 
@@ -17,7 +17,7 @@ The “UI vs code” table is in [COREAI_SINGLETON_API](../../../../Docs/COREAI_
 
 *English:* `CoreAiChatPanel` (right) during Play Mode, with Unity Console (left) showing `[CoreAI] [Llm]` stream traces and `[CoreAI] [MessagePipe]` `ApplyAiGameCommand` after the reply completes.
 
-*Русский:* панель чата в Play Mode и консоль с логами стрима LLM и публикацией команды через MessagePipe.
+*English:* chat panel in Play Mode and the console with LLM stream logs and command publication through MessagePipe.
 
 ## Quick start (1 click)
 
@@ -103,9 +103,9 @@ blueprintBot.ApplyToPolicy(policy);
 Create two **`CoreAiChatConfig`** assets (or duplicate one) with **Role ID** = `Merchant` or `BlueprintBot`, assign each to separate **`CoreAiChatPanel`** instances **or** switch configs at runtime if your game drives one panel.
 
 <details>
-<summary>Русский: кратко</summary>
+<summary>English: short version</summary>
 
-Панель **не привязана** к одной роли: в **`CoreAiChatConfig`** задаётся **Role ID**, тот же, что вы зарегистрировали через **`AgentBuilder`**. Оркестратор и MEAI одинаковы для UI и программных вызовов. **`ToolsOnly`** для чата технически допустим — панель не режет режим агента; на UX рассчитывать на доминирование тулов, не на болтовню. Игровой код может добавлять только своему режиму политику в **`BuildAiTaskRequest`**.
+The panel is **not bound** to a single role: **`CoreAiChatConfig`** sets **Role ID**, the same one you registered through **`AgentBuilder`**. The orchestrator and MEAI are the same for UI and programmatic calls. **`ToolsOnly`** is technically allowed for chat; the panel does not trim the agent mode. For UX, expect tools to dominate rather than conversation. Game code can add policy for its own mode in **`BuildAiTaskRequest`**.
 </details>
 
 **Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`** and the same **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`** asserts **`CoreAILifetimeScope.RegisterAgentMemoryStore`** binds **`FileAgentMemoryStore`** for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
@@ -143,7 +143,7 @@ On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed*
 - **API from code:**
   - `bool IsCollapsed { get; }`
   - `void SetCollapsed(bool collapsed, bool persist = true)` — expand before a cutscene or collapse after; with `persist: false` the state is not written to `PlayerPrefs`.
-- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** while no streaming bubble is active, aligned with RedoSchool-style in-flight feedback. **Stop** and **StartStreaming** clear it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `⌛ Ответ формируется… ~{elapsed} с`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
+- **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** while no streaming bubble is active, aligned with RedoSchool-style in-flight feedback. **Stop** and **StartStreaming** clear it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `⌛ Response is being generated... ~{elapsed} s`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
 - **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`. **ScrollView:** default theme uses **no right padding** on `.coreai-chat-scroll` and zero horizontal **margin/padding** on `unity-scroll-view__content-and-vertical-scroll-container` and the vertical scroller so the **scrollbar track sits flush with the panel’s inner right edge** (no “floating” gap inside the bar).
 
 Custom layout: if you **copy** UXML into your project, add the same element names or override bindings in a subclass of `CoreAiChatPanel` (override `BindUI` and call `base.BindUI()` or duplicate the logic).
@@ -388,7 +388,7 @@ Tool JSON is not rendered in assistant bubbles: the player only sees the final r
 
 #### Optional in-chat tool diagnostics (`CoreAiChatConfig.ShowToolCallsInChat`)
 
-- **Default:** `ShowToolCallsInChat` is **off** (Inspector: **UI — Диагностика** on the chat config asset).
+- **Default:** `ShowToolCallsInChat` is **off** (Inspector: **UI — Diagnostics** on the chat config asset).
 - When **on**, `CoreAiChatPanel` subscribes to **`CoreAi.OnToolExecuted`** and appends a separate muted row for calls whose **`roleId`** matches the panel’s **`RoleId`** (same rule as other chat routing).
 - Rows are **not** written to `IAgentMemoryStore` / persisted chat history — session UI only.
 - Customize text via **`CoreAiChatPanel.FormatToolExecutedForChat`** in a subclass, or keep the default formatter **`CoreAiToolCallChatFormatter.BuildDisplayText`** (truncated JSON for args/result).
@@ -621,4 +621,3 @@ chatPanel.ResetBusyStateWithoutCancellation();
 | `CurrentTurnGeneration` | `int` (get) | Monotonic counter, incremented at the start of each agent turn. Compare across awaits to detect "a newer turn started". |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
 | `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request (in contrast to `StopActiveGeneration()` / `StopAgent()`). |
-

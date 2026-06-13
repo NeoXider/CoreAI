@@ -56,6 +56,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void BuiltInProgrammerPrompt_IncludesFullLuaModeGuidance()
+        {
+            BuiltInDefaultAgentSystemPromptProvider provider = new();
+
+            Assert.IsTrue(provider.TryGetSystemPrompt(BuiltInAgentRoleIds.Programmer, out string prompt));
+            StringAssert.Contains("Full Lua Mode", prompt);
+            StringAssert.Contains("unity_list_objects", prompt);
+            StringAssert.Contains("unity_find_by_component", prompt);
+            StringAssert.Contains("unity_describe_object", prompt);
+            StringAssert.Contains("Success/Output/Error", prompt);
+            StringAssert.Contains("game.enemies", prompt);
+            StringAssert.Contains("GameObject.Find", prompt);
+        }
+
+        [Test]
         public void AiPromptComposer_AllBuiltInRoles_BuildUserPayload()
         {
             BuiltInDefaultAgentSystemPromptProvider provider = new();

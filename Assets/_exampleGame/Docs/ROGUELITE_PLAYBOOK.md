@@ -1,31 +1,31 @@
-# Пример: Roguelite-арена (CoreAI `_exampleGame`)
+﻿# Example: Roguelite Arena (CoreAI `_exampleGame`)
 
-## Концепт сессии
+## Session Concept
 
-- **Длительность забега:** 10–25 минут.
-- **Поражение:** смерть / провал условия (ядро уничтожено, время вышло) → экран итогов → **база/хаб**.
-- **Мета-прогрессия:** разблокировки пассивок, оружия, персонажей (валюта забега + постоянная).
-- **Соло:** один игрок, один поток правил.
-- **Кооп:** та же арена; прогрессия в мете — настраиваемо (общая / личная / смешанная).
+- **Run duration:** 10-25 minutes.
+- **Defeat:** death / failed objective (core destroyed, timer expired) -> results screen -> **base/hub**.
+- **Meta-progression:** unlock passives, weapons, and characters (run currency + persistent currency).
+- **Solo:** one player, one rules stream.
+- **Co-op:** the same arena; meta-progression is configurable (shared / personal / mixed).
 
-## Почему это хорошо под шаблон CoreAI
+## Why This Fits the CoreAI Template
 
-- Мало уникального арта: 1–3 пресета арен, примитивы врагов.
-- **Аффиксы, волны, «недельные» модификаторы** — данные + процедурная логика; позже — LLM под хостом.
-- Телеметрия для ИИ: волна, DPS, смерти, выбранные апгрейды, время сессии.
+- Little unique art: 1-3 arena presets, primitive enemies.
+- **Affixes, waves, "weekly" modifiers** are data + procedural logic; later, LLM under host authority.
+- Telemetry for AI: wave, DPS, deaths, selected upgrades, session time.
 
-**Код и роли ИИ (волны, анализ игрока, мультиплеер):** см. [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md).
+**Code and AI roles (waves, player analysis, multiplayer):** see [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md).
 
-## Уроки из GameDev-Last-War (референс-архитектура)
+## Lessons from GameDev-Last-War (Reference Architecture)
 
-Проект `D:\Git\GameDev-Last-War` — крупный продакшен: **Clean Architecture**, **VContainer**, **MessagePipe**, **R3**, **UniTask**, **ECS (Entities)** для тяжёлых визуальных частей, **gRPC / MagicOnion**, **PlayFab**, **SQLite**, логирование **Serilog/ZLogger**, тесты на **NSubstitute**.
+The `D:\Git\GameDev-Last-War` project is a large production codebase: **Clean Architecture**, **VContainer**, **MessagePipe**, **R3**, **UniTask**, **ECS (Entities)** for heavy visual parts, **gRPC / MagicOnion**, **PlayFab**, **SQLite**, **Serilog/ZLogger** logging, and **NSubstitute** tests.
 
-Для **лёгкого** roguelite-примера в CoreAI **не обязательно** тянуть весь стек: достаточно повторить **идею слоёв** (Domain → UseCases → Presentation) и DI, а сеть/бэкенд добавить по необходимости.
+For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is **not required**: it is enough to reuse the **layering idea** (Domain -> UseCases -> Presentation) and DI, then add networking/backend pieces only when needed.
 
-## Следующие шаги в репозитории CoreAI
+## Next Steps in the CoreAI Repository
 
-1. Подключить **CoreAI**: UPM **`com.nexoider.coreai`** (`Assets/CoreAI` в монорепозитории; внешний проект — Git URL **`?path=Assets/CoreAI`**) — оркестрация ИИ, песочница Lua, события; при необходимости скопировать хост **`CoreAiUnity`** (тесты, промпты в **Resources**, сцена **`_mainCoreAI`**).
-2. Подключить **VContainer + MessagePipe + R3** в пример (как в Last-War, но минимальный набор).
-3. Сцена `RogueliteBootstrap` с `ExampleRogueliteEntry` + позже `LifetimeScope`.
-4. Прототип петли: спавн волны → урон → лут-валюта забега → экран смерти → хаб с разблокировками (без сети).
-5. Кооп: выбрать стек (**Netcode for GameObjects** или другой) и вынести авторитет смены правил на хост.
+1. Connect **CoreAI**: UPM **`com.nexoider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; copy the **`CoreAiUnity`** host if needed (tests, prompts in **Resources**, **`_mainCoreAI`** scene).
+2. Add **VContainer + MessagePipe + R3** to the example (as in Last-War, but with the minimal set).
+3. Scene `RogueliteBootstrap` with `ExampleRogueliteEntry` + later `LifetimeScope`.
+4. Prototype loop: spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks (without networking).
+5. Co-op: choose the stack (**Netcode for GameObjects** or another option) and move rule-change authority to the host.

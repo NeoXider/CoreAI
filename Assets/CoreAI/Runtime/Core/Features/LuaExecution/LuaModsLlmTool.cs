@@ -175,7 +175,7 @@ namespace CoreAI.Ai
 
             if (source.Length > MaxSourceLengthReturned)
             {
-                source = source.Substring(0, MaxSourceLengthReturned) + "\n--[[ …(truncated) ]]";
+                source = source.Substring(0, MaxSourceLengthReturned) + "\n--[[ ...(truncated) ]]";
             }
 
             return Ok($"Source of mod '{modId.Trim()}'.", source);

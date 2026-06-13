@@ -1,25 +1,25 @@
-# 🤖 AI Агенты — Архитектура и Воркфлоу
+﻿# 🤖 AI Agents - Architecture and Workflow
 
-## Роли агентов
+## Agent Roles
 
-| Агент | Роль | Доступ | Память | Пример использования |
-|-------|------|--------|--------|---------------------|
-| **Creator** | Управляющий / дизайнер | Изменение мира, конфиги, управление другими агентами | `Creator` | "Создай волну врагов", "Разработай систему крафта" |
-| **Analyzer** | Аналитик телеметрии | Чтение данных, рекомендации | `Analyzer` | "Игроку скучно, увеличь сложность" |
-| **Programmer** | Генерация Lua кода | Песочница Lua, add/report | `Programmer` | "Напиши формулу урона в Lua" |
-| **CoreMechanicAI** | Игровая механика | Численные исходы, крафт, лут, совместимость | `CoreMechanicAI` | "Скрафти оружие из железа и кристалла" |
-| **AINpc** | Диалоги NPC | Реплики в мире | `AINpc` | "Приветствую, путник!" |
-| **SmartChat** | Ассистент игрока (память + чат) | Чат с игроком | `SmartChat` | "Как скрафтить меч?" |
+| Agent | Role | Access | Memory | Example use |
+|-------|------|--------|--------|-------------|
+| **Creator** | Director / designer | World changes, configs, managing other agents | `Creator` | "Create an enemy wave", "Design a crafting system" |
+| **Analyzer** | Telemetry analyst | Data reading, recommendations | `Analyzer` | "The player is bored, increase difficulty" |
+| **Programmer** | Lua code generation | Lua sandbox, add/report | `Programmer` | "Write a damage formula in Lua" |
+| **CoreMechanicAI** | Game mechanics | Numeric outcomes, crafting, loot, compatibility | `CoreMechanicAI` | "Craft a weapon from iron and crystal" |
+| **AINpc** | NPC dialogue | World lines | `AINpc` | "Greetings, traveler!" |
+| **SmartChat** | Player assistant (memory + chat) | Chat with the player | `SmartChat` | "How do I craft a sword?" |
 
 ---
 
-## Архитектура: Одна модель, разные роли
+## Architecture: One Model, Different Roles
 
-Все агенты используют **одну и ту же LLM модель** (Qwen 35B через LM Studio), но:
+All agents use **the same LLM model** (Qwen 35B through LM Studio), but with:
 
-1. **Разные системные промпты** — каждый агент получает свою роль
-2. **Разная изолированная память** — `CoreMechanicAI` не видит память `Creator`
-3. **Разные инструменты** — Programmer получает Lua sandbox, CoreMechanicAI — числовой вывод
+1. **Different system prompts**: each agent receives its own role.
+2. **Different isolated memory**: `CoreMechanicAI` cannot see `Creator` memory.
+3. **Different tools**: Programmer receives the Lua sandbox; CoreMechanicAI receives numeric output.
 
 ```
                     ┌─────────────────────────┐
@@ -35,139 +35,139 @@
               │                 │                 │
     ┌─────────▼──────┐ ┌───────▼──────┐ ┌───────▼──────┐
     │ Creator        │ │ CoreMechanic │ │ Programmer   │
-    │ Память: Creator│ │Память: CM    │ │Память: Prog  │
-    │ Промпт: Design │ │Промпт: Craft │ │Промпт: Lua   │
+    │ Memory: Creator│ │Memory: CM    │ │Memory: Prog  │
+    │ Prompt: Design │ │Prompt: Craft │ │Prompt: Lua   │
     └────────────────┘ └──────────────┘ └──────────────┘
 ```
 
 ---
 
-## Пример: Полный воркфлоу крафта с несколькими агентами
+## Example: Full Multi-Agent Crafting Workflow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ШАГ 1: Creator решает ЧТО и КАК крафтить                           │
-│  Агент: Creator                                                     │
-│  Память: Creator (изолированная)                                    │
+│  STEP 1: Creator decides WHAT to craft and HOW                      │
+│  Agent: Creator                                                     │
+│  Memory: Creator (isolated)                                         │
 │                                                                     │
-│  Запрос: "Разработай рецепт оружия из Iron + Fire Crystal"          │
-│  Ответ: JSON с параметрами (item_type, damage, fire_damage)         │
-│  Память: "Design: Iron+Fire Crystal → weapon, damage ~45, fire ~15" │
+│  Request: "Design a weapon recipe from Iron + Fire Crystal"         │
+│  Response: JSON with parameters (item_type, damage, fire_damage)    │
+│  Memory: "Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15" │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ШАГ 2: CoreMechanicAI считает точный результат крафта              │
-│  Агент: CoreMechanicAI                                              │
-│  Память: CoreMechanicAI (изолированная)                             │
+│  STEP 2: CoreMechanicAI computes the exact crafting result          │
+│  Agent: CoreMechanicAI                                              │
+│  Memory: CoreMechanicAI (isolated)                                  │
 │                                                                     │
-│  Запрос: "Рассчитай крафт из: Iron (hardness:60) + Fire Crystal"    │
-│  Память (читает): "" (первый крафт)                                 │
-│  Ответ: {"item_name": "Iron Fireblade", "damage": 45, "fire": 15}   │
-│  Память (пишет): "Craft#1: Iron Fireblade damage:45 fire:15"       │
+│  Request: "Calculate craft from: Iron (hardness:60) + Fire Crystal" │
+│  Memory (reads): "" (first craft)                                   │
+│  Response: {"item_name": "Iron Fireblade", "damage": 45, "fire": 15} │
+│  Memory (writes): "Craft#1: Iron Fireblade damage:45 fire:15"      │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ШАГ 3: Programmer генерирует Lua код для реализации                │
-│  Агент: Programmer                                                  │
-│  Память: Programmer (изолированная)                                 │
+│  STEP 3: Programmer generates Lua code for implementation           │
+│  Agent: Programmer                                                  │
+│  Memory: Programmer (isolated)                                      │
 │                                                                     │
-│  Запрос: "Создай Lua код для Iron Fireblade (damage:45, fire:15)"   │
-│  Ответ: create_item('Iron Fireblade', 'weapon', 65)                 │
+│  Request: "Create Lua code for Iron Fireblade (damage:45, fire:15)" │
+│  Response: create_item('Iron Fireblade', 'weapon', 65)              │
 │         add_special_effect('fire_damage: 15')                       │
-│  Память: (может не писать, если не запрошено)                       │
+│  Memory: (may skip writing unless requested)                        │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ШАГ 4: CoreMechanicAI — повторный крафт (проверка детерминизма)    │
-│  Агент: CoreMechanicAI                                              │
-│  Память: CoreMechanicAI (читает Craft#1)                            │
+│  STEP 4: CoreMechanicAI repeats crafting (determinism check)        │
+│  Agent: CoreMechanicAI                                              │
+│  Memory: CoreMechanicAI (reads Craft#1)                             │
 │                                                                     │
-│  Запрос: "Снова крафт из: Iron + Fire Crystal (те же параметры)"    │
-│  Память (читает): "Craft#1: Iron Fireblade damage:45 fire:15"      │
-│  Ответ: {"item_name": "Iron Fireblade", "damage": 45, "fire": 15}   │
-│  ✅ Тот же результат! Детерминизм работает!                         │
+│  Request: "Craft again from: Iron + Fire Crystal (same parameters)" │
+│  Memory (reads): "Craft#1: Iron Fireblade damage:45 fire:15"       │
+│  Response: {"item_name": "Iron Fireblade", "damage": 45, "fire": 15} │
+│  ✅ Same result. Determinism works.                                  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Результат:**
-- ✓ Creator спроектировал крафт
-- ✓ CoreMechanicAI рассчитал числа
-- ✓ Programmer сгенерировал Lua код
-- ✓ Память каждого агента изолирована
-- ✓ Повторный крафт детерминирован
+**Result:**
+- ✓ Creator designed the craft
+- ✓ CoreMechanicAI calculated the numbers
+- ✓ Programmer generated Lua code
+- ✓ Each agent's memory is isolated
+- ✓ Repeat crafting is deterministic
 
 ---
 
-## MemoryTool — Microsoft.Extensions.AI
+## MemoryTool - Microsoft.Extensions.AI
 
-Каждый агент имеет свой `MemoryTool` с изолированной памятью:
+Each agent has its own `MemoryTool` with isolated memory:
 
 ```csharp
-// CoreMechanicAI память — история крафтов
+// CoreMechanicAI memory: crafting history
 var mechanicTool = new MemoryTool(store, "CoreMechanicAI");
 await mechanicTool.ExecuteAsync("write", "Craft#1: Iron Fireblade damage:45");
 
-// Creator память — дизайн-решения
+// Creator memory: design decisions
 var creatorTool = new MemoryTool(store, "Creator");
-await creatorTool.ExecuteAsync("write", "Design: Iron+Fire Crystal → weapon");
+await creatorTool.ExecuteAsync("write", "Design: Iron+Fire Crystal -> weapon");
 
-// Они НЕ видят память друг друга!
-store.TryLoad("Creator", out var creatorState);       // → "Design: ..."
-store.TryLoad("CoreMechanicAI", out var mechanicState); // → "Craft#1: ..."
+// They do NOT see each other's memory.
+store.TryLoad("Creator", out var creatorState);       // -> "Design: ..."
+store.TryLoad("CoreMechanicAI", out var mechanicState); // -> "Craft#1: ..."
 ```
 
-**Три действия:**
-- `write` — перезаписать память
-- `append` — добавить к существующей
-- `clear` — очистить память
+**Three actions:**
+- `write`: overwrite memory
+- `append`: add to existing memory
+- `clear`: clear memory
 
-Реализация: `Microsoft.Extensions.AI.AIFunctionFactory.Create()`
-
----
-
-## Тесты
-
-### PlayMode тесты (полный воркфлоу с реальной моделью)
-
-| Файл | Агенты | Бэкенд | Описание |
-|------|--------|--------|----------|
-| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator → CoreMechanicAI → Programmer** | OpenAI HTTP | **Полный воркфлоу 3 агентов** |
-| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator → CoreMechanicAI** | OpenAI HTTP | **Быстрый тест 2 агентов** |
-| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | CoreMechanicAI | LLMUnity | 4 крафта + детерминизм |
-| `CraftingMemoryViaOpenAiPlayModeTests.cs` | CoreMechanicAI | OpenAI HTTP | 4 крафта + детерминизм + 2 крафта |
-
-### EditMode тесты (с моковой LLM)
-
-| Файл | Описание |
-|------|----------|
-| `AiCraftingMechanicIntegrationEditModeTests.cs` | Крафт с моковой LLM |
-| `MemoryToolMeaiEditModeTests.cs` | Тесты MemoryTool (write/append/clear) |
+Implementation: `Microsoft.Extensions.AI.AIFunctionFactory.Create()`
 
 ---
 
-## Ключевые компоненты
+## Tests
+
+### PlayMode Tests (Full Workflow with a Real Model)
+
+| File | Agents | Backend | Description |
+|------|--------|--------|-------------|
+| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator -> CoreMechanicAI -> Programmer** | OpenAI HTTP | **Full 3-agent workflow** |
+| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator -> CoreMechanicAI** | OpenAI HTTP | **Fast 2-agent test** |
+| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | CoreMechanicAI | LLMUnity | 4 crafts + determinism |
+| `CraftingMemoryViaOpenAiPlayModeTests.cs` | CoreMechanicAI | OpenAI HTTP | 4 crafts + determinism + 2 crafts |
+
+### EditMode Tests (with Mock LLM)
+
+| File | Description |
+|------|-------------|
+| `AiCraftingMechanicIntegrationEditModeTests.cs` | Crafting with a mock LLM |
+| `MemoryToolMeaiEditModeTests.cs` | MemoryTool tests (write/append/clear) |
+
+---
+
+## Key Components
 
 ```
 AiOrchestrator
-    ├── ILlmClient (LLMUnity или OpenAI HTTP)
-    ├── IAgentMemoryStore (хранение памяти)
-    ├── AgentMemoryPolicy (политика обновления)
-    ├── AiPromptComposer (сборка промпта + память)
-    └── IAiGameCommandSink (приём команд)
+    ├── ILlmClient (LLMUnity or OpenAI HTTP)
+    ├── IAgentMemoryStore (memory storage)
+    ├── AgentMemoryPolicy (update policy)
+    ├── AiPromptComposer (prompt + memory assembly)
+    └── IAiGameCommandSink (command intake)
 
 MemoryTool (Microsoft.Extensions.AI)
-    ├── CreateAIFunction() → AIFunction для model function calling
+    ├── CreateAIFunction() -> AIFunction for model function calling
     ├── ExecuteAsync("write", content)
     ├── ExecuteAsync("append", content)
     └── ExecuteAsync("clear")
 ```
 
-## Примечания
+## Notes
 
-> 💡 **Все агенты используют одну модель** — Qwen 35B через LM Studio.
-> Разделение происходит на уровне:
-> - **Системного промпта** (роль агента)
-> - **Памяти** (изолированная по `roleId`)
-> - **Инструментов** (доступные функции)
+> 💡 **All agents use one model**: Qwen 35B through LM Studio.
+> Separation happens at the level of:
+> - **System prompt** (agent role)
+> - **Memory** (isolated by `roleId`)
+> - **Tools** (available functions)
 >
-> Это позволяет масштабировать систему — добавить нового агента = добавить новый roleId + промпт.
+> This lets the system scale: adding a new agent = adding a new roleId + prompt.

@@ -1,54 +1,51 @@
-# Live Mechanics Demo — реальная LLM меняет механики через чат
+﻿# Live Mechanics Demo - Real LLM Changes Mechanics Through Chat
 
-Сцена: `Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity`
+Scene: `Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsDemo.unity`
 
-Демонстрирует главный сценарий CoreAI: **настоящая LLM-модель** (не stub) через игровой чат
-пишет Lua-код и на лету создаёт/меняет игровые механики, пока игра работает.
+Demonstrates the main CoreAI scenario: a **real LLM model** (not a stub) writes Lua code through
+in-game chat and creates/changes gameplay mechanics on the fly while the game is running.
 
-## Что в сцене
+## What Is in the Scene
 
-- Мини-игра: герой каждые N секунд бьёт босса; урон, интервал атаки и лут считаются
-  через **Lua logic slots** (`damage_formula`, `attack_interval`, `loot_formula`).
-  Пока слот не переопределён — работает C#-дефолт (`atk - def`, 2 сек, 10 золота).
-- `CoreAiChatPanel` с ролью **Programmer**: модель отвечает Lua-кодом (fenced-блок или
-  tool-call `execute_lua`), который проходит штатный пайплайн
-  `LuaAiEnvelopeProcessor → SecureLuaEnvironment` с полным набором игровых биндингов
-  (`LuaCapabilities.All`): logic slots, `LuaModRuntime`, world-команды
-  (`coreai_world_spawn` и др., префабы из `Shared/DemoPrefabRegistry`).
-- Левая панель (OnGUI): HP босса, золото, состояние слотов (C# default / Lua override),
-  загруженные моды, боевой лог. Чат открывается клавишей **C**.
+- Mini-game: the hero attacks the boss every N seconds; damage, attack interval, and loot are computed
+  through **Lua logic slots** (`damage_formula`, `attack_interval`, `loot_formula`).
+  Until a slot is overridden, the C# default is used (`atk - def`, 2 sec, 10 gold).
+- `CoreAiChatPanel` with the **Programmer** role: the model replies with Lua code (a fenced block or
+  tool-call `execute_lua`), which goes through the normal pipeline
+  `LuaAiEnvelopeProcessor -> SecureLuaEnvironment` with the full game binding set
+  (`LuaCapabilities.All`): logic slots, `LuaModRuntime`, world commands
+  (`coreai_world_spawn`, etc.; prefabs from `Shared/DemoPrefabRegistry`).
+- Left panel (OnGUI): boss HP, gold, slot states (C# default / Lua override), loaded mods, combat log.
+  Open chat with **C**.
 
-## Требования
+## Requirements
 
-- LM Studio (или любой OpenAI-совместимый сервер) на `http://127.0.0.1:1234/v1`
-  с загруженной моделью — endpoint настраивается в `Assets/Resources/CoreAISettings.asset`.
-- MoonSharp в проекте (define `COREAI_HAS_MOONSHARP`, без `COREAI_NO_LUA`).
+- LM Studio (or any OpenAI-compatible server) at `http://127.0.0.1:1234/v1` with a loaded model;
+  the endpoint is configured in `Assets/Resources/CoreAISettings.asset`.
+- MoonSharp in the project (define `COREAI_HAS_MOONSHARP`, without `COREAI_NO_LUA`).
 
-## Как пользоваться
+## How to Use It
 
-1. Откройте сцену, войдите в Play Mode.
-2. Нажмите **C**, чтобы открыть чат.
-3. Попросите модель изменить механику — примеры промптов ниже.
-4. Следите за левой панелью: слот переключится на «Lua override», и числа в боевом
-   логе изменятся сразу же.
+1. Open the scene and enter Play Mode.
+2. Press **C** to open chat.
+3. Ask the model to change a mechanic; sample prompts are below.
+4. Watch the left panel: the slot switches to `Lua override`, and the numbers in the combat log change immediately.
 
-## Примеры промптов
+## Sample Prompts
 
-Создание / изменение правил (logic slots):
+Creating / changing rules (logic slots):
 
-- «Создай механику крита: переопредели слот `damage_formula(atk, def)` так, чтобы
-  с шансом 30% урон удваивался, иначе обычный atk - def.»
-- «Измени правило боя: урон должен быть (atk - def) * 1.5, минимум 1.»
-- «Сделай героя быстрее: переопредели `attack_interval` так, чтобы атака шла раз в 0.5 секунды.»
-- «Поменяй экономику: `loot_formula(bossMaxHp)` должна давать bossMaxHp / 10 + 25 золота.»
-- «Покажи, какие слоты есть в игре (вызови `logic_list()`), и сбрось `damage_formula`
-  к дефолту через `logic_reset`.»
+- "Create a critical hit mechanic: override the `damage_formula(atk, def)` slot so that damage has a 30% chance to double, otherwise use the normal atk - def."
+- "Change the combat rule: damage should be (atk - def) * 1.5, minimum 1."
+- "Make the hero faster: override `attack_interval` so attacks happen once every 0.5 seconds."
+- "Change the economy: `loot_formula(bossMaxHp)` should give bossMaxHp / 10 + 25 gold."
+- "Show which slots exist in the game (call `logic_list()`), and reset `damage_formula` to the default through `logic_reset`."
 
-Мир (world-команды):
+World (world commands):
 
-- «Заспавни трёх врагов prefab `enemy` вокруг точки (0, 1.5, 0) и перекрась босса в фиолетовый.»
+- "Spawn three enemies with prefab `enemy` around point (0, 1.5, 0) and recolor the boss purple."
 
-Подсказка модели, если она не знает API: в промпте можно прямо назвать функции —
+Hint for the model if it does not know the API: you can name the functions directly in the prompt:
 `logic_define(name, fn)`, `logic_reset(name)`, `logic_list()`, `report(msg)`.
 
 ## Persistence
@@ -62,11 +59,11 @@ again, it reapplies the saved Lua chunk before the battle loop continues.
 file-backed by `FileLuaModStore`, but the loaded mod source list is not auto-restored by this demo.
 Hosts that want mods to autoload should load/reload their selected mod sources on startup.
 
-## Безопасность
+## Security
 
-Код модели исполняется только в `SecureLuaEnvironment` (sandbox MoonSharp: без io/os/файлов,
-лимиты инструкций/памяти). Возможности ограничиваются `LuaCapabilities`; в демо у роли
-Programmer полный набор (`All`) намеренно — это и есть демонстрация «AI-геймдизайнера».
+Model code runs only in `SecureLuaEnvironment` (MoonSharp sandbox: no io/os/files, instruction and
+memory limits). Capabilities are restricted by `LuaCapabilities`; the demo intentionally gives the
+Programmer role the full standard set (`All`) because it demonstrates an "AI game designer".
 
 ## Mods-chat copy
 

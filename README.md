@@ -6,8 +6,6 @@
 
 **CoreAI is a Unity framework for LLM-powered NPCs and agents that call your game code** — function calling, tools, persistent memory, and runtime Lua — running on a **local 4 GB model** or any **OpenAI-compatible API**. No cloud keys required, no scripted dialogue trees.
 
-*Read this in other languages: [English](README.md) · [Russian](README_RU.md).*
-
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
 [![EditMode tests](https://img.shields.io/badge/EditMode-967%20passing-brightgreen)](Assets/CoreAiUnity/Tests/EditMode)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
@@ -247,6 +245,34 @@ Programmer AI: execute_lua → create_item("Flame Sword", "weapon", 75)
   ↓
 ✨ Player receives a unique item!
 ```
+
+---
+
+### 🧪 Build a whole game from mods alone
+
+CoreAI mods aren't limited to tuning numbers — a host can expose its own Lua API so the **AI authors brand-new content at runtime**. The included **Unit Forge** demo ships an **empty arena**: every unit type, every wave, and every behaviour is added by Lua mods written through chat.
+
+```lua
+-- The AI writes this when you ask for "a knight line vs a goblin swarm"
+forge_define("knight", "ally",  60, 8, 1.4, 1.1, "#3aa0ff")
+forge_define("goblin", "enemy", 25, 4, 2.0, 1.0, "#3cc452")
+for i = 1, 3 do forge_spawn("knight", -5, (i - 2) * 1.5) end
+for i = 1, 4 do forge_spawn("goblin",  5, (i - 2) * 1.2) end
+
+hooks_every(3.0, function()         -- endless reinforcements, also written by the AI
+  if forge_count("enemy") < 6 then forge_spawn("goblin", 6, math.random(-3, 3)) end
+end)
+```
+
+Capability tiers keep it safe: `forge_*` lives behind the **WorldEdit** tier, while a separate **Full** tier (opt-in, public members only by default) can reach arbitrary components via reflection. Toggle the optional Lua/LLM packages from **`CoreAI → Setup → Modules`**.
+
+| Demo scene | What it shows |
+|------------|---------------|
+| 🛠️ **Unit Forge** (`Assets/CoreAI.Demos/ModdableUnits`) | New units & whole game loops created by mods alone |
+| 🌊 **Wave Auto-Battler** (`Assets/CoreAI.Demos/LiveMechanicsMods`) | Number-tuning mods over a live battle |
+| 🔓 **Full Access** (`Assets/CoreAI.Demos/FullAccess`) | Reflection-tier Lua reaching scene objects via `unity_*` |
+
+Docs: [LUA_GAME_API](Assets/CoreAI/Docs/LUA_GAME_API.md) · [OPTIONAL_MODULES](Assets/CoreAiUnity/Docs/OPTIONAL_MODULES.md)
 
 ---
 
@@ -518,7 +544,7 @@ var storyteller = new AgentBuilder("Storyteller")
 
 ## 📚 Documentation
 
-**Language:** In-depth Markdown under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/) is maintained in **English**. The portable `CoreAI` package docs are English-only except clearly marked `_RU` redirect/plan stubs. [README_RU.md](README_RU.md) mirrors this page for Russian navigation; follow the linked guides for detail.
+**Language:** All documentation is maintained in **English** — in-depth Markdown lives under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/). Follow the linked guides for detail.
 
 Start from the index and pick the level that matches your goal:
 

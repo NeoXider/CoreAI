@@ -1,87 +1,87 @@
-# Арена: прогрессия (мета + сессия)
+﻿# Arena: Progression (Meta + Session)
 
-Реализация в стиле Vampire Survivors: **сессионный** XP/уровень и драфт карт, **мета** между забегами через `Neo.Save.SaveProvider`. Волны — сценарий `ArenaSurvival.UseCases.ArenaSurvivalDirector`; фаза 2: координатор не вшит в директор.
+Implementation in the Vampire Survivors style: **session** XP/level and card drafts, plus **meta** between runs through `Neo.Save.SaveProvider`. Waves are handled by `ArenaSurvival.UseCases.ArenaSurvivalDirector`; phase 2: the coordinator is not hardwired into the director.
 
-## Структура папок (чистая архитектура)
+## Folder Structure (Clean Architecture)
 
-**Корень примера** `Assets/_exampleGame/RogueliteArena/`:
+**Example root** `Assets/_exampleGame/RogueliteArena/`:
 
-- `Composition/` — композиция приложения: `RogueliteArenaLifetimeScope` (VContainer)
+- `Composition/` - application composition: `RogueliteArenaLifetimeScope` (VContainer)
 
-Каждая фича под `Features/<Имя>/` делится на слои (папки = слои):
+Each feature under `Features/<Name>/` is split into layers (folders = layers):
 
-| Фича | Domain | UseCases | Presenter | View | Infrastructure |
+| Feature | Domain | UseCases | Presenter | View | Infrastructure |
 |------|--------|----------|-----------|------|----------------|
-| **ArenaSurvival** | контракты сессии (`IArenaSessionView`), `ArenaSimulationRole` | оркестрация волн (`ArenaSurvivalDirector`) | — | `ArenaSurvivalHud` | `ArenaSurvivalSession`, `ArenaSurvivalProceduralSetup` |
-| **ArenaWaves** | `IArenaWaveSchedule`, планы, кривая сложности (модель) | `ArenaLocalWavePlanner`, `ArenaWavePlanValidator` | — | — | Creator/парсер, `ArenaLinearWaveSchedule`, SO пресетов и VS-кривой |
-| **ArenaCombat** | — | — | — | — | игрок, враг, компаньон, слушатель AINpc |
-| **ArenaCamera** | — | — | — | — | `ArenaFollowCamera` |
-| **ArenaAi** | константы `ArenaAiSourceTags` | — | — | — | шина задач, триггеры, aux LLM |
-| **ArenaBootstrap** | — | — | — | — | `ExampleRogueliteEntry`, хоткеи LLM/Lua |
+| **ArenaSurvival** | session contracts (`IArenaSessionView`), `ArenaSimulationRole` | wave orchestration (`ArenaSurvivalDirector`) | - | `ArenaSurvivalHud` | `ArenaSurvivalSession`, `ArenaSurvivalProceduralSetup` |
+| **ArenaWaves** | `IArenaWaveSchedule`, plans, difficulty curve (model) | `ArenaLocalWavePlanner`, `ArenaWavePlanValidator` | - | - | Creator/parser, `ArenaLinearWaveSchedule`, preset SOs and VS curve |
+| **ArenaCombat** | - | - | - | - | player, enemy, companion, AINpc listener |
+| **ArenaCamera** | - | - | - | - | `ArenaFollowCamera` |
+| **ArenaAi** | constants `ArenaAiSourceTags` | - | - | - | task bus, triggers, aux LLM |
+| **ArenaBootstrap** | - | - | - | - | `ExampleRogueliteEntry`, LLM/Lua hotkeys |
 
-**Прогрессия** `Features/ArenaProgression/`:
+**Progression** `Features/ArenaProgression/`:
 
-- `Domain` — состояние, enum, `IArenaCombatStats`
-- `UseCases` — сценарии сохранения меты, XP, ролла, применения апгрейда
-- `Presenter` — `ArenaUpgradeDraftPresenter`, заглушка `ArenaWaveUpgradeCoordinator`
-- `View` — `ArenaUpgradeChoiceView`, `ArenaUpgradeCardWidget` (TMP + UI)
-- `Infrastructure` — ScriptableObject и контент (`ArenaProgressionContent`, конфиги, `ArenaUpgradeDefinition`), рантайм-сервисы (ролл, сейв, Lua, сессионный хост, хаб, модель боя, мозги компаньона)
+- `Domain` - state, enum, `IArenaCombatStats`
+- `UseCases` - use cases for meta save, XP, rolling, and applying upgrades
+- `Presenter` - `ArenaUpgradeDraftPresenter`, placeholder `ArenaWaveUpgradeCoordinator`
+- `View` - `ArenaUpgradeChoiceView`, `ArenaUpgradeCardWidget` (TMP + UI)
+- `Infrastructure` - ScriptableObject and content (`ArenaProgressionContent`, configs, `ArenaUpgradeDefinition`), runtime services (roll, save, Lua, session host, hub, combat model, companion brain)
 
-Пространства имён зеркалят слой: `CoreAI.ExampleGame.<Фича>.<Domain|UseCases|Presenter|View|Infrastructure>`.
+Namespaces mirror the layer: `CoreAI.ExampleGame.<Feature>.<Domain|UseCases|Presenter|View|Infrastructure>`.
 
 ## ScriptableObjects
 
-Создание дефолтных ассетов: меню **CoreAI Example → Arena → Generate Progression Assets (Defaults)** (пишет в `Assets/_exampleGame/Settings/Progression/`).
+Create default assets from the menu **CoreAI Example -> Arena -> Generate Progression Assets (Defaults)** (writes to `Assets/_exampleGame/Settings/Progression/`).
 
-- `ArenaUnitBaselineConfig` — стартовые статы игрока и компаньона
-- `ArenaRunBalanceConfig` — ссылки на `LevelCurveDefinition` (сессия + мета), XP за килл, деление на команду, множители редкости, лимиты карточек
-- `ArenaProgressionContent` — реестр апгрейдов и ссылки на `ChanceData` (редкость, категории по редкости, веса стат-пула)
-- `ArenaUpgradeDefinition` — id, title, description, kind, rarity, statDelta
-- `ArenaUpgradePresentationConfig` — спрайты/материалы рамок по редкости
-- `ArenaPersistenceConfig` — ключ меты для SaveProvider (опционально; иначе дефолтный ключ в коде шлюза)
+- `ArenaUnitBaselineConfig` - starting stats for the player and companion
+- `ArenaRunBalanceConfig` - references to `LevelCurveDefinition` (session + meta), XP per kill, team split, rarity multipliers, card limits
+- `ArenaProgressionContent` - upgrade registry and references to `ChanceData` (rarity, categories by rarity, stat-pool weights)
+- `ArenaUpgradeDefinition` - id, title, description, kind, rarity, statDelta
+- `ArenaUpgradePresentationConfig` - frame sprites/materials by rarity
+- `ArenaPersistenceConfig` - meta key for SaveProvider (optional; otherwise the gateway uses the default key in code)
 
 Neoxider: [Random / ChanceData](https://github.com/NeoXider/NeoxiderTools/tree/main/Assets/Neoxider/Docs/Tools/Random), [Progression / LevelCurveDefinition](https://github.com/NeoXider/NeoxiderTools/tree/main/Assets/Neoxider/Docs/Progression).
 
-### Индексы ChanceData
+### ChanceData Indexes
 
-- **Редкость:** 0 Common, 1 Rare, 2 Epic, 3 Legendary
-- **Категории Common/Rare:** 0 = Stat
+- **Rarity:** 0 Common, 1 Rare, 2 Epic, 3 Legendary
+- **Common/Rare categories:** 0 = Stat
 - **Epic:** 0 Stat, 1 PassiveSlot
-- **Legendary:** индексы ChanceData `0` Stat, `1` OfferExtraChoices, `2` LegendaryDoublePick (маппинг в `ArenaUpgradeRollService.TryMapCategory`)
-- **StatUpgradeWeights:** индекс = порядок стат-апгрейдов в списке `ArenaProgressionContent.upgrades` (первые N только со стат-кайндами в дефолтной генерации)
+- **Legendary:** ChanceData indexes `0` Stat, `1` OfferExtraChoices, `2` LegendaryDoublePick (mapping in `ArenaUpgradeRollService.TryMapCategory`)
+- **StatUpgradeWeights:** index = order of stat upgrades in the `ArenaProgressionContent.upgrades` list (the first N are stat kinds only in the default generation)
 
-## Сцена и проводка
+## Scene and Wiring
 
-На `ArenaSurvivalProceduralSetup` задайте **Arena Progression Content** и **Arena Unit Baseline Config**. При старте создаётся `ArenaProgressionSessionHost` (XP за килл, мета load/save, Lua).
+On `ArenaSurvivalProceduralSetup`, assign **Arena Progression Content** and **Arena Unit Baseline Config**. At startup it creates `ArenaProgressionSessionHost` (XP per kill, meta load/save, Lua).
 
-Префаб UI драфта: повесьте `ArenaUpgradeChoiceView` + пул из пяти `ArenaUpgradeCardWidget`, назначьте ссылку в `ArenaProgressionSessionHost.draftView`. Без UI драфт можно вызвать из Lua (`arena_open_draft_debug`) — вид не откроется, если view null.
+Draft UI prefab: add `ArenaUpgradeChoiceView` + a pool of five `ArenaUpgradeCardWidget` instances, then assign the reference in `ArenaProgressionSessionHost.draftView`. Without draft UI, Lua can still call it (`arena_open_draft_debug`), but the view will not open if view is null.
 
-**Отладка:** `ArenaProgressionDebugHotkey` — клавиша **L** (по умолчанию) открывает драфт.
+**Debug:** `ArenaProgressionDebugHotkey` - key **L** (default) opens the draft.
 
-### Кривая сложности волн (VS-style)
+### Wave Difficulty Curve (VS-style)
 
-Нелинейная сложность в духе Vampire Survivors: **к концу забега суммарно жёстче** (ramp по прогрессу волны), но **отдельные волны мягче** за счёт синусов по числу врагов и статам.
+Nonlinear Vampire Survivors-style difficulty: **overall harder toward the end of the run** (ramp by wave progress), while **individual waves can be softer** because of sine waves over enemy count and stats.
 
-- **Назначение:** поле **VS Wave Difficulty** на `ArenaSurvivalProceduralSetup` (передаётся в `ArenaSurvivalDirector.Init` как override) **или** **Wave Difficulty Profile** на самом `ArenaSurvivalDirector`, если override не задан.
-- **Ассет:** `ArenaVsStyleWaveDifficulty` — меню **Assets → Create → CoreAI Example → Arena → VS-style Wave Difficulty**, либо **CoreAI Example → Arena → Generate VS Wave Difficulty Asset** (пишет в `Assets/_exampleGame/Settings/Arena/ArenaVsWaveDifficulty.asset`).
-- Множители накладываются на план Creator / локальный план / линейное расписание (число врагов, HP, урон, скорость, интервал спавна). В телеметрии — ключи `arena.wave.vs.*_mult`.
+- **Assignment:** **VS Wave Difficulty** field on `ArenaSurvivalProceduralSetup` (passed to `ArenaSurvivalDirector.Init` as an override) **or** **Wave Difficulty Profile** on `ArenaSurvivalDirector` itself if no override is assigned.
+- **Asset:** `ArenaVsStyleWaveDifficulty` - menu **Assets -> Create -> CoreAI Example -> Arena -> VS-style Wave Difficulty**, or **CoreAI Example -> Arena -> Generate VS Wave Difficulty Asset** (writes to `Assets/_exampleGame/Settings/Arena/ArenaVsWaveDifficulty.asset`).
+- Multipliers are applied on top of the Creator plan / local plan / linear schedule (enemy count, HP, damage, speed, spawn interval). Telemetry keys are `arena.wave.vs.*_mult`.
 
-## Lua API (Creator и Programmer)
+## Lua API (Creator and Programmer)
 
-Регистрация через `GameLuaBindingsExtensibility` + `ArenaProgressionLuaBindings` (ядро агрегирует в `AggregatingGameLuaRuntimeBindings`).
+Registered through `GameLuaBindingsExtensibility` + `ArenaProgressionLuaBindings` (the core aggregates them in `AggregatingGameLuaRuntimeBindings`).
 
-| Функция | Назначение |
+| Function | Purpose |
 |--------|------------|
-| `arena_add_session_xp(n)` | Сессионный XP (учёт деления — через хаб живых членов команды) |
-| `arena_add_meta_xp(n)` | Мета-XP + пересчёт уровня по мета-кривой |
-| `arena_save_meta()` / `arena_load_meta()` | SaveProvider JSON меты |
-| `arena_apply_upgrade_id("id")` | Применить апгрейд по id из контента |
-| `arena_open_draft_debug()` | Открыть экран выбора (нужен View) |
+| `arena_add_session_xp(n)` | Session XP (team split is handled through the live team member hub) |
+| `arena_add_meta_xp(n)` | Meta-XP + level recalculation through the meta curve |
+| `arena_save_meta()` / `arena_load_meta()` | SaveProvider JSON for meta |
+| `arena_apply_upgrade_id("id")` | Apply an upgrade by id from the content |
+| `arena_open_draft_debug()` | Open the choice screen (requires View) |
 
-## Сеть и авторитет
+## Networking and Authority
 
-Мутации забега — только при `IArenaSessionAuthority.IsAuthoritativeSimulation`. XP за смерть врага вызывается на авторитетном узле в `ArenaEnemyBrain.Die`.
+Run mutations only when `IArenaSessionAuthority.IsAuthoritativeSimulation`. XP for enemy death is awarded on the authoritative node in `ArenaEnemyBrain.Die`.
 
-## Фаза 2
+## Phase 2
 
-Вставка `ArenaWaveUpgradeCoordinator` между волнами в `ArenaSurvivalDirector.RunWaves` — по плану отдельно.
+Insert `ArenaWaveUpgradeCoordinator` between waves in `ArenaSurvivalDirector.RunWaves` as a separate planned task.

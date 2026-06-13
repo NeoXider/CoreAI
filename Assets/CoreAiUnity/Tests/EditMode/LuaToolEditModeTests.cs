@@ -192,12 +192,20 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(string.IsNullOrEmpty(wrapper.ParametersSchema));
             StringAssert.Contains("logic_define", wrapper.Description,
                 "execute_lua should advertise the runtime rule-slot API used by LiveMechanics.");
+            StringAssert.Contains("Full Lua Mode", wrapper.Description,
+                "execute_lua should advertise the Full Lua diagnostic workflow.");
+            StringAssert.Contains("unity_find_by_component", wrapper.Description,
+                "execute_lua should list Full scene discovery APIs.");
             StringAssert.DoesNotContain("create_item", wrapper.Description,
                 "The generic execute_lua metadata must not advertise helper globals that many scenes do not provide.");
+            StringAssert.Contains("game.enemies", wrapper.Description,
+                "The generic execute_lua metadata should explicitly forbid common invented game globals.");
             StringAssert.Contains("\"code\"", wrapper.ParametersSchema,
                 "JSON schema должна описывать параметр code");
             StringAssert.Contains("logic_define", wrapper.ParametersSchema,
                 "The code parameter schema should steer local models toward declared rule slots.");
+            StringAssert.Contains("unity_describe_object", wrapper.ParametersSchema,
+                "The code parameter schema should steer local models toward Full diagnostics.");
         }
 
         // ===================== Helpers =====================

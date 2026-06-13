@@ -79,7 +79,7 @@ namespace CoreAI.Infrastructure.Lua
                 return value ?? "";
             }
 
-            return value.Substring(0, maxLength) + " …(truncated)";
+            return value.Substring(0, maxLength) + " ...(truncated)";
         }
     }
 }

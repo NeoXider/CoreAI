@@ -1,31 +1,31 @@
-# Demo: Lua Mods
+﻿# Demo: Lua Mods
 
-Сцена: `LuaModsDemo.unity`. LLM не нужен — демонстрируется рантайм, которым пользуется ИИ.
+Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used by AI.
 
-## Что внутри
+## What Is Inside
 
-- **`LuaModsDemoController`** — резолвит из DI `LuaModRuntime` и `LuaLogicSlots`, рисует OnGUI-панель.
-- **`WaveDirectorMod.lua.txt`** — мод с уровнем `Read | WorldEdit`:
-  - `hooks_on("wave_started", ...)` — спавнит волну врагов одной транзакцией
-    (`coreai_world_begin/commit`), счётчик волн хранит в персистентном store (`store_set/get`);
-  - `hooks_every(4.0, ...)` — перекрашивает «Boss» через `coreai_world_set_props`;
-  - `events_emit("wave_spawned", n)` — событие обратно в игру (`ModEventEmitted`).
-- **`DamageTunerMod.lua.txt`** — мод с уровнем `Read | LogicOverride`: при загрузке вызывает
-  `logic_define("damage_formula", ...)`. Контроллер каждый кадр зовёт
-  `slots.TryInvokeNumber(...)` и показывает, какая формула активна — Lua-override или C#-дефолт.
+- **`LuaModsDemoController`** resolves `LuaModRuntime` and `LuaLogicSlots` from DI and draws an OnGUI panel.
+- **`WaveDirectorMod.lua.txt`** is a mod with the `Read | WorldEdit` level:
+  - `hooks_on("wave_started", ...)` spawns a wave of enemies in one transaction
+    (`coreai_world_begin/commit`), and stores the wave counter in persistent store (`store_set/get`);
+  - `hooks_every(4.0, ...)` recolors `Boss` through `coreai_world_set_props`;
+  - `events_emit("wave_spawned", n)` sends an event back to the game (`ModEventEmitted`).
+- **`DamageTunerMod.lua.txt`** is a mod with the `Read | LogicOverride` level: on load it calls
+  `logic_define("damage_formula", ...)`. The controller calls `slots.TryInvokeNumber(...)` every
+  frame and shows which formula is active: Lua override or C# default.
 
-## Как пользоваться
+## How to Use It
 
-1. Открыть сцену, нажать Play.
-2. «Load mod» → «Emit 'wave_started'» — на полу появляется волна капсул, в углу видно событие мода.
-3. «Load override mod» — формула урона меняется с `atk - def` (C#) на `atk * 2 - def * 0.5` (Lua).
-4. «Unload + reset slot» — возврат к C#-дефолту.
+1. Open the scene and press Play.
+2. `Load mod` -> `Emit 'wave_started'`: a wave of capsules appears on the floor, and the mod event is visible in the corner.
+3. `Load override mod`: the damage formula changes from `atk - def` (C#) to `atk * 2 - def * 0.5` (Lua).
+4. `Unload + reset slot`: returns to the C# default.
 
-## Что проверить глазами
+## What to Verify Visually
 
-- У мода `wave_director` нет `logic_define` (нет уровня `LogicOverride`), а у `damage_tuner`
-  нет `coreai_world_spawn` — capability-уровни реально ограничивают набор глобалов.
-- Счётчик волн переживает Unload/Load мода (хранится в `FileLuaModStore`,
+- The `wave_director` mod has no `logic_define` (no `LogicOverride` level), and `damage_tuner`
+  has no `coreai_world_spawn`: capability levels really restrict the global set.
+- The wave counter survives mod Unload/Load (stored in `FileLuaModStore`,
   `persistentDataPath/CoreAI/LuaMods`).
-- Подробности API: `Assets/CoreAI/Docs/LUA_GAME_API.md`, безопасность —
+- API details: `Assets/CoreAI/Docs/LUA_GAME_API.md`; security:
   `Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md`.

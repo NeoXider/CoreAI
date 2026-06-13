@@ -1,97 +1,97 @@
-# MultiAgent Workflow Plan (v2.0)
+﻿# MultiAgent Workflow Plan (v2.0)
 
-## Цель
-Реализовать multi-agent orchestration по паттерну Claude Agent SDK / Anthropic Research System.
+## Goal
+Implement multi-agent orchestration following the Claude Agent SDK / Anthropic Research System pattern.
 
-## Источники паттернов (из открытых исходников)
+## Pattern Sources (from Open Sources)
 
-### Claude Agent SDK (Anthropic) — Лучшие практики
-Изучено из: ksred.com, DeepWiki, Claude Lab
+### Claude Agent SDK (Anthropic) - Best Practices
+Studied from: ksred.com, DeepWiki, Claude Lab
 
-1. **Декларативное определение subagents**
+1. **Declarative subagent definitions**
    ```typescript
    agents: {
      "security-reviewer": {
        description: "Identifies security vulnerabilities",
        prompt: "You are a security specialist...",
        tools: ["Read", "Grep"],
-       model: "opus"  // subagent может использовать другую модель
+       model: "opus"  // subagent can use a different model
      }
    }
    ```
 
-2. **Task tool** — НЕ ЯВЛЯЕТСЯ частью subagent tools!
-   - Task ДОЛЖЕН быть в allowedTools родителя
-   - Task НЕ должен быть в subagent tools — subagents не спавнят своих subagents
+2. **Task tool** - NOT part of subagent tools!
+   - Task MUST be in the parent's allowedTools
+   - Task MUST NOT be in subagent tools - subagents do not spawn their own subagents
 
-3. **Контекстная изоляция** — каждый subagent получает ЧИСТЫЙ контекст
-   - subagent видит ТОЛЬКО свою задачу
-   - не засоряет родительский контекст
-   - результаты агрегируются обратно
+3. **Context isolation** - each subagent receives a CLEAN context
+   - subagent sees ONLY its own task
+   - does not pollute the parent context
+   - results are aggregated back
 
-4. **Модель САМА решает параллельность** — не нужно явное `parallel` действие
+4. **The model decides parallelism ITSELF** - no explicit `parallel` action is needed
    - define capability, not scheduling
 
-5. **Контроль ресурсов**:
-   - `maxTurns` — лимит tool calls для subagent
-   - `maxTokens` — лимит output tokens
-   - `maxBudgetUsd` — лимит бюджета
+5. **Resource control**:
+   - `maxTurns` - tool call limit for subagent
+   - `maxTokens` - output token limit
+   - `maxBudgetUsd` - budget limit
 
 ### Anthropic Research System
-- **Lead agent + Subagents** — lead координирует, subagents выполняют
-- **Parallel subagents** — 3-5 subagents одновременно
-- **Result synthesis** — lead собирает результаты
-- **Token budget** — multi-agent использует ~15x токенов vs single agent
+- **Lead agent + Subagents** - lead coordinates, subagents execute
+- **Parallel subagents** - 3-5 subagents simultaneously
+- **Result synthesis** - lead collects results
+- **Token budget** - multi-agent uses about 15x tokens vs single agent
 
-## Ключевые изменения vs v1.0
+## Key Changes vs v1.0
 
-1. ✅ Контекстная изоляция — subagent получает ТОЛЬКО свою задачу, не весь родительский контекст
-2. ✅ Модель сама решает о параллельности (но лимитировано через MaxParallelAgents)
-3. ✅ Результаты subagent агрегируются в родителя
-4. ✅ Бюджет токенов и max turns для subagents
-5. ✅ Агенты определяются декларативно с description + tools + model
+1. ✅ Context isolation - subagent receives ONLY its own task, not the full parent context
+2. ✅ The model decides parallelism itself (but limited through MaxParallelAgents)
+3. ✅ Subagent results are aggregated into the parent
+4. ✅ Token budget and max turns for subagents
+5. ✅ Agents are defined declaratively with description + tools + model
 
 ---
 
-## Архитектура
+## Architecture
 
-### 1. SubAgentDefinition — декларативное определение subagent
-**Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/SubAgentDefinition.cs` (NEW)
+### 1. SubAgentDefinition - declarative subagent definition
+**File:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/SubAgentDefinition.cs` (NEW)
 
-**Важно:** SubAgentDefinition НЕ содержит Task tool — subagents не могут спавнить subagents!
+**Important:** SubAgentDefinition does NOT contain the Task tool - subagents cannot spawn subagents!
 
 ```csharp
 public sealed class SubAgentDefinition {
-    /// <summary>Role ID агента (используется для поиска в AgentRegistry).</summary>
+    /// <summary>Agent role ID (used for lookup in AgentRegistry).</summary>
     public string RoleId { get; init; }
     
-    /// <summary>Описание для orchestrator LLM — когда использовать этого агента.</summary>
+    /// <summary>Description for the orchestrator LLM - when to use this agent.</summary>
     public string Description { get; init; }
     
-    /// <summary>Специфичный system prompt для subagent (расширяет базовый).</summary>
+    /// <summary>Specific system prompt for the subagent (extends the base one).</summary>
     public string CustomPrompt { get; init; }
     
-    /// <summary>Инструменты для subagent (НЕ включает Task tool!).</summary>
+    /// <summary>Tools for the subagent (does NOT include Task tool!).</summary>
     public IReadOnlyList<ILlmTool> Tools { get; init; }
     
-    /// <summary>Модель для subagent (null = использовать модель родителя).</summary>
+    /// <summary>Model for the subagent (null = use parent model).</summary>
     public string Model { get; init; }
     
-    /// <summary>Max токенов для subagent ответа. По умолчанию: 4096.</summary>
+    /// <summary>Max tokens for subagent response. Default: 4096.</summary>
     public int MaxTokens { get; init; } = 4096;
     
-    /// <summary>Max turns (tool calls) для subagent. По умолчанию: 10.</summary>
+    /// <summary>Max turns (tool calls) for subagent. Default: 10.</summary>
     public int MaxTurns { get; init; } = 10;
 }
 ```
 
-**Ограничения Claude Agent SDK (лучшие практики):**
-- Task tool ДОЛЖЕН быть в allowedTools родителя
-- Task tool НЕ должен быть в subagent tools — subagents не спавнят subagents
+**Claude Agent SDK constraints (best practices):**
+- Task tool MUST be in the parent's allowedTools
+- Task tool MUST NOT be in subagent tools - subagents do not spawn subagents
 
-### 2. AgentLlmTool Schema — по паттерну Claude Agent SDK
+### 2. AgentLlmTool Schema - following the Claude Agent SDK pattern
 
-**Ключевое правило:** AgentLlmTool (подобен Task в Claude Agent SDK) — только для родительского агента!
+**Key rule:** AgentLlmTool (similar to Task in Claude Agent SDK) is only for the parent agent!
 
 ```json
 {
@@ -118,22 +118,22 @@ public sealed class SubAgentDefinition {
 }
 ```
 
-### 3. AgentRegistry — реестр с поддержкой SubAgentDefinition
-**Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentRegistry.cs` (MODIFY)
+### 3. AgentRegistry - registry with SubAgentDefinition support
+**File:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentRegistry.cs` (MODIFY)
 
 ```csharp
 public interface IAgentRegistry {
-    // Существующие методы...
+    // Existing methods...
     void RegisterSubAgents(IReadOnlyDictionary<string, SubAgentDefinition> subAgents);
     IReadOnlyDictionary<string, SubAgentDefinition> GetSubAgents();
     bool TryGetSubAgent(string roleId, out SubAgentDefinition definition);
 }
 ```
 
-### 3. AgentTool — простой MEAI tool (по паттерну Task в Claude Agent SDK)
-**Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentLlmTool.cs` (MODIFY)
+### 3. AgentTool - simple MEAI tool (following the Task pattern in Claude Agent SDK)
+**File:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentLlmTool.cs` (MODIFY)
 
-Вместо явных `action: "call"`, делаем проще — модель описывает кого вызвать и с какой задачей:
+Instead of explicit `action: "call"`, make it simpler - the model describes who to call and with what task:
 
 ```json
 {
@@ -160,39 +160,39 @@ public interface IAgentRegistry {
 }
 ```
 
-**Отличие от v1:**
-- ❌ `action: "call"` → ✅ `subagent: "role"` — декларативнее, LLM сам решает
-- ❌ Явный parallel → ✅ Модель сама решает через несколько вызовов AgentTool
-- ❌ Сложный action enum → ✅ Простой task description
+**Difference from v1:**
+- ❌ `action: "call"` -> ✅ `subagent: "role"` - more declarative, LLM decides itself
+- ❌ Explicit parallel -> ✅ Model decides itself through multiple AgentTool calls
+- ❌ Complex action enum -> ✅ Simple task description
 
-### 4. AgentOrchestrator — выполнение subagent с изоляцией контекста
-**Файл:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentOrchestrator.cs` (MODIFY)
+### 4. AgentOrchestrator - subagent execution with context isolation
+**File:** `Assets/CoreAI/Runtime/Core/Features/Orchestration/AgentOrchestrator.cs` (MODIFY)
 
-**Session Persistence (опционально):**
+**Session Persistence (optional):**
 ```csharp
-// Сохранение сессии subagent для продолжения
+// Save the subagent session for continuation
 Task<AgentCallResult> ExecuteSubAgentAsync(
     string subAgentRoleId,
     string task,
     string context,
     int maxTurns,
     CancellationToken ct,
-    string? resumeSessionId = null  // опционально для продолжения
+    string? resumeSessionId = null  // optional for continuation
 );
 ```
 
-**Лучшие практики Claude Agent SDK:**
-- Subagent получает ЧИСТЫЙ контекст — только свою задачу
-- Результат возвращается как текст/tool_result
-- НЕ засоряет контекст родителя промежуточными шагами
-- Модель САМА решает когда параллелить (через несколько вызовов)
+**Claude Agent SDK best practices:**
+- Subagent receives a CLEAN context - only its own task
+- Result is returned as text/tool_result
+- Does NOT pollute parent context with intermediate steps
+- Model decides ITSELF when to parallelize (through multiple calls)
 
 ```csharp
 public interface IAgentOrchestrator {
     Task<AgentCallResult> ExecuteSubAgentAsync(
         string subAgentRoleId,
         string task,
-        string context,  // опциональный контекст от родителя
+        string context,  // optional context from parent
         int maxTurns,
         CancellationToken ct);
     
@@ -203,38 +203,38 @@ public interface IAgentOrchestrator {
 }
 ```
 
-**Ключевое отличие:**
-- Subagent получает ЧИСТЫЙ контекст — только свою задачу
-- Результат возвращается родителю как текст/tool result
-- НЕ засоряет контекст родителя промежуточными шагами subagent
+**Key distinction:**
+- Subagent receives a CLEAN context - only its own task
+- Result returns to the parent as text/tool result
+- Does NOT pollute the parent context with subagent intermediate steps
 
-### 5. CoreAISettings — добавить настройки subagent
-**Файл:** `CoreAISettings.cs` (MODIFY)
+### 5. CoreAISettings - add subagent settings
+**File:** `CoreAISettings.cs` (MODIFY)
 
 ```csharp
 public static class CoreAISettings {
-    /// <summary>Max параллельных subagents. По умолчанию: 3 (Anthropic Research).</summary>
+    /// <summary>Max parallel subagents. Default: 3 (Anthropic Research).</summary>
     public static int MaxParallelAgents { get; set; } = 3;
     
-    /// <summary>Таймаут subagent в секундах. По умолчанию: 60.</summary>
+    /// <summary>Subagent timeout in seconds. Default: 60.</summary>
     public static int AgentCallTimeoutSeconds { get; set; } = 60;
     
-    /// <summary>Max turns (tool calls) для subagent. По умолчанию: 10.</summary>
+    /// <summary>Max turns (tool calls) for subagent. Default: 10.</summary>
     public static int SubAgentMaxTurns { get; set; } = 10;
     
-    /// <summary>Max tokens для subagent ответа. По умолчанию: 4096.</summary>
+    /// <summary>Max tokens for subagent response. Default: 4096.</summary>
     public static int SubAgentMaxTokens { get; set; } = 4096;
 }
 ```
 
-**Почему 3:**
-- Anthropic Research System использует 3-5 parallel agents
-- Claude Agent SDK: "Claude decides when to parallelise" — модель сама
+**Why 3:**
+- Anthropic Research System uses 3-5 parallel agents
+- Claude Agent SDK: "Claude decides when to parallelise" - the model itself
 ```
 
 ---
 
-## System Prompt для Creator (обновить)
+## System Prompt for Creator (update)
 
 ```
 ## Subagents
@@ -254,179 +254,179 @@ Example:
 
 ---
 
-## DI Регистрация
+## DI Registration
 
-**Файл:** `CorePortableInstaller.cs` (MODIFY)
+**File:** `CorePortableInstaller.cs` (MODIFY)
 ```csharp
-// Subagents регистрируются при старте игры
-// AgentLlmTool добавляется через AgentMemoryPolicy.GetToolsForRole()
+// Subagents are registered at game start
+// AgentLlmTool is added through AgentMemoryPolicy.GetToolsForRole()
 ```
 
 ---
 
-## Пример работы (v2)
+## Example Flow (v2)
 
 ```
 User: "Create a wave of enemies and implement it"
 
-1. Creator LLM вызывает agent tool:
+1. Creator LLM calls agent tool:
    {subagent: "CoreMechanicAI", task: "Design enemy wave parameters"}
    
 2. AgentOrchestrator.ExecuteSubAgentAsync():
-   - Читает SubAgentDefinition из registry
-   - Создаёт чистый контекст с task
-   - Вызывает LLM сCustomPrompt + task
-   - Результат возвращается как текст
+   - Reads SubAgentDefinition from registry
+   - Creates a clean context with task
+   - Calls LLM with CustomPrompt + task
+   - Result is returned as text
 
-3. Creator получает результат:
+3. Creator receives result:
    {wave_size: 10, enemy_types: ["goblin", "orc"], difficulty: 5}
 
-4. Creator вызывает Programmer:
+4. Creator calls Programmer:
    {subagent: "Programmer", task: "Generate enemy_wave.lua", context: "wave config..."}
    
-5. Programmer возвращает Lua код
+5. Programmer returns Lua code
 
-6. Creator агрегирует результат и возвращает пользователю
+6. Creator aggregates the result and returns it to the user
 ```
 
-**Параллельность:**
+**Parallelism:**
 ```
-Creator вызывает несколько subagents одновременно:
+Creator calls several subagents at once:
 {subagent: "Analyzer", task: "Analyze current session balance"}
 {subagent: "CoreMechanicAI", task: "Calculate next wave difficulty"}
-→ AgentOrchestrator.ExecuteSubAgentsParallelAsync() запускает параллельно
-→ Результаты агрегируются
+-> AgentOrchestrator.ExecuteSubAgentsParallelAsync() runs them in parallel
+-> Results are aggregated
 ```
 
 ---
 
-## Файлы для создания/модификации
+## Files to Create/Modify
 
-### Новые файлы
-| Файл | Описание |
+### New Files
+| File | Description |
 |------|-----------|
-| `SubAgentDefinition.cs` | Декларативное определение subagent |
-| `AgentCallResult.cs` | Результат вызова агента |
+| `SubAgentDefinition.cs` | Declarative subagent definition |
+| `AgentCallResult.cs` | Agent call result |
 
-### Модифицируемые
-| Файл | Изменение |
+### Modified
+| File | Change |
 |------|-----------|
-| `AgentRegistry.cs` | Добавить RegisterSubAgents, GetSubAgents |
-| `AgentLlmTool.cs` | Упростить до субagent вызова |
-| `AgentOrchestrator.cs` | Добавить ExecuteSubAgentAsync с изоляцией |
-| `CoreAISettings.cs` | Добавить MaxParallelAgents, AgentCallTimeoutSeconds, SubAgentMaxTurns |
-| `CoreAISettingsAsset.cs` | Добавить поля в Inspector |
-| `AgentMemoryPolicy.cs` | Добавить AgentLlmTool в GetToolsForRole |
-| `CorePortableInstaller.cs` | DI регистрация |
+| `AgentRegistry.cs` | Add RegisterSubAgents, GetSubAgents |
+| `AgentLlmTool.cs` | Simplify to subagent call |
+| `AgentOrchestrator.cs` | Add ExecuteSubAgentAsync with isolation |
+| `CoreAISettings.cs` | Add MaxParallelAgents, AgentCallTimeoutSeconds, SubAgentMaxTurns |
+| `CoreAISettingsAsset.cs` | Add fields in Inspector |
+| `AgentMemoryPolicy.cs` | Add AgentLlmTool in GetToolsForRole |
+| `CorePortableInstaller.cs` | DI registration |
 
 ---
 
-## Вопросы
+## Questions
 
-1. ✅ Таймаут — 60 сек подтверждено
-2. ✅ Ошибки — возвращать в JSON подтверждено
-3. ✅ Параллельность — да, default=3 (по Anthropic Research System)
+1. ✅ Timeout - 60 sec confirmed
+2. ✅ Errors - return in JSON confirmed
+3. ✅ Parallelism - yes, default=3 (based on Anthropic Research System)
 
-4. **Новый вопрос:** Как передавать результат subagent обратно?
-   - Вариант A: Как текст в родительский контекст (просто, но засоряет)
-   - Вариент B: Как tool_result — агрегируется автоматически через MEAI
-   - **Предлагаю:** Вариант B — через tool resultMEAI FunctionInvokingChatClient сам обрабатывает
+4. **New question:** How should the subagent result be passed back?
+   - Option A: As text in the parent context (simple, but pollutes it)
+   - Option B: As tool_result - aggregated automatically through MEAI
+   - **Proposal:** Option B - through tool result; MEAI FunctionInvokingChatClient handles it itself
 
-5. **Новый вопрос:** Max turns — как контролировать чтобы subagent не делал бесконечные вызовы?
-   - Предлагаю: `SubAgentMaxTurns` (по умолчанию 10) — лимит tool calls
+5. **New question:** Max turns - how do we control this so a subagent does not make infinite calls?
+   - Proposal: `SubAgentMaxTurns` (default 10) - tool call limit
 
 ---
 
-## Финальные шаги: документация и версионирование
+## Final Steps: Documentation and Versioning
 
-После реализации всех компонентов:
+After implementing all components:
 
-### 1. CHANGELOG.md — добавить v0.9.0
+### 1. CHANGELOG.md - add v0.9.0
 
 ```markdown
 ## v0.9.0 - Multi-Agent Orchestration
 
 ### New Features
-- **AgentRegistry** — глобальный реестр агентов для multi-agent систем
-- **SubAgentDefinition** — декларативное определение subagent с description, tools, model
-- **AgentLlmTool** — MEAI tool для вызова subagents из основного агента (по паттерну Claude Agent SDK)
-- **AgentOrchestrator** — выполнение subagent с контекстной изоляцией и параллельным выполнением
+- **AgentRegistry** - global agent registry for multi-agent systems
+- **SubAgentDefinition** - declarative subagent definition with description, tools, model
+- **AgentLlmTool** - MEAI tool for calling subagents from the main agent (following the Claude Agent SDK pattern)
+- **AgentOrchestrator** - subagent execution with context isolation and parallel execution
 
 ### Settings
-- `MaxParallelAgents` — макс. параллельных subagents (по умолч. 3)
-- `AgentCallTimeoutSeconds` — таймаут вызова агента (по умолч. 60с)
-- `SubAgentMaxTurns` — макс. turns для subagent (по умолч. 10)
-- `SubAgentMaxTokens` — макс. tokens для subagent (по умолч. 4096)
+- `MaxParallelAgents` - max parallel subagents (default 3)
+- `AgentCallTimeoutSeconds` - agent call timeout (default 60s)
+- `SubAgentMaxTurns` - max turns for subagent (default 10)
+- `SubAgentMaxTokens` - max tokens for subagent (default 4096)
 
 ### Breaking Changes
-- AgentTool schema изменён: `{action, role, hint}` → `{subagent, task, context}`
+- AgentTool schema changed: `{action, role, hint}` -> `{subagent, task, context}`
 
 ### Examples
-- Creator может вызывать Programmer, CoreMechanicAI, Analyzer через agent tool
-- Параллельный вызов нескольких subagents
+- Creator can call Programmer, CoreMechanicAI, Analyzer through agent tool
+- Parallel call of several subagents
 ```
 
-### 2. TODO.md — обновить статус
+### 2. TODO.md - update status
 
-- Добавить ✅ для MultiAgentWorkflow
-- Убрать из "Следующие задачи"
+- Add ✅ for MultiAgentWorkflow
+- Remove from "Next tasks"
 
-### 3. README.md / Docs — обновить секцию agents
+### 3. README.md / Docs - update agents section
 
-### 4. Version bump — v0.8.0 → v0.9.0
-
----
-
-## Итоговый список файлов
-
-### Новые файлы
-| Файл | Описание |
-|------|-----------|
-| `SubAgentDefinition.cs` | Декларативное определение subagent |
-| `AgentCallResult.cs` | Результат вызова агента |
-
-### Модифицируемые
-| Файл | Изменение |
-|------|-----------|
-| `AgentRegistry.cs` | Добавить RegisterSubAgents, GetSubAgents |
-| `AgentLlmTool.cs` | Упростить до subagent вызова |
-| `AgentOrchestrator.cs` | Добавить ExecuteSubAgentAsync с изоляцией |
-| `CoreAISettings.cs` | Добавить MaxParallelAgents, AgentCallTimeoutSeconds, SubAgentMaxTurns |
-| `CoreAISettingsAsset.cs` | Добавить поля в Inspector |
-| `AgentMemoryPolicy.cs` | Добавить AgentLlmTool в GetToolsForRole |
-| `CorePortableInstaller.cs` | DI регистрация |
-| `CHANGELOG.md` | Добавить v0.9.0 |
-| `TODO.md` | Обновить статус |
-   ✅ **Подтверждено** — да, по умолчанию 3, добавить в CoreAISettings
+### 4. Version bump - v0.8.0 -> v0.9.0
 
 ---
 
-## Дополнительные изменения
+## Final File List
 
-### CoreAISettings — добавить настройки параллельности
-**Файл:** `CoreAISettings.cs` (MODIFY)
+### New Files
+| File | Description |
+|------|-----------|
+| `SubAgentDefinition.cs` | Declarative subagent definition |
+| `AgentCallResult.cs` | Agent call result |
+
+### Modified
+| File | Change |
+|------|-----------|
+| `AgentRegistry.cs` | Add RegisterSubAgents, GetSubAgents |
+| `AgentLlmTool.cs` | Simplify to subagent call |
+| `AgentOrchestrator.cs` | Add ExecuteSubAgentAsync with isolation |
+| `CoreAISettings.cs` | Add MaxParallelAgents, AgentCallTimeoutSeconds, SubAgentMaxTurns |
+| `CoreAISettingsAsset.cs` | Add fields in Inspector |
+| `AgentMemoryPolicy.cs` | Add AgentLlmTool in GetToolsForRole |
+| `CorePortableInstaller.cs` | DI registration |
+| `CHANGELOG.md` | Add v0.9.0 |
+| `TODO.md` | Update status |
+   ✅ **Confirmed** - yes, default 3, add to CoreAISettings
+
+---
+
+## Additional Changes
+
+### CoreAISettings - add parallelism settings
+**File:** `CoreAISettings.cs` (MODIFY)
 
 ```csharp
 public static class CoreAISettings {
-    /// <summary>Максимум параллельных агентов по умолчанию. По умолчанию: 3.</summary>
+    /// <summary>Default maximum parallel agents. Default: 3.</summary>
     public static int MaxParallelAgents { get; set; } = 3;
     
-    /// <summary>Таймаут вызова агента в секундах. По умолчанию: 60.</summary>
+    /// <summary>Agent call timeout in seconds. Default: 60.</summary>
     public static int AgentCallTimeoutSeconds { get; set; } = 60;
 }
 ```
 
-### CoreAISettingsAsset — добавить поля
-**Файл:** `CoreAISettingsAsset.cs` (MODIFY)
+### CoreAISettingsAsset - add fields
+**File:** `CoreAISettingsAsset.cs` (MODIFY)
 
 ```csharp
 [Header("⚙️ Multi-Agent")]
-[Tooltip("Максимум параллельных агентов. 3 = рекомендуемое значение.")]
+[Tooltip("Maximum parallel agents. 3 = recommended value.")]
 [SerializeField]
 [Min(1)]
 private int maxParallelAgents = 3;
 
-[Tooltip("Таймаут вызова агента (секунды).")]
+[Tooltip("Agent call timeout (seconds).")]
 [SerializeField]
 [Min(10)]
 private int agentCallTimeoutSeconds = 60;
@@ -436,7 +436,7 @@ public int MaxParallelAgents => maxParallelAgents < 1 ? 1 : maxParallelAgents;
 public int AgentCallTimeoutSeconds => agentCallTimeoutSeconds < 10 ? 60 : agentCallTimeoutSeconds;
 ```
 
-### AgentLlmTool — добавить поддержку parallel
+### AgentLlmTool - add parallel support
 **Tool Schema:**
 ```json
 {
@@ -480,29 +480,29 @@ public int AgentCallTimeoutSeconds => agentCallTimeoutSeconds < 10 ? 60 : agentC
 
 ---
 
-## Итоговый план реализации
+## Final Implementation Plan
 
-### Фаза 1: Базовая инфраструктура
-1. **AgentCallResult.cs** — data class для результата
-2. **CoreAISettings.cs** — добавить MaxParallelAgents, AgentCallTimeoutSeconds
-3. **CoreAISettingsAsset.cs** — добавить поля и properties
+### Phase 1: Base Infrastructure
+1. **AgentCallResult.cs** - data class for result
+2. **CoreAISettings.cs** - add MaxParallelAgents, AgentCallTimeoutSeconds
+3. **CoreAISettingsAsset.cs** - add fields and properties
 
-### Фаза 2: AgentRegistry
-4. **AgentRegistry.cs** — интерфейс и реализация
-5. **AgentBuilder.cs** — добавить метод Register()
+### Phase 2: AgentRegistry
+4. **AgentRegistry.cs** - interface and implementation
+5. **AgentBuilder.cs** - add Register() method
 
-### Фаза 3: AgentOrchestrator
-6. **AgentOrchestrator.cs** — вызов агента (sync + parallel)
-7. Обновление конструктора с ILlmClient, IAgentRegistry
+### Phase 3: AgentOrchestrator
+6. **AgentOrchestrator.cs** - agent call (sync + parallel)
+7. Constructor update with ILlmClient, IAgentRegistry
 
-### Фаза 4: AgentLlmTool (MEAI)
-8. **AgentLlmTool.cs** — MEAI tool с действиями call/parallel/update_prompt/add_tool/list_agents
-9. Интеграция с AgentOrchestrator
+### Phase 4: AgentLlmTool (MEAI)
+8. **AgentLlmTool.cs** - MEAI tool with actions call/parallel/update_prompt/add_tool/list_agents
+9. Integration with AgentOrchestrator
 
-### Фаза 5: Интеграция
-10. **CorePortableInstaller.cs** — DI регистрация
-11. **AgentMemoryPolicy.cs** — добавить AgentLlmTool в GetToolsForRole()
+### Phase 5: Integration
+10. **CorePortableInstaller.cs** - DI registration
+11. **AgentMemoryPolicy.cs** - add AgentLlmTool in GetToolsForRole()
 
-### Фаза 6: Тесты
-12. EditMode тесты для AgentRegistry
-13. EditMode тесты для AgentLlmTool
+### Phase 6: Tests
+12. EditMode tests for AgentRegistry
+13. EditMode tests for AgentLlmTool

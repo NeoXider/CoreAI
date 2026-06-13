@@ -4,7 +4,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-- No unreleased changes.
+## [4.2.0] - 2026-06-13
+
+Depends on **`com.nexoider.coreai` 4.2.0**.
+
+- Added `Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity`: a mod-driven game where chat-authored Lua mods create entirely new content. `UnitForgeLuaBindings` exposes `forge_define`/`forge_spawn`/`forge_count`/`forge_clear`/`forge_reset` (WorldEdit tier, via `GameLuaBindingsExtensibility`); the host runs a small auto-battle and emits `unit_spawned`/`unit_died`/`team_wiped` events back to mods. The bindings use only plain CLR types so the demo assembly never hard-references the optional MoonSharp package.
+- Added `Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity`: the previously controller-only Full demo now ships a runnable scene with Full Lua access enabled and prompt buttons that move/grow/inspect an auto-created `TargetCube`.
+- **Full Lua private access opt-in.** `CoreAILifetimeScope` gains `enableFullLuaPrivateAccess` (default off), wired through `WorldCommandsInstaller.RegisterWorldCommands` to `CoreAiFullUnityLuaRuntimeBindings`. Full reflection is public-members-only unless this is enabled.
+- **Full Lua scene tools.** Full-tier Lua now has GameObject discovery and hierarchy helpers: `unity_list_objects`, `unity_find_all`, `unity_find_by_tag`, `unity_find_by_component`, `unity_describe_object`, `unity_get_transform`, `unity_set_rotation_euler`, `unity_set_scale`, `unity_parent`, and `unity_get_children`. Programmer keeps direct `execute_lua` / `manage_mods` tools, with a Full Lua Mode instruction instead of a runtime `SkillSet` proxy. When Full is enabled on the host, `manage_mods` now grants loaded mods the same Full tier so persistent mods can use `unity_*` APIs after a diagnostic one-shot script.
+- Added EditMode coverage for the public-only default vs non-public opt-in, plus a Full-tier PlayMode test (`unity_find` + `unity_set_position` on a live scene object).
+- **New editor tool `CoreAI → Setup → Modules` (`CoreAIModuleManager`):** enable/disable/update the optional MoonSharp (Lua) and LLMUnity packages, soft-disable Lua via `COREAI_NO_LUA`, and report effective module status — installs missing packages and bumps installed ones to the latest branch tip via UPM.
+- Added `Assets/CoreAiUnity/Docs/OPTIONAL_MODULES.md` documenting the optional-module defines, the editor tool, and CI parity with the `no-lua` matrix; linked from `DOCS_INDEX.md`.
+- **Docs are now English-only.** Removed the Russian `README_RU.md` mirror and the Russian language switcher from the READMEs; documentation is maintained in English.
 
 ## [4.1.0] - 2026-06-12
 
@@ -463,7 +474,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (**`com.nexoider.coreai`**) — marker chunk (no `Text`) so host UI can refresh the typing row during special streaming phases (unbound iteration, tool JSON hold, etc.).
 - **`LlmStreamChunk.BufferedStreamingUseToolProgressHint`** — when set with the marker, chat shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (native / text-shaped tool execution, hybrid hold). When the marker arrives **without** this flag (e.g. unbound iteration waiting for the model step), **`CoreAiChatPanel`** keeps the default animated typing dots.
 - **`MeaiLlmClient`** — yields marker(s) for unbound streaming, hybrid JSON hold, native tool deltas, and text-shaped tool execute; logs optional hold start.
-- **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **«Действие…»**; empty falls back to **`CoreAiChatPanel`** default.
+- **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **`Action...`**; empty falls back to **`CoreAiChatPanel`** default.
 - **`CoreAiChatPanel`** — applies the short hint only when **`BufferedStreamingUseToolProgressHint`** is true.
 - **Tests:** **`CoreAiChatConfigEditModeTests`**, **`StreamingAndPromptsEditModeTests`** (`BufferedStreamingNoToolBinding` / `BufferedStreamingUseToolProgressHint` default **false**).
 - **Sampling temperature:** **`CoreAISettingsAsset`** — **`overrideTemperature`** (Inspector **Override temperature**, default **off**); when on, **`temperature`** is sent via orchestrator (**`LlmCompletionRequest.SendTemperature`**) to HTTP and LLMUnity. **`ConfigureHttpApi`** turns the override on. **`MeaiLlmClient`** only assigns MEAI **`ChatOptions.Temperature`** when **`SendTemperature`** is true.
@@ -535,7 +546,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Documentation — WebGL streaming defaults and version drift
 
-- Synced **`WebGlNativeStreaming`** default-**on** story and fetch-bridge wording across **`TODO.md`**, **`Docs/WEBGL_SERVER_MANAGED_PLAN_RU.md`** (header + этап 2), **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`HTTP_TRANSPORT_SPEC.md`**, root **`README.md`** / **`README_RU.md`**, **`Assets/CoreAiUnity/README.md`**, and the historical WebGL note in **`CHANGELOG`** (**0.25.2**).
+- Synced **`WebGlNativeStreaming`** default-**on** story and fetch-bridge wording across **`TODO.md`**, **`Docs/WEBGL_SERVER_MANAGED_PLAN_RU.md`** (header + stage 2), **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`HTTP_TRANSPORT_SPEC.md`**, root **`README.md`** / **`README_RU.md`**, **`Assets/CoreAiUnity/README.md`**, and the historical WebGL note in **`CHANGELOG`** (**0.25.2**).
 
 #### Package **`1.6.14`**.
 
@@ -617,7 +628,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 ### Chat — streaming UI thread + clear button label
 
 - **`CoreAiChatPanel.SendStreamingAsync`** — after each streamed chunk (and before final hooks), **`await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional`** runs on **all** targets, not only `#if UNITY_WEBGL`. The LLM stack resumes on the thread pool via **`ConfigureAwait(false)`**; without this hop, UI Toolkit often did not repaint incrementally so streaming looked “broken” in Editor / standalone.
-- **`CoreAiChat.uxml`** — header clear control: label **`*` → `C`** (Clear); tooltip **«Очистить контекст (Clear)»**.
+- **`CoreAiChat.uxml`** — header clear control: label **`*` → `C`** (Clear); tooltip **`Clear context (Clear)`**.
 
 #### Package **`1.6.6`**.
 

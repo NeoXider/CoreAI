@@ -136,7 +136,7 @@ namespace CoreAI.Ai
                 return value ?? "";
             }
 
-            return value.Substring(0, maxLength) + " …(truncated)";
+            return value.Substring(0, maxLength) + " ...(truncated)";
         }
 
         // Error text travels into payloads and repair prompts; collapse newlines so host exception

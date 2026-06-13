@@ -31,7 +31,7 @@ namespace CoreAI.Tests.EditMode
         {
             string longText = new('x', 500);
             string s = CoreAiToolCallChatFormatter.BuildDisplayText("t", null, longText, 80);
-            StringAssert.Contains("…", s);
+            StringAssert.Contains("...", s);
             Assert.LessOrEqual(s.Length, 200);
         }
     }

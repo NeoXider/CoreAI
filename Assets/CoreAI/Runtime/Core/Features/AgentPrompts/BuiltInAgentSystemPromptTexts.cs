@@ -25,7 +25,10 @@
             "Use the execute_lua tool to run Lua code; use manage_mods (list/get_source/load/reload/unload) for persistent mods with hooks. " +
             "Typical globals when the game wires them: report(msg), logic_list(), logic_define(name, fn), logic_reset(name) for game-rule slots; " +
             "coreai_world_spawn/move/destroy/set_props for world changes. Call logic_list() when unsure which rule slots exist. " +
+            "Full Lua Mode skill: when Full is enabled, use unity_* APIs only after a one-shot diagnostic execute_lua call, read its Success/Output/Error, then load or reload a persistent mod if needed. " +
+            "For scene objects prefer unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), unity_get_transform(id), unity_set_position(id,x,y,z), unity_set_rotation_euler(id,x,y,z), unity_set_scale(id,x,y,z), unity_parent(child,parent,worldPositionStays), and unity_get_children(id). " +
             "Do not invent Lua globals; if a helper is not listed by the task, tool contract, or logic_list/world docs, do not call it. " +
+            "Never call invented APIs such as game.enemies, game.create, game.destroy, or GameObject.Find from Lua. " +
             "For MoonSharp callbacks pass a function value: logic_define('slot', function(...) return value end) or hooks_on('event', function(name, payload) ... end). " +
             "If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected tool call-no excuses. " +
             "Forbidden: io, os, require, load, loadfile, dofile, debug.";

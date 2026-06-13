@@ -1,95 +1,95 @@
-# Арена-пример: архитектура под мультиплеер и роли ИИ
+﻿# Arena Example: Architecture for Multiplayer and AI Roles
 
-## 1. Что было не так в первом прототипе
+## 1. What Was Wrong in the First Prototype
 
-- **Глобальный синглтон** `ArenaSurvivalGameHost.Instance` — в коопе и сети нельзя иметь один статический «хост игры» на процесс; нужен экземпляр на **матч / комнату** и явные ссылки.
-- **Скрытые зависимости** — `ArenaEnemyBrain` искал сессию через `FindFirstObjectByType`, что ломает порядок инициализации и тестируемость.
-- **Симуляция без роли узла** — весь код вращался вокруг «один игрок локально», без разделения **авторитетного хоста** и **клиента-презентатора**.
+- **Global singleton** `ArenaSurvivalGameHost.Instance` - in co-op and networking, one static "game host" per process is not viable; the game needs an instance per **match / room** and explicit references.
+- **Hidden dependencies** - `ArenaEnemyBrain` found the session through `FindFirstObjectByType`, which breaks initialization order and testability.
+- **Simulation without a node role** - all code revolved around "one local player", without separating an **authoritative host** from a **presentation client**.
 
-## 2. Текущая модель (после рефакторинга)
+## 2. Current Model (After Refactoring)
 
-| Компонент | Назначение |
+| Component | Purpose |
 |-----------|------------|
-| **`IArenaSessionView` / `IArenaSessionAuthority`** | Контракт состояния забега: волна, живые враги, конец рана. UI и директор зависят от **интерфейса**, не от синглтона. |
-| **`ArenaSurvivalSession`** | Реализация сессии на сцене. Поле **`ArenaSimulationRole`**: **AuthoritativeHost** (соло / listen server) или **ClientPresentationOnly** (клиент без симуляции волн и ИИ врагов). |
-| **`ArenaSurvivalDirector`** | Запускает корутину волн **только** если `IsAuthoritativeSimulation`. Спавн: `Instantiate` → `ArenaEnemyBrain.Configure(session)` → `SetActive(true)`. Ожидание плана **Creator** — до **`creatorPlanWaitSeconds`** (инспектор), иначе запасной план из **`ArenaLinearWaveSchedule`**. Режим «только локальный планировщик» если **`LoggingLlmClientDecorator.Unwrap(ILlmClient)`** — **`StubLlmClient`**. |
-| **`ArenaEnemyBrain`** | Движение, урон игроку, смерть — только при **авторитете**. Без `Find*`. |
-| **`IArenaWaveSchedule` / `ArenaLinearWaveSchedule`** | Правило «сколько врагов на волне». Линейка — дефолт; дальше подменяется **валидированным** дескриптором от ИИ (или таблицей с сервера). |
-| **`ArenaCreatorWavePlanner`** | Перед волной вызывает **`RunTaskAsync`** с ролью **Creator**; ответ парсится в **`ArenaWavePlan`**; планы хранятся **по номеру волны** (ответ LLM может прийти с задержкой). Невалидный план — предупреждение в консоль. |
-| **`ArenaSurvivalProceduralSetup`** | Опция **`logOnStartRoles`**: одноразовый лог, какие роли LLM в примере реально вызываются (Creator по волнам, Programmer по F9; **AINpc** не подключён; компаньон — бот без LLM). |
+| **`IArenaSessionView` / `IArenaSessionAuthority`** | Run state contract: wave, alive enemies, run end. UI and director depend on an **interface**, not a singleton. |
+| **`ArenaSurvivalSession`** | Scene session implementation. Field **`ArenaSimulationRole`**: **AuthoritativeHost** (solo / listen server) or **ClientPresentationOnly** (client without wave simulation and enemy AI). |
+| **`ArenaSurvivalDirector`** | Starts the wave coroutine **only** when `IsAuthoritativeSimulation`. Spawn: `Instantiate` -> `ArenaEnemyBrain.Configure(session)` -> `SetActive(true)`. Waits for a **Creator** plan up to **`creatorPlanWaitSeconds`** (inspector), otherwise uses the fallback plan from **`ArenaLinearWaveSchedule`**. Uses "local planner only" mode when **`LoggingLlmClientDecorator.Unwrap(ILlmClient)`** is **`StubLlmClient`**. |
+| **`ArenaEnemyBrain`** | Movement, player damage, death - only under **authority**. No `Find*`. |
+| **`IArenaWaveSchedule` / `ArenaLinearWaveSchedule`** | Rule for "how many enemies in a wave". Linear schedule is the default; later it is replaced by a **validated** descriptor from AI (or a table from the server). |
+| **`ArenaCreatorWavePlanner`** | Before a wave, calls **`RunTaskAsync`** with the **Creator** role; parses the response into **`ArenaWavePlan`**; stores plans **by wave number** (LLM responses can arrive late). Invalid plan - console warning. |
+| **`ArenaSurvivalProceduralSetup`** | Option **`logOnStartRoles`**: one-time log of which LLM roles the example actually calls (Creator for waves, Programmer on F9; **AINpc** is not connected; the companion is a bot without LLM). |
 
-### Встраивание Netcode for GameObjects (NGO) или аналога
+### Integrating Netcode for GameObjects (NGO) or an Equivalent
 
-1. **Симуляция волн и спавн** — только на **сервере** (`IsServer` + роль как **AuthoritativeHost**). Клиент: **ClientPresentationOnly** + `NetworkObject` / `NetworkTransform` на копиях врагов, спавн через `NetworkManager.Spawn`.
-2. **Состояние сессии** — реплицировать минимум: `CurrentWave`, `RunEnded`, `PlayerWon`, счётчик живых врагов (или выводить его с сервера событием «волна очищена»).
-3. **Урон** — авторитет на сервере: `ServerRpc` от локального ввода или prediction + откат (политика тайтла).
-4. **ИИ (LLM)** — только на **хосте**; клиентам уходят уже **команды / параметры волны**, не сырой текст модели (см. DGF_SPEC и DEVELOPER_GUIDE).
-
----
-
-## 3. Предложения: чем займутся агенты ИИ в этой игре
-
-Ниже — практичные роли из ядра (**`BuiltInAgentRoleIds`**) и как их подключить к арене **без** исполнения сырого текста в геймплее.
-
-### 3.1. Creator — **проектирование волн и «закона» забега**
-
-**Задача:** по краткому **снимку сессии** (текущая волна, время волны, тег арены, флаги недели) предложить **структурированный** план следующей волны или модификаторов.
-
-**Примеры выхода (после парсера/валидации):**
-
-- Число врагов, **типы** (быстрые / танки / дальний бой), множитель скорости, **радиус спавна**, мини-босс на N-й волне.
-- **Аффикс волны** («усиленный контактный урон», «враги вдвое медленнее») — как ID из таблицы, не свободный текст.
-- Редкий **сюрприз-раунд** (элитка, пауза, смена музыкального стейта) — тоже как перечисление / bool-флаги.
-
-**Конвейер в коде:**
-
-1. Хост собирает `ArenaTelemetrySnapshot` (расширить `SessionTelemetryCollector` / отдельный билдер).
-2. `RunTaskAsync` с ролью **`Creator`**, `Hint` = сериализованный снимок + бюджет сложности.
-3. Ответ: JSON по схеме → **валидатор** (лимиты min/max, whitelist типов) → если OK — **`IArenaWaveSchedule`** на следующий интервал или разовая подмена параметров `ArenaSurvivalDirector` (лучше вынести в `ArenaWaveDescriptor` и применять между волнами).
-
-**Почему не «просто Lua»:** для баланса волн чаще достаточно **JSON + жёсткая схема**; Lua (**Programmer**) оставить для узких сценариев и тулзов.
-
-### 3.2. Analyzer — **анализ игрока и темпа**
-
-**Задача:** по **анонимизированной статистике** (не PII) оценить «как идёт забег» и выдать **классификацию** для директора и Creator.
-
-**Примеры метрик на вход:**
-
-- Средний % HP после волны, время очистки волны, частота ударов / промахов (если есть телеметрия), число «почти смертей».
-- Скользящее **настроение темпа**: слишком скучно / в норме / перегруз.
-
-**Выход (снова структурированно):**
-
-- `skill_band`: novice / comfortable / expert (границы в коде).
-- `recommended_pressure`: -1…+1 → маппится на множитель к числу врагов или к задержке между волнами.
-- `flags`: например `player_turtling`, `aggressive_melee` — для выбора типов врагов в Creator.
-
-**Конвейер:** отдельный вызов **`Analyzer`** раз в волну или раз в N минут; результат кладётся в **очередь подсказок** для Creator / `CoreMechanicAI`, не напрямую в Transform.
-
-### 3.3. CoreMechanicAI — **правила боя и честность**
-
-**Задача:** удерживать **рамки** (кап урона, анти-эксплойт, «не больше X элиток подряд»), предлагать **корректировки** таблиц, если Analyzer сигналит дисбаланс.
-
-**Выход:** снова JSON/флаги, применяемые к **конфигу** (ScriptableObject / ключ-значение), не к произвольному C#.
-
-### 3.4. Programmer — **инструменты и отладка**
-
-Уже задействован в шаблоне (**F9**, Lua + `report`). На арене: генерация **одноразовых** дебаг-сценариев, экспорт телеметрии, не основной баланс волн.
-
-### 3.5. AINpc / PlainChat / SmartChat — **опционально**
-
-- **AINpc:** реплики комментатора / «арена оживает» — текст в UI, без влияния на HP.
-- **PlainChat / SmartChat:** советы игроку, если нужен чат в хабе или после рана (**SmartChat** — с MemoryTool по умолчанию).
+1. **Wave simulation and spawning** - only on the **server** (`IsServer` + role as **AuthoritativeHost**). Client: **ClientPresentationOnly** + `NetworkObject` / `NetworkTransform` on enemy copies, spawned through `NetworkManager.Spawn`.
+2. **Session state** - replicate the minimum: `CurrentWave`, `RunEnded`, `PlayerWon`, alive-enemy counter (or expose it from the server via a "wave cleared" event).
+3. **Damage** - server authority: `ServerRpc` from local input, or prediction + rollback (title policy).
+4. **AI (LLM)** - only on the **host**; clients receive already validated **commands / wave parameters**, not raw model text (see DGF_SPEC and DEVELOPER_GUIDE).
 
 ---
 
-## 4. Приоритет внедрения
+## 3. Proposal: What AI Agents Do in This Game
 
-1. Зафиксировать **JSON-схему** одной волны и валидатор в **CoreAI.ExampleGame** (без LLM).
-2. Подключить **Creator** к заполнению `ArenaWaveDescriptor` между волнами (хост).
-3. Добавить **Analyzer** с 3–5 метриками из `ArenaSurvivalSession` + таймеры волн.
-4. Потом NGO: репликация дескриптора волны и `NetworkObject` на врагов.
+Below are practical roles from the core (**`BuiltInAgentRoleIds`**) and how to connect them to the arena **without** executing raw text in gameplay.
 
-**Связанные документы:** [../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md), [../../CoreAiUnity/Docs/AI_AGENT_ROLES.md](../../CoreAiUnity/Docs/AI_AGENT_ROLES.md), [../../CoreAiUnity/Docs/DGF_SPEC.md](../../CoreAiUnity/Docs/DGF_SPEC.md).
+### 3.1. Creator - **Wave and Run "Law" Design**
 
-**Версия:** 1.1 (апрель 2026) — Creator-планировщик, ожидание LLM, unwrap stub, лог ролей.
+**Task:** from a concise **session snapshot** (current wave, wave time, arena tag, weekly flags), propose a **structured** plan for the next wave or modifiers.
+
+**Example outputs (after parser/validation):**
+
+- Enemy count, **types** (fast / tanks / ranged), speed multiplier, **spawn radius**, mini-boss on the Nth wave.
+- **Wave affix** ("increased contact damage", "enemies are twice as slow") - as an ID from a table, not free text.
+- Rare **surprise round** (elite, pause, music state change) - also as enum / bool flags.
+
+**Code pipeline:**
+
+1. Host builds `ArenaTelemetrySnapshot` (extend `SessionTelemetryCollector` / separate builder).
+2. `RunTaskAsync` with role **`Creator`**, `Hint` = serialized snapshot + difficulty budget.
+3. Response: schema JSON -> **validator** (min/max limits, type whitelist) -> if OK, **`IArenaWaveSchedule`** for the next interval or one-time parameter override in `ArenaSurvivalDirector` (better to extract `ArenaWaveDescriptor` and apply it between waves).
+
+**Why not "just Lua":** for wave balance, **JSON + strict schema** is usually enough; keep Lua (**Programmer**) for narrow scenarios and tools.
+
+### 3.2. Analyzer - **Player and Pace Analysis**
+
+**Task:** evaluate "how the run is going" from **anonymized statistics** (not PII) and produce a **classification** for the director and Creator.
+
+**Example input metrics:**
+
+- Average HP percent after a wave, wave clear time, hit/miss frequency (if telemetry exists), number of "near deaths".
+- Rolling **pace mood**: too boring / normal / overloaded.
+
+**Output (structured again):**
+
+- `skill_band`: novice / comfortable / expert (boundaries in code).
+- `recommended_pressure`: -1...+1 -> mapped to an enemy-count multiplier or delay between waves.
+- `flags`: for example `player_turtling`, `aggressive_melee` - for Creator enemy-type selection.
+
+**Pipeline:** call **`Analyzer`** once per wave or once every N minutes; place the result into a **hint queue** for Creator / `CoreMechanicAI`, not directly into Transform.
+
+### 3.3. CoreMechanicAI - **Combat Rules and Fairness**
+
+**Task:** keep the **bounds** (damage cap, anti-exploit, "no more than X elites in a row"), and suggest **table adjustments** when Analyzer reports imbalance.
+
+**Output:** again JSON/flags applied to **config** (ScriptableObject / key-value), not arbitrary C#.
+
+### 3.4. Programmer - **Tools and Debugging**
+
+Already used in the template (**F9**, Lua + `report`). In the arena: generate **one-off** debug scenarios and telemetry exports, not the main wave balance.
+
+### 3.5. AINpc / PlainChat / SmartChat - **Optional**
+
+- **AINpc:** commentator lines / "the arena comes alive" - text in UI, with no effect on HP.
+- **PlainChat / SmartChat:** player advice if chat is needed in the hub or after a run (**SmartChat** has MemoryTool by default).
+
+---
+
+## 4. Implementation Priority
+
+1. Lock down a **JSON schema** for one wave and a validator in **CoreAI.ExampleGame** (without LLM).
+2. Connect **Creator** to filling `ArenaWaveDescriptor` between waves (host).
+3. Add **Analyzer** with 3-5 metrics from `ArenaSurvivalSession` + wave timers.
+4. Then NGO: replicate the wave descriptor and `NetworkObject` on enemies.
+
+**Related documents:** [../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md), [../../CoreAiUnity/Docs/AI_AGENT_ROLES.md](../../CoreAiUnity/Docs/AI_AGENT_ROLES.md), [../../CoreAiUnity/Docs/DGF_SPEC.md](../../CoreAiUnity/Docs/DGF_SPEC.md).
+
+**Version:** 1.1 (April 2026) - Creator planner, LLM wait, stub unwrap, role log.

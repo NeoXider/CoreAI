@@ -75,7 +75,7 @@ namespace CoreAI.Chat
                 return string.Empty;
             }
 
-            return s.Length <= maxChars ? s : s.Substring(0, maxChars) + "…";
+            return s.Length <= maxChars ? s : s.Substring(0, maxChars) + "...";
         }
     }
 }

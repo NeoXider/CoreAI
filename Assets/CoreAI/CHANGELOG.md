@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-- No unreleased changes.
+## [4.2.0] - 2026-06-13
+
+- **Full-tier member visibility split.** `CoreAiFullUnityLuaRuntimeBindings` now exposes only **public** members by default; non-public access is an explicit opt-in (`allowNonPublicMembers` ctor flag). The reflection member cache is keyed by visibility so public-only and private-enabled bindings never collide.
+- **Full Lua Mode guidance.** The built-in Programmer prompt and `execute_lua` metadata now document the diagnostic-first Full workflow: inspect with one-shot Lua, read `Success` / `Output` / `Error`, then use `manage_mods` for persistent hook/timer behavior. The guidance explicitly forbids invented Lua APIs such as `game.enemies`, `game.create`, and `GameObject.Find`.
+- **Release sync.** `com.nexoider.coreai` is bumped to `4.2.0` to stay version-aligned with the Unity package's mod-driven Unit Forge / Full Access demos and the optional-module editor tool.
 
 ## [4.1.0] - 2026-06-12
 
@@ -1447,7 +1451,6 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
-
 
 
 

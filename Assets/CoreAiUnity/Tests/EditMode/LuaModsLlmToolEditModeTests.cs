@@ -187,6 +187,53 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void RegisterWorldCommands_FullAccess_ManageModsGrantsFullLua()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject probe = new("FullManageModsProbe");
+            try
+            {
+                ContainerBuilder builder = new();
+                builder.RegisterInstance<IGameLogger>(GameLoggerUnscopedFallback.Instance);
+                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.Register<NullLuaScriptVersionStore>(Lifetime.Singleton).As<ILuaScriptVersionStore>();
+                builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
+                builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+                builder.RegisterInstance<ICoreAISettings>(_settings);
+                builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+                builder.Register<SecureLuaEnvironment>(Lifetime.Singleton);
+
+                builder.RegisterWorldCommands(registry, enableFullLuaAccess: true);
+
+                using IObjectResolver container = builder.Build();
+                AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
+                LuaModsLlmTool modsTool = null;
+                foreach (ILlmTool tool in policy.GetToolsForRole(BuiltInAgentRoleIds.Programmer))
+                {
+                    if (tool is LuaModsLlmTool luaMods)
+                    {
+                        modsTool = luaMods;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(modsTool, "Programmer must get manage_mods as LuaModsLlmTool.");
+                JObject load = Execute(modsTool, "load", "full_probe",
+                    "local id = unity_find('FullManageModsProbe')\nif id == 0 then error('Full unity_find missing') end");
+                Assert.IsTrue(load.Value<bool>("success"), load.ToString());
+
+                IReadOnlyList<LuaModInfo> loaded = container.Resolve<LuaModRuntime>().ListMods();
+                Assert.AreEqual(LuaCapabilities.All | LuaCapabilities.Full, loaded[0].Capabilities);
+            }
+            finally
+            {
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(probe);
+            }
+        }
+
+        [Test]
         public void RegisterWorldCommands_WithoutPolicyServices_StillBuilds()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();

@@ -131,7 +131,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("recovered", r.Content);
             Assert.AreEqual(2, inner.CompleteCallCount);
             string joined = string.Join("\n", spy.Lines);
-            StringAssert.Contains("LLM ↺", joined);
+            StringAssert.Contains("LLM ~", joined);
             StringAssert.Contains("failed completion", joined);
         }
 
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("up", r.Content);
             Assert.AreEqual(2, inner.CompleteCallCount);
             string joined = string.Join("\n", spy.Lines);
-            StringAssert.Contains("LLM ↺", joined);
+            StringAssert.Contains("LLM ~", joined);
             StringAssert.Contains("failed completion", joined);
         }
 
@@ -176,13 +176,13 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("abc123", joined);
             StringAssert.Contains(BuiltInAgentRoleIds.Creator, joined);
-            StringAssert.Contains("LLM ▶", joined);
-            StringAssert.Contains("LLM ◀", joined);
+            StringAssert.Contains("LLM >", joined);
+            StringAssert.Contains("LLM <", joined);
             StringAssert.Contains("promptBudget", joined);
-            StringAssert.Contains("estTok≈", joined);
-            StringAssert.Contains("words≈", joined);
+            StringAssert.Contains("estTok~", joined);
+            StringAssert.Contains("words~", joined);
             StringAssert.Contains("systemSplit", joined);
-            StringAssert.Contains("outWords≈", joined);
+            StringAssert.Contains("outWords~", joined);
         }
 
         [Test]
@@ -294,8 +294,8 @@ namespace CoreAI.Tests.EditMode
             string joined = string.Join("\n", spy.Lines);
             StringAssert.Contains("s2", joined, "Должен быть traceId");
             StringAssert.Contains("(stream)", joined, "Маркер стримингового вызова");
-            StringAssert.Contains("LLM ▶", joined, "Лог старта");
-            StringAssert.Contains("LLM ◀", joined, "Лог успешного завершения");
+            StringAssert.Contains("LLM >", joined, "Лог старта");
+            StringAssert.Contains("LLM <", joined, "Лог успешного завершения");
             StringAssert.Contains("chunks=2", joined, "Должно быть число текстовых чанков");
             StringAssert.Contains("promptBudget", joined);
         }
@@ -320,10 +320,10 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("total=3", line);
             StringAssert.Contains("core=3", line);
             StringAssert.Contains("memory=0", line);
-            StringAssert.Contains("toolsDef≈0(0 tools)", line);
+            StringAssert.Contains("toolsDef~0(0 tools)", line);
             StringAssert.Contains("chat chars=12", line);
-            StringAssert.Contains("estTok≈3", line);
-            StringAssert.Contains("words≈3", line);
+            StringAssert.Contains("estTok~3", line);
+            StringAssert.Contains("words~3", line);
         }
 
         [Test]
@@ -353,7 +353,7 @@ namespace CoreAI.Tests.EditMode
             int d = LoggingLlmClientDecorator.EstimateToolsCatalogChars(tools);
             Assert.Greater(d, 50);
             string line = LoggingLlmClientDecorator.FormatPromptBudgetLine("x", "y", tools);
-            StringAssert.Contains("toolsDef≈", line);
+            StringAssert.Contains("toolsDef~", line);
             StringAssert.Contains("(1 tools)", line);
         }
     }

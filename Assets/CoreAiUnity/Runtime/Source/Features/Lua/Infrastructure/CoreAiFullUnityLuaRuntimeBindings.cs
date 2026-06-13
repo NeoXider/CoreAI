@@ -9,33 +9,52 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Sandbox;
 using MoonSharp.Interpreter;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace CoreAI.Infrastructure.Lua
 {
     /// <summary>
     /// Full-tier Lua bindings: reflection access to live <see cref="GameObject"/>s and components.
-    /// Registered only when <see cref="LuaCapabilities.Full"/> is granted. Policy is allow-all
-    /// (no type blacklist yet — see <c>LUA_ACCESS_MODES_AUDIT_RU.md</c> Planned section).
+    /// Registered only when <see cref="LuaCapabilities.Full"/> is granted. By default, only public
+    /// members are exposed; non-public member access is opt-in.
     /// </summary>
     public sealed class CoreAiFullUnityLuaRuntimeBindings : IGameLuaRuntimeBindings
     {
         private static readonly ConcurrentDictionary<string, Type> TypeCache = new(StringComparer.Ordinal);
-        private static readonly ConcurrentDictionary<(Type type, string member), MemberInfo> MemberCache = new();
+        private static readonly ConcurrentDictionary<(Type type, string member, bool nonPublic), MemberInfo> MemberCache = new();
 
         private readonly IGameLogger _logger;
+        private readonly bool _allowNonPublic;
 
-        public CoreAiFullUnityLuaRuntimeBindings(IGameLogger logger = null)
+        public CoreAiFullUnityLuaRuntimeBindings(IGameLogger logger = null, bool allowNonPublicMembers = false)
         {
             _logger = logger;
+            _allowNonPublic = allowNonPublicMembers;
+        }
+
+        private BindingFlags MemberFlags()
+        {
+            return BindingFlags.Instance | BindingFlags.Public |
+                   (_allowNonPublic ? BindingFlags.NonPublic : BindingFlags.Default);
         }
 
         public void RegisterGameplayApis(LuaApiRegistry registry)
         {
             registry.Register("unity_find", new Func<string, int>(FindByName));
             registry.Register("unity_id", new Func<string, int>(FindByName));
+            registry.Register("unity_list_objects", new Func<int, List<object>>(ListObjects));
+            registry.Register("unity_find_all", new Func<string, int, List<object>>(FindAll));
+            registry.Register("unity_find_by_tag", new Func<string, int, List<object>>(FindByTag));
+            registry.Register("unity_find_by_component", new Func<string, int, List<object>>(FindByComponent));
+            registry.Register("unity_describe_object", new Func<int, object>(DescribeObject));
             registry.Register("unity_set_active", new Func<int, bool, bool>(SetActive));
             registry.Register("unity_get_position", new Func<int, Table>(GetPosition));
             registry.Register("unity_set_position", new Func<int, double, double, double, bool>(SetPosition));
+            registry.Register("unity_get_transform", new Func<int, object>(GetTransform));
+            registry.Register("unity_set_rotation_euler", new Func<int, double, double, double, bool>(SetRotationEuler));
+            registry.Register("unity_set_scale", new Func<int, double, double, double, bool>(SetScale));
+            registry.Register("unity_parent", new Func<int, int, bool, bool>(SetParent));
+            registry.Register("unity_get_children", new Func<int, List<object>>(GetChildren));
             registry.Register("unity_list_components", new Func<int, List<string>>(ListComponents));
             registry.Register("unity_get_member", new Func<int, string, string, DynValue>(GetMember));
             registry.Register("unity_set_member", new Func<int, string, string, DynValue, bool>(SetMember));
@@ -51,6 +70,55 @@ namespace CoreAI.Infrastructure.Lua
 
             GameObject go = GameObject.Find(name.Trim());
             return go != null ? go.GetInstanceID() : 0;
+        }
+
+        private static List<object> ListObjects(int max)
+        {
+            List<object> results = new();
+            CollectSceneObjects("", ClampMax(max), results, MatchAny);
+            return results;
+        }
+
+        private static List<object> FindAll(string pattern, int max)
+        {
+            string search = (pattern ?? "").Trim();
+            List<object> results = new();
+            CollectSceneObjects(search, ClampMax(max), results, MatchNameOrPath);
+            return results;
+        }
+
+        private static List<object> FindByTag(string tag, int max)
+        {
+            string targetTag = (tag ?? "").Trim();
+            List<object> results = new();
+            if (string.IsNullOrEmpty(targetTag))
+            {
+                return results;
+            }
+
+            CollectSceneObjects(targetTag, ClampMax(max), results,
+                (go, search) => string.Equals(go.tag, search, StringComparison.Ordinal));
+            return results;
+        }
+
+        private static List<object> FindByComponent(string componentType, int max)
+        {
+            Type type = ResolveType((componentType ?? "").Trim());
+            List<object> results = new();
+            if (type == null || !typeof(Component).IsAssignableFrom(type))
+            {
+                return results;
+            }
+
+            CollectSceneObjects(componentType, ClampMax(max), results,
+                (go, _) => go.GetComponent(type) != null);
+            return results;
+        }
+
+        private static object DescribeObject(int instanceId)
+        {
+            GameObject go = Resolve(instanceId);
+            return go == null ? null : BuildObjectSummary(go, includeTransform: true, includeComponents: true);
         }
 
         private static bool SetActive(int instanceId, bool active)
@@ -93,6 +161,68 @@ namespace CoreAI.Infrastructure.Lua
             return true;
         }
 
+        private static object GetTransform(int instanceId)
+        {
+            GameObject go = Resolve(instanceId);
+            return go == null ? null : BuildTransformSummary(go.transform);
+        }
+
+        private static bool SetRotationEuler(int instanceId, double x, double y, double z)
+        {
+            GameObject go = Resolve(instanceId);
+            if (go == null)
+            {
+                return false;
+            }
+
+            go.transform.rotation = Quaternion.Euler((float)x, (float)y, (float)z);
+            return true;
+        }
+
+        private static bool SetScale(int instanceId, double x, double y, double z)
+        {
+            GameObject go = Resolve(instanceId);
+            if (go == null)
+            {
+                return false;
+            }
+
+            go.transform.localScale = new Vector3((float)x, (float)y, (float)z);
+            return true;
+        }
+
+        private static bool SetParent(int childInstanceId, int parentInstanceId, bool worldPositionStays)
+        {
+            GameObject child = Resolve(childInstanceId);
+            if (child == null)
+            {
+                return false;
+            }
+
+            GameObject parent = Resolve(parentInstanceId);
+            child.transform.SetParent(parent != null ? parent.transform : null, worldPositionStays);
+            return true;
+        }
+
+        private static List<object> GetChildren(int instanceId)
+        {
+            List<object> children = new();
+            GameObject go = Resolve(instanceId);
+            if (go == null)
+            {
+                return children;
+            }
+
+            Transform t = go.transform;
+            for (int i = 0; i < t.childCount; i++)
+            {
+                children.Add(BuildObjectSummary(t.GetChild(i).gameObject, includeTransform: true,
+                    includeComponents: false));
+            }
+
+            return children;
+        }
+
         private static List<string> ListComponents(int instanceId)
         {
             GameObject go = Resolve(instanceId);
@@ -115,7 +245,7 @@ namespace CoreAI.Infrastructure.Lua
             return names;
         }
 
-        private static DynValue GetMember(int instanceId, string componentType, string memberName)
+        private DynValue GetMember(int instanceId, string componentType, string memberName)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -135,7 +265,7 @@ namespace CoreAI.Infrastructure.Lua
             return ToDyn(value);
         }
 
-        private static bool SetMember(int instanceId, string componentType, string memberName, DynValue value)
+        private bool SetMember(int instanceId, string componentType, string memberName, DynValue value)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -158,7 +288,7 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
-        private static DynValue CallMethod(int instanceId, string componentType, string methodName, DynValue[] args)
+        private DynValue CallMethod(int instanceId, string componentType, string methodName, DynValue[] args)
         {
             object target = ResolveComponent(instanceId, componentType);
             if (target == null)
@@ -168,8 +298,7 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             Type type = target.GetType();
-            MethodInfo method = type.GetMethod(methodName,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            MethodInfo method = type.GetMethod(methodName, MemberFlags());
             if (method == null)
             {
                 throw new ScriptRuntimeException($"unity_call: method '{methodName}' not found on {type.Name}.");
@@ -211,6 +340,151 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             return null;
+        }
+
+        private delegate bool ObjectMatch(GameObject go, string search);
+
+        private static void CollectSceneObjects(
+            string search,
+            int max,
+            List<object> results,
+            ObjectMatch match)
+        {
+            if (results == null || max <= 0)
+            {
+                return;
+            }
+
+            Scene scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid())
+            {
+                return;
+            }
+
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int i = 0; i < roots.Length && results.Count < max; i++)
+            {
+                CollectObjectRecursive(roots[i], search, max, results, match);
+            }
+        }
+
+        private static void CollectObjectRecursive(
+            GameObject go,
+            string search,
+            int max,
+            List<object> results,
+            ObjectMatch match)
+        {
+            if (go == null || results.Count >= max)
+            {
+                return;
+            }
+
+            if (match == null || match(go, search))
+            {
+                results.Add(BuildObjectSummary(go, includeTransform: false, includeComponents: false));
+            }
+
+            Transform t = go.transform;
+            for (int i = 0; i < t.childCount && results.Count < max; i++)
+            {
+                CollectObjectRecursive(t.GetChild(i).gameObject, search, max, results, match);
+            }
+        }
+
+        private static bool MatchAny(GameObject go, string search)
+        {
+            return true;
+        }
+
+        private static bool MatchNameOrPath(GameObject go, string search)
+        {
+            if (string.IsNullOrEmpty(search))
+            {
+                return true;
+            }
+
+            return go.name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   GetPath(go).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static int ClampMax(int max)
+        {
+            return Math.Max(1, Math.Min(max <= 0 ? 100 : max, 500));
+        }
+
+        private static Dictionary<string, object> BuildObjectSummary(
+            GameObject go,
+            bool includeTransform,
+            bool includeComponents)
+        {
+            Dictionary<string, object> summary = new()
+            {
+                { "id", go.GetInstanceID() },
+                { "name", go.name },
+                { "path", GetPath(go) },
+                { "tag", go.tag },
+                { "layer", LayerMask.LayerToName(go.layer) },
+                { "layer_index", go.layer },
+                { "active", go.activeSelf },
+                { "active_in_hierarchy", go.activeInHierarchy },
+                { "parent_id", go.transform.parent != null ? go.transform.parent.gameObject.GetInstanceID() : 0 },
+                { "parent", go.transform.parent != null ? go.transform.parent.gameObject.name : "" },
+                { "child_count", go.transform.childCount }
+            };
+
+            if (includeTransform)
+            {
+                summary["transform"] = BuildTransformSummary(go.transform);
+            }
+
+            if (includeComponents)
+            {
+                summary["components"] = ListComponents(go.GetInstanceID());
+            }
+
+            return summary;
+        }
+
+        private static Dictionary<string, object> BuildTransformSummary(Transform transform)
+        {
+            Vector3 p = transform.position;
+            Vector3 r = transform.eulerAngles;
+            Vector3 s = transform.localScale;
+            return new Dictionary<string, object>
+            {
+                { "position", Vector(p) },
+                { "rotation", Vector(r) },
+                { "scale", Vector(s) }
+            };
+        }
+
+        private static Dictionary<string, object> Vector(Vector3 v)
+        {
+            return new Dictionary<string, object>
+            {
+                { "x", (double)v.x },
+                { "y", (double)v.y },
+                { "z", (double)v.z }
+            };
+        }
+
+        private static string GetPath(GameObject go)
+        {
+            if (go == null)
+            {
+                return "";
+            }
+
+            Stack<string> names = new();
+            Transform current = go.transform;
+            while (current != null)
+            {
+                names.Push(current.gameObject.name);
+                current = current.parent;
+            }
+
+            return string.Join("/", names);
         }
 
         private static object ResolveComponent(int instanceId, string componentTypeName)
@@ -263,15 +537,15 @@ namespace CoreAI.Infrastructure.Lua
             return t;
         }
 
-        private static MemberInfo ResolveMember(Type type, string memberName)
+        private MemberInfo ResolveMember(Type type, string memberName)
         {
-            (Type, string) key = (type, memberName);
+            (Type, string, bool) key = (type, memberName, _allowNonPublic);
             if (MemberCache.TryGetValue(key, out MemberInfo cached))
             {
                 return cached;
             }
 
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            BindingFlags flags = MemberFlags();
             MemberInfo member = type.GetField(memberName, flags) as MemberInfo ??
                                 type.GetProperty(memberName, flags);
             if (member == null)

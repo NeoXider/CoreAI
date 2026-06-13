@@ -20,7 +20,7 @@ Package manifests:
 | Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) |
 | Understand architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md), [DGF_SPEC.md](DGF_SPEC.md) |
 | Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
-| Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES_RU](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
+| Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
 | Run or extend tests | [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Test-specific docs listed below |
 
 ## First Run
@@ -33,6 +33,7 @@ Package manifests:
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
+| [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable MoonSharp (Lua) & LLMUnity via the `CoreAI в–ё Setup в–ё Modules` editor tool; defines and CI parity. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
 
 ## Chat And Streaming
@@ -71,8 +72,8 @@ Package manifests:
 | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
 | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`. |
-| [LUA_BEST_PRACTICES_RU](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md) | Do's and don'ts: slots, extensions, MoonSharp, LLM context (RU). |
-| [MOONSHARP_NATIVE_APIS_RU](../../CoreAI/Docs/MOONSHARP_NATIVE_APIS_RU.md) | Native MoonSharp vs custom CoreAI code (RU). |
+| [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, MoonSharp, LLM context. |
+| [MOONSHARP_NATIVE_APIS](../../CoreAI/Docs/MOONSHARP_NATIVE_APIS.md) | Native MoonSharp vs custom CoreAI code. |
 
 ## Architecture
 

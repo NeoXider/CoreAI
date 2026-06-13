@@ -37,15 +37,22 @@ namespace CoreAI.Ai
             "For game-rule changes, call logic_list() when unsure, then use " +
             "logic_define('slot_name', function(...) return value end); for example " +
             "logic_define('loot_formula', function(bossMaxHp) return 1000 end). " +
+            "Full Lua Mode skill: when Full is enabled, first run a diagnostic script and return a compact string/JSON from Output; " +
+            "then use manage_mods for persistent hooks. Full scene APIs include unity_list_objects(max), " +
+            "unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), " +
+            "unity_describe_object(id), unity_get_transform(id), unity_set_position(id,x,y,z), " +
+            "unity_set_rotation_euler(id,x,y,z), unity_set_scale(id,x,y,z), unity_parent(child,parent,worldPositionStays), " +
+            "and unity_get_children(id). " +
             "Use report(message) to describe the applied change. Do not invent helper globals; " +
-            "only call APIs listed by the prompt/tool contract or discovered from the environment.";
+            "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
+            "Never call invented APIs such as game.enemies, game.create, game.destroy, or GameObject.Find from Lua.";
 
         /// <inheritdoc />
         public string ParametersSchema =>
             "{" +
             "  \"type\": \"object\"," +
             "  \"properties\": {" +
-            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
+            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with unity_set_position, unity_set_rotation_euler, unity_set_scale, unity_parent, or unity_get_children. Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
             "  }," +
             "  \"required\": [\"code\"]" +
             "}";

@@ -4,11 +4,11 @@ How **token numbers** are produced in the CoreAI stack, how they relate to **tim
 
 ---
 
-## 1. Two different meanings of “tokens”
+## 1. Two different meanings of вЂњtokensвЂќ
 
 | Source | What it is | When it appears |
 |--------|--------------|-----------------|
-| **Fact from the provider** | `prompt_tokens` / `completion_tokens` / `total_tokens` in the JSON response (or a final SSE object with `usage`) | After a successful completion; in streaming, often as a dedicated chunk carrying `UsageContent` (see §2) |
+| **Fact from the provider** | `prompt_tokens` / `completion_tokens` / `total_tokens` in the JSON response (or a final SSE object with `usage`) | After a successful completion; in streaming, often as a dedicated chunk carrying `UsageContent` (see В§2) |
 | **Pre-flight estimate** | Any client-side heuristic (string length, third-party tokenizer, UI limits) | Before the network call; **does not** guarantee parity with provider billing |
 
 Providers may count differently (especially with tool messages and non-standard fields). **For quotas and accounting, trust API `usage` fields**, not client approximations.
@@ -29,14 +29,14 @@ OpenAI-style servers may emit a **final** SSE object with an empty `choices` arr
 
 **`MeaiLlmClient.CompleteStreamingAsync`** (Unity) observes `UsageContent` in the update stream and copies usage onto **terminal** `LlmStreamChunk` values via `ApplyStreamingUsageFields`, so UI and metrics see the final numbers after a streaming iteration completes.
 
-If the provider does not send `usage` while streaming, facts may exist only on the non-streaming path—or not at all, depending on the server.
+If the provider does not send `usage` while streaming, facts may exist only on the non-streaming pathвЂ”or not at all, depending on the server.
 
 ---
 
 ## 3. Two timeouts: orchestrator and HTTP
 
-- **`ICoreAISettings.LlmRequestTimeoutSeconds`** — chat/orchestrator cancel window: `CoreAiChatService` links a token cancelled with **`CancelAfterSlim`** (WebGL-friendly).
-- **`IOpenAiHttpSettings.RequestTimeoutSeconds`** — per round-trip HTTP limit in the transport.
+- **`ICoreAISettings.LlmRequestTimeoutSeconds`** вЂ” chat/orchestrator cancel window: `CoreAiChatService` links a token cancelled with **`CancelAfterSlim`** (WebGL-friendly).
+- **`IOpenAiHttpSettings.RequestTimeoutSeconds`** вЂ” per round-trip HTTP limit in the transport.
 
 On Unity, **`CoreAISettingsAsset.EffectiveHttpRequestTimeoutSeconds`** is:
 
@@ -59,11 +59,11 @@ so a single HTTP call **cannot outlive** the orchestrator cancel (important for 
 
 Portable contract: **`IToolCallEventPublisher`**. In Unity the MEAI pipeline typically receives **`MessagePipeToolCallEventPublisher.Instance`**, publishing tool lifecycle events to **`GlobalMessagePipe`**. Assembly is described in `LlmPipelineInstaller` and in Unity docs (`TOOL_CALL_SPEC`, `DEVELOPER_GUIDE`).
 
-MEAI → `AIFunction` details: [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md). Routing, policy, and usage sinks: [`LLM_ROUTING.md`](LLM_ROUTING.md).
+MEAI в†’ `AIFunction` details: [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md). Routing, policy, and usage sinks: [`LLM_ROUTING.md`](LLM_ROUTING.md).
 
 ---
 
 ## 6. See also
 
-- [README.md](README.md) — index of everything under `Assets/CoreAI/Docs`
+- [README.md](README.md) вЂ” index of everything under `Assets/CoreAI/Docs`
 - Tests: `MeaiOpenAiChatClientHttpEditModeTests` (`stream_options` / `include_usage` in JSON), `CoreAISettingsAssetEditModeTests` (`EffectiveHttpRequestTimeoutSeconds`), `RoutingLlmClientEditModeTests`, `CoreAiChatServiceEditModeTests`

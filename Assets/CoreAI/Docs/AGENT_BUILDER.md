@@ -1,4 +1,4 @@
-# 🏗️ Agent Builder — Custom Agent Constructor
+# рџЏ—пёЏ Agent Builder вЂ” Custom Agent Constructor
 
 ## Overview
 
@@ -6,22 +6,22 @@
 
 ### Capabilities
 
-- ✅ **Unique tools** — any `ILlmTool` for a specific agent
-- ✅ **Skills** — named tool+instruction groups with per-request activation (**v2.0+**)
-- ✅ **Three response modes** — `ChatOnly`, `ToolsAndChat`, `ToolsOnly`
-- ✅ **Memory** — persistent agent memory (write/append/clear)
-- ✅ **Chat history** — automatic saving of conversation context
-- ✅ **Per-agent output budget** — `WithMaxOutputTokens(...)` for roles that should stay short or verbose
-- ✅ **Minimal code** — 3–5 lines per agent
-- ✅ **Single MEAI pipeline** — the same tool calling for HTTP API and LLMUnity
+- вњ… **Unique tools** вЂ” any `ILlmTool` for a specific agent
+- вњ… **Skills** вЂ” named tool+instruction groups with per-request activation (**v2.0+**)
+- вњ… **Three response modes** вЂ” `ChatOnly`, `ToolsAndChat`, `ToolsOnly`
+- вњ… **Memory** вЂ” persistent agent memory (write/append/clear)
+- вњ… **Chat history** вЂ” automatic saving of conversation context
+- вњ… **Per-agent output budget** вЂ” `WithMaxOutputTokens(...)` for roles that should stay short or verbose
+- вњ… **Minimal code** вЂ” 3вЂ“5 lines per agent
+- вњ… **Single MEAI pipeline** вЂ” the same tool calling for HTTP API and LLMUnity
 
 ---
 
 ## Skills (v2.1)
 
-`SkillSet` — a group of tools + instructions that the model loads **on demand** via two meta-tools:
-- `read_skill(skill_name)` — load instructions + tool schemas
-- `call_skill_tool(tool_name, arguments_json)` — execute a skill's tool
+`SkillSet` вЂ” a group of tools + instructions that the model loads **on demand** via two meta-tools:
+- `read_skill(skill_name)` вЂ” load instructions + tool schemas
+- `call_skill_tool(tool_name, arguments_json)` вЂ” execute a skill's tool
 
 The model always sees exactly **2 meta-tools** regardless of how many skills/tools exist. This keeps the token count constant even with hundreds of tools across dozens of skills.
 
@@ -37,7 +37,7 @@ var crafting = new SkillSet("Crafting",
     new DelegateLlmTool("get_recipes", "List recipes", (string type) => ...),
     new DelegateLlmTool("craft_item", "Craft an item", (string id, float q) => ...));
 
-// Without instructions — model relies on tool descriptions
+// Without instructions вЂ” model relies on tool descriptions
 var combat = new SkillSet("Combat", "Fight enemies",
     new DelegateLlmTool("attack", "Attack target", (string target) => ...));
 ```
@@ -53,9 +53,9 @@ var quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
 var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
 ```
 
-### SkillSetAsset — via Inspector
+### SkillSetAsset вЂ” via Inspector
 
-`Create → CoreAI → Skill Set Asset` — ScriptableObject for designers.
+`Create в†’ CoreAI в†’ Skill Set Asset` вЂ” ScriptableObject for designers.
 
 | Field | Purpose |
 |-------|---------|
@@ -102,12 +102,12 @@ await orch.RunTaskAsync(new AiTaskRequest {
     RoleId = "GameMaster",
     Hint = "Craft me an iron sword"
 });
-// Model: sees catalog → read_skill("Crafting") → call_skill_tool("get_recipes", "{}") → response
+// Model: sees catalog в†’ read_skill("Crafting") в†’ call_skill_tool("get_recipes", "{}") в†’ response
 ```
 
 ### How it works
 
-1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list
+1. `WithSkill()` stores the `SkillSet` вЂ” tools are **not** added to the model's tool list
 2. `ApplyToPolicy()` registers `SkillRuntimeContextProvider` (catalog in prompt) + `read_skill` + `call_skill_tool`
 3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
 4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
@@ -126,25 +126,25 @@ await orch.RunTaskAsync(new AiTaskRequest {
 | `FromFile(name, desc, path, tools)` | Create from file |
 | `FromTextContent(name, desc, text, tools)` | Create from text |
 
-### Best practices — when to use skills vs direct tools
+### Best practices вЂ” when to use skills vs direct tools
 
 **Use `WithSkill()` when:**
-- The agent has **many tools** it doesn't always need (e.g. 5 skills × 4 tools = 20 tools, but any single request uses 2–4)
+- The agent has **many tools** it doesn't always need (e.g. 5 skills Г— 4 tools = 20 tools, but any single request uses 2вЂ“4)
 - Tools require **detailed instructions** (complex protocols, multi-step workflows, secret parameters)
-- You want to **reduce context window usage** — only 2 meta-tools are sent regardless of total tool count
+- You want to **reduce context window usage** вЂ” only 2 meta-tools are sent regardless of total tool count
 - Different game scenarios activate **different tool subsets** (crafting vs combat vs trading)
 
 **Use `WithTool()` directly when:**
-- The agent has **few tools** (1–3) that it always needs
+- The agent has **few tools** (1вЂ“3) that it always needs
 - The tool is simple enough that its description is self-sufficient
-- You need **minimum latency** — direct tools skip the read_skill → call_skill_tool round-trip
+- You need **minimum latency** вЂ” direct tools skip the read_skill в†’ call_skill_tool round-trip
 
 **Mixing both:**
 ```csharp
 var agent = new AgentBuilder("GameMaster")
-    .WithTool(memoryTool)            // always needed → direct
-    .WithSkill(craftingSkill)        // used sometimes → on-demand
-    .WithSkill(combatSkill)          // used sometimes → on-demand
+    .WithTool(memoryTool)            // always needed в†’ direct
+    .WithSkill(craftingSkill)        // used sometimes в†’ on-demand
+    .WithSkill(combatSkill)          // used sometimes в†’ on-demand
     .Build();
 // Model sees: memory (direct) + read_skill + call_skill_tool = 3 tools total
 ```
@@ -155,38 +155,38 @@ var agent = new AgentBuilder("GameMaster")
 |-----------|---------|-----|
 | **Skills for rarely-used tools** | ~50-100 tokens per hidden tool | Move tools into skills, model loads only what it needs |
 | **Short tool descriptions** | ~10-20 tokens per tool | Use concise descriptions: "List recipes" not "Returns a list of all available crafting recipes in JSON format" |
-| **File-based instructions** | 0 tokens until read | `SkillSet.FromFile()` — instructions load only when `read_skill` is called |
+| **File-based instructions** | 0 tokens until read | `SkillSet.FromFile()` вЂ” instructions load only when `read_skill` is called |
 | **Skill grouping** | Fewer read_skill calls | Group related tools into one skill (e.g. all crafting tools together) |
 
 **Token math example:**
-- 10 skills × 5 tools = 50 tools
-- Without skills: ~50 tools × ~80 tokens/tool = **~4,000 tokens** per request
-- With skills: 2 meta-tools × ~80 tokens + catalog ~200 tokens = **~360 tokens** per request
+- 10 skills Г— 5 tools = 50 tools
+- Without skills: ~50 tools Г— ~80 tokens/tool = **~4,000 tokens** per request
+- With skills: 2 meta-tools Г— ~80 tokens + catalog ~200 tokens = **~360 tokens** per request
 - **Saving: ~91%** of tool-related context
 
 ### How the proxy works (for advanced users)
 
 ```
 User: "Craft me an iron sword"
-  ↓
+  в†“
 Model sees system prompt with catalog:
-  - Crafting — Forge weapons and armor
-  - Combat — Fight enemies
-  ↓
+  - Crafting вЂ” Forge weapons and armor
+  - Combat вЂ” Fight enemies
+  в†“
 Model calls: read_skill("Crafting")
-  → Returns: instructions + tool schemas:
+  в†’ Returns: instructions + tool schemas:
     { tool_name: "get_recipes", parameters: [{name: "type", type: "string"}] }
     { tool_name: "craft_item", parameters: [{name: "recipe_id", type: "string"}] }
-  ↓
+  в†“
 Model calls: call_skill_tool("get_recipes", "{\"type\": \"sword\"}")
-  → Proxy finds get_recipes delegate, parses JSON, invokes it
-  → Returns: [{recipe_id: "iron_sword_01", materials: [...]}]
-  ↓
+  в†’ Proxy finds get_recipes delegate, parses JSON, invokes it
+  в†’ Returns: [{recipe_id: "iron_sword_01", materials: [...]}]
+  в†“
 Model calls: call_skill_tool("craft_item", "{\"recipe_id\": \"iron_sword_01\"}")
-  → Proxy routes to craft_item
-  → Returns: {success: true, item: "Iron Sword"}
-  ↓
-Model: "Your Iron Sword has been forged! ⚔️"
+  в†’ Proxy routes to craft_item
+  в†’ Returns: {success: true, item: "Iron Sword"}
+  в†“
+Model: "Your Iron Sword has been forged! вљ”пёЏ"
 ```
 
 ---
@@ -212,18 +212,18 @@ merchant.ApplyToPolicy(policy);
 ### 2. Configure the backend (unified settings)
 
 ```
-Unity → Create → CoreAI → CoreAI Settings
+Unity в†’ Create в†’ CoreAI в†’ CoreAI Settings
 ```
 
 In the Inspector, choose **LLM Backend**:
-- **Auto** — picks LLMUnity or HTTP API automatically
-- **LlmUnity** — local GGUF model
-- **OpenAiHttp** — HTTP API (LM Studio, OpenAI, Qwen)
-- **Offline** — no model (stub)
+- **Auto** вЂ” picks LLMUnity or HTTP API automatically
+- **LlmUnity** вЂ” local GGUF model
+- **OpenAiHttp** вЂ” HTTP API (LM Studio, OpenAI, Qwen)
+- **Offline** вЂ” no model (stub)
 
 ### 3. Invoke the agent
 
-**🟢 Primary — `AskAsync` (await):**
+**рџџў Primary вЂ” `AskAsync` (await):**
 
 ```csharp
 // Returns the model's text response:
@@ -235,7 +235,7 @@ var orch = container.Resolve<IAiOrchestrationService>();
 string response2 = await merchant.AskAsync(orch, "Show me your swords");
 ```
 
-**🟡 Convenience — `AskWithCallback` (fire-and-forget, no async):**
+**рџџЎ Convenience вЂ” `AskWithCallback` (fire-and-forget, no async):**
 
 ```csharp
 // One line! No await, no container. Errors are logged, not thrown.
@@ -245,10 +245,10 @@ merchant.AskWithCallback("Show me your swords");
 merchant.AskWithCallback("Show me your swords", (response) => Debug.Log(response));
 ```
 
-> 💡 Both use the global `CoreAIAgent.Orchestrator` — it auto-initializes at scene start with `CoreAILifetimeScope`. `AskWithCallback` is for callback-style call sites (UI buttons, UnityEvents); the old `Ask(...)` is an `[Obsolete]` alias of it.
+> рџ’Ў Both use the global `CoreAIAgent.Orchestrator` вЂ” it auto-initializes at scene start with `CoreAILifetimeScope`. `AskWithCallback` is for callback-style call sites (UI buttons, UnityEvents); the old `Ask(...)` is an `[Obsolete]` alias of it.
 > The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
 
-**🔴 Advanced — full control:**
+**рџ”ґ Advanced вЂ” full control:**
 
 ```csharp
 // Via the orchestrator directly:
@@ -271,22 +271,22 @@ var result = await client.CompleteAsync(new LlmCompletionRequest
 });
 ```
 
-> 🛡️ **Built-in spam protection (call cancellation):**
+> рџ›ЎпёЏ **Built-in spam protection (call cancellation):**
 > Both methods (`AskWithCallback` and `AskAsync`) automatically pass `CancellationScope = Agent.RoleId` to the orchestrator.
 > That means **if you call `merchant.AskWithCallback()` again while the first request is still generating, the old request is forcibly stopped (Cancelled)** and the new one runs. This saves CPU and tokens on double-clicks or message spam to the same NPC.
 
 ---
 
-## 📋 Ready-made recipes — copy and use
+## рџ“‹ Ready-made recipes вЂ” copy and use
 
-> 💡 Each recipe is **complete** working code. Copy, rename, done.
+> рџ’Ў Each recipe is **complete** working code. Copy, rename, done.
 
 ### Recipe 1: Blacksmith (sells items + remembers purchases)
 
 ```csharp
 // 1. Create the agent
 var blacksmith = new AgentBuilder("Blacksmith")
-    .WithSystemPrompt(@"You are a blacksmith NPC. When player asks to buy, 
+    .WithSystemPrompt(@"You are a blacksmith NPC. When player asks to buy,
 FIRST call get_inventory tool. Then respond in-character with items and prices.
 Remember what the player bought using memory.")
     .WithTool(new InventoryLlmTool(myInventoryProvider))
@@ -322,7 +322,7 @@ storyteller.AskWithCallback("Tell me a story", (s) => Debug.Log(s));
 
 ```csharp
 var guard = new AgentBuilder("Guard")
-    .WithSystemPrompt(@"You are a city guard. 
+    .WithSystemPrompt(@"You are a city guard.
 If the player admits to a crime, you MUST call the 'alarm' tool immediately.")
     .WithEventTool("alarm", "Sound the alarm when player confesses a crime")
     .WithChatHistory()
@@ -379,7 +379,7 @@ master.AskWithCallback("Players say the game is hard. Multiply damage in calcula
 
 ## Agent response modes
 
-### 1. ChatOnly — chat only
+### 1. ChatOnly вЂ” chat only
 
 The agent **does not use tools**. It only replies with text based on the system prompt and chat history.
 
@@ -394,13 +394,13 @@ var storyteller = new AgentBuilder("Storyteller")
 ```
 
 **Behavior:**
-- ❌ Does not call tools
-- ✅ Replies with text
-- ✅ Remembers chat history (if enabled)
+- вќЊ Does not call tools
+- вњ… Replies with text
+- вњ… Remembers chat history (if enabled)
 
 ---
 
-### 2. ToolsAndChat — tools + chat (default)
+### 2. ToolsAndChat вЂ” tools + chat (default)
 
 The agent **calls tools** when it needs data, then **replies with text** based on the results.
 
@@ -417,25 +417,25 @@ var merchant = new AgentBuilder("Merchant")
 ```
 
 **Behavior:**
-- ✅ Calls tools when needed
-- ✅ Replies with text based on tool output
-- ✅ Remembers memory and chat history
-- ✅ By default uses a streaming override for stable tool calling in stream (single-cycle), unless you set `WithStreaming(...)` explicitly
+- вњ… Calls tools when needed
+- вњ… Replies with text based on tool output
+- вњ… Remembers memory and chat history
+- вњ… By default uses a streaming override for stable tool calling in stream (single-cycle), unless you set `WithStreaming(...)` explicitly
 
 **Example workflow:**
 ```
 Player: "What do you have?"
-  ↓
-Merchant: {"name": "get_inventory", "arguments": {}}  ← calls tool
-  ↓
-Tool: [Iron Sword(50), Potion(25), Armor(100)]        ← receives data
-  ↓
-Merchant: "I have an Iron Sword for 50 coins..."     ← replies from data
+  в†“
+Merchant: {"name": "get_inventory", "arguments": {}}  в†ђ calls tool
+  в†“
+Tool: [Iron Sword(50), Potion(25), Armor(100)]        в†ђ receives data
+  в†“
+Merchant: "I have an Iron Sword for 50 coins..."     в†ђ replies from data
 ```
 
 ---
 
-### 3. ToolsOnly — tools only
+### 3. ToolsOnly вЂ” tools only
 
 The agent **only calls tools**. It does not reply with text to the player. Used for background tasks.
 
@@ -450,16 +450,16 @@ var analyzer = new AgentBuilder("BackgroundAnalyzer")
 ```
 
 **Behavior:**
-- ✅ Calls tools
-- ❌ Does not reply with text (or minimal reply)
-- ✅ Suited for automated tasks
-- ✅ By default uses a streaming override for tool calling in the streaming pipeline, unless you set `WithStreaming(...)` explicitly
+- вњ… Calls tools
+- вќЊ Does not reply with text (or minimal reply)
+- вњ… Suited for automated tasks
+- вњ… By default uses a streaming override for tool calling in the streaming pipeline, unless you set `WithStreaming(...)` explicitly
 
 ---
 
 ## Memory vs chat history
 
-### Memory — persistent memory
+### Memory вЂ” persistent memory
 
 **What it is:** Long-term agent memory. Persists across sessions.
 
@@ -486,7 +486,7 @@ var agent = new AgentBuilder("Merchant")
 
 ---
 
-### ChatHistory — conversation history
+### ChatHistory вЂ” conversation history
 
 **What it is:** Full dialogue context for a role. The framework **automatically** appends user and assistant turns to `IAgentMemoryStore` (same abstraction as MemoryTool). For **LLMUnity**, messages are also fed into `LLMAgent` during the play session so the model sees prior lines.
 
@@ -511,11 +511,11 @@ var agentPersistent = new AgentBuilder("Teacher")
 **How it works:**
 ```
 Request 1: "Tell me about the forest"
-  → Saved in ChatHistory (store + LLMUnity agent history when applicable)
+  в†’ Saved in ChatHistory (store + LLMUnity agent history when applicable)
 
 Request 2: "What was the forest about?"
-  → ChatHistory is injected into context
-  → The agent remembers the prior exchange
+  в†’ ChatHistory is injected into context
+  в†’ The agent remembers the prior exchange
 ```
 
 **Authoritative docs (Unity integration):** see package **[MemorySystem.md](../../CoreAiUnity/Docs/MemorySystem.md)** (architecture) and **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (UI restore, `Load Persisted Chat On Startup`). For custom backends (PlayerPrefs, cloud), see **[MEMORY_STORE_CUSTOM_BACKENDS.md](../../CoreAiUnity/Docs/MEMORY_STORE_CUSTOM_BACKENDS.md)**.
@@ -533,7 +533,7 @@ var merchant = new AgentBuilder("Merchant")
 
 | | Memory (MemoryTool) | ChatHistory |
 |--|---------------------|-------------|
-| **Backed by** | `IAgentMemoryStore` — default Unity: `FileAgentMemoryStore` JSON field `memory` | Same store — field `chatHistoryJson` (plus in-process history for LLMUnity) |
+| **Backed by** | `IAgentMemoryStore` вЂ” default Unity: `FileAgentMemoryStore` JSON field `memory` | Same store вЂ” field `chatHistoryJson` (plus in-process history for LLMUnity) |
 | **Across app restarts** | Yes, when using the default file store (or any persistent `IAgentMemoryStore`) | Yes for built-in **`PlainChat`** / **`SmartChat`** by default; for custom roles use **`WithChatHistory(..., persistBetweenSessions: true)`** (and UI loads history if you use `CoreAiChatPanel`; see README_CHAT) |
 | **Control** | Model via `memory` tool call | Automatic append of user/assistant messages |
 | **Use for** | Facts, purchases, quests | Conversation context |
@@ -542,17 +542,17 @@ var merchant = new AgentBuilder("Merchant")
 
 ## Quick Actions and Events (no classes)
 
-**Recommendation:** start with **`WithAction`** whenever the tool maps to a concrete C# callback — **MEAI** infers the JSON schema from the delegate. Use **`WithEventTool`** when you want loose coupling via **`CoreAiEvents`**. Reserve a custom **`ILlmTool`** class ([next section](#building-a-custom-tool-via-classes)) for advanced control (custom schemas, portability, or non-delegate wiring).
+**Recommendation:** start with **`WithAction`** whenever the tool maps to a concrete C# callback вЂ” **MEAI** infers the JSON schema from the delegate. Use **`WithEventTool`** when you want loose coupling via **`CoreAiEvents`**. Reserve a custom **`ILlmTool`** class ([next section](#building-a-custom-tool-via-classes)) for advanced control (custom schemas, portability, or non-delegate wiring).
 
 ### 1. WithAction (recommended for direct C# tools)
 
-Passes any C# `Delegate` (`Action` or `Func`) into the agent pipeline. **Microsoft.Extensions.AI** builds the tool schema from the delegate parameters — no handwritten JSON Schema for normal cases.
+Passes any C# `Delegate` (`Action` or `Func`) into the agent pipeline. **Microsoft.Extensions.AI** builds the tool schema from the delegate parameters вЂ” no handwritten JSON Schema for normal cases.
 
 ```csharp
 var agent = new AgentBuilder("Helper")
     // Parameterless method
     .WithAction("heal_player", "Heals the player fully", () => player.Heal())
-    
+
     // Method with parameters (the agent infers amount(int) and item(string))
     .WithAction("give_item", "Gives an item", (int amount, string item) => {
         inventory.Add(item, amount);
@@ -574,7 +574,7 @@ var agent = new AgentBuilder("Storyteller")
 
 **Any script in the game:**
 ```csharp
-void Start() 
+void Start()
 {
     // Agent raised an event with no parameters:
     CoreAiEvents.Subscribe("trigger_scare", () => {
@@ -589,16 +589,16 @@ void Start()
 }
 ```
 
-> 💡 **How does the model know when to call Action/Event?**
-> No special system prompt for triggers is generated — everything goes through standard **tool calling**.
+> рџ’Ў **How does the model know when to call Action/Event?**
+> No special system prompt for triggers is generated вЂ” everything goes through standard **tool calling**.
 > For the model to call your tool reliably, do two things:
 > 1. **Give a clear `description` for the tool.** The model reads it and understands intent (e.g. *"Use this ONLY IF player is dying"*).
 > 2. **Spell out rules in the agent's `WithSystemPrompt`.** If you add at least one Action or Event, it is **strongly recommended** to add instructions on when to use that tool. For example:
 >    `.WithSystemPrompt("You are a guard. If the player admits to a crime, you MUST call the 'alarm' tool immediately.")`
 
-> ❓ **What's the difference between WithAction and WithEventTool?**
-> - **`WithAction`** — wires a specific C# delegate. The agent invokes your method directly (e.g. `() => player.Heal()`). Good for direct actions with a clear outcome.
-> - **`WithEventTool`** — only publishes on the `CoreAiEvents` bus via `CoreAiEvents.Publish()`. The agent does not know who handles it. Useful for decoupling: the agent fires `trigger_scare` while handlers live on audio, VFX spawners, etc.
+> вќ“ **What's the difference between WithAction and WithEventTool?**
+> - **`WithAction`** вЂ” wires a specific C# delegate. The agent invokes your method directly (e.g. `() => player.Heal()`). Good for direct actions with a clear outcome.
+> - **`WithEventTool`** вЂ” only publishes on the `CoreAiEvents` bus via `CoreAiEvents.Publish()`. The agent does not know who handles it. Useful for decoupling: the agent fires `trigger_scare` while handlers live on audio, VFX spawners, etc.
 
 ---
 
@@ -621,7 +621,7 @@ public class MyTool : ILlmTool
     // 3. JSON schema for parameters (if any)
     public string ParametersSchema => "{}"; // No parameters
 
-    // 4. Create AIFunction — this runs when the tool is invoked
+    // 4. Create AIFunction вЂ” this runs when the tool is invoked
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
@@ -642,14 +642,14 @@ public class MyTool : ILlmTool
 ```csharp
 var agent = new AgentBuilder("MyAgent")
     .WithSystemPrompt("You are an agent with custom tools.")
-    .WithTool(new MyTool())  // ← add tool
+    .WithTool(new MyTool())  // в†ђ add tool
     .WithMemory()
 ```
 
-> 💡 **Tool design for token savings:**
-> - Use **clear names** (`spawn_quiz`, `get_inventory`) — the model should grasp intent immediately.
-> - Keep **short descriptions** (one line) — `Description` is sent on every request.
-> - Use **short parameter keys** (`q`, `opts`, `correct` instead of `question_text`, `answer_options`, `correct_answer_indexes`) — can save 30–50% tokens per call.
+> рџ’Ў **Tool design for token savings:**
+> - Use **clear names** (`spawn_quiz`, `get_inventory`) вЂ” the model should grasp intent immediately.
+> - Keep **short descriptions** (one line) вЂ” `Description` is sent on every request.
+> - Use **short parameter keys** (`q`, `opts`, `correct` instead of `question_text`, `answer_options`, `correct_answer_indexes`) вЂ” can save 30вЂ“50% tokens per call.
 > - Prefer **indices over strings** (`"correct": [1]` instead of `"correct": ["full answer text"]`).
 > - Set **defaults in code** so the model does not fill rarely used fields.
 >
@@ -658,25 +658,25 @@ var agent = new AgentBuilder("MyAgent")
 ### Generation temperature, output tokens, and duplicate tool calls
 
 #### Duplicate tool calls
-By default CoreAI **disallows** calling the same tool with identical arguments repeatedly in a row (`AllowDuplicateToolCalls = false`). This protects small local models (2B, 4B) from infinite loops. For stronger models (API or 30B+ local), duplicates can be useful — for example a watchdog agent that polls a status tool until it returns "ready", or an animation agent that legitimately re-fires the same `play_animation` call.
+By default CoreAI **disallows** calling the same tool with identical arguments repeatedly in a row (`AllowDuplicateToolCalls = false`). This protects small local models (2B, 4B) from infinite loops. For stronger models (API or 30B+ local), duplicates can be useful вЂ” for example a watchdog agent that polls a status tool until it returns "ready", or an animation agent that legitimately re-fires the same `play_animation` call.
 
 There are **three** layers, evaluated from broadest to narrowest:
 
 | Layer | Where | Default | Effect |
 |------|------|------|------|
 | Global | `CoreAISettings.AllowDuplicateToolCalls` | `false` (reject) | Baseline for every agent that does not override |
-| Per-role | `AgentBuilder.WithAllowDuplicateToolCalls(bool)` | unset → falls back to global | Wins over the global setting |
+| Per-role | `AgentBuilder.WithAllowDuplicateToolCalls(bool)` | unset в†’ falls back to global | Wins over the global setting |
 | Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt regardless of role/global setting (used by tools like `world_command` and `execute_lua`) |
 
 Examples:
 
 ```csharp
-// Strong model that polls a status tool — let it re-call.
+// Strong model that polls a status tool вЂ” let it re-call.
 var watchdog = new AgentBuilder("Watchdog")
     .WithAllowDuplicateToolCalls(true)
     .Build();
 
-// Small model that occasionally loops — keep the guard on for this agent
+// Small model that occasionally loops вЂ” keep the guard on for this agent
 // even if the global default is true.
 var planner = new AgentBuilder("Programmer")
     .WithAllowDuplicateToolCalls(false)
@@ -690,13 +690,13 @@ When a duplicate is rejected, the policy returns a synthetic tool result of:
 The trace surfaces it as `source=duplicate` in the per-call diagnostic line:
 
 ```
-[ToolCall] traceId=… role=… tool=memory status=FAIL dur=0ms …
-LLM ◀ … | tools=[memory(fail,0ms,duplicate)]
+[ToolCall] traceId=вЂ¦ role=вЂ¦ tool=memory status=FAIL dur=0ms вЂ¦
+LLM в—Ђ вЂ¦ | tools=[memory(fail,0ms,duplicate)]
 ```
 
 If you see this line repeatedly, that's the signal to either (a) flip `WithAllowDuplicateToolCalls(true)` for that agent, (b) mark the specific tool with `AllowDuplicates = true`, or (c) tighten the system prompt to stop the model retrying.
 
-> 💡 *Note: For some tools (e.g. `world_command` → `play_animation` or `execute_lua`), duplicates are always allowed at the tool level.*
+> рџ’Ў *Note: For some tools (e.g. `world_command` в†’ `play_animation` or `execute_lua`), duplicates are always allowed at the tool level.*
 
 #### Generation temperature
 
@@ -705,7 +705,7 @@ Temperature controls **creativity**. The global default is `CoreAISettings.Tempe
 | Value | Behavior | When to use |
 |----------|-----------|-------------------|
 | `0.0` | Fully deterministic | Strict JSON, code, math |
-| `0.1` | Minimal variance | **Default** — tool calling, crafting |
+| `0.1` | Minimal variance | **Default** вЂ” tool calling, crafting |
 | `0.3` | Light variance | NPC dialogue, analytics |
 | `0.7` | Creative | Storyteller, content generation |
 | `1.0+` | Maximum randomness | Rarely, creative tasks only |
@@ -724,13 +724,13 @@ var npc = new AgentBuilder("Guard")
     .WithChatHistory()
     .Build();
 
-// No override — uses global temperature (0.1)
+// No override вЂ” uses global temperature (0.1)
 var creator = new AgentBuilder("Creator")
     .WithSystemPrompt("You are the Creator agent...")
     .Build();  // Temperature = 0.1 from CoreAISettings
 ```
 
-> 💡 **Tip:** for tool calling use `0.0–0.2`. Higher temperature makes the model more likely to “improvise” instead of following the format.
+> рџ’Ў **Tip:** for tool calling use `0.0вЂ“0.2`. Higher temperature makes the model more likely to вЂњimproviseвЂќ instead of following the format.
 
 #### Per-agent output token budget
 
@@ -748,7 +748,7 @@ var planner = new AgentBuilder("QuestPlanner")
     .Build();
 ```
 
-Priority through the orchestrator is: `AiTaskRequest.MaxOutputTokens` (per-call) → `AgentBuilder.WithMaxOutputTokens` (per-agent) → `CoreAISettings.MaxTokens` (global) → provider default. Direct `LlmCompletionRequest.MaxOutputTokens` still wins when you call an `ILlmClient` yourself.
+Priority through the orchestrator is: `AiTaskRequest.MaxOutputTokens` (per-call) в†’ `AgentBuilder.WithMaxOutputTokens` (per-agent) в†’ `CoreAISettings.MaxTokens` (global) в†’ provider default. Direct `LlmCompletionRequest.MaxOutputTokens` still wins when you call an `ILlmClient` yourself.
 
 **Step 3: The model calls the tool when needed**
 
@@ -774,15 +774,15 @@ public class WeatherLlmTool : ILlmTool
     }
 
     public string Name => "get_weather";
-    
+
     public string Description => "Get current weather in the game world.";
-    
+
     public string ParametersSchema => "{}";
 
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
-            async (CancellationToken ct) => 
+            async (CancellationToken ct) =>
             {
                 var weather = await _weather.GetCurrentAsync(ct);
                 return new { weather.Temperature, weather.Condition, weather.IsRaining };
@@ -799,10 +799,10 @@ public class WeatherLlmTool : ILlmTool
 public class CraftItemTool : ILlmTool
 {
     public string Name => "craft_item";
-    
+
     public string Description => "Craft an item from ingredients.";
-    
-    public string ParametersSchema => 
+
+    public string ParametersSchema =>
         "{" +
         "  \"type\": \"object\"," +
         "  \"properties\": {" +
@@ -815,7 +815,7 @@ public class CraftItemTool : ILlmTool
     public AIFunction CreateAIFunction()
     {
         return AIFunctionFactory.Create(
-            async (string ingredient1, string ingredient2, CancellationToken ct) => 
+            async (string ingredient1, string ingredient2, CancellationToken ct) =>
             {
                 var result = await CraftingSystem.CraftAsync(ingredient1, ingredient2, ct);
                 return new { result.ItemName, result.Quality, result.Success };
@@ -838,7 +838,7 @@ public static class MyGameAgents
     public static AgentConfig CreateMerchant(IInventoryProvider inventory)
     {
         return new AgentBuilder("Merchant")
-            .WithSystemPrompt(@"You are a shopkeeper NPC. 
+            .WithSystemPrompt(@"You are a shopkeeper NPC.
 When player asks to buy or browse, FIRST call get_inventory tool.
 Then respond in-character with items and prices.
 Remember what the player bought using memory.")
@@ -888,13 +888,13 @@ Track completed quests in memory.")
 void SetupAgents()
 {
     var policy = new AgentMemoryPolicy();
-    
+
     // Custom agents
     MyGameAgents.CreateMerchant(GameServices.Inventory).ApplyToPolicy(policy);
     MyGameAgents.CreateQuestGiver(GameServices.Quests).ApplyToPolicy(policy);
     MyGameAgents.CreateStoryteller().ApplyToPolicy(policy);
     MyGameAgents.CreateBackgroundAnalyzer(GameServices.Telemetry).ApplyToPolicy(policy);
-    
+
     // Store policy in the DI container
     container.RegisterInstance(policy);
 }
@@ -947,11 +947,11 @@ async Task AskMerchant(string playerMessage)
 | Method | Description | Example |
 |-------|----------|--------|
 | `ApplyToPolicy(policy)` | Register agent in policy | `merchant.ApplyToPolicy(CoreAIAgent.Policy)` |
-| `AskWithCallback(message, onDone?)` | 🟢 Fire-and-forget convenience, optional `Action<string>` | `merchant.AskWithCallback("Hi", (s) => print(s))` |
-| `AskAsync(message)` | 🟡 Async (returns `Task<string>`) | `await merchant.AskAsync("Hi")` |
-| `AskAsync(orch, message)` | 🔴 Async with explicit orchestrator | `await merchant.AskAsync(orch, "Hi")` |
+| `AskWithCallback(message, onDone?)` | рџџў Fire-and-forget convenience, optional `Action<string>` | `merchant.AskWithCallback("Hi", (s) => print(s))` |
+| `AskAsync(message)` | рџџЎ Async (returns `Task<string>`) | `await merchant.AskAsync("Hi")` |
+| `AskAsync(orch, message)` | рџ”ґ Async with explicit orchestrator | `await merchant.AskAsync(orch, "Hi")` |
 
-> 💡 The primary idiom is awaitable `AskAsync`; `AskWithCallback` exists for callback-style call sites (UnityEvents, legacy code). The old `Ask(message, onDone?)` still compiles but is `[Obsolete]`.
+> рџ’Ў The primary idiom is awaitable `AskAsync`; `AskWithCallback` exists for callback-style call sites (UnityEvents, legacy code). The old `Ask(message, onDone?)` still compiles but is `[Obsolete]`.
 > The callback is marshaled to the caller's `SynchronizationContext` when one exists (for example, the Unity main thread); when called from a thread without a `SynchronizationContext`, the callback may run on a background thread and must not touch `UnityEngine` APIs.
 
 ### RoleId (typed role identifiers)
@@ -994,50 +994,50 @@ Built-in statics: `RoleId.Creator`, `RoleId.Analyzer`, `RoleId.Programmer`, `Rol
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                       AgentBuilder                            │
-├──────────────────────────────────────────────────────────────┤
-│  new AgentBuilder("Merchant")                                │
-│    .WithSystemPrompt("You are a shopkeeper...")  ← prompt    │
-│    .WithTool(new InventoryLlmTool(...))          ← tools     │
-│    .WithMemory()                                 ← memory     │
-│    .WithChatHistory()                            ← history    │
-│    .WithMode(AgentMode.ToolsAndChat)             ← mode       │
-│    .Build()                                        ↓         │
-└──────────────────────────────────────────────────────────────┘
-                              ↓
-┌──────────────────────────────────────────────────────────────┐
-│                       AgentConfig                             │
-├──────────────────────────────────────────────────────────────┤
-│  RoleId: "Merchant"                                          │
-│  SystemPrompt: "You are a shopkeeper..."                     │
-│  Tools: [InventoryLlmTool, MemoryLlmTool]                    │
-│  Mode: ToolsAndChat                                          │
-└──────────────────────────────────────────────────────────────┘
-                              ↓
-┌──────────────────────────────────────────────────────────────┐
-│               AgentConfig.ApplyToPolicy(policy)               │
-├──────────────────────────────────────────────────────────────┤
-│  policy.SetToolsForRole("Merchant", [tools])                 │
-│  policy.EnableMemoryTool("Merchant")                         │
-│  policy.EnableChatHistory("Merchant")                        │
-└──────────────────────────────────────────────────────────────┘
-                              ↓
-┌──────────────────────────────────────────────────────────────┐
-│                    AiOrchestrator                              │
-├──────────────────────────────────────────────────────────────┤
-│  RunTaskAsync("Merchant", "What do you have?")               │
-│    ↓                                                          │
-│  → FunctionInvokingChatClient → tools=[inventory, memory]    │
-│    ↓                                                          │
-│  → Model: {"name": "get_inventory", "arguments": {}}         │
-│    ↓                                                          │
-│  → InventoryTool executes → [Iron Sword(50), Potion(25)]     │
-│    ↓                                                          │
-│  → Model: "I have Iron Sword for 50 coins..."                │
-│    ↓                                                          │
-│  → ChatHistory saves: user + assistant messages              │
-└──────────────────────────────────────────────────────────────┘
+в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+в”‚                       AgentBuilder                            в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚  new AgentBuilder("Merchant")                                в”‚
+в”‚    .WithSystemPrompt("You are a shopkeeper...")  в†ђ prompt    в”‚
+в”‚    .WithTool(new InventoryLlmTool(...))          в†ђ tools     в”‚
+в”‚    .WithMemory()                                 в†ђ memory     в”‚
+в”‚    .WithChatHistory()                            в†ђ history    в”‚
+в”‚    .WithMode(AgentMode.ToolsAndChat)             в†ђ mode       в”‚
+в”‚    .Build()                                        в†“         в”‚
+в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
+                              в†“
+в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+в”‚                       AgentConfig                             в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚  RoleId: "Merchant"                                          в”‚
+в”‚  SystemPrompt: "You are a shopkeeper..."                     в”‚
+в”‚  Tools: [InventoryLlmTool, MemoryLlmTool]                    в”‚
+в”‚  Mode: ToolsAndChat                                          в”‚
+в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
+                              в†“
+в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+в”‚               AgentConfig.ApplyToPolicy(policy)               в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚  policy.SetToolsForRole("Merchant", [tools])                 в”‚
+в”‚  policy.EnableMemoryTool("Merchant")                         в”‚
+в”‚  policy.EnableChatHistory("Merchant")                        в”‚
+в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
+                              в†“
+в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+в”‚                    AiOrchestrator                              в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚  RunTaskAsync("Merchant", "What do you have?")               в”‚
+в”‚    в†“                                                          в”‚
+в”‚  в†’ FunctionInvokingChatClient в†’ tools=[inventory, memory]    в”‚
+в”‚    в†“                                                          в”‚
+в”‚  в†’ Model: {"name": "get_inventory", "arguments": {}}         в”‚
+в”‚    в†“                                                          в”‚
+в”‚  в†’ InventoryTool executes в†’ [Iron Sword(50), Potion(25)]     в”‚
+в”‚    в†“                                                          в”‚
+в”‚  в†’ Model: "I have Iron Sword for 50 coins..."                в”‚
+в”‚    в†“                                                          в”‚
+в”‚  в†’ ChatHistory saves: user + assistant messages              в”‚
+в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
 ```
 
 ---
@@ -1082,21 +1082,21 @@ CoreAISettings.MaxResponseChars = 50000;      // Max response chars (default 0 =
 CoreAISettings.MaxToolCallRoundtrips = 15;    // Max tool-call iterations (default 10)
 ```
 
-### 🛡️ Resilience & Safety
+### рџ›ЎпёЏ Resilience & Safety
 
 Production agents face three classes of risk: tool result overflow, tool hangs, and model runaway. CoreAI has built-in protections for all three:
 
 | Setting | Default | What it does |
 |---------|---------|-------------|
-| `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `…[truncated: N chars → M shown]`. Prevents a single tool from overflowing the context window. |
+| `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `вЂ¦[truncated: N chars в†’ M shown]`. Prevents a single tool from overflowing the context window. |
 | `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. |
 | `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
-| `MaxToolCallRoundtrips` | **10** | Maximum tool-call loop iterations per request. Prevents infinite tool-calling loops (model calls tools → gets results → calls again → …). |
+| `MaxToolCallRoundtrips` | **10** | Maximum tool-call loop iterations per request. Prevents infinite tool-calling loops (model calls tools в†’ gets results в†’ calls again в†’ вЂ¦). |
 | `MaxToolCallHistoryMessages` | **20** | Max tool call messages retained in the MEAI list during a single request's tool-calling loop. Prevents unbounded context growth. 0 = no limit. |
 
 **All five** are configurable via:
 - `CoreAISettings.X = value` (static C# override)
-- `CoreAISettingsAsset` in Unity Inspector (under 🛡️ **Resilience & Safety**)
+- `CoreAISettingsAsset` in Unity Inspector (under рџ›ЎпёЏ **Resilience & Safety**)
 - `ICoreAISettings` interface (DI / custom settings)
 
 **Examples:**
@@ -1115,10 +1115,10 @@ CoreAISettings.MaxResponseChars = 2000;
 **What happens on truncation/timeout:**
 
 ```
-[ToolPolicy] ✂ Tool 'get_inventory' result truncated: 45230 → 4000 chars
-[ToolPolicy] ⏱ Error: Tool 'fetch_weather' timed out after 5000ms
-[SmartToolCall] ⚠ Max tool-call roundtrips (10) reached. Stopping.
-[SmartToolCall] ✂ Response truncated at 2000 chars
+[ToolPolicy] вњ‚ Tool 'get_inventory' result truncated: 45230 в†’ 4000 chars
+[ToolPolicy] вЏ± Error: Tool 'fetch_weather' timed out after 5000ms
+[SmartToolCall] вљ  Max tool-call roundtrips (10) reached. Stopping.
+[SmartToolCall] вњ‚ Response truncated at 2000 chars
 [SmartToolCall] Trimmed 4 old tool call message(s), keeping 12 total.
 ```
 
@@ -1128,35 +1128,35 @@ If the model fails to emit a tool call in the correct format, the system automat
 
 ```
 Attempt 1: Model returns wrong format
-  ↓
+  в†“
 System: "ERROR: Tool call not recognized. Use this format: {"name": "...", "arguments": {...}}"
-  ↓
+  в†“
 Attempt 2: Model retries
-  ↓
+  в†“
 (If still wrong)
-  ↓
+  в†“
 Attempt 3: Final attempt
-  ↓
+  в†“
 (If still wrong - accepts response as is)
 ```
 
 This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
 
-### 🔄 Dual-Backend with Auto-Fallback
+### рџ”„ Dual-Backend with Auto-Fallback
 
-Configure a secondary HTTP backend in Inspector (**🔄 Fallback Backend** section). When the primary backend fails, requests are automatically retried on the secondary:
+Configure a secondary HTTP backend in Inspector (**рџ”„ Fallback Backend** section). When the primary backend fails, requests are automatically retried on the secondary:
 
 ```
 Primary: http://127.0.0.1:1234/v1 (local Qwen3.5-4B)
 Secondary: https://api.openai.com/v1 (GPT-4o)
 
-Request → Primary fails (timeout/503) → Retry on Secondary → Success
+Request в†’ Primary fails (timeout/503) в†’ Retry on Secondary в†’ Success
 ```
 
 **Setup in Inspector:**
 
 1. Open `CoreAISettings` asset
-2. Toggle **Enable Fallback Backend** ✓
+2. Toggle **Enable Fallback Backend** вњ“
 3. Fill **Secondary API Base URL**, **Secondary API Key**, **Secondary Model Name**
 
 **Setup via code:**
@@ -1168,7 +1168,7 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 // secondaryApiKey = "sk-..."
 // secondaryModelName = "gpt-4o-mini"
 
-// The pipeline auto-wraps: primary → FallbackLlmClientDecorator(primary, secondary)
+// The pipeline auto-wraps: primary в†’ FallbackLlmClientDecorator(primary, secondary)
 ```
 
 **Use cases:**
@@ -1182,14 +1182,14 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 
 | Model | Size | Tool calling | When to use |
 |--------|--------|--------------|-------------------|
-| **Qwen3.5-4B** | 4B | ✅ Strong | **Recommended** for local runs |
-| **Qwen3.5-35B (MoE) API** | 35B/3A | ✅ Excellent | **Ideal** via API — fast and accurate |
-| **Gemma 4 26B** | 26B | ✅ Excellent | Great via LM Studio / HTTP API |
-| Qwen3.5-2B | 2B | ⚠️ Works | Works but can err on multi-step |
-| Qwen3.5-0.8B | 0.8B | ⚠️ Basic | Most tests pass; multi-step is harder |
+| **Qwen3.5-4B** | 4B | вњ… Strong | **Recommended** for local runs |
+| **Qwen3.5-35B (MoE) API** | 35B/3A | вњ… Excellent | **Ideal** via API вЂ” fast and accurate |
+| **Gemma 4 26B** | 26B | вњ… Excellent | Great via LM Studio / HTTP API |
+| Qwen3.5-2B | 2B | вљ пёЏ Works | Works but can err on multi-step |
+| Qwen3.5-0.8B | 0.8B | вљ пёЏ Basic | Most tests pass; multi-step is harder |
 
-> 🏆 **Qwen3.5-4B passes ALL PlayMode tests.** Recommended minimum for production.
-> 💡 MoE models activate only part of the parameters (3B) — fast like 4B, accurate like 35B.
+> рџЏ† **Qwen3.5-4B passes ALL PlayMode tests.** Recommended minimum for production.
+> рџ’Ў MoE models activate only part of the parameters (3B) вЂ” fast like 4B, accurate like 35B.
 
 ---
 
@@ -1198,7 +1198,7 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 ### Agent does not call tools
 - Ensure `Mode` is `AgentMode.ToolsAndChat` or `ToolsOnly`
 - Confirm tools are passed via `.WithTool()`
-- Check the system prompt — the model must know about the tools
+- Check the system prompt вЂ” the model must know about the tools
 
 ### Memory does not persist
 - Ensure `.WithMemory()` is called
@@ -1207,15 +1207,15 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 
 ### Chat history does not work
 - Ensure `.WithChatHistory()` is called on the role
-- For **LLMUnity**, history is mirrored into `LLMAgent` during the session — if the list is empty, confirm the client was created with chat history enabled for that role
-- For **persistence after closing the game**, built-in **`PlainChat`** / **`SmartChat`** persist chat by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false — only in-memory for that process
+- For **LLMUnity**, history is mirrored into `LLMAgent` during the session вЂ” if the list is empty, confirm the client was created with chat history enabled for that role
+- For **persistence after closing the game**, built-in **`PlainChat`** / **`SmartChat`** persist chat by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false вЂ” only in-memory for that process
 - UI restore: see **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (`Load Persisted Chat On Startup`, role policy)
 
 ---
 
 ## Related portable documentation
 
-- [`README.md`](README.md) — index of all guides under `Assets/CoreAI/Docs`
-- [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md) — MEAI tool pipeline
-- [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](MEAI_TOKENS_FACT_VS_ESTIMATE.md) — token `usage`, streaming, timeouts
-- [`LLM_ROUTING.md`](LLM_ROUTING.md) — portable routing contracts
+- [`README.md`](README.md) вЂ” index of all guides under `Assets/CoreAI/Docs`
+- [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md) вЂ” MEAI tool pipeline
+- [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](MEAI_TOKENS_FACT_VS_ESTIMATE.md) вЂ” token `usage`, streaming, timeouts
+- [`LLM_ROUTING.md`](LLM_ROUTING.md) вЂ” portable routing contracts

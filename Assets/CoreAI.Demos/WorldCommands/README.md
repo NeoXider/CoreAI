@@ -1,28 +1,28 @@
-# Demo: World Commands
+﻿# Demo: World Commands
 
-Сцена: `WorldCommandsDemo.unity`. LLM и Lua не нужны.
+Scene: `WorldCommandsDemo.unity`. No LLM or Lua required.
 
-## Что показывает
+## What It Shows
 
-Сырой конвейер AI-команд CoreAI — тот же путь, по которому действия применяют LLM-агенты
-(tool `world_command`), Lua-биндинги и серверные команды:
+The raw CoreAI AI-command pipeline: the same path used to apply actions from LLM agents
+(tool `world_command`), Lua bindings, and server commands:
 
 ```
 WorldCommandsDemoController
-  → IAiGameCommandSink.Publish(ApplyAiGameCommand { CommandTypeId = WorldCommand, JsonPayload })
-  → MessagePipe → AiGameCommandRouter (main thread)
-  → CoreAiWorldCommandExecutor (spawn / move / set_color / destroy ...)
+  -> IAiGameCommandSink.Publish(ApplyAiGameCommand { CommandTypeId = WorldCommand, JsonPayload })
+  -> MessagePipe -> AiGameCommandRouter (main thread)
+  -> CoreAiWorldCommandExecutor (spawn / move / set_color / destroy ...)
 ```
 
-Кнопки OnGUI публикуют конверты `CoreAiWorldCommandEnvelope` (spawn врага из
-`CoreAiPrefabRegistryAsset`, перемещение и перекраска «Boss», destroy).
+The OnGUI buttons publish `CoreAiWorldCommandEnvelope` envelopes (spawn an enemy from
+`CoreAiPrefabRegistryAsset`, move and recolor `Boss`, destroy).
 
-## Зачем
+## Why It Exists
 
-- Быстрая проверка, что роутер/экзекьютор/реестр префабов сцены настроены правильно,
-  до подключения LLM.
-- Референс для своих систем: как публиковать команды в общий конвейер из любого кода игры.
+- Quickly verify that the scene router/executor/prefab registry are configured correctly before
+  connecting an LLM.
+- Reference for custom systems: how to publish commands into the shared pipeline from any game code.
 
-Поддерживаемые действия экзекьютора: см. `CoreAiWorldCommandExecutor.TryExecute`
+Supported executor actions: see `CoreAiWorldCommandExecutor.TryExecute`
 (`spawn`, `move`, `destroy`, `set_active`, `parent`, `set_scale`, `set_color`, `load_scene`,
-`play_animation`, `play_sound`, `apply_force`, `set_velocity` и др.).
+`play_animation`, `play_sound`, `apply_force`, `set_velocity`, etc.).

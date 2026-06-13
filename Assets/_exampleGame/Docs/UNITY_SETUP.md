@@ -1,134 +1,134 @@
-# Example Game — настройка в Unity (RogueliteArena)
+# Example Game - Unity Setup (RogueliteArena)
 
-Пошаговая инструкция: открыть демо-сцену, настроить **LLM** (локально или по HTTP), убедиться, что **F9** вызывает **Programmer** с исполнением Lua.
+Step-by-step instructions: open the demo scene, configure **LLM** (locally or over HTTP), and confirm that **F9** calls **Programmer** with Lua execution.
 
-Предполагается версия Unity из **`ProjectSettings/ProjectVersion.txt`** (ветка **6000.3.x**).
-
----
-
-## Шаг 1. Открыть сцену примера
-
-1. Запустите проект **CoreAI** в Unity.
-2. Верхнее меню: **CoreAI → Development → Example Game → Open RogueliteArena scene**  
-   *или* Project: **`Assets/_exampleGame/Scenes/RogueliteArena.unity`** → двойной щелчок.
-
-Сцена уже содержит нужную иерархию; правки в инспекторе — в основном **модель LLM** и опционально **OpenAI HTTP**.
+Assumes the Unity version from **`ProjectSettings/ProjectVersion.txt`** (branch **6000.3.x**).
 
 ---
 
-## Шаг 2. Понять иерархию (ничего не ломая)
+## Step 1. Open the Example Scene
 
-В **Hierarchy** под **`CompositionRoot`** есть дочерний **`ArenaGameplay`**:
+1. Launch the **CoreAI** project in Unity.
+2. Top menu: **CoreAI -> Development -> Example Game -> Open RogueliteArena scene**
+   *or* Project: **`Assets/_exampleGame/Scenes/RogueliteArena.unity`** -> double-click.
 
-| Объект | Компоненты |
+The scene already contains the required hierarchy; inspector edits are mostly the **LLM model** and optional **OpenAI HTTP**.
+
+---
+
+## Step 2. Understand the Hierarchy (Without Breaking Anything)
+
+In **Hierarchy**, under **`CompositionRoot`**, there is a child **`ArenaGameplay`**:
+
+| Object | Components |
 |--------|------------|
-| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** — волны, игрок, HUD (поле **Skip Runtime Floor** включено: пол сцены — **ArenaGroundPlane**). Прогрессия VS-style: назначьте **Arena Progression Content** + **Arena Unit Baseline** и сгенерируйте ассеты меню **CoreAI Example → Arena → Generate Progression Assets** — см. **[ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)**. |
-| **ArenaGroundPlane** | Mesh (Plane), **MeshCollider**, материал — видимое игровое поле ~44×44 м. |
-| **PlayerSpawn** | Пустой Transform — стартовая позиция игрока (**Player Spawn Anchor** в сетапе). |
+| **ArenaGameplay** | **ArenaSurvivalProceduralSetup** - waves, player, HUD (field **Skip Runtime Floor** enabled: the scene floor is **ArenaGroundPlane**). VS-style progression: assign **Arena Progression Content** + **Arena Unit Baseline** and generate menu assets via **CoreAI Example -> Arena -> Generate Progression Assets** - see **[ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)**. |
+| **ArenaGroundPlane** | Mesh (Plane), **MeshCollider**, material - visible gameplay field about 44x44 m. |
+| **PlayerSpawn** | Empty Transform - player start position (**Player Spawn Anchor** in setup). |
 
-**Main Camera** уже содержит **ArenaFollowCamera** (цель подставляется при спавне игрока).
+**Main Camera** already contains **ArenaFollowCamera** (the target is assigned when the player spawns).
 
-Далее — объект **`CompositionRoot`** (родитель арены). На нём висят:
+Next is **`CompositionRoot`** (arena parent). It has:
 
-| Компонент | Роль |
+| Component | Role |
 |-----------|------|
-| **CoreAILifetimeScope** | Корень DI ядра: лог, MessagePipe, **`ILlmClient`** (в рантайме — **`LoggingLlmClientDecorator`** + реализация), оркестратор, роутер **`ApplyAiGameCommand`**, Lua-процессор. Поля: **Llm Request Timeout Seconds** (по умолчанию 15, 0 = без лимита), **Game Log Settings**. **Auto Run** включён. |
-| **ExampleRogueliteEntry** | Старт прототипа арены (волны). В **Awake** добавляет **`CoreAiLuaHotkey`** (**F9**) и демо **`CoreAiArenaLlmHotkeys`** (**F1/F2** → **`ArenaAiTaskBus`** на сгенерированной арене). |
+| **CoreAILifetimeScope** | Core DI root: log, MessagePipe, **`ILlmClient`** (at runtime - **`LoggingLlmClientDecorator`** + implementation), orchestrator, router **`ApplyAiGameCommand`**, Lua processor. Fields: **Llm Request Timeout Seconds** (default 15, 0 = no limit), **Game Log Settings**. **Auto Run** is enabled. |
+| **ExampleRogueliteEntry** | Starts the arena prototype (waves). In **Awake**, adds **`CoreAiLuaHotkey`** (**F9**) and demo **`CoreAiArenaLlmHotkeys`** (**F1/F2** -> **`ArenaAiTaskBus`** on the generated arena). |
 
-События арены (волна, низкое HP, босс, триггер комнаты) идут через **`ArenaAiTaskBus`**; контекст Creator для планов волн — **[CREATOR_WAVE_CONTEXT.md](CREATOR_WAVE_CONTEXT.md)**.
+Arena events (wave, low HP, boss, room trigger) go through **`ArenaAiTaskBus`**; Creator context for wave plans is **[CREATOR_WAVE_CONTEXT.md](CREATOR_WAVE_CONTEXT.md)**.
 
-**Дочерний** объект **`LLM`** (под `CompositionRoot`):
+Child object **`LLM`** (under `CompositionRoot`):
 
-| Компонент | Роль |
+| Component | Role |
 |-----------|------|
-| **LLM** | Сервер inference LLMUnity: модель GGUF, потоки, GPU layers, контекст. |
-| **LLMAgent** | Клиент к этому **LLM**; поле **LLM** должно ссылаться на соседний компонент **LLM**. |
+| **LLM** | LLMUnity inference server: GGUF model, threads, GPU layers, context. |
+| **LLMAgent** | Client to this **LLM**; field **LLM** must reference the neighboring **LLM** component. |
 
-**Важно:** `CoreAILifetimeScope` ищет в сцене **`LLMAgent`** через `FindFirstObjectByType`. Пока **Open Ai Http Llm Settings** не переводит ядро на HTTP, живой ответ модели идёт через этот агент.
-
----
-
-## Шаг 3. Режим A — только LLMUnity (локальная GGUF)
-
-Подходит для офлайн-разработки и соответствует дефолту сцены (**Open Ai Http Llm Settings** = *None*).
-
-По официальному **Quick start** LLMUnity: на объекте **LLM** скачайте или загрузите `.gguf` (**Download model** / **Load model**), затем **обязательно нажмите радиокнопку** слева от нужной строки в списке Model Manager — так в компонент записывается поле **model** (путь к файлу). **Сохраните сцену (Ctrl+S).** Без этого в YAML сцены `_model` остаётся пустым, CoreAI отключает LLMUnity и берёт **StubLlmClient**.
-
-1. Выберите объект **`LLM`** в Hierarchy.
-2. Компонент **LLM (Script)**:
-   - В **Model Settings**: **Download model** или **Load model** → выберите строку модели **радиокнопкой** → **Ctrl+S**.
-   - Колонка **Build**: для релиза обычно одна основная модель с галочкой (см. README пакета, раздел *LLM model management*).
-   - При наличии GPU увеличьте **Num GPU Layers** (начните с части слоёв, при нехватке VRAM уменьшите).
-   - **Remote** на **LLM** — выключен для чисто локального режима.
-   - Для отладки: **Log Level = All** (если поле есть в вашей версии пакета).
-   - Если включён **Download on Start**, при первом запуске дождитесь загрузки; в коде LLMUnity рекомендует `await LLM.WaitUntilModelSetup()` — адаптер CoreAI **MeaiLlmUnityClient** ждёт готовности перед **Chat**.
-3. Компонент **LLM Agent (Script)**:
-   - **LLM** — ссылка на компонент **LLM** на том же GameObject (в репозитории уже проставлена).
-   - **Remote** — выключен.
-4. На **`CompositionRoot` → CoreAILifetimeScope** поле **Open Ai Http Llm Settings** оставьте **None** *или* в назначенном asset снимите **Use Open Ai Compatible Http**.
-
-5. **Play.** Дождитесь загрузки модели (первый раз может занять время). В консоли не должно быть ошибок инициализации **LLM**.
-
-Дополнительно: рекомендации по размерам Qwen и билду — **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2.
+**Important:** `CoreAILifetimeScope` looks for **`LLMAgent`** in the scene through `FindFirstObjectByType`. Until **Open Ai Http Llm Settings** switches the core to HTTP, live model responses come through this agent.
 
 ---
 
-## Шаг 4. Режим B — OpenAI-compatible HTTP (LM Studio, облако)
+## Step 3. Mode A - LLMUnity Only (Local GGUF)
 
-Когда локальная GGUF не нужна, а есть сервер с **`/v1/chat/completions`**:
+This is suitable for offline development and matches the scene default (**Open Ai Http Llm Settings** = *None*).
 
-1. В Project: **ПКМ → Create → CoreAI → LLM → OpenAI-compatible HTTP** (ScriptableObject). Сохраните, например, в `Assets/_exampleGame/Settings/`.
-2. В asset:
-   - **Api Base Url** — без слэша в конце, **с `/v1`**, например `http://127.0.0.1:1234/v1` (LM Studio) или `https://api.openai.com/v1`.
-   - **Model** — имя модели на сервере.
-   - **Api Key** — для OpenAI обычно обязателен; для локального LM Studio часто пусто.
-   - Включите **Use Open Ai Compatible Http**.
-3. Выберите **`CompositionRoot`**, в **CoreAILifetimeScope** перетащите asset в **Open Ai Http Llm Settings**.
+Following the official **Quick start** for LLMUnity: on the **LLM** object, download or load a `.gguf` (**Download model** / **Load model**), then **make sure to click the radio button** to the left of the desired row in Model Manager - that writes the **model** field (file path) into the component. **Save the scene (Ctrl+S).** Without this, `_model` remains empty in the scene YAML, CoreAI disables LLMUnity, and **StubLlmClient** is used.
 
-После этого **`ILlmClient`** = **OpenAiChatLlmClient**; компоненты **LLM** / **LLMAgent** для вызовов ядра **не используются** (их можно оставить на сцене выключенными или для других целей).
+1. Select object **`LLM`** in Hierarchy.
+2. Component **LLM (Script)**:
+   - In **Model Settings**: **Download model** or **Load model** -> select the model row with the **radio button** -> **Ctrl+S**.
+   - **Build** column: for release, usually one main model should be checked (see the package README, *LLM model management* section).
+   - If GPU is available, increase **Num GPU Layers** (start with part of the layers, reduce if VRAM is insufficient).
+   - **Remote** on **LLM** - disabled for pure local mode.
+   - For debugging: **Log Level = All** (if this field exists in your package version).
+   - If **Download on Start** is enabled, wait for the first download; LLMUnity recommends `await LLM.WaitUntilModelSetup()` in code - CoreAI adapter **MeaiLlmUnityClient** waits for readiness before **Chat**.
+3. Component **LLM Agent (Script)**:
+   - **LLM** - reference to the **LLM** component on the same GameObject (already assigned in the repository).
+   - **Remote** - disabled.
+4. On **`CompositionRoot` -> CoreAILifetimeScope**, leave **Open Ai Http Llm Settings** as **None** *or* disable **Use Open Ai Compatible Http** in the assigned asset.
 
-Подробности: **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §4.
+5. **Play.** Wait for the model to load (the first time can take a while). The console should not show **LLM** initialization errors.
+
+Additional Qwen size and build recommendations: **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2.
 
 ---
 
-## Шаг 5. Опционально: логи и промпты
+## Step 4. Mode B - OpenAI-compatible HTTP (LM Studio, Cloud)
 
-| Поле CoreAILifetimeScope | Назначение |
+Use this when a local GGUF is not needed and you have a server with **`/v1/chat/completions`**:
+
+1. In Project: **RMB -> Create -> CoreAI -> LLM -> OpenAI-compatible HTTP** (ScriptableObject). Save it, for example, in `Assets/_exampleGame/Settings/`.
+2. In the asset:
+   - **Api Base Url** - no trailing slash, **with `/v1`**, for example `http://127.0.0.1:1234/v1` (LM Studio) or `https://api.openai.com/v1`.
+   - **Model** - model name on the server.
+   - **Api Key** - usually required for OpenAI; often empty for local LM Studio.
+   - Enable **Use Open Ai Compatible Http**.
+3. Select **`CompositionRoot`**, then drag the asset into **Open Ai Http Llm Settings** on **CoreAILifetimeScope**.
+
+After that, **`ILlmClient`** = **OpenAiChatLlmClient**; **LLM** / **LLMAgent** components are **not used** for core calls (they can remain in the scene disabled or be used for other purposes).
+
+Details: **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §4.
+
+---
+
+## Step 5. Optional: Logs and Prompts
+
+| CoreAILifetimeScope Field | Purpose |
 |--------------------------|------------|
-| **Game Log Settings** | Asset **Create → CoreAI → Logging → Game Log Settings** — фильтр категорий/уровней. Включите **Llm** для логов **`LLM ▶` / `LLM ◀`** и **traceId** в **`ApplyAiGameCommand`**. Старый ассет без **Llm** обновится при открытии в инспекторе. |
-| **Llm Request Timeout Seconds** | Автоотмена одного вызова модели (секунды). **0** — без ограничения. |
-| **Agent Prompts Manifest** | **Create → CoreAI → Agent Prompts Manifest** — переопределения системных/user промптов и кастомные роли. |
+| **Game Log Settings** | Asset **Create -> CoreAI -> Logging -> Game Log Settings** - category/level filter. Enable **Llm** for **`LLM ▶` / `LLM ◀`** logs and **traceId** in **`ApplyAiGameCommand`**. Older assets without **Llm** update when opened in the inspector. |
+| **Llm Request Timeout Seconds** | Automatic cancellation for one model call (seconds). **0** means no limit. |
+| **Agent Prompts Manifest** | **Create -> CoreAI -> Agent Prompts Manifest** - overrides for system/user prompts and custom roles. |
 
-Без них ядро работает на встроенных промптах и дефолтном логе (и таймауте **15** с).
+Without these, the core uses built-in prompts and the default log (and a **15** s timeout).
 
 ---
 
-## Шаг 6. Проверка геймплея и ИИ
+## Step 6. Gameplay and AI Check
 
 1. **Play.**
-2. Должен стартовать прототип арены (волны, управление согласно скриптам арены — см. консольное сообщение при старте).
-3. Нажмите **F9** — ставится задача роли **Programmer**; модель должна вернуть ответ с Lua; **`LuaAiEnvelopeProcessor`** выполнит его; в логе появится вывод **`report(...)`** из **`LoggingLuaRuntimeBindings`**.
-4. **R** — перезагрузка сцены (прототип арены).
+2. The arena prototype should start (waves, controls according to arena scripts - see the console message at startup).
+3. Press **F9** - a task is assigned to the **Programmer** role; the model should return a Lua response; **`LuaAiEnvelopeProcessor`** executes it; the log should show output from **`report(...)`** in **`LoggingLuaRuntimeBindings`**.
+4. **R** - reload the scene (arena prototype).
 
-Если при **F9** нет реального ответа модели:
+If **F9** does not produce a real model response:
 
-- Проверьте режим **A** или **B** выше.
-- Убедитесь, что не остался активным только **StubLlmClient** (в DI снаружи — декоратор: смотрите разрешённый **`ILlmClient`** и при необходимости лог **`backend=StubLlmClient`**; см. [LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
-
----
-
-## Шаг 7. Сборка билда (кратко)
-
-1. **File → Build Settings** — добавьте **RogueliteArena** (уже может быть в списке).
-2. Для воспроизводимого **Play** из редактора: **CoreAI → Development → Example Game → Set RogueliteArena as first build scene**.
-3. Для локальной модели в релизе: в LLMUnity у нужной GGUF включите **Build** и политику доставки модели (StreamingAssets и т.д.) — см. **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2 и §6.
+- Check mode **A** or **B** above.
+- Make sure only **StubLlmClient** is not active (from outside DI it is wrapped by a decorator: inspect the resolved **`ILlmClient`** and, if needed, the **`backend=StubLlmClient`** log; see [LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)).
 
 ---
 
-## Связанные документы
+## Step 7. Build Setup (Brief)
 
-- **[QUICK_START.md](../../CoreAiUnity/Docs/QUICK_START.md)** — общий быстрый старт по репозиторию.
-- **[DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md)** — поток данных и расширение ядра.
-- **[README.md](../README.md)** — обзор Example Game.
+1. **File -> Build Settings** - add **RogueliteArena** (it may already be in the list).
+2. For reproducible editor **Play**: **CoreAI -> Development -> Example Game -> Set RogueliteArena as first build scene**.
+3. For a local model in release: in LLMUnity, enable **Build** on the required GGUF and configure the model delivery policy (StreamingAssets, etc.) - see **[LLMUNITY_SETUP_AND_MODELS.md](../../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md)** §2 and §6.
 
-**Версия:** 1.1 (апрель 2026) — таймаут LLM, логи Llm/traceId, декоратор ILlmClient.
+---
+
+## Related Documents
+
+- **[QUICK_START.md](../../CoreAiUnity/Docs/QUICK_START.md)** - general repository quick start.
+- **[DEVELOPER_GUIDE.md](../../CoreAiUnity/Docs/DEVELOPER_GUIDE.md)** - data flow and core extension.
+- **[README.md](../README.md)** - Example Game overview.
+
+**Version:** 1.1 (April 2026) - LLM timeout, Llm/traceId logs, ILlmClient decorator.

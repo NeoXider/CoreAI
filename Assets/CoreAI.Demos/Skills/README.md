@@ -1,26 +1,26 @@
-# Demo: Skills (SkillSet + AgentBuilder)
+﻿# Demo: Skills (SkillSet + AgentBuilder)
 
-Сцена: `SkillsDemo.unity`. **Нужен настроенный LLM-бэкенд** в `CoreAISettings`
-(LLMUnity-модель или HTTP API — LM Studio, OpenAI и т.п.).
+Scene: `SkillsDemo.unity`. A **configured LLM backend** is required in `CoreAISettings`
+(LLMUnity model or HTTP API: LM Studio, OpenAI, etc.).
 
-## Что показывает
+## What It Shows
 
-Агент «DemoGameMaster» с двумя скиллами, собранный через `AgentBuilder`:
+A `DemoGameMaster` agent with two skills, built through `AgentBuilder`:
 
-- **Crafting** — `check_inventory`, `craft_item` (+ инструкции скилла);
-- **Combat** — `attack`, `get_enemy_status`.
+- **Crafting**: `check_inventory`, `craft_item` (+ skill instructions);
+- **Combat**: `attack`, `get_enemy_status`.
 
-Модель всегда видит только два мета-инструмента — `read_skill` и `call_skill_tool` — плюс каталог
-скиллов в системном промпте. Схемы инструментов подгружаются по запросу (`read_skill`), поэтому
-токен-оверхед не растёт с числом скиллов/инструментов.
+The model always sees only two meta-tools, `read_skill` and `call_skill_tool`, plus the skill catalog
+in the system prompt. Tool schemas are loaded on demand (`read_skill`), so token overhead does not grow
+with the number of skills/tools.
 
-## Как пользоваться
+## How to Use It
 
-1. Убедиться, что в `Resources/CoreAISettings` выбран рабочий LLM Backend.
-2. Открыть сцену, Play, нажать «Ask the Game Master» (запрос по умолчанию: скрафтить меч и
-   атаковать манекен).
-3. Наблюдать: инвентарь уменьшается, появляется предмет, HP манекена падает — всё через
-   tool-вызовы модели; ответ агента выводится в панели.
+1. Make sure `Resources/CoreAISettings` has a working LLM Backend selected.
+2. Open the scene, press Play, then press `Ask the Game Master` (default request: craft a sword and
+   attack the training dummy).
+3. Observe: inventory decreases, an item appears, and the dummy's HP drops; all of this happens through
+   model tool calls. The agent response is shown in the panel.
 
-Подробности: `Assets/CoreAI/Docs/AGENT_BUILDER.md` (раздел Skills),
+Details: `Assets/CoreAI/Docs/AGENT_BUILDER.md` (Skills section),
 `Assets/CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md`.

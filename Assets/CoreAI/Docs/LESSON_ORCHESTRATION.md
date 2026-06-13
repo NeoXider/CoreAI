@@ -12,7 +12,7 @@ Global `IAiPromptContextProvider` registrations still work and run after the per
 
 Use `AiTaskRequest.AllowedToolNames` to narrow the role's registered tools for one turn:
 
-- `null`: do not filter — all role tools are available.
+- `null`: do not filter вЂ” all role tools are available.
 - non-null **empty** array: **no** tools are attached (chat-only turn, unless you also use other mechanisms).
 - non-empty array: only the listed tool names are attached after filtering.
 - `ForcedToolMode = None`: no tools are sent (takes precedence over the allowlist).
@@ -46,5 +46,5 @@ This lets projects replace free-form result strings with stable machine-readable
 
 ## Related portable documentation
 
-- [`README.md`](README.md) — all guides under `Assets/CoreAI/Docs`
-- [`LLM_ROUTING.md`](LLM_ROUTING.md) — execution modes, `ILlmRouteResolver`, usage sinks, timeouts (overlaps with lesson policy)
+- [`README.md`](README.md) вЂ” all guides under `Assets/CoreAI/Docs`
+- [`LLM_ROUTING.md`](LLM_ROUTING.md) вЂ” execution modes, `ILlmRouteResolver`, usage sinks, timeouts (overlaps with lesson policy)

@@ -1,31 +1,31 @@
-# Контекст Creator для плана волны (арена-пример)
+﻿# Creator Context for Wave Plans (Arena Example)
 
-**Версия контракта:** `1` (ключ телеметрии `arena.context.version`).
+**Contract version:** `1` (telemetry key `arena.context.version`).
 
-Связанные типы: `ArenaCreatorWavePlanner`, `ArenaWavePlanParser`, `ArenaWavePlanValidator`, `ArenaAiSourceTags`.
+Related types: `ArenaCreatorWavePlanner`, `ArenaWavePlanParser`, `ArenaWavePlanValidator`, `ArenaAiSourceTags`.
 
-## Телеметрия, которую выставляет игра перед запросом плана
+## Telemetry Published by the Game Before Requesting a Plan
 
-| Ключ | Смысл |
+| Key | Meaning |
 |------|--------|
-| `arena.context.version` | Версия этого документа (`1`). |
-| `arena.wave` | Текущий номер волны (1-based). |
-| `wave` | Дублирует `arena.wave` (совместимость). |
-| `arena.wave_schedule.linear_enemy_count` | Число врагов из линейного расписания для этой волны (fallback). |
-| `arena.next_wave_index` | Следующая волна после текущей; пусто на финальной. |
-| `arena.alive_enemies` | Живые враги на момент снимка. |
-| `arena.kills_this_wave` | Убийства на текущей волне (сбрасывается при старте волны). |
-| `arena.total_kills_run` | Всего убийств за забег. |
-| `player.hp.current`, `player.hp.max`, `player.hp.pct` | HP игрока (pct — проценты 0–100). |
-| `arena.creator.request_wave` | Номер волны, для которой запрошен план (пишет планировщик). |
-| `arena.ai.source` | Источник вызова (`AiTaskRequest.SourceTag`), например `arena_director:wave_start`. |
-| `arena.last_wave_duration_sec` | Длительность **предыдущей** завершённой волны (сек). |
+| `arena.context.version` | Version of this document (`1`). |
+| `arena.wave` | Current wave number (1-based). |
+| `wave` | Duplicates `arena.wave` (compatibility). |
+| `arena.wave_schedule.linear_enemy_count` | Enemy count from the linear schedule for this wave (fallback). |
+| `arena.next_wave_index` | The wave after the current one; empty on the final wave. |
+| `arena.alive_enemies` | Alive enemies at snapshot time. |
+| `arena.kills_this_wave` | Kills in the current wave (reset at wave start). |
+| `arena.total_kills_run` | Total kills during the run. |
+| `player.hp.current`, `player.hp.max`, `player.hp.pct` | Player HP (pct is 0-100 percent). |
+| `arena.creator.request_wave` | Wave number requested for planning (written by the planner). |
+| `arena.ai.source` | Call source (`AiTaskRequest.SourceTag`), for example `arena_director:wave_start`. |
+| `arena.last_wave_duration_sec` | Duration of the **previous** completed wave (seconds). |
 
-В user-prompt также передаётся поле `ai_task_source` (JSON по умолчанию) и плейсхолдер `{source_tag}` в TextAsset-шаблонах.
+The user prompt also receives the `ai_task_source` field (default JSON) and the `{source_tag}` placeholder in TextAsset templates.
 
-## Ответ модели (конверт)
+## Model Response (Envelope)
 
-Один JSON-объект (см. `ArenaWavePlanParser`):
+One JSON object (see `ArenaWavePlanParser`):
 
 ```json
 {
@@ -42,16 +42,16 @@
 }
 ```
 
-Правила валидации — `ArenaWavePlanValidator` (диапазоны, согласованность `waveIndex1Based` с запросом).
+Validation rules are in `ArenaWavePlanValidator` (ranges, consistency of `waveIndex1Based` with the request).
 
-## Источники запроса плана
+## Plan Request Sources
 
-- `arena_director:wave_start` — старт волны (`ArenaSurvivalDirector`).
-- `arena_director:pre_next_wave` — предзапрос плана волны N+1 при малом числе оставшихся врагов.
-- `hotkey:F1` — ручной демо-вызов через `ArenaAiTaskBus`.
+- `arena_director:wave_start` - wave start (`ArenaSurvivalDirector`).
+- `arena_director:pre_next_wave` - prefetch plan for wave N+1 when few enemies remain.
+- `hotkey:F1` - manual demo call through `ArenaAiTaskBus`.
 
-При ошибке парсинга/валидации после серии сбоев включается только линейное расписание (`ArenaCreatorWavePlanner.ForceLinearWavePlans`).
+If parsing/validation fails repeatedly, only the linear schedule is used (`ArenaCreatorWavePlanner.ForceLinearWavePlans`).
 
-## Пост-волна Analyzer
+## Post-Wave Analyzer
 
-После каждой волны (если не stub LLM) ставится низкоприоритетная задача Analyzer с `SourceTag` `arena_post_wave:{n}` — короткий текстовый разбор сложности (только лог/мета, не команды в игру).
+After each wave (if the LLM is not a stub), a low-priority Analyzer task with `SourceTag` `arena_post_wave:{n}` is queued. It produces a short text analysis of difficulty (logs/meta only, no game commands).

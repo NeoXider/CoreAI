@@ -1,26 +1,28 @@
 # CoreAI.Demos
 
-Самодостаточные демо-сцены поверх CoreAI (вне `Assets/CoreAI` и `Assets/CoreAiUnity`,
-чтобы не попадать в пакеты). Каждая папка: сцена + минимальные скрипты + README.
+Self-contained demo scenes built on top of CoreAI (kept outside `Assets/CoreAI` and
+`Assets/CoreAiUnity` so they never ship inside the packages). Each folder holds a scene,
+minimal scripts, and a README.
 
-| Демо | Сцена | Что показывает | Нужен LLM |
+| Demo | Scene | What it shows | Needs LLM |
 |---|---|---|---|
-| [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua-моды (`LuaModRuntime`): хуки, таймеры, события, store, capability-уровни; `LuaLogicSlots` — переопределение формулы урона из Lua | Нет |
-| [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | Конвейер AI-команд: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (тот же путь, что у LLM-агентов и Lua-биндингов) | Нет |
-| [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: каталог скиллов, `read_skill` / `call_skill_tool`, агент-«гейммастер» с крафтом и боем | Да |
-| [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **Реальная LLM через чат меняет механики на лету**: роль Programmer пишет Lua → `execute_lua`-пайплайн → logic slots / `LuaModRuntime` / world-команды | Да |
-| [FullAccess](FullAccess/README.md) | *(сцена в TODO)* | Full-tier `unity_*` reflection (opt-in), controller + README | Да |
+| [LuaMods](LuaMods/README.md) | `LuaMods/LuaModsDemo.unity` | Lua mods (`LuaModRuntime`): hooks, timers, events, store, capability tiers; `LuaLogicSlots` — overriding the damage formula from Lua | No |
+| [WorldCommands](WorldCommands/README.md) | `WorldCommands/WorldCommandsDemo.unity` | AI command pipeline: `IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor` (the same path used by LLM agents and Lua bindings) | No |
+| [Skills](Skills/README.md) | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: skill catalog, `read_skill` / `call_skill_tool`, a "game master" agent with crafting and combat | Yes |
+| [LiveMechanics](LiveMechanics/README.md) | `LiveMechanics/LiveMechanicsDemo.unity` | **A real LLM changes mechanics live through chat**: the Programmer role writes Lua → `execute_lua` pipeline → logic slots / `LuaModRuntime` / world commands | Yes |
+| [FullAccess](FullAccess/README.md) | `FullAccess/FullAccessDemo.unity` | Full-tier `unity_*` access (opt-in): Programmer can inspect scene objects, components, transforms, and hierarchy, then move/rotate/parent objects from Lua | Yes |
+| [ModdableUnits](ModdableUnits/README.md) | `ModdableUnits/ModdableUnitsDemo.unity` | **A whole game built from mods**: `forge_define`/`forge_spawn` let mods create new unit types and armies, `hooks_every`/`hooks_on` drive the fight; the host only runs the auto-battle | Yes |
 
-## Общие требования
+## Common requirements
 
-- В каждой сцене стоит `CoreAILifetimeScope` (DI-композиция CoreAI). Настройки берутся из
-  `Resources/CoreAISettings`, если в инспекторе не назначен отдельный ассет.
-- Lua-демо требуют MoonSharp в проекте (define `COREAI_HAS_MOONSHARP`) и отсутствие `COREAI_NO_LUA`.
-- Skills-демо требует настроенный LLM-бэкенд в `CoreAISettings` (LLMUnity-модель или HTTP API);
-  остальные демо работают полностью офлайн.
+- Every scene has a `CoreAILifetimeScope` (CoreAI's DI composition). Settings come from
+  `Resources/CoreAISettings` unless a dedicated asset is assigned in the Inspector.
+- Lua demos require MoonSharp in the project (define `COREAI_HAS_MOONSHARP`) and the absence of `COREAI_NO_LUA`.
+- The Skills demo needs a configured LLM backend in `CoreAISettings` (an LLMUnity model or HTTP API);
+  the other demos run fully offline.
 
-> Сцены и ассеты демо собраны через MCP for Unity (см. `Assets/CoreAiUnity/Docs/DGF_SPEC.md`, §11) —
-> тот же канал редакторной автоматизации, которым агент запускает тесты этого репозитория.
+> Demo scenes and assets were assembled through MCP for Unity (see `Assets/CoreAiUnity/Docs/DGF_SPEC.md`, §11) —
+> the same editor-automation channel the agent uses to run this repository's tests.
 
 ## LiveMechanicsMods
 

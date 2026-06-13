@@ -24,8 +24,8 @@ namespace CoreAI.Infrastructure.Ai
                 return;
             }
 
-            string r = string.IsNullOrWhiteSpace(roleId) ? "—" : roleId.Trim();
-            string t = string.IsNullOrWhiteSpace(traceId) ? "—" : traceId.Trim();
+            string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
+            string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
                 $"[ai-metrics] llm role={r} traceId={t} ok={ok} wallMs={wallMs:F0}");
         }
@@ -38,9 +38,9 @@ namespace CoreAI.Infrastructure.Ai
                 return;
             }
 
-            string r = string.IsNullOrWhiteSpace(roleId) ? "—" : roleId.Trim();
-            string t = string.IsNullOrWhiteSpace(traceId) ? "—" : traceId.Trim();
-            string msg = string.IsNullOrWhiteSpace(reason) ? "—" : reason.Trim();
+            string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
+            string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
+            string msg = string.IsNullOrWhiteSpace(reason) ? "-" : reason.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
                 $"[ai-metrics] structured_retry role={r} traceId={t} reason={msg}");
         }
@@ -53,8 +53,8 @@ namespace CoreAI.Infrastructure.Ai
                 return;
             }
 
-            string r = string.IsNullOrWhiteSpace(roleId) ? "—" : roleId.Trim();
-            string t = string.IsNullOrWhiteSpace(traceId) ? "—" : traceId.Trim();
+            string r = string.IsNullOrWhiteSpace(roleId) ? "-" : roleId.Trim();
+            string t = string.IsNullOrWhiteSpace(traceId) ? "-" : traceId.Trim();
             _logger.LogInfo(GameLogFeature.Metrics,
                 $"[ai-metrics] publish role={r} traceId={t}");
         }

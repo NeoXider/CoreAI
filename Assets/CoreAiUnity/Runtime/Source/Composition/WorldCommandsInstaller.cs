@@ -29,11 +29,15 @@ namespace CoreAI.Composition
         /// When true, scripts with the Full capability tier receive reflection bindings to arbitrary
         /// GameObjects/components (<see cref="CoreAiFullUnityLuaRuntimeBindings"/>). Off by default.
         /// </param>
+        /// <param name="enableFullLuaPrivateAccess">
+        /// When true, Full-tier Lua reflection may access non-public members. Off by default.
+        /// </param>
         public static void RegisterWorldCommands(
             this IContainerBuilder builder,
             CoreAiPrefabRegistryAsset worldPrefabRegistry,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
-            bool enableFullLuaAccess = false)
+            bool enableFullLuaAccess = false,
+            bool enableFullLuaPrivateAccess = false)
         {
             CoreAiPrefabRegistryAsset registry =
                 worldPrefabRegistry != null
@@ -53,7 +57,10 @@ namespace CoreAI.Composition
                 Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
-            builder.Register<CoreAiFullUnityLuaRuntimeBindings>(Lifetime.Singleton);
+            builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
+                    c.Resolve<IGameLogger>(),
+                    enableFullLuaPrivateAccess),
+                Lifetime.Singleton);
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
@@ -104,7 +111,7 @@ namespace CoreAI.Composition
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                         new LuaLlmTool(container.Resolve<LuaTool.ILuaExecutor>(), settings, log, limiter));
                     policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaModsLlmTool(container.Resolve<LuaModRuntime>(), settings, log));
+                        new LuaModsLlmTool(container.Resolve<LuaModRuntime>(), settings, log, scriptCapabilities));
                 }
                 catch (VContainerException)
                 {

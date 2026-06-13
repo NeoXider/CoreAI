@@ -10,8 +10,6 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 **Changelog:** [CHANGELOG.md](CHANGELOG.md) (release notes; keep `version` in `package.json` in sync when you ship).
 
-*Languages:* [English](../../README.md) · [Russian](../../README_RU.md)
-
 > **First time?** Open [DOCS_INDEX](Docs/DOCS_INDEX.md) or go straight to [QUICK_START](Docs/QUICK_START.md). **Need a one-liner from code?** See [COREAI_SINGLETON_API](Docs/COREAI_SINGLETON_API.md).
 
 ---
