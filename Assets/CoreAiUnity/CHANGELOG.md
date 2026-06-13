@@ -4,6 +4,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Batch test runner for targeted verification.** Added `CoreAiBatchTestRunner` so CI/agents can run
+  exact EditMode or PlayMode test names through `-executeMethod` and still get NUnit XML when Unity's
+  built-in `-runTests` path is unavailable in a local editor session.
+- **LiveMechanicsModsChatDemo scene validation.** Added EditMode coverage that opens the demo scene
+  and verifies the auto-repair bridge, persistence panel, prompt buttons and user-facing prompt text.
 - **Active Lua mod auto-repair.** `LuaModRuntime` now surfaces runtime hook/timer failures through
   `ModHandlerErrored`, and `CoreAiLuaModAutoRepair` bridges those failures into the existing
   Programmer Lua repair flow with the broken source, runtime error, and saved version key. The
