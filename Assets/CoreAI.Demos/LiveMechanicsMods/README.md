@@ -3,7 +3,8 @@
 Folder: `Assets/CoreAI.Demos/LiveMechanicsMods/`
 
 This folder contains two chat-driven Lua mod demos. Both use `manage_mods`, persist successful mod
-sources, and expose a runtime mod manager panel.
+sources, expose a runtime mod manager panel, and opt in to Full Lua scene-object APIs so the
+Programmer can inspect and modify live GameObjects after a diagnostic `execute_lua` call.
 
 ## Scenes
 
@@ -43,6 +44,9 @@ Both windows can be dragged by their title bar and toggled with their hotkey.
 
 The generic `LuaModRuntime` still does not autoload arbitrary source by itself. These scenes are
 host policies: they decide which saved sources are trusted enough to restore.
+
+Validation-only mod ids such as `auto_repair_smoke` are treated as transient artifacts. The demo
+clears and skips them during autoload so smoke-test mods do not reappear in a playable scene.
 
 ## Runtime Mod Auto-Repair
 
@@ -117,6 +121,9 @@ The mod manager panel works the same way as in the auto-battler scene.
 
 Saved sources are stored through `ILuaScriptVersionStore`, normally backed by
 `persistentDataPath/CoreAI/LuaScriptVersions`.
+
+Only ordinary saved mod ids are restored. Transient validation ids are ignored, and deactivated mods
+remain saved but inactive until the user activates them from the `F9` panel.
 
 Scene prefixes:
 

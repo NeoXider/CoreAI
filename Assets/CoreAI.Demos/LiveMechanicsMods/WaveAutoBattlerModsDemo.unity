@@ -808,7 +808,7 @@ MonoBehaviour:
   llmRoutingManifest: {fileID: 11400000, guid: 52fdaaba817692049a2843c54c6b6f4f, type: 2}
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   luaAllowedScenes: []
-  enableFullLuaAccess: 0
+  enableFullLuaAccess: 1
   enableFullLuaPrivateAccess: 0
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}

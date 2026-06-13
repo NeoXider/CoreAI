@@ -3,6 +3,7 @@ using System.Linq;
 using CoreAI.Ai;
 using CoreAI.Session;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -67,6 +68,20 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("unity_describe_object", prompt);
             StringAssert.Contains("Success/Output/Error", prompt);
             StringAssert.Contains("game.enemies", prompt);
+            StringAssert.Contains("GameObject.Find", prompt);
+        }
+
+        [Test]
+        public void ProgrammerResourcePrompt_IncludesFullLuaModeGuidance()
+        {
+            TextAsset asset = Resources.Load<TextAsset>("AgentPrompts/System/Programmer");
+
+            Assert.IsNotNull(asset);
+            string prompt = asset.text;
+            StringAssert.Contains("Full Lua Mode", prompt);
+            StringAssert.Contains("unity_list_objects", prompt);
+            StringAssert.Contains("Success/Output/Error", prompt);
+            StringAssert.Contains("print()", prompt);
             StringAssert.Contains("GameObject.Find", prompt);
         }
 

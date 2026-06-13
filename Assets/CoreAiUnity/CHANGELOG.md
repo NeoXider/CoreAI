@@ -9,6 +9,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   built-in `-runTests` path is unavailable in a local editor session.
 - **LiveMechanicsModsChatDemo scene validation.** Added EditMode coverage that opens the demo scene
   and verifies the auto-repair bridge, persistence panel, prompt buttons and user-facing prompt text.
+- **Full Lua mods-demo prompt and autoload hardening.** The resource-backed Programmer prompt now
+  includes the Full Lua diagnostic workflow, warns against invented APIs such as `print()` /
+  `GameObject.Find`, and both mods demos opt in to Full Lua scene APIs. The mods-chat persistence
+  controller now ignores transient validation ids such as `auto_repair_smoke` so smoke-test mods do
+  not autoload in playable demo sessions.
 - **Active Lua mod auto-repair.** `LuaModRuntime` now surfaces runtime hook/timer failures through
   `ModHandlerErrored`, and `CoreAiLuaModAutoRepair` bridges those failures into the existing
   Programmer Lua repair flow with the broken source, runtime error, and saved version key. The

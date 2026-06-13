@@ -40,6 +40,10 @@ namespace CoreAI.Demos
         [SerializeField]
         private bool showPanel = true;
 
+        [Tooltip("Saved ids that are validation artifacts and must not autoload in the playable demo.")]
+        [SerializeField]
+        private string[] transientModIds = { "auto_repair_smoke" };
+
         private const int WindowId = 0x10D_0001;
 
         private LuaModRuntime _mods;
@@ -158,6 +162,13 @@ namespace CoreAI.Demos
                         continue;
                     }
 
+                    if (IsTransientModId(modId))
+                    {
+                        ForgetSavedMod(modId, updateStatus: false);
+                        Debug.Log($"[LiveMechanicsModsChatDemo] Ignored transient saved Lua mod '{modId}'.");
+                        continue;
+                    }
+
                     if (!ShouldAutoload(modId))
                     {
                         continue;
@@ -194,6 +205,12 @@ namespace CoreAI.Demos
         {
             if (_isAutoloading || _versions == null || string.IsNullOrWhiteSpace(modId))
             {
+                return;
+            }
+
+            if (IsTransientModId(modId))
+            {
+                ForgetSavedMod(modId, updateStatus: false);
                 return;
             }
 
@@ -382,7 +399,7 @@ namespace CoreAI.Demos
 
                 if (GUILayout.Button("Forget", GUILayout.Width(72)))
                 {
-                    ForgetSavedMod(descriptor.Id);
+                    ForgetSavedMod(descriptor.Id, updateStatus: true);
                 }
 
                 GUILayout.EndHorizontal();
@@ -403,7 +420,7 @@ namespace CoreAI.Demos
                 }
 
                 string modId = key.Substring(modKeyPrefix.Length);
-                if (string.IsNullOrWhiteSpace(modId) || _mods.IsLoaded(modId) ||
+                if (string.IsNullOrWhiteSpace(modId) || IsTransientModId(modId) || _mods.IsLoaded(modId) ||
                     !_versions.TryGetSnapshot(key, out LuaScriptVersionRecord record) ||
                     string.IsNullOrWhiteSpace(record.CurrentLua) ||
                     ShouldAutoload(modId))
@@ -439,13 +456,37 @@ namespace CoreAI.Demos
             }
         }
 
-        private void ForgetSavedMod(string modId)
+        private void ForgetSavedMod(string modId, bool updateStatus)
         {
             string key = MakeModKey(modId);
             _versions.SeedOriginal(key, "", false);
             _versions.RecordSuccessfulExecution(key, "");
             SetActiveFlag(modId, false);
-            _status = $"Forgot saved mod '{modId}'.";
+            if (updateStatus)
+            {
+                _status = $"Forgot saved mod '{modId}'.";
+            }
+        }
+
+        private bool IsTransientModId(string modId)
+        {
+            if (string.IsNullOrWhiteSpace(modId) || transientModIds == null)
+            {
+                return false;
+            }
+
+            string trimmed = modId.Trim();
+            for (int i = 0; i < transientModIds.Length; i++)
+            {
+                string candidate = transientModIds[i];
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    string.Equals(trimmed, candidate.Trim(), System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string ReadMetadata(string source, string key)
