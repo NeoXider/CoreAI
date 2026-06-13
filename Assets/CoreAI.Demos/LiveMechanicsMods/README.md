@@ -31,6 +31,8 @@ Both windows can be dragged by their title bar and toggled with their hotkey.
 - The title bar shows a live `active N / inactive N` summary.
 - Active mods carry an `[ACTIVE]` badge and show name, id, description, capabilities,
   handler/timer counts and error count; saved/unloaded mods carry an `[ inactive ]` badge.
+- Active mods also have a `Logs` toggle. It is off by default: Lua `report()` calls from persistent
+  mods are muted unless this toggle is enabled, so timer mods do not flood the Unity Console.
 - `Deactivate` moves an active mod to the saved/unloaded list; the source is not lost.
 - Saved/unloaded mods can be activated again from the panel.
 - Deactivated mods stay inactive across scene restarts until the user presses `Activate`.
@@ -104,6 +106,12 @@ Ready prompt buttons insert prompts into the chat input:
 - Healer Aura: creates a regen + wave-cleared hook mod.
 - Battle Scaler: changes enemy count, HP, damage and rewards.
 - Modify Battle Scaler: asks the model to inspect and reload an existing mod.
+
+Visible spawn path:
+
+- `coreai_world_list_prefabs()` includes `Enemy`.
+- `coreai_world_spawn('enemy.basic', 'Enemy_1', x, y, z)` creates the demo enemy cube prefab.
+- A Lua timer that only calls `report('spawn...')` is just a log message, not a physical spawn.
 
 ## LiveMechanics Mods Chat
 

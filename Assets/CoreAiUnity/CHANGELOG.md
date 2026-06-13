@@ -14,6 +14,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `GameObject.Find`, and both mods demos opt in to Full Lua scene APIs. The mods-chat persistence
   controller now ignores transient validation ids such as `auto_repair_smoke` so smoke-test mods do
   not autoload in playable demo sessions.
+- **Lua mod report logging control.** Persistent mod `report()` output is now muted by default and
+  can be toggled per active mod in the F9 mod manager. The mods demo also registers a visible
+  `enemy.basic` prefab for `coreai_world_spawn`, and Programmer guidance now steers night changes
+  through Full Lua reflection (`unity_set_member` on `Light.intensity`) instead of invented
+  `game.*` APIs.
 - **Active Lua mod auto-repair.** `LuaModRuntime` now surfaces runtime hook/timer failures through
   `ModHandlerErrored`, and `CoreAiLuaModAutoRepair` bridges those failures into the existing
   Programmer Lua repair flow with the broken source, runtime error, and saved version key. The

@@ -42,7 +42,10 @@ namespace CoreAI.Ai
             "unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), " +
             "unity_describe_object(id), unity_get_transform(id), unity_set_position(id,x,y,z), " +
             "unity_set_rotation_euler(id,x,y,z), unity_set_scale(id,x,y,z), unity_parent(child,parent,worldPositionStays), " +
-            "and unity_get_children(id). " +
+            "unity_get_children(id), unity_list_components(id), unity_get_member(id,component,member), " +
+            "unity_set_member(id,component,member,value), and unity_call(id,component,method,args). " +
+            "For night, find a Light and set Light.intensity through unity_set_member. " +
+            "For visible spawns, call coreai_world_list_prefabs first, then coreai_world_spawn/coreai_world_spawn_batch with a real prefab key; report() alone is not a spawn. " +
             "Use report(message) to describe the applied change. Do not invent helper globals; " +
             "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
             "Never call invented APIs such as game.enemies, game.create, game.destroy, or GameObject.Find from Lua.";
@@ -52,7 +55,7 @@ namespace CoreAI.Ai
             "{" +
             "  \"type\": \"object\"," +
             "  \"properties\": {" +
-            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with unity_set_position, unity_set_rotation_euler, unity_set_scale, unity_parent, or unity_get_children. Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
+            "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Full mode: first inspect with unity_list_objects(max), unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), unity_describe_object(id), or unity_get_transform(id); then edit with unity_set_position, unity_set_rotation_euler, unity_set_scale, unity_parent, unity_get_children, unity_set_member, or unity_call. For visible spawns use coreai_world_list_prefabs then coreai_world_spawn with a real key. Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
             "  }," +
             "  \"required\": [\"code\"]" +
             "}";

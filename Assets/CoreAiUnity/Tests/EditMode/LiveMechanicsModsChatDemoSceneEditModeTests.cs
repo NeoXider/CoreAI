@@ -2,6 +2,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using CoreAI.Infrastructure.World;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -55,6 +56,13 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotEmpty(prompt);
                 AssertUserFacingPrompt(prompt);
             }
+
+            CoreAiPrefabRegistryAsset registry =
+                AssetDatabase.LoadAssetAtPath<CoreAiPrefabRegistryAsset>(
+                    "Assets/CoreAiUnity/Settings/CoreAiPrefabRegistry.asset");
+            Assert.IsNotNull(registry, "Demo world prefab registry must exist.");
+            Assert.IsTrue(registry.TryResolve("enemy.basic", out GameObject enemyPrefab));
+            Assert.IsNotNull(enemyPrefab, "Lua coreai_world_spawn('enemy.basic', ...) must create a visible prefab.");
         }
 
         [Test]

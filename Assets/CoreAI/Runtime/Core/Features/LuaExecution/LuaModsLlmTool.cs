@@ -154,6 +154,7 @@ namespace CoreAI.Ai
                     handlers = mod.HandlerCount,
                     timers = mod.TimerCount,
                     errors = mod.ErrorCount,
+                    log_reports = mod.LogReports,
                     loaded_at_utc = mod.LoadedAtUtc.ToString("O")
                 });
             }

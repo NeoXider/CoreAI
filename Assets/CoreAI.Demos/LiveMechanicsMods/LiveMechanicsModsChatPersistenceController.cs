@@ -360,13 +360,21 @@ namespace CoreAI.Demos
                 GUILayout.Label("[ACTIVE]", _activeBadge, GUILayout.Width(64));
                 GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
                 GUILayout.FlexibleSpace();
+                bool logReports = _mods.GetModReportLoggingEnabled(info.Id);
+                bool nextLogReports = GUILayout.Toggle(logReports, "Logs", GUILayout.Width(58));
+                if (nextLogReports != logReports)
+                {
+                    _mods.SetModReportLoggingEnabled(info.Id, nextLogReports);
+                    _status = $"Mod '{info.Id}' logs {(nextLogReports ? "enabled" : "disabled")}.";
+                }
+
                 if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
                 {
                     _mods.UnloadMod(info.Id);
                 }
 
                 GUILayout.EndHorizontal();
-                GUILayout.Label($"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}", _richLabel);
+                GUILayout.Label($"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}  logs={(info.LogReports ? "on" : "off")}", _richLabel);
                 GUILayout.Label(descriptor.Description, _richLabel);
                 GUILayout.EndVertical();
             }

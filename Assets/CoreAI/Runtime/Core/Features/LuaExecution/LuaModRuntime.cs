@@ -15,6 +15,7 @@ namespace CoreAI.Ai
         public int HandlerCount;
         public int TimerCount;
         public int ErrorCount;
+        public bool LogReports;
         public DateTime LoadedAtUtc;
     }
 
@@ -60,6 +61,7 @@ namespace CoreAI.Ai
             public Script Script;
             public string Source = "";
             public LuaCapabilities Caps;
+            public bool LogReports;
             public readonly Dictionary<string, List<Closure>> Handlers = new(StringComparer.Ordinal);
             public readonly List<TimerEntry> Timers = new();
             public readonly Queue<KeyValuePair<string, string>> Pending = new();
@@ -107,6 +109,12 @@ namespace CoreAI.Ai
         /// </summary>
         public event Action<string, string, int> ModHandlerErrored;
 
+        /// <summary>
+        /// Raised when a loaded mod calls <c>report(message)</c> and report logging is enabled for
+        /// that mod: (modId, message). Reports are muted by default so timer mods cannot flood logs.
+        /// </summary>
+        public event Action<string, string> ModReportEmitted;
+
         /// <summary>True when the Lua sandbox is available on this platform.</summary>
         public static bool IsSupported => SecureLuaEnvironment.IsSupported;
 
@@ -146,6 +154,7 @@ namespace CoreAI.Ai
                         HandlerCount = mod.HandlerCount,
                         TimerCount = mod.Timers.Count,
                         ErrorCount = mod.ErrorCount,
+                        LogReports = mod.LogReports,
                         LoadedAtUtc = mod.LoadedAtUtc
                     });
                 }
@@ -172,6 +181,30 @@ namespace CoreAI.Ai
 
             source = "";
             return false;
+        }
+
+        /// <summary>Returns whether <c>report()</c> output is logged for a loaded mod.</summary>
+        public bool GetModReportLoggingEnabled(string id)
+        {
+            lock (_gate)
+            {
+                return _mods.TryGetValue(Normalize(id), out Mod mod) && mod.LogReports;
+            }
+        }
+
+        /// <summary>Enables or disables <c>report()</c> output for a loaded mod.</summary>
+        public bool SetModReportLoggingEnabled(string id, bool enabled)
+        {
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(Normalize(id), out Mod mod))
+                {
+                    return false;
+                }
+
+                mod.LogReports = enabled;
+                return true;
+            }
         }
 
         /// <summary>True when a mod with this id is currently loaded.</summary>
@@ -563,6 +596,16 @@ namespace CoreAI.Ai
                 registry.Register("store_get", new Func<string, string>(key =>
                     _store.Get(mod.Id, Normalize(key)) ?? ""));
             }
+
+            registry.Register("report", new Action<string>(message =>
+            {
+                if (!mod.LogReports)
+                {
+                    return;
+                }
+
+                ModReportEmitted?.Invoke(mod.Id, message ?? "");
+            }));
         }
 
         private void EmitFromMod(Mod sender, string evt, string payload)

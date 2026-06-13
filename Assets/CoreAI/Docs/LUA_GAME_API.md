@@ -26,6 +26,10 @@ on `CoreAILifetimeScope` or per mod through `LoadMod`.
 Per-mod: `LuaModRuntime.LoadMod(id, code, caps)` passes caps to `ICapabilityScopedLuaBindings`; a
 restricted mod **cannot** expand the host tier.
 
+Persistent mod `report()` output is muted by default. Hosts can expose
+`LuaModRuntime.SetModReportLoggingEnabled(id, true)` for per-mod diagnostics when console output is
+needed.
+
 | Level | Opens |
 |---|---|
 | `Read` | `log_*`, versions, `coreai_world_exists/pos/find/list_prefabs/raycast` |
@@ -92,6 +96,9 @@ local v = store_get("kills")
 events_emit("director_ready", "")      -- to other mods and the game
 log_info(mod_id())
 ```
+
+`coreai_world_spawn` creates visible objects only when the host prefab registry contains the prefab
+key/name. Check `coreai_world_list_prefabs()` first; a `report("spawn...")` call is only a log.
 
 Budgets: every handler call gets 100 ms / 100k instructions; <= 64 handlers and <= 16 timers per
 mod; event queue <= 256 (oldest evicted); 8 consecutive errors unload the mod automatically.

@@ -102,6 +102,32 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_ReportLogging_MutedByDefaultAndCanBeEnabled()
+        {
+            LuaModRuntime runtime = new();
+            List<string> reports = new();
+            runtime.ModReportEmitted += (modId, message) => reports.Add($"{modId}:{message}");
+            runtime.LoadMod("m", @"
+                hooks_every(0.1, function()
+                    report('tick')
+                end)");
+
+            runtime.Tick(0.11);
+            Assert.AreEqual(0, reports.Count, "Mod report() output must be muted by default.");
+            Assert.IsFalse(runtime.ListMods()[0].LogReports);
+
+            Assert.IsTrue(runtime.SetModReportLoggingEnabled("m", true));
+            runtime.Tick(0.11);
+            CollectionAssert.AreEqual(new[] { "m:tick" }, reports);
+            Assert.IsTrue(runtime.GetModReportLoggingEnabled("m"));
+            Assert.IsTrue(runtime.ListMods()[0].LogReports);
+
+            Assert.IsTrue(runtime.SetModReportLoggingEnabled("m", false));
+            runtime.Tick(0.11);
+            Assert.AreEqual(1, reports.Count);
+        }
+
+        [Test]
         public void LuaModRuntime_HooksEvery_IntervalBelowMinimum_LoadModThrows()
         {
             LuaModRuntime runtime = new();

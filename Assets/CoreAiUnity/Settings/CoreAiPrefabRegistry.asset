@@ -16,3 +16,6 @@ MonoBehaviour:
   - Key: 
     Name: 
     Prefab: {fileID: 0}
+  - Key: enemy.basic
+    Name: Enemy
+    Prefab: {fileID: 1084092905995793375, guid: 4225745882ae4dd40931a599ba5c6bb6, type: 3}
