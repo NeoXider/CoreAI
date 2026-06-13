@@ -118,6 +118,51 @@ return by_name[1].name == 'FullLuaChild'
         }
 
         [Test]
+        public void FullBindings_SearchApis_AllowOmittedMaxArgument()
+        {
+            GameObject sun = new("FullLuaSun");
+            GameObject npc = new("FullLuaNpc");
+            npc.tag = "Player";
+            npc.AddComponent<ForgeMemberProbe>();
+
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+
+                MoonSharp.Interpreter.DynValue result = env.RunChunk(script, @"
+local objects = unity_list_objects()
+local suns = unity_find_all('FullLuaSun')
+local players = unity_find_by_tag('Player')
+local probes = unity_find_by_component('CoreAI.Tests.EditMode.ForgeMemberProbe')
+return #objects >= 2
+    and #suns == 1
+    and suns[1].name == 'FullLuaSun'
+    and #players == 1
+    and players[1].name == 'FullLuaNpc'
+    and #probes == 1
+    and probes[1].name == 'FullLuaNpc'
+");
+
+                Assert.IsTrue(result.Boolean);
+            }
+            finally
+            {
+                if (sun != null)
+                {
+                    Object.DestroyImmediate(sun);
+                }
+
+                if (npc != null)
+                {
+                    Object.DestroyImmediate(npc);
+                }
+            }
+        }
+
+        [Test]
         public void FullBindings_TransformMutationApis_UpdateSceneObject()
         {
             GameObject parent = new("FullLuaNewParent");

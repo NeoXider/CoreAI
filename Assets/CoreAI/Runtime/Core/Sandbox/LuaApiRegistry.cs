@@ -12,11 +12,23 @@ namespace CoreAI.Sandbox
     public sealed class LuaApiRegistry
     {
         private readonly Dictionary<string, Delegate> _apis = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Func<ScriptExecutionContext, CallbackArguments, DynValue>> _callbacks =
+            new(StringComparer.Ordinal);
 
         /// <summary>Registers a new value or callback with the target runtime registry.</summary>
         public void Register(string name, Delegate callback)
         {
             _apis[name] = callback;
+            _callbacks.Remove(name);
+        }
+
+        /// <summary>Registers a Lua-facing callback when the API needs custom argument handling.</summary>
+        public void RegisterCallback(
+            string name,
+            Func<ScriptExecutionContext, CallbackArguments, DynValue> callback)
+        {
+            _callbacks[name] = callback;
+            _apis.Remove(name);
         }
 
         /// <summary>Attempts to resolve a registered Lua API callback by name.</summary>
@@ -28,7 +40,7 @@ namespace CoreAI.Sandbox
         /// <summary>True when <paramref name="name"/> is registered (tests / introspection).</summary>
         public bool Contains(string name)
         {
-            return _apis.ContainsKey(name);
+            return _apis.ContainsKey(name) || _callbacks.ContainsKey(name);
         }
 
         /// <summary>
@@ -57,6 +69,28 @@ namespace CoreAI.Sandbox
                     catch (TargetInvocationException ex) when (ex.InnerException != null)
                     {
                         throw ToScriptRuntimeException(name, ex.InnerException);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw ToScriptRuntimeException(name, ex);
+                    }
+                }, name);
+            }
+
+            foreach (KeyValuePair<string, Func<ScriptExecutionContext, CallbackArguments, DynValue>> kv in _callbacks)
+            {
+                string name = kv.Key;
+                Func<ScriptExecutionContext, CallbackArguments, DynValue> callback = kv.Value;
+
+                globals[name] = DynValue.NewCallback((ctx, args) =>
+                {
+                    try
+                    {
+                        return callback(ctx, args);
+                    }
+                    catch (InterpreterException)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {

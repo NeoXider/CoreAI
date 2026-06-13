@@ -42,10 +42,14 @@ namespace CoreAI.Infrastructure.Lua
         {
             registry.Register("unity_find", new Func<string, int>(FindByName));
             registry.Register("unity_id", new Func<string, int>(FindByName));
-            registry.Register("unity_list_objects", new Func<int, List<object>>(ListObjects));
-            registry.Register("unity_find_all", new Func<string, int, List<object>>(FindAll));
-            registry.Register("unity_find_by_tag", new Func<string, int, List<object>>(FindByTag));
-            registry.Register("unity_find_by_component", new Func<string, int, List<object>>(FindByComponent));
+            registry.RegisterCallback("unity_list_objects",
+                (ctx, args) => ToLuaValue(ctx.GetScript(), ListObjects(ReadOptionalMax(args, 0))));
+            registry.RegisterCallback("unity_find_all", (ctx, args) => ToLuaValue(ctx.GetScript(),
+                FindAll(ReadString(args, 0, "unity_find_all"), ReadOptionalMax(args, 1))));
+            registry.RegisterCallback("unity_find_by_tag", (ctx, args) => ToLuaValue(ctx.GetScript(),
+                FindByTag(ReadString(args, 0, "unity_find_by_tag"), ReadOptionalMax(args, 1))));
+            registry.RegisterCallback("unity_find_by_component", (ctx, args) => ToLuaValue(ctx.GetScript(),
+                FindByComponent(ReadString(args, 0, "unity_find_by_component"), ReadOptionalMax(args, 1))));
             registry.Register("unity_describe_object", new Func<int, object>(DescribeObject));
             registry.Register("unity_set_active", new Func<int, bool, bool>(SetActive));
             registry.Register("unity_get_position", new Func<int, Table>(GetPosition));
@@ -59,6 +63,81 @@ namespace CoreAI.Infrastructure.Lua
             registry.Register("unity_get_member", new Func<int, string, string, DynValue>(GetMember));
             registry.Register("unity_set_member", new Func<int, string, string, DynValue, bool>(SetMember));
             registry.Register("unity_call", new Func<int, string, string, DynValue[], DynValue>(CallMethod));
+        }
+
+        private static int ReadOptionalMax(CallbackArguments args, int index)
+        {
+            if (args == null || args.Count <= index || args[index].IsNil() || args[index].Type == DataType.Void)
+            {
+                return 100;
+            }
+
+            return (int)args.AsType(index, "max", DataType.Number, false).Number;
+        }
+
+        private static string ReadString(CallbackArguments args, int index, string apiName)
+        {
+            return args.AsType(index, apiName, DataType.String, false).String;
+        }
+
+        private static DynValue ToLuaValue(Script script, object value)
+        {
+            if (value == null)
+            {
+                return DynValue.Nil;
+            }
+
+            switch (value)
+            {
+                case DynValue dyn:
+                    return dyn;
+                case bool b:
+                    return DynValue.NewBoolean(b);
+                case string s:
+                    return DynValue.NewString(s);
+                case int i:
+                    return DynValue.NewNumber(i);
+                case long l:
+                    return DynValue.NewNumber(l);
+                case float f:
+                    return DynValue.NewNumber(f);
+                case double d:
+                    return DynValue.NewNumber(d);
+                case IDictionary<string, object> dict:
+                {
+                    Table table = new(script);
+                    foreach (KeyValuePair<string, object> kv in dict)
+                    {
+                        table[kv.Key] = ToLuaValue(script, kv.Value);
+                    }
+
+                    return DynValue.NewTable(table);
+                }
+                case IEnumerable<string> strings:
+                {
+                    Table table = new(script);
+                    int index = 1;
+                    foreach (string item in strings)
+                    {
+                        table[index++] = DynValue.NewString(item);
+                    }
+
+                    return DynValue.NewTable(table);
+                }
+                case IEnumerable<object> list:
+                {
+                    Table table = new(script);
+                    int index = 1;
+                    foreach (object item in list)
+                    {
+                        table[index++] = ToLuaValue(script, item);
+                    }
+
+                    return DynValue.NewTable(table);
+                }
+                default:
+                    return DynValue.NewString(value.ToString());
+            }
         }
 
         private static int FindByName(string name)
