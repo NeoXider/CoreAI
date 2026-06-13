@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Active Lua mod auto-repair.** `LuaModRuntime` now surfaces runtime hook/timer failures through
+  `ModHandlerErrored`, and `CoreAiLuaModAutoRepair` bridges those failures into the existing
+  Programmer Lua repair flow with the broken source, runtime error, and saved version key. The
+  `LiveMechanicsModsChatDemo` F9 panel shows the current auto-repair status.
+- **Demo panels reworked into two independent draggable windows.** The mod manager (`LiveMechanicsModsChatPersistenceController`) is now a draggable `GUILayout.Window` toggled with **F9**, showing an `active N / inactive N` summary in its title and per-mod `[ACTIVE]` / `[ inactive ]` badges so it is obvious which mods are loaded. **F10** is reserved for the draggable Token Budget / usage overlay (`CoreAiTokenBudgetOverlay`) — model, token counts and estimated session cost — which was restored to F10 after the mod manager had taken it over.
+- **Prompt buttons moved out of the way.** `ChatPromptButtonsController` is now bottom-anchored next to the chat panel (with a configurable `chatReserveWidth`) so it no longer overlaps the usage overlay or the mod manager.
+- **TMP-safe demo strings.** Decorative glyphs that the default TMP/WebGL font (LiberationSans SDF) renders as missing boxes were replaced with ASCII in demo UI strings; prompt-context ellipses used in LLM budget math were left untouched.
+- **English-only demo docs.** Remaining Russian text in demo READMEs and `Assets/CoreAI/Docs` / `Assets/CoreAiUnity/Docs` was translated to English; the `_RU` doc mirrors were removed.
+- Fixed a `CS0308` compile error in `ModdableUnitsDemoController` by importing `VContainer` for the generic `Container.Resolve<LuaModRuntime>()` call.
+
 ## [4.2.0] - 2026-06-13
 
 Depends on **`com.nexoider.coreai` 4.2.0**.

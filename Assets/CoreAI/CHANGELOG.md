@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Lua mod runtime errors are observable.** `LuaModRuntime` now raises `ModHandlerErrored` when an
+  active mod's hook or timer fails during `Tick`, allowing hosts to route asynchronous mod failures
+  into repair or telemetry flows instead of only logging and incrementing `ErrorCount`.
+- **TMP-safe strings.** Decorative Unicode glyphs in user-visible strings were replaced with ASCII where the default TMP/WebGL font cannot render them; prompt-context ellipses (`…`) used in conversation-summary budget math were deliberately kept as single characters so the `MaxSummaryChars` accounting and its EditMode coverage stay correct.
+- **English-only docs.** Remaining Russian text in `Assets/CoreAI/Docs` was translated to English and the `_RU` doc mirrors were removed.
+
 ## [4.2.0] - 2026-06-13
 
 - **Full-tier member visibility split.** `CoreAiFullUnityLuaRuntimeBindings` now exposes only **public** members by default; non-public access is an explicit opt-in (`allowNonPublicMembers` ctor flag). The reflection member cache is keyed by visibility so public-only and private-enabled bindings never collide.
@@ -1451,6 +1457,5 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
-
 
 

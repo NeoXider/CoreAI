@@ -156,6 +156,51 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_HandlerError_RaisesModHandlerErroredWithRisingCount()
+        {
+            LuaModRuntime runtime = new();
+            List<(string ModId, string Error, int Count)> errors = new();
+            runtime.ModHandlerErrored += (modId, error, count) => errors.Add((modId, error, count));
+
+            runtime.LoadMod("m", "hooks_on('bad', function() error('boom') end)");
+
+            runtime.EmitEvent("bad", "");
+            runtime.Tick(0);
+            runtime.EmitEvent("bad", "");
+            runtime.Tick(0);
+
+            Assert.AreEqual(2, errors.Count);
+            Assert.AreEqual("m", errors[0].ModId);
+            Assert.AreEqual(1, errors[0].Count);
+            Assert.AreEqual(2, errors[1].Count);
+            StringAssert.Contains("boom", errors[0].Error);
+            // The error text is flattened to a single line for prompt/log safety.
+            Assert.IsFalse(errors[0].Error.Contains("\n"));
+        }
+
+        [Test]
+        public void LuaModRuntime_HandlerErrored_CountResetsAfterSuccess()
+        {
+            LuaModRuntime runtime = new();
+            List<int> counts = new();
+            runtime.ModHandlerErrored += (_, _, count) => counts.Add(count);
+
+            runtime.LoadMod("m", @"
+                hooks_on('bad', function() error('boom') end)
+                hooks_on('good', function() end)");
+
+            runtime.EmitEvent("bad", "");
+            runtime.Tick(0);
+            runtime.EmitEvent("good", "");
+            runtime.Tick(0);
+            runtime.EmitEvent("bad", "");
+            runtime.Tick(0);
+
+            // Both failures report streak length 1 because the success in between reset the counter.
+            CollectionAssert.AreEqual(new[] { 1, 1 }, counts);
+        }
+
+        [Test]
         public void LuaModRuntime_UnloadModAndReloadMod_BasicBehavior()
         {
             MemoryStore store = new();

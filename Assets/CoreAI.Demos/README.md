@@ -32,4 +32,5 @@ minimal scripts, and a README.
   persist loaded mod sources, and autoload them on next scene start.
 - Main scene: `LiveMechanicsMods/WaveAutoBattlerModsDemo.unity`
 - Purpose: full wave auto-battler demo where the hero levels up, enemy waves scale, and Lua mods
-  are managed through an F10-style active/saved mod panel plus ready prompt buttons.
+  are managed through a draggable active/saved mod panel (`F9`) plus a Token Budget / usage
+  overlay (`F10`) and ready prompt buttons.

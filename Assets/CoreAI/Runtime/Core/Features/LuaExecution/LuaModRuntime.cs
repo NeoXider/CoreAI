@@ -95,6 +95,18 @@ namespace CoreAI.Ai
         /// </summary>
         public event Action<string, string, LuaCapabilities> ModSourceUnloaded;
 
+        /// <summary>
+        /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>:
+        /// (modId, error, consecutiveErrorCount). Unlike load/reload failures (which propagate
+        /// synchronously to the caller), these happen asynchronously on the host thread long after
+        /// the mod was accepted. The count is the mod's current consecutive-failure streak (it resets
+        /// to zero after any successful call), so a host can bridge this into an auto-repair loop and
+        /// debounce on the streak length. The mod is still loaded when this fires; a handler may call
+        /// <see cref="TryGetModSource"/> to capture the failing source, but must not reload/unload
+        /// synchronously; schedule that work instead.
+        /// </summary>
+        public event Action<string, string, int> ModHandlerErrored;
+
         /// <summary>True when the Lua sandbox is available on this platform.</summary>
         public static bool IsSupported => SecureLuaEnvironment.IsSupported;
 
@@ -456,6 +468,22 @@ namespace CoreAI.Ai
             {
                 mod.ErrorCount++;
                 _log?.Error($"[LuaModRuntime] Mod '{mod.Id}' handler failed ({mod.ErrorCount}): {ex}");
+
+                // Surface the runtime failure so hosts can drive auto-repair. Fired outside the gate
+                // (InvokeGuarded never holds it); a throwing subscriber must not derail the tick.
+                if (ModHandlerErrored != null)
+                {
+                    string message = (ex is InterpreterException ie ? ie.Message : ex.Message ?? "")
+                        .Replace("\r", " ").Replace("\n", " ").Trim();
+                    try
+                    {
+                        ModHandlerErrored.Invoke(mod.Id, message, mod.ErrorCount);
+                    }
+                    catch (Exception subscriberEx)
+                    {
+                        _log?.Error($"[LuaModRuntime] ModHandlerErrored subscriber threw: {subscriberEx}");
+                    }
+                }
             }
         }
 

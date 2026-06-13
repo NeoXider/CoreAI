@@ -4,6 +4,7 @@ using UnityEngine;
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
 using CoreAI.Ai;
 using CoreAI.Composition;
+using CoreAI.Presentation;
 using VContainer;
 #endif
 
@@ -43,6 +44,7 @@ namespace CoreAI.Demos
 
         private LuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
+        private CoreAiLuaModAutoRepair _autoRepair;
         private string _status = "Waiting for CoreAI scope.";
         private int _autoloadedCount;
         private bool _isAutoloading;
@@ -108,6 +110,7 @@ namespace CoreAI.Demos
 
             _mods = coreAiScope.Container.Resolve<LuaModRuntime>();
             _versions = coreAiScope.Container.Resolve<ILuaScriptVersionStore>();
+            _autoRepair = FindFirstObjectByType<CoreAiLuaModAutoRepair>();
             _mods.ModSourceLoaded += OnModSourceLoaded;
             _mods.ModSourceUnloaded += OnModSourceUnloaded;
 
@@ -275,6 +278,11 @@ namespace CoreAI.Demos
             }
 
             GUILayout.Label(_status, _richLabel);
+            if (_autoRepair != null)
+            {
+                GUILayout.Label($"<b>Auto-repair:</b> {_autoRepair.StatusLine}", _richLabel);
+            }
+
             GUILayout.Space(4);
 
             if (_mods == null || _versions == null)

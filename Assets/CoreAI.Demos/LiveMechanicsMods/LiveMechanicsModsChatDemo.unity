@@ -146,15 +146,16 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1944e5601b054674f9aba21055a2342c, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
   title: LiveMechanics ready mod prompts
   panelRect:
     serializedVersion: 2
-    x: 1220
+    x: 700
     y: 520
     width: 500
     height: 190
+  chatReserveWidth: 560
   prompts:
   - Label: Big boss reward
     Prompt: Make every boss victory give a big 1000 coin reward. Save it as a mod
@@ -209,7 +210,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 85e25988323cae8459326e7c65644c29, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: CoreAI.Source::CoreAI.Chat.CoreAiChatPanel
   config: {fileID: 11400000, guid: 35a273c9c56ed3d488f1445c0c8c3efb, type: 2}
   customStyleSheet: {fileID: 7433441132597879392, guid: 54e4e52b0db8c294fb66ec9495faa77f, type: 3}
@@ -224,7 +225,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
   m_PanelSettings: {fileID: 11400000, guid: 0bc925d4640801549a6b5fe23e8b43b6, type: 2}
   m_ParentUI: {fileID: 0}
@@ -573,6 +574,7 @@ GameObject:
   - component: {fileID: 933156840}
   - component: {fileID: 933156842}
   - component: {fileID: 933156843}
+  - component: {fileID: 933156844}
   m_Layer: 0
   m_Name: LiveMechanicsDemo
   m_TagString: Untagged
@@ -646,6 +648,25 @@ MonoBehaviour:
   _showOverlay: 1
   _toggleKey: 291
   _rollingWindowSeconds: 60
+--- !u!114 &933156844
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933156839}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7685b0dcbf88bd4aa64e17421b6c629, type: 3}
+  m_Name: CoreAiLuaModAutoRepair
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Presentation.CoreAiLuaModAutoRepair
+  lifetimeScope: {fileID: 0}
+  autoRepairEnabled: 1
+  minConsecutiveErrors: 3
+  maxAttemptsPerMod: 2
+  cooldownSeconds: 20
+  modVersionKeyPrefix: demo.live_mechanics.mods_chat.mod.
+  sourceTag: lua_mod_auto_repair
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0

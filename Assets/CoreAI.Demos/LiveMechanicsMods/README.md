@@ -12,11 +12,25 @@ sources, and expose a runtime mod manager panel.
 | `LiveMechanicsModsChatDemo.unity` | Boss-rule sandbox based on `LiveMechanicsDemo`: quick mods for boss reward and attack interval. |
 | `WaveAutoBattlerModsDemo.unity` | Full auto-battler: our hero fights scaling enemy waves, levels up, earns gold, and Lua mods change real combat rules. |
 
+## On-screen panels
+
+Each mods scene shows two independent, draggable IMGUI windows plus the prompt buttons:
+
+| Panel | Hotkey | Purpose |
+|---|---|---|
+| Mod manager | `F9` | Active / saved mods, with `active N / inactive N` in the title bar. |
+| Token Budget / usage overlay | `F10` | Model, token counts and estimated session cost. |
+| Prompt buttons | n/a | Bottom-anchored next to the chat, so they no longer overlap the other panels. |
+
+Both windows can be dragged by their title bar and toggled with their hotkey.
+
 ## Mod Manager Panel
 
-- Toggle: `F10`.
-- Active mods show name, id, description, capabilities, handler/timer counts and error count.
-- `X` deactivates a mod. The source is not lost; it moves to the saved/unloaded list.
+- Toggle: `F9` (drag by the title bar to move it).
+- The title bar shows a live `active N / inactive N` summary.
+- Active mods carry an `[ACTIVE]` badge and show name, id, description, capabilities,
+  handler/timer counts and error count; saved/unloaded mods carry an `[ inactive ]` badge.
+- `Deactivate` moves an active mod to the saved/unloaded list; the source is not lost.
 - Saved/unloaded mods can be activated again from the panel.
 - Deactivated mods stay inactive across scene restarts until the user presses `Activate`.
 - `Forget` removes a saved source from the demo list.
@@ -29,6 +43,22 @@ sources, and expose a runtime mod manager panel.
 
 The generic `LuaModRuntime` still does not autoload arbitrary source by itself. These scenes are
 host policies: they decide which saved sources are trusted enough to restore.
+
+## Runtime Mod Auto-Repair
+
+`LiveMechanicsModsChatDemo.unity` includes `CoreAiLuaModAutoRepair`. When an already-loaded Lua mod
+throws inside a hook or timer, `LuaModRuntime` raises a runtime error event. After 3 consecutive
+errors for the same mod, the bridge sends a headless Programmer repair task with:
+
+- the failing mod id;
+- the latest runtime error;
+- the captured Lua source in the existing `fix_this_lua` repair context;
+- the saved source version key, when available.
+
+The Programmer is instructed to preserve the same mod id and reload the fixed source through
+`manage_mods reload`, or load it again if the broken mod was already auto-unloaded. The policy allows
+2 repair attempts per mod and uses a cooldown to avoid repair loops. The current auto-repair status is
+shown in the `F9` mod manager panel.
 
 ## Wave Auto-Battler
 
