@@ -34,7 +34,7 @@ needed.
 |---|---|
 | `Read` | `log_*`, versions, `coreai_world_exists/pos/find/list_prefabs/raycast` |
 | `Gameplay` | `time_*` (including `time_set_scale`) |
-| `WorldEdit` | `coreai_world_spawn/move/destroy/...`, batches, transactions, `set_props`, `parent` |
+| `WorldEdit` | `coreai_world_spawn/move/rotate/set_transform/destroy/...`, batches, transactions, `set_props`, `parent` |
 | `LogicOverride` | `logic_define/reset/list`, mod APIs (`hooks_*`, `store_*`, `events_emit`) |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
 
@@ -120,6 +120,9 @@ coreai_world_spawn_batch({
   {prefab="wall", name="w2", x=2, y=0, z=0},
 })
 coreai_world_grid("floor_tile", "cell", 0, 0, 9, 9, 1, 0)  -- 10x10 max (<= 100 cells), names cell_ix_iz
+coreai_world_move("turret_1", 2, 0, 4)
+coreai_world_rotate("turret_1", 0, 90, 0)
+coreai_world_set_transform("turret_1", 2, 0, 4, 0, 180, 0, 1.5)
 coreai_world_parent("turret_1", "tower")                     -- "" or "none" = detach
 coreai_world_set_props("boss", {scale=2.5, color="#ff3300"}) -- whitelist: scale, color
 
@@ -186,6 +189,11 @@ unity_set_rotation_euler(unity_find("Directional Light"), 45, 90, 0)
 unity_set_scale(id, 2, 1, 2)
 unity_parent(id, unity_find("LevelRoot"), true)
 ```
+
+Spawn, delete, hierarchy, and common transform control are intentionally available without Full
+through `WorldEdit`: use `coreai_world_spawn`, `coreai_world_destroy`, `coreai_world_parent`,
+`coreai_world_move`, `coreai_world_rotate`, and `coreai_world_set_transform` when object names and
+prefab keys are known. Full remains for diagnostics and reflection-only cases.
 
 Demo: `Assets/CoreAI.Demos/FullAccess/`. For production, targeted bindings are preferable, or the
 future migration to MoonSharp `UserData.RegisterType` (see MOONSHARP_NATIVE_APIS.md).

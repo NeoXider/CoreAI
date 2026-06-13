@@ -16,9 +16,11 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   not autoload in playable demo sessions.
 - **Lua mod report logging control.** Persistent mod `report()` output is now muted by default and
   can be toggled per active mod in the F9 mod manager. The mods demo also registers a visible
-  `enemy.basic` prefab for `coreai_world_spawn`, and Programmer guidance now steers night changes
-  through Full Lua reflection (`unity_set_member` on `Light.intensity`) instead of invented
-  `game.*` APIs.
+  `enemy.basic` prefab for `coreai_world_spawn`, and Programmer guidance now steers visible scene
+  edits through real `coreai_world_*` commands instead of invented `game.*` APIs.
+- **Non-Full Lua transform commands.** `WorldEdit` Lua now includes `coreai_world_rotate` and
+  `coreai_world_set_transform`, so spawn/delete/hierarchy/transform control does not require Full
+  mode.
 - **Active Lua mod auto-repair.** `LuaModRuntime` now surfaces runtime hook/timer failures through
   `ModHandlerErrored`, and `CoreAiLuaModAutoRepair` bridges those failures into the existing
   Programmer Lua repair flow with the broken source, runtime error, and saved version key. The

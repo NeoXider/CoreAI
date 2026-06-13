@@ -207,44 +207,6 @@ return t.position.x == 4 and t.scale.z == 4
         }
 
         [Test]
-        public void FullBindings_LightCanBeDimmedThroughReflection()
-        {
-            GameObject lightGo = new("FullLuaNightLight");
-            Light light = lightGo.AddComponent<Light>();
-            light.intensity = 1f;
-
-            try
-            {
-                SecureLuaEnvironment env = new();
-                LuaApiRegistry registry = new();
-                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
-                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
-
-                MoonSharp.Interpreter.DynValue result = env.RunChunk(script, @"
-local lights = unity_find_by_component('Light', 10)
-local id = 0
-for i = 1, #lights do
-    if lights[i].name == 'FullLuaNightLight' then
-        id = lights[i].id
-    end
-end
-assert(id ~= 0, 'light not found')
-assert(unity_set_rotation_euler(id, 25, -30, 0), 'rotate light')
-assert(unity_set_member(id, 'Light', 'intensity', 0.08), 'dim light')
-return unity_get_member(id, 'Light', 'intensity')
-");
-
-                Assert.AreEqual(0.08d, result.Number, 0.001d);
-                Assert.AreEqual(0.08f, light.intensity, 0.001f);
-                Assert.AreEqual(25f, lightGo.transform.eulerAngles.x, 0.01f);
-            }
-            finally
-            {
-                Object.DestroyImmediate(lightGo);
-            }
-        }
-
-        [Test]
         public void FullBindings_PublicOnly_ByDefault_HidesNonPublicMembers()
         {
             GameObject probe = new("ForgeProbeGo");

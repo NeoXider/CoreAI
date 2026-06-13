@@ -86,6 +86,29 @@ namespace CoreAI.Infrastructure.World
             return new Vector3(fx, fy, fz);
         }
 
+        private static Vector3 ValidateEulerAngles(double x, double y, double z)
+        {
+            if (double.IsNaN(x) || double.IsInfinity(x) ||
+                double.IsNaN(y) || double.IsInfinity(y) ||
+                double.IsNaN(z) || double.IsInfinity(z))
+            {
+                throw new ArgumentException("world rotation must be finite on every axis.");
+            }
+
+            return new Vector3((float)x, (float)y, (float)z);
+        }
+
+        private static float ValidateUniformScale(double scale)
+        {
+            if (double.IsNaN(scale) || double.IsInfinity(scale) ||
+                scale < MinScale || scale > MaxScale)
+            {
+                throw new ArgumentException($"scale must be finite and within [{MinScale}; {MaxScale}].");
+            }
+
+            return (float)scale;
+        }
+
         /// <summary>
         /// Discards any unfinished transaction. Hosts can call this after a script run fails to
         /// guarantee no stale buffered commands survive into the next script.
@@ -122,6 +145,34 @@ namespace CoreAI.Infrastructure.World
 
                 Publish(CoreAiWorldCommandEnvelope.Move(name, ValidatePosition(x, y, z)));
             }));
+
+            registry.Register("coreai_world_rotate", new Action<string, double, double, double>((targetName, x, y, z) =>
+            {
+                string name = (targetName ?? "").Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    return;
+                }
+
+                Publish(CoreAiWorldCommandEnvelope.Rotate(name, ValidateEulerAngles(x, y, z)));
+            }));
+
+            registry.Register("coreai_world_set_transform",
+                new Action<string, double, double, double, double, double, double, double>(
+                    (targetName, x, y, z, rx, ry, rz, scale) =>
+                    {
+                        string name = (targetName ?? "").Trim();
+                        if (string.IsNullOrEmpty(name))
+                        {
+                            return;
+                        }
+
+                        Publish(CoreAiWorldCommandEnvelope.SetTransform(
+                            name,
+                            ValidatePosition(x, y, z),
+                            ValidateEulerAngles(rx, ry, rz),
+                            ValidateUniformScale(scale)));
+                    }));
 
             registry.Register("coreai_world_destroy", new Action<string>(targetName =>
             {
@@ -205,15 +256,9 @@ namespace CoreAI.Infrastructure.World
                                     throw new ArgumentException("scale must be a number.");
                                 }
 
-                                double scale = pair.Value.Number;
-                                if (double.IsNaN(scale) || double.IsInfinity(scale) ||
-                                    scale < MinScale || scale > MaxScale)
-                                {
-                                    throw new ArgumentException(
-                                        $"scale must be finite and within [{MinScale}; {MaxScale}].");
-                                }
-
-                                Publish(CoreAiWorldCommandEnvelope.SetScale(name, (float)scale));
+                                Publish(CoreAiWorldCommandEnvelope.SetScale(
+                                    name,
+                                    ValidateUniformScale(pair.Value.Number)));
                                 break;
                             case "color":
                                 if (pair.Value.Type != MoonSharp.Interpreter.DataType.String)

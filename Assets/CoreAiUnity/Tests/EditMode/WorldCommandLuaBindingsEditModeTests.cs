@@ -57,6 +57,50 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("e1", sink.Items[0].JsonPayload);
         }
 
+        [Test]
+        public void Lua_coreai_world_rotate_PublishesRotateCommand()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, "coreai_world_rotate('sun', 25, 180, 0)");
+
+            Assert.AreEqual(1, sink.Items.Count);
+            CoreAiWorldCommandEnvelope envelope = EnvelopeAt(sink, 0);
+            Assert.AreEqual("rotate", envelope.action);
+            Assert.AreEqual("sun", envelope.targetName);
+            Assert.AreEqual(25f, envelope.fx);
+            Assert.AreEqual(180f, envelope.fy);
+            Assert.AreEqual(0f, envelope.fz);
+        }
+
+        [Test]
+        public void Lua_coreai_world_set_transform_PublishesSetTransformCommand()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            env.RunChunk(script, "coreai_world_set_transform('platform', 1, 2, 3, 10, 20, 30, 2)");
+
+            Assert.AreEqual(1, sink.Items.Count);
+            CoreAiWorldCommandEnvelope envelope = EnvelopeAt(sink, 0);
+            Assert.AreEqual("set_transform", envelope.action);
+            Assert.AreEqual("platform", envelope.targetName);
+            Assert.AreEqual(1f, envelope.x);
+            Assert.AreEqual(2f, envelope.y);
+            Assert.AreEqual(3f, envelope.z);
+            Assert.AreEqual(10f, envelope.fx);
+            Assert.AreEqual(20f, envelope.fy);
+            Assert.AreEqual(30f, envelope.fz);
+            Assert.AreEqual(2f, envelope.floatValue);
+        }
+
         [TestCase("0/0", "2", "3")]
         [TestCase("2", "1/0", "3")]
         [TestCase("2", "3", "-1/0")]
@@ -97,6 +141,34 @@ namespace CoreAI.Tests.EditMode
 
             Assert.Throws<ScriptRuntimeException>(() =>
                 env.RunChunk(script, $"coreai_world_move('e1', {x}, {y}, {z})"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_rotate_NonFiniteRotation_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_rotate('sun', 0, 1/0, 0)"));
+            Assert.AreEqual(0, sink.Items.Count);
+        }
+
+        [Test]
+        public void Lua_coreai_world_set_transform_InvalidScale_ThrowsAndPublishesNothing()
+        {
+            ListSink sink = new();
+            LuaApiRegistry reg = new();
+            new CoreAiWorldLuaRuntimeBindings(sink).RegisterGameplayApis(reg);
+            SecureLuaEnvironment env = new();
+            Script script = env.CreateScript(reg);
+
+            Assert.Throws<ScriptRuntimeException>(() =>
+                env.RunChunk(script, "coreai_world_set_transform('platform', 1, 2, 3, 0, 0, 0, 1000)"));
             Assert.AreEqual(0, sink.Items.Count);
         }
 

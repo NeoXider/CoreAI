@@ -70,6 +70,10 @@ namespace CoreAI.Infrastructure.World
                     return TrySpawn(env);
                 case "move":
                     return TryMove(env);
+                case "rotate":
+                    return TryRotate(env);
+                case "set_transform":
+                    return TrySetTransform(env);
                 case "destroy":
                     return TryDestroy(env);
                 case "set_active":
@@ -390,6 +394,38 @@ namespace CoreAI.Infrastructure.World
             }
 
             go.transform.position = new Vector3(env.x, env.y, env.z);
+            return true;
+        }
+
+        private bool TryRotate(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                return false;
+            }
+
+            go.transform.rotation = Quaternion.Euler(env.fx, env.fy, env.fz);
+            return true;
+        }
+
+        private bool TrySetTransform(CoreAiWorldCommandEnvelope env)
+        {
+            if (!ResolveObject(env.targetName, out GameObject go))
+            {
+                return false;
+            }
+
+            if (float.IsNaN(env.floatValue) || float.IsInfinity(env.floatValue))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] set_transform: non-finite scale rejected (name='{env.targetName}')");
+                return false;
+            }
+
+            go.transform.SetPositionAndRotation(
+                new Vector3(env.x, env.y, env.z),
+                Quaternion.Euler(env.fx, env.fy, env.fz));
+            go.transform.localScale = Vector3.one * Mathf.Clamp(env.floatValue, 0.01f, 100f);
             return true;
         }
 

@@ -29,8 +29,12 @@ Built-in functions:
 
 - `coreai_world_spawn(prefabKeyOrName, targetName, x, y, z) -> bool`
 - `coreai_world_move(targetName, x, y, z)`
+- `coreai_world_rotate(targetName, x, y, z)`
+- `coreai_world_set_transform(targetName, x, y, z, rx, ry, rz, scale)`
 - `coreai_world_destroy(targetName)`
 - `coreai_world_set_active(targetName, active)`
+- `coreai_world_parent(childName, parentName)` (`""` / `"none"` detaches)
+- `coreai_world_set_props(targetName, { scale=..., color=... })`
 - `coreai_world_load_scene(sceneName)`
 - `coreai_world_reload_scene()`
 - `coreai_world_play_animation(targetName, animationName)`
@@ -43,7 +47,8 @@ Built-in functions:
 ### Key recommendations
 
 - **prefabKeyOrName:** Prefer a **GUID string** (or another stable id) or a prefab name from the registry.
-- **targetName:** Scene object name (`GameObject` name). Commands resolve objects dynamically via `GameObject.Find()`.
+- **targetName:** Scene object name (`GameObject` name). Commands resolve objects dynamically on the Unity side; Lua code does not call `GameObject.Find()`.
+- **Transform commands:** `coreai_world_move`, `coreai_world_rotate`, and `coreai_world_set_transform` are part of normal `WorldEdit` access, not Full mode.
 - **Animation commands:** `coreai_world_play_animation`, `coreai_world_list_animations`, and direct `world_command` actions `play_animation` / `list_animations` require `targetName`; pass it as a structured argument, not only in prose.
 
 ---

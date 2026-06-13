@@ -55,6 +55,38 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
+        public static CoreAiWorldCommandEnvelope Rotate(string targetName, Vector3 eulerAngles)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "rotate",
+                targetName = targetName ?? "",
+                fx = eulerAngles.x,
+                fy = eulerAngles.y,
+                fz = eulerAngles.z
+            };
+        }
+
+        public static CoreAiWorldCommandEnvelope SetTransform(
+            string targetName,
+            Vector3 pos,
+            Vector3 eulerAngles,
+            float uniformScale)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "set_transform",
+                targetName = targetName ?? "",
+                x = pos.x,
+                y = pos.y,
+                z = pos.z,
+                fx = eulerAngles.x,
+                fy = eulerAngles.y,
+                fz = eulerAngles.z,
+                floatValue = uniformScale
+            };
+        }
+
         public static CoreAiWorldCommandEnvelope Destroy(string targetName)
         {
             return new CoreAiWorldCommandEnvelope

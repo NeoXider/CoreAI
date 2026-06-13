@@ -4,9 +4,11 @@
 
 - **Lua mod report logging control.** `LuaModRuntime` now mutes persistent mod `report()` output by
   default and exposes per-mod report logging state so hosts can opt into diagnostics without timer
-  mods flooding the console. Programmer guidance now points Full Lua night edits at real reflection
-  APIs such as `unity_set_member(id, 'Light', 'intensity', value)` and visible spawns at
-  `coreai_world_spawn` with discovered prefab keys instead of invented `game.*` APIs.
+  mods flooding the console.
+- **WorldEdit transform coverage.** Non-Full Lua WorldEdit now exposes safe spawn, destroy, parent,
+  move, rotate, and set-transform commands, and Programmer guidance directs visible scene edits
+  through `coreai_world_*` APIs instead of hard-coded Full-mode visual recipes or invented `game.*`
+  APIs.
 - **Lua mod runtime errors are observable.** `LuaModRuntime` now raises `ModHandlerErrored` when an
   active mod's hook or timer fails during `Tick`, allowing hosts to route asynchronous mod failures
   into repair or telemetry flows instead of only logging and incrementing `ErrorCount`.
@@ -1462,4 +1464,3 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Removed
 - `AgentMemoryDirectiveParser` — superseded by the MEAI pipeline
-
