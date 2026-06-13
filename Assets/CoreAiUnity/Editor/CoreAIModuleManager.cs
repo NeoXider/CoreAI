@@ -110,9 +110,9 @@ namespace CoreAI.Editor
                 string message =
                     $"MoonSharp package: {moonsharp}\n" +
                     $"COREAI_NO_LUA define: {(noLua ? "SET (Lua disabled)" : "not set")}\n" +
-                    $"→ Lua effective: {((moonsharp != "not installed" && !noLua) ? "ENABLED" : "disabled")}\n\n" +
+                    $"-> Lua effective: {((moonsharp != "not installed" && !noLua) ? "ENABLED" : "disabled")}\n\n" +
                     $"LLMUnity package: {llmunity}\n" +
-                    $"→ Local LLM effective: {(llmunity != "not installed" ? "ENABLED" : "disabled")}";
+                    $"-> Local LLM effective: {(llmunity != "not installed" ? "ENABLED" : "disabled")}";
 
                 EditorUtility.DisplayDialog("CoreAI - Module status", message, "OK");
             });

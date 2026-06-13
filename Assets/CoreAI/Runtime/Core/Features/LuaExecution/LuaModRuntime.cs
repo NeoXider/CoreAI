@@ -266,7 +266,7 @@ namespace CoreAI.Ai
             // restricted mod gets no game APIs at all instead of silently getting everything.
             _log?.Warn(
                 $"[LuaModRuntime] Game bindings ({_gameBindings.GetType().Name}) do not implement " +
-                $"ICapabilityScopedLuaBindings; mod requested '{capabilities}' — game APIs withheld.");
+                $"ICapabilityScopedLuaBindings; mod requested '{capabilities}' - game APIs withheld.");
         }
 
         /// <summary>Unloads a mod and drops its handlers/timers/queued events.</summary>

@@ -68,7 +68,7 @@ namespace CoreAI.Composition
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    $"LLMUnity autostart: agent.Start() threw — {ex}");
+                    $"LLMUnity autostart: agent.Start() threw - {ex}");
             }
 
             WarmupAsync(llm).Forget();

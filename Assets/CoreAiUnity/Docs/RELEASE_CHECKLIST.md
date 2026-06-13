@@ -19,10 +19,10 @@ Use this checklist before every commit or release that changes Assets/CoreAI or 
 
 - Update affected Markdown docs when behavior or public usage changes.
 - Do not use changelog entries as the only source of architecture documentation.
-- Update DOCS_INDEX.md or DOCS_INDEX_RU.md when adding or moving important docs.
+- Update DOCS_INDEX.md when adding or moving important docs.
 - Update SCRIPTABLE_OBJECTS.md when ScriptableObject/options/config rules change.
 - Update README_CHAT.md when chat panel, runtime options, or busy API behavior changes.
-- Update KNOWN_ISSUES_RU.md when warning debt changes.
+- Update KNOWN_ISSUES.md when warning debt changes.
 
 ## Tests
 

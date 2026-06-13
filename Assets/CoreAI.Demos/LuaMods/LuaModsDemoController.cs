@@ -34,7 +34,7 @@ namespace CoreAI.Demos
         private LuaModRuntime _mods;
         private LuaLogicSlots _slots;
         private string _status = "";
-        private string _lastModEvent = "—";
+        private string _lastModEvent = "-";
         private int _waveButtonPresses;
 
         private void Start()
@@ -76,13 +76,13 @@ namespace CoreAI.Demos
 
         private void OnModEvent(string modId, string eventName, string payload)
         {
-            _lastModEvent = $"{modId} → {eventName}({payload})";
+            _lastModEvent = $"{modId} -> {eventName}({payload})";
         }
 
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(12, 12, 460, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI — Lua Mods Demo</b>", RichLabel());
+            GUILayout.Label("<b>CoreAI - Lua Mods Demo</b>", RichLabel());
             GUILayout.Label(_status, RichLabel());
             GUILayout.Space(6);
 
@@ -182,7 +182,7 @@ namespace CoreAI.Demos
             foreach (LuaModInfo mod in mods)
             {
                 GUILayout.Label(
-                    $"• {mod.Id}  caps={mod.Capabilities}  handlers={mod.HandlerCount}  " +
+                    $"* {mod.Id}  caps={mod.Capabilities}  handlers={mod.HandlerCount}  " +
                     $"timers={mod.TimerCount}  errors={mod.ErrorCount}");
             }
         }

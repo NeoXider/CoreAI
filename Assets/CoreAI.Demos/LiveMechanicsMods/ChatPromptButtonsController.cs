@@ -24,8 +24,14 @@ namespace CoreAI.Demos
         [SerializeField]
         private string title = "Prompt templates";
 
+        [Tooltip("Width/height of the panel. It is auto-anchored to the bottom of the screen, " +
+                 "just left of the chat, so it does not overlap the usage / mod panels.")]
         [SerializeField]
         private Rect panelRect = new(12, 420, 520, 180);
+
+        [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")]
+        [SerializeField]
+        private float chatReserveWidth = 560f;
 
         [SerializeField]
         private PromptButton[] prompts = System.Array.Empty<PromptButton>();
@@ -55,7 +61,15 @@ namespace CoreAI.Demos
                 return;
             }
 
-            GUILayout.BeginArea(panelRect, GUI.skin.box);
+            // Anchor to the bottom of the screen, just left of the chat panel, so the prompt
+            // buttons sit next to the chat and never overlap the usage / mod-manager panels.
+            float w = Mathf.Min(panelRect.width, Screen.width - 24f);
+            float h = panelRect.height;
+            float x = Mathf.Clamp(Screen.width - chatReserveWidth - w - 12f, 12f, Mathf.Max(12f, Screen.width - w - 12f));
+            float y = Mathf.Max(12f, Screen.height - h - 12f);
+            Rect rect = new(x, y, w, h);
+
+            GUILayout.BeginArea(rect, GUI.skin.box);
             GUILayout.Label($"<b>{title}</b>", RichLabel());
             GUILayout.Label(_status, RichLabel());
 

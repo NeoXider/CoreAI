@@ -36,7 +36,7 @@ For teams who **wire the core into their own game** or **extend this repository*
 
 **Verification:** compile with `dotnet build` on generated `*.csproj` (Unity/Rider) or build from the IDE; **NUnit Edit Mode / Play Mode** — in **Unity Test Runner** (`Window → General → Test Runner`). The source of truth for scenarios involving `UnityEngine` and test assets is Test Runner, not bare `dotnet test` without Unity.
 
-**Rule:** title gameplay logic should not “leak” into Core unless necessary. New **game** APIs for Lua go through **`IGameLuaRuntimeBindings`** / **`GameLuaBindingsExtensibility`** in Source (or in the game assembly), not by editing the sandbox outside the whitelist. Guide: [LUA_BEST_PRACTICES_RU.md](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md).
+**Rule:** title gameplay logic should not “leak” into Core unless necessary. New **game** APIs for Lua go through **`IGameLuaRuntimeBindings`** / **`GameLuaBindingsExtensibility`** in Source (or in the game assembly), not by editing the sandbox outside the whitelist. Guide: [LUA_BEST_PRACTICES.md](../../CoreAI/Docs/LUA_BEST_PRACTICES.md).
 
 ---
 
@@ -586,7 +586,7 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 - **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run **`CoreAI.Tests.PlayMode.FastNoLlm`** (always quick), then selectively **`CoreAI.Tests.PlayMode.LlmVerification`** / **`Scenarios`** where your change touches live LLMs or workflows.
 - **Secrets:** do not commit API keys, `.env` with keys, or local model paths with personal data; for CI use environment variables (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
 - **Documentation:** if contracts or flow change (DGF §3 / DI), update **DGF_SPEC** and this guide in the same PR if needed.
-- **UPM release (any change under `Assets/CoreAI` or `Assets/CoreAiUnity`):** bump **`version`** in [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) and [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; dependency = core version); add entries in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** and **[../CHANGELOG.md](../CHANGELOG.md)**; update docs for the affected feature (root **README.md** / **README_RU.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.); if public API changes, add tests as needed.
+- **UPM release (any change under `Assets/CoreAI` or `Assets/CoreAiUnity`):** bump **`version`** in [`../../CoreAI/package.json`](../../CoreAI/package.json) (`com.nexoider.coreai`) and [`../package.json`](../package.json) (`com.nexoider.coreaiunity`; dependency = core version); add entries in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** and **[../CHANGELOG.md](../CHANGELOG.md)**; update docs for the affected feature (root **README.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.); if public API changes, add tests as needed.
 
 ---
 
@@ -597,4 +597,3 @@ Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOP
 **UPM sync:** the number in the README header and in **QUICK_START** should match the current **`package.json`**, or package consumers see a stale version.
 
 **Version of this guide:** 1.9.1 (May 2026) — Editor menu **CoreAI → Delete All Persistent Saves...** documents wiping **`persistentDataPath/CoreAI`**. **1.9** / UPM **1.7.4:** LLMUnity runtime auto-host, **`GgufModelPath`** → **`LLM.model`**, **`LlmUnityAutostartLocalServer`**. **1.7.3:** streaming hybrid hold when **`Tools`** declared; **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`**. **1.7.2:** WebGL **`CoreAiPersistFs`** **`FS.syncfs`** single-flight. **1.7.1:** `CoreAiChatPanel` typing after buffered tool-hint marker. **1.7.0:** `LlmStreamChunk.BufferedStreamingNoToolBinding`, **`BufferedStreamingUseToolProgressHint`**, **`CoreAiChatConfig.StreamingToolProgressHint`**. WebGL agent memory / chat JSON via **`FileAgentMemoryStore`** + **`CoreAi_PersistFsSync`** under **`CoreAILifetimeScope`** (**v1.6.19+**); fetch SSE jslib logs quiet by default (**v1.6.19**). Earlier: portable LLM pipeline decoupling (**v1.5**), MessagePipe event tests, UPM **v1.5.0**.
-

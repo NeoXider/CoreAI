@@ -33,7 +33,7 @@ Package manifests:
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
-| [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable MoonSharp (Lua) & LLMUnity via the `CoreAI в–ё Setup в–ё Modules` editor tool; defines and CI parity. |
+| [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable MoonSharp (Lua) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common setup, backend, WebGL, tool-call, and logging problems. |
 
 ## Chat And Streaming
@@ -86,6 +86,8 @@ Package manifests:
 | [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md) | Multiplayer AI authority and replication notes. |
 | [SCRIPTABLE_OBJECTS.md](SCRIPTABLE_OBJECTS.md) | ScriptableObject assets used by the package and their roles. |
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
+| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for both packages. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 
 ## Tests
@@ -115,11 +117,3 @@ Package manifests:
 ## Roadmap
 
 Live backlog and recently closed documentation debt: [../../../TODO.md](../../../TODO.md).
-
-## Russian Notes
-
-| Document | Purpose |
-|---|---|
-| [DOCS_INDEX_RU.md](DOCS_INDEX_RU.md) | Russian version of this index. |
-| [KNOWN_ISSUES_RU.md](KNOWN_ISSUES_RU.md) | Accepted warning debt and known project-level issues. |
-| [RELEASE_CHECKLIST_RU.md](RELEASE_CHECKLIST_RU.md) | Pre-commit/pre-release checklist for both packages. |

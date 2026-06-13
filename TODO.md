@@ -7,13 +7,13 @@
 - [x] Lua as a second language: phases 1-5, capability tiers, `manage_mods`, sandbox/audit fixes.
 - [x] Demo `Assets/CoreAI.Demos/`: LuaMods, WorldCommands, Skills, LiveMechanics (+ LLM chat).
 - [x] `ICoreAiCustomWorldCommandHandler`, scene whitelist, perf (MPB `set_color`, `LuaModRuntime.Tick` scratch).
-- [x] Documentation: `LUA_GAME_API`, `LUA_BEST_PRACTICES_RU`, `MOONSHARP_NATIVE_APIS_RU`, `LUA_ACCESS_MODES_AUDIT_RU`, `PERF_REVIEW_2026-06-12_RU`.
+- [x] Documentation: `LUA_GAME_API`, `LUA_BEST_PRACTICES`, `MOONSHARP_NATIVE_APIS`, `LUA_ACCESS_MODES_AUDIT`, `PERF_REVIEW_2026-06-12`.
 - [x] Version **4.0.0** in `com.nexoider.coreai` / `com.nexoider.coreaiunity`.
 - [x] `IGameLogger` instead of `Debug.*` in CoreAiUnity Runtime.
 
 ## [P1] Full mode
 
-> Currently available: `LuaCapabilities.Full`, reflection bindings `CoreAiFullUnityLuaRuntimeBindings` (`unity_*`), opt-in `enableFullLuaAccess`, audit `LUA_ACCESS_MODES_AUDIT_RU.md`.
+> Currently available: `LuaCapabilities.Full`, reflection bindings `CoreAiFullUnityLuaRuntimeBindings` (`unity_*`), opt-in `enableFullLuaAccess`, audit `LUA_ACCESS_MODES_AUDIT.md`.
 
 - [x] **Demo scene** `FullAccess/FullAccessDemo.unity` (chat + scope with Full + auto-`TargetCube`, prompt buttons move/grow/inspect).
 - [x] **PlayMode tests** Full: `unity_find` / `unity_set_position` on a scene object.

@@ -28,7 +28,7 @@ operations.
 ## Optional Module (`COREAI_NO_LUA`, since v3.0.0)
 
 Lua is an **optional module**. Defining the scripting symbol `COREAI_NO_LUA`
-(Project Settings в†’ Player в†’ Scripting Define Symbols) compiles the entire
+(Project Settings → Player → Scripting Define Symbols) compiles the entire
 MoonSharp-based sandbox out of `CoreAI.Core` and `CoreAI.Source`, mirroring the
 existing `COREAI_NO_LLM` opt-out. The core (orchestration, LLM, chat, agent
 memory) builds and runs with no MoonSharp usage, and with the define set you may
@@ -53,7 +53,7 @@ Default builds (symbol unset) keep Lua enabled and behave exactly as before.
 push/PR: the default project with MoonSharp, and a `no-lua` job that deletes
 `org.moonsharp.moonsharp` from `Packages/manifest.json`/`packages-lock.json` and
 appends `COREAI_NO_LUA` to every platform's Scripting Define Symbols before
-compiling вЂ” exactly the opt-out procedure described above. The MoonSharp job
+compiling — exactly the opt-out procedure described above. The MoonSharp job
 additionally asserts that the `SecureLuaSandboxEditModeTests` escape-test
 fixture actually executed, so isolation coverage cannot silently drop out of
 the suite. The workflow needs the standard GameCI secrets (`UNITY_LICENSE`,
@@ -70,7 +70,7 @@ Lua generation is constrained at multiple stages:
 
 `LuaGenerationRateLimiter` is default-on. `maxPerWindow <= 0` still disables it.
 
-When the limiter is saturated, the envelope fails with `Lua rate limit exceeded` and repair is skipped, so a failing script cannot spin a runaway generateв†’failв†’repair loop against the LLM.
+When the limiter is saturated, the envelope fails with `Lua rate limit exceeded` and repair is skipped, so a failing script cannot spin a runaway generate→fail→repair loop against the LLM.
 
 ## Additional hardening (current implementation)
 
@@ -233,6 +233,6 @@ Lua binding:
 
 ## Related docs
 
-- [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md) вЂ” which MoonSharp/Lua features CoreAI uses natively vs custom wrappers.
-- [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) вЂ” integration do's and don'ts.
-- [LUA_GAME_API.md](LUA_GAME_API.md) вЂ” game API reference.
+- [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md) — which MoonSharp/Lua features CoreAI uses natively vs custom wrappers.
+- [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) — integration do's and don'ts.
+- [LUA_GAME_API.md](LUA_GAME_API.md) — game API reference.

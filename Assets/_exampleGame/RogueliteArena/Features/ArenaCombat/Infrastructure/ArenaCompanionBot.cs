@@ -81,7 +81,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             {
                 Debug.Log(
                     "[CoreAI.ExampleGame] Компаньон: стойка " + stance +
-                    $" → speed={moveSpeed:F1}, follow={followDistance:F1}, acquireRadius={enemyAcquireRadius:F1}");
+                    $" -> speed={moveSpeed:F1}, follow={followDistance:F1}, acquireRadius={enemyAcquireRadius:F1}");
             }
 
             ApplyStanceVisual(stance);

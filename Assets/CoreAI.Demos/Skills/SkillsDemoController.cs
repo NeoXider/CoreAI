@@ -94,13 +94,13 @@ namespace CoreAI.Demos
             }
 
             _busy = true;
-            _response = "…";
+            _response = "...";
             try
             {
                 // Callback arrives on the Unity main thread (captured SynchronizationContext).
                 _agent.AskWithCallback(_input, text =>
                 {
-                    _response = string.IsNullOrEmpty(text) ? "(empty response — check LLM backend)" : text;
+                    _response = string.IsNullOrEmpty(text) ? "(empty response - check LLM backend)" : text;
                     _busy = false;
                 });
             }
@@ -115,17 +115,17 @@ namespace CoreAI.Demos
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(12, 12, 520, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("CoreAI — Skills Demo (read_skill / call_skill_tool)");
+            GUILayout.Label("CoreAI - Skills Demo (read_skill / call_skill_tool)");
             GUILayout.Space(4);
 
             GUILayout.Label($"Inventory: {string.Join(", ", _inventory.Select(p => $"{p.Key} x{p.Value}"))}");
-            GUILayout.Label($"Crafted: {(_crafted.Count == 0 ? "—" : string.Join(", ", _crafted))}");
+            GUILayout.Label($"Crafted: {(_crafted.Count == 0 ? "-" : string.Join(", ", _crafted))}");
             GUILayout.Label($"Training dummy HP: {_enemyHp}");
             GUILayout.Space(8);
 
             _input = GUILayout.TextField(_input);
             GUI.enabled = !_busy;
-            if (GUILayout.Button(_busy ? "Waiting for the model…" : "Ask the Game Master"))
+            if (GUILayout.Button(_busy ? "Waiting for the model..." : "Ask the Game Master"))
             {
                 Ask();
             }

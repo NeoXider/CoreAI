@@ -40,7 +40,7 @@ namespace CoreAI.Demos
 
             Vector3 p = targetCube.position;
             GUILayout.BeginArea(new Rect(12, 12, 440, 150), GUI.skin.box);
-            GUILayout.Label("<b>Full Access Demo</b> — enable Full Lua on CoreAILifetimeScope", Rich());
+            GUILayout.Label("<b>Full Access Demo</b> - enable Full Lua on CoreAILifetimeScope", Rich());
             GUILayout.Label("Programmer mods reach this cube via unity_find / unity_set_member.", Rich());
             GUILayout.Label("Private members need 'Enable Full Lua Private Access' (off by default).", Rich());
             GUILayout.Label($"TargetCube position: ({p.x:0.##}, {p.y:0.##}, {p.z:0.##})", Rich());

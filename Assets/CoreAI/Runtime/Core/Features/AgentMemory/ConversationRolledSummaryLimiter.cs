@@ -44,11 +44,11 @@ namespace CoreAI.Ai
 
             if (lo <= 0)
             {
-                return "...";
+                return "…";
             }
 
             string prefix = trimmed.Substring(0, lo).TrimEnd();
-            return string.IsNullOrEmpty(prefix) ? "..." : prefix + "...";
+            return string.IsNullOrEmpty(prefix) ? "…" : prefix + "…";
         }
     }
 }

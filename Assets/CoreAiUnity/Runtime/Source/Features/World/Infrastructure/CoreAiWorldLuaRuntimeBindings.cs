@@ -80,7 +80,7 @@ namespace CoreAI.Infrastructure.World
                 !TryValidateCoordinate(z, out float fz))
             {
                 throw new ArgumentException(
-                    $"world position must be finite and within ±{MaxCoordinate:0} per axis.");
+                    $"world position must be finite and within +/-{MaxCoordinate:0} per axis.");
             }
 
             return new Vector3(fx, fy, fz);

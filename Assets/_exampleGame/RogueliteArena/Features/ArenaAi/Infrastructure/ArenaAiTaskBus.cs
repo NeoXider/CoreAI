@@ -232,7 +232,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
             {
                 _planner.RequestWavePlan(wave, ArenaAiSourceTags.HotkeyF1);
                 Debug.Log(
-                    $"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF1} → Creator: запрос плана волны {wave}.");
+                    $"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF1} -> Creator: запрос плана волны {wave}.");
                 return;
             }
 
@@ -255,7 +255,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
                 CancellationScope = "arena_hotkey_f1",
                 Priority = 100
             });
-            Debug.Log($"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF1} → Creator: ad-hoc, wave={wave}.");
+            Debug.Log($"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF1} -> Creator: ad-hoc, wave={wave}.");
         }
 
         /// <summary>Demo F2 path for requesting a companion stance change.</summary>
@@ -285,7 +285,7 @@ namespace CoreAI.ExampleGame.ArenaAi.Infrastructure
                 CancellationScope = "arena_hotkey_f2_companion",
                 Priority = 50
             });
-            Debug.Log($"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF2} → AINpc.");
+            Debug.Log($"[CoreAI.ExampleGame] {ArenaAiSourceTags.HotkeyF2} -> AINpc.");
         }
 
         private bool TryResolveOrchestrator(out IAiOrchestrationService orch)

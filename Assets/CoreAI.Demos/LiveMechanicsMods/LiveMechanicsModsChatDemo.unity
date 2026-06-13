@@ -146,7 +146,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1944e5601b054674f9aba21055a2342c, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ChatPromptButtonsController
   title: LiveMechanics ready mod prompts
   panelRect:
@@ -156,37 +156,15 @@ MonoBehaviour:
     width: 500
     height: 190
   prompts:
-  - Label: 'Insert: 1000 boss reward mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `boss_reward_1000` using manage_mods.
-      It must include metadata comments `-- name:` and `-- description:`. Code:
-
-      --
-      name: Boss Reward 1000
-
-      -- description: Makes every boss defeat give
-      exactly 1000 gold.
-
-      logic_define(''boss_reward'', function(bossMaxHp)
-      return 1000 end)
-
-      report(''Boss Reward 1000 loaded.'')'
-  - Label: 'Insert: change boss reward mod'
-    Prompt: Read mod `boss_reward_1000` with manage_mods get_source, then reload
-      it so the reward becomes 250 coins plus bossMaxHp / 2. Keep metadata comments
-      and report the change.
-  - Label: 'Insert: fast attacks mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `fast_attacks` using manage_mods.
-      Code:
-
-      -- name: Fast Attacks
-
-      -- description: Makes the hero attack
-      every 0.45 seconds in LiveMechanics.
-
-      logic_define(''attack_interval'',
-      function() return 0.45 end)
-
-      report(''Fast Attacks loaded.'')'
+  - Label: Big boss reward
+    Prompt: Make every boss victory give a big 1000 coin reward. Save it as a mod
+      so I can disable it later.
+  - Label: Scale boss reward
+    Prompt: Change the boss reward mod so the reward depends on boss strength instead
+      of always being the same. Keep the reward generous.
+  - Label: Faster hero attacks
+    Prompt: Make the hero attack much faster so the boss fight speeds up. Save it
+      as a mod.
   submitWhenInputUnavailable: 0
 --- !u!4 &126857024
 Transform:
@@ -594,6 +572,7 @@ GameObject:
   - component: {fileID: 933156841}
   - component: {fileID: 933156840}
   - component: {fileID: 933156842}
+  - component: {fileID: 933156843}
   m_Layer: 0
   m_Name: LiveMechanicsDemo
   m_TagString: Untagged
@@ -644,14 +623,29 @@ MonoBehaviour:
   coreAiScope: {fileID: 0}
   modKeyPrefix: demo.live_mechanics.mods_chat.mod.
   panelTitle: LiveMechanics Mod Manager
-  toggleKey: 291
+  toggleKey: 290
   panelRect:
     serializedVersion: 2
-    x: 1220
-    y: 92
-    width: 500
-    height: 410
+    x: 470
+    y: 12
+    width: 430
+    height: 460
   showPanel: 1
+--- !u!114 &933156843
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933156839}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f684e3ef8cb34affb7e1aa9006e81e6c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Diagnostics.CoreAiTokenBudgetOverlay
+  _showOverlay: 1
+  _toggleKey: 291
+  _rollingWindowSeconds: 60
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -897,6 +891,7 @@ MonoBehaviour:
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   luaAllowedScenes: []
   enableFullLuaAccess: 0
+  enableFullLuaPrivateAccess: 0
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
 --- !u!4 &2106438250

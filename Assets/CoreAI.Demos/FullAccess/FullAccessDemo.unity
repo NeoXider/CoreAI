@@ -395,6 +395,7 @@ GameObject:
   m_Component:
   - component: {fileID: 933156841}
   - component: {fileID: 933156842}
+  - component: {fileID: 933156843}
   m_Layer: 0
   m_Name: LiveMechanicsDemo
   m_TagString: Untagged
@@ -432,14 +433,29 @@ MonoBehaviour:
   coreAiScope: {fileID: 0}
   modKeyPrefix: demo.full_access.mods_chat.mod.
   panelTitle: Full Access Mod Manager
-  toggleKey: 291
+  toggleKey: 290
   panelRect:
     serializedVersion: 2
-    x: 1280
-    y: 92
+    x: 470
+    y: 12
     width: 430
     height: 460
   showPanel: 1
+--- !u!114 &933156843
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933156839}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f684e3ef8cb34affb7e1aa9006e81e6c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Diagnostics.CoreAiTokenBudgetOverlay
+  _showOverlay: 1
+  _toggleKey: 291
+  _rollingWindowSeconds: 60
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -580,7 +596,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0492cc3bb12b78a4c9b36c3e046564d0, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.FullAccessDemoController
   targetCube: {fileID: 0}
 --- !u!4 &1828887120
@@ -727,23 +743,15 @@ MonoBehaviour:
     width: 560
     height: 180
   prompts:
-  - Label: 'Insert: lift the cube'
-    Prompt: 'Create or reload a Lua mod with mod_id `mover` using manage_mods. Include
-      metadata comments. It finds the scene object TargetCube and lifts it through Full
-      reflection. Lua: local id = unity_find(''TargetCube'') if id ~= 0 then unity_set_position(id,
-      0, 2, 0) end report(''TargetCube lifted to (0,2,0).'')'
-  - Label: 'Insert: grow the cube'
-    Prompt: 'Create or reload a Lua mod with mod_id `grower` using manage_mods. Include
-      metadata comments. It enlarges TargetCube by writing Transform.localScale via unity_set_member.
-      Lua: local id = unity_find(''TargetCube'') if id ~= 0 then unity_set_member(id,
-      ''Transform'', ''localScale'', { x = 1.6, y = 1.6, z = 1.6 }) end report(''TargetCube
-      scaled up.'')'
-  - Label: 'Insert: inspect the cube'
-    Prompt: 'Create or reload a Lua mod with mod_id `inspector` using manage_mods. Include
-      metadata comments. It reads TargetCube''s Transform.position via unity_get_member
-      and reports it. Lua: local id = unity_find(''TargetCube'') if id ~= 0 then local
-      p = unity_get_member(id, ''Transform'', ''position'') report(''TargetCube position:
-      '' .. tostring(p)) end'
+  - Label: Make cube float
+    Prompt: Make the cube float above the arena and keep it there as a small saved
+      mod. Tell me briefly what changed.
+  - Label: Make cube bigger
+    Prompt: Make the cube noticeably bigger, but keep it in the same place. Save
+      it as a reusable mod and tell me briefly what changed.
+  - Label: Inspect cube
+    Prompt: Check the cube in the scene and tell me its current position, scale,
+      and important components. Do not change it.
   submitWhenInputUnavailable: 0
 --- !u!4 &2100352201
 Transform:
@@ -800,6 +808,7 @@ MonoBehaviour:
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   luaAllowedScenes: []
   enableFullLuaAccess: 1
+  enableFullLuaPrivateAccess: 0
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
 --- !u!4 &2106438250

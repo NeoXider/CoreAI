@@ -38,7 +38,7 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
                 if (logOnStart)
                 {
                     Debug.Log(
-                        "[CoreAI.ExampleGame] Арена из сцены (ArenaSurvivalProceduralSetup). R — перезапуск. Docs: _exampleGame/Docs/");
+                        "[CoreAI.ExampleGame] Арена из сцены (ArenaSurvivalProceduralSetup). R - перезапуск. Docs: _exampleGame/Docs/");
                 }
 
                 return;
@@ -52,7 +52,7 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
                 if (logOnStart)
                 {
                     Debug.Log(
-                        "[CoreAI.ExampleGame] Прототип арены создан из кода. R — перезапуск. Подробности: Docs/ROGUELITE_PLAYBOOK.md");
+                        "[CoreAI.ExampleGame] Прототип арены создан из кода. R - перезапуск. Подробности: Docs/ROGUELITE_PLAYBOOK.md");
                 }
 
                 return;

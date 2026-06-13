@@ -201,7 +201,7 @@ public sealed class MyGameBindings : IGameLuaRuntimeBindings
 GameLuaBindingsExtensibility.Register(new MyGameBindings(), LuaCapabilities.Gameplay);
 ```
 
-See [LUA_BEST_PRACTICES_RU.md](../../CoreAI/Docs/LUA_BEST_PRACTICES_RU.md) for capability gating and anti-patterns.
+See [LUA_BEST_PRACTICES.md](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) for capability gating and anti-patterns.
 
 Or state in the Programmer prompt which functions are available:
 ```

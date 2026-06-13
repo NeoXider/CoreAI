@@ -29,14 +29,17 @@ namespace CoreAI.Demos
         [SerializeField]
         private string panelTitle = "Lua Mod Manager";
 
+        // F9 toggles the mod manager; F10 is reserved for the Token Budget / usage overlay.
         [SerializeField]
-        private KeyCode toggleKey = KeyCode.F10;
+        private KeyCode toggleKey = KeyCode.F9;
 
         [SerializeField]
-        private Rect panelRect = new(1280, 92, 430, 420);
+        private Rect panelRect = new(24, 92, 430, 460);
 
         [SerializeField]
         private bool showPanel = true;
+
+        private const int WindowId = 0x10D_0001;
 
         private LuaModRuntime _mods;
         private ILuaScriptVersionStore _versions;
@@ -44,6 +47,9 @@ namespace CoreAI.Demos
         private int _autoloadedCount;
         private bool _isAutoloading;
         private Vector2 _scroll;
+        private GUIStyle _richLabel;
+        private GUIStyle _activeBadge;
+        private GUIStyle _inactiveBadge;
 
         private readonly struct ModDescriptor
         {
@@ -249,28 +255,32 @@ namespace CoreAI.Demos
                 return;
             }
 
-            Rect rect = panelRect;
-            if (rect.xMax > Screen.width)
-            {
-                rect.x = Mathf.Max(8f, Screen.width - rect.width - 12f);
-            }
+            EnsureStyles();
 
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<b>{panelTitle}</b>  <size=10>({toggleKey})</size>", RichLabel());
-            if (GUILayout.Button("Hide", GUILayout.Width(58)))
+            // Keep the window reachable, then let the user drag it anywhere.
+            panelRect.x = Mathf.Clamp(panelRect.x, 0f, Mathf.Max(0f, Screen.width - 120f));
+            panelRect.y = Mathf.Clamp(panelRect.y, 0f, Mathf.Max(0f, Screen.height - 40f));
+
+            int activeCount = _mods?.ListMods().Count ?? 0;
+            int inactiveCount = (_mods != null && _versions != null) ? GetInactiveSavedMods().Count : 0;
+            string title = $"{panelTitle}  ({toggleKey})   active {activeCount} / inactive {inactiveCount}";
+            panelRect = GUILayout.Window(WindowId, panelRect, DrawWindow, title);
+        }
+
+        private void DrawWindow(int id)
+        {
+            if (GUI.Button(new Rect(panelRect.width - 58f, 2f, 52f, 18f), "Hide"))
             {
                 showPanel = false;
             }
 
-            GUILayout.EndHorizontal();
-            GUILayout.Label(_status, RichLabel());
+            GUILayout.Label(_status, _richLabel);
             GUILayout.Space(4);
 
             if (_mods == null || _versions == null)
             {
-                GUILayout.Label("Waiting for runtime...");
-                GUILayout.EndArea();
+                GUILayout.Label("Waiting for runtime...", _richLabel);
+                GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
                 return;
             }
 
@@ -279,16 +289,40 @@ namespace CoreAI.Demos
             GUILayout.Space(8);
             DrawSavedInactiveMods();
             GUILayout.EndScrollView();
-            GUILayout.EndArea();
+
+            // Drag the window by its title bar.
+            GUI.DragWindow(new Rect(0, 0, panelRect.width, 22f));
+        }
+
+        private void EnsureStyles()
+        {
+            if (_richLabel != null)
+            {
+                return;
+            }
+
+            _richLabel = new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
+            _activeBadge = new GUIStyle(GUI.skin.label)
+            {
+                richText = true,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.40f, 0.85f, 0.45f) }
+            };
+            _inactiveBadge = new GUIStyle(GUI.skin.label)
+            {
+                richText = true,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.65f, 0.65f, 0.68f) }
+            };
         }
 
         private void DrawActiveMods()
         {
-            GUILayout.Label("<b>Active mods</b>", RichLabel());
             IReadOnlyList<LuaModInfo> active = _mods.ListMods();
+            GUILayout.Label($"<b>Active mods</b>  ({active.Count})", _richLabel);
             if (active.Count == 0)
             {
-                GUILayout.Label("No active mods.");
+                GUILayout.Label("No active mods. Load one with manage_mods from chat.", _richLabel);
                 return;
             }
 
@@ -298,35 +332,40 @@ namespace CoreAI.Demos
                 ModDescriptor descriptor = new(info.Id, source);
                 GUILayout.BeginVertical(GUI.skin.box);
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"<b>{descriptor.Name}</b>", RichLabel());
-                if (GUILayout.Button("X", GUILayout.Width(28)))
+                GUILayout.Label("[ACTIVE]", _activeBadge, GUILayout.Width(64));
+                GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Deactivate", GUILayout.Width(86)))
                 {
                     _mods.UnloadMod(info.Id);
                 }
 
                 GUILayout.EndHorizontal();
-                GUILayout.Label($"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}");
-                GUILayout.Label(descriptor.Description, RichLabel());
+                GUILayout.Label($"id: {info.Id}  caps={info.Capabilities}  handlers={info.HandlerCount}  timers={info.TimerCount}  errors={info.ErrorCount}", _richLabel);
+                GUILayout.Label(descriptor.Description, _richLabel);
                 GUILayout.EndVertical();
             }
         }
 
         private void DrawSavedInactiveMods()
         {
-            GUILayout.Label("<b>Saved / unloaded mods</b>", RichLabel());
             List<ModDescriptor> inactive = GetInactiveSavedMods();
+            GUILayout.Label($"<b>Saved / inactive mods</b>  ({inactive.Count})", _richLabel);
             if (inactive.Count == 0)
             {
-                GUILayout.Label("No saved inactive mods.");
+                GUILayout.Label("No saved inactive mods.", _richLabel);
                 return;
             }
 
             foreach (ModDescriptor descriptor in inactive)
             {
                 GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label($"<b>{descriptor.Name}</b>", RichLabel());
-                GUILayout.Label($"id: {descriptor.Id}");
-                GUILayout.Label(descriptor.Description, RichLabel());
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("[ inactive ]", _inactiveBadge, GUILayout.Width(78));
+                GUILayout.Label($"<b>{descriptor.Name}</b>", _richLabel);
+                GUILayout.EndHorizontal();
+                GUILayout.Label($"id: {descriptor.Id}", _richLabel);
+                GUILayout.Label(descriptor.Description, _richLabel);
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("Activate"))
                 {
@@ -420,11 +459,6 @@ namespace CoreAI.Demos
             }
 
             return null;
-        }
-
-        private static GUIStyle RichLabel()
-        {
-            return new GUIStyle(GUI.skin.label) { richText = true, wordWrap = true };
         }
 #else
         private void Start()

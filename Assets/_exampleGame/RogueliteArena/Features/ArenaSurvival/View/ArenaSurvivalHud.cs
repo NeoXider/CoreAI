@@ -55,8 +55,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.View
             if (_session.RunEnded)
             {
                 GUI.Label(new Rect(pad, pad, 900f, 32f),
-                    _session.PlayerWon ? "Победа — все волны пройдены!" : "Поражение", style);
-                GUI.Label(new Rect(pad, pad + 28f, 900f, 32f), "R — перезапуск сцены", style);
+                    _session.PlayerWon ? "Победа - все волны пройдены!" : "Поражение", style);
+                GUI.Label(new Rect(pad, pad + 28f, 900f, 32f), "R - перезапуск сцены", style);
                 return;
             }
 
@@ -72,11 +72,11 @@ namespace CoreAI.ExampleGame.ArenaSurvival.View
             GUI.Label(new Rect(pad, pad, 900f, 32f),
                 $"Волна {_session.CurrentWave}  |  HP {h}  |  Врагов: {_session.AliveEnemies}{prog}", style);
             string simHint = _session.IsAuthoritativeSimulation ? "" : "  [клиент: без симуляции врагов]";
-            GUI.Label(new Rect(pad, pad + 28f, 900f, 32f), $"WASD — движение, Space / ЛКМ — удар{simHint}", style);
+            GUI.Label(new Rect(pad, pad + 28f, 900f, 32f), $"WASD - движение, Space / ЛКМ - удар{simHint}", style);
             float y = pad + 56f;
             if (_creatorPlanner != null && _creatorPlanner.IsAwaitingCreatorPlan)
             {
-                GUI.Label(new Rect(pad, y, 900f, 28f), "ИИ думает… (план волны)", style);
+                GUI.Label(new Rect(pad, y, 900f, 28f), "ИИ думает... (план волны)", style);
                 y += 26f;
             }
 

@@ -728,28 +728,16 @@ MonoBehaviour:
     width: 560
     height: 180
   prompts:
-  - Label: 'Insert: starter armies mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `starter_armies` using manage_mods.
-      Include metadata comments. The mod must forge two new unit types and deploy
-      them with the forge API. Lua: forge_define(''knight'', ''ally'', 60, 8, 1.4,
-      1.1, ''#3aa0ff'') forge_define(''goblin'', ''enemy'', 25, 4, 2.0, 1.0, ''#3cc452'')
-      for i=1,3 do forge_spawn(''knight'', -5, (i-2)*1.5) end for i=1,4 do forge_spawn(''goblin'',
-      5, (i-2)*1.2) end report(''Starter armies forged.'')'
-  - Label: 'Insert: archers and ogre boss'
-    Prompt: 'Create or reload a Lua mod with mod_id `reinforcements` using manage_mods.
-      Include metadata comments. It forges a long-range ally archer and a heavy enemy
-      ogre, then deploys them. Lua: forge_define(''archer'', ''ally'', 30, 10, 1.2,
-      4.0, ''#7ad0ff'') forge_define(''ogre'', ''enemy'', 140, 14, 1.0, 1.4, ''#d23c3c'')
-      for i=1,3 do forge_spawn(''archer'', -6, (i-2)*1.2) end forge_spawn(''ogre'',
-      6, 0) report(''Reinforcements deployed.'')'
-  - Label: 'Insert: endless waves mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `endless_waves` using manage_mods.
-      Include metadata comments. Using the unit types from starter_armies, it keeps
-      the battle alive: every 3 seconds it tops up goblins, and when a team is wiped
-      it revives a defender. Lua: hooks_every(3.0, function() if forge_count(''enemy'')
-      < 6 then forge_spawn(''goblin'', 6, math.random(-3, 3)) end end) hooks_on(''team_wiped'',
-      function(name, team) if team == ''ally'' then forge_spawn(''knight'', -5, 0)
-      end end) report(''Endless waves armed.'')'
+  - Label: 'Start a battle'
+    Prompt: Make a small starter battle: create a few blue allied knights on the left
+      and green goblins on the right. Save it as a mod so I can unload it later.
+  - Label: 'Add archers and boss'
+    Prompt: Add a new long-range allied archer and a large enemy ogre boss to the
+      current fight. Save this as a separate mod and tell me what it adds.
+  - Label: 'Endless waves'
+    Prompt: Make the fight continue on its own: when there are too few enemies, spawn
+      more small enemies, and if allies are wiped out, bring back a defender. Save it
+      as a mod.
   submitWhenInputUnavailable: 0
 --- !u!4 &2100352201
 Transform:

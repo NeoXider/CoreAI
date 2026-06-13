@@ -181,7 +181,7 @@ namespace CoreAI.Ai
                 string content = history[i].Content ?? "";
                 if (content.Length > maxPerMsg)
                 {
-                    content = content.Substring(0, maxPerMsg).TrimEnd() + "...";
+                    content = content.Substring(0, maxPerMsg).TrimEnd() + "…";
                 }
 
                 sb.Append("- ").Append(role).Append(": ").AppendLine(content);
@@ -192,7 +192,7 @@ namespace CoreAI.Ai
                 "Output a compact updated rolling summary (bullets or short paragraphs). Do not repeat wording unnecessarily.");
 
             string text = sb.ToString();
-            return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "\n...[truncated]";
+            return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "\n…[truncated]";
         }
 
         private static string NormalizeSummaryText(string content, int maxChars)
@@ -205,7 +205,7 @@ namespace CoreAI.Ai
             string s = content.Trim();
             if (s.Length > maxChars)
             {
-                s = s.Substring(0, maxChars).TrimEnd() + "...";
+                s = s.Substring(0, maxChars).TrimEnd() + "…";
             }
 
             return s;

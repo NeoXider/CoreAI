@@ -90,7 +90,7 @@ namespace CoreAI.Demos
 
             EnsureUnitRoot();
             _status = "Empty arena. Ask chat to write a mod that forges units.";
-            Log("No content yet — units and waves arrive only from Lua mods.");
+            Log("No content yet - units and waves arrive only from Lua mods.");
         }
 
         private void OnDestroy()
@@ -314,7 +314,7 @@ namespace CoreAI.Demos
 
         private void OnModEvent(string modId, string eventName, string payload)
         {
-            Log($"Mod event: {modId} → {eventName}({payload}).");
+            Log($"Mod event: {modId} -> {eventName}({payload}).");
         }
 
         private void OnModLoaded(string modId, string source, LuaCapabilities caps)
@@ -334,7 +334,7 @@ namespace CoreAI.Demos
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(12, 12, 560, 540), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI — Unit Forge (mod-driven game)</b>", RichLabel());
+            GUILayout.Label("<b>CoreAI - Unit Forge (mod-driven game)</b>", RichLabel());
             GUILayout.Label(_status, RichLabel());
 
             GUILayout.Space(4);
@@ -346,14 +346,14 @@ namespace CoreAI.Demos
             GUILayout.Label("<b>Unit types (forged by mods)</b>", RichLabel());
             if (_archetypes.Count == 0)
             {
-                GUILayout.Label("None yet — ask chat to write a mod that calls forge_define.");
+                GUILayout.Label("None yet - ask chat to write a mod that calls forge_define.");
             }
             else
             {
                 foreach (KeyValuePair<string, Archetype> entry in _archetypes)
                 {
                     Archetype a = entry.Value;
-                    GUILayout.Label($"• {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
+                    GUILayout.Label($"* {a.Name} [{a.Team}] hp={a.Hp:0.#} dmg={a.Damage:0.#} spd={a.Speed:0.#} rng={a.Range:0.#}");
                 }
             }
 
@@ -370,7 +370,7 @@ namespace CoreAI.Demos
                 {
                     foreach (LuaModInfo mod in mods)
                     {
-                        GUILayout.Label($"• {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
+                        GUILayout.Label($"* {mod.Id} handlers={mod.HandlerCount} timers={mod.TimerCount} errors={mod.ErrorCount}");
                     }
                 }
             }

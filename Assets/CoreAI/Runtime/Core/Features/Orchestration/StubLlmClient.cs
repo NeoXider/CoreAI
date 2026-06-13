@@ -31,7 +31,7 @@ namespace CoreAI.Ai
                 return Task.FromResult(new LlmCompletionResult
                 {
                     Ok = true,
-                    Content = "[stub] Offline — LLM unavailable (stub)."
+                    Content = "[stub] Offline - LLM unavailable (stub)."
                 });
             }
 

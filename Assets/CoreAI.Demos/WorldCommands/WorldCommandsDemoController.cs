@@ -65,7 +65,7 @@ namespace CoreAI.Demos
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(12, 12, 420, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("CoreAI — World Commands Demo (AI command pipeline)");
+            GUILayout.Label("CoreAI - World Commands Demo (AI command pipeline)");
             GUILayout.Label(_status);
             GUILayout.Space(6);
 

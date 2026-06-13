@@ -53,7 +53,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             {
                 Debug.LogWarning(
                     "[CoreAI.ExampleGame] AINpc (F2): не удалось разобрать stance из ответа (ожидается JSON с полем stance или слова aggressive/defensive/balanced). Payload: " +
-                    (raw.Length > 200 ? raw.Substring(0, 200) + "…" : raw));
+                    (raw.Length > 200 ? raw.Substring(0, 200) + "..." : raw));
                 return;
             }
 
@@ -67,7 +67,7 @@ namespace CoreAI.ExampleGame.ArenaCombat.Infrastructure
             bot.ApplyCombatStance(stance);
             if (!string.IsNullOrWhiteSpace(flavor))
             {
-                Debug.Log($"[CoreAI.ExampleGame] Компаньон (AINpc): «{flavor.Trim()}»");
+                Debug.Log($"[CoreAI.ExampleGame] Компаньон (AINpc): \"{flavor.Trim()}\"");
             }
         }
 

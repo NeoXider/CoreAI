@@ -240,8 +240,8 @@ namespace CoreAI.ExampleGame.ArenaSurvival.Infrastructure
                     ? $" Пресеты волн в ассете: {wavePresetLibrary.Presets.Count}."
                     : "";
                 Debug.Log(
-                    "[CoreAI.ExampleGame] ИИ: ArenaAiTaskBus (события волны/HP/босс/комната + демо F1/F2); Creator — план волны и предзапрос следующей; " +
-                    "раз в N волн — Analyzer/AINpc (ArenaAuxLlmEveryNWaves); пост-волна — Analyzer (лог); Programmer — F9. " +
+                    "[CoreAI.ExampleGame] ИИ: ArenaAiTaskBus (события волны/HP/босс/комната + демо F1/F2); Creator - план волны и предзапрос следующей; " +
+                    "раз в N волн - Analyzer/AINpc (ArenaAuxLlmEveryNWaves); пост-волна - Analyzer (лог); Programmer - F9. " +
                     "Контекст Creator: Docs/CREATOR_WAVE_CONTEXT.md." +
                     presetInfo);
             }

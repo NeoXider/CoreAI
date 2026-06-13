@@ -395,6 +395,7 @@ GameObject:
   m_Component:
   - component: {fileID: 933156841}
   - component: {fileID: 933156842}
+  - component: {fileID: 933156843}
   m_Layer: 0
   m_Name: LiveMechanicsDemo
   m_TagString: Untagged
@@ -432,14 +433,29 @@ MonoBehaviour:
   coreAiScope: {fileID: 0}
   modKeyPrefix: demo.wave_auto_battler.mods_chat.mod.
   panelTitle: Wave Auto-Battler Mod Manager
-  toggleKey: 291
+  toggleKey: 290
   panelRect:
     serializedVersion: 2
-    x: 1280
-    y: 92
+    x: 470
+    y: 12
     width: 430
     height: 460
   showPanel: 1
+--- !u!114 &933156843
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933156839}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f684e3ef8cb34affb7e1aa9006e81e6c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: CoreAI.Source::CoreAI.Diagnostics.CoreAiTokenBudgetOverlay
+  _showOverlay: 1
+  _toggleKey: 291
+  _rollingWindowSeconds: 60
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -729,52 +745,14 @@ MonoBehaviour:
     width: 560
     height: 180
   prompts:
-  - Label: 'Insert: healer aura mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `healer_aura` using manage_mods.
-      It must be real for the Wave Auto-Battler scene and include metadata comments.
-      Code:
-
-      -- name: Healer Aura
-
-      -- description: Adds strong hero regeneration
-      that scales with level and announces every cleared wave.
-
-      logic_define(''hero_regen'',
-      function(heroLevel, wave) return 2 + heroLevel * 0.7 end)
-
-      hooks_on(''wave_cleared'',
-      function(eventName, payload) report(''Healer Aura restored the hero after wave
-      '' .. payload) end)
-
-      report(''Healer Aura loaded.'')'
-  - Label: 'Insert: battle scaler mod'
-    Prompt: 'Create or reload a Lua mod with mod_id `battle_scaler` using manage_mods.
-      Include metadata comments. Code:
-
-      -- name: Battle Scaler
-
-      -- description:
-      Makes waves denser, enemies tougher, and rewards higher so the autobattler
-      visibly changes.
-
-      logic_define(''enemy_count'', function(wave) return
-      math.min(8, 2 + math.floor(wave / 2)) end)
-
-      logic_define(''enemy_hp'',
-      function(wave) return 20 + wave * 11 end)
-
-      logic_define(''enemy_damage'',
-      function(wave) return 2 + wave * 0.55 end)
-
-      logic_define(''wave_reward'',
-      function(wave) return 25 + wave * 7 end)
-
-      report(''Battle Scaler loaded.'')'
-  - Label: 'Insert: modify battle scaler'
-    Prompt: Use manage_mods get_source for `battle_scaler`, then manage_mods reload
-      it. Change its description to say it is the generous version, reduce enemy_hp
-      scaling to `18 + wave * 7`, and increase wave_reward to `40 + wave * 10`. Keep
-      the same mod_id.
+  - Label: Add healer aura
+    Prompt: Make the hero slowly regenerate health, and announce it whenever a wave
+      is cleared. Save this as a mod so I can turn it off later.
+  - Label: Make waves harder
+    Prompt: 
+  - Label: Make rewards generous
+    Prompt: Change the wave difficulty mod so enemies are a bit less tanky, but rewards
+      are much better. Keep it as the same mod instead of creating a duplicate.
   submitWhenInputUnavailable: 0
 --- !u!4 &2100352201
 Transform:
@@ -831,6 +809,7 @@ MonoBehaviour:
   worldPrefabRegistry: {fileID: 11400000, guid: 719ce111264b64f448356376b6f5acab, type: 2}
   luaAllowedScenes: []
   enableFullLuaAccess: 0
+  enableFullLuaPrivateAccess: 0
   aiNetworkExecutionPolicy: 0
   networkPeerBehaviour: {fileID: 0}
 --- !u!4 &2106438250

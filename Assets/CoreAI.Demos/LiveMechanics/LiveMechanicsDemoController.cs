@@ -196,7 +196,7 @@ namespace CoreAI.Demos
         private void OnGUI()
         {
             GUILayout.BeginArea(new Rect(12, 12, 470, Screen.height - 24), GUI.skin.box);
-            GUILayout.Label("<b>CoreAI — Live Mechanics Demo (LLM edits the rules)</b>", RichLabel());
+            GUILayout.Label("<b>CoreAI - Live Mechanics Demo (LLM edits the rules)</b>", RichLabel());
             GUILayout.Label(_status, RichLabel());
 
             if (_slots == null)
@@ -233,7 +233,7 @@ namespace CoreAI.Demos
             {
                 foreach (LuaModInfo mod in mods)
                 {
-                    GUILayout.Label($"• {mod.Id} caps={mod.Capabilities} errors={mod.ErrorCount}");
+                    GUILayout.Label($"* {mod.Id} caps={mod.Capabilities} errors={mod.ErrorCount}");
                 }
             }
 
@@ -250,7 +250,7 @@ namespace CoreAI.Demos
         private void DrawSlotRow(string slot, string args)
         {
             string state = _slots.IsOverridden(slot) ? "<b>Lua override</b>" : "C# default";
-            GUILayout.Label($"• {slot}({args}) — {state}", RichLabel());
+            GUILayout.Label($"* {slot}({args}) - {state}", RichLabel());
         }
 
         private static GUIStyle RichLabel()
