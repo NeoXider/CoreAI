@@ -34,7 +34,7 @@ namespace CoreAI.Tests.EditMode
             });
 
             Assert.IsTrue(result.Ok);
-            // Creator имеет специфичную заглушку
+            // Creator has a role-specific offline stub.
             Assert.AreEqual("{\"created\": false, \"note\": \"offline\"}", result.Content);
 
             Object.DestroyImmediate(settings);
@@ -124,15 +124,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            // Включаем кастомный ответ
-            settings.GetType()
-                .GetField("offlineUseCustomResponse",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
-            settings.GetType()
-                .GetField("offlineCustomResponse",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "Custom offline message");
+            settings.ConfigureOffline(true, "Custom offline message");
 
             OfflineLlmClient client = new(settings);
 
@@ -154,22 +146,11 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            settings.GetType()
-                .GetField("offlineUseCustomResponse",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
-            settings.GetType()
-                .GetField("offlineCustomResponse",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "Custom");
-            settings.GetType()
-                .GetField("offlineCustomResponseRoles",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "Creator");
+            settings.ConfigureOffline(true, "Custom", "Creator");
 
             OfflineLlmClient client = new(settings);
 
-            // Creator — кастомный
+            // Creator gets the custom response.
             LlmCompletionResult result1 = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Creator",
@@ -177,7 +158,7 @@ namespace CoreAI.Tests.EditMode
             });
             Assert.AreEqual("Custom", result1.Content);
 
-            // Programmer — заглушка по ролям
+            // Programmer keeps the role-specific stub.
             LlmCompletionResult result2 = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Programmer",

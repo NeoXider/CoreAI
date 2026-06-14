@@ -19,10 +19,7 @@ namespace CoreAI.Tests.EditMode
         public void Constructor_WithOpenAiHttpSettings_ShouldCreateClient()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
+            settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "gpt-4o-mini");
 
             OpenAiChatLlmClient client = new(settings);
             Assert.IsNotNull(client);
@@ -46,17 +43,7 @@ namespace CoreAI.Tests.EditMode
         public void Constructor_WithFullParams_ShouldCreateClient()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
-            settings.GetType()
-                .GetField("apiBaseUrl",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "http://localhost:1234/v1");
-            settings.GetType()
-                .GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "test-model");
+            settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "test-model");
 
             OpenAiChatLlmClient client = new(settings, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 GameLoggerUnscopedFallback.Instance, null);
@@ -78,24 +65,11 @@ namespace CoreAI.Tests.EditMode
         public async Task CompleteAsync_WithoutRealBackend_ShouldReturnError()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
-            settings.GetType()
-                .GetField("apiBaseUrl",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "http://invalid-host-test:9999/v1");
-            settings.GetType()
-                .GetField("model", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "test");
-            settings.GetType().GetField("requestTimeoutSeconds",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, 5);
+            settings.SetRuntimeConfiguration(true, "http://invalid-host-test:9999/v1", "", "test", 0.2f, 5);
 
             OpenAiChatLlmClient client = new(settings);
 
-            // Сбой сети / таймаут: UWR-тексты, HttpClient SendAsync, или TaskCanceledException при таймауте HttpClient.
+            // Network failure or timeout: UnityWebRequest text, HttpClient SendAsync, or TaskCanceledException.
             LogAssert.Expect(LogType.Warning,
                 new System.Text.RegularExpressions.Regex(
                     @".*\[Llm\] MeaiOpenAiChatClient: (Cannot resolve destination host|Request timeout|Network error|SendAsync failed:|Send failed:|Request timeout or transport canceled|stream open: Request timeout or transport canceled).*"));
@@ -109,7 +83,6 @@ namespace CoreAI.Tests.EditMode
                 UserPayload = "test"
             });
 
-            // Ожидается ошибка подключения к несуществующему хосту
             Assert.IsFalse(result.Ok);
 
             Object.DestroyImmediate(settings);

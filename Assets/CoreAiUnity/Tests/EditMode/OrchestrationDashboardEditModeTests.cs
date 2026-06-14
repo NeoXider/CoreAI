@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using CoreAI.Diagnostics;
 using NUnit.Framework;
 using UnityEngine;
@@ -7,8 +7,8 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// Smoke coverage for <see cref="OrchestrationDashboard"/> compatibility with both input stacks.
-    /// Full keyboard simulation belongs in PlayMode; this test verifies construction,
-    /// initialization, and the update loop under the active input configuration.
+    /// Full keyboard simulation belongs in PlayMode; this test verifies that the update loop
+    /// tolerates any Active Input Handling configuration without throwing.
     /// </summary>
     [TestFixture]
     public sealed class OrchestrationDashboardEditModeTests
@@ -33,19 +33,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Component_CanBeInstantiated_OnAnyActiveInputHandler()
-        {
-            Assert.IsNotNull(_dashboard,
-                "OrchestrationDashboard must AddComponent successfully regardless of Active Input Handling.");
-        }
-
-        [Test]
         public void Update_DoesNotThrow_WhenNoMetricsAttached()
         {
-            // Reflection — Update — приватный метод. Ранее вызов Input.GetKeyDown() выбрасывал
-            // InvalidOperationException, когда legacy Input Manager отключён в проекте,
-            // и Update крашил каждый кадр. Smoke-тест ловит регресс: метод вызывается
-            // безопасно при любом значении ENABLE_LEGACY_INPUT_MANAGER / ENABLE_INPUT_SYSTEM.
+            // Reflection path: call the private Update method directly.
+            // Older editor/input combinations can throw when legacy input references Input.GetKeyDown(); this test guards resilience
+            // by validating Update under different Active Input Handling configurations.
+            // Covers both legacy and new Input System branches controlled by project symbols.
+            // This is intentionally a smoke test for startup robustness, not input behavior.
             MethodInfo update = typeof(OrchestrationDashboard).GetMethod(
                 "Update",
                 BindingFlags.Instance | BindingFlags.NonPublic);

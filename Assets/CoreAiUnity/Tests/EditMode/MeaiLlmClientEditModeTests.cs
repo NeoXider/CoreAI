@@ -20,10 +20,7 @@ namespace CoreAI.Tests.EditMode
         public void CreateHttp_WithOpenAiSettings_ShouldNotThrow()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
+            settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "test-model");
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings,
@@ -65,10 +62,7 @@ namespace CoreAI.Tests.EditMode
         public void BuildAIFunctions_ShouldCreateMemoryTool()
         {
             OpenAiHttpLlmSettings settings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            settings.GetType()
-                .GetField("useOpenAiCompatibleHttp",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
+            settings.SetRuntimeConfiguration(true, "http://localhost:1234/v1", "", "test-model");
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
             TestMemoryStore memoryStore = new();

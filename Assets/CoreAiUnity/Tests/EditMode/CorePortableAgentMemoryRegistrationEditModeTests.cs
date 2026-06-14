@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -27,7 +26,7 @@ namespace CoreAI.Tests.EditMode
 #if !UNITY_WEBGL
         /// <summary>
         /// Mirrors successful <see cref="CoreAILifetimeScope.Configure"/>: summary + portable with suppressed
-        /// default agent memory, then host file store — container must build and resolve a single implementation.
+        /// default agent memory, then host file store - container must build and resolve a single implementation.
         /// </summary>
         [Test]
         public void RegisterCorePortable_SuppressAgentMemory_ThenFileStore_BuildsAndResolvesFileStore()
@@ -67,7 +66,7 @@ namespace CoreAI.Tests.EditMode
 
         /// <summary>
         /// Without <c>suppressDefaultAgentMemoryStore</c>, portable registers <see cref="NullAgentMemoryStore"/> and
-        /// the host adds <see cref="FileAgentMemoryStore"/> — different implementation types, so
+        /// the host adds <see cref="FileAgentMemoryStore"/> - different implementation types, so
         /// <see cref="ContainerBuilder.Build"/> does not throw; VContainer exposes both via
         /// <see cref="IReadOnlyList{IAgentMemoryStore}"/>. That broken state is what <see cref="CoreAILifetimeScope"/>
         /// avoids (two bindings for one role store). Duplicate <b>same</b> type (e.g. two Null on WebGL) throws
@@ -113,9 +112,7 @@ namespace CoreAI.Tests.EditMode
             builder.RegisterCore();
 
             settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            FieldInfo executionModeField = typeof(CoreAISettingsAsset).GetField(
-                "executionMode", BindingFlags.NonPublic | BindingFlags.Instance);
-            executionModeField.SetValue(settings, LlmExecutionMode.Offline);
+            settings.ConfigureOffline();
 
             builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
             builder.RegisterAgentPrompts(null);

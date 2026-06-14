@@ -106,8 +106,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(result.Success);
             Assert.IsTrue(result.Message.Contains("Unknown action"));
         }
-
-        // TODO: play_sound удалён из WorldLlmTool, будет реализован отдельно через IAudioController (на потом)
+        // TODO: Keep play_animation focused test here; add dedicated audio coverage when WorldLlmTool exposes sound actions.
 
         [Test]
         public async Task WorldLlmTool_ExecuteAsync_PlayAnimation_ReturnsSuccess()
@@ -285,7 +284,7 @@ namespace CoreAI.Tests.EditMode
             {
                 LastThreadId = Thread.CurrentThread.ManagedThreadId;
                 LastCommandJson = cmd.JsonPayload;
-                return true; // Всегда возвращаем успех для тестов
+                return true; // Keep execution synchronous for deterministic editor-only tests.
             }
         }
 

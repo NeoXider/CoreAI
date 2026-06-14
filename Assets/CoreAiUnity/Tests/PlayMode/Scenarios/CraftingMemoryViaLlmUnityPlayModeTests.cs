@@ -1,5 +1,5 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,9 +22,7 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode           memory
-    ///     .       ,
-    ///         .
+    /// PlayMode scenario that verifies crafting memory across multiple LLMUnity-backed turns.
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class CraftingMemoryViaLlmUnityPlayModeTests
@@ -79,19 +77,16 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        ///     LLMUnity: 3 , AI   
-        ///   memory     .
+        /// Verifies that three LLMUnity crafting turns produce unique items and persist memory.
         /// </summary>
         [UnityTest]
         [Explicit("Targeted backend-parity crafting probe. Mandatory full PlayMode keeps CraftingMemoryOpenAi_ThreeCrafts_AllUnique as the representative Lua-backed ThreeCrafts gate.")]
         [Timeout(600000)]
         public IEnumerator CraftingMemoryLlmUnity_ThreeCrafts_AllUnique()
         {
-            Debug.Log("[CraftingMemory.LLMUnity] ========================================");
             Debug.Log("[CraftingMemory.LLMUnity] TEST START");
-            Debug.Log("[CraftingMemory.LLMUnity] ========================================");
 
-            // Backend  CoreAISettingsAsset (null = FromSettings)
+            // Resolve the configured production-like LLM backend.
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -104,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                //   LLMUnity    .  HTTP  .
+                // Wait for LLMUnity model readiness when that backend is selected.
                 if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
@@ -114,7 +109,7 @@ namespace CoreAI.Tests.PlayMode
 
                 InMemoryStore store = new();
 
-                //  LuaLlmTool    Lua (SecureLuaEnvironment)
+                // Register Lua execution as the crafting tool.
                 RealLuaExecutor luaExecutor = new();
                 LuaLlmTool luaTool = new(luaExecutor, ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                     Logging.NullLog.Instance);
@@ -124,7 +119,7 @@ namespace CoreAI.Tests.PlayMode
                 // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
                 // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
                 policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                //  execute_lua   CoreMechanic
+                // Restrict CoreMechanicAI to the execute_lua crafting tool.
                 policy.SetToolsForRole(BuiltInAgentRoleIds.CoreMechanic, new ILlmTool[] { luaTool });
 
                 SessionTelemetryCollector telemetry = new();
@@ -140,7 +135,7 @@ namespace CoreAI.Tests.PlayMode
                 List<string> craftedNames = new();
                 string memoryAccum = "";
 
-                // =====  1: Iron + Oak =====
+                // Craft 1: Iron + Oak.
                 {
                     string prompt = BuildCraftPrompt(1,
                         "Iron (metal, hardness:60, magic:5, rarity:1)",
@@ -176,7 +171,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====  2: Steel + Hardwood =====
+                // Craft 2: Steel + Hardwood.
                 {
                     string prompt = BuildCraftPrompt(2,
                         "Steel (metal, hardness:75, magic:8, rarity:2)",
@@ -212,7 +207,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====  3: Mithril + Enchanted Wood =====
+                // Craft 3: Mithril + Enchanted Wood.
                 {
                     string prompt = BuildCraftPrompt(3,
                         "Mithril (metal, hardness:70, magic:60, rarity:4)",
@@ -248,10 +243,8 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====   =====
-                Debug.Log("[CraftingMemory.LLMUnity] ");
+                // Final validation.
                 Debug.Log("[CraftingMemory.LLMUnity]  FINAL VALIDATION ");
-                Debug.Log("[CraftingMemory.LLMUnity] ");
 
                 Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
 
@@ -268,9 +261,7 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
                 }
 
-                Debug.Log("[CraftingMemory.LLMUnity] ");
                 Debug.Log("[CraftingMemory.LLMUnity]  TEST PASSED ");
-                Debug.Log("[CraftingMemory.LLMUnity] ");
             }
             finally
             {
@@ -299,7 +290,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        ///  ILuaExecutor  SecureLuaEnvironment   Lua   .
+        /// Executes Lua in a secure sandbox for the crafting memory scenario.
         /// </summary>
         private sealed class RealLuaExecutor : LuaTool.ILuaExecutor
         {
@@ -312,7 +303,7 @@ namespace CoreAI.Tests.PlayMode
                 _sandbox = new SecureLuaEnvironment();
                 _registry = new LuaApiRegistry();
 
-                //   API: report, create_item
+                // Register Lua APIs used by generated scripts.
                 _registry.Register("report", new Action<string>(msg =>
                     Debug.Log($"[Lua.report] {msg}")));
                 _registry.Register("create_item", new Action<string, string, double>((name, type, quality) =>
@@ -458,31 +449,24 @@ namespace CoreAI.Tests.PlayMode
 
         private static void LogBeforeModelCall(string label, string prompt, InMemoryStore store)
         {
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
             Debug.Log($"[CraftingMemory.LLMUnity] SENDING TO MODEL: {label}");
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
 
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
                 Debug.Log($"[CraftingMemory.LLMUnity] MEMORY VISIBLE TO MODEL:\n{mem.Memory}");
-                Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
             }
             else
             {
                 Debug.Log("[CraftingMemory.LLMUnity] MEMORY: (empty - first craft)");
-                Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
             }
 
             Debug.Log($"[CraftingMemory.LLMUnity] PROMPT ({prompt.Length} chars):\n{prompt}");
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
         }
 
         private static void LogAfterModelCall(string label, ListSink sink, InMemoryStore store)
         {
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
             Debug.Log($"[CraftingMemory.LLMUnity] MODEL RESPONSE: {label}");
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
 
             if (sink.Items.Count > 0)
             {
@@ -503,10 +487,9 @@ namespace CoreAI.Tests.PlayMode
             else
             {
                 Debug.Log(
-                    "[CraftingMemory.LLMUnity] MEMORY: (empty in store after turn — may still be applied next frame, or filled by ExtractCraftInfo from payload)");
+                    "[CraftingMemory.LLMUnity] MEMORY: (empty in store after turn - may still be applied next frame, or filled by ExtractCraftInfo from payload)");
             }
 
-            Debug.Log("[CraftingMemory.LLMUnity] ----------------------------------------");
         }
 
         private static bool ExtractCraftInfo(

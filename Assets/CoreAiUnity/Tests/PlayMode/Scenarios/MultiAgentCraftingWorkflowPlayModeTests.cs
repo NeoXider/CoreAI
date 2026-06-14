@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,9 +17,7 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    ///      :
-    /// Creator ()  CoreMechanicAI ()  Programmer (Lua ).
-    ///      ,     .
+    /// PlayMode scenarios that verify a multi-agent crafting workflow and isolated role memory.
     /// </summary>
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MultiAgentCraftingWorkflowPlayModeTests
@@ -71,17 +69,15 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        ///  : Creator  CoreMechanicAI  Programmer
+        /// Runs the Creator, CoreMechanicAI, and Programmer roles through a complete crafting workflow.
         /// </summary>
         [UnityTest]
         [Timeout(600000)]
         public IEnumerator MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow()
         {
-            Debug.Log("[MultiAgent] ");
             Debug.Log("[MultiAgent]  TEST START: Creator  CoreMechanic  Programmer ");
-            Debug.Log("[MultiAgent] ");
 
-            // Backend  CoreAISettingsAsset (null = FromSettings)
+            // Resolve the configured production-like LLM backend.
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -115,16 +111,14 @@ namespace CoreAI.Tests.PlayMode
                     new NoAgentUserPromptTemplateProvider(),
                     new NullLuaScriptVersionStore());
 
-                //     MemoryStore
+                // Wrap the client with the shared memory store.
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
                 CoreAi.ClearToolCallHistory();
                 using ToolCallCapture toolCalls = new();
 
-                // =====  1: Creator    =====
+                // Step 1: Creator designs the craft.
                 {
-                    Debug.Log("[MultiAgent] ");
                     Debug.Log("[MultiAgent]   1: Creator   ");
-                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "Creator");
 
@@ -148,7 +142,7 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("creator", sink);
                     LogAgentMemory(store, "Creator");
 
-                    //   Creator   
+                    // Verify that Creator wrote memory.
                     Assert.IsTrue(
                         store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorMem) &&
                         !string.IsNullOrWhiteSpace(creatorMem.Memory),
@@ -157,11 +151,9 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[MultiAgent]  Creator memory: {creatorMem.Memory}");
                 }
 
-                // =====  2: CoreMechanicAI   =====
+                // Step 2: CoreMechanicAI calculates the result.
                 {
-                    Debug.Log("[MultiAgent] ");
                     Debug.Log("[MultiAgent]   2: CoreMechanicAI   ");
-                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "CoreMechanicAI");
 
@@ -219,11 +211,9 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====  3: Programmer  Lua  =====
+                // Step 3: Programmer generates Lua.
                 {
-                    Debug.Log("[MultiAgent] ");
                     Debug.Log("[MultiAgent]   3: Programmer   Lua");
-                    Debug.Log("[MultiAgent] ");
 
                     LogAgentMemory(store, "Programmer");
 
@@ -258,13 +248,10 @@ namespace CoreAI.Tests.PlayMode
                         "Programmer must execute Lua through the registered execute_lua tool.");
                 }
 
-                // =====  4: CoreMechanicAI    () =====
+                // Step 4: CoreMechanicAI repeats the craft from memory.
                 {
-                    Debug.Log("[MultiAgent] ");
                     Debug.Log("[MultiAgent]   4: CoreMechanicAI    ()");
-                    Debug.Log("[MultiAgent] ");
 
-                    //     
                     string craft1Memory = "";
                     if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem1))
                     {
@@ -291,19 +278,15 @@ namespace CoreAI.Tests.PlayMode
                     LogAgentResponse("mechanic repeat", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
 
-                    //    
                     if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem2))
                     {
                         Debug.Log($"[MultiAgent] Final CoreMechanicAI memory:\n{mem2.Memory}");
                     }
                 }
 
-                // =====   =====
-                Debug.Log("[MultiAgent] ");
+                // Final validation.
                 Debug.Log("[MultiAgent]  FINAL VALIDATION ");
-                Debug.Log("[MultiAgent] ");
 
-                //   
                 Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorState),
                     "Creator must persist its design memory.");
                 Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicState),
@@ -315,7 +298,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
                 Debug.Log($"[MultiAgent] Programmer memory:  {(hasProgrammerMemory ? programmerState.Memory : "(none)")}");
 
-                //      
                 Assert.AreNotEqual(creatorState.Memory, mechanicState.Memory,
                     "Creator and CoreMechanicAI must have DIFFERENT memory");
                 if (hasProgrammerMemory)
@@ -325,9 +307,7 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 Debug.Log("[MultiAgent]  Memory isolation verified");
-                Debug.Log("[MultiAgent] ");
                 Debug.Log("[MultiAgent]  TEST PASSED ");
-                Debug.Log("[MultiAgent] ");
             }
             finally
             {
@@ -336,19 +316,16 @@ namespace CoreAI.Tests.PlayMode
         }
 
         /// <summary>
-        ///  :  Creator  CoreMechanicAI ( Programmer)
-        ///   .
+        /// Runs a shorter Creator and CoreMechanicAI workflow to verify memory isolation.
         /// </summary>
         [UnityTest]
         [Explicit("Targeted shorter duplicate of the full multi-agent workflow; run directly when triaging Creator/CoreMechanic memory isolation, not in mandatory full live-model suite.")]
         [Timeout(600000)]
         public IEnumerator MultiAgent_CreatorThenMechanic_QuickWorkflow()
         {
-            Debug.Log("[MultiAgent.Quick] ");
             Debug.Log("[MultiAgent.Quick]  TEST START: Creator  CoreMechanic ");
-            Debug.Log("[MultiAgent.Quick] ");
 
-            // Backend  CoreAISettingsAsset (null = FromSettings)
+            // Resolve the configured production-like LLM backend.
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -372,7 +349,7 @@ namespace CoreAI.Tests.PlayMode
 
                 ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
 
-                // ===== CREATOR =====
+                // Creator designs the craft.
                 {
                     Debug.Log("[MultiAgent.Quick] === CREATOR: Design craft ===");
                     LogAgentMemory(store, "Creator");
@@ -402,13 +379,13 @@ namespace CoreAI.Tests.PlayMode
                     if (!creatorMemoryOk && sink.Items.Count == 0)
                     {
                         Assert.Inconclusive(
-                            "Creator: no orchestrator output — check LLM / LM Studio (model reload, load errors).");
+                            "Creator: no orchestrator output - check LLM / LM Studio (model reload, load errors).");
                     }
 
                     Assert.IsTrue(creatorMemoryOk, "Creator did not write memory");
                 }
 
-                // ===== COREMECHANIC =====
+                // CoreMechanicAI calculates the result.
                 {
                     Debug.Log("[MultiAgent.Quick] === COREMECHANIC: Calculate result ===");
                     LogAgentMemory(store, "CoreMechanicAI");
@@ -437,7 +414,7 @@ namespace CoreAI.Tests.PlayMode
                     if (!mechanicMemoryOk && sink.Items.Count == 0)
                     {
                         Assert.Inconclusive(
-                            "CoreMechanic: no orchestrator output — usually local LLM HTTP errors " +
+                            "CoreMechanic: no orchestrator output - usually local LLM HTTP errors " +
                             "(e.g. LM Studio \"Model reloaded.\" or model load canceled). Retry when the model is idle.");
                     }
 
@@ -445,7 +422,7 @@ namespace CoreAI.Tests.PlayMode
                         "CoreMechanicAI did not write memory (model may have skipped the memory tool).");
                 }
 
-                // =====   =====
+                // Final validation.
                 Debug.Log("[MultiAgent.Quick]  MEMORY ISOLATION CHECK ");
 
                 AgentMemoryState creatorMem = store.States[BuiltInAgentRoleIds.Creator];

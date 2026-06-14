@@ -86,6 +86,8 @@ If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChat
 
 ## Test Integrity Rule
 
+See also `Assets/CoreAiUnity/Tests/README.md` for the full EditMode + PlayMode test requirements.
+
 Tests must measure whether the system under test works. They must not rescue the implementation or the model with answer-shaped hints after a failure.
 
 - Prompts and fixtures should describe the user/game goal in domain language. They may mention a capability only when that capability is the actual feature under test, but they must not dictate exact tool payloads, exact Lua bodies, exact response text, or private expected values unless the test is explicitly a parser, serializer, repair, or deterministic extraction fixture.

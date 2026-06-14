@@ -856,8 +856,62 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Disable networked LLMs (offline/stub).</summary>
         public void ConfigureOffline()
         {
+            ConfigureOffline(false);
+        }
+
+        /// <summary>Disable networked LLMs and optionally serve a fixed custom response for matched roles.</summary>
+        public void ConfigureOffline(bool useCustomResponse, string customResponse = null, string roles = null)
+        {
             backendType = LlmBackendType.Offline;
             executionMode = LlmExecutionMode.Offline;
+            offlineUseCustomResponse = useCustomResponse;
+            if (customResponse != null)
+            {
+                offlineCustomResponse = customResponse;
+            }
+
+            if (roles != null)
+            {
+                offlineCustomResponseRoles = roles;
+            }
+        }
+
+        /// <summary>Enable/disable the secondary fallback backend and set its URL/model/key.</summary>
+        public void ConfigureFallbackBackend(
+            bool enabled,
+            string secondaryBaseUrl,
+            string secondaryModel,
+            string secondaryKey = "")
+        {
+            enableFallbackBackend = enabled;
+            secondaryApiBaseUrl = secondaryBaseUrl ?? "";
+            secondaryModelName = secondaryModel ?? "";
+            secondaryApiKey = secondaryKey ?? "";
+        }
+
+        /// <summary>Sets the orchestration-level LLM cancel-after window (seconds).</summary>
+        public void SetOrchestratorTimeoutSeconds(float seconds)
+        {
+            llmRequestTimeoutSeconds = seconds;
+        }
+
+        /// <summary>Sets the OpenAI-compatible base URL without normalization (callers may pass raw values).</summary>
+        public void SetApiBaseUrl(string baseUrl)
+        {
+            apiBaseUrl = baseUrl;
+        }
+
+        /// <summary>Sets execution mode, legacy backend, and model identifiers for backend/model resolution.</summary>
+        public void SetModelResolution(
+            LlmExecutionMode mode,
+            LlmBackendType backend,
+            string model,
+            string ggufPath)
+        {
+            executionMode = mode;
+            backendType = backend;
+            modelName = model;
+            ggufModelPath = ggufPath;
         }
 
         /// <summary>Use automatic backend resolution (respects routing manifest + priority).</summary>

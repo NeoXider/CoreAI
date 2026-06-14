@@ -18,9 +18,7 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode      OpenAI API ( LM Studio).
-    ///  :          .
-    ///       .
+    /// PlayMode scenarios that verify crafting memory through an OpenAI-compatible backend.
     /// </summary>
     public sealed class CraftingMemoryViaOpenAiPlayModeTests
     {
@@ -80,11 +78,9 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_ThreeCrafts_AllUnique()
         {
-            Debug.Log("[CraftingMemory.OpenAI] ");
             Debug.Log("[CraftingMemory.OpenAI]  TEST START ");
-            Debug.Log("[CraftingMemory.OpenAI] ");
 
-            // Backend  CoreAISettingsAsset (null = FromSettings)
+            // Resolve the configured production-like LLM backend.
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -119,13 +115,11 @@ namespace CoreAI.Tests.PlayMode
                 CoreAi.ClearToolCallHistory();
                 using ToolCallCapture toolCalls = new();
                 List<string> craftedNames = new();
-                //  ""  :   craft#    .
-                //    store, :
-                // -    (  ,    memory tool)
-                // -  (craft 4)
+                // Canonical memory string used by later craft prompts.
+                // Keep this separate from store memory because the model can write memory directly.
                 string memoryAccum = "";
 
-                // =====  1: Iron + Oak =====
+                // Craft 1.
                 {
                     const string ing1 = "Iron";
                     const string ing2 = "Oak";
@@ -162,7 +156,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====  2: Steel + Hardwood =====
+                // Craft 2 with the same ingredients plus memory.
                 {
                     const string ing1 = "Steel";
                     const string ing2 = "Hardwood";
@@ -199,7 +193,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====  3: Mithril + Enchanted Wood =====
+                // Craft 3: Mithril + Enchanted Wood.
                 {
                     const string ing1 = "Mithril";
                     const string ing2 = "Enchanted";
@@ -236,10 +230,8 @@ namespace CoreAI.Tests.PlayMode
                     }
                 }
 
-                // =====   =====
-                Debug.Log("[CraftingMemory.OpenAI] ");
+                // Final validation.
                 Debug.Log("[CraftingMemory.OpenAI]  FINAL VALIDATION ");
-                Debug.Log("[CraftingMemory.OpenAI] ");
 
                 Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
 
@@ -250,9 +242,7 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[CraftingMemory.OpenAI]  First 3 crafts are unique");
                 Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
                 Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
-                Debug.Log("[CraftingMemory.OpenAI] ");
                 Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
-                Debug.Log("[CraftingMemory.OpenAI] ");
             }
             finally
             {
@@ -387,11 +377,9 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent()
         {
-            Debug.Log("[CraftingMemory.OpenAI] ");
             Debug.Log("[CraftingMemory.OpenAI]  2-CRAFT TEST START ");
-            Debug.Log("[CraftingMemory.OpenAI] ");
 
-            // Backend  CoreAISettingsAsset (null = FromSettings)
+            // Resolve the configured production-like LLM backend.
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
@@ -418,7 +406,7 @@ namespace CoreAI.Tests.PlayMode
                 CoreAi.ClearToolCallHistory();
                 using ToolCallCapture toolCalls = new();
 
-                // =====  1 =====
+                // Craft 1.
                 string prompt1 = BuildCraftPrompt(1,
                     "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
                     "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
@@ -450,7 +438,7 @@ namespace CoreAI.Tests.PlayMode
                 string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
 
-                // =====  2 (   + ) =====
+                // Craft 2 with the same ingredients plus memory.
                 // This harness only registers execute_lua (no memory ILlmTool), so the model's "memory" JSON
                 // never hits IAgentMemoryStore. Feed craft #2 the canonical previous-crafts line from craft #1
                 // so the prompt can require a different weapon name (same as ThreeCrafts memoryAccum pattern).
@@ -499,10 +487,8 @@ namespace CoreAI.Tests.PlayMode
                 string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
                 Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 2 name: '{secondName ?? "unknown"}'");
 
-                // ===== :   =====
-                Debug.Log("[CraftingMemory.OpenAI] ");
+                // Final validation.
                 Debug.Log("[CraftingMemory.OpenAI]  VALIDATION ");
-                Debug.Log("[CraftingMemory.OpenAI] ");
 
                 Assert.AreNotEqual(firstName.ToLowerInvariant(), secondName.ToLowerInvariant(),
                     $"Craft 2 repeated Craft 1 name. Both are '{firstName}'.");
@@ -511,9 +497,7 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.OpenAI]   Craft 1: '{firstName}'");
                 Debug.Log($"[CraftingMemory.OpenAI]   Craft 2: '{secondName}'");
 
-                Debug.Log("[CraftingMemory.OpenAI] ");
                 Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
-                Debug.Log("[CraftingMemory.OpenAI] ");
             }
             finally
             {
@@ -630,32 +614,24 @@ namespace CoreAI.Tests.PlayMode
 
         private static void LogBeforeModelCall(string label, string prompt, InMemoryStore store)
         {
-            Debug.Log($"[CraftingMemory.OpenAI] ");
             Debug.Log($"[CraftingMemory.OpenAI]   SENDING TO MODEL: {label}");
-            Debug.Log($"[CraftingMemory.OpenAI] ");
 
-            //  ,
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
                 Debug.Log($"[CraftingMemory.OpenAI]   MEMORY VISIBLE TO MODEL:\n{mem.Memory}");
-                Debug.Log($"[CraftingMemory.OpenAI] ");
             }
             else
             {
                 Debug.Log("[CraftingMemory.OpenAI]   MEMORY: (empty - first craft)");
-                Debug.Log($"[CraftingMemory.OpenAI] ");
             }
 
             Debug.Log($"[CraftingMemory.OpenAI]   PROMPT ({prompt.Length} chars):\n{prompt}");
-            Debug.Log($"[CraftingMemory.OpenAI] ");
         }
 
         private static void LogAfterModelCall(string label, ListSink sink, InMemoryStore store)
         {
-            Debug.Log($"[CraftingMemory.OpenAI] ");
             Debug.Log($"[CraftingMemory.OpenAI]   MODEL RESPONSE: {label}");
-            Debug.Log($"[CraftingMemory.OpenAI] ");
 
             if (sink.Items.Count > 0)
             {
@@ -668,7 +644,6 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[CraftingMemory.OpenAI]   NO COMMAND produced");
             }
 
-            //
             if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mem) &&
                 !string.IsNullOrWhiteSpace(mem.Memory))
             {
@@ -680,7 +655,6 @@ namespace CoreAI.Tests.PlayMode
                     "[CraftingMemory.OpenAI]   MEMORY: (empty in store after turn - harness may sync after ExtractCraftInfo)");
             }
 
-            Debug.Log($"[CraftingMemory.OpenAI] ");
         }
 
         private static bool ExtractCraftInfo(
@@ -708,7 +682,7 @@ namespace CoreAI.Tests.PlayMode
             memoryAccum = BuildCanonicalMemory(memoryAccum, craftNumber, itemName, ingredient1Short, ingredient2Short);
 
             // Keep store aligned with memoryAccum (what the next BuildCraftPrompt uses). Do not append
-            // "| New: ..." to model-written memory — that made "MEMORY VISIBLE TO MODEL" logs misleading.
+            // "| New: ..." to model-written memory; that made "MEMORY VISIBLE TO MODEL" logs misleading.
             store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryAccum });
 
             Debug.Log($"[{label}]  Crafted: '{itemName}'");
@@ -811,8 +785,7 @@ namespace CoreAI.Tests.PlayMode
     }
 
     /// <summary>
-    ///        payload.
-    ///    : , has been crafted with quality (  <c>with</c>  IgnoreCase)  ..
+    /// Extracts crafted item names from model payloads while ignoring common filler words.
     /// </summary>
     internal static class CraftingMemoryItemNameExtractor
     {
@@ -972,7 +945,7 @@ namespace CoreAI.Tests.PlayMode
                 return true;
             }
 
-            //  ""
+            // Reject empty or one-character names.
             if (name.Length <= 1)
             {
                 return true;

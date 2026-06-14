@@ -39,7 +39,7 @@ namespace CoreAI.Tests.PlayMode
         private const int PhaseTimeoutSeconds = 180;
         private const int LiveModelMaxOutputTokens = 2048;
 
-        // ─── Tool call tracking ──────────────────────────────────────────────
+        // Tool call tracking.
 
         private static readonly List<string> _calledTools = new();
         private static readonly Dictionary<string, string> _lastToolArgs = new();
@@ -52,13 +52,13 @@ namespace CoreAI.Tests.PlayMode
             _memoryContent = "";
         }
 
-        // ─── Crafting tools ──────────────────────────────────────────────────
+        // Crafting tools.
 
         private static object GetRecipes(string itemType)
         {
             _calledTools.Add("get_recipes");
             _lastToolArgs["get_recipes"] = itemType;
-            Debug.Log($"[E2E] 🔨 get_recipes({itemType})");
+            Debug.Log($"[E2E] get_recipes({itemType})");
             return new[]
             {
                 new
@@ -78,7 +78,7 @@ namespace CoreAI.Tests.PlayMode
         {
             _calledTools.Add("check_inventory");
             _lastToolArgs["check_inventory"] = materials;
-            Debug.Log($"[E2E] 📦 check_inventory({materials})");
+            Debug.Log($"[E2E] check_inventory({materials})");
             return new { iron_ingot = 5, fire_gem = 2, leather = 3, sufficient = true };
         }
 
@@ -86,7 +86,7 @@ namespace CoreAI.Tests.PlayMode
         {
             _calledTools.Add("craft_item");
             _lastToolArgs["craft_item"] = recipeId;
-            Debug.Log($"[E2E] ⚒️ craft_item({recipeId}, quality={qualityMod})");
+            Debug.Log($"[E2E] craft_item({recipeId}, quality={qualityMod})");
             return new
             {
                 success = true,
@@ -98,20 +98,20 @@ namespace CoreAI.Tests.PlayMode
             };
         }
 
-        // ─── Combat tools ────────────────────────────────────────────────────
+        // Combat tools.
 
         private static object GetEnemyInfo(string enemyId)
         {
             _calledTools.Add("get_enemy_info");
             _lastToolArgs["get_enemy_info"] = enemyId;
-            Debug.Log($"[E2E] ⚔️ get_enemy_info({enemyId})");
+            Debug.Log($"[E2E] get_enemy_info({enemyId})");
             return new { name = "Fire Drake", hp = 200, weakness = "ice", attack = 35, level = 10 };
         }
 
         private static object AttackEnemy(string enemyId, string weaponId)
         {
             _calledTools.Add("attack_enemy");
-            Debug.Log($"[E2E] ⚔️ attack_enemy({enemyId}, {weaponId})");
+            Debug.Log($"[E2E] attack_enemy({enemyId}, {weaponId})");
             return new
             {
                 hit = true, damage_dealt = 60, enemy_hp_remaining = 140, critical = true,
@@ -119,12 +119,12 @@ namespace CoreAI.Tests.PlayMode
             };
         }
 
-        // ─── Lore tools ─────────────────────────────────────────────────────
+        // Lore tools.
 
         private static object SearchLore(string query)
         {
             _calledTools.Add("search_lore");
-            Debug.Log($"[E2E] 📜 search_lore({query})");
+            Debug.Log($"[E2E] search_lore({query})");
             return new
             {
                 title = "Fire Drakes of the Ashen Peaks",
@@ -134,24 +134,24 @@ namespace CoreAI.Tests.PlayMode
             };
         }
 
-        // ─── Memory tool (manual tracking) ───────────────────────────────────
+        // Memory tool with manual tracking.
 
         private static object WriteMemory(string content)
         {
             _calledTools.Add("memory_write");
             _memoryContent = content;
-            Debug.Log($"[E2E] 💾 memory_write: {content}");
+            Debug.Log($"[E2E] memory_write: {content}");
             return new { success = true };
         }
 
         private static object ReadMemory()
         {
             _calledTools.Add("memory_read");
-            Debug.Log($"[E2E] 💾 memory_read → {_memoryContent}");
+            Debug.Log($"[E2E] memory_read -> {_memoryContent}");
             return new { content = string.IsNullOrEmpty(_memoryContent) ? "(empty)" : _memoryContent };
         }
 
-        // ─── Helpers ─────────────────────────────────────────────────────────
+        // Helpers.
 
         private sealed class Sink : IAiGameCommandSink
         {
@@ -198,15 +198,13 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        // ─── E2E Test ────────────────────────────────────────────────────────
+        // E2E test.
 
         [UnityTest]
         [Timeout(600000)]
         public IEnumerator FullPipeline_Skills_Tools_Memory_MultiTurn()
         {
-            Debug.Log("[E2E] ╔══════════════════════════════════════════════════════╗");
-            Debug.Log("[E2E] ║  FULL PIPELINE E2E: Skills + Tools + Memory + Chat  ║");
-            Debug.Log("[E2E] ╚══════════════════════════════════════════════════════╝");
+            Debug.Log("[E2E] FULL PIPELINE E2E: Skills + Tools + Memory + Chat");
 
             ResetTracking();
             LogAssert.ignoreFailingMessages = true;
@@ -227,9 +225,9 @@ namespace CoreAI.Tests.PlayMode
                     Assert.Inconclusive("E2E test requires a live LLM backend (HTTP or LLMUnity).");
                 }
 
-                // ═══════════════════════════════════════════════════════════
-                //  DEFINE SKILLS
-                // ═══════════════════════════════════════════════════════════
+
+                // Define skills.
+
 
                 SkillSet craftingSkill = new("Crafting",
                     "Forge weapons and armor from raw materials",
@@ -261,15 +259,15 @@ namespace CoreAI.Tests.PlayMode
                     new DelegateLlmTool("search_lore", "Search the game lore database",
                         new Func<string, object>(SearchLore)));
 
-                // Memory tools (outside skills — always available)
+                // Memory tools outside skills are always available.
                 DelegateLlmTool memoryWriteTool = new("memory_write", "Save information to persistent memory",
                     new Func<string, object>(WriteMemory));
                 DelegateLlmTool memoryReadTool = new("memory_read", "Read previously saved memory",
                     new Func<object>(ReadMemory));
 
-                // ═══════════════════════════════════════════════════════════
-                //  BUILD AGENT
-                // ═══════════════════════════════════════════════════════════
+
+                // Build agent.
+
 
                 const string roleId = "E2E_GameMaster";
                 AgentConfig config = new AgentBuilder(roleId) { SuppressBuildWarnings = true }
@@ -305,11 +303,11 @@ namespace CoreAI.Tests.PlayMode
                     new NullAiOrchestrationMetrics(),
                     settings, null, null, null);
 
-                // ═══════════════════════════════════════════════════════════
-                //  PHASE 1: Crafting with SkillSet
-                // ═══════════════════════════════════════════════════════════
 
-                Debug.Log("[E2E] ═══ PHASE 1: Craft a Flame Sword (SkillSet → tools → memory) ═══");
+                // Phase 1: Crafting with SkillSet.
+
+
+                Debug.Log("[E2E] PHASE 1: Craft a Flame Sword (SkillSet -> tools -> memory)");
 
                 using CancellationTokenSource phase1Cts = new();
                 Task t1 = orch.RunTaskAsync(new AiTaskRequest
@@ -337,8 +335,8 @@ namespace CoreAI.Tests.PlayMode
                 if (!anyCraftTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
                     Assert.Fail(
-                        $"Phase 1: local model ({handle.ResolvedBackend}) did not call crafting tools — " +
-                        $"multi-step SkillSet pipeline (read_skill→get_recipes→check_inventory→craft_item→memory_write) " +
+                        $"Phase 1: local model ({handle.ResolvedBackend}) did not call crafting tools - " +
+                        $"multi-step SkillSet pipeline (read_skill->get_recipes->check_inventory->craft_item->memory_write) " +
                         $"exceeds small model capacity. Called: [{string.Join(", ", _calledTools)}]. " +
                         $"Pipeline correctness verified by SelfService_* tests.");
                 }
@@ -346,13 +344,13 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsTrue(anyCraftTool,
                     $"Phase 1: at least one crafting tool must be called. Got: [{string.Join(", ", _calledTools)}]");
 
-                Debug.Log("[E2E] ✅ Phase 1 passed — crafting tools invoked");
+                Debug.Log("[E2E] Phase 1 passed - crafting tools invoked");
 
-                // ═══════════════════════════════════════════════════════════
-                //  PHASE 2: Memory recall
-                // ═══════════════════════════════════════════════════════════
 
-                Debug.Log("[E2E] ═══ PHASE 2: Recall what was crafted (memory_read) ═══");
+                // Phase 2: Memory recall.
+
+
+                Debug.Log("[E2E] PHASE 2: Recall what was crafted (memory_read)");
 
                 int toolsBefore = _calledTools.Count;
                 using CancellationTokenSource phase2Cts = new();
@@ -383,13 +381,13 @@ namespace CoreAI.Tests.PlayMode
                     $"Phase 2: model should recall via memory_read or mention the crafted item. " +
                     $"memory_read called: {hasMemoryRead}, mentions sword/flame/craft: {mentionsSword}");
 
-                Debug.Log("[E2E] ✅ Phase 2 passed — memory recall works");
+                Debug.Log("[E2E] Phase 2 passed - memory recall works");
 
-                // ═══════════════════════════════════════════════════════════
-                //  PHASE 3: Cross-skill — switch to Combat
-                // ═══════════════════════════════════════════════════════════
 
-                Debug.Log("[E2E] ═══ PHASE 3: Fight a Fire Drake (Combat skill) ═══");
+                // Phase 3: Cross-skill switch to Combat.
+
+
+                Debug.Log("[E2E] PHASE 3: Fight a Fire Drake (Combat skill)");
 
                 int toolsBefore3 = _calledTools.Count;
                 using CancellationTokenSource phase3Cts = new();
@@ -415,7 +413,7 @@ namespace CoreAI.Tests.PlayMode
                 if (!anyCombatTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
                     Assert.Fail(
-                        $"Phase 3: local model ({handle.ResolvedBackend}) did not call combat tools — " +
+                        $"Phase 3: local model ({handle.ResolvedBackend}) did not call combat tools - " +
                         $"multi-step skill pipeline exceeds small model capacity. " +
                         $"Called: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]. " +
                         $"Pipeline correctness verified by SelfService_* tests.");
@@ -424,15 +422,13 @@ namespace CoreAI.Tests.PlayMode
                 Assert.IsTrue(anyCombatTool,
                     $"Phase 3: at least one combat tool must be called. Got: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
 
-                Debug.Log("[E2E] ✅ Phase 3 passed — combat tools invoked");
+                Debug.Log("[E2E] Phase 3 passed - combat tools invoked");
 
-                // ═══════════════════════════════════════════════════════════
-                //  SUMMARY
-                // ═══════════════════════════════════════════════════════════
 
-                Debug.Log("[E2E] ╔══════════════════════════════════════════════════════╗");
-                Debug.Log("[E2E] ║                  E2E RESULTS                        ║");
-                Debug.Log("[E2E] ╚══════════════════════════════════════════════════════╝");
+                // Summary.
+
+
+                Debug.Log("[E2E] E2E RESULTS");
                 Debug.Log($"[E2E] Total LLM calls:    {cap.CallCount}");
                 Debug.Log($"[E2E] Total time:         {cap.TotalMs} ms");
                 Debug.Log($"[E2E] All tools called:   [{string.Join(", ", _calledTools)}]");
@@ -451,7 +447,7 @@ namespace CoreAI.Tests.PlayMode
                     $"Crafting: {hasCraftingTools}, Combat: {hasCombatTools}. " +
                     $"All: [{string.Join(", ", uniqueTools)}]");
 
-                Debug.Log("[E2E] ✅ ALL PHASES PASSED — Full pipeline E2E verified!");
+                Debug.Log("[E2E] ALL PHASES PASSED - Full pipeline E2E verified!");
             }
             finally
             {

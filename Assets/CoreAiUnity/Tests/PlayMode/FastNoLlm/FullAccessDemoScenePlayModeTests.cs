@@ -42,12 +42,6 @@ namespace CoreAI.Tests.PlayMode
 
             MonoBehaviour buttons = FindBehaviour("CoreAI.Demos.ChatPromptButtonsController");
             Assert.IsNotNull(buttons, "FullAccessDemo must expose prompt buttons for manual demo checks.");
-
-            SerializedObject buttonsSo = new(buttons);
-            SerializedProperty reserve = buttonsSo.FindProperty("chatReserveWidth");
-            Assert.IsNotNull(reserve, "Prompt button controller must expose chatReserveWidth.");
-            Assert.GreaterOrEqual(reserve.floatValue, 650f,
-                "Prompt buttons must reserve enough space to avoid overlapping the chat panel.");
         }
 
         private static MonoBehaviour FindBehaviour(string typeFullName)

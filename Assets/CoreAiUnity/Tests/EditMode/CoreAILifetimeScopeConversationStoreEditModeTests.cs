@@ -1,7 +1,4 @@
 using System;
-#if !UNITY_WEBGL
-using System.Reflection;
-#endif
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -64,9 +61,7 @@ namespace CoreAI.Tests.EditMode
             builder.RegisterCore();
 
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            FieldInfo executionModeField = typeof(CoreAISettingsAsset).GetField(
-                "executionMode", BindingFlags.NonPublic | BindingFlags.Instance);
-            executionModeField.SetValue(settings, LlmExecutionMode.Offline);
+            settings.ConfigureOffline();
 
             builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
             builder.RegisterAgentPrompts(null);

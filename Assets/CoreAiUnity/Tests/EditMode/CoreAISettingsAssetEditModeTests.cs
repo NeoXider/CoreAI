@@ -41,8 +41,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(8192, settings.ContextWindowTokens);
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
-            Assert.AreEqual(true, settings.EnableStreaming, "Стриминг включён по умолчанию");
-            Assert.AreEqual(true, settings.WebGlNativeStreaming, "WebGL native SSE включён по умолчанию");
+            Assert.AreEqual(true, settings.EnableStreaming, "Streaming is enabled by default");
+            Assert.AreEqual(true, settings.WebGlNativeStreaming, "WebGL native SSE is enabled by default");
             Assert.AreEqual(false, settings.SameOriginCredentials);
             Assert.AreEqual(false, settings.OfflineUseCustomResponse);
             Assert.AreEqual("Offline mode: LLM unavailable", settings.OfflineCustomResponse);
@@ -72,9 +72,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            SetPrivateField(settings, "enableFallbackBackend", true);
-            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1/");
-            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
+            settings.ConfigureFallbackBackend(true, "https://openrouter.ai/api/v1/", "google/gemini-2.5-flash");
             Assert.IsTrue(settings.HasValidFallbackBackend,
                 "Fallback should be valid only when enabled and both URL + model are configured");
             Assert.AreEqual(
@@ -82,18 +80,15 @@ namespace CoreAI.Tests.EditMode
                 settings.SecondaryApiBaseUrl,
                 "Secondary URL should be normalized by stripping trailing slash");
 
-            SetPrivateField(settings, "secondaryModelName", "   ");
+            settings.ConfigureFallbackBackend(true, "https://openrouter.ai/api/v1/", "   ");
             Assert.IsFalse(settings.HasValidFallbackBackend,
                 "Fallback should be invalid when secondary model is missing");
 
-            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
-            SetPrivateField(settings, "secondaryApiBaseUrl", "  ");
+            settings.ConfigureFallbackBackend(true, "  ", "google/gemini-2.5-flash");
             Assert.IsFalse(settings.HasValidFallbackBackend,
                 "Fallback should be invalid when secondary URL is missing");
 
-            SetPrivateField(settings, "enableFallbackBackend", false);
-            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1");
-            SetPrivateField(settings, "secondaryModelName", "google/gemini-2.5-flash");
+            settings.ConfigureFallbackBackend(false, "https://openrouter.ai/api/v1", "google/gemini-2.5-flash");
             Assert.IsFalse(settings.HasValidFallbackBackend,
                 "Fallback should be invalid when disabled even if URL+model are filled");
 
@@ -107,10 +102,10 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(string.Empty, settings.SecondaryApiBaseUrl);
 
-            SetPrivateField(settings, "secondaryApiBaseUrl", "https://openrouter.ai/api/v1/");
+            settings.ConfigureFallbackBackend(false, "https://openrouter.ai/api/v1/", "m");
             Assert.AreEqual("https://openrouter.ai/api/v1", settings.SecondaryApiBaseUrl);
 
-            SetPrivateField(settings, "secondaryApiBaseUrl", "   ");
+            settings.ConfigureFallbackBackend(false, "   ", "m");
             Assert.AreEqual(string.Empty, settings.SecondaryApiBaseUrl);
 
             Object.DestroyImmediate(settings);
@@ -123,10 +118,10 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
 
-            SetPrivateField(settings, "apiBaseUrl", "https://openrouter.ai/api/v1/");
+            settings.SetApiBaseUrl("https://openrouter.ai/api/v1/");
             Assert.AreEqual("https://openrouter.ai/api/v1", settings.ApiBaseUrl);
 
-            SetPrivateField(settings, "apiBaseUrl", "  ");
+            settings.SetApiBaseUrl("  ");
             Assert.AreEqual("http://localhost:1234/v1", settings.ApiBaseUrl);
 
             Object.DestroyImmediate(settings);
@@ -137,20 +132,19 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            SetPrivateField(settings, "modelName", "   ");
-            SetPrivateField(settings, "ggufModelPath", "local-model.gguf");
-
             // Direct local-mode path
-            SetPrivateField(settings, "executionMode", LlmExecutionMode.LocalModel);
+            settings.SetModelResolution(
+                LlmExecutionMode.LocalModel, LlmBackendType.LlmUnity, "   ", "local-model.gguf");
             Assert.AreEqual("local-model.gguf", settings.ModelName);
 
             // Auto mode resolves to LocalModel when backend is LlmUnity
-            SetPrivateField(settings, "executionMode", LlmExecutionMode.Auto);
-            SetPrivateField(settings, "backendType", LlmBackendType.LlmUnity);
+            settings.SetModelResolution(
+                LlmExecutionMode.Auto, LlmBackendType.LlmUnity, "   ", "local-model.gguf");
             Assert.AreEqual("local-model.gguf", settings.ModelName);
 
             // Auto + HTTP backend should not use local GGUF fallback
-            SetPrivateField(settings, "backendType", LlmBackendType.OpenAiHttp);
+            settings.SetModelResolution(
+                LlmExecutionMode.Auto, LlmBackendType.OpenAiHttp, "   ", "local-model.gguf");
             Assert.AreEqual("gpt-4o-mini", settings.ModelName);
 
             Object.DestroyImmediate(settings);
@@ -161,11 +155,7 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             settings.ConfigureHttpApi("https://api.test.com/v1", "sk", "m", 0.1f, 500, 2048);
-            System.Reflection.FieldInfo f = typeof(CoreAISettingsAsset).GetField(
-                "llmRequestTimeoutSeconds",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            Assert.NotNull(f);
-            f.SetValue(settings, 45f);
+            settings.SetOrchestratorTimeoutSeconds(45f);
             Assert.AreEqual(45, settings.EffectiveHttpRequestTimeoutSeconds);
             Object.DestroyImmediate(settings);
         }
@@ -175,13 +165,13 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            // По умолчанию Auto
+            // Auto by default
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
             Assert.AreEqual(false, settings.UseHttpApi);
             Assert.AreEqual(true, settings.UseLlmUnity);
             Assert.AreEqual(false, settings.UseOffline);
 
-            // Переключаем на HTTP
+            // Switch to HTTP
             settings.ConfigureHttpApi("https://api.openai.com/v1", "sk-test", "gpt-4");
             Assert.AreEqual(LlmBackendType.OpenAiHttp, settings.BackendType);
             Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, settings.ExecutionMode);
@@ -190,7 +180,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.UseLlmUnity);
             Assert.AreEqual(false, settings.UseOffline);
 
-            // Переключаем на Offline
+            // Switch to Offline
             settings.ConfigureOffline();
             Assert.AreEqual(LlmBackendType.Offline, settings.BackendType);
             Assert.AreEqual(LlmExecutionMode.Offline, settings.ExecutionMode);
@@ -198,7 +188,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.UseLlmUnity);
             Assert.AreEqual(true, settings.UseOffline);
 
-            // Переключаем на Auto
+            // Switch to Auto
             settings.ConfigureAuto();
             Assert.AreEqual(LlmBackendType.Auto, settings.BackendType);
             Assert.AreEqual(LlmExecutionMode.Auto, settings.ExecutionMode);
@@ -280,22 +270,16 @@ namespace CoreAI.Tests.EditMode
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
 
-            // По умолчанию — кастомный ответ выключен
+            // Custom response is disabled by default
             Assert.AreEqual(false, settings.ShouldUseOfflineCustomResponse("Creator"));
 
-            // Включаем с wildcard
-            settings.GetType()
-                .GetField("offlineUseCustomResponse",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, true);
+            // Enable with wildcard roles
+            settings.ConfigureOffline(true, roles: "*");
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Creator"));
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Programmer"));
 
-            // Конкретные роли
-            settings.GetType()
-                .GetField("offlineCustomResponseRoles",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(settings, "Creator,Programmer");
+            // Specific roles
+            settings.ConfigureOffline(true, roles: "Creator,Programmer");
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Creator"));
             Assert.AreEqual(true, settings.ShouldUseOfflineCustomResponse("Programmer"));
             Assert.AreEqual(false, settings.ShouldUseOfflineCustomResponse("Merchant"));
@@ -335,16 +319,6 @@ namespace CoreAI.Tests.EditMode
 
             CoreAISettingsAsset.ResetInstance();
             Object.DestroyImmediate(settings);
-        }
-
-        private static void SetPrivateField(CoreAISettingsAsset target, string fieldName, object value)
-        {
-            System.Reflection.FieldInfo fieldInfo = typeof(CoreAISettingsAsset).GetField(
-                fieldName,
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            Assert.IsNotNull(fieldInfo,
-                $"Expected private field '{fieldName}' exists on {nameof(CoreAISettingsAsset)}.");
-            fieldInfo.SetValue(target, value);
         }
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -32,26 +31,27 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Instance_Delegation_ReadsFromAsset()
         {
-            // Arrange: создаём мок-настройки
+            // Arrange test settings.
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            Type type = typeof(CoreAISettingsAsset);
-            BindingFlags bf = BindingFlags.NonPublic | BindingFlags.Instance;
-            type.GetField("maxLuaRepairRetries", bf).SetValue(settings, 99);
-            type.GetField("maxToolCallRetries", bf).SetValue(settings, 77);
-            type.GetField("enableMeaiDebugLogging", bf).SetValue(settings, true);
-            type.GetField("contextWindowTokens", bf).SetValue(settings, 12345);
-            type.GetField("universalSystemPromptPrefix", bf).SetValue(settings, "TEST PREFIX");
-            type.GetField("temperature", bf).SetValue(settings, 0.99f);
-            type.GetField("enableTemperatureOverriding", bf).SetValue(settings, true);
-            type.GetField("logToolCalls", bf).SetValue(settings, false);
-            type.GetField("logToolCallArguments", bf).SetValue(settings, false);
-            type.GetField("logToolCallResults", bf).SetValue(settings, false);
-            type.GetField("logMeaiToolCallingSteps", bf).SetValue(settings, false);
+            settings.ApplyOptions(new CoreAISettingsOptions
+            {
+                MaxLuaRepairRetries = 99,
+                MaxToolCallRetries = 77,
+                EnableMeaiDebugLogging = true,
+                ContextWindowTokens = 12345,
+                UniversalSystemPromptPrefix = "TEST PREFIX",
+                Temperature = 0.99f,
+                OverrideTemperature = true,
+                LogToolCalls = false,
+                LogToolCallArguments = false,
+                LogToolCallResults = false,
+                LogMeaiToolCallingSteps = false
+            });
 
-            // Act: устанавливаем Instance
+            // Act: set Instance.
             CoreAISettings.Instance = settings;
 
-            // Assert: статические свойства делегируются в Instance
+            // Assert: static properties delegate to Instance.
             Assert.AreEqual(99, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(77, CoreAISettings.MaxToolCallRetries);
             Assert.AreEqual(true, CoreAISettings.EnableMeaiDebugLogging);
@@ -71,17 +71,18 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Override_TakesPrecedenceOverInstance()
         {
-            // Arrange: настройки с MaxLuaRepairRetries = 99
+            // Arrange settings with MaxLuaRepairRetries = 99.
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            typeof(CoreAISettingsAsset)
-                .GetField("maxLuaRepairRetries", BindingFlags.NonPublic | BindingFlags.Instance)
-                .SetValue(settings, 99);
+            settings.ApplyOptions(new CoreAISettingsOptions
+            {
+                MaxLuaRepairRetries = 99
+            });
             CoreAISettings.Instance = settings;
 
-            // Act: локальный override
+            // Act: local override.
             CoreAISettings.MaxLuaRepairRetries = 5;
 
-            // Assert: override побеждает
+            // Assert: override wins.
             Assert.AreEqual(5, CoreAISettings.MaxLuaRepairRetries);
 
             // Cleanup
@@ -92,9 +93,10 @@ namespace CoreAI.Tests.EditMode
         public void ResetOverrides_RestoresInstanceDelegation()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            typeof(CoreAISettingsAsset)
-                .GetField("maxLuaRepairRetries", BindingFlags.NonPublic | BindingFlags.Instance)
-                .SetValue(settings, 42);
+            settings.ApplyOptions(new CoreAISettingsOptions
+            {
+                MaxLuaRepairRetries = 42
+            });
             CoreAISettings.Instance = settings;
 
             // Set override
@@ -111,7 +113,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void NoInstance_UsesDefaults()
         {
-            // Без Instance — значения по умолчанию
+            // Without Instance, defaults are used.
             Assert.AreEqual(3, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
             Assert.IsFalse(CoreAISettings.OverrideTemperature);
@@ -124,10 +126,11 @@ namespace CoreAI.Tests.EditMode
         {
             // Arrange
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            Type type = typeof(CoreAISettingsAsset);
-            BindingFlags bf = BindingFlags.NonPublic | BindingFlags.Instance;
-            type.GetField("maxLuaRepairRetries", bf).SetValue(settings, 99);
-            type.GetField("temperature", bf).SetValue(settings, 0.99f);
+            settings.ApplyOptions(new CoreAISettingsOptions
+            {
+                MaxLuaRepairRetries = 99,
+                Temperature = 0.99f
+            });
 
             GameObject go = new("TestScope");
             CoreAILifetimeScope scope = go.AddComponent<CoreAILifetimeScope>();
@@ -143,7 +146,7 @@ namespace CoreAI.Tests.EditMode
             // Act
             configureMethod.Invoke(scope, new object[] { builder });
 
-            // Assert: Instance должен быть установлен
+            // Instance should be assigned.
             Assert.AreSame(settings, CoreAISettings.Instance);
             Assert.AreEqual(99, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(0.99f, CoreAISettings.Temperature);
