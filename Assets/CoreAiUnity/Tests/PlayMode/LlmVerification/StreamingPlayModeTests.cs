@@ -45,7 +45,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "SmartChat",
                 SystemPrompt = "You are a helpful assistant. Be very brief.",
-                UserPayload = "Say hello in exactly 3 words."
+                UserPayload = "Greet the player briefly."
             };
 
             List<LlmStreamChunk> chunks = new();

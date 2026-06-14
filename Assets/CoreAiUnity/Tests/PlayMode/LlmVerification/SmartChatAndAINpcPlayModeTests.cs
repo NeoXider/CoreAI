@@ -133,7 +133,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log("[SmartChat] Sending: 'Hello, how are you?'");
                 Task<LlmCompletionResult> task = chatService.SendPlayerMessageAsync("Hello, how are you?");
-                yield return PlayModeTestAwait.WaitTask(task, 300f, "Send message 1");
+                yield return PlayModeTestAwait.WaitTask(task, 120f, "Send message 1");
                 LlmCompletionResult result = task.Result;
 
                 Debug.Log("[SmartChat] ----------------------------------------");
@@ -190,13 +190,13 @@ namespace CoreAI.Tests.PlayMode
 
                 // First message
                 Task<LlmCompletionResult> t1 = chatService.SendPlayerMessageAsync("My name is Adventurer");
-                yield return PlayModeTestAwait.WaitTask(t1, 300f, "First message");
+                yield return PlayModeTestAwait.WaitTask(t1, 120f, "First message");
                 LlmCompletionResult r1 = t1.Result;
                 Assert.AreEqual(1, chatService.HistoryPairCount);
 
                 // Second message - should see history
                 Task<LlmCompletionResult> t2 = chatService.SendPlayerMessageAsync("What is my name?");
-                yield return PlayModeTestAwait.WaitTask(t2, 300f, "Second message");
+                yield return PlayModeTestAwait.WaitTask(t2, 120f, "Second message");
                 LlmCompletionResult r2 = t2.Result;
                 Assert.AreEqual(2, chatService.HistoryPairCount);
 
@@ -253,7 +253,7 @@ namespace CoreAI.Tests.PlayMode
                 InGameLlmChatService chatService = new(capturing, systemPrompts, 10);
 
                 Task<LlmCompletionResult> t1 = chatService.SendPlayerMessageAsync("First line");
-                yield return PlayModeTestAwait.WaitTask(t1, 300f, "First message");
+                yield return PlayModeTestAwait.WaitTask(t1, 120f, "First message");
                 LlmCompletionResult r1 = t1.Result;
                 Assert.IsTrue(r1.Ok, r1.Error);
                 Assert.AreEqual(1, chatService.HistoryPairCount);
@@ -262,7 +262,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.AreEqual(0, chatService.HistoryPairCount);
 
                 Task<LlmCompletionResult> t2 = chatService.SendPlayerMessageAsync("After clear");
-                yield return PlayModeTestAwait.WaitTask(t2, 300f, "After clear");
+                yield return PlayModeTestAwait.WaitTask(t2, 120f, "After clear");
                 LlmCompletionResult r2 = t2.Result;
                 Assert.IsTrue(r2.Ok, r2.Error);
                 Assert.AreEqual(1, chatService.HistoryPairCount);
@@ -281,7 +281,7 @@ namespace CoreAI.Tests.PlayMode
         {
             Debug.Log("[AINpc] === TEST START ===");
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 180,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -323,13 +323,15 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log("[AINpc] Requesting NPC with memory tool...");
                 CoreAi.ClearToolCallHistory();
+                using System.Threading.CancellationTokenSource cts = new();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.AiNpc,
-                    Hint = "Welcome the player and remember their name is 'Hero'"
-                });
+                    Hint = "Welcome the player and remember their name is 'Hero'",
+                    MaxOutputTokens = 2048
+                }, cts.Token);
 
-                yield return PlayModeTestAwait.WaitTask(t, 180f, "AINpc with tools");
+                yield return PlayModeTestAwait.WaitTask(t, 240f, "AINpc with tools", cts);
 
                 Debug.Log($"[AINpc] Response: {capturing.LastResult.Content}");
                 Debug.Log($"[AINpc] Commands: {sink.Items.Count}");
@@ -411,7 +413,7 @@ namespace CoreAI.Tests.PlayMode
                     Hint = "A customer approaches. What do you sell?"
                 });
 
-                yield return PlayModeTestAwait.WaitTask(t, 300f, "AINpc ChatOnly");
+                yield return PlayModeTestAwait.WaitTask(t, 120f, "AINpc ChatOnly");
 
                 Assert.IsTrue(capturing.LastResult.Ok);
                 Assert.IsFalse(string.IsNullOrWhiteSpace(capturing.LastResult.Content));

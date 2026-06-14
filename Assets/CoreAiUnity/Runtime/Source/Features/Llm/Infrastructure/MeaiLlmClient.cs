@@ -1651,6 +1651,9 @@ namespace CoreAI.Infrastructure.Llm
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public string ExtraBodyJson => "";
+            public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
+            public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;
             public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;

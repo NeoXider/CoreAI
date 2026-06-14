@@ -26,6 +26,8 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class SkillSetBenchmarkPlayModeTests
     {
+        private const float BenchmarkTurnTimeoutSeconds = 240f;
+
         // ── Capturing LLM client ──────────────────────────────────────────────
 
         private sealed class BenchmarkCaptureLlm : ILlmClient
@@ -203,6 +205,7 @@ Some merchants only trade specific item types.",
             public int ToolCount;
             public long ElapsedMs;
             public bool Ok;
+            public bool TimedOut;
             public int ResponseChars;
         }
 
@@ -213,6 +216,7 @@ Some merchants only trade specific item types.",
                 $"[SkillBenchmark] │ System prompt: {r.SystemPromptChars} chars (~{r.SystemPromptChars / 4} tokens)");
             Debug.Log($"[SkillBenchmark] │ Tools sent:    {r.ToolCount}");
             Debug.Log($"[SkillBenchmark] │ LLM time:      {r.ElapsedMs} ms");
+            Debug.Log($"[SkillBenchmark] │ Timed out:     {r.TimedOut}");
             Debug.Log($"[SkillBenchmark] │ Response:      {r.ResponseChars} chars");
             Debug.Log($"[SkillBenchmark] │ OK:            {r.Ok}");
             Debug.Log($"[SkillBenchmark] └────────────────────────────");
@@ -221,14 +225,15 @@ Some merchants only trade specific item types.",
         // ── Test ──────────────────────────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator Benchmark_WithSkillProxy_VsDirectTools_ComparesTokesAndTime()
         {
             Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");
             Debug.Log("[SkillBenchmark] BENCHMARK — Skills (2 meta-tools) vs Direct (19 tools)");
             Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 120, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, (int)BenchmarkTurnTimeoutSeconds,
+                    out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -280,12 +285,38 @@ Some merchants only trade specific item types.",
                         settings,
                         null, null, null);
 
+                    using CancellationTokenSource skillsTimeout = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = "GM_skills",
-                        Hint = userMsg
-                    });
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "with-skills");
+                        Hint = userMsg,
+                        MaxOutputTokens = 2048
+                    }, skillsTimeout.Token);
+
+                    Stopwatch skillsSw = Stopwatch.StartNew();
+                    while (!t.IsCompleted && skillsSw.Elapsed.TotalSeconds < BenchmarkTurnTimeoutSeconds)
+                    {
+                        yield return null;
+                    }
+
+                    skillsSw.Stop();
+
+                    bool skillsTimedOut = !t.IsCompleted;
+                    if (skillsTimedOut)
+                    {
+                        skillsTimeout.Cancel();
+                        Debug.LogWarning(
+                            $"[SkillBenchmark] with-skills timed out after {BenchmarkTurnTimeoutSeconds:0}s; " +
+                            "recording the timeout as benchmark data instead of failing the structural comparison.");
+                    }
+                    else if (t.IsFaulted)
+                    {
+                        throw new InvalidOperationException("with-skills benchmark task failed.", t.Exception);
+                    }
+                    else if (t.IsCanceled)
+                    {
+                        skillsTimedOut = true;
+                    }
 
                     rA = new BenchmarkResult
                     {
@@ -294,6 +325,7 @@ Some merchants only trade specific item types.",
                         ToolCount = cap.LastToolCount,
                         ElapsedMs = cap.ElapsedMs,
                         Ok = cap.LastOk,
+                        TimedOut = skillsTimedOut,
                         ResponseChars = cap.LastContent?.Length ?? 0
                     };
 
@@ -345,20 +377,47 @@ Some merchants only trade specific item types.",
                         settings,
                         null, null, null);
 
+                    using CancellationTokenSource directTimeout = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = "GM_direct",
-                        Hint = userMsg
-                    });
-                    yield return PlayModeTestAwait.WaitTask(t, 120f, "direct-tools");
+                        Hint = userMsg,
+                        MaxOutputTokens = 2048
+                    }, directTimeout.Token);
+
+                    Stopwatch directSw = Stopwatch.StartNew();
+                    while (!t.IsCompleted && directSw.Elapsed.TotalSeconds < BenchmarkTurnTimeoutSeconds)
+                    {
+                        yield return null;
+                    }
+
+                    directSw.Stop();
+
+                    bool directTimedOut = !t.IsCompleted;
+                    if (directTimedOut)
+                    {
+                        directTimeout.Cancel();
+                        Debug.LogWarning(
+                            $"[SkillBenchmark] direct-tools timed out after {BenchmarkTurnTimeoutSeconds:0}s; " +
+                            "recording the timeout as benchmark data instead of failing the structural comparison.");
+                    }
+                    else if (t.IsFaulted)
+                    {
+                        throw new InvalidOperationException("direct-tools benchmark task failed.", t.Exception);
+                    }
+                    else if (t.IsCanceled)
+                    {
+                        throw new OperationCanceledException("direct-tools benchmark task was canceled before timeout.");
+                    }
 
                     rB = new BenchmarkResult
                     {
                         Label = "WITHOUT Skills (19 direct tools)",
                         SystemPromptChars = cap.LastSystemPromptChars,
                         ToolCount = cap.LastToolCount,
-                        ElapsedMs = cap.ElapsedMs,
-                        Ok = cap.LastOk,
+                        ElapsedMs = directTimedOut ? directSw.ElapsedMilliseconds : cap.ElapsedMs,
+                        Ok = !directTimedOut && cap.LastOk,
+                        TimedOut = directTimedOut,
                         ResponseChars = cap.LastContent?.Length ?? 0
                     };
 

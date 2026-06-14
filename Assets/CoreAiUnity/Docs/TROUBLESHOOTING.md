@@ -587,6 +587,26 @@ Unity console filter: "abc123"
 
 ---
 
+## Problem: Reasoning model returns empty content
+
+### Symptoms
+
+- Streaming tests or chat demos wait for visible chunks, then finish with an empty final response.
+- The local OpenAI-compatible server logs show `reasoning_content` or long thinking output, but `content` is empty.
+- Smaller `max_tokens` values make the issue easier to reproduce.
+
+### Cause
+
+Some Qwen/DeepSeek-style thinking models can spend the whole output budget on reasoning tokens before they emit user-visible content. In that state the model is reachable and generating, but CoreAI has no visible assistant text or tool payload to apply.
+
+### Fix
+
+1. In `CoreAISettings.asset`, leave **Reasoning Mode** as **Provider Default** unless the provider needs an explicit override.
+2. For Qwen OpenAI-compatible endpoints that support it, set **Reasoning Mode** to **Disabled**. CoreAI sends `enable_thinking=false` and `chat_template_kwargs.enable_thinking=false`.
+3. Keep `Max Tokens` high enough for the scenario. The local 27B Qwen test profile uses `20000` output tokens and a `128000` context-window hint.
+4. If the provider supports it, use **Thinking Budget Tokens** to cap reasoning. `0` omits the field.
+
+---
 > 📖 **Related documents:**
 > - [COREAI_SETTINGS.md](COREAI_SETTINGS.md) — all settings
 > - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — architecture

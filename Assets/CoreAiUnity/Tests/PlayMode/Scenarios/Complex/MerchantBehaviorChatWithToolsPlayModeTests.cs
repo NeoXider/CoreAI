@@ -25,14 +25,18 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
     /// </summary>
     public sealed class MerchantBehaviorChatWithToolsPlayModeTests
     {
+        private const int LlmStepTimeoutSeconds = 240;
+        private const int ScenarioStepMaxOutputTokens = 2048;
+
         [UnityTest]
+        [Explicit("Long live-model negotiation scenario; run targeted when validating merchant behavior, not in mandatory full PlayMode.")]
         [Timeout(600000)]
         public IEnumerator MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase()
         {
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.25f,
-                    350,
+                    240,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -83,31 +87,16 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step1_GreetAndList",
                     "You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. " +
-                    "You MUST call get_inventory first, then answer with item names and prices.");
+                    "Answer with available item names and prices.");
 
                 const string step2Base =
                     "Player says: 'I want Leather Armor x1'. Player has low gold (40 gold). " +
-                    "Do NOT call get_inventory again. " +
-                    "You MUST call get_player_gold, then buy_item(itemName='Leather Armor', quantity=1). " +
                     "If purchase fails, explain briefly and suggest cheaper options.";
                 yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base);
-                for (int retry = 0;
-                     retry < 2 &&
-                     !economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal));
-                     retry++)
-                {
-                    Debug.LogWarning(
-                        $"[MerchantScenario] Step2 missing buy_item(Leather Armor); corrective retry {retry + 1}.");
-                    yield return RunStep(orch, sink, inventory, economy, store, $"Step2_TooExpensive_Retry{retry + 1}",
-                        step2Base +
-                        " Your last answer did not invoke get_player_gold and buy_item. " +
-                        "Call those two tools now (no meta commentary about prior steps).");
-                }
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
-                    "Player says: 'Can you discount Health Potion? I have little money.' " +
-                    "You MUST call apply_discount(itemName='Health Potion', percent=20), then buy_item(itemName='Health Potion', quantity=1). " +
-                    "Then confirm successful purchase.");
+                    "Player says: 'I can spend at most 40 gold and I want one Iron Sword. " +
+                    "Can we make a deal and complete the purchase if the price fits?'");
 
                 Assert.IsTrue(inventory.CallLog.Any(c => c.StartsWith("get_inventory", StringComparison.Ordinal)),
                     "Merchant should inspect inventory.");
@@ -115,13 +104,13 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                     economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal)),
                     "Scenario should attempt expensive purchase first.");
                 Assert.IsTrue(
-                    economy.CallLog.Any(c => c.StartsWith("apply_discount:Health Potion:20", StringComparison.Ordinal)),
+                    economy.CallLog.Any(c => c.StartsWith("apply_discount:Iron Sword:", StringComparison.Ordinal)),
                     "Scenario should negotiate discount.");
                 Assert.IsTrue(
                     economy.CallLog.Any(c =>
-                        c.StartsWith("buy_item:Health Potion:1:success", StringComparison.Ordinal)),
+                        c.StartsWith("buy_item:Iron Sword:1:success", StringComparison.Ordinal)),
                     "Scenario should finish with successful purchase.");
-                Assert.AreEqual(1, economy.PlayerInventory.Count(i => i == "Health Potion"));
+                Assert.AreEqual(1, economy.PlayerInventory.Count(i => i == "Iron Sword"));
                 Assert.Less(economy.PlayerGold, 40, "Gold should decrease after successful purchase.");
                 Assert.IsTrue(sink.Items.Count > 0, "Orchestrator should publish chat payloads.");
             }
@@ -143,13 +132,15 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
             Debug.Log($"[MerchantScenario] === {label} ===");
             Debug.Log($"[MerchantScenario] PLAYER: {hint}");
             int beforeCommands = sink.Items.Count;
+            using CancellationTokenSource cts = new();
             Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Merchant,
                 Hint = hint,
-                SourceTag = "BehaviorScenario"
-            });
-            yield return PlayModeTestAwait.WaitTask(task, 300f, label);
+                SourceTag = "BehaviorScenario",
+                MaxOutputTokens = ScenarioStepMaxOutputTokens
+            }, cts.Token);
+            yield return PlayModeTestAwait.WaitTask(task, LlmStepTimeoutSeconds, label, cts);
 
             if (sink.Items.Count > beforeCommands)
             {

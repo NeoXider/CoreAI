@@ -121,7 +121,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Merchant_ToolsAndChat()
         {
             Debug.Log("[CustomAgents] === TEST 1: MERCHANT (ToolsAndChat) ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 300, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.3f, 240, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -137,7 +137,7 @@ namespace CoreAI.Tests.PlayMode
                     { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
 
                 AgentConfig merchant = new AgentBuilder("TestMerchant")
-                    .WithSystemPrompt("You are a shopkeeper. When asked about items, call get_inventory first.")
+                    .WithSystemPrompt("You are a shopkeeper. When asked about items, use your inventory information.")
                     .WithTool(new InventoryLlmTool(inv))
                     .WithMemory()
                     .WithMode(AgentMode.ToolsAndChat)
@@ -171,7 +171,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Analyzer_ToolsOnly()
         {
             Debug.Log("[CustomAgents] === TEST 2: ANALYZER (ToolsOnly) ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 240, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -181,7 +181,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 AgentConfig analyzer = new AgentBuilder("TestAnalyzer")
-                    .WithSystemPrompt("You analyze sessions. Call get_session_stats tool.")
+                    .WithSystemPrompt("You analyze sessions using the available session statistics.")
                     .WithTool(new SessionStatsLlmTool())
                     .WithMode(AgentMode.ToolsOnly)
                     .Build();
@@ -206,7 +206,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Storyteller_ChatOnly()
         {
             Debug.Log("[CustomAgents] === TEST 3: STORYTELLER (ChatOnly) ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.4f, 300, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.4f, 240, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -248,7 +248,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CustomAgent_Helper_WithAction()
         {
             Debug.Log("[CustomAgents] === TEST 4: HELPER (WithAction) ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 240, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -261,7 +261,7 @@ namespace CoreAI.Tests.PlayMode
                 string receivedMessage = string.Empty;
 
                 AgentConfig helper = new AgentBuilder("TestHelper")
-                    .WithSystemPrompt("Call the send_ping tool with the message 'hello'.")
+                    .WithSystemPrompt("When asked to send a ping, send the provided message through the available action.")
                     .WithMode(AgentMode.ToolsOnly)
                     .WithAction("send_ping", "Send a ping message", new Action<string>((string message) =>
                     {

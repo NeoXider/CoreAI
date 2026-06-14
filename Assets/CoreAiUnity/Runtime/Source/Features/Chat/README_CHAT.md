@@ -448,6 +448,7 @@ bool useStream = chatService.IsStreamingEnabled("SmartChat", uiFallback: true);
 
 Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI automatically:
 - **When streaming**: shared stateful filter `CoreAI.Ai.ThinkBlockStreamFilter` removes blocks **even if open/close tags are split across SSE chunks**. While the model “thinks”, the typing indicator is shown.
+- Some OpenAI-compatible reasoning models may stream hidden reasoning without the opening `<think>` tag and only emit `</think>` before the final answer. The shared filter treats the buffered prefix before that orphan closing tag as hidden reasoning and drops it.
 - **Non-streaming**: regex strips `<think>` blocks from the final reply.
 - **Tool calls**: not shown in chat (handled inside the MEAI pipeline, including streaming single-cycle).
 - **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots — including after a hint-only chunk when no assistant prose has appeared yet (since **`com.nexoider.coreaiunity` 1.7.1**).

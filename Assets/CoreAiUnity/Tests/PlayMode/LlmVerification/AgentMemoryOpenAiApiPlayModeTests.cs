@@ -44,9 +44,7 @@ namespace CoreAI.Tests.PlayMode
             AiTaskRequest request = new()
             {
                 RoleId = Role,
-                Hint =
-                    "Respond ONLY with the tool call, no explanations. " +
-                    "Use the 'memory' tool to write new info. Call it with action='write' and content='qwen4b works great'."
+                Hint = "Remember this new fact for future turns: qwen4b works great."
             };
             LogHintToConsole(request);
 
@@ -92,48 +90,21 @@ namespace CoreAI.Tests.PlayMode
             AiTaskRequest appendRequest = new()
             {
                 RoleId = Role,
-                Hint =
-                    "Respond ONLY with the tool call, no explanations. " +
-                    "Use the 'memory' tool to append info. Call it with action='append' and content='appended value'."
+                Hint = "Keep the existing memory and add this extra note: appended value."
             };
             LogHintToConsole(appendRequest);
 
             Task<string> run = setup.Orchestrator.RunTaskAsync(appendRequest);
             yield return setup.RunAndWait(run, 240f, "memory append");
             LogOrchestratorReply(run);
-            Task<string> lastRun = run;
-
             string memAfterFirst = ReadMemoryOrEmpty(setup);
             LogMemorySnapshot(setup, "after first append request");
-
-            bool appendApplied = memAfterFirst.Contains(InitialBaseline, StringComparison.Ordinal) &&
-                                 memAfterFirst.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase);
-
-            if (!appendApplied)
-            {
-                Debug.LogWarning(
-                    "[AgentMemoryOpenAiApiPlayMode] Store still missing baseline or append marker — retrying with strict prompt.");
-
-                AiTaskRequest retryRequest = new()
-                {
-                    RoleId = Role,
-                    Hint =
-                        "IMPORTANT: Call ONLY memory tool now. action='append', content='appended value'. " +
-                        "Do not explain. Do not answer with text before the tool call."
-                };
-                LogHintToConsole(retryRequest);
-                Task<string> retryRun = setup.Orchestrator.RunTaskAsync(retryRequest);
-                yield return setup.RunAndWait(retryRun, 240f, "memory append retry");
-                LogOrchestratorReply(retryRun);
-                lastRun = retryRun;
-                LogMemorySnapshot(setup, "after append retry");
-            }
 
             string finalAppendMemory = ReadMemoryOrEmpty(setup);
             if (!finalAppendMemory.Contains(InitialBaseline, StringComparison.Ordinal) ||
                 !finalAppendMemory.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase))
             {
-                llmFailures.InconclusiveIfInfrastructureFailureOrNoResponse("memory append", lastRun);
+                llmFailures.InconclusiveIfInfrastructureFailureOrNoResponse("memory append", run);
             }
 
             AssertAgentMemoryNonEmpty(setup, "final append state");
@@ -172,9 +143,7 @@ namespace CoreAI.Tests.PlayMode
             AiTaskRequest clearRequest = new()
             {
                 RoleId = Role,
-                Hint =
-                    "Respond ONLY with the tool call, no explanations. " +
-                    "Use the 'memory' tool to clear all info. Call it with action='clear'."
+                Hint = "Clear your stored memory for this role."
             };
             LogHintToConsole(clearRequest);
 

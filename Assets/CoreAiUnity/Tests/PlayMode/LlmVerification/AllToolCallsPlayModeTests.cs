@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -200,7 +201,7 @@ namespace CoreAI.Tests.PlayMode
 
                     //    native tool calling
                     string prompt =
-                        "Save this to memory using the memory tool: 'Test craft #1: Iron Sword'. CALL the memory tool now.";
+                        "Remember this craft result for later: Test craft #1 is an Iron Sword.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
@@ -209,13 +210,17 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[AllToolCalls] {prompt}");
                     Debug.Log($"[AllToolCalls] ");
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
-                    });
+                        Hint = prompt,
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "memory",
+                        MaxOutputTokens = 2048
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write", cts);
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content (FULL):");
@@ -245,8 +250,7 @@ namespace CoreAI.Tests.PlayMode
                     }
 
                     Assert.IsTrue(memorySaved,
-                        "Memory must be saved by actual tool call, not by text response. " +
-                        "Model should call the memory tool, not respond with text.");
+                        "Memory must be saved by the required memory tool call, not by text response.");
                 }
 
                 // ===== TEST 2: APPEND MEMORY =====
@@ -257,7 +261,7 @@ namespace CoreAI.Tests.PlayMode
 
                     //    native tool calling
                     string prompt =
-                        "Append this to memory using the memory tool: 'Test craft #2: Steel Shield'. CALL the memory tool now.";
+                        "Keep the existing craft memory and also remember: Test craft #2 is a Steel Shield.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
@@ -266,13 +270,17 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[AllToolCalls] {prompt}");
                     Debug.Log($"[AllToolCalls] ");
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
-                    });
+                        Hint = prompt,
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "memory",
+                        MaxOutputTokens = 2048
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append", cts);
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -307,7 +315,7 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
 
                     //    native tool calling
-                    string prompt = "Clear all memory using the memory tool. CALL the memory tool now.";
+                    string prompt = "Forget the stored craft memory.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
@@ -316,13 +324,17 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[AllToolCalls] {prompt}");
                     Debug.Log($"[AllToolCalls] ");
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
-                    });
+                        Hint = prompt,
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "memory",
+                        MaxOutputTokens = 2048
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear", cts);
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -370,7 +382,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.1f, //     tool calling
-                    300,
+                    240,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -419,7 +431,7 @@ namespace CoreAI.Tests.PlayMode
 
                     //    native tool calling
                     string prompt =
-                        "Create a simple item called 'TestDagger' with quality 50. You MUST use the execute_lua tool call.";
+                        "Create a simple item called 'TestDagger' with quality 50 in the game.";
 
                     Debug.Log($"[AllToolCalls] ");
                     Debug.Log($"[AllToolCalls] TEST: EXECUTE LUA TOOL");
@@ -428,13 +440,14 @@ namespace CoreAI.Tests.PlayMode
                     Debug.Log($"[AllToolCalls] {prompt}");
                     Debug.Log($"[AllToolCalls] ");
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Programmer,
                         Hint = prompt
-                    });
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "execute_lua");
+                    yield return PlayModeTestAwait.WaitTask(t, 240f, "execute_lua", cts);
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");

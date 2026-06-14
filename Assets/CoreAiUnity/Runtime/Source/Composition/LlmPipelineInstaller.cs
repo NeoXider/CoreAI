@@ -265,6 +265,9 @@ namespace CoreAI.Composition
             public float Temperature => _s.Temperature;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public string ExtraBodyJson => "";
+            public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
+            public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;
             public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
@@ -341,6 +344,9 @@ namespace CoreAI.Composition
             public float Temperature => _settings.Temperature;
             public int RequestTimeoutSeconds => _settings.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _settings.MaxTokens;
+            public string ExtraBodyJson => "";
+            public LlmReasoningMode ReasoningMode => _settings.ReasoningMode;
+            public int ThinkingBudgetTokens => _settings.ThinkingBudgetTokens;
             public bool LogLlmInput => _settings.LogLlmInput;
             public bool LogLlmOutput => _settings.LogLlmOutput;
             public bool EnableHttpDebugLogging => _settings.EnableHttpDebugLogging;

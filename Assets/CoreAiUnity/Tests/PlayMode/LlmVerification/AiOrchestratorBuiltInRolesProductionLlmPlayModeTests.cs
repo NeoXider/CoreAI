@@ -14,11 +14,11 @@ namespace CoreAI.Tests.PlayMode
     public sealed class AiOrchestratorBuiltInRolesProductionLlmPlayModeTests
     {
         [UnityTest]
-        [Timeout(900000)]
+        [Timeout(600000)]
         public IEnumerator Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto()
         {
             Debug.Log("[Test] Starting Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.15f, 300,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.15f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);

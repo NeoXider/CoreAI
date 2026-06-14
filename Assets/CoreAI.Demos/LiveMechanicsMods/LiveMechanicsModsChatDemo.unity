@@ -155,7 +155,7 @@ MonoBehaviour:
     y: 520
     width: 500
     height: 190
-  chatReserveWidth: 560
+  chatReserveWidth: 700
   prompts:
   - Label: Big boss reward
     Prompt: Make every boss victory give a big 1000 coin reward. Save it as a mod

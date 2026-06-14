@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using MEAI = Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -95,6 +96,93 @@ namespace CoreAI.Tests.EditMode
             Assert.NotNull(capturedJson);
             StringAssert.Contains("\"temperature\"", capturedJson);
             StringAssert.Contains("0.42", capturedJson);
+        }
+
+        [Test]
+        public async Task GetResponseAsync_ProviderDefaultReasoning_DoesNotAddThinkingFields()
+        {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                }))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            MeaiOpenAiChatClient client = new(new BodySettings());
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
+
+            Assert.NotNull(capturedJson);
+            JObject request = JObject.Parse(capturedJson);
+            Assert.IsNull(request["enable_thinking"]);
+            Assert.IsNull(request["chat_template_kwargs"]);
+            Assert.IsNull(request["thinking_budget"]);
+        }
+
+        [Test]
+        public async Task GetResponseAsync_DisabledReasoning_AddsQwenThinkingControls()
+        {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                }))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            MeaiOpenAiChatClient client = new(new BodySettings
+            {
+                ReasoningModeValue = LlmReasoningMode.Disabled,
+                ThinkingBudgetTokensValue = 128
+            });
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
+
+            Assert.NotNull(capturedJson);
+            JObject request = JObject.Parse(capturedJson);
+            Assert.AreEqual(false, request["enable_thinking"]?.Value<bool>());
+            Assert.AreEqual(false, request["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
+            Assert.AreEqual(128, request["thinking_budget"]?.Value<int>());
+        }
+
+        [Test]
+        public async Task GetResponseAsync_ExtraBodyJson_MergesProviderFields()
+        {
+            const string body =
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"x\"}}]}";
+            string capturedJson = null;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new DelegateHttpHandler(req =>
+                {
+                    capturedJson = req.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                    return OkJson(body);
+                }))
+            {
+                Timeout = System.TimeSpan.FromSeconds(30)
+            };
+
+            MeaiOpenAiChatClient client = new(new BodySettings
+            {
+                ExtraBodyJsonValue = "{\"top_k\":20,\"chat_template_kwargs\":{\"custom\":true}}",
+                ReasoningModeValue = LlmReasoningMode.Enabled
+            });
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, null);
+
+            Assert.NotNull(capturedJson);
+            JObject request = JObject.Parse(capturedJson);
+            Assert.AreEqual(20, request["top_k"]?.Value<int>());
+            Assert.AreEqual(true, request["enable_thinking"]?.Value<bool>());
+            Assert.AreEqual(true, request["chat_template_kwargs"]?["custom"]?.Value<bool>());
+            Assert.AreEqual(true, request["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
         }
 
         [Test]
@@ -201,6 +289,28 @@ namespace CoreAI.Tests.EditMode
             public float Temperature => 0f;
             public int RequestTimeoutSeconds => 60;
             public int MaxTokens => 512;
+            public bool LogLlmInput => false;
+            public bool LogLlmOutput => false;
+            public bool EnableHttpDebugLogging => false;
+            public string ApiBaseUrl => "http://127.0.0.1:9";
+            public string ApiKey => "";
+            public string AuthorizationHeader => "";
+            public string Model => "test-model";
+            public IRequestHeaderProvider? HeaderProvider => null;
+        }
+
+        private sealed class BodySettings : IOpenAiHttpSettings
+        {
+            public string ExtraBodyJsonValue { get; set; } = "";
+            public LlmReasoningMode ReasoningModeValue { get; set; } = LlmReasoningMode.ProviderDefault;
+            public int ThinkingBudgetTokensValue { get; set; }
+
+            public float Temperature => 0f;
+            public int RequestTimeoutSeconds => 60;
+            public int MaxTokens => 512;
+            public string ExtraBodyJson => ExtraBodyJsonValue;
+            public LlmReasoningMode ReasoningMode => ReasoningModeValue;
+            public int ThinkingBudgetTokens => ThinkingBudgetTokensValue;
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;
             public bool EnableHttpDebugLogging => false;

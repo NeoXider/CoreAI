@@ -36,6 +36,9 @@ namespace CoreAI.Tests.PlayMode
     [TestFixture]
     public sealed class FullPipelineE2EPlayModeTests
     {
+        private const int PhaseTimeoutSeconds = 180;
+        private const int LiveModelMaxOutputTokens = 2048;
+
         // ─── Tool call tracking ──────────────────────────────────────────────
 
         private static readonly List<string> _calledTools = new();
@@ -198,7 +201,7 @@ namespace CoreAI.Tests.PlayMode
         // ─── E2E Test ────────────────────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator FullPipeline_Skills_Tools_Memory_MultiTurn()
         {
             Debug.Log("[E2E] ╔══════════════════════════════════════════════════════╗");
@@ -208,7 +211,7 @@ namespace CoreAI.Tests.PlayMode
             ResetTracking();
             LogAssert.ignoreFailingMessages = true;
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 120,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -234,7 +237,7 @@ namespace CoreAI.Tests.PlayMode
                     "1. Call get_recipes to see available recipes.\n" +
                     "2. Call check_inventory to verify materials.\n" +
                     "3. Call craft_item with recipe_id and quality 1.0.\n" +
-                    "4. Call memory tool write to save what you crafted.\n" +
+                    "4. Record what you crafted for later recall.\n" +
                     "5. Tell the player the result.\n" +
                     "Always follow this order.",
                     new DelegateLlmTool("get_recipes", "Get available crafting recipes",
@@ -272,11 +275,8 @@ namespace CoreAI.Tests.PlayMode
                 AgentConfig config = new AgentBuilder(roleId) { SuppressBuildWarnings = true }
                     .WithSystemPrompt(
                         "You are a Game Master for a fantasy RPG. " +
-                        "When the player asks to do something, first call read_skill to load the relevant skill, " +
-                        "then follow the instructions. " +
-                        "You also have memory_write and memory_read tools available at all times. " +
-                        "Use memory_write to save important events. Use memory_read to recall past events. " +
-                        "Respond briefly after using tools. Do not explain your reasoning.")
+                        "Rely on configured capabilities to handle the player's request. " +
+                        "Save important events, recall past events when asked, and respond briefly.")
                     .WithSkill(craftingSkill)
                     .WithSkill(combatSkill)
                     .WithSkill(loreSkill)
@@ -311,13 +311,14 @@ namespace CoreAI.Tests.PlayMode
 
                 Debug.Log("[E2E] ═══ PHASE 1: Craft a Flame Sword (SkillSet → tools → memory) ═══");
 
+                using CancellationTokenSource phase1Cts = new();
                 Task t1 = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "I want to craft a Flame Sword. Read the crafting skill first, " +
-                           "then follow the steps. Save what you crafted to memory."
-                });
-                yield return PlayModeTestAwait.WaitTask(t1, 120f, "Phase 1: Crafting");
+                    Hint = "I want to craft a Flame Sword. Save what you crafted to memory.",
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, phase1Cts.Token);
+                yield return PlayModeTestAwait.WaitTask(t1, PhaseTimeoutSeconds, "Phase 1: Crafting", phase1Cts);
 
                 Debug.Log($"[E2E] Phase 1 tools: [{string.Join(", ", _calledTools)}]");
                 Debug.Log($"[E2E] Phase 1 response: {cap.LastContent}");
@@ -335,7 +336,7 @@ namespace CoreAI.Tests.PlayMode
 
                 if (!anyCraftTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
-                    Assert.Inconclusive(
+                    Assert.Fail(
                         $"Phase 1: local model ({handle.ResolvedBackend}) did not call crafting tools — " +
                         $"multi-step SkillSet pipeline (read_skill→get_recipes→check_inventory→craft_item→memory_write) " +
                         $"exceeds small model capacity. Called: [{string.Join(", ", _calledTools)}]. " +
@@ -354,12 +355,14 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[E2E] ═══ PHASE 2: Recall what was crafted (memory_read) ═══");
 
                 int toolsBefore = _calledTools.Count;
+                using CancellationTokenSource phase2Cts = new();
                 Task t2 = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "What did I craft earlier? Use memory_read to check."
-                });
-                yield return PlayModeTestAwait.WaitTask(t2, 120f, "Phase 2: Memory recall");
+                    Hint = "What did I craft earlier?",
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, phase2Cts.Token);
+                yield return PlayModeTestAwait.WaitTask(t2, PhaseTimeoutSeconds, "Phase 2: Memory recall", phase2Cts);
 
                 Debug.Log($"[E2E] Phase 2 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore))}]");
                 Debug.Log($"[E2E] Phase 2 response: {cap.LastContent}");
@@ -389,12 +392,14 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[E2E] ═══ PHASE 3: Fight a Fire Drake (Combat skill) ═══");
 
                 int toolsBefore3 = _calledTools.Count;
+                using CancellationTokenSource phase3Cts = new();
                 Task t3 = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "A Fire Drake appeared! Read the combat skill and fight it."
-                });
-                yield return PlayModeTestAwait.WaitTask(t3, 120f, "Phase 3: Combat");
+                    Hint = "A Fire Drake appeared! Fight it.",
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, phase3Cts.Token);
+                yield return PlayModeTestAwait.WaitTask(t3, PhaseTimeoutSeconds, "Phase 3: Combat", phase3Cts);
 
                 Debug.Log($"[E2E] Phase 3 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
                 Debug.Log($"[E2E] Phase 3 response: {cap.LastContent}");
@@ -409,7 +414,7 @@ namespace CoreAI.Tests.PlayMode
 
                 if (!anyCombatTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
-                    Assert.Inconclusive(
+                    Assert.Fail(
                         $"Phase 3: local model ({handle.ResolvedBackend}) did not call combat tools — " +
                         $"multi-step skill pipeline exceeds small model capacity. " +
                         $"Called: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]. " +

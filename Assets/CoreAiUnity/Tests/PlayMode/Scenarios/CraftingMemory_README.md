@@ -132,9 +132,9 @@ Implementation: `Microsoft.Extensions.AI.AIFunctionFactory.Create()`
 | File | Agents | Backend | Description |
 |------|--------|--------|-------------|
 | `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator -> CoreMechanicAI -> Programmer** | OpenAI HTTP | **Full 3-agent workflow** |
-| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator -> CoreMechanicAI** | OpenAI HTTP | **Fast 2-agent test** |
-| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | CoreMechanicAI | LLMUnity | 4 crafts + determinism |
-| `CraftingMemoryViaOpenAiPlayModeTests.cs` | CoreMechanicAI | OpenAI HTTP | 4 crafts + determinism + 2 crafts |
+| `MultiAgentCraftingWorkflowPlayModeTests.cs` | **Creator -> CoreMechanicAI** | OpenAI HTTP | Explicit targeted 2-agent duplicate for memory-isolation triage |
+| `CraftingMemoryViaLlmUnityPlayModeTests.cs` | CoreMechanicAI | Production-like backend | Explicit targeted backend-parity ThreeCrafts probe; requires completed `execute_lua` for every craft |
+| `CraftingMemoryViaOpenAiPlayModeTests.cs` | CoreMechanicAI | OpenAI-compatible / production-like backend | Mandatory ThreeCrafts Lua-backed gate; repeat/determinism variants are explicit targeted |
 
 ### EditMode Tests (with Mock LLM)
 

@@ -142,7 +142,7 @@ namespace CoreAI.Tests.PlayMode
         // =========================================================================
 
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(600000)]
         public IEnumerator UnknownTool_ErrorFedBack_RealLlmSelfCorrects()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
@@ -162,16 +162,17 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher. You have ONE tool: 'memory' (action=write, content=string). " +
-                    "If you receive an error about an unknown tool, call 'memory' with action='write' " +
-                    "and content describing the data. Never repeat the failed tool name.",
+                    "You are a teacher with a memory tool for saving information. " +
+                    "If a tool is unavailable, recover by using an available tool instead of retrying the failed name.",
                 UserPayload = "Save this important info to memory.",
-                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+                Tools = new List<ILlmTool> { new MemoryLlmTool() },
+                MaxOutputTokens = 2048
             };
 
             ResultBox box = new();
-            Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
-            yield return WaitTask(task, 180f, "UnknownTool_SelfCorrection");
+            using CancellationTokenSource cts = new();
+            Task task = CollectStreamAsync(client, request, box, cts.Token);
+            yield return PlayModeTestAwait.WaitTask(task, 600f, "UnknownTool_SelfCorrection", cts);
 
             Debug.Log($"[RepairTest2] Output: '{box.FullText}' | Calls: {hybrid.StreamCalls}");
 

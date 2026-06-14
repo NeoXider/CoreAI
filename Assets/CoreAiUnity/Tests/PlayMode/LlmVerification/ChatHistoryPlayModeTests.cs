@@ -54,7 +54,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator ChatHistory_PersistentBetweenSessions_Works()
         {
             Debug.Log("[ChatHistory]  TEST 1: Persistent Context Across Restarts ");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 300, out PlayModeProductionLikeLlmHandle handle,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 120, out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -94,7 +94,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                     { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
-                yield return PlayModeTestAwait.WaitTask(t1, 300f, "chat history part 1");
+                yield return PlayModeTestAwait.WaitTask(t1, 120f, "chat history part 1");
 
                 // ===   ===
                 ChatMessage[] history1 = store1.GetChatHistory(chatAgent.RoleId);
@@ -133,7 +133,7 @@ namespace CoreAI.Tests.PlayMode
 
                 Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                     { RoleId = chatAgent.RoleId, Hint = "What was my secret word?" });
-                yield return PlayModeTestAwait.WaitTask(t2, 300f, "chat history part 2");
+                yield return PlayModeTestAwait.WaitTask(t2, 120f, "chat history part 2");
 
                 string response2 = cap.LastContent ?? "";
                 Debug.Log($"[ChatHistory] Final Response: {response2}");

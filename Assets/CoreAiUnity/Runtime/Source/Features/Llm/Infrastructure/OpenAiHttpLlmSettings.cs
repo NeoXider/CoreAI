@@ -30,6 +30,21 @@ namespace CoreAI.Infrastructure.Llm
 
         [SerializeField] [Min(64)] private int maxTokens = 2048;
 
+        [Header("Provider-specific request body")]
+        [Tooltip("Raw JSON object merged into each OpenAI-compatible request body. Leave empty for standard requests.")]
+        [SerializeField]
+        [TextArea(2, 6)]
+        private string extraBodyJson = "";
+
+        [Tooltip("Provider Default leaves request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls.")]
+        [SerializeField]
+        private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
+
+        [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")]
+        [SerializeField]
+        [Min(0)]
+        private int thinkingBudgetTokens;
+
         [Header("Client limits")] [SerializeField] [Min(0)]
         private int maxRequestsPerSession;
 
@@ -72,6 +87,15 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Maximum response tokens.</summary>
         public int MaxTokens => maxTokens;
 
+        /// <summary>Provider-specific extra request body JSON.</summary>
+        public string ExtraBodyJson => extraBodyJson ?? "";
+
+        /// <summary>Provider-specific reasoning mode.</summary>
+        public LlmReasoningMode ReasoningMode => reasoningMode;
+
+        /// <summary>Optional provider-side thinking budget in tokens.</summary>
+        public int ThinkingBudgetTokens => thinkingBudgetTokens < 0 ? 0 : thinkingBudgetTokens;
+
         /// <summary>Maximum LLM requests allowed in the current session; zero disables this limit.</summary>
         public int MaxRequestsPerSession => maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
 
@@ -105,6 +129,9 @@ namespace CoreAI.Infrastructure.Llm
                 Temperature = Temperature,
                 RequestTimeoutSeconds = RequestTimeoutSeconds,
                 MaxTokens = MaxTokens,
+                ExtraBodyJson = ExtraBodyJson,
+                ReasoningMode = ReasoningMode,
+                ThinkingBudgetTokens = ThinkingBudgetTokens,
                 MaxRequestsPerSession = MaxRequestsPerSession,
                 MaxPromptChars = MaxPromptChars,
                 LogLlmInput = LogLlmInput,
@@ -134,6 +161,9 @@ namespace CoreAI.Infrastructure.Llm
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
             requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
             maxTokens = options.MaxTokens < 64 ? 2048 : options.MaxTokens;
+            extraBodyJson = options.ExtraBodyJson ?? "";
+            reasoningMode = options.ReasoningMode;
+            thinkingBudgetTokens = options.ThinkingBudgetTokens < 0 ? 0 : options.ThinkingBudgetTokens;
             maxRequestsPerSession = options.MaxRequestsPerSession < 0 ? 0 : options.MaxRequestsPerSession;
             maxPromptChars = options.MaxPromptChars < 0 ? 0 : options.MaxPromptChars;
             logLlmInput = options.LogLlmInput;

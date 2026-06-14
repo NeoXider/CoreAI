@@ -173,9 +173,21 @@ namespace CoreAI.Infrastructure.Llm
         private bool llmUnityKeepAlive = false;
 
         [Tooltip(
-            "Strip/enable reasoning tags for models that emit <think> blocks (Qwen3.5, DeepSeek, ...). Works for HTTP + LLMUnity.")]
+            "Provider Default leaves HTTP request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls for compatible models.")]
         [SerializeField]
-        private bool enableReasoning = false;
+        private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
+
+        [Tooltip(
+            "Optional thinking budget for compatible OpenAI-style providers. 0 = omit. " +
+            "When set, CoreAI sends thinking_budget together with reasoning controls.")]
+        [SerializeField]
+        [Min(0)]
+        private int thinkingBudgetTokens;
+
+        [Tooltip("Optional JSON object merged into OpenAI-compatible HTTP request bodies. Leave empty for provider default.")]
+        [TextArea(2, 6)]
+        [SerializeField]
+        private string extraBodyJson = "";
 
         [Tooltip("Concurrent LLMUnity chat sessions (1 = strictly serial).")] [SerializeField] [Min(1)]
         private int llmUnityMaxConcurrentChats = 1;
@@ -562,8 +574,14 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Hold LLMUnity server between prompts.</summary>
         public bool LlmUnityKeepAlive => llmUnityKeepAlive;
 
-        /// <summary>Reasoning-tag cleanup toggle.</summary>
-        public bool EnableReasoning => enableReasoning;
+        /// <summary>Provider-specific HTTP reasoning mode.</summary>
+        public LlmReasoningMode ReasoningMode => reasoningMode;
+
+        /// <summary>Optional provider-side thinking budget in tokens. 0 = omit.</summary>
+        public int ThinkingBudgetTokens => thinkingBudgetTokens < 0 ? 0 : thinkingBudgetTokens;
+
+        /// <summary>Optional provider-specific HTTP request body JSON.</summary>
+        public string ExtraBodyJson => extraBodyJson ?? "";
 
         /// <summary>LLMUnity session concurrency clamp.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
@@ -962,6 +980,11 @@ namespace CoreAI.Infrastructure.Llm
             if (llmUnityNumGPULayers < 0)
             {
                 llmUnityNumGPULayers = 0;
+            }
+
+            if (thinkingBudgetTokens < 0)
+            {
+                thinkingBudgetTokens = 0;
             }
 
             if (maxToolResultChars < 0)

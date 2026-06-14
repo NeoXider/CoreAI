@@ -36,6 +36,9 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class SkillSetReadSkillVerificationPlayModeTests
     {
+        private const int ComplexTurnTimeoutSeconds = 240;
+        private const int LiveModelMaxOutputTokens = 2048;
+
         // ── Tracking ──────────────────────────────────────────────────────────
 
         private static readonly List<string> _calledTools = new();
@@ -166,7 +169,7 @@ namespace CoreAI.Tests.PlayMode
         // ── Test ──────────────────────────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator SelfService_ModelMustReadSkill_ToLearnSecretProtocol()
         {
             Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
@@ -179,7 +182,7 @@ namespace CoreAI.Tests.PlayMode
 
             ResetTracking();
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 120,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, ComplexTurnTimeoutSeconds,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -236,9 +239,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                     .WithSystemPrompt(
                         "You are a Game Master. The player wants to brew potions.\n" +
-                        "IMPORTANT: You MUST call read_skill('Alchemy') first to learn the guild's secret protocol.\n" +
-                        "Then use call_skill_tool to execute the tools described in the skill instructions.\n" +
-                        "Without reading the skill, you will not know the correct secret_code, temperature, or stir_count.")
+                        "Rely on configured capabilities to follow the guild protocol before brewing.")
                     .WithSkill(alchemySkill)
                     .WithSkill(combatSkill)
                     .WithMode(AgentMode.ToolsAndChat)
@@ -270,13 +271,14 @@ namespace CoreAI.Tests.PlayMode
 
                 CoreAi.ClearToolCallHistory();
 
+                using CancellationTokenSource cts = new();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint =
-                        "Brew me a healing potion. Remember to read the Alchemy skill first to learn the secret protocol!"
-                });
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "alchemy brewing");
+                    Hint = "Brew me a healing potion.",
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, cts.Token);
+                yield return PlayModeTestAwait.WaitTask(t, ComplexTurnTimeoutSeconds, "alchemy brewing", cts);
 
                 // ── Results ──────────────────────────────────────────────────
 

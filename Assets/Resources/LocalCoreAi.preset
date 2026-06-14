@@ -93,7 +93,7 @@ Preset:
     value: 0
     objectReference: {fileID: 0}
   - target: {fileID: 0}
-    propertyPath: enableReasoning
+    propertyPath: reasoningMode
     value: 0
     objectReference: {fileID: 0}
   - target: {fileID: 0}

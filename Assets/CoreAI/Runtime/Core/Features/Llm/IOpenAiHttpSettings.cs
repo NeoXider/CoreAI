@@ -3,6 +3,21 @@ using System.Collections.Generic;
 namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
+    /// Provider-side reasoning/thinking request mode for OpenAI-compatible APIs.
+    /// </summary>
+    public enum LlmReasoningMode
+    {
+        /// <summary>Do not send provider-specific thinking controls.</summary>
+        ProviderDefault = 0,
+
+        /// <summary>Ask compatible providers to disable thinking.</summary>
+        Disabled = 1,
+
+        /// <summary>Ask compatible providers to enable thinking.</summary>
+        Enabled = 2
+    }
+
+    /// <summary>
     /// Defines the contract for open ai http settings implementations.
     /// </summary>
     public interface IOpenAiHttpSettings
@@ -29,6 +44,33 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Maximum number of output tokens requested from the backend.</summary>
         int MaxTokens { get; }
+
+        /// <summary>
+        /// Optional raw JSON object merged into OpenAI-compatible request bodies.
+        /// Use for provider-specific fields that are not part of the standard OpenAI schema.
+        /// Empty string disables this extension point.
+        /// </summary>
+        string ExtraBodyJson => "";
+
+        /// <summary>
+        /// Provider-specific thinking mode. ProviderDefault leaves request bodies unchanged.
+        /// </summary>
+        LlmReasoningMode ReasoningMode => LlmReasoningMode.ProviderDefault;
+
+        /// <summary>
+        /// When true, request bodies include reasoning/thinking controls for compatible providers.
+        /// </summary>
+        bool SendReasoningControls => ReasoningMode != LlmReasoningMode.ProviderDefault;
+
+        /// <summary>
+        /// Desired thinking mode when <see cref="SendReasoningControls"/> is true.
+        /// </summary>
+        bool EnableReasoning => ReasoningMode == LlmReasoningMode.Enabled;
+
+        /// <summary>
+        /// Optional provider-specific thinking budget in tokens. Zero disables the field.
+        /// </summary>
+        int ThinkingBudgetTokens => 0;
 
         /// <summary>True when request prompts should be written to diagnostic logs.</summary>
         bool LogLlmInput { get; }

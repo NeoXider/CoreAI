@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -22,6 +23,9 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MerchantWithToolCallingPlayModeTests
     {
+        private const int LlmTurnTimeoutSeconds = 240;
+        private const int LiveModelMaxOutputTokens = 2048;
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -71,10 +75,12 @@ namespace CoreAI.Tests.PlayMode
         private sealed class TestInventoryProvider : InventoryTool.IInventoryProvider
         {
             public List<InventoryTool.InventoryItem> Inventory { get; } = new();
+            public int CallCount { get; private set; }
 
             public Task<List<InventoryTool.InventoryItem>> GetInventoryAsync(
                 System.Threading.CancellationToken cancellationToken)
             {
+                CallCount++;
                 return Task.FromResult(Inventory);
             }
         }
@@ -126,7 +132,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
-                    300,
+                    LlmTurnTimeoutSeconds,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -173,13 +179,15 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log($"[ChatWithToolCalling] {playerMessage}");
                 Debug.Log($"[ChatWithToolCalling] ");
 
+                using CancellationTokenSource cts = new();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.Merchant,
-                    Hint = playerMessage
-                });
+                    Hint = playerMessage,
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, cts.Token);
 
-                yield return PlayModeTestAwait.WaitTask(t, 240f, "chat with tool calling"); // 240s  retry loop
+                yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "chat with tool calling", cts);
 
                 Debug.Log($"[ChatWithToolCalling]  AGENT RESPONSE:");
                 Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
@@ -193,18 +201,10 @@ namespace CoreAI.Tests.PlayMode
                     capturingLlm.LastContent?.Contains("inventory", StringComparison.OrdinalIgnoreCase) == true ||
                     capturingLlm.LastContent?.Contains("items", StringComparison.OrdinalIgnoreCase) == true;
 
-                if (responseMentionsItems)
-                {
-                    Debug.Log($"[ChatWithToolCalling]  Agent responded with inventory items!");
-                    Assert.Pass("Chat Agent called tool and responded with real items");
-                }
-                else
-                {
-                    Debug.LogWarning($"[ChatWithToolCalling]  Agent did not mention items in response");
-                    Debug.LogWarning($"[ChatWithToolCalling] Response: {capturingLlm.LastContent}");
-                    //    -     
-                    Assert.Pass("Chat Agent responded (may not have called tool)");
-                }
+                Assert.Greater(testInventory.CallCount, 0,
+                    "Merchant must call the inventory tool before answering available items.");
+                Assert.IsTrue(responseMentionsItems,
+                    $"Merchant should answer with available inventory items after tool use. Response: {capturingLlm.LastContent}");
 
                 Debug.Log("[ChatWithToolCalling]  TEST PASSED ");
             }

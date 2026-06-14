@@ -23,7 +23,7 @@ namespace CoreAI.Tests.PlayMode
     /// What is covered:
     /// 1. Tool calls execute without leaking JSON into user-facing text.
     /// 2. Streaming tool calls keep text flowing while JSON is stripped mid-stream.
-    /// 3. Memory write/read cycles work with a real LLM.
+    /// 3. Memory writes persist through the real LLM tool-call path.
     /// 4. Orchestrator-level Merchant inventory calls produce clean output.
     /// 5. Tool call trace diagnostics populated on streaming chunks.
     /// All tests use a real LLM backend (HTTP API or LLMUnity) and validate that
@@ -99,7 +99,7 @@ namespace CoreAI.Tests.PlayMode
             LlmCompletionRequest probeRequest = new()
             {
                 AgentRoleId = "Teacher",
-                SystemPrompt = "Reply with exactly one word: pong.",
+                SystemPrompt = "Reply briefly.",
                 UserPayload = "ping",
                 Tools = new List<ILlmTool>()
             };
@@ -108,9 +108,10 @@ namespace CoreAI.Tests.PlayMode
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 LlmCompletionResult probeResult = null;
+                using CancellationTokenSource cts = new();
                 Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r,
-                    CancellationToken.None);
-                yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability");
+                    cts.Token);
+                yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability", cts);
 
                 if (probeResult != null && probeResult.Ok && !string.IsNullOrWhiteSpace(probeResult.Content))
                 {
@@ -216,12 +217,12 @@ namespace CoreAI.Tests.PlayMode
 
         /// <summary>
         /// Full pipeline: streaming + memory tool calling.
-        /// LLM must call 'memory' tool with action='write', then produce clean text.
+        /// LLM should persist memory and then produce clean text.
         /// Validates: MeaiLlmClient → TryExtractToolCallsFromText → ToolExecutionPolicy
         /// → TryRepairToolName → AIFunction → memory persisted → JSON stripped.
         /// </summary>
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(300000)]
         public IEnumerator StreamingMemoryWrite_ToolExecutes_NoJsonLeak()
         {
             Debug.Log($"[FullPipeline1] Backend: {_setup.BackendName}");
@@ -232,18 +233,17 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher. You have a 'memory' tool. " +
-                    "When asked to remember something, you MUST emit valid tool JSON on its own line before any confirmation: " +
-                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"<facts>\"}} " +
-                    "Do not say you saved anything unless that JSON appears in your reply. " +
-                    "After the JSON line, add one short confirmation sentence.",
+                    "You are a teacher with a memory tool. Use it when the user asks you to remember something. " +
+                    "Do not expose tool-call syntax, JSON, or arguments in the user-visible reply.",
                 UserPayload = "Remember that the student's name is Alex and they prefer math.",
-                Tools = new List<ILlmTool> { new MemoryLlmTool() }
+                Tools = new List<ILlmTool> { new MemoryLlmTool() },
+                MaxOutputTokens = 2048
             };
 
             StreamResultBox box = new();
-            Task task = CollectStreamAsync(_setup.Client, request, box, CancellationToken.None);
-            yield return WaitTask(task, 150f, "StreamingMemoryWrite");
+            using CancellationTokenSource cts = new();
+            Task task = CollectStreamAsync(_setup.Client, request, box, cts.Token);
+            yield return WaitTask(task, 120f, "StreamingMemoryWrite", cts);
 
             Debug.Log($"[FullPipeline1] Output ({box.ChunkCount} chunks): '{box.FullText}'");
 
@@ -296,17 +296,16 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher with a memory tool (text-shaped calling on this host). " +
-                    "When asked to remember a fact, your reply MUST include a parseable JSON object with " +
-                    "\"name\":\"memory\" and \"arguments\" with action \"write\" and \"content\" set to the text to store. " +
-                    "Do not claim you saved unless that JSON is present; after the tool runs you may say Saved briefly.",
+                    "You are a teacher with a memory tool. Use it when the user asks you to remember a fact. " +
+                    "Keep the final user-visible reply brief and free of tool-call JSON.",
                 UserPayload = "Remember: The student scored 95 on the math test.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
             LlmCompletionResult result = null;
-            Task task = CompleteNonStreamAsync(_setup.Client, request, r => result = r, CancellationToken.None);
-            yield return WaitTask(task, 150f, "NonStreamingMemoryWrite");
+            using CancellationTokenSource cts = new();
+            Task task = CompleteNonStreamAsync(_setup.Client, request, r => result = r, cts.Token);
+            yield return WaitTask(task, 120f, "NonStreamingMemoryWrite", cts);
 
             Assert.IsNotNull(result, "Result should not be null");
             Assert.IsTrue(result.Ok, $"Request should succeed: {result?.Error}");
@@ -393,13 +392,15 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics(),
                 ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
+            using CancellationTokenSource orchCts = new();
             Task orchTask = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Merchant,
-                Hint = "What items do you have for sale?"
-            });
+                Hint = "What items do you have for sale?",
+                MaxOutputTokens = 2048
+            }, orchCts.Token);
 
-            yield return WaitTask(orchTask, 240f, "OrchestratorMerchant");
+            yield return WaitTask(orchTask, 240f, "OrchestratorMerchant", orchCts);
 
             // Check commands
             Debug.Log($"[FullPipeline3] Commands: {sink.Items.Count}");
@@ -429,6 +430,9 @@ namespace CoreAI.Tests.PlayMode
                 response.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
                 response.Contains("items", StringComparison.OrdinalIgnoreCase);
 
+            Assert.IsTrue(mentionsItems,
+                $"Merchant inventory response should mention available items. Response: {response}");
+
             if (mentionsItems)
             {
                 Debug.Log("[FullPipeline3] ✓ Agent mentioned inventory items");
@@ -446,12 +450,13 @@ namespace CoreAI.Tests.PlayMode
         // =====================================================================
 
         /// <summary>
-        /// Two-phase test: first request writes to memory, second request reads and confirms.
-        /// Validates the full round-trip through the pipeline with persistent state.
+        /// Validates that a streaming memory tool call persists state without leaking raw tool JSON.
+        /// MemoryLlmTool supports write/append/clear, not read; recall behavior belongs in
+        /// orchestrator/context tests that inject persisted memory into prompts.
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
-        public IEnumerator WriteRead_TwoRequests_MemoryPersistsAndNoJsonLeak()
+        [Timeout(600000)]
+        public IEnumerator StreamingMemoryWrite_PersistsAndNoJsonLeak()
         {
             Debug.Log($"[FullPipeline4] Backend: {_setup.BackendName}");
 
@@ -462,17 +467,16 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher. You have a 'memory' tool. " +
-                    "To save what the user asks, you MUST output this JSON on its own line (replace CONTENT): " +
-                    "{\"name\":\"memory\",\"arguments\":{\"action\":\"write\",\"content\":\"CONTENT\"}} " +
-                    "Do not claim the memory was saved without that JSON. After it, reply with only: Saved.",
+                    "You are a teacher with a memory tool. Use it to save what the user asks you to remember. " +
+                    "Keep the final reply brief and do not show tool-call JSON.",
                 UserPayload = "Remember this: Final exam is on June 15th.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
             StreamResultBox writeBox = new();
-            Task writeTask = CollectStreamAsync(_setup.Client, writeRequest, writeBox, CancellationToken.None);
-            yield return WaitTask(writeTask, 120f, "Write_Phase");
+            using CancellationTokenSource writeCts = new();
+            Task writeTask = CollectStreamAsync(_setup.Client, writeRequest, writeBox, writeCts.Token);
+            yield return WaitTask(writeTask, 240f, "Write_Phase", writeCts);
 
             Debug.Log($"[FullPipeline4] Write output: '{writeBox.FullText}'");
             Assert.IsTrue(_setup.MemoryStore.TryLoad("Teacher", out AgentMemoryState writeState),
@@ -482,36 +486,10 @@ namespace CoreAI.Tests.PlayMode
             // No JSON in write output
             Assert.That(writeBox.FullText, Does.Not.Contain("\"name\":"),
                 "Write phase: no JSON leak");
-
-            // --- Phase 2: Read ---
-            LlmCompletionRequest readRequest = new()
-            {
-                AgentRoleId = "Teacher",
-                SystemPrompt =
-                    "You are a teacher. You have a 'memory' tool. " +
-                    "Call memory with action='read' to check what is saved. " +
-                    "Then tell the user what's in your memory. Be brief.",
-                UserPayload = "What do you have in your memory?",
-                Tools = new List<ILlmTool> { new MemoryLlmTool() }
-            };
-
-            StreamResultBox readBox = new();
-            Task readTask = CollectStreamAsync(_setup.Client, readRequest, readBox, CancellationToken.None);
-            yield return WaitTask(readTask, 120f, "Read_Phase");
-
-            Debug.Log($"[FullPipeline4] Read output: '{readBox.FullText}'");
-
-            // No JSON in read output
-            Assert.That(readBox.FullText, Does.Not.Contain("\"name\":"),
-                "Read phase: no JSON leak");
-            Assert.That(readBox.FullText, Does.Not.Contain("\"arguments\":"),
-                "Read phase: no arguments JSON leak");
-
-            // Memory should still contain the written data
-            Assert.IsTrue(_setup.MemoryStore.TryLoad("Teacher", out AgentMemoryState readState),
-                "Read phase: memory should still be persisted");
-            Assert.That(readState.Memory, Is.Not.Empty,
-                "Read phase: memory should not be empty after read");
+            Assert.That(writeBox.FullText, Does.Not.Contain("\"arguments\":"),
+                "Write phase: no arguments JSON leak");
+            Assert.That(writeState.Memory, Does.Contain("June 15"),
+                "Write phase: memory should contain the requested exam date.");
 
             Debug.Log("[FullPipeline4] ✓ PASSED");
         }
@@ -536,16 +514,16 @@ namespace CoreAI.Tests.PlayMode
             {
                 AgentRoleId = "Teacher",
                 SystemPrompt =
-                    "You are a teacher. You have a 'memory' tool. " +
-                    "Call memory with action='write' and content='trace_test_data'. " +
-                    "After saving, say 'Trace test complete.'",
+                    "You are a teacher with a memory tool. Save requested trace data when asked. " +
+                    "Keep the final response brief.",
                 UserPayload = "Save trace test data to memory now.",
                 Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
             TraceResultBox traceBox = new();
-            Task task = CollectStreamWithTracesAsync(_setup.Client, request, traceBox, CancellationToken.None);
-            yield return WaitTask(task, 150f, "StreamingTraces");
+            using CancellationTokenSource cts = new();
+            Task task = CollectStreamWithTracesAsync(_setup.Client, request, traceBox, cts.Token);
+            yield return WaitTask(task, 240f, "StreamingTraces", cts);
 
             Debug.Log($"[FullPipeline5] Output: '{traceBox.FullText}' | Traces: {traceBox.Traces.Count}");
 
@@ -566,12 +544,12 @@ namespace CoreAI.Tests.PlayMode
             else if (memorySaved)
             {
                 Debug.LogWarning("[FullPipeline5] Memory saved but no tool traces — backend may not return traces");
-                Assert.Pass("Tool executed but traces not populated (backend-dependent)");
+                Assert.Fail("Memory tool executed but no LlmToolCallTrace diagnostics were emitted.");
             }
             else
             {
                 Debug.LogWarning("[FullPipeline5] Tool not called — model-dependent");
-                Assert.Pass("Model did not call tool (model-dependent behavior)");
+                Assert.Fail("Streaming trace test requires the model to execute the memory tool.");
             }
 
             // No JSON leak regardless
@@ -628,6 +606,15 @@ namespace CoreAI.Tests.PlayMode
         private static IEnumerator WaitTask(Task task, float timeoutSec, string label)
         {
             return PlayModeTestAwait.WaitTask(task, timeoutSec, label);
+        }
+
+        private static IEnumerator WaitTask(
+            Task task,
+            float timeoutSec,
+            string label,
+            CancellationTokenSource cancellationOnTimeout)
+        {
+            return PlayModeTestAwait.WaitTask(task, timeoutSec, label, cancellationOnTimeout);
         }
 
         private static async Task CompleteNonStreamAsync(

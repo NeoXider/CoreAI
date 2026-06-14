@@ -84,6 +84,20 @@ If the backend reports **`LlmErrorCode.ContextLengthExceeded`** (`MeaiOpenAiChat
 
 **Error propagation:** `CoreAiChatService` does not swallow exceptions; `CoreAiChatPanel` catches and displays them.
 
+## Test Integrity Rule
+
+Tests must measure whether the system under test works. They must not rescue the implementation or the model with answer-shaped hints after a failure.
+
+- Prompts and fixtures should describe the user/game goal in domain language. They may mention a capability only when that capability is the actual feature under test, but they must not dictate exact tool payloads, exact Lua bodies, exact response text, or private expected values unless the test is explicitly a parser, serializer, repair, or deterministic extraction fixture.
+- A retry may handle infrastructure only: model startup, transport retry, rate-limit/backoff, or a fresh user turn that a real player could reasonably send. A retry must not say "previous answer failed; now call this exact tool with these exact arguments".
+- Assertions must verify resulting state, emitted commands, tool traces, memory contents, or UI output. Avoid asserting exact natural-language text from a real LLM; assert the semantic fact that matters.
+- Tool-backed integration tests must prove the tool-backed behaviour actually happened. A Lua test should require a completed `execute_lua` trace or the runtime Lua state it produced; a memory test should require the memory tool or persisted memory contract; a merchant/economy test should require the economy state change. Do not accept prose, memory-only text, or final JSON as a substitute for the tool/runtime contract under test.
+- Forced tool choice is allowed only when the test explicitly validates a specific tool binding/execution path. It must not be used in tests that claim to measure whether the model autonomously chooses the correct tool.
+- Mandatory live-model PlayMode should contain the strongest representative scenario for each behaviour. Long duplicates, same-path variants, and exploratory stress probes should be `[Explicit]` targeted tests with their diagnostic purpose documented, so the full suite remains a stable product gate rather than a stochastic benchmark collection.
+- Timeout is diagnostic data. Medium single-turn live-model tests should use 120 seconds. Complex tool, SkillSet, crafting, Lua, or multi-agent turns should use 240 seconds. Do not exceed 600 seconds without a separate investigation note. If a test hits timeout, first inspect whether the prompt, routing, tool schema, cancellation path, or model reasoning mode is wrong; do not blindly raise the timeout.
+- EditMode and stubbed PlayMode tests may use exact strings and exact payloads only when the exact bytes are the contract under test: parser extraction, JSON repair, serialization, migration, deterministic sandbox execution, or regression fixtures. Keep those tests clearly named and separate from live-model verification.
+- Integration tests should not assert implementation details that are not part of the public contract. If a test needs an exact internal call sequence, prefer a narrower unit/parser test or add a trace contract that makes the sequence observable.
+
 ## WebGL Rule
 
 `LocalModel` cannot use native LLMUnity in WebGL. WebGL projects should use `ServerManagedApi` for production, or `ClientOwnedApi` only for local/dev scenarios where key exposure is acceptable. Timeout in WebGL uses `CancelAfterSlim` (UniTask PlayerLoop) — `CancellationTokenSource.CancelAfter` is not functional in Emscripten (v1.5.1 fix).
@@ -107,4 +121,3 @@ Applies to **`Assets/CoreAI`** (portable) and **`Assets/CoreAiUnity/Runtime`** u
 - **`// TODO:`** and **`// HACK:`** are allowed when behaviour is non-obvious or a deliberate temporary workaround (**`TODO`** = planned follow-up, **`HACK`** = invariant or constraint callers must respect). Prefer a **short** phrase after the keyword.
 - **Other `//` comments:** Avoid narrative `//` comments in production runtime code. Prefer **`///`** on APIs, **`// HACK:`** where the codebase must preserve a subtle invariant, or no comment if the code is clear. **`Tests`** (`Assets/*/Tests`) may retain richer comments for Arrange/Assert clarity.
 - **`*` fenced regions** (`#region`) are optional; keep **English** labels if used.
-

@@ -48,13 +48,13 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator ChatService_Integration_AllModesAndAgentSwapping()
         {
             Debug.Log("[ChatServiceIntegration] ===== TEST START =====");
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null, 0.3f, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
+                    null, 0.3f, 240, out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
             }
@@ -112,7 +112,7 @@ namespace CoreAI.Tests.PlayMode
                             chatOnlyResponse += c.Text;
                         }
                     });
-                yield return PlayModeTestAwait.WaitTask(t1, 60f, "Chat Only");
+                yield return PlayModeTestAwait.WaitTask(t1, 240f, "Chat Only");
                 if (string.IsNullOrEmpty(chatOnlyResponse))
                 {
                     chatOnlyResponse = t1.Result;
@@ -135,7 +135,7 @@ namespace CoreAI.Tests.PlayMode
                             toolOnlyResponse += c.Text;
                         }
                     });
-                yield return PlayModeTestAwait.WaitTask(t2, 60f, "Tools Only");
+                yield return PlayModeTestAwait.WaitTask(t2, 240f, "Tools Only");
 
                 // It might still output some text, but the main thing is the tool should be called.
                 // We verify sink or the response
@@ -163,7 +163,7 @@ namespace CoreAI.Tests.PlayMode
                             hybridResponse += c.Text;
                         }
                     });
-                yield return PlayModeTestAwait.WaitTask(t3, 120f, "Hybrid");
+                yield return PlayModeTestAwait.WaitTask(t3, 240f, "Hybrid");
                 if (string.IsNullOrEmpty(hybridResponse))
                 {
                     hybridResponse = t3.Result;
@@ -176,21 +176,11 @@ namespace CoreAI.Tests.PlayMode
                 string swappedResponse = "";
                 yield return SendAndCapture(
                     chatService,
-                    "Reply with exactly this text: SWAP_OK",
+                    "Return one short non-empty sentence.",
                     "SimpleChatOnly",
-                    60f,
+                    240f,
                     "Agent Swapping",
                     value => swappedResponse = value);
-                if (string.IsNullOrWhiteSpace(swappedResponse))
-                {
-                    yield return SendAndCapture(
-                        chatService,
-                        "You are SimpleChatOnly. Return one short non-empty sentence.",
-                        "SimpleChatOnly",
-                        60f,
-                        "Agent Swapping retry",
-                        value => swappedResponse = value);
-                }
 
                 Assert.IsNotEmpty(swappedResponse, "Swapped response should not be empty");
 
@@ -245,7 +235,7 @@ namespace CoreAI.Tests.PlayMode
             public bool EnableHttpDebugLogging => false;
             public bool LogMeaiToolCallingSteps => false;
             public bool EnableMeaiDebugLogging => false;
-            public float LlmRequestTimeoutSeconds => 120f;
+            public float LlmRequestTimeoutSeconds => 240f;
             public int MaxLlmRequestRetries => 2;
             public bool LogTokenUsage => false;
             public bool LogLlmLatency => false;

@@ -44,7 +44,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to spawn an object. Set prefabKey='TestPrefab' and targetName='test_obj' at coordinates x=0, y=0, z=0."
+                    "Spawn TestPrefab as an object named test_obj at coordinates x=0, y=0, z=0."
             });
 
             yield return setup.RunAndWait(task, 240f, "world spawn");
@@ -87,7 +87,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to move the target named 'Player' to coordinates x=10, y=20, z=30."
+                    "Move the target named 'Player' to coordinates x=10, y=20, z=30."
             });
 
             yield return setup.RunAndWait(task, 240f, "world move");
@@ -128,7 +128,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to list all the objects currently in the scene."
+                    "List all objects currently in the scene."
             });
 
             yield return setup.RunAndWait(task, 240f, "world list_objects");
@@ -169,7 +169,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to play the 'attack' animation on the target named 'Enemy'."
+                    "Play the 'attack' animation on the target named 'Enemy'."
             });
 
             yield return setup.RunAndWait(task, 240f, "world play_animation");
@@ -210,7 +210,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Use the world_command tool to list the available animations for the target named 'Enemy'."
+                    "List the available animations for the target named 'Enemy'."
             });
 
             yield return setup.RunAndWait(task, 240f, "world list_animations");

@@ -163,10 +163,8 @@ namespace CoreAI.Tests.PlayMode
                     }
                     .WithSystemPrompt(
                         "You are a Game Master in a fantasy RPG.\n" +
-                        "When the player asks you to do something:\n" +
-                        "1. Call read_skill for the relevant skill to learn available tools.\n" +
-                        "2. Call call_skill_tool to use the tools from that skill.\n" +
-                        "Always read the skill first!")
+                        "When the player asks you to do something, use the relevant available skill " +
+                        "and its tools to complete the request.")
                     .WithSkill(enchantingSkill)
                     .WithSkill(explorationSkill)
                     .WithMode(AgentMode.ToolsAndChat)

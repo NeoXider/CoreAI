@@ -100,6 +100,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ProcessChunk_OrphanCloseTag_DropsBufferedReasoningPrefix()
+        {
+            ThinkBlockStreamFilter filter = new();
+            string result = filter.ProcessChunk("reasoning text</think>Answer");
+
+            Assert.AreEqual("Answer", result);
+        }
+
+        [Test]
+        public void ProcessChunk_OrphanCloseTagSplitAcrossChunks_DropsBufferedReasoningPrefix()
+        {
+            ThinkBlockStreamFilter filter = new();
+            string result = FeedChunks(filter,
+                "reasoning text</th",
+                "ink>Answer");
+
+            Assert.AreEqual("Answer", result);
+        }
+
+        [Test]
         public void ProcessChunk_BothTagsHeavilySplit_Handled()
         {
             ThinkBlockStreamFilter filter = new();

@@ -1,6 +1,8 @@
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
-﻿using System;
+using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -29,7 +31,16 @@ namespace CoreAI.Tests.PlayMode
         {
             public readonly SecureLuaEnvironment Sandbox = new();
             public readonly LuaApiRegistry Registry = new();
+            public readonly LuaLogicSlots LogicSlots = new();
+            public int ExecutionCount;
+            public string LastCode = "";
             public Script ScriptInstance;
+
+            public SharedLuaExecutor()
+            {
+                LogicSlots.DeclareSlot("calculate_damage");
+                LogicSlots.RegisterApis(Registry);
+            }
 
             public Task<LuaTool.LuaResult> ExecuteAsync(string code, System.Threading.CancellationToken ct)
             {
@@ -39,6 +50,10 @@ namespace CoreAI.Tests.PlayMode
                     {
                         ScriptInstance = Sandbox.CreateScript(Registry);
                     }
+
+                    ExecutionCount++;
+                    LastCode = code ?? "";
+                    Debug.Log($"[LuaDynamic] execute_lua code:\n{LastCode}");
 
                     DynValue result = Sandbox.RunChunk(ScriptInstance, code);
                     return Task.FromResult(
@@ -50,14 +65,19 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
 
-            public double CallFunctionCurrent(string functionName)
+            public double CallDamageCurrent()
             {
+                if (LogicSlots.TryInvokeNumber("calculate_damage", out double overriddenDamage))
+                {
+                    return overriddenDamage;
+                }
+
                 if (ScriptInstance == null)
                 {
                     return 0;
                 }
 
-                DynValue func = ScriptInstance.Globals.Get(functionName);
+                DynValue func = ScriptInstance.Globals.Get("calculate_damage");
                 if (func.Type == DataType.Function)
                 {
                     return ScriptInstance.Call(func).Number;
@@ -97,10 +117,13 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        private sealed class NullSink : IAiGameCommandSink
+        private sealed class ListSink : IAiGameCommandSink
         {
+            public readonly List<ApplyAiGameCommand> Items = new();
+
             public void Publish(ApplyAiGameCommand command)
             {
+                Items.Add(command);
             }
         }
 
@@ -135,7 +158,7 @@ end
                 executor.ExecuteAsync(INITIAL_LOGIC, default).GetAwaiter().GetResult();
 
                 // ,       10
-                double initialDamage = executor.CallFunctionCurrent("calculate_damage");
+                double initialDamage = executor.CallDamageCurrent();
                 Debug.Log($"[LuaDynamic] Initial calculate_damage() = {initialDamage}");
                 Assert.AreEqual(10.0, initialDamage, "Initial damage should be 10");
 
@@ -153,10 +176,11 @@ end
                 AgentMemoryPolicy policy = new();
                 config.ApplyToPolicy(policy);
 
+                ListSink sink = new();
                 AiOrchestrator orch = new(
                     new SoloAuthorityHost(),
                     handle.Client,
-                    new NullSink(),
+                    sink,
                     new SessionTelemetryCollector(),
                     new AiPromptComposer(
                         new BuiltInDefaultAgentSystemPromptProvider(),
@@ -171,26 +195,35 @@ end
 
                 // 3.   : " ,   .    5 ."
                 string prompt = "Players are complaining that the game is too hard. " +
-                                "Change the 'calculate_damage()' lua function to return 50 instead of 10.\n" +
-                                "You MUST use the 'execute_lua' tool to redefine the function globally.\n" +
-                                "Example code: \nfunction calculate_damage() return 50 end";
+                                "The game exposes a runtime rule slot named calculate_damage. " +
+                                "Change that rule so the current damage result becomes 50 instead of 10.\n" +
+                                "Apply the change through the available Lua execution tool.";
 
                 Debug.Log($"[LuaDynamic]  PROMPT: {prompt}");
 
+                using CancellationTokenSource cts = new();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = "GameMaster",
                     Hint = prompt
-                });
+                }, cts.Token);
 
-                yield return PlayModeTestAwait.WaitTask(t, 240f, "modify lua mechanics");
+                yield return PlayModeTestAwait.WaitTask(t, 240f, "modify lua mechanics", cts);
+
+                for (int i = 0; i < sink.Items.Count; i++)
+                {
+                    Debug.Log($"[LuaDynamic] LLM RESPONSE[{i}]: {sink.Items[i].JsonPayload}");
+                }
+
+                Assert.Greater(executor.ExecutionCount, 1,
+                    "GameMaster must execute Lua through execute_lua after the initial setup script.");
 
                 // 4. ,        !
-                double modifiedDamage = executor.CallFunctionCurrent("calculate_damage");
+                double modifiedDamage = executor.CallDamageCurrent();
                 Debug.Log($"[LuaDynamic] Modified calculate_damage() = {modifiedDamage}");
 
                 Assert.AreEqual(50.0, modifiedDamage,
-                    "AI must successfully rewrite the lua logic to return 50!");
+                    "AI must successfully change the runtime damage rule to return 50.");
 
                 Debug.Log("[LuaDynamic]  AI successfully modified game logic at runtime!");
             }

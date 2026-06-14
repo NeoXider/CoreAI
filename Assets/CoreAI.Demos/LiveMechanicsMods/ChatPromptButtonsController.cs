@@ -31,7 +31,7 @@ namespace CoreAI.Demos
 
         [Tooltip("Horizontal space (px) reserved on the right for the chat panel.")]
         [SerializeField]
-        private float chatReserveWidth = 560f;
+        private float chatReserveWidth = 700f;
 
         [SerializeField]
         private PromptButton[] prompts = System.Array.Empty<PromptButton>();

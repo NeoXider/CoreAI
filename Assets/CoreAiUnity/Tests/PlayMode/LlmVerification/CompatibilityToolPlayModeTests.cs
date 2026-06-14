@@ -32,7 +32,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CompatibilityTool_CompatibleIngredients_LlmReportsCompatible()
         {
             Debug.Log("[CompatibilityTest] === TEST 1: Compatible ingredients ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -50,8 +50,8 @@ namespace CoreAI.Tests.PlayMode
                 AgentConfig agent = new AgentBuilder("TestCompatChecker")
                     .WithSystemPrompt(
                         "You are a crafting assistant. When the user asks to check ingredients, " +
-                        "call the check_compatibility tool with the ingredient names as a comma-separated string. " +
-                        "Then report whether they are compatible and mention the score.")
+                        "use the available compatibility capability, then report whether they are compatible " +
+                        "and mention the score.")
                     .WithTool(tool)
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();
@@ -82,7 +82,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible()
         {
             Debug.Log("[CompatibilityTest] === TEST 2: Incompatible ingredients ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -99,8 +99,8 @@ namespace CoreAI.Tests.PlayMode
                 AgentConfig agent = new AgentBuilder("TestIncompatChecker")
                     .WithSystemPrompt(
                         "You are a crafting assistant. When the user asks to check ingredients, " +
-                        "call the check_compatibility tool with the ingredient names as a comma-separated string. " +
-                        "Report the result: whether compatible or not, and warnings.")
+                        "use the available compatibility capability and report whether they are compatible " +
+                        "or not, including warnings.")
                     .WithTool(tool)
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();
@@ -131,7 +131,7 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator CompatibilityTool_ThreeIngredients_GroupRule()
         {
             Debug.Log("[CompatibilityTest] === TEST 3: Three ingredients group rule ===");
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 300,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.1f, 240,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -148,8 +148,8 @@ namespace CoreAI.Tests.PlayMode
 
                 AgentConfig agent = new AgentBuilder("TestTripleChecker")
                     .WithSystemPrompt(
-                        "You are a crafting assistant. Call the check_compatibility tool with " +
-                        "the ingredient names separated by commas. Report the compatibility result.")
+                        "You are a crafting assistant. Use the available compatibility capability " +
+                        "and report the compatibility result.")
                     .WithTool(tool)
                     .WithMode(AgentMode.ToolsAndChat)
                     .Build();

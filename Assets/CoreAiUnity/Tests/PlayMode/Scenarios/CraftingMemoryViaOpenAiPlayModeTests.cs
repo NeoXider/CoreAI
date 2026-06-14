@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -23,6 +24,9 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class CraftingMemoryViaOpenAiPlayModeTests
     {
+        private const int LlmTurnTimeoutSeconds = 240;
+        private const int LongScenarioTimeoutMs = 600000;
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -73,7 +77,7 @@ namespace CoreAI.Tests.PlayMode
         ///     .    PlayModeOpenAiTestConfig.
         /// </summary>
         [UnityTest]
-        [Timeout(2400000)]
+        [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_ThreeCrafts_AllUnique()
         {
             Debug.Log("[CraftingMemory.OpenAI] ");
@@ -84,7 +88,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
-                    300,
+                    LlmTurnTimeoutSeconds,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -137,37 +141,20 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     int toolMark = toolCalls.Count;
+                    using CancellationTokenSource cts = CreateTurnCancellation();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = prompt
-                    });
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 1");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 1");
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 1", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                    if (executeLua == null)
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 1", "IronOakSword", 42, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
-                    }
-
+                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
                     string executedLua = executeLua.Info.ArgumentsJson;
-                    if (!HasExtractableCraftName(executedLua))
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 1", "IronOakSword", 42, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1 retry");
-                        executedLua = executeLua.Info.ArgumentsJson;
-                    }
 
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
                     {
@@ -191,37 +178,20 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     int toolMark = toolCalls.Count;
+                    using CancellationTokenSource cts = CreateTurnCancellation();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = prompt
-                    });
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 2");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 2");
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 2", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                    if (executeLua == null)
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 2", "SteelHardwoodAxe", 75, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
-                    }
-
+                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
                     string executedLua = executeLua.Info.ArgumentsJson;
-                    if (!HasExtractableCraftName(executedLua))
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 2", "SteelHardwoodAxe", 75, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2 retry");
-                        executedLua = executeLua.Info.ArgumentsJson;
-                    }
 
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
                     {
@@ -245,116 +215,22 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     int toolMark = toolCalls.Count;
+                    using CancellationTokenSource cts = CreateTurnCancellation();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = prompt
-                    });
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 3");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 3");
                     yield return FlushMemoryStorePersistenceFrames();
 
                     LogAfterModelCall("craft 3", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                    if (executeLua == null)
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 3", "MithrilEnchantedWoodBow", 62, clientWithMemory, store, policy, telemetry,
-                            composer, toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
-                    }
-
+                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 3");
                     string executedLua = executeLua.Info.ArgumentsJson;
-                    if (!HasExtractableCraftName(executedLua))
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 3", "MithrilEnchantedWoodBow", 62, clientWithMemory, store, policy, telemetry,
-                            composer, toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3 retry");
-                        executedLua = executeLua.Info.ArgumentsJson;
-                    }
 
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
-                    {
-                        yield break;
-                    }
-                }
-
-                // =====  4: Steel + Hardwood (  #2)    =====
-                {
-                    const string ing1 = "Steel";
-                    const string ing2 = "Hardwood";
-                    string prompt = BuildDeterministicCraftPrompt(4,
-                        "Steel (metal, hardness:75, magic:8, rarity:2)",
-                        "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        memoryAccum);
-
-                    LogBeforeModelCall("CRAFT 4: Steel + Hardwood (REPEAT of craft #2  DETERMINISM CHECK)", prompt,
-                        store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt
-                    });
-
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "craft 4");
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 4 (determinism)", sink, store);
-
-                    //  :      #2
-                    string craft2Name = craftedNames[1]; // Steel+Hardwood   #2
-                    LlmToolCallRecord executeLua = toolCalls.TryGetCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                    if (executeLua == null)
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 4", craft2Name, 75, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 4");
-                    }
-
-                    string executedLua = executeLua.Info.ArgumentsJson;
-                    if (!HasExtractableCraftName(executedLua))
-                    {
-                        yield return RetryExactExecuteLua(
-                            "craft 4", craft2Name, 75, clientWithMemory, store, policy, telemetry, composer,
-                            toolCalls);
-                        executeLua = toolCalls.RequireCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 4 retry");
-                        executedLua = executeLua.Info.ArgumentsJson;
-                    }
-
-                    string craft4Name = CraftingMemoryItemNameExtractor.ExtractName(executedLua);
-                    Debug.Log(
-                        $"[CraftingMemory.OpenAI] DETERMINISM CHECK: Craft #2 was '{craft2Name}', Craft #4 is '{craft4Name ?? "unknown"}'");
-
-                    bool isDeterministic = !string.IsNullOrEmpty(craft4Name) &&
-                                           CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft4Name,
-                                               craft2Name);
-
-                    if (!isDeterministic)
-                    {
-                        Debug.LogWarning(
-                            $"[CraftingMemory.OpenAI]  DETERMINISM FAILED: Craft #4 '{craft4Name}' != Craft #2 '{craft2Name}'");
-                    }
-                    else
-                    {
-                        Debug.Log(
-                            $"[CraftingMemory.OpenAI]  DETERMINISM PASS: Craft #4 repeated Craft #2 name '{craft2Name}'");
-                    }
-
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 4", 4, ing1, ing2))
                     {
                         yield break;
                     }
@@ -365,25 +241,15 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[CraftingMemory.OpenAI]  FINAL VALIDATION ");
                 Debug.Log("[CraftingMemory.OpenAI] ");
 
-                Assert.AreEqual(4, craftedNames.Count, "Must have 4 crafted items");
+                Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
 
-                //  1, 2, 3
-                HashSet<string> uniqueFirst3 = new(craftedNames.Take(3).Select(n => n.ToLowerInvariant()));
+                HashSet<string> uniqueFirst3 = new(craftedNames.Select(n => n.ToLowerInvariant()));
                 Assert.AreEqual(3, uniqueFirst3.Count,
-                    $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames.Take(3))}");
+                    $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames)}");
 
                 Debug.Log("[CraftingMemory.OpenAI]  First 3 crafts are unique");
-
-                string craft2Final = craftedNames[1];
-                string craft4Final = craftedNames[3];
                 Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
-                bool namesMatch = CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(craft2Final, craft4Final);
-                Debug.Log($"[CraftingMemory.OpenAI] Determinism: Craft#2='{craft2Final}' vs Craft#4='{craft4Final}' " +
-                          $" {(namesMatch ? " SAME" : " DIFFERENT")} (whitespace-insensitive)");
                 Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
-
-                Assert.IsTrue(namesMatch,
-                    $"Determinism failed: craft #4 must repeat craft #2 name (whitespace-insensitive). Craft2='{craft2Final}' Craft4='{craft4Final}'");
                 Debug.Log("[CraftingMemory.OpenAI] ");
                 Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
                 Debug.Log("[CraftingMemory.OpenAI] ");
@@ -394,12 +260,131 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        [Test]
+        public void CraftingMemoryNameExtractor_PrefersCraftItemOverIngredientNames()
+        {
+            const string payload =
+                "local craft_id = 1\n" +
+                "local ingredients = { { name = \"Iron\" }, { name = \"Oak Wood\" } }\n" +
+                "memory = 'Craft #1: Created \"Ironwood Sword\" (Weapon). Ingredients: Iron, Oak Wood. Quality: 45.'";
+
+            Assert.AreEqual("Ironwood Sword", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCanonicalMemoryLine()
+        {
+            const string payload =
+                "{\"action\":\"append\",\"content\":\"Craft #2 - Steel-Hardwood Scimitar made from Steel + Hardwood\"}";
+
+            Assert.AreEqual("Steel-Hardwood Scimitar", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsEscapedExecuteLuaArguments()
+        {
+            const string payload =
+                "{\"code\":\"local item = create_item(\\\"Steel-Hardwood Halberd\\\", \\\"weapon\\\", 72)\\nreturn item.name\"}";
+
+            Assert.AreEqual("Steel-Hardwood Halberd", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCreatedItemMemoryLine()
+        {
+            const string payload =
+                "{\"action\":\"append\",\"content\":\"Craft #2 Created Item: Flame-Forged Warhammer (weapon). Quality: 102.\"}";
+
+            Assert.AreEqual("Flame-Forged Warhammer", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCreateItemTypeNameOverload()
+        {
+            const string payload =
+                "{\"code\":\"local item = CreateItem(\\\"weapon\\\", \\\"Flame-Forged Warhammer\\\")\\nreturn item\"}";
+
+            Assert.AreEqual("Flame-Forged Warhammer", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCreateItemNameTypeOverload()
+        {
+            const string payload =
+                "{\"code\":\"local item = CreateItem(\\\"Steelwood Blade\\\", \\\"weapon\\\")\\nreturn item\"}";
+
+            Assert.AreEqual("Steelwood Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_DoesNotReadEscapedNewlineAsName()
+        {
+            const string payload =
+                "{\"code\":\"local craft_id = 1\\nlocal ingredients = { \\\"Steel Ingot\\\", \\\"Fire Crystal\\\" }\\nlocal item_name = \\\"Infernal Steel Blade\\\"\"}";
+
+            Assert.AreEqual("Infernal Steel Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsSingleQuotedLuaTableName()
+        {
+            const string payload =
+                "{\"code\":\"local item = {name='Hardsteel Saber', type='weapon', quality=36}\\nreturn item\"}";
+
+            Assert.AreEqual("Hardsteel Saber", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsEscapedJsonNameField()
+        {
+            const string payload =
+                "{\"code\":\"return string.format('{\\\"name\\\":\\\"Ironwood Blade\\\",\\\"type\\\":\\\"weapon\\\"}')\"}";
+
+            Assert.AreEqual("Ironwood Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsEscapedJsonItemNameField()
+        {
+            const string payload =
+                "{\"code\":\"local result = \\\"{\\\\n\\\" ..\\n    \\\"  \\\\\\\"item_name\\\\\\\": \\\\\\\"Ironwood Blade\\\\\\\",\\\\n\\\" ..\\n    \\\"}\\\"\\nreturn result\"}";
+
+            Assert.AreEqual("Ironwood Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCraftLogWeaponLine()
+        {
+            const string payload =
+                "Craft Log #1: Weapon \"Ironwood Blade\" crafted from Iron + Oak Wood. Quality: 46.";
+
+            Assert.AreEqual("Ironwood Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCraftColonNameLine()
+        {
+            const string payload =
+                "Craft #2: Steelwood Saber (weapon). Quality: 72. Ingredients: Steel, Hardwood.";
+
+            Assert.AreEqual("Steelwood Saber", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
+        public void CraftingMemoryNameExtractor_ReadsCraftedMarkdownLine()
+        {
+            const string payload = "Crafted: **Ironwood Blade** | Type: weapon | Quality: 57";
+
+            Assert.AreEqual("Ironwood Blade", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
         /// <summary>
         ///  : 2        .
         ///   .
         /// </summary>
         [UnityTest]
-        [Timeout(900000)]
+        [Explicit("Targeted duplicate of ThreeCrafts_AllUnique for same-ingredient drift; too expensive for mandatory full live-model suite.")]
+        [Timeout(LongScenarioTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent()
         {
             Debug.Log("[CraftingMemory.OpenAI] ");
@@ -410,7 +395,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
-                    300,
+                    LlmTurnTimeoutSeconds,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -445,27 +430,20 @@ namespace CoreAI.Tests.PlayMode
                 AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
 
                 int toolMark1 = toolCalls.Count;
+                using CancellationTokenSource cts1 = CreateTurnCancellation();
                 Task t1 = orch1.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.CoreMechanic,
                     Hint = prompt1
-                });
+                }, cts1.Token);
 
-                yield return PlayModeTestAwait.WaitTask(t1, 300f, "craft 1");
+                yield return PlayModeTestAwait.WaitTask(t1, LlmTurnTimeoutSeconds, "craft 1");
                 yield return FlushMemoryStorePersistenceFrames();
 
                 LogAfterModelCall("craft 1", sink1, store);
 
-                LlmToolCallRecord firstExecuteLua = toolCalls.TryGetCompletedToolSince(
-                    toolMark1, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                if (firstExecuteLua == null)
-                {
-                    yield return RetryExactExecuteLua(
-                        "craft 1", "Firesteel Blade", 75, clientWithMemory, store, policy, telemetry, composer,
-                        toolCalls);
-                    firstExecuteLua = toolCalls.RequireCompletedToolSince(
-                        toolMark1, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
-                }
+                LlmToolCallRecord firstExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                    toolMark1, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
 
                 string firstPayload = firstExecuteLua.Info.ArgumentsJson;
                 AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "craft 1");
@@ -501,27 +479,20 @@ namespace CoreAI.Tests.PlayMode
                 AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
 
                 int toolMark2 = toolCalls.Count;
+                using CancellationTokenSource cts2 = CreateTurnCancellation();
                 Task t2 = orch2.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.CoreMechanic,
                     Hint = prompt2
-                });
+                }, cts2.Token);
 
-                yield return PlayModeTestAwait.WaitTask(t2, 300f, "craft 2");
+                yield return PlayModeTestAwait.WaitTask(t2, LlmTurnTimeoutSeconds, "craft 2");
                 yield return FlushMemoryStorePersistenceFrames();
 
                 LogAfterModelCall("craft 2", sink2, store);
 
-                LlmToolCallRecord secondExecuteLua = toolCalls.TryGetCompletedToolSince(
-                    toolMark2, BuiltInAgentRoleIds.CoreMechanic, "execute_lua");
-                if (secondExecuteLua == null)
-                {
-                    yield return RetryExactExecuteLua(
-                        "craft 2", "Flameforge Dagger", 68, clientWithMemory, store, policy, telemetry, composer,
-                        toolCalls);
-                    secondExecuteLua = toolCalls.RequireCompletedToolSince(
-                        toolMark2, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
-                }
+                LlmToolCallRecord secondExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                    toolMark2, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
 
                 string secondPayload = secondExecuteLua.Info.ArgumentsJson;
                 AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "craft 2");
@@ -533,19 +504,12 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[CraftingMemory.OpenAI]  VALIDATION ");
                 Debug.Log("[CraftingMemory.OpenAI] ");
 
-                if (!string.IsNullOrEmpty(firstName) && !string.IsNullOrEmpty(secondName))
-                {
-                    Assert.AreNotEqual(firstName.ToLowerInvariant(), secondName.ToLowerInvariant(),
-                        $"Craft 2 repeated Craft 1 name! Both are '{firstName}'  model did NOT check memory!");
+                Assert.AreNotEqual(firstName.ToLowerInvariant(), secondName.ToLowerInvariant(),
+                    $"Craft 2 repeated Craft 1 name. Both are '{firstName}'.");
 
-                    Debug.Log($"[CraftingMemory.OpenAI]  Craft names are different:");
-                    Debug.Log($"[CraftingMemory.OpenAI]   Craft 1: '{firstName}'");
-                    Debug.Log($"[CraftingMemory.OpenAI]   Craft 2: '{secondName}'");
-                }
-                else
-                {
-                    Debug.LogWarning("[CraftingMemory.OpenAI]  Could not extract one or both craft names");
-                }
+                Debug.Log($"[CraftingMemory.OpenAI]  Craft names are different:");
+                Debug.Log($"[CraftingMemory.OpenAI]   Craft 1: '{firstName}'");
+                Debug.Log($"[CraftingMemory.OpenAI]   Craft 2: '{secondName}'");
 
                 Debug.Log("[CraftingMemory.OpenAI] ");
                 Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
@@ -587,6 +551,13 @@ namespace CoreAI.Tests.PlayMode
                 new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
         }
 
+        private static CancellationTokenSource CreateTurnCancellation()
+        {
+            CancellationTokenSource cts = new();
+            cts.CancelAfter(TimeSpan.FromSeconds(LlmTurnTimeoutSeconds));
+            return cts;
+        }
+
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
             string previousCrafts)
         {
@@ -595,63 +566,13 @@ namespace CoreAI.Tests.PlayMode
             string memorySection = string.IsNullOrEmpty(previousCrafts)
                 ? "This is your first craft. No previous crafts to check.\n\n"
                 : $"YOUR MEMORY (previous crafts):\n{previousCrafts}\n\n" +
-                  "CRITICAL: You MUST create a DIFFERENT weapon from all previous crafts above. " +
-                  "Do NOT repeat any previous craft name or concept.\n\n";
+                  "Create a weapon that is distinct from the previous crafts recorded above.\n\n";
 
             string instructions =
-                "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
-                "OUTPUT FORMAT:\n" +
-                "1. First, call the memory tool to save this craft:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <list all crafts including this one>\"}}\n" +
-                "   ```\n\n" +
-                "2. Then, call the execute_lua tool to create the item:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('YourWeaponName', 'weapon', 42)\\nreport('crafted YourWeaponName')\"}}\n" +
-                "   ```\n" +
-                "Use an integer literal 1-100 for the third create_item argument (never the identifier quality).\n" +
-                "The code field must contain ONLY the Lua code, nothing else.";
+                "Apply the craft in the game through the available Lua execution capability and preserve enough memory for future crafts. " +
+                "The created item should have a concrete name, type 'weapon', and a numeric quality value.";
 
             return header + ingredients + memorySection + instructions;
-        }
-
-        private IEnumerator RetryExactExecuteLua(
-            string label,
-            string weaponName,
-            int quality,
-            ILlmClient client,
-            InMemoryStore store,
-            AgentMemoryPolicy policy,
-            SessionTelemetryCollector telemetry,
-            AiPromptComposer composer,
-            ToolCallCapture toolCalls)
-        {
-            string prompt = BuildExactExecuteLuaRetryPrompt(weaponName, quality);
-            Debug.LogWarning(
-                $"[CraftingMemory.OpenAI] {label}: execute_lua was not completed; retrying with exact Lua-only tool prompt.");
-            LogBeforeModelCall($"{label.ToUpperInvariant()} RETRY: exact execute_lua", prompt, store);
-
-            ListSink retrySink = new();
-            AiOrchestrator retryOrch = CreateOrchestrator(client, store, policy, telemetry, composer, retrySink);
-            Task retry = retryOrch.RunTaskAsync(new AiTaskRequest
-            {
-                RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                Hint = prompt
-            });
-
-            yield return PlayModeTestAwait.WaitTask(retry, 300f, $"{label} retry execute_lua");
-            yield return FlushMemoryStorePersistenceFrames();
-            LogAfterModelCall($"{label} retry", retrySink, store);
-        }
-
-        private static string BuildExactExecuteLuaRetryPrompt(string weaponName, int quality)
-        {
-            string luaLiteral = weaponName.Replace("\\", "\\\\", StringComparison.Ordinal)
-                .Replace("'", "\\'", StringComparison.Ordinal);
-            return "The previous answer did not call execute_lua. Do not explain. Do not think out loud. " +
-                   "Call ONLY the execute_lua tool now with exactly this Lua code:\n" +
-                   $"create_item('{luaLiteral}', 'weapon', {quality})\n" +
-                   $"report('crafted {luaLiteral}')";
         }
 
         private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,
@@ -664,22 +585,8 @@ namespace CoreAI.Tests.PlayMode
                 : $"YOUR MEMORY (ALL previous crafts):\n{previousCrafts}\n\n";
 
             string instructions =
-                "IMPORTANT: Respond ONLY with tool calls. Do NOT explain your reasoning or think out loud.\n\n" +
-                "These EXACT ingredients were used before (see memory above).\n" +
-                "You MUST craft the EXACT SAME item as before - use the SAME name and properties.\n" +
-                "This tests deterministic behavior: same input = same output.\n\n" +
-                "OUTPUT FORMAT:\n" +
-                "1. Call the memory tool:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"memory\", \"arguments\": {\"action\": \"write\", \"content\": \"Previous crafts: <update list>\"}}\n" +
-                "   ```\n\n" +
-                "2. Call the execute_lua tool with the EXACT weapon name from your earlier craft with these same ingredients:\n" +
-                "   ```json\n" +
-                "   {\"name\": \"execute_lua\", \"arguments\": {\"code\": \"create_item('<EXACT_NAME_FROM_MEMORY>', 'weapon', <SAME_QUALITY>)\\nreport('crafted <EXACT_NAME_FROM_MEMORY>')\"}}\n" +
-                "   ```\n" +
-                "Replace <EXACT_NAME_FROM_MEMORY> with the weapon name you used before for these ingredients. " +
-                "Replace <SAME_QUALITY> with the same integer you used before. Do NOT use placeholder text.\n" +
-                "The code field must contain ONLY the Lua code, nothing else.";
+                "These ingredients were used before. Use the available Lua execution capability and the recorded craft memory to create the consistent result " +
+                "that the game should produce for the same ingredients, and preserve the updated memory.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -878,8 +785,24 @@ namespace CoreAI.Tests.PlayMode
                 {
                     string seen = string.Join(", ", _records.Skip(startIndex)
                         .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
-                    Assert.Inconclusive(
+                    Assert.Fail(
                         $"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
+                }
+
+                return record;
+            }
+
+            public LlmToolCallRecord RequireExtractableExecuteLuaSince(int startIndex, string roleId, string label)
+            {
+                LlmToolCallRecord record = RequireCompletedToolSince(startIndex, roleId, "execute_lua", label);
+                string payload = record.Info.ArgumentsJson;
+                if (!HasExtractableCraftName(payload))
+                {
+                    string seen = string.Join("\n---\n", _records.Skip(startIndex)
+                        .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}\n{r.Info.ArgumentsJson}"));
+                    Assert.Fail(
+                        $"[{label}] execute_lua completed, but no craft item name could be extracted. " +
+                        $"This is a model/tool-output quality failure, not a retryable harness prompt. Seen:\n{seen}");
                 }
 
                 return record;
@@ -897,7 +820,9 @@ namespace CoreAI.Tests.PlayMode
         {
             "with", "the", "a", "an", "and", "or", "for", "from", "to", "of", "in", "on", "at", "is", "it", "as", "be",
             "quality", "weapon", "memory", "item", // line "- Weapon created" () vs
-            "execute_lua" // tool JSON envelope: "name": "execute_lua" must not become the item name
+            "iron", "steel", "hardwood", "oak", "mithril", "enchanted", "wood", "crystal", "fire",
+            "execute_lua", // tool JSON envelope: "name": "execute_lua" must not become the item name
+            "nlocal"
         };
 
         private static readonly Regex[] Patterns =
@@ -905,29 +830,54 @@ namespace CoreAI.Tests.PlayMode
             // Lua: create_item('Name', ...)
             new("create_item\\s*\\(\\s*'([^']+)'"),
             new("create_item\\s*\\(\\s*\"([^\"]+)\""),
+            new(@"create_item\s*\(\s*\\""\s*([^""\\]+)\s*\\""", RegexOptions.IgnoreCase),
+            // Lua: CreateItem("weapon", "Name")
+            new("CreateItem\\s*\\(\\s*\"weapon\"\\s*,\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase),
+            new(@"CreateItem\s*\(\s*\\""\s*weapon\s*\\""\s*,\s*\\""\s*([^""\\]+)\s*\\""", RegexOptions.IgnoreCase),
+            new("CreateItem\\s*\\(\\s*\"([^\"]+)\"\\s*,\\s*\"weapon\"", RegexOptions.IgnoreCase),
+            new(@"CreateItem\s*\(\s*\\""\s*([^""\\]+)\s*\\""\s*,\s*\\""\s*weapon\s*\\""", RegexOptions.IgnoreCase),
             // Markdown craft line used by some local models (before generic **Bold** single-token matches).
             new(@"\*\*Weapon\s+crafted\*\*\s*:\s*([^\r\n*]+?)(?=\s+created\b)", RegexOptions.IgnoreCase),
+            // Response line: Crafted: **Ironwood Blade** | Type: weapon
+            new(@"Crafted\s*:\s*\*{0,2}([^\r\n\|\*]+?)\*{0,2}\s*\|", RegexOptions.IgnoreCase),
             // Prose: Created "IronOak Blade" weapon ...
             new("Created\\s+\"([^\"]+)\"\\s+weapon", RegexOptions.IgnoreCase),
+            // Memory: Craft #1: Created "Ironwood Sword" (Weapon).
+            new("Craft #\\d+\\s*:\\s*Created\\s+\"([^\"]+)\"\\s*\\(", RegexOptions.IgnoreCase),
+            // Memory: Craft #1: Ironwood Blade (weapon).
+            new("Craft #\\d+\\s*:\\s*([^\\r\\n\\(\\.]+?)\\s*\\(", RegexOptions.IgnoreCase),
+            // Memory: Craft #2 Created Item: Flame-Forged Warhammer (weapon).
+            new("Craft #\\d+\\s+Created\\s+Item\\s*:\\s*([^\\r\\n\\(\\.]+)", RegexOptions.IgnoreCase),
             // Prose: memory line in these tests
             new("details for \"([^\"]+)\""),
             // e.g. **Memory updated** with Craft #3 entry for "MithrilEnchant Blade "
             new("entry for \"([^\"]+)\""),
             // "The weapon "SteelHardwood Blade" has been crafted"
             new("(?:[Tt]he )?weapon\\s+\"([^\"]+)\""),
+            // Memory: Craft Log #1: Weapon "Ironwood Blade" crafted from ...
+            new("Weapon\\s+\"([^\"]+)\"\\s+crafted\\b", RegexOptions.IgnoreCase),
+            // Canonical memory line: Craft #2 - Steel-Hardwood Scimitar made from Steel + Hardwood
+            new("Craft #\\d+\\s*-\\s*([A-Za-z0-9][A-Za-z0-9_ -]*?)\\s+made\\s+from\\b",
+                RegexOptions.IgnoreCase),
             // " with Craft #4 - SteelHardwood Blade (identical to "
             new("Craft #\\d+\\s*-\\s*([A-Za-z0-9][A-Za-z0-9_ ]*?)\\s*\\("),
-            // Qwen3.5 thinking: "Craft #2: SteelHardwoodAxe" or "Craft #2 - SteelHardwoodAxe" (no parens after)
+            // Thinking traces may mention a PascalCase craft name next to the craft number.
             new("Craft #\\d+\\s*[-:]+\\s*\"?([A-Z][A-Za-z0-9]+(?:[A-Z][a-z]+)+)\"?", RegexOptions.IgnoreCase),
-            // Qwen3.5 thinking: 'should be "SteelHardwoodAxe"' or 'use "SteelHardwoodAxe"'
+            // Thinking traces may quote the selected craft name in natural language.
             new("(?:should be|exact name|use|same as)\\s+\"([A-Z][A-Za-z0-9_ ]+)\"", RegexOptions.IgnoreCase),
             // Lua table field inside generated code (before generic JSON "name": tool keys)
+            new(@"\bitem_name\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
+            new(@"\bitem_name\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
+            new("\"item_name\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase),
+            new(@"\\\""item_name\\\""\s*:\s*\\\""([^""\\]+)\\\""", RegexOptions.IgnoreCase),
+            new(@"\bname\s*=\s*'([^']+)'", RegexOptions.IgnoreCase),
             new(@"\bname\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
             new(@"\bname\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
             // JSON: "name": "..." (may match tool envelope; junk-filter execute_lua / memory above)
             new("\"name\"\\s*:\\s*\"([^\"]+)\""),
+            new(@"\\\""name\\\""\s*:\s*\\\""([^""\\]+)\\\""", RegexOptions.IgnoreCase),
             new("Name\\s*=\\s*\"([^\"]+)\""),
-            // Qwen3.5 thinking: quoted PascalCase compound names like "SteelHardwoodAxe"
+            // Quoted PascalCase compound craft names.
             new("\"([A-Z][a-z]+(?:[A-Z][a-z]+){1,})\""),
             // " crafted with quality" must NOT match "with" as the name  (?!with\b)
             new("\\bcrafted\\s+(?!with\\b)\\s*\\*{0,2}([A-Za-z][A-Za-z0-9_']*(?:\\s+[A-Za-z][A-Za-z0-9_']*)*)\\*{0,2}",
@@ -968,6 +918,23 @@ namespace CoreAI.Tests.PlayMode
                 return null;
             }
 
+            string name = ExtractNameFromPatterns(payload);
+            if (!string.IsNullOrEmpty(name))
+            {
+                return name;
+            }
+
+            string normalizedEscapedJson = payload.Replace(@"\\\""", @"\""");
+            if (!string.Equals(normalizedEscapedJson, payload, StringComparison.Ordinal))
+            {
+                return ExtractNameFromPatterns(normalizedEscapedJson);
+            }
+
+            return null;
+        }
+
+        private static string ExtractNameFromPatterns(string payload)
+        {
             foreach (Regex regex in Patterns)
             {
                 foreach (Match match in regex.Matches(payload))
@@ -993,6 +960,14 @@ namespace CoreAI.Tests.PlayMode
         private static bool IsJunkName(string name)
         {
             if (JunkSingleWordNames.Contains(name))
+            {
+                return true;
+            }
+
+            if (name.Contains("\\n", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("\\r", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("n", StringComparison.OrdinalIgnoreCase) && name.Length > 1 &&
+                JunkSingleWordNames.Contains(name.Substring(1)))
             {
                 return true;
             }

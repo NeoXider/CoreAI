@@ -17,6 +17,9 @@ namespace CoreAI.Infrastructure.Llm
         public float Temperature { get; set; } = 0.2f;
         public int RequestTimeoutSeconds { get; set; } = 120;
         public int MaxTokens { get; set; } = 2048;
+        public string ExtraBodyJson { get; set; } = "";
+        public LlmReasoningMode ReasoningMode { get; set; } = LlmReasoningMode.ProviderDefault;
+        public int ThinkingBudgetTokens { get; set; }
         public int MaxRequestsPerSession { get; set; }
         public int MaxPromptChars { get; set; }
         public bool LogLlmInput { get; set; } = true;
@@ -54,6 +57,9 @@ namespace CoreAI.Infrastructure.Llm
                 Temperature = source.Temperature,
                 RequestTimeoutSeconds = source.RequestTimeoutSeconds,
                 MaxTokens = source.MaxTokens,
+                ExtraBodyJson = source.ExtraBodyJson,
+                ReasoningMode = source.ReasoningMode,
+                ThinkingBudgetTokens = source.ThinkingBudgetTokens,
                 MaxRequestsPerSession = maxRequests,
                 MaxPromptChars = maxPromptChars,
                 LogLlmInput = source.LogLlmInput,

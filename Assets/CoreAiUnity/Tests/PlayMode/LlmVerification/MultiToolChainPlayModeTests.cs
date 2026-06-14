@@ -55,14 +55,11 @@ namespace CoreAI.Tests.PlayMode
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
-                    "Respond ONLY with tool calls, no explanations. Do ALL of the following in order using your tools:\n" +
-                    "1) Call world_command to spawn prefabKey='TestPrefab', targetName='chain_obj', position x=1 y=2 z=3.\n" +
-                    "2) Call memory with action=write and content exactly: '" + marker +
-                    ": spawned chain_obj at (1,2,3)'.\n" +
-                    "3) Answer the user in plain language only (no JSON): one short sentence confirming spawn + saved note."
+                    "Spawn TestPrefab as chain_obj at position (1,2,3), remember the note '" + marker +
+                    ": spawned chain_obj at (1,2,3)', then answer with one short confirmation."
             });
 
-            yield return setup.RunAndWait(task, 300f, "multi-tool chain");
+            yield return setup.RunAndWait(task, 240f, "multi-tool chain");
 
             bool spawned = setup.WorldExecutor.AllCommandsJson.Any(static j =>
                 j != null &&
@@ -76,28 +73,6 @@ namespace CoreAI.Tests.PlayMode
             bool loaded = setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState mem);
             bool memOk = loaded && mem != null && !string.IsNullOrWhiteSpace(mem.Memory) &&
                          mem.Memory.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0;
-
-            if (!memOk)
-            {
-                Debug.LogWarning(
-                    "[MultiToolChain] Memory marker missing after first turn (common on small local models); retrying with a memory-only hint.");
-
-                Task retryTask = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Creator,
-                    Hint =
-                        "The world spawn for chain_obj at (1,2,3) is already done. " +
-                        "You MUST now call the memory tool with action=write and content EXACTLY: '" +
-                        marker + ": spawned chain_obj at (1,2,3)'. " +
-                        "Then one short plain sentence (no JSON)."
-                });
-
-                yield return setup.RunAndWait(retryTask, 120f, "multi-tool chain memory retry");
-
-                loaded = setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out mem);
-                memOk = loaded && mem != null && !string.IsNullOrWhiteSpace(mem.Memory) &&
-                        mem.Memory.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0;
-            }
 
             Assert.IsTrue(memOk,
                 $"Memory should contain marker '{marker}'. Loaded={loaded}, body='{mem?.Memory ?? "(null)"}'");

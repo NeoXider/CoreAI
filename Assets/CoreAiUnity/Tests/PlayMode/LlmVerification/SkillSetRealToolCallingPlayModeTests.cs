@@ -25,6 +25,9 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class SkillSetRealToolCallingPlayModeTests
     {
+        private const int ComplexTurnTimeoutSeconds = 240;
+        private const int LiveModelMaxOutputTokens = 2048;
+
         // ── Tool call trackers ────────────────────────────────────────────────
 
         private static readonly List<string> _calledTools = new();
@@ -175,7 +178,7 @@ namespace CoreAI.Tests.PlayMode
         // ── Test: Self-Service Pattern ────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator SelfService_ModelCallsReadSkill_ThenUsesCraftingTools()
         {
             Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
@@ -184,7 +187,7 @@ namespace CoreAI.Tests.PlayMode
 
             ResetTracking();
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, 120,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, ComplexTurnTimeoutSeconds,
                     out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
@@ -233,8 +236,7 @@ namespace CoreAI.Tests.PlayMode
                     }
                     .WithSystemPrompt(
                         "You are a Game Master for a fantasy RPG. " +
-                        "When the player asks to do something, first call read_skill to load " +
-                        "the relevant skill instructions, then follow them. " +
+                        "Use the configured skill capabilities when the player asks for specialized work. " +
                         "Respond briefly after using tools.")
                     .WithSkill(craftingSkill)
                     .WithSkill(combatSkill)
@@ -269,12 +271,14 @@ namespace CoreAI.Tests.PlayMode
 
                 CoreAi.ClearToolCallHistory();
 
+                using CancellationTokenSource cts = new();
                 Task t = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "I want to craft an iron sword. Read the crafting skill first."
-                });
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "self-service crafting");
+                    Hint = "I want to craft an iron sword.",
+                    MaxOutputTokens = LiveModelMaxOutputTokens
+                }, cts.Token);
+                yield return PlayModeTestAwait.WaitTask(t, ComplexTurnTimeoutSeconds, "self-service crafting", cts);
 
                 // ── Results ────────────────────────────────────────────────
 

@@ -4,6 +4,67 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Reasoning-model HTTP controls and diagnostics.** `CoreAISettingsAsset` and
+  `OpenAiHttpLlmSettings` now expose a tri-state **Reasoning Mode** for OpenAI-compatible backends:
+  **Provider Default** sends no thinking controls, while **Disabled** / **Enabled** send compatible
+  `enable_thinking` / `chat_template_kwargs.enable_thinking` request fields. The
+  `OpenAiChatLlmClient(CoreAISettingsAsset)` adapter now forwards the same reasoning and extra-body
+  settings used by lower-level HTTP clients, so PlayMode factory clients and demos do not silently
+  fall back to provider defaults. The real-model chat streaming test now reports
+  empty/reasoning-only output distinctly. Live-model PlayMode waits now use a consistent 120s budget
+  for medium prompts and 240s for complex tool/crafting/benchmark turns, and the local qwen settings
+  asset uses a 240s HTTP/LLM timeout with 128k context and 20k output tokens. Streaming think-block
+  filtering now handles OpenAI-compatible reasoning output that arrives without an opening
+  `<think>` tag but includes an orphan `</think>` before the visible answer. Crafting-memory /
+  scenario tests no longer retry with exact Lua, tool payloads, or response text that helps the
+  model pass. The ChatService all-modes integration test now treats the full mode-swap sequence as a
+  complex scenario, the Lua runtime modification test validates the real `logic_define` rule-slot
+  contract instead of a stale global-function assumption, and the merchant negotiation scenario now
+  requires a real Iron Sword discount because the player budget is below the item price. The real
+  chat streaming stop test now uses the complex first-token budget and stops an active turn before
+  failing, crafting-name extraction covers escaped `execute_lua` tool arguments, and the duplicate
+  same-ingredients TwoCrafts live-model probe is now explicit/targeted so the mandatory full suite
+  keeps the stronger ThreeCrafts coverage without repeating the same expensive LLM path. The merchant
+  negotiation prompt now states the player's purchase goal clearly without prescribing tool names or
+  arguments, and the long full-negotiation scenario is explicit/targeted instead of a mandatory
+  full-suite gate for slow local reasoning models. Shared PlayMode task waits can now cancel the
+  test-owned LLM request on timeout so one timed-out turn does not keep the local backend busy for
+  following tests; the two-phase full-pipeline memory read/write probe now uses the 240s complex
+  turn budget. Targeted crafting regression coverage now handles `CreateItem("weapon", "Name")`
+  Lua payloads and `item_name` assignments without treating escaped newline fragments such as
+  `nlocal` as item names. The LLMUnity crafting harness now reports failed `execute_lua` records
+  with arguments/result/error instead of downgrading them to inconclusive. The LLMUnity crafting
+  harness also exposes the generic `logic_define` / `logic_reset` / `logic_list` APIs advertised by
+  `execute_lua`, requires every craft to produce an extractable item name from the completed
+  `execute_lua` arguments rather than accepting memory/prose-only output, canonicalizes verified
+  craft memory between turns so model prose cannot pollute later prompts, and bounds each live craft
+  response to 2048 tokens. The historical LLMUnity/backend-parity ThreeCrafts probe is explicit
+  targeted; the mandatory full suite keeps `CraftingMemoryOpenAi_ThreeCrafts_AllUnique` as the
+  representative Lua-backed ThreeCrafts gate. The shorter Creator/CoreMechanic multi-agent duplicate
+  is now explicit/targeted because the full Creator/CoreMechanic/Programmer workflow is the
+  mandatory representative scenario. The `AllToolCalls` memory test now uses required memory-tool
+  mode as a narrow tool-binding mechanics check; autonomous memory-tool selection remains covered by
+  the dedicated AgentMemory and resilience PlayMode tests. The AINpc tools/chat test now bounds its
+  live response and cancels the active request on timeout. The SkillSet benchmark now treats
+  with-skill and direct-tools timeouts symmetrically as benchmark data and cancels the active request
+  on either path. The unknown-tool repair PlayMode test now uses a multi-turn timeout budget and
+  cancels the active streaming request, matching its scripted failure plus real-model correction
+  flow. The explicit merchant
+  negotiation scenario cancels the active turn on timeout and bounds each live step response to 2048
+  tokens so a failed or overly long negotiation cannot poison later targeted runs.
+- **Crafting PlayMode scope and extraction cleanup.** `ThreeCrafts_AllUnique` now verifies exactly
+  three unique Lua-backed crafts; the previous fourth repeat/determinism turn is tracked separately
+  so it cannot hide a long LLM call inside a uniqueness test. The crafting name extractor now
+  prefers actual crafted item names over ingredient `name` fields and has regression coverage for
+  the material-name false positive.
+- **Test integrity rule.** The Unity architecture docs and PlayMode test README now define the
+  project-wide testing standard: tests must validate behaviour without answer-shaped prompt hints;
+  exact payloads are reserved for parser, serializer, migration, repair, or deterministic fixtures.
+- **FullAccess demo smoke coverage.** Added a PlayMode scene-smoke for
+  `FullAccessDemo.unity` that loads the demo, verifies Full Lua is enabled with private reflection
+  disabled, confirms the `TargetCube` bootstrap, and checks prompt buttons reserve enough room for
+  the chat panel. Prompt buttons now reserve a wider chat area by default so manual Full Lua demo
+  checks do not overlap the chat input.
 - **Batch test runner for targeted verification.** Added `CoreAiBatchTestRunner` so CI/agents can run
   exact EditMode or PlayMode test names through `-executeMethod` and still get NUnit XML when Unity's
   built-in `-runTests` path is unavailable in a local editor session.

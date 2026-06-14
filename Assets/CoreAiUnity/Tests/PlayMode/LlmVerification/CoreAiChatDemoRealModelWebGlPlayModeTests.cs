@@ -25,7 +25,7 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         [Category("RealLlm")]
         [Category("WebGL")]
-        [Timeout(300000)]
+        [Timeout(600000)]
         public IEnumerator CoreAiChatDemo_RealModel_StreamsStopAndRecovers()
         {
             yield return SceneManager.LoadSceneAsync(SceneName, LoadSceneMode.Single);
@@ -70,12 +70,12 @@ namespace CoreAI.Tests.PlayMode
             CoreAiChatExternalSubmitOptions options = new() { AppendUserMessageToChat = true };
 
             Task<string> firstTask = Submit(panel,
-                "Reply with exactly five short words about streaming chat.",
+                "Give a short response about streaming chat.",
                 options);
             StreamingTextProbe firstProbe = new();
             yield return WaitForVisibleStreamingText(firstTask, panel, firstProbe, 90f, "first real-model stream");
             Debug.Log($"{LogPrefix} First visible stream: '{TrimForLog(firstProbe.Text)}'");
-            yield return WaitTask(firstTask, 180f, "first real-model response");
+            yield return WaitTask(firstTask, 120f, "first real-model response");
             Assert.IsFalse(string.IsNullOrWhiteSpace(firstTask.Result), $"{LogPrefix} First response is empty.");
             Debug.Log($"{LogPrefix} First final response: '{TrimForLog(firstTask.Result)}'");
 
@@ -83,7 +83,7 @@ namespace CoreAI.Tests.PlayMode
                 "Write a long numbered list from 1 to 80. Keep each line short, but do not stop early.",
                 options);
             StreamingTextProbe stopProbe = new();
-            yield return WaitForVisibleStreamingText(stopTask, panel, stopProbe, 90f, "cancellable real-model stream");
+            yield return WaitForVisibleStreamingText(stopTask, panel, stopProbe, 240f, "cancellable real-model stream");
             if (stopTask.IsCompleted)
             {
                 Assert.Ignore(
@@ -94,7 +94,7 @@ namespace CoreAI.Tests.PlayMode
             string textAtStop = stoppedLabel?.text ?? string.Empty;
             Debug.Log($"{LogPrefix} Stop before text: '{TrimForLog(textAtStop)}'");
             panel.StopAgent();
-            yield return WaitTask(stopTask, 90f, "stopped real-model response");
+            yield return WaitTask(stopTask, 120f, "stopped real-model response");
             Assert.IsNull(stopTask.Result, $"{LogPrefix} Stop should cancel the active turn and return null.");
             yield return WaitUntil(() => !panel.IsBusy, 10f, "chat panel unlock after Stop");
             yield return null;
@@ -104,9 +104,9 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"{LogPrefix} Stop cancelled streaming and left chat usable.");
 
             Task<string> thirdTask = Submit(panel,
-                "Reply with exactly five short words proving chat still works.",
+                "Give a short response showing chat still works.",
                 options);
-            yield return WaitTask(thirdTask, 180f, "third real-model response");
+            yield return WaitTask(thirdTask, 120f, "third real-model response");
             Assert.IsFalse(string.IsNullOrWhiteSpace(thirdTask.Result), $"{LogPrefix} Third response is empty.");
             Assert.IsFalse(panel.IsBusy, $"{LogPrefix} Chat panel stayed busy after third response.");
             Debug.Log($"{LogPrefix} Third final response after Stop: '{TrimForLog(thirdTask.Result)}'");
@@ -158,7 +158,13 @@ namespace CoreAI.Tests.PlayMode
 
                 if (Time.realtimeSinceStartup - started > timeoutSeconds)
                 {
-                    Assert.Fail($"{LogPrefix} Timeout waiting for visible streaming text: {operationName}.");
+                    StopActiveTurn(panel, task, operationName);
+                    yield return null;
+                    Assert.Fail(
+                        $"{LogPrefix} Timeout waiting for visible streaming text: {operationName}. " +
+                        $"TaskStatus={task.Status}; visibleLabels='{DescribeVisibleLabels(panel)}'. " +
+                        "If TaskStatus is still Running and visible labels are empty, the backend may be streaming only reasoning_content " +
+                        "or taking too long before the first visible content token. Try Reasoning Mode = Disabled for hybrid-thinking models.");
                 }
 
                 yield return null;
@@ -167,8 +173,21 @@ namespace CoreAI.Tests.PlayMode
             Assert.Fail(
                 $"{LogPrefix} {operationName} completed before any streaming text was visible. " +
                 $"TaskStatus={task.Status}; visibleLabels='{DescribeVisibleLabels(panel)}'. " +
-                "If the task returned a response, the model may have completed between frames before the transient streaming label was observed. " +
+                $"FinalResult='{DescribeCompletedTaskResult(task)}'. " +
+                "If FinalResult is <empty>, the backend likely exhausted generation in reasoning_content and produced no visible assistant content. " +
+                "If the task returned non-empty text, the model may have completed between frames before the transient streaming label was observed. " +
                 "If the task returned an error, the backend likely failed before the first SSE chunk (for example connection refused/CORS).");
+        }
+
+        private static void StopActiveTurn(CoreAiChatPanel panel, Task<string> task, string operationName)
+        {
+            if (panel == null || task == null || task.IsCompleted || !panel.IsBusy)
+            {
+                return;
+            }
+
+            Debug.LogWarning($"{LogPrefix} Stopping active turn after streaming wait timeout: {operationName}.");
+            panel.StopAgent();
         }
 
         private static IEnumerator WaitTask(Task task, float timeoutSeconds, string operationName)
@@ -247,6 +266,32 @@ namespace CoreAI.Tests.PlayMode
             }
 
             return texts.Count == 0 ? "<no labels>" : string.Join(" | ", texts);
+        }
+
+        private static string DescribeCompletedTaskResult(Task<string> task)
+        {
+            if (task == null)
+            {
+                return "<null task>";
+            }
+
+            if (!task.IsCompleted)
+            {
+                return "<not completed>";
+            }
+
+            if (task.IsCanceled)
+            {
+                return "<canceled>";
+            }
+
+            if (task.IsFaulted)
+            {
+                return $"<faulted: {task.Exception?.GetBaseException().Message}>";
+            }
+
+            string result = task.Result;
+            return string.IsNullOrWhiteSpace(result) ? "<empty>" : TrimForLog(result);
         }
 
         private static string TrimForLog(string text)

@@ -30,7 +30,8 @@ MonoBehaviour:
   llmUnityStartupTimeoutSeconds: 120
   llmUnityStartupDelaySeconds: 1
   llmUnityKeepAlive: 0
-  enableReasoning: 0
+  reasoningMode: 0
+  thinkingBudgetTokens: 0
   llmUnityMaxConcurrentChats: 1
   llmUnityNumGPULayers: 99
   universalSystemPromptPrefix: Respond concisely and to the point. Avoid unnecessary

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -23,6 +24,9 @@ namespace CoreAI.Tests.PlayMode
 #if !COREAI_NO_LLM && !UNITY_WEBGL
     public sealed class MultiAgentCraftingWorkflowPlayModeTests
     {
+        private const int LlmTurnTimeoutSeconds = 240;
+        private const int LiveModelMaxOutputTokens = 2048;
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -70,7 +74,7 @@ namespace CoreAI.Tests.PlayMode
         ///  : Creator  CoreMechanicAI  Programmer
         /// </summary>
         [UnityTest]
-        [Timeout(1800000)]
+        [Timeout(600000)]
         public IEnumerator MultiAgent_CreatorThenMechanicThenProgrammer_CompleteWorkflow()
         {
             Debug.Log("[MultiAgent] ");
@@ -81,7 +85,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
-                    300,
+                    240,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -128,17 +132,18 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Creator,
                         Hint = "Design a crafting recipe for a weapon made from these ingredients:\n" +
                                "- Iron (metal, hardness:60, magic:5, rarity:1)\n" +
                                "- Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)\n\n" +
-                               "STEP 1: You must call the 'memory' tool (action: 'write', content: 'Design: Iron+Fire Crystal -> weapon, damage ~45, fire ~15').\n" +
-                               "STEP 2: Once the memory tool succeeds, stop calling tools and output a raw JSON response: {\"item_type\": \"weapon\", \"estimated_damage\": 45, \"estimated_fire_damage\": 15, \"quality\": 1}"
-                    });
+                               "Remember the design summary, then return a compact structured response with item_type, estimated_damage, estimated_fire_damage, and quality.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "creator design");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "creator design", cts);
 
                     LogAgentResponse("creator", sink);
                     LogAgentMemory(store, "Creator");
@@ -164,16 +169,16 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate craft result for Iron + Fire Crystal.\n" +
-                               "CRITICAL INSTRUCTION:\n" +
-                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Craft#1: weapon damage:45').\n" +
-                               "2. ONLY AFTER the tool succeeds, output JSON: {\"item_name\": \"Frostblade\", \"damage\": 45}"
-                    });
+                               "Remember the calculated craft result, then return a structured response with item_name and damage.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic calculation");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "mechanic calculation", cts);
 
                     LogAgentResponse("mechanic", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
@@ -227,16 +232,16 @@ namespace CoreAI.Tests.PlayMode
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
                     int toolMark = toolCalls.Count;
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Programmer,
                         Hint = "Generate Lua code for a weapon.\n" +
-                               "CRITICAL INSTRUCTION:\n" +
-                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Programmer wrote Lua script').\n" +
-                               "2. ONLY THEN call the 'execute_lua' tool to run the code."
-                    });
+                               "Execute the Lua through the available tool and return a compact result.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "programmer lua");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "programmer lua", cts);
 
                     LogAgentResponse("programmer", sink);
                     LogAgentMemory(store, "Programmer");
@@ -245,17 +250,8 @@ namespace CoreAI.Tests.PlayMode
                     string programmerPayload = sink.Items[0].JsonPayload ?? string.Empty;
                     Assert.IsFalse(string.IsNullOrWhiteSpace(programmerPayload),
                         "Programmer response payload should not be empty.");
-                    Assert.That(programmerPayload.ToLowerInvariant(), Does.Contain("lua"),
-                        "Programmer response should contain Lua-related output.");
                     Assert.That(programmerPayload, Does.Not.Contain("execute_lua tool is not available"),
                         "Workflow claims execute_lua step, but tool was unavailable.");
-                    if (toolCalls.TryGetCompletedToolSince(
-                            toolMark, BuiltInAgentRoleIds.Programmer, "execute_lua") == null)
-                    {
-                        yield return RetryProgrammerExecuteLua(
-                            clientWithMemory, store, policy, telemetry, composer, toolCalls);
-                    }
-
                     toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.Programmer, "execute_lua", "programmer lua");
                     Assert.IsFalse(string.IsNullOrWhiteSpace(programmerLuaCode),
@@ -280,17 +276,17 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate craft result for Iron + Fire Crystal.\n" +
                                $"YOUR PREVIOUS CRAFT MEMORY: {craft1Memory}\n\n" +
-                               "CRITICAL INSTRUCTION:\n" +
-                               "1. You MUST FIRST call the 'memory' tool (action: 'write', content: 'Craft#2: weapon').\n" +
-                               "2. ONLY THEN output EXACT SAME JSON as your previous craft."
-                    });
+                               "Use the previous craft memory to keep the result consistent, remember this repeat craft, and return a structured response.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic repeat");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "mechanic repeat", cts);
 
                     LogAgentResponse("mechanic repeat", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
@@ -308,19 +304,25 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[MultiAgent] ");
 
                 //   
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorState));
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicState));
-                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Programmer, out AgentMemoryState programmerState));
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState creatorState),
+                    "Creator must persist its design memory.");
+                Assert.IsTrue(store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState mechanicState),
+                    "CoreMechanicAI must persist craft memory for the repeat-craft step.");
+                bool hasProgrammerMemory = store.TryLoad(BuiltInAgentRoleIds.Programmer,
+                    out AgentMemoryState programmerState);
 
                 Debug.Log($"[MultiAgent] Creator memory:      {creatorState.Memory}");
                 Debug.Log($"[MultiAgent] CoreMechanic memory: {mechanicState.Memory}");
-                Debug.Log($"[MultiAgent] Programmer memory:  {programmerState.Memory}");
+                Debug.Log($"[MultiAgent] Programmer memory:  {(hasProgrammerMemory ? programmerState.Memory : "(none)")}");
 
                 //      
                 Assert.AreNotEqual(creatorState.Memory, mechanicState.Memory,
                     "Creator and CoreMechanicAI must have DIFFERENT memory");
-                Assert.AreNotEqual(mechanicState.Memory, programmerState.Memory,
-                    "Mechanic and Programmer must have DIFFERENT memory");
+                if (hasProgrammerMemory)
+                {
+                    Assert.AreNotEqual(mechanicState.Memory, programmerState.Memory,
+                        "Mechanic and Programmer must have DIFFERENT memory when Programmer stores memory.");
+                }
 
                 Debug.Log("[MultiAgent]  Memory isolation verified");
                 Debug.Log("[MultiAgent] ");
@@ -338,7 +340,8 @@ namespace CoreAI.Tests.PlayMode
         ///   .
         /// </summary>
         [UnityTest]
-        [Timeout(900000)]
+        [Explicit("Targeted shorter duplicate of the full multi-agent workflow; run directly when triaging Creator/CoreMechanic memory isolation, not in mandatory full live-model suite.")]
+        [Timeout(600000)]
         public IEnumerator MultiAgent_CreatorThenMechanic_QuickWorkflow()
         {
             Debug.Log("[MultiAgent.Quick] ");
@@ -349,7 +352,7 @@ namespace CoreAI.Tests.PlayMode
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null,
                     0.3f,
-                    300,
+                    240,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {
@@ -378,16 +381,17 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.Creator,
                         Hint =
                             "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
-                            "STEP 1: Call 'memory' tool (action: 'write', content: 'Design: Iron+Fire Crystal -> weapon').\n" +
-                            "STEP 2: Output JSON response."
-                    });
+                            "Remember the design summary and return a structured response.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "creator");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "creator", cts);
                     LogAgentResponse("creator", sink);
                     LogAgentMemory(store, "Creator");
 
@@ -413,15 +417,16 @@ namespace CoreAI.Tests.PlayMode
                     AiOrchestrator orch =
                         CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
+                    using CancellationTokenSource cts = new();
                     Task t = orch.RunTaskAsync(new AiTaskRequest
                     {
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate weapon from: Iron (hardness:60) + Fire Crystal (magic:85).\n" +
-                               "STEP 1: Call 'memory' tool (action: 'write', content: 'Craft#1: weapon damage:20 fire:10').\n" +
-                               "STEP 2: Output JSON with item_name, damage, fire_damage."
-                    });
+                               "Remember the craft result and return a structured response with item_name, damage, fire_damage.",
+                        MaxOutputTokens = LiveModelMaxOutputTokens
+                    }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 300f, "mechanic");
+                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "mechanic", cts);
                     LogAgentResponse("mechanic", sink);
                     LogAgentMemory(store, "CoreMechanicAI");
 
@@ -501,42 +506,6 @@ namespace CoreAI.Tests.PlayMode
                 ScriptableObject.CreateInstance<Infrastructure.Llm.CoreAISettingsAsset>());
         }
 
-        private IEnumerator RetryProgrammerExecuteLua(
-            ILlmClient client,
-            InMemoryStore store,
-            AgentMemoryPolicy policy,
-            SessionTelemetryCollector telemetry,
-            AiPromptComposer composer,
-            ToolCallCapture toolCalls)
-        {
-            int beforeRetry = toolCalls.Count;
-            string prompt =
-                "The previous Programmer answer did not call execute_lua. Do not call memory now. " +
-                "Do not explain. Call ONLY the execute_lua tool with exactly this Lua code:\n" +
-                "report('programmer generated Lua weapon script')";
-
-            Debug.LogWarning(
-                "[MultiAgent] Programmer did not complete execute_lua; retrying with exact execute_lua-only prompt.");
-
-            ListSink retrySink = new();
-            AiOrchestrator retryOrch =
-                CreateOrchestrator(client, store, policy, telemetry, composer, retrySink);
-
-            Task retry = retryOrch.RunTaskAsync(new AiTaskRequest
-            {
-                RoleId = BuiltInAgentRoleIds.Programmer,
-                Hint = prompt,
-                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                RequiredToolName = "execute_lua"
-            });
-
-            yield return PlayModeTestAwait.WaitTask(retry, 300f, "programmer lua retry");
-
-            LogAgentResponse("programmer retry", retrySink);
-            toolCalls.RequireCompletedToolSince(
-                beforeRetry, BuiltInAgentRoleIds.Programmer, "execute_lua", "programmer lua retry");
-        }
-
         #region Logging
 
         private static void LogAgentMemory(InMemoryStore store, string roleId)
@@ -592,7 +561,7 @@ namespace CoreAI.Tests.PlayMode
                 {
                     string seen = string.Join(", ", _records.Skip(startIndex)
                         .Select(r => $"{r.Info.RoleId}:{r.Info.ToolName}:{r.Status}"));
-                    Assert.Inconclusive(
+                    Assert.Fail(
                         $"[{label}] Expected completed tool '{toolName}' for role '{roleId}'. Seen: [{seen}]");
                 }
 

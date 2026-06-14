@@ -112,6 +112,8 @@ namespace CoreAI.Infrastructure.Llm
                 reqBody["tools"] = toolsList;
             }
 
+            ApplyProviderSpecificRequestBody(reqBody);
+
             string json = JsonConvert.SerializeObject(reqBody);
 
             if (_settings.EnableHttpDebugLogging)
@@ -251,6 +253,8 @@ namespace CoreAI.Infrastructure.Llm
             {
                 reqBody["tools"] = toolsList;
             }
+
+            ApplyProviderSpecificRequestBody(reqBody);
 
             string json = JsonConvert.SerializeObject(reqBody);
 
@@ -1557,6 +1561,67 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return toolsList;
+        }
+
+        private void ApplyProviderSpecificRequestBody(Dictionary<string, object> reqBody)
+        {
+            if (reqBody == null)
+            {
+                return;
+            }
+
+            string extraBodyJson = _settings.ExtraBodyJson;
+            if (!string.IsNullOrWhiteSpace(extraBodyJson))
+            {
+                try
+                {
+                    JObject extra = JObject.Parse(extraBodyJson);
+                    foreach (JProperty property in extra.Properties())
+                    {
+                        reqBody[property.Name] = property.Value;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"MeaiOpenAiChatClient: ignored invalid ExtraBodyJson: {ex.Message}", LogTag.Llm);
+                }
+            }
+
+            if (!_settings.SendReasoningControls)
+            {
+                return;
+            }
+
+            bool enableThinking = _settings.EnableReasoning;
+            reqBody["enable_thinking"] = enableThinking;
+            ApplyChatTemplateThinkingFlag(reqBody, enableThinking);
+
+            int thinkingBudget = _settings.ThinkingBudgetTokens;
+            if (thinkingBudget > 0)
+            {
+                reqBody["thinking_budget"] = thinkingBudget;
+            }
+        }
+
+        private static void ApplyChatTemplateThinkingFlag(Dictionary<string, object> reqBody, bool enableThinking)
+        {
+            const string key = "chat_template_kwargs";
+            if (reqBody.TryGetValue(key, out object existing) && existing is JObject jObject)
+            {
+                jObject["enable_thinking"] = enableThinking;
+                return;
+            }
+
+            if (existing is Dictionary<string, object> dict)
+            {
+                dict["enable_thinking"] = enableThinking;
+                return;
+            }
+
+            reqBody[key] = new Dictionary<string, object>
+            {
+                { "enable_thinking", enableThinking }
+            };
         }
 
         public void Dispose()

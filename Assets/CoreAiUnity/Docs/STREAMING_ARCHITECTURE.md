@@ -80,6 +80,17 @@ Key files:
 
 Reasoning models (DeepSeek-R1, Qwen3 thinking, o1-class) emit chain-of-thought inside `<think>…</think>` tags. **OpenAI-compatible HTTP (LM Studio, vLLM, etc.)** may instead stream a separate `delta.reasoning_content` field; `MeaiOpenAiChatClient` does **not** forward that to MEAI/Chat (it never becomes `update.Text` for the think filter). The tag-based filter only sees **in-content** tags.
 
+For hybrid-thinking local models, keep `CoreAISettingsAsset` **Reasoning Mode** at **Provider Default**
+unless you need to override backend behavior. **Disabled** sends provider-specific request fields such as
+`enable_thinking=false` and `chat_template_kwargs.enable_thinking=false`; **Enabled** sends the same
+fields with `true`. Provider Default intentionally sends no reasoning controls so model/server defaults
+remain unchanged. Use **Thinking Budget Tokens** only with servers that document support for that field.
+
+If a stream produces no visible chunks and then ends with empty assistant content, inspect raw HTTP logs:
+the model may have spent the output budget on `reasoning_content`. For Qwen-style thinking models this is
+a backend/model behavior issue, not a UI streaming bug. Try Reasoning Mode = Disabled before changing
+prompts or tests.
+
 Idle / stall budgets for HTTP SSE are enforced in **`MeaiOpenAiChatClient`** (read-loop timeouts aligned with **`RequestTimeoutSeconds`**), separate from **`HttpClient.Timeout`** on the streaming client (kept high so long generations are not cut off at the transport level).
 
 Those blocks must never reach the UI, but:

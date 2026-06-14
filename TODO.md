@@ -1,6 +1,6 @@
 ﻿# TODO
 
-> Updated 2026-06-12. Completed v4.0.0 work is in `CHANGELOG.md` (both packages) and the git log. This file lists only open tasks.
+> Updated 2026-06-14. Completed v4.0.0 work is in `CHANGELOG.md` (both packages) and the git log. This file lists only open tasks.
 
 ## v4.0.0 - done (2026-06-12)
 
@@ -25,6 +25,13 @@
 
 - [ ] **GameCI secrets** (`UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`) - without them the CI matrix moonsharp / no-lua will not run.
 - [ ] **GitHub Release / tag v4.0.0** after push.
+- [ ] **EditMode test integrity audit** - project-wide rules are documented in `Assets/CoreAiUnity/Docs/ARCHITECTURE.md`; PlayMode live-model tests are the priority now. Later, review EditMode fixtures and keep exact payloads only where they test parsers, repair, serialization, migration, deterministic extraction logic, or other exact-byte contracts.
+- [ ] **Crafting determinism PlayMode test** - `ThreeCrafts_AllUnique` now checks only three unique crafts. Add a separate targeted repeat-ingredients test for determinism so the full PlayMode suite does not hide a fourth long LLM turn inside a uniqueness scenario.
+- [x] **LLMUnity crafting timeout triage** - targeted `CraftingMemoryLlmUnity_ThreeCrafts_AllUnique` with `qwen3.6-27b-mtp-ud` passed after bounding live craft turns to 2048 output tokens, exposing the generic `logic_*` Lua APIs advertised by `execute_lua`, and canonicalizing verified craft memory between turns.
+- [x] **Merchant negotiation timeout triage** - targeted `MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase` with `qwen3.6-27b-mtp-ud` passed after making the negotiation mechanically necessary (Iron Sword costs 60, player has 40) and bounding each live step to 2048 output tokens. The scenario remains explicit/targeted rather than a mandatory full-suite gate.
+- [ ] **Merchant negotiation decomposition** - the full merchant negotiation scenario is explicit and now cancels/bounds long turns. Consider splitting Step3 into smaller targeted tests for discount application and purchase completion so failures identify tool-choice versus final-sale behaviour.
+- [x] **Targeted PlayMode follow-up before full suite** - attached failures and known slow live-model tests were triaged one by one before the full rerun. FullAccess demo scene checks now include targeted Full Lua API smoke, PlayMode scene-smoke, and manual visual layout verification.
+- [x] **Full PlayMode rerun after targeted fixes** - full mandatory PlayMode suite with `qwen3.6-27b-mtp-ud` passed after targeted fixes: 114 total, 109 passed, 0 failed, 5 skipped/explicit.
 
 ## [P1] Lua - remaining work (does not block v4)
 

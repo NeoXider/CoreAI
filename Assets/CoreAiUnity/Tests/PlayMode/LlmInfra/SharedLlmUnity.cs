@@ -139,8 +139,8 @@ namespace CoreAI.Tests.PlayMode
                 yield break;
             }
 
-            //  reasoning   llmService (   C++   )
-            if (settings != null && settings.EnableReasoning)
+            // Enable llama.cpp reasoning only when the operator explicitly asks for it.
+            if (settings != null && settings.ReasoningMode == LlmReasoningMode.Enabled)
             {
                 _llm.reasoning = true;
                 Debug.Log("[SharedLlmUnity] Reasoning (think mode) enabled.");

@@ -465,9 +465,15 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 EditorGUI.EndDisabledGroup();
 
                 EditorGUILayout.Space();
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableReasoning"),
-                    new GUIContent("Enable Reasoning",
-                        "Enable reasoning/thinking output handling for models such as Qwen3.5 and DeepSeek. Applies to HTTP API and LLMUnity."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("reasoningMode"),
+                    new GUIContent("Reasoning Mode",
+                        "Provider Default sends no reasoning controls. Disabled/Enabled sends provider-specific thinking controls for compatible HTTP APIs and LLMUnity."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("thinkingBudgetTokens"),
+                    new GUIContent("Thinking Budget Tokens",
+                        "Optional provider-specific thinking budget. 0 = omit."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("extraBodyJson"),
+                    new GUIContent("Extra Body JSON",
+                        "Optional JSON object merged into OpenAI-compatible HTTP request bodies. Empty = provider default."));
 
                 if (string.IsNullOrEmpty(settings.UniversalSystemPromptPrefix))
                 {

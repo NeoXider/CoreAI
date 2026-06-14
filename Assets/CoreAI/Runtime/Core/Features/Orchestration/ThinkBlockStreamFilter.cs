@@ -60,6 +60,16 @@ namespace CoreAI.Ai
                 else
                 {
                     int openIdx = buf.IndexOf(OpenTag, StringComparison.OrdinalIgnoreCase);
+                    int closeIdx = buf.IndexOf(CloseTag, StringComparison.OrdinalIgnoreCase);
+                    if (closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx))
+                    {
+                        // Some OpenAI-compatible reasoning models stream hidden thought text without
+                        // the opening tag but still include </think> before the visible answer.
+                        // Treat the buffered prefix as hidden and resume after the orphan close tag.
+                        buf = buf.Substring(closeIdx + CloseTag.Length);
+                        continue;
+                    }
+
                     if (openIdx >= 0)
                     {
                         if (openIdx > 0)
@@ -77,6 +87,13 @@ namespace CoreAI.Ai
                         if (lastLt >= 0)
                         {
                             string possibleTag = buf.Substring(lastLt);
+                            if (IsPrefixOf(possibleTag, CloseTag))
+                            {
+                                _buffer.Clear();
+                                _buffer.Append(buf);
+                                return visible.ToString();
+                            }
+
                             if (IsPrefixOf(possibleTag, OpenTag))
                             {
                                 if (lastLt > 0)

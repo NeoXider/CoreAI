@@ -24,7 +24,7 @@ namespace CoreAI.Tests.PlayMode
         /// (Auto picks the first reachable backend).
         /// </summary>
         [UnityTest]
-        [Timeout(900000)]
+        [Timeout(600000)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()
         {
             using TestAgentSetup setup = new();
@@ -41,10 +41,9 @@ namespace CoreAI.Tests.PlayMode
             Task t1 = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
-                Hint =
-                    "IMPORTANT: Use the 'memory' tool to write data. CALL the memory tool now with action='write' and content='remember: apples'."
+                Hint = "Please remember for later that the player likes apples."
             });
-            yield return setup.RunAndWait(t1, 300f, "creator memory write");
+            yield return setup.RunAndWait(t1, 240f, "creator memory write");
 
             if (!setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState st) ||
                 string.IsNullOrWhiteSpace(st.Memory))
@@ -53,7 +52,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Fail("Model did not write memory via memory tool.");
             }
 
-            StringAssert.StartsWith("remember:", st.Memory.Trim(), "Memory should start with 'remember:'");
+            StringAssert.Contains("apples", st.Memory.ToLowerInvariant(), "Memory should contain the remembered fact.");
             Debug.Log($"[Test] Memory stored: {st.Memory}");
 
             // Task 2: Recall memory
@@ -74,7 +73,7 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>());
 
-            const int recallMaxAttempts = 3;
+            const int recallMaxAttempts = 2;
             string recallResult = null;
             for (int attempt = 1; attempt <= recallMaxAttempts; attempt++)
             {
@@ -86,9 +85,9 @@ namespace CoreAI.Tests.PlayMode
                 Task<string> tRecall = orch2.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.Creator,
-                    Hint = "What is your available memory? Reply with exactly: I remember: apples"
+                    Hint = "What is your available memory about apples?"
                 });
-                yield return setup.RunAndWait(tRecall, 300f,
+                yield return setup.RunAndWait(tRecall, 120f,
                     $"creator memory recall ({attempt}/{recallMaxAttempts})");
 
                 recallResult = tRecall.Result;
@@ -106,7 +105,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             Assert.AreEqual(1, sink2.Items.Count);
-            StringAssert.Contains("remember:", sink2.Items[0].JsonPayload);
+            StringAssert.Contains("apples", sink2.Items[0].JsonPayload.ToLowerInvariant());
             Debug.Log("[Test] Test completed successfully!");
         }
     }

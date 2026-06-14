@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **OpenAI-compatible reasoning controls.** `IOpenAiHttpSettings` now exposes a tri-state
+  `ReasoningMode` (`ProviderDefault`, `Disabled`, `Enabled`), optional `ThinkingBudgetTokens`, and
+  `ExtraBodyJson`. `MeaiOpenAiChatClient` merges provider-specific JSON into both streaming and
+  non-streaming chat completions and emits Qwen/vLLM-style `enable_thinking` /
+  `chat_template_kwargs.enable_thinking` only when the mode is explicitly not provider-default.
 - **Lua mod report logging control.** `LuaModRuntime` now mutes persistent mod `report()` output by
   default and exposes per-mod report logging state so hosts can opt into diagnostics without timer
   mods flooding the console.

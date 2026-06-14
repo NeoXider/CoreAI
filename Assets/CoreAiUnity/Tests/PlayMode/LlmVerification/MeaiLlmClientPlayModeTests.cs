@@ -56,7 +56,7 @@ namespace CoreAI.Tests.PlayMode
             };
 
             Task<LlmCompletionResult> task = client.CompleteAsync(request);
-            yield return PlayModeTestAwait.WaitTask(task, 300f, "MeaiLlmClient HTTP request");
+            yield return PlayModeTestAwait.WaitTask(task, 120f, "MeaiLlmClient HTTP request");
 
             LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
             Assert.IsTrue(result.Ok, $"HTTP request failed: {result?.Error}");
