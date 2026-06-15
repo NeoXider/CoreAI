@@ -32,11 +32,10 @@
       `## Conversation Summary` OUT of top-level `system` into the **tail** of `messages[]` as the first
       system-role message, before recent verbatim turns, because it summarizes the evicted oldest turns.
       Frozen prefix = persona + tool defs (+ current canonical memory) -> cacheable; live tail -> cheap.
-- [ ] **Prefix vs Tail follow-up.** Move memory deltas and world-state into the tail without moving the
-      canonical `## Memory` block yet; verify Anthropic/OpenAI-compatible provider semantics per backend.
-- [ ] **Stable cacheable prefix + verbatim recent turns.** Stop rewriting the `system`/`tools` prefix every turn;
-      keep the most recent N turns as real `user`/`assistant`/`tool` messages in the tail
-      (`AiOrchestrator.BuildChatHistoryAsync`, `DeterministicConversationContextManager`).
+- [x] **Stable cacheable prefix + verbatim recent turns.** Recent turns are kept as real `user`/`assistant`/`tool`
+      messages in the tail; the `system`/`tools` prefix is no longer rewritten per turn for summary/world-state
+      (both moved to the tail behind `PlaceLiveContextInTail`) and is deterministic (sorted tools/JSON, no
+      timestamps/GUIDs). Remaining churn source = the canonical `## Memory` block — see follow-ups below.
 - [x] **Compaction by threshold, not every turn.** Anchored summary replaces only the oldest turns when near the
       limit; re-summarize infrequently so the cached prefix survives.
 - [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
@@ -63,6 +62,36 @@
 - [x] **Deterministic serialization + per-role policy.** Stable tool order, sorted JSON keys, no timestamps/UUIDs
       in the frozen prefix; history depth / memory scope / tool-result policy / world-state / compaction thresholds
       configured per role (Teacher / NPC / mechanics agent).
+
+## [P1] Context overhaul — follow-ups (after T1–T9)
+
+> Wave 2 (T1–T9) is committed and `dotnet build` green; full Unity EditMode/PlayMode rerun still pending.
+> These are the remaining gaps + improvements found while building it. Ship behind config; keep the CoreAiPro
+> extension points (`ILlmUsageSink`, `ILlmEntitlementPolicy`, `ServerManagedAuthorization`, `LlmUsageReported`) intact.
+
+- [ ] **Run EditMode + targeted PlayMode after wave 2.** Agent-authored wave-2 tests compile but have not been
+      run in Unity yet (wave 1 needed 3 fixes after a real run). Run the EditMode suite + a small PlayMode subset
+      (e.g. `AiOrchestrator*`, role/history tests) and fix any regression before flipping defaults.
+- [ ] **`.gitattributes` line-ending normalization.** Add a Unity-standard `.gitattributes` (`* text=auto` +
+      binary/asset rules) — every commit currently warns `LF will be replaced by CRLF`; risks phantom diffs.
+- [ ] **Memory deltas in tail + boundary consolidation (roadmap §6 placement).** Mid-session memory edits go into
+      a small `## Memory (updates)` tail block; at a boundary (session start / after summarization / explicit
+      reload) consolidate deltas into the canonical `## Memory` prefix snapshot and clear the tail. Behind
+      `PlaceLiveContextInTail`. This removes the last per-turn prefix-churn source and completes §1a/§6.
+- [ ] **Flip `PlaceLiveContextInTail` default ON.** After verifying on WebGL/IL2CPP with the live server (use the
+      new `cache_read`/`cache_write` metrics to confirm caching), make tail placement the default.
+- [ ] **Streaming overflow retry.** `RunStreamingAsync` has no bounded context-overflow recovery; mirror the
+      `RunTaskAsync` `MaxContextOverflowRetries` loop for symmetry.
+- [ ] **Persist token-calibration scale per model.** `CalibratingTokenEstimator._scale` resets each session; add
+      an `ITokenCalibrationStore` (no-op default in core, file-backed in the Unity layer) keyed by model id.
+- [ ] **Cross-turn superseded tool-result pruning.** `ConversationHistoryPruner` keeps the newest N `## Tool Results`;
+      extend it to drop an older result for the SAME tool when a newer one exists (Cline "narrative integrity").
+- [ ] **Per-role compaction-threshold override.** `ConversationCompactionTriggerRatio` is global only; add a
+      nullable per-role override (`AgentBuilder.WithCompactionTriggerRatio` / `AgentMemoryPolicy.Set...`).
+- [ ] **Native `tool_call_id` linkage.** Tool results are replayed as `ChatRole.User` text (OpenAI-safe). For
+      backends that expose tool-call ids, link `FunctionResultContent` properly; keep the User-text fallback.
+- [ ] **Anthropic `cache_control` breakpoints (deferred).** Only when an Anthropic-style backend is added: attach
+      `cache_control` on the frozen prefix via `ChatOptions.AdditionalProperties`/`RawRepresentationFactory`.
 
 ## Infrastructure
 
