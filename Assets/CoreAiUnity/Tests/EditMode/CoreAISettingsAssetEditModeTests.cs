@@ -54,6 +54,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(settings.PlaceLiveContextInTail);
             Assert.AreEqual(0, settings.ConversationHistoryRecentTokenBudgetOverride);
             Assert.AreEqual(0, settings.ConversationRolledSummaryMaxTokens);
+            Assert.AreEqual(CoreAISettings.DefaultConversationCompactionTriggerRatio,
+                settings.ConversationCompactionTriggerRatio);
             Assert.IsTrue(settings.EnableContextPruning);
             Assert.AreEqual(3, settings.MaxRetainedToolResultMessages);
 

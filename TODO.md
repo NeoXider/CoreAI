@@ -37,7 +37,7 @@
 - [ ] **Stable cacheable prefix + verbatim recent turns.** Stop rewriting the `system`/`tools` prefix every turn;
       keep the most recent N turns as real `user`/`assistant`/`tool` messages in the tail
       (`AiOrchestrator.BuildChatHistoryAsync`, `DeterministicConversationContextManager`).
-- [ ] **Compaction by threshold, not every turn.** Anchored summary replaces only the oldest turns when near the
+- [x] **Compaction by threshold, not every turn.** Anchored summary replaces only the oldest turns when near the
       limit; re-summarize infrequently so the cached prefix survives.
 - [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
       persist tool results into history, collapse intra-turn duplicate results, head/tail-truncate large outputs.

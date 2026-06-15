@@ -45,6 +45,42 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class RecordingSummaryStore : IConversationSummaryStore
+        {
+            private readonly Dictionary<string, string> _summaries = new(StringComparer.Ordinal);
+
+            public int SaveSummaryCalls { get; private set; }
+            public string LastSavedSummary { get; private set; }
+
+            public void Seed(string roleId, string summary)
+            {
+                _summaries[roleId] = summary;
+            }
+
+            public string LoadSummary(string roleId)
+            {
+                return _summaries.TryGetValue(roleId, out string summary) ? summary : "";
+            }
+
+            public void SaveSummary(string roleId, string summary)
+            {
+                SaveSummaryCalls++;
+                LastSavedSummary = summary;
+                if (string.IsNullOrWhiteSpace(summary))
+                {
+                    _summaries.Remove(roleId);
+                    return;
+                }
+
+                _summaries[roleId] = summary;
+            }
+
+            public void ClearSummary(string roleId)
+            {
+                _summaries.Remove(roleId);
+            }
+        }
+
         [Test]
         public void ConversationContextManagerFactories_DisableOrNullLlm_UsesDeterministic()
         {
@@ -278,6 +314,94 @@ namespace CoreAI.Tests.EditMode
                 Role = i % 2 == 0 ? "user" : "assistant",
                 Content = $"msg{i}"
             }).ToArray();
+        }
+
+        [Test]
+        public void DeterministicManager_BelowCompactionTrigger_KeepsAllHistoryAndDoesNotSave()
+        {
+            RecordingSummaryStore store = new();
+            store.Seed("r", "existing summary");
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ChatMessage[] history = MakeHistory(7);
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r",
+                history,
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 100,
+                    CompactionTriggerRatio = 0.8f
+                });
+
+            Assert.IsFalse(snap.WasCompacted);
+            Assert.AreEqual("existing summary", snap.Summary);
+            Assert.AreEqual(0, store.SaveSummaryCalls, "Below-trigger builds must not churn the summary store.");
+            Assert.AreEqual(history.Length, snap.RecentMessages.Length);
+            for (int i = 0; i < history.Length; i++)
+            {
+                Assert.AreEqual(history[i].Content, snap.RecentMessages[i].Content);
+            }
+        }
+
+        [Test]
+        public void DeterministicManager_AboveCompactionTrigger_SummarizesOldestAndSaves()
+        {
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+            ChatMessage[] history = MakeHistory(5);
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r",
+                history,
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 25,
+                    CompactionTriggerRatio = 0.8f
+                });
+
+            Assert.IsTrue(snap.WasCompacted);
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+            Assert.AreEqual(store.LastSavedSummary, snap.Summary);
+            StringAssert.Contains("msg0", snap.Summary);
+            StringAssert.Contains("msg2", snap.Summary);
+            Assert.AreEqual(2, snap.RecentMessages.Length);
+            Assert.AreEqual("msg3", snap.RecentMessages[0].Content);
+            Assert.AreEqual("msg4", snap.RecentMessages[1].Content);
+        }
+
+        [Test]
+        public void DeterministicManager_BelowTriggerAfterPriorCompaction_DoesNotRewriteSummary()
+        {
+            RecordingSummaryStore store = new();
+            DeterministicConversationContextManager mgr = new(store, new FlatTokenEstimator(10));
+
+            mgr.BuildSnapshot(
+                "r",
+                MakeHistory(5),
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 25,
+                    CompactionTriggerRatio = 0.8f
+                });
+            string savedSummary = store.LoadSummary("r");
+
+            ConversationContextSnapshot snap = mgr.BuildSnapshot(
+                "r",
+                MakeHistory(3),
+                new AgentMemoryPolicy.RoleMemoryConfig { ContextTokens = 8192 },
+                new ConversationContextBuildArgs
+                {
+                    HistoryTokenBudget = 100,
+                    CompactionTriggerRatio = 0.8f
+                });
+
+            Assert.AreEqual(1, store.SaveSummaryCalls);
+            Assert.AreEqual(savedSummary, snap.Summary);
+            Assert.IsFalse(snap.WasCompacted);
+            Assert.AreEqual(3, snap.RecentMessages.Length);
         }
 
         [Test]

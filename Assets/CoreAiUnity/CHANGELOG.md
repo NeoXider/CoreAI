@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Compaction by threshold.** `CoreAISettingsAsset` now exposes **Compaction trigger ratio** (default `0.8`)
+  under Chat history summarization. Below `historyBudget * ratio`, CoreAI keeps all history verbatim and
+  does not rewrite the stored rolling summary; `0`/invalid values use legacy over-budget compaction.
 - **Deterministic provider tool ordering.** MEAI native tool arrays now use the shared CoreAI
   ordinal-by-name tool order, matching the text-shaped tool contract order so identical role/tool inputs
   do not churn provider prompt-cache prefixes.

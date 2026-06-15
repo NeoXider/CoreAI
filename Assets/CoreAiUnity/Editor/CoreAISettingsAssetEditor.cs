@@ -434,6 +434,10 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Max rolled summary (tokens)",
                         "0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("conversationCompactionTriggerRatio"),
+                    new GUIContent(
+                        "Compaction trigger ratio",
+                        "Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. 0 or 1 = legacy budget-boundary behavior."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableContextPruning"),
                     new GUIContent(
                         "Enable context pruning",

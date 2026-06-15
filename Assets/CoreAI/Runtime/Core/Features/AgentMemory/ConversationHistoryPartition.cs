@@ -23,6 +23,48 @@ namespace CoreAI.Ai
                 : CoreAISettings.DefaultContextWindowTokens;
             return Math.Max(1, maxTokens / 2);
         }
+
+        internal static int EstimateHistoryTokens(ChatMessage[] history, ITokenEstimator estimator)
+        {
+            if (history == null || history.Length == 0)
+            {
+                return 0;
+            }
+
+            long total = 0;
+            for (int i = 0; i < history.Length; i++)
+            {
+                total += Math.Max(0, estimator.EstimateText(history[i].Content ?? ""));
+                if (total >= int.MaxValue)
+                {
+                    return int.MaxValue;
+                }
+            }
+
+            return (int)total;
+        }
+
+        internal static float ResolveCompactionTriggerRatio(ConversationContextBuildArgs buildArgs)
+        {
+            float ratio = buildArgs?.CompactionTriggerRatio ?? 0f;
+            if (ratio <= 0f || ratio > 1f || float.IsNaN(ratio) || float.IsInfinity(ratio))
+            {
+                return 1f;
+            }
+
+            return ratio;
+        }
+
+        internal static bool ShouldPartitionForCompaction(
+            ChatMessage[] history,
+            ITokenEstimator estimator,
+            int historyBudget,
+            ConversationContextBuildArgs buildArgs)
+        {
+            int totalHistoryTokens = EstimateHistoryTokens(history, estimator);
+            double triggerTokens = historyBudget * (double)ResolveCompactionTriggerRatio(buildArgs);
+            return totalHistoryTokens >= triggerTokens;
+        }
     }
 
     /// <summary>

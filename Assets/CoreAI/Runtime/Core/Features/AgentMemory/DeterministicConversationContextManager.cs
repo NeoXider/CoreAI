@@ -42,12 +42,25 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
+            string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             int historyBudget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
+            if (!ConversationContextBudgetTokens.ShouldPartitionForCompaction(
+                    history,
+                    _estimator,
+                    historyBudget,
+                    buildArgs))
+            {
+                return new ConversationContextSnapshot
+                {
+                    Summary = LimitSummaryIfNeeded(storedSummary, buildArgs),
+                    RecentMessages = history,
+                    WasCompacted = false
+                };
+            }
 
             (int splitExclusive, List<ChatMessage> recent) =
                 ConversationHistoryPartition.PartitionByBudget(history, _estimator, historyBudget);
 
-            string storedSummary = _summaryStore.LoadSummary(roleId) ?? "";
             if (splitExclusive <= 0)
             {
                 string summaryOut = LimitSummaryIfNeeded(storedSummary, buildArgs);

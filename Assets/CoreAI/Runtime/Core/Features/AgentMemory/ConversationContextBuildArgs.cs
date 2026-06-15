@@ -21,6 +21,13 @@ namespace CoreAI.Ai
         public int MaxRolledSummaryTokens { get; set; }
 
         /// <summary>
+        /// Compaction (summarization of older turns) only triggers once estimated history tokens reach this
+        /// fraction of the history budget; below it, all turns are kept verbatim and the stored summary is left untouched.
+        /// Roadmap §2. Values less than or equal to zero preserve legacy budget-boundary behavior.
+        /// </summary>
+        public float CompactionTriggerRatio { get; set; }
+
+        /// <summary>
         /// When true, roadmap §7 context editing prunes stale prompt-history entries before budget partitioning.
         /// </summary>
         public bool EnableContextPruning { get; set; }

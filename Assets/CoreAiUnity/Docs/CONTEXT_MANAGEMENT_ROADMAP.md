@@ -60,6 +60,9 @@ survives.** Caching is not the priority — but this placement costs nothing ext
 invalidates system+messages but **not** tools; a tail-only `messages` change invalidates neither tools nor system.
 
 ### 2. Compaction by threshold (not every turn)
+- Status: **implemented.** `ConversationCompactionTriggerRatio` defaults to `0.8`; invalid/unset per-request
+  values use the legacy budget boundary. Below the trigger, the prompt keeps all history verbatim and does not
+  rewrite the stored rolling summary.
 - Run condensation only when approaching the context limit. Produce an **anchored summary** that replaces the
   **oldest** turns; keep the most recent N turns verbatim while they fit.
 - Re-summarize infrequently so the cached prefix survives across turns.

@@ -152,6 +152,13 @@ namespace CoreAI
         int ConversationRolledSummaryMaxTokens => 0;
 
         /// <summary>
+        /// Compaction (summarization of older turns) only triggers once estimated history tokens reach this
+        /// fraction of the history budget; below it, all turns are kept verbatim and the stored summary is left untouched.
+        /// Roadmap §2. Values less than or equal to zero or greater than one preserve legacy budget-boundary behavior.
+        /// </summary>
+        float ConversationCompactionTriggerRatio => 0.8f;
+
+        /// <summary>
         /// When true, roadmap §7 context editing prunes stale prompt-history entries before compaction.
         /// This operates only on the in-memory request copy, never on durable chat history.
         /// </summary>

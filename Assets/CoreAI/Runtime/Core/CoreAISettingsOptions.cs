@@ -37,6 +37,8 @@ namespace CoreAI
         public bool PlaceLiveContextInTail { get; set; } = CoreAISettings.DefaultPlaceLiveContextInTail;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
         public int ConversationRolledSummaryMaxTokens { get; set; }
+        public float ConversationCompactionTriggerRatio { get; set; } =
+            CoreAISettings.DefaultConversationCompactionTriggerRatio;
         public bool EnableContextPruning { get; set; } = CoreAISettings.DefaultEnableContextPruning;
         public int MaxRetainedToolResultMessages { get; set; } =
             CoreAISettings.DefaultMaxRetainedToolResultMessages;
@@ -84,6 +86,7 @@ namespace CoreAI
                 PlaceLiveContextInTail = source.PlaceLiveContextInTail,
                 ConversationHistoryRecentTokenBudgetOverride = source.ConversationHistoryRecentTokenBudgetOverride,
                 ConversationRolledSummaryMaxTokens = source.ConversationRolledSummaryMaxTokens,
+                ConversationCompactionTriggerRatio = source.ConversationCompactionTriggerRatio,
                 EnableContextPruning = source.EnableContextPruning,
                 MaxRetainedToolResultMessages = source.MaxRetainedToolResultMessages,
                 ToolInvocationMarshaler = source.ToolInvocationMarshaler,

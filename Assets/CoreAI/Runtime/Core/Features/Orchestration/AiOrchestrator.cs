@@ -155,6 +155,7 @@ namespace CoreAI.Ai
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
                     MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0,
+                    CompactionTriggerRatio = _settings.ConversationCompactionTriggerRatio,
                     EnableContextPruning = _settings.EnableContextPruning,
                     MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages
                 };

@@ -319,6 +319,12 @@ namespace CoreAI.Infrastructure.Llm
         private int conversationRolledSummaryMaxTokens;
 
         [Tooltip(
+            "Roadmap §2: compaction only triggers once estimated history tokens reach this fraction of the history budget. Below it, all turns stay verbatim and the stored summary is left untouched. Values <= 0 or > 1 preserve legacy budget-boundary behavior.")]
+        [SerializeField]
+        [Range(0f, 1f)]
+        private float conversationCompactionTriggerRatio = CoreAISettings.DefaultConversationCompactionTriggerRatio;
+
+        [Tooltip(
             "Roadmap §7: prune stale/superseded prompt-history entries before compaction. Operates only on the in-memory request copy; durable chat history on disk is untouched.")]
         [SerializeField]
         private bool enableContextPruning = CoreAISettings.DefaultEnableContextPruning;
@@ -671,6 +677,9 @@ namespace CoreAI.Infrastructure.Llm
         public int ConversationRolledSummaryMaxTokens =>
             conversationRolledSummaryMaxTokens < 0 ? 0 : conversationRolledSummaryMaxTokens;
 
+        /// <inheritdoc cref="ICoreAISettings.ConversationCompactionTriggerRatio"/>
+        public float ConversationCompactionTriggerRatio => conversationCompactionTriggerRatio;
+
         /// <inheritdoc cref="ICoreAISettings.EnableContextPruning"/>
         public bool EnableContextPruning => enableContextPruning;
 
@@ -802,6 +811,8 @@ namespace CoreAI.Infrastructure.Llm
                     : options.ConversationHistoryRecentTokenBudgetOverride;
             conversationRolledSummaryMaxTokens =
                 options.ConversationRolledSummaryMaxTokens < 0 ? 0 : options.ConversationRolledSummaryMaxTokens;
+            conversationCompactionTriggerRatio =
+                options.ConversationCompactionTriggerRatio > 1f ? 1f : options.ConversationCompactionTriggerRatio;
             enableContextPruning = options.EnableContextPruning;
             maxRetainedToolResultMessages =
                 options.MaxRetainedToolResultMessages < 0 ? 0 : options.MaxRetainedToolResultMessages;
@@ -1063,6 +1074,11 @@ namespace CoreAI.Infrastructure.Llm
             if (conversationRolledSummaryMaxTokens < 0)
             {
                 conversationRolledSummaryMaxTokens = 0;
+            }
+
+            if (conversationCompactionTriggerRatio > 1f)
+            {
+                conversationCompactionTriggerRatio = 1f;
             }
 
             if (maxRetainedToolResultMessages < 0)

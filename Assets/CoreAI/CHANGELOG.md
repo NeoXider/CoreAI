@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Compaction by threshold.** Added `ICoreAISettings.ConversationCompactionTriggerRatio` (default `0.8`)
+  and `ConversationContextBuildArgs.CompactionTriggerRatio`. Deterministic and LLM-assisted context managers
+  now leave all history verbatim and do not call `SaveSummary` while estimated history tokens are below
+  `historyBudget * ratio`; unset/invalid request ratios preserve legacy over-budget compaction.
 - **Deterministic tool contract prefix.** Added shared ordinal-by-name tool ordering, canonical
   Newtonsoft JSON schema rendering with recursively sorted object keys for text-shaped tool contracts,
   and EditMode regression coverage that guards stable fixed-input system prefixes from generated
