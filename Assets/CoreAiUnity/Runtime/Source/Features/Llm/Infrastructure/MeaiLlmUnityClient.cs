@@ -22,6 +22,9 @@ namespace CoreAI.Infrastructure.Llm
         public LLMAgent UnityAgent => _unityAgent;
         public LLM? LLM => _unityAgent?.llm ?? _unityAgent?.GetComponent<LLM>();
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCalling => false;
+
         public MeaiLlmUnityClient(
             LLMAgent unityAgent,
             ICoreAISettings settings,

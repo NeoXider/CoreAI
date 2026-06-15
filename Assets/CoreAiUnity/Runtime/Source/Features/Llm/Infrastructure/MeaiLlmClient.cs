@@ -32,6 +32,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IGameLogger _logger;
         private readonly IAgentMemoryStore? _memoryStore;
         private readonly ICoreAISettings _settings;
+        private readonly bool _supportsNativeToolCalling;
         private string _currentRoleId = "";
 
         /// <summary>
@@ -41,13 +42,17 @@ namespace CoreAI.Infrastructure.Llm
         private const int LiveUiStreamMaxCharsPerChunk = 48;
 
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            IAgentMemoryStore? memoryStore = null)
+            IAgentMemoryStore? memoryStore = null, bool supportsNativeToolCalling = false)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
+            _supportsNativeToolCalling = supportsNativeToolCalling;
         }
+
+        /// <inheritdoc />
+        public bool SupportsNativeToolCalling => _supportsNativeToolCalling;
 
         /// <summary>
         /// Creates an OpenAI-compatible HTTP-backed MEAI client.
@@ -89,7 +94,7 @@ namespace CoreAI.Infrastructure.Llm
             transport = new HttpClientOpenAiTransport();
 #endif
             MeaiOpenAiChatClient innerClient = new(openAiSettings, transport);
-            return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
+            return new MeaiLlmClient(innerClient, logger, settings, memoryStore, true);
         }
 
         /// <summary>
@@ -146,7 +151,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             LlmUnityMeaiChatClient innerClient = new(unityAgent, logger);
-            return new MeaiLlmClient(innerClient, logger, settings, memoryStore);
+            return new MeaiLlmClient(innerClient, logger, settings, memoryStore, false);
 #endif
         }
 

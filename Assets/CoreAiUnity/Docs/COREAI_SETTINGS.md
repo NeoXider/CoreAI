@@ -242,7 +242,7 @@ The Inspector includes an **LLMUnity status** panel:
 | **Max LLM request retries** | `1` | How many **automatic retries** run after a recoverable failure (transport **`LlmClientException`** or failed **`LlmCompletionResult`** with **`RateLimited`** / **`BackendUnavailable`**), with backoff / **`Retry-After`** (**v1.7.0+**). Inspector clamps below **1** to **1** (default **one** retry → up to **two** **`CompleteAsync`** attempts). **`LoggingLlmClientDecorator`** logs **`LLM ↺`**. Streaming completions still do not retry terminal error chunks. |
 | **Universal System Prompt Prefix** | _(empty)_ | Universal opening prompt — placed **before** each agent’s prompt |
 | **Max Output Tokens** | `4096` | Global LLM response token limit — applied uniformly to **both** HTTP API and LLMUnity. Per-agent override: `AgentBuilder.WithMaxOutputTokens`. Per-call override: `AiTaskRequest.MaxOutputTokens`. Per-request override: `LlmCompletionRequest.MaxOutputTokens`. `0` = unlimited (provider default). |
-| **Context Window** | `8192` | Context window (tokens) |
+| **Context Window** | `131072` | Context window (tokens, 128K default) |
 | **Max Concurrent** | `2` | Parallel orchestrator tasks |
 | **LLM Timeout** | `15` | LLM request timeout (seconds). v1.5.1: enforced by `CoreAiChatService` via UniTask `CancelAfterSlim` (WebGL-compatible). |
 | **Lua Repair Retries** | `3` | Max consecutive failed Lua repair attempts for Programmer (counter resets on success) |

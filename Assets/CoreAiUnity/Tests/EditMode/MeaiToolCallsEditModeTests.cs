@@ -71,7 +71,86 @@ namespace CoreAI.Tests.EditMode
             MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
-            Assert.IsFalse(store.States.ContainsKey("TestRole"));
+            Assert.IsTrue(store.States.ContainsKey("TestRole"));
+            Assert.AreEqual("", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_StrReplace_ReplacesFirstExactMatch()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Quest: old\nQuest: old" });
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("str_replace", old_text: "old", new_text: "new");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Quest: new\nQuest: old", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_Insert_AddsContentAfterAnchorLine()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Profile:\nFacts:" });
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("insert", "Mood: wary", anchor: "Profile:");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Profile:\nMood: wary\nFacts:", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_Delete_RemovesFirstExactBlock()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Keep\nDelete me\nKeep\nDelete me" });
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("delete", old_text: "Delete me\n");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Keep\nKeep\nDelete me", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_Rename_RenamesFirstLeadingKeyLabel()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Profile: calm\nProfile: duplicate" });
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("rename", old_text: "Profile", new_text: "Identity");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Identity: calm\nProfile: duplicate", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_Versioning_RevertRestoresPriorSnapshot()
+        {
+            TestMemoryStore store = new();
+            MemoryTool tool = new(store, "TestRole");
+
+            await tool.ExecuteAsync("write", "Version one");
+            await tool.ExecuteAsync("append", "Version two");
+
+            IReadOnlyList<AgentMemoryVersionSnapshot> versions = store.ListVersions("TestRole");
+            Assert.AreEqual(2, versions.Count);
+            Assert.AreEqual(1, versions[0].Version);
+            Assert.AreEqual("Version one", versions[0].ContentAfter);
+
+            Assert.IsTrue(store.Revert("TestRole", 1, out string error), error);
+            Assert.AreEqual("Version one", store.States["TestRole"].Memory);
+
+            IReadOnlyList<AgentMemoryVersionSnapshot> afterRevert = store.ListVersions("TestRole");
+            Assert.AreEqual(3, afterRevert.Count);
+            Assert.AreEqual("revert", afterRevert[2].Action);
         }
 
         #endregion

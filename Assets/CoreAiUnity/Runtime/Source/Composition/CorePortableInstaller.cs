@@ -3,6 +3,7 @@ using CoreAI.Ai;
 using CoreAI;
 using CoreAI.Authority;
 using CoreAI.Config;
+using CoreAI.Diagnostics;
 using CoreAI.Messaging;
 using CoreAI.Session;
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
@@ -55,6 +56,7 @@ namespace CoreAI.Composition
             builder.Register<NullDataOverlayVersionStore>(Lifetime.Singleton).As<IDataOverlayVersionStore>();
             builder.Register<AiPromptComposer>(Lifetime.Singleton);
             builder.Register<AgentMemoryPolicy>(Lifetime.Singleton);
+            builder.Register<AgentSessionInspector>(Lifetime.Singleton);
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
             builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
             builder.Register<HeuristicTokenEstimator>(Lifetime.Singleton).As<ITokenEstimator>();

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Default context window raised to 128K.** `CoreAISettings.ContextWindowTokens` and related
+  last-resort context-budget defaults now use `131072` tokens instead of `8192`; per-role
+  `RoleMemoryConfig.ContextTokens` defaults to `0`, meaning inherit the global
+  `ICoreAISettings.ContextWindowTokens` unless a role explicitly overrides it.
+- **Agent session inspector Edit Mode snapshots.** `AgentSessionInspector` can now build a read-only best-effort snapshot from serialized settings/prompts/policy inputs and marks live request-only fields as `(unavailable in Edit Mode)`.
+- **Conditional tool contract prompt.** Native tool-calling backends now receive the minimal
+  `## Tool Contract` guidance while text-shaped/local backends keep the full `Available tools`,
+  schema, and JSON-call prompt block.
 - **OpenAI-compatible reasoning controls.** `IOpenAiHttpSettings` now exposes a tri-state
   `ReasoningMode` (`ProviderDefault`, `Disabled`, `Enabled`), optional `ThinkingBudgetTokens`, and
   `ExtraBodyJson`. `MeaiOpenAiChatClient` merges provider-specific JSON into both streaming and

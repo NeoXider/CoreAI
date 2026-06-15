@@ -72,7 +72,8 @@
         private const bool DefaultLogTokenUsage = true;
         private const bool DefaultLogLlmLatency = true;
         private const bool DefaultLogLlmConnectionErrors = true;
-        private const int DefaultContextWindowTokens = 8192;
+        /// <summary>Default model context window in tokens (128K = 131072).</summary>
+        public const int DefaultContextWindowTokens = 131072;
         private const float DefaultTemperature = 0.1f;
         private const bool DefaultOverrideTemperature = false;
         private const int DefaultMaxToolCallRetries = 3;

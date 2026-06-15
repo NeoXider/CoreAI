@@ -14,7 +14,7 @@ namespace CoreAI
         public bool LogTokenUsage { get; set; } = true;
         public bool LogLlmLatency { get; set; } = true;
         public bool LogLlmConnectionErrors { get; set; } = true;
-        public int ContextWindowTokens { get; set; } = 8192;
+        public int ContextWindowTokens { get; set; } = CoreAISettings.DefaultContextWindowTokens;
 
         public string UniversalSystemPromptPrefix { get; set; } =
             "Respond concisely and to the point. Avoid unnecessary verbosity.";

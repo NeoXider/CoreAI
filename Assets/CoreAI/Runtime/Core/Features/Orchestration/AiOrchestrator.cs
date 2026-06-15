@@ -102,7 +102,7 @@ namespace CoreAI.Ai
             string user = _promptComposer.BuildUserPayload(snap, task);
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
             tools = FilterToolsForRequest(tools, task);
-            system = AppendToolContract(system, tools, task);
+            system = AppendToolContract(system, tools, task, roleId);
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
@@ -771,78 +771,16 @@ namespace CoreAI.Ai
         private string AppendToolContract(
             string system,
             IReadOnlyList<ILlmTool> tools,
-            AiTaskRequest task)
+            AiTaskRequest task,
+            string roleId)
         {
-            if (tools == null || tools.Count == 0)
-            {
-                return system;
-            }
-
-            StringBuilder sb = new();
-            sb.Append(string.IsNullOrWhiteSpace(system) ? "" : system.Trim());
-            sb.AppendLine();
-            sb.AppendLine();
-            AiOrchestratorToolContractDefaults.AppendStandardSection(sb);
-
-            string extra = _settings.ToolContractAdditionalInstructions?.Trim();
-            if (!string.IsNullOrEmpty(extra))
-            {
-                sb.AppendLine(extra);
-            }
-
-            bool hasMemoryTool = false;
-            foreach (ILlmTool tool in tools)
-            {
-                if (tool != null &&
-                    string.Equals(tool.Name?.Trim(), "memory", StringComparison.OrdinalIgnoreCase))
-                {
-                    hasMemoryTool = true;
-                    break;
-                }
-            }
-
-            if (hasMemoryTool)
-            {
-                sb.AppendLine(
-                    "Example memory tool call for text-shaped backends: {\"name\":\"memory\",\"arguments\":{\"action\":\"append\",\"content\":\"fact to remember\"}}");
-            }
-
-            if (task != null && task.ForcedToolMode == LlmToolChoiceMode.RequireSpecific &&
-                !string.IsNullOrWhiteSpace(task.RequiredToolName))
-            {
-                sb.AppendLine($"This request requires calling tool '{task.RequiredToolName.Trim()}'.");
-            }
-            else if (task != null && task.ForcedToolMode == LlmToolChoiceMode.RequireAny)
-            {
-                sb.AppendLine("This request requires calling at least one available tool.");
-            }
-
-            sb.AppendLine("Available tools:");
-            foreach (ILlmTool tool in tools)
-            {
-                if (tool == null || string.IsNullOrWhiteSpace(tool.Name))
-                {
-                    continue;
-                }
-
-                sb.Append("- ");
-                sb.Append(tool.Name.Trim());
-                if (!string.IsNullOrWhiteSpace(tool.Description))
-                {
-                    sb.Append(": ");
-                    sb.Append(SingleLine(tool.Description, 500));
-                }
-
-                sb.AppendLine();
-
-                if (!string.IsNullOrWhiteSpace(tool.ParametersSchema) && tool.ParametersSchema.Trim() != "{}")
-                {
-                    sb.Append("  schema: ");
-                    sb.AppendLine(SingleLine(tool.ParametersSchema, 800));
-                }
-            }
-
-            return sb.ToString();
+            bool supportsNativeToolCalling = _llm?.SupportsNativeToolCallingForRole(roleId) == true;
+            return AiToolContractPromptFormatter.AppendToolContract(
+                system,
+                tools,
+                task,
+                _settings,
+                supportsNativeToolCalling);
         }
 
         private static string SingleLine(string value, int maxChars)

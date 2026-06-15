@@ -121,8 +121,8 @@ namespace CoreAI.Ai
         /// <summary>Short backend label after role routing (LLM logs).</summary>
         public string RoutingProfileId { get; set; } = "";
 
-        /// <summary>Context budget in tokens (default 8192; routing may override).</summary>
-        public int ContextWindowTokens { get; set; } = 8192;
+        /// <summary>Context budget in tokens (default 128K; routing may override).</summary>
+        public int ContextWindowTokens { get; set; } = CoreAISettings.DefaultContextWindowTokens;
 
         /// <summary>Optional max completion tokens for the model.</summary>
         public int? MaxOutputTokens { get; set; }
@@ -304,6 +304,21 @@ namespace CoreAI.Ai
     /// </summary>
     public interface ILlmClient
     {
+        /// <summary>
+        /// True when this backend receives tool definitions through a native tool/function channel.
+        /// Defaults to false so text-shaped/local backends keep the full prompt contract unless they opt in.
+        /// </summary>
+        virtual bool SupportsNativeToolCalling => false;
+
+        /// <summary>
+        /// Role-aware native tool capability. Routing clients should resolve the role-specific backend;
+        /// non-routing clients can use <see cref="SupportsNativeToolCalling"/>.
+        /// </summary>
+        virtual bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return SupportsNativeToolCalling;
+        }
+
         /// <summary>Single completion; cancellation and timeouts are applied by outer decorators.</summary>
         Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default);

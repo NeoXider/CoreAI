@@ -18,7 +18,7 @@ namespace CoreAI.Ai
         public string Model { get; set; } = "";
 
         /// <summary>Context window in tokens for requests routed to this profile.</summary>
-        public int ContextWindowTokens { get; set; } = 8192;
+        public int ContextWindowTokens { get; set; } = CoreAISettings.DefaultContextWindowTokens;
 
         /// <summary>Optional maximum response tokens for this profile.</summary>
         public int? MaxOutputTokens { get; set; }

@@ -118,13 +118,19 @@ namespace CoreAI.Ai
             /// <summary>Allow duplicate tool calls.</summary>
             public bool? AllowDuplicateToolCalls;
 
-            /// <summary>With chat history.</summary>
+            /// <summary>
+            /// With chat history. Enabled by default for continuity, but still capped because raw
+            /// chat consumes prompt tokens faster than compact MemoryTool facts.
+            /// </summary>
             public bool WithChatHistory;
 
             /// <summary>Persist chat history.</summary>
             public bool PersistChatHistory;
 
-            /// <summary>Context tokens.</summary>
+            /// <summary>
+            /// Per-role context window in tokens; 0 = inherit the global ICoreAISettings.ContextWindowTokens (default 128K).
+            /// Set explicitly only to override a single role.
+            /// </summary>
             public int ContextTokens;
 
             /// <summary>Max chat history messages.</summary>
@@ -146,7 +152,7 @@ namespace CoreAI.Ai
             public bool UseLlmContextCompaction;
 
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
-                bool withChatHistory = false, bool persistChatHistory = false, int contextTokens = 8192,
+                bool withChatHistory = true, bool persistChatHistory = false, int contextTokens = 0,
                 bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
                 bool useLlmContextCompaction = true, float? temperature = null)
             {
@@ -270,6 +276,20 @@ namespace CoreAI.Ai
             lock (_lock)
             {
                 return _roleConfigs.ContainsKey(roleId);
+            }
+        }
+
+        /// <summary>
+        /// Returns a snapshot of role ids currently configured on this policy.
+        /// Includes built-in roles and any roles registered through <see cref="AgentConfig.ApplyToPolicy"/>.
+        /// </summary>
+        public IReadOnlyList<string> GetKnownRoleIds()
+        {
+            lock (_lock)
+            {
+                List<string> roleIds = new(_roleConfigs.Keys);
+                roleIds.Sort(StringComparer.Ordinal);
+                return roleIds;
             }
         }
 

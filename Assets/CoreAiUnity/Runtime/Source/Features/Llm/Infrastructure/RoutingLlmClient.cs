@@ -49,6 +49,13 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            ILlmClient inner = _registry.ResolveClientForRole(agentRoleId);
+            return inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
+        }
+
+        /// <inheritdoc />
         public async Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)

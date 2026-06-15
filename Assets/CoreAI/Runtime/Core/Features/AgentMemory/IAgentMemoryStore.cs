@@ -1,4 +1,7 @@
-﻿namespace CoreAI.Ai
+using System;
+using System.Collections.Generic;
+
+namespace CoreAI.Ai
 {
     /// <summary>Persistence contract for role-scoped agent memory and chat history.</summary>
     public interface IAgentMemoryStore
@@ -34,7 +37,7 @@
     }
 
     /// <summary>Serializable chat transcript entry.</summary>
-    [System.Serializable]
+    [Serializable]
     public struct ChatMessage
     {
         public string Role; // "user" | "assistant" | "system"
@@ -45,7 +48,94 @@
         {
             Role = role;
             Content = content;
-            Timestamp = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        }
+    }
+
+    /// <summary>
+    /// Backward-compatible memory version APIs layered over <see cref="IAgentMemoryStore"/>.
+    /// Stores that preserve <see cref="AgentMemoryState.Versions"/> get version listing and rollback
+    /// without adding required interface members to existing implementations.
+    /// </summary>
+    public static class AgentMemoryStoreExtensions
+    {
+        /// <summary>Returns retained memory versions for a role in chronological order.</summary>
+        public static IReadOnlyList<AgentMemoryVersionSnapshot> ListVersions(this IAgentMemoryStore store,
+            string roleId)
+        {
+            if (store == null ||
+                string.IsNullOrWhiteSpace(roleId) ||
+                !store.TryLoad(roleId, out AgentMemoryState state) ||
+                state?.Versions == null)
+            {
+                return Array.Empty<AgentMemoryVersionSnapshot>();
+            }
+
+            return new List<AgentMemoryVersionSnapshot>(state.Versions);
+        }
+
+        /// <summary>
+        /// Restores the memory document to a retained version and records the rollback as a new version.
+        /// </summary>
+        public static bool Revert(this IAgentMemoryStore store, string roleId, int version)
+        {
+            return store.Revert(roleId, version, out _);
+        }
+
+        /// <summary>
+        /// Restores the memory document to a retained version and records the rollback as a new version.
+        /// </summary>
+        public static bool Revert(this IAgentMemoryStore store, string roleId, int version, out string error)
+        {
+            error = null;
+            if (store == null)
+            {
+                error = "Store is required";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                error = "Role id is required";
+                return false;
+            }
+
+            if (!store.TryLoad(roleId, out AgentMemoryState state) || state == null)
+            {
+                error = $"No memory state exists for role: {roleId}";
+                return false;
+            }
+
+            AgentMemoryVersionSnapshot target = FindVersion(state, version);
+            if (target == null)
+            {
+                error = $"Version {version} was not found for role: {roleId}";
+                return false;
+            }
+
+            state.Memory = target.ContentAfter ?? "";
+            state.RecordVersion("revert", state.Memory, $"Reverted to version {version}.");
+            store.Save(roleId, state);
+            return true;
+        }
+
+        private static AgentMemoryVersionSnapshot FindVersion(AgentMemoryState state, int version)
+        {
+            if (state?.Versions == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < state.Versions.Length; i++)
+            {
+                AgentMemoryVersionSnapshot snapshot = state.Versions[i];
+                if (snapshot != null && snapshot.Version == version)
+                {
+                    return snapshot;
+                }
+            }
+
+            return null;
         }
     }
 }

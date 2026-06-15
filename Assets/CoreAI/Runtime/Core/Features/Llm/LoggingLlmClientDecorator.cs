@@ -44,6 +44,15 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Inner.</summary>
         public ILlmClient Inner => _inner;
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCalling => _inner?.SupportsNativeToolCalling == true;
+
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return _inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
+        }
+
         /// <summary>Peels all <see cref="LoggingLlmClientDecorator"/> from the top of the chain.</summary>
         public static ILlmClient Unwrap(ILlmClient client)
         {

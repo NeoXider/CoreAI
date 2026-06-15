@@ -3,6 +3,7 @@
   "rootNamespace": "CoreAI.Tests",
   "references": [
     "CoreAI.Core",
+    "CoreAI.Editor",
     "CoreAI.ExampleGame",
     "CoreAI.Source",
     "MoonSharp.Interpreter",

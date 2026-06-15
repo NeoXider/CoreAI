@@ -57,8 +57,8 @@ namespace CoreAI.Infrastructure.Llm
         public int maxPromptChars;
 
         /// <summary>Context window in tokens for requests routed to this profile.</summary>
-        [Min(256)] [Tooltip("Context window size in tokens for this profile. Default is 8192.")]
-        public int contextWindowTokens = 8192;
+        [Min(256)] [Tooltip("Context window size in tokens for this profile. Default is 128K.")]
+        public int contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
     }
 
     /// <summary>
@@ -108,7 +108,9 @@ namespace CoreAI.Infrastructure.Llm
                     Model = profile.httpSettings != null
                         ? profile.httpSettings.Model
                         : profile.unityAgentGameObjectName ?? "",
-                    ContextWindowTokens = profile.contextWindowTokens < 256 ? 8192 : profile.contextWindowTokens,
+                    ContextWindowTokens = profile.contextWindowTokens < 256
+                        ? CoreAISettings.DefaultContextWindowTokens
+                        : profile.contextWindowTokens,
                     Capabilities = new[] { "chat", "streaming", "tools" }
                 });
             }

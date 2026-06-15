@@ -118,7 +118,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
             Assert.IsFalse(CoreAISettings.OverrideTemperature);
             Assert.AreEqual(false, CoreAISettings.EnableMeaiDebugLogging);
-            Assert.AreEqual(8192, CoreAISettings.ContextWindowTokens);
+            Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, CoreAISettings.ContextWindowTokens);
         }
 
         [Test]

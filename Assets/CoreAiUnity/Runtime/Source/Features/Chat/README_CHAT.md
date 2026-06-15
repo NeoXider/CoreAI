@@ -87,7 +87,7 @@ AgentConfig merchant = new AgentBuilder("Merchant")
     .WithMode(AgentMode.ToolsAndChat)
     .WithSystemPrompt("You are a merchant. Prefer tools …")
     .WithTool(/* your ILlmTool */)
-    .WithChatHistory(2048)
+    .WithChatHistory(2048) // optional override; builders default to history on with a 30-message cap
     .Build();
 
 AgentConfig blueprintBot = new AgentBuilder("BlueprintBot")
@@ -125,7 +125,7 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 
 **WebGL:** the same **`FileAgentMemoryStore`** path applies; Unity maps **`persistentDataPath`** to browser storage (IDBFS). After each persist, **`FileAgentMemoryStore`** calls **`CoreAi_PersistFsSync`** (**`CoreAiPersistFs.jslib`**) so writes are pushed to IndexedDB — without this, closing the tab before **`Application.Quit`** can drop data. Since **v1.7.2**, the jslib runs **`FS.syncfs`** single-flight so overlapping persists (chat + memory in one turn) do not start a second sync while the first is in flight. Conversation **summaries** for compaction stay in-memory on WebGL (see **`CoreAILifetimeScope`**); only agent memory / chat JSON uses the file store.
 
-**Requirements:** for the role, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. Built-in chat roles support this out of the box: **`PlainChat`** (history + no MemoryTool) and **`SmartChat`** (history + MemoryTool). For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk — there is nothing to load (only **Welcome Message** remains).
+**Requirements:** for persisted restart restore, **`WithChatHistory`** and **`PersistChatHistory`** must be enabled in `AgentMemoryPolicy`. Runtime chat history is on by default for `AgentBuilder` and built-in role policy entries (`MaxChatHistoryMessages = 30`), but disk restore still requires `PersistChatHistory`. Built-in chat roles support persisted restore out of the box: **`PlainChat`** (history + no MemoryTool) and **`SmartChat`** (history + MemoryTool). For custom chat roles (e.g. `Teacher`), call `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`; otherwise history is not written to disk. Use `AgentBuilder.WithoutChatHistory()` for token-sensitive roles that should not receive recent raw turns.
 
 **Welcome message:** if after load the scroll area **already has** messages, **Welcome Message** is not added (to avoid duplicating “Hello!” on top of the dialog). If there is no history, the welcome message is shown as before.
 

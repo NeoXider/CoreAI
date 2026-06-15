@@ -1,0 +1,186 @@
+using CoreAI.Ai;
+using CoreAI.Diagnostics;
+using CoreAI.Editor.Diagnostics;
+using CoreAI.Infrastructure.Prompts;
+using Newtonsoft.Json.Linq;
+using NUnit.Framework;
+
+namespace CoreAI.Tests.EditMode
+{
+    [TestFixture]
+    public sealed class AgentSessionInspectorEditModeTests
+    {
+        [Test]
+        public void InspectSerializedInputs_BuildsEditModeSnapshot_ReadOnly()
+        {
+            CoreAISettingsOptions settings = new()
+            {
+                ContextWindowTokens = 8192,
+                UniversalSystemPromptPrefix = "Universal prefix.",
+                ToolContractAdditionalInstructions = "Use tools carefully.",
+                EnableConversationHistorySummarization = true
+            };
+
+            AgentPromptsDefinition prompts = new();
+            prompts.CustomAgents.Add(new AgentPromptEntryDefinition
+            {
+                RoleId = "Teacher",
+                SystemPrompt = "Base teacher prompt.",
+                UserPromptTemplate = "Teach {hint}.",
+                OverrideUniversalPrefix = false
+            });
+
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("Teacher", true, 4096, true, maxChatHistoryMessages: 12);
+            policy.SetMaxOutputTokens("Teacher", 512);
+            policy.SetAdditionalSystemPrompt("Teacher", "Additional teacher prompt.");
+
+            ReadOnlyMemoryStore memoryStore = new("Remember the student likes examples.");
+
+            AgentSessionSnapshot snapshot = AgentSessionInspector.InspectSerializedInputs(
+                "Teacher",
+                settings,
+                prompts,
+                policy,
+                memoryStore);
+
+            Assert.AreEqual("edit-mode (serialized scene)", snapshot.SnapshotSource);
+            Assert.AreEqual("Teacher", snapshot.RoleId);
+            Assert.IsTrue(snapshot.RoleIsExplicitlyConfigured);
+            Assert.AreEqual("Universal prefix.", snapshot.UniversalSystemPromptPrefix);
+            Assert.AreEqual("Base teacher prompt.", snapshot.BaseSystemPrompt);
+            Assert.AreEqual("Additional teacher prompt.", snapshot.AdditionalSystemPrompt);
+            StringAssert.Contains("Universal prefix.", snapshot.ResolvedSystemPrompt);
+            StringAssert.Contains("Base teacher prompt.", snapshot.ResolvedSystemPrompt);
+            StringAssert.Contains("Additional teacher prompt.", snapshot.ResolvedSystemPrompt);
+            StringAssert.Contains("Remember the student likes examples.", snapshot.MemoryText);
+
+            Assert.IsTrue(snapshot.RoleConfig.WithChatHistory);
+            Assert.IsTrue(snapshot.RoleConfig.PersistChatHistory);
+            Assert.AreEqual(4096, snapshot.RoleConfig.ContextTokens);
+            Assert.AreEqual(12, snapshot.RoleConfig.MaxChatHistoryMessages);
+            Assert.AreEqual(512, snapshot.RoleConfig.MaxOutputTokens);
+            Assert.AreEqual(4096, snapshot.Budget.ContextWindowTokens);
+            Assert.AreEqual(512, snapshot.Budget.ReservedForCompletionTokens);
+            Assert.Greater(snapshot.Budget.EstimatedSystemTokens, 0);
+            Assert.Greater(snapshot.Budget.HistoryTokenBudget, 0);
+
+            Assert.AreEqual(AgentSessionSnapshot.UnavailableInEditMode,
+                snapshot.ResolvedSystemPromptWithRuntimeContext);
+            Assert.AreEqual(AgentSessionSnapshot.UnavailableInEditMode,
+                snapshot.UserPayloadEstimate);
+            Assert.AreEqual(1, snapshot.EstimatedRequestChatHistory.Count);
+            Assert.AreEqual(AgentSessionSnapshot.UnavailableInEditMode,
+                snapshot.EstimatedRequestChatHistory[0].Content);
+
+            StringAssert.Contains("Source: edit-mode (serialized scene)", snapshot.ToStatsText());
+            StringAssert.Contains(AgentSessionSnapshot.UnavailableInEditMode, snapshot.ToSessionText());
+        }
+
+        [Test]
+        public void SerializeSnapshotToJson_ExportsValidIndentedJsonWithKnownField()
+        {
+            AgentSessionSnapshot snapshot = new()
+            {
+                SnapshotSource = "test",
+                RoleId = "Teacher",
+                RoleIsExplicitlyConfigured = true,
+                UniversalSystemPromptPrefix = "Universal prefix.",
+                BaseSystemPrompt = "Base teacher prompt.",
+                AdditionalSystemPrompt = "Additional teacher prompt.",
+                ResolvedSystemPrompt = "Resolved teacher prompt.",
+                MemoryText = "Remember the student likes examples.",
+                ConversationSummary = "Prior lesson summary.",
+                RoleConfig = new AgentSessionRoleConfigSnapshot
+                {
+                    UseMemoryTool = true,
+                    DefaultAction = MemoryToolAction.Append,
+                    AllowDuplicateToolCalls = null,
+                    WithChatHistory = true,
+                    PersistChatHistory = true,
+                    ContextTokens = 4096,
+                    MaxChatHistoryMessages = 12,
+                    MaxOutputTokens = 512,
+                    Temperature = 0.1f,
+                    UseLlmContextCompaction = true
+                },
+                Budget = new AgentSessionBudgetSnapshot
+                {
+                    ContextWindowTokens = 4096,
+                    ReservedForCompletionTokens = 512,
+                    EstimatedSystemTokens = 128,
+                    EstimatedUserTokens = 16
+                }
+            };
+            snapshot.Tools.Add(new AgentSessionToolSnapshot
+            {
+                Name = "memory",
+                Description = "Memory tool",
+                ParametersSchema = "{}",
+                AllowDuplicates = false
+            });
+            snapshot.ChatHistory.Add(new AgentSessionChatMessageSnapshot
+            {
+                Role = "user",
+                Content = "Can you explain loops?",
+                Timestamp = 123
+            });
+
+            string json = AgentSessionInspectorWindow.SerializeSnapshotToJson(snapshot);
+            JObject parsed = JObject.Parse(json);
+
+            Assert.IsNotEmpty(json);
+            StringAssert.Contains("\n  \"RoleId\"", json);
+            Assert.AreEqual("Teacher", parsed.Value<string>("RoleId"));
+            Assert.AreEqual("Append", parsed["RoleConfig"]?.Value<string>("DefaultAction"));
+        }
+
+        private sealed class ReadOnlyMemoryStore : IAgentMemoryStore
+        {
+            private readonly string _memory;
+
+            public ReadOnlyMemoryStore(string memory)
+            {
+                _memory = memory;
+            }
+
+            public bool TryLoad(string roleId, out AgentMemoryState state)
+            {
+                state = new AgentMemoryState
+                {
+                    LastSystemPrompt = "",
+                    Memory = _memory
+                };
+                return true;
+            }
+
+            public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
+            {
+                return new[]
+                {
+                    new ChatMessage("user", "Can you explain loops?")
+                };
+            }
+
+            public void Save(string roleId, AgentMemoryState state)
+            {
+                throw new AssertionException("Inspector must not save memory.");
+            }
+
+            public void Clear(string roleId)
+            {
+                throw new AssertionException("Inspector must not clear memory.");
+            }
+
+            public void ClearChatHistory(string roleId)
+            {
+                throw new AssertionException("Inspector must not clear chat history.");
+            }
+
+            public void AppendChatMessage(string roleId, string role, string content, bool persistToDisk = true)
+            {
+                throw new AssertionException("Inspector must not append chat history.");
+            }
+        }
+    }
+}

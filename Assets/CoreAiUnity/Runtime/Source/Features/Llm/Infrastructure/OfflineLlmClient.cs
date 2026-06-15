@@ -21,6 +21,9 @@ namespace CoreAI.Infrastructure.Llm
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCalling => false;
+
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {
             _tools = tools ?? Array.Empty<ILlmTool>();

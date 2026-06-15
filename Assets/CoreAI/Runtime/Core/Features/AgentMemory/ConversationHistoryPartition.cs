@@ -18,7 +18,9 @@ namespace CoreAI.Ai
                 return Math.Max(1, buildArgs.HistoryTokenBudget);
             }
 
-            int maxTokens = roleConfig.ContextTokens > 0 ? roleConfig.ContextTokens : 8192;
+            int maxTokens = roleConfig.ContextTokens > 0
+                ? roleConfig.ContextTokens
+                : CoreAISettings.DefaultContextWindowTokens;
             return Math.Max(1, maxTokens / 2);
         }
     }

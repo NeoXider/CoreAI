@@ -153,7 +153,7 @@ namespace CoreAI.Ai
                     SendTemperature = true,
                     Temperature = _options.Temperature,
                     MaxOutputTokens = _options.MaxSummaryOutputTokens > 0 ? _options.MaxSummaryOutputTokens : null,
-                    ContextWindowTokens = 8192
+                    ContextWindowTokens = CoreAISettings.DefaultContextWindowTokens
                 },
                 cancellationToken).ConfigureAwait(false);
 

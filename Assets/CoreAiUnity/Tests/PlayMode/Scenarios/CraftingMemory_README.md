@@ -116,10 +116,16 @@ store.TryLoad("Creator", out var creatorState);       // -> "Design: ..."
 store.TryLoad("CoreMechanicAI", out var mechanicState); // -> "Craft#1: ..."
 ```
 
-**Three actions:**
+**Memory actions:**
 - `write`: overwrite memory
 - `append`: add to existing memory
 - `clear`: clear memory
+- `str_replace`: replace the first exact text match, or every match with `replace_all`
+- `insert`: add content before a line, after an anchor line, or at the end
+- `delete`: remove the first exact block, or every match with `replace_all`
+- `rename`: rename the first leading `key:` / `# key:` memory section label
+
+Successful memory mutations record bounded snapshots on `AgentMemoryState.Versions` for stores that preserve the full state object; call `IAgentMemoryStore.ListVersions(roleId)` to inspect them and `IAgentMemoryStore.Revert(roleId, version)` to restore one.
 
 Implementation: `Microsoft.Extensions.AI.AIFunctionFactory.Create()`
 

@@ -24,12 +24,25 @@ LLM Request → FunctionInvokingChatClient → LLMAgent
             Final response → AiOrchestrator
 ```
 
-**Three actions (single format):**
+**Supported actions (single format):**
 ```json
 {"name": "memory", "arguments": {"action": "write", "content": "Craft#1: Iron Blade damage:45"}}
 {"name": "memory", "arguments": {"action": "append", "content": "Craft#2: Steel Longsword damage:72"}}
 {"name": "memory", "arguments": {"action": "clear"}}
+{"name": "memory", "arguments": {"action": "str_replace", "old_text": "damage:45", "new_text": "damage:50"}}
+{"name": "memory", "arguments": {"action": "insert", "anchor": "Crafts:", "content": "Craft#3: Frost Axe damage:61"}}
+{"name": "memory", "arguments": {"action": "delete", "old_text": "obsolete fact"}}
+{"name": "memory", "arguments": {"action": "rename", "old_text": "Crafts", "new_text": "Craft History"}}
 ```
+
+Granular edits operate on the canonical `AgentMemoryState.Memory` document that prompt assembly and inspectors already read. Edits are exact and case-sensitive:
+
+- `str_replace`: replaces the first exact `old_text` with `new_text` (or `content`). Set `replace_all: true` to replace every exact match.
+- `insert`: adds `content` before a 1-based `line`, after the first line containing `anchor`, or at the end when neither is supplied.
+- `delete`: removes the first exact `old_text` (or `content`). Set `replace_all: true` to remove every exact match.
+- `rename`: renames the first leading section/key label `old_text:` or `# old_text:` to `new_text:` (or `content:`).
+
+Every successful memory mutation records a bounded audit snapshot on `AgentMemoryState.Versions`: version number, UTC timestamp, action, full `contentAfter`, and a short size-delta note. Stores that preserve the full `AgentMemoryState` retain those snapshots; custom stores can persist them alongside `Memory`. Use `IAgentMemoryStore.ListVersions(roleId)` to inspect retained snapshots and `IAgentMemoryStore.Revert(roleId, version)` to restore one; revert itself creates a new version.
 
 **When to use:**
 - ✅ CoreMechanicAI — craft history
@@ -161,17 +174,17 @@ These are **default policy choices**, not hard limits. The key distinction:
 
 | Role | MemoryTool | Default action | ChatHistory default | Persisted chat default | Why |
 |------|:----------:|:--------------:|:-------------------:|:----------------------:|-----|
-| **Creator** | ✅ | Write | ❌ | ❌ | Creator should make decisions from the current world snapshot + compact durable facts, not stale raw chat. Enable ChatHistory only for an interactive designer/co-author session. |
-| **Analyzer** | ✅ | Append | ❌ | ❌ | Analyzer should consume telemetry/snapshots and store summarized observations. Raw chat history can bias analysis and waste tokens; use MemoryTool or structured telemetry for trends. |
-| **Programmer** | ✅ | Append | ❌ | ❌ | Repair context is passed explicitly (`LuaRepairPreviousCode`, errors, version store). Full chat is usually unnecessary and can confuse code generation. |
-| **CoreMechanicAI** | ✅ | Append | ❌ | ❌ | Needs deterministic facts such as craft history/results; compact MemoryTool is better than raw dialogue. |
-| **AINpc** | ✅ | Append | ❌ | ❌ | Defaults stay conservative because NPC roles vary: bark-only NPCs need no chat history; named NPCs can opt in. |
+| **Creator** | ✅ | Write | ✅ | ❌ | Keeps short session continuity by default while durable design decisions still belong in compact MemoryTool facts. |
+| **Analyzer** | ✅ | Append | ✅ | ❌ | Keeps recent discussion context, but summarized observations should still go through MemoryTool or structured telemetry. |
+| **Programmer** | ✅ | Append | ✅ | ❌ | Recent dialogue is retained by default; deterministic repair inputs remain the authoritative code context. |
+| **CoreMechanicAI** | ✅ | Append | ✅ | ❌ | Retains recent mechanic discussion while deterministic craft history/results stay in compact MemoryTool memory. |
+| **AINpc** | ✅ | Append | ✅ | ❌ | Sequential NPC lines now keep recent conversation by default; persistence remains opt-in for named/long-lived NPCs. |
 | **PlainChat** | ❌ | - | ✅ | ✅ | Simple drop-in chat; session restore after restart. |
 | **SmartChat** | ✅ | Append | ✅ | ✅ | Chat + MemoryTool for durable facts; session restore after restart. |
 
-**Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` defaults `WithChatHistory` to **false** and **`PersistChatHistory` to false** unless you pass `true` (for example **`PlainChat`** / **`SmartChat`** entries in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). That keeps agent roles on MemoryTool-only defaults without implying disk chat persistence.
+**Implementation note:** `AgentMemoryPolicy.RoleMemoryConfig` and `AgentBuilder` now default `WithChatHistory` to **true** with `MaxChatHistoryMessages = 30`, but **`PersistChatHistory` remains false** unless you pass `true` (for example **`PlainChat`** / **`SmartChat`** entries in the policy constructor, or `ConfigureChatHistory` / `AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`). This improves continuity without implying disk chat persistence. Use `AgentBuilder.WithoutChatHistory()` or `ConfigureChatHistory(roleId, enabled: false, ...)` for token-sensitive/tool-only roles.
 
-**Chat UI exception:** orchestrator requests with `SourceTag = "Chat"` get short-term chat history for the current role even if that role normally defaults to `WithChatHistory = false`. This is session context only unless the role policy already enables persistence. It lets a `CoreAiChatPanel` using `Programmer` remember immediate dialogue instructions such as the user's response language, while direct Programmer Lua/repair tasks still run without raw chat history.
+**Token-cost note:** ChatHistory sends recent raw turns, so it costs more prompt tokens than compact MemoryTool facts. Keep durable facts in MemoryTool and disable ChatHistory explicitly for roles that must stay deterministic or very small.
 
 Recommended opt-ins:
 

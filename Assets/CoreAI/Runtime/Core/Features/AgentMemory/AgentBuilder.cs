@@ -30,7 +30,8 @@ namespace CoreAI.Ai
         private readonly List<SkillSet> _skills = new();
         private string _systemPrompt;
         private AgentMode _mode = AgentMode.ToolsAndChat;
-        private bool _withChatHistory;
+        // Default chat history keeps agent continuity; callers can opt out to save prompt tokens.
+        private bool _withChatHistory = true;
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
         private int _maxChatHistoryMessages = 30;
@@ -182,6 +183,17 @@ namespace CoreAI.Ai
             _contextWindowTokens = contextWindowTokens;
             _persistChatHistory = persistBetweenSessions;
             _maxChatHistoryMessages = maxChatHistoryMessages;
+            return this;
+        }
+
+        /// <summary>
+        /// Disables role-scoped chat history for this agent. Use for tool-only roles where raw
+        /// transcript context would waste tokens or bias deterministic work.
+        /// </summary>
+        public AgentBuilder WithoutChatHistory()
+        {
+            _withChatHistory = false;
+            _persistChatHistory = false;
             return this;
         }
 

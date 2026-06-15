@@ -31,6 +31,15 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public ILlmClient Inner => _inner;
 
+        /// <inheritdoc />
+        public bool SupportsNativeToolCalling => _inner?.SupportsNativeToolCalling == true;
+
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return _inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
+        }
+
         /// <summary>
         /// Checks local limits and delegates a non-streaming request.
         /// </summary>

@@ -4,6 +4,24 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Agent Session Inspector JSON export.** Added a `Copy JSON` button that copies the full inspected `AgentSessionSnapshot` as indented JSON.
+- **Default context window raised to 128K.** Unity settings assets, route profiles, and routing
+  fallbacks now inherit the shared `131072` token default instead of `8192`; per-role
+  `ContextTokens` defaults to `0`, meaning inherit the global `ICoreAISettings.ContextWindowTokens`
+  unless a single role explicitly overrides it.
+- **Agent Session Inspector works in Edit Mode.** When no live VContainer scope is available, the editor window reads the active scene's serialized `CoreAILifetimeScope`, prompt/settings assets, and persistent CoreAI memory read-only, then labels the snapshot source as `edit-mode (serialized scene)`.
+- **Agent memory granular edits and versions.** `MemoryTool` now supports `str_replace`, `insert`,
+  `delete`, and `rename` alongside existing `write` / `append` / `clear`, with bounded mutation
+  snapshots on `AgentMemoryState` and store extension APIs for version listing and rollback. Runtime
+  chat history now defaults on for built-in and builder-created roles (30-message cap, persistence
+  still opt-in).
+- **Version bump to 4.3.0** (`com.nexoider.coreai` + `com.nexoider.coreaiunity`).
+- **Context management roadmap documented.** New `Assets/CoreAiUnity/Docs/CONTEXT_MANAGEMENT_ROADMAP.md`
+  fixes the target design for Claude Code / Cline / Kilo-grade history handling: stable cacheable prefix +
+  verbatim recent turns, threshold-based compaction (not per-turn re-summarization), a per-role
+  `ToolResultMemoryPolicy`, token budgeting calibrated from real API `usage`, an emergency overflow fallback,
+  and persistent cross-session agent memory. Tracked in root `TODO.md` → *Context management overhaul*. Design
+  only in this release — implementation lands in follow-up tasks.
 - **Reasoning-model HTTP controls and diagnostics.** `CoreAISettingsAsset` and
   `OpenAiHttpLlmSettings` now expose a tri-state **Reasoning Mode** for OpenAI-compatible backends:
   **Provider Default** sends no thinking controls, while **Disabled** / **Enabled** send compatible

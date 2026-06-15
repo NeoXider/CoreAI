@@ -54,6 +54,9 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public bool SupportsNativeToolCalling => _client.SupportsNativeToolCalling;
+
+        /// <inheritdoc />
         public Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)

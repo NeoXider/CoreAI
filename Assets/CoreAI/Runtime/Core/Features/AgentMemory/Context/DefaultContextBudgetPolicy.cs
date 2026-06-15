@@ -23,7 +23,8 @@ namespace CoreAI.Ai
                 throw new ArgumentNullException(nameof(request));
             }
 
-            int maxCtx = Math.Max(256, request.MaxContextTokens <= 0 ? 8192 : request.MaxContextTokens);
+            int maxCtx = Math.Max(256,
+                request.MaxContextTokens <= 0 ? CoreAISettings.DefaultContextWindowTokens : request.MaxContextTokens);
             int reservedCompletion = ResolveCompletionReserve(maxCtx, request.MaxOutputTokens);
 
             int systemEst = estimator.EstimateText(request.SystemPrompt ?? "");

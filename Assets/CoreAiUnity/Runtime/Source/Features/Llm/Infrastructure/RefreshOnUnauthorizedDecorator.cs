@@ -29,6 +29,15 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
+
+        /// <inheritdoc />
+        public bool SupportsNativeToolCallingForRole(string agentRoleId)
+        {
+            return _inner.SupportsNativeToolCallingForRole(agentRoleId);
+        }
+
+        /// <inheritdoc />
         public async Task<LlmCompletionResult> CompleteAsync(
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)

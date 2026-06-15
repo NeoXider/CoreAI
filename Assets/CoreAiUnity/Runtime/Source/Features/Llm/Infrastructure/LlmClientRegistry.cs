@@ -102,7 +102,9 @@ namespace CoreAI.Infrastructure.Llm
                     if (c != null)
                     {
                         newClients[id] = c;
-                        newContexts[id] = p.contextWindowTokens < 256 ? 8192 : p.contextWindowTokens;
+                        newContexts[id] = p.contextWindowTokens < 256
+                            ? CoreAISettings.DefaultContextWindowTokens
+                            : p.contextWindowTokens;
                         newModes[id] = ResolveProfileMode(p);
                     }
                 }
@@ -142,17 +144,17 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (!_useManifestRouting || _contextByProfileId.Count == 0)
                 {
-                    return 8192;
+                    return CoreAISettings.DefaultContextWindowTokens;
                 }
 
                 LlmRouteResolution resolution = _routeResolver.Resolve(role);
                 if (resolution.Found &&
                     _contextByProfileId.TryGetValue(resolution.Profile.ProfileId, out int ctx))
                 {
-                    return ctx < 256 ? 8192 : ctx;
+                    return ctx < 256 ? CoreAISettings.DefaultContextWindowTokens : ctx;
                 }
 
-                return 8192;
+                return CoreAISettings.DefaultContextWindowTokens;
             }
         }
 

@@ -76,10 +76,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void WithoutChatHistory_ShouldHaveDefaults()
+        public void DefaultBuilder_ShouldEnableChatHistoryWithoutPersistence()
         {
             AgentConfig config = new AgentBuilder("TestAgent")
                 .WithSystemPrompt("Test prompt")
+                .Build();
+
+            Assert.IsTrue(config.WithChatHistory);
+            Assert.IsFalse(config.PersistChatHistoryBetweenSessions);
+            Assert.AreEqual(30, config.MaxChatHistoryMessages);
+        }
+
+        [Test]
+        public void WithoutChatHistory_ShouldOptOutOfDefaultHistory()
+        {
+            AgentConfig config = new AgentBuilder("TestAgent")
+                .WithSystemPrompt("Test prompt")
+                .WithoutChatHistory()
                 .Build();
 
             Assert.IsFalse(config.WithChatHistory);
@@ -110,14 +123,50 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void AgentMemoryPolicy_Default_Creator_StillUsesMemoryToolOnly()
+        public void AgentMemoryPolicy_Default_Creator_UsesMemoryToolAndChatHistory()
         {
             AgentMemoryPolicy policy = new();
             AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.Creator);
 
             Assert.IsTrue(config.UseMemoryTool);
-            Assert.IsFalse(config.WithChatHistory);
+            Assert.IsTrue(config.WithChatHistory);
             Assert.IsFalse(config.PersistChatHistory);
+            Assert.AreEqual(30, config.MaxChatHistoryMessages);
+        }
+
+        [Test]
+        public void RoleMemoryConfig_DefaultContextTokens_ShouldInheritGlobalContextWindow()
+        {
+            CoreAISettingsOptions settings = new();
+            AgentMemoryPolicy.RoleMemoryConfig config =
+                new AgentMemoryPolicy.RoleMemoryConfig(true, MemoryToolAction.Append);
+
+            Assert.AreEqual(0, config.ContextTokens);
+            Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, settings.ContextWindowTokens);
+
+            int effectiveContextTokens = config.ContextTokens > 0
+                ? config.ContextTokens
+                : settings.ContextWindowTokens;
+            ContextBudget budget = new DefaultContextBudgetPolicy().Compute(
+                new ContextBudgetRequest
+                {
+                    MaxContextTokens = effectiveContextTokens
+                },
+                new HeuristicTokenEstimator());
+
+            Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, budget.MaxContextTokens);
+        }
+
+        [Test]
+        public void AgentMemoryPolicy_Default_AINpc_HasChatHistoryOn()
+        {
+            AgentMemoryPolicy policy = new();
+            AgentMemoryPolicy.RoleMemoryConfig config = policy.GetRoleConfig(BuiltInAgentRoleIds.AiNpc);
+
+            Assert.IsTrue(config.UseMemoryTool);
+            Assert.IsTrue(config.WithChatHistory);
+            Assert.IsFalse(config.PersistChatHistory);
+            Assert.AreEqual(30, config.MaxChatHistoryMessages);
         }
 
         [Test]

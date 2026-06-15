@@ -230,7 +230,7 @@ namespace CoreAI.Infrastructure.Llm
         private int maxLlmRequestRetries = 1;
 
         [Tooltip("Default context-window hint in tokens.")] [SerializeField] [Min(256)]
-        private int contextWindowTokens = 8192;
+        private int contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
 
         [Header("Resilience & Safety")]
         [Tooltip(
@@ -608,7 +608,9 @@ namespace CoreAI.Infrastructure.Llm
         public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 1 : maxLlmRequestRetries;
 
         /// <summary>Estimated context-window tokens exposed to budgeting.</summary>
-        public int ContextWindowTokens => contextWindowTokens < 256 ? 8192 : contextWindowTokens;
+        public int ContextWindowTokens => contextWindowTokens < 256
+            ? CoreAISettings.DefaultContextWindowTokens
+            : contextWindowTokens;
 
         /// <summary>Global streaming flag.</summary>
         public bool EnableStreaming => enableStreaming;
@@ -730,7 +732,9 @@ namespace CoreAI.Infrastructure.Llm
             logTokenUsage = options.LogTokenUsage;
             logLlmLatency = options.LogLlmLatency;
             logLlmConnectionErrors = options.LogLlmConnectionErrors;
-            contextWindowTokens = options.ContextWindowTokens < 256 ? 8192 : options.ContextWindowTokens;
+            contextWindowTokens = options.ContextWindowTokens < 256
+                ? CoreAISettings.DefaultContextWindowTokens
+                : options.ContextWindowTokens;
             universalSystemPromptPrefix = options.UniversalSystemPromptPrefix ?? "";
             toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
@@ -983,7 +987,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (contextWindowTokens < 256)
             {
-                contextWindowTokens = 8192;
+                contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
             }
 
             if (maxConcurrentOrchestrations < 1)

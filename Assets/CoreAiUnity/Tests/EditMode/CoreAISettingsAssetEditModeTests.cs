@@ -38,7 +38,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, settings.MaxLuaRepairRetries);
             Assert.AreEqual(3, settings.MaxToolCallRetries);
             Assert.AreEqual(1, settings.MaxLlmRequestRetries);
-            Assert.AreEqual(8192, settings.ContextWindowTokens);
+            Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, settings.ContextWindowTokens);
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
             Assert.AreEqual(true, settings.EnableStreaming, "Streaming is enabled by default");

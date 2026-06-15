@@ -27,6 +27,8 @@ namespace CoreAI.Tests.EditMode
         {
             public LlmCompletionRequest LastRequest { get; private set; }
 
+            public bool SupportsNativeToolCalling { get; set; }
+
             public void SetTools(IReadOnlyList<ILlmTool> tools)
             {
             }
@@ -210,10 +212,82 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsNotNull(llm.LastRequest);
             StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Available tools:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("buy_item", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("do not claim that the tool is unavailable", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("This request requires calling tool 'buy_item'", llm.LastRequest.SystemPrompt);
             StringAssert.Contains("itemName", llm.LastRequest.SystemPrompt);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_TextShapedBackend_KeepsFullToolContract()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Merchant");
+            policy.SetToolsForRole("Merchant", new ILlmTool[]
+            {
+                new StubTool
+                {
+                    Name = "memory",
+                    Description = "Persist a fact.",
+                    ParametersSchema =
+                        "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"action\",\"content\"]}"
+                }
+            });
+
+            CapturingLlmClient llm = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Merchant",
+                Hint = "remember the player likes tea"
+            });
+
+            Assert.IsNotNull(llm.LastRequest);
+            StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Available tools:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("schema:", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Example memory tool call for text-shaped backends", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("{\"name\":\"memory\",\"arguments\"", llm.LastRequest.SystemPrompt);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_NativeToolBackend_UsesMinimalToolContract()
+        {
+            AgentMemoryPolicy policy = new();
+            policy.DisableMemoryTool("Merchant");
+            policy.SetToolsForRole("Merchant", new ILlmTool[]
+            {
+                new StubTool
+                {
+                    Name = "buy_item",
+                    Description = "Buy an item for the player.",
+                    ParametersSchema =
+                        "{\"type\":\"object\",\"properties\":{\"itemName\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"}},\"required\":[\"itemName\",\"quantity\"]}"
+                }
+            });
+
+            CapturingLlmClient llm = new() { SupportsNativeToolCalling = true };
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Merchant",
+                Hint = "buy potion"
+            });
+
+            Assert.IsNotNull(llm.LastRequest);
+            StringAssert.Contains("## Tool Contract", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("call the matching tool through the tool interface", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Pass arguments as structured tool arguments", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("After a tool succeeds", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Available tools:", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("schema:", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("itemName", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("include a parseable JSON object", llm.LastRequest.SystemPrompt);
+            StringAssert.DoesNotContain("Example memory tool call", llm.LastRequest.SystemPrompt);
         }
 
         [Test]
