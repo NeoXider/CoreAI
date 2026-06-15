@@ -296,6 +296,11 @@ namespace CoreAI.Infrastructure.Llm
         private bool enableConversationHistorySummarization = true;
 
         [Tooltip(
+            "When true, the conversation summary is prepended as the first tail message before recent verbatim turns instead of placed in the system prefix, so the cached prefix stays stable (roadmap §1a). Later memory deltas/world-state still belong near the end of the tail. Default false = legacy behaviour.")]
+        [SerializeField]
+        private bool placeLiveContextInTail = CoreAISettings.DefaultPlaceLiveContextInTail;
+
+        [Tooltip(
             "When greater than zero, overrides the orchestrator's computed recent-history token budget (heuristic). Zero keeps automatic budgeting from context window minus system/tools.")]
         [SerializeField]
         [Min(0)]
@@ -627,6 +632,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>When false, skip rolling history partition into summary + recent tail.</summary>
         public bool EnableConversationHistorySummarization => enableConversationHistorySummarization;
 
+        /// <inheritdoc cref="ICoreAISettings.PlaceLiveContextInTail"/>
+        public bool PlaceLiveContextInTail => placeLiveContextInTail;
+
         /// <summary>Zero = use automatic history budget; positive = override recent tail token budget.</summary>
         public int ConversationHistoryRecentTokenBudgetOverride =>
             conversationHistoryRecentTokenBudgetOverride < 0 ? 0 : conversationHistoryRecentTokenBudgetOverride;
@@ -749,6 +757,7 @@ namespace CoreAI.Infrastructure.Llm
             maxTokens = options.MaxTokens <= 0 ? 2048 : options.MaxTokens;
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
+            placeLiveContextInTail = options.PlaceLiveContextInTail;
             conversationHistoryRecentTokenBudgetOverride =
                 options.ConversationHistoryRecentTokenBudgetOverride < 0
                     ? 0

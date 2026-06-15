@@ -25,11 +25,19 @@ Reference implementations we are aligning with:
 ## Target design
 
 ### 1. Transcript model + stable cacheable prefix
+- Status: **partially implemented behind `PlaceLiveContextInTail` (default off)** for `## Conversation Summary`
+  only. The summary is prepended as the first tail message because it represents the evicted oldest turns;
+  recent turns already remain verbatim after it. Memory deltas and world-state tail placement are still pending.
 - Keep recent turns as **real `user`/`assistant`/`tool` messages** in the tail; do **not** rewrite the
   `system`/`tools` prefix each turn. The frozen prefix is what the provider caches.
 - Volatile, per-turn content goes at the **end**, after the cache breakpoint.
 
 ### 1a. Prefix vs Tail — how live memory & summary coexist with caching (the core decision)
+- Status: **summary-to-tail implemented behind `PlaceLiveContextInTail` (default off)**. When enabled,
+  `AiOrchestrator.BuildChatHistoryAsync` emits `## Conversation Summary` as the first system-role
+  `ChatHistory` message, before recent verbatim turns, instead of appending it to the system prefix.
+  `## Memory` remains in the prefix for now; memory deltas/world-state are later steps near the end of the tail.
+
 The reason today's design breaks caching is **placement, not content**: the `## Memory` block and
 `## Conversation Summary` are injected into the **top-level `system`** (the prefix), so every memory update or
 re-summarization changes the prefix and invalidates the provider cache. Fix it by splitting context into:

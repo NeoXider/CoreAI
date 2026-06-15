@@ -588,19 +588,39 @@ namespace CoreAI.Ai
             }
 
             string resultSystem = system;
-            if (!string.IsNullOrWhiteSpace(snapshot.Summary))
+            bool hasSummary = !string.IsNullOrWhiteSpace(snapshot.Summary);
+            bool placeLiveContextInTail = _settings.PlaceLiveContextInTail;
+            string summaryBlock = hasSummary
+                ? "## Conversation Summary\n" + snapshot.Summary.Trim()
+                : "";
+            if (hasSummary && !placeLiveContextInTail)
             {
-                resultSystem = resultSystem.Trim() + "\n\n## Conversation Summary\n" + snapshot.Summary.Trim();
+                resultSystem = resultSystem.Trim() + "\n\n" + summaryBlock;
             }
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
             if (recent.Length == 0)
             {
+                if (hasSummary && placeLiveContextInTail)
+                {
+                    return (resultSystem, new List<Microsoft.Extensions.AI.ChatMessage>
+                    {
+                        new(Microsoft.Extensions.AI.ChatRole.System, summaryBlock)
+                    });
+                }
+
                 return (resultSystem, null);
             }
 
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
-                new(recent.Length);
+                new(recent.Length + (hasSummary && placeLiveContextInTail ? 1 : 0));
+            if (hasSummary && placeLiveContextInTail)
+            {
+                chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.System,
+                    summaryBlock));
+            }
+
             foreach (ChatMessage msg in recent)
             {
                 Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"

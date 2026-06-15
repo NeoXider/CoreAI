@@ -296,6 +296,7 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
             public bool EnableConversationHistorySummarization { get; set; } = true;
+            public bool PlaceLiveContextInTail { get; set; }
             public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
             public int ConversationRolledSummaryMaxTokens { get; set; }
         }
@@ -465,6 +466,37 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task RunTaskAsync_PlaceLiveContextInTail_TogglesSummaryPlacement()
+        {
+            TestLlmClient legacyLlm = new();
+            await RunSummaryPlacementRequestAsync(legacyLlm, placeLiveContextInTail: false);
+
+            Assert.IsNotNull(legacyLlm.LastRequest);
+            StringAssert.Contains("## Conversation Summary", legacyLlm.LastRequest.SystemPrompt);
+            Assert.IsNotNull(legacyLlm.LastRequest.ChatHistory);
+            Assert.AreNotEqual(
+                ChatRole.System,
+                legacyLlm.LastRequest.ChatHistory[^1].Role,
+                "Legacy mode must not append a trailing system chat-history message.");
+
+            TestLlmClient tailLlm = new();
+            await RunSummaryPlacementRequestAsync(tailLlm, placeLiveContextInTail: true);
+
+            Assert.IsNotNull(tailLlm.LastRequest);
+            Assert.IsFalse(
+                tailLlm.LastRequest.SystemPrompt.Contains("## Conversation Summary"),
+                "Tail mode should keep volatile summary out of the stable system prefix.");
+            Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage summaryMessage = tailLlm.LastRequest.ChatHistory[0];
+            Assert.AreEqual(ChatRole.System, summaryMessage.Role);
+            StringAssert.Contains("## Conversation Summary", summaryMessage.Text);
+            StringAssert.Contains("old-context-0", summaryMessage.Text);
+            Assert.Greater(tailLlm.LastRequest.ChatHistory.Count, 1);
+            Assert.AreNotEqual(ChatRole.System, tailLlm.LastRequest.ChatHistory[1].Role);
+            StringAssert.Contains("old-context-9", tailLlm.LastRequest.ChatHistory[^1].Text);
+        }
+
+        [Test]
         public async Task RunTaskAsync_DisableHistorySummarization_KeepsFullChatTail()
         {
             TestLlmClient llm = new();
@@ -496,6 +528,33 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.AreEqual(10, llm.LastRequest.ChatHistory.Count);
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
+        }
+
+        private static async Task RunSummaryPlacementRequestAsync(TestLlmClient llm, bool placeLiveContextInTail)
+        {
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+
+            for (int i = 0; i < 10; i++)
+            {
+                string content = $"old-context-{i}-".PadRight(90, 'x');
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = content
+                });
+            }
+
+            policy.ConfigureChatHistory("test_role", true, 60, false, 50);
+
+            TestSettings settings = new() { PlaceLiveContextInTail = placeLiveContextInTail };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
         }
 
         [Test]

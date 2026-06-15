@@ -124,6 +124,13 @@ namespace CoreAI
         bool EnableConversationHistorySummarization => true;
 
         /// <summary>
+        /// When true, the conversation summary is prepended as the first tail message before recent verbatim turns
+        /// instead of in the system prefix, so the cached prefix stays stable (roadmap §1a). Later memory
+        /// deltas/world-state still belong near the end of the tail. Default false = legacy behaviour.
+        /// </summary>
+        bool PlaceLiveContextInTail => false;
+
+        /// <summary>
         /// When greater than zero, overrides the computed recent-history token budget from <see cref="IContextBudgetPolicy"/>.
         /// </summary>
         int ConversationHistoryRecentTokenBudgetOverride => 0;

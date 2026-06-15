@@ -28,10 +28,12 @@
 > token budgeting from real API `usage`, and a **stable cacheable prefix** (today's per-turn re-summarization
 > into `system` breaks prompt caching). Build behind config; do not regress existing roles.
 
-- [ ] **Prefix vs Tail (the core decision).** Move live context (memory snapshot, conversation summary,
-      world-state) OUT of top-level `system` into the **tail** of `messages[]` (Anthropic: `role:"system"`
-      mid-conversation; OpenAI-compatible: tail system/user msg). Frozen prefix = persona + tool defs (+ optional
-      global memory) → cacheable; live tail → cheap. This makes memory + caching coexist and fixes "amnesia".
+- [x] **Prefix vs Tail (summary-only first step).** Behind `PlaceLiveContextInTail` (default off), move
+      `## Conversation Summary` OUT of top-level `system` into the **tail** of `messages[]` as the first
+      system-role message, before recent verbatim turns, because it summarizes the evicted oldest turns.
+      Frozen prefix = persona + tool defs (+ current canonical memory) -> cacheable; live tail -> cheap.
+- [ ] **Prefix vs Tail follow-up.** Move memory deltas and world-state into the tail without moving the
+      canonical `## Memory` block yet; verify Anthropic/OpenAI-compatible provider semantics per backend.
 - [ ] **Stable cacheable prefix + verbatim recent turns.** Stop rewriting the `system`/`tools` prefix every turn;
       keep the most recent N turns as real `user`/`assistant`/`tool` messages in the tail
       (`AiOrchestrator.BuildChatHistoryAsync`, `DeterministicConversationContextManager`).

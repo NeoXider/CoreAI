@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Context prefix stability flag.** `CoreAISettingsAsset` now exposes `PlaceLiveContextInTail` (default
+  off), letting `## Conversation Summary` travel as the first system-role chat-history message before
+  recent verbatim turns while preserving legacy prefix placement unless opted in.
 - **Agent Session Inspector JSON export.** Added a `Copy JSON` button that copies the full inspected `AgentSessionSnapshot` as indented JSON.
 - **Default context window raised to 128K.** Unity settings assets, route profiles, and routing
   fallbacks now inherit the shared `131072` token default instead of `8192`; per-role

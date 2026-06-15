@@ -50,6 +50,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, settings.MaxClientLimitedRequestsPerSession);
             Assert.AreEqual(0, settings.MaxClientLimitedPromptChars);
             Assert.IsTrue(settings.EnableConversationHistorySummarization);
+            Assert.IsFalse(settings.PlaceLiveContextInTail);
             Assert.AreEqual(0, settings.ConversationHistoryRecentTokenBudgetOverride);
             Assert.AreEqual(0, settings.ConversationRolledSummaryMaxTokens);
 

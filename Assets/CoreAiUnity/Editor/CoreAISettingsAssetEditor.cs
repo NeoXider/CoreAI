@@ -421,6 +421,10 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Enable history summarization",
                         "When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("placeLiveContextInTail"),
+                    new GUIContent(
+                        "Place live context in tail",
+                        "When on, the conversation summary is sent as the first tail system message before recent verbatim turns instead of being merged into the system prefix. Default off preserves legacy behaviour."));
                 EditorGUILayout.PropertyField(
                     serializedObject.FindProperty("conversationHistoryRecentTokenBudgetOverride"),
                     new GUIContent(

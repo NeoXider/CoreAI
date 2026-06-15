@@ -32,6 +32,7 @@ namespace CoreAI
         public int MaxTokens { get; set; } = 2048;
         public bool EnableLlmContextCompaction { get; set; }
         public bool EnableConversationHistorySummarization { get; set; } = true;
+        public bool PlaceLiveContextInTail { get; set; } = CoreAISettings.DefaultPlaceLiveContextInTail;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
         public int ConversationRolledSummaryMaxTokens { get; set; }
         public ILlmAsyncMarshaler ToolInvocationMarshaler { get; set; } = PassThroughLlmAsyncMarshaler.Instance;
@@ -73,6 +74,7 @@ namespace CoreAI
                 MaxTokens = source.MaxTokens,
                 EnableLlmContextCompaction = source.EnableLlmContextCompaction,
                 EnableConversationHistorySummarization = source.EnableConversationHistorySummarization,
+                PlaceLiveContextInTail = source.PlaceLiveContextInTail,
                 ConversationHistoryRecentTokenBudgetOverride = source.ConversationHistoryRecentTokenBudgetOverride,
                 ConversationRolledSummaryMaxTokens = source.ConversationRolledSummaryMaxTokens,
                 ToolInvocationMarshaler = source.ToolInvocationMarshaler,

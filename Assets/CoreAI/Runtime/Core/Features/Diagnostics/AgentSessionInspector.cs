@@ -111,7 +111,9 @@ namespace CoreAI.Diagnostics
 
             string conversationSummary = _summaryStore?.LoadSummary(resolvedRoleId) ?? "";
             string systemForBudget = systemWithTools;
-            if (roleConfig.WithChatHistory && !string.IsNullOrWhiteSpace(conversationSummary))
+            if (roleConfig.WithChatHistory &&
+                !_settings.PlaceLiveContextInTail &&
+                !string.IsNullOrWhiteSpace(conversationSummary))
             {
                 systemWithTools = systemWithTools.Trim() + "\n\n## Conversation Summary\n" +
                                   conversationSummary.Trim();
@@ -219,7 +221,9 @@ namespace CoreAI.Diagnostics
 
             string conversationSummary = summaryStore?.LoadSummary(resolvedRoleId) ?? "";
             string systemForBudget = systemWithTools;
-            if (roleConfig.WithChatHistory && !string.IsNullOrWhiteSpace(conversationSummary))
+            if (roleConfig.WithChatHistory &&
+                !settings.PlaceLiveContextInTail &&
+                !string.IsNullOrWhiteSpace(conversationSummary))
             {
                 systemWithTools = systemWithTools.Trim() + "\n\n## Conversation Summary\n" +
                                   conversationSummary.Trim();

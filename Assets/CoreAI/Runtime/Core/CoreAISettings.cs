@@ -54,6 +54,7 @@
         private static bool? _allowDuplicateToolCalls;
         private static bool? _enableStreaming;
         private static bool? _enableLlmContextCompaction;
+        private static bool? _placeLiveContextInTail;
         private static int? _maxToolResultChars;
         private static int? _defaultToolTimeoutMs;
         private static int? _maxResponseChars;
@@ -84,6 +85,7 @@
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
         private const bool DefaultEnableLlmContextCompaction = false;
+        public const bool DefaultPlaceLiveContextInTail = false;
         private const int DefaultMaxToolResultChars = 8000;
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
@@ -281,6 +283,18 @@
         }
 
         /// <summary>
+        /// When true, volatile live context is sent in chat history instead of rewriting the system prefix.
+        /// </summary>
+        public static bool PlaceLiveContextInTail
+        {
+            get =>
+                _placeLiveContextInTail ??
+                Instance?.PlaceLiveContextInTail ??
+                DefaultPlaceLiveContextInTail;
+            set => _placeLiveContextInTail = value;
+        }
+
+        /// <summary>
         /// Max chars per tool result sent to the model. 0 = no truncation.
         /// Default: 8000 (~2000 tokens).
         /// </summary>
@@ -361,6 +375,7 @@
                 _allowDuplicateToolCalls = null;
                 _enableStreaming = null;
                 _enableLlmContextCompaction = null;
+                _placeLiveContextInTail = null;
                 _maxToolResultChars = null;
                 _defaultToolTimeoutMs = null;
                 _maxResponseChars = null;

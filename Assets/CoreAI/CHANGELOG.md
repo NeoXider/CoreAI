@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **Context prefix stability flag.** Added `ICoreAISettings.PlaceLiveContextInTail` (default `false`) so
+  `## Conversation Summary` can be sent as the first system-role chat-history message, before recent
+  verbatim turns, instead of rewriting the system prompt prefix; legacy placement remains the default.
 - **Default context window raised to 128K.** `CoreAISettings.ContextWindowTokens` and related
   last-resort context-budget defaults now use `131072` tokens instead of `8192`; per-role
   `RoleMemoryConfig.ContextTokens` defaults to `0`, meaning inherit the global
