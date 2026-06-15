@@ -81,7 +81,7 @@
       `PlaceLiveContextInTail`. This removes the last per-turn prefix-churn source and completes §1a/§6.
 - [ ] **Flip `PlaceLiveContextInTail` default ON.** After verifying on WebGL/IL2CPP with the live server (use the
       new `cache_read`/`cache_write` metrics to confirm caching), make tail placement the default.
-- [ ] **Streaming overflow retry.** `RunStreamingAsync` has no bounded context-overflow recovery; mirror the
+- [x] **Streaming overflow retry.** `RunStreamingAsync` has no bounded context-overflow recovery; mirror the
       `RunTaskAsync` `MaxContextOverflowRetries` loop for symmetry.
 - [ ] **Persist token-calibration scale per model.** `CalibratingTokenEstimator._scale` resets each session; add
       an `ITokenCalibrationStore` (no-op default in core, file-backed in the Unity layer) keyed by model id.
@@ -105,6 +105,16 @@
 - [ ] **Merchant negotiation decomposition** - the full merchant negotiation scenario is explicit and now cancels/bounds long turns. Consider splitting Step3 into smaller targeted tests for discount application and purchase completion so failures identify tool-choice versus final-sale behaviour.
 - [x] **Targeted PlayMode follow-up before full suite** - attached failures and known slow live-model tests were triaged one by one before the full rerun. FullAccess demo scene checks now include targeted Full Lua API smoke, PlayMode scene-smoke, and manual visual layout verification.
 - [x] **Full PlayMode rerun after targeted fixes** - full mandatory PlayMode suite with `qwen3.6-27b-mtp-ud` passed after targeted fixes: 114 total, 109 passed, 0 failed, 5 skipped/explicit.
+
+## [P1] Model benchmark & test harness
+
+- [ ] **Полноценный бенчмарк для тестов и сравнения моделей.** Прогон PlayMode/LLM-сценариев
+      (crafting, merchant, GameMaster/Lua, tool-calling, memory) как воспроизводимого бенчмарка по
+      набору моделей (qwen3.6-27b, qwen ~4B, и т.д.). На выходе — таблица per-model: pass/fail по
+      сценарию, кол-во tool-calls, корректность Lua-синтаксиса, длительность турна, токены (real
+      `usage`), число ретраев. Цель — отделять «4B не вытягивает» от наших регрессий объективно,
+      а не вручную по логам. Сохранять результаты (JSON/markdown) для сравнения между версиями CoreAI.
+      Решает текущую ручную триаж-работу: capability модели vs баг кода.
 
 ## [P1] Lua - remaining work (does not block v4)
 
