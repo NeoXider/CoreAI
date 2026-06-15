@@ -213,11 +213,14 @@ namespace CoreAI.Ai
 
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
-                bool smartCompaction =
-                    roleId != BuiltInAgentRoleIds.Programmer;
+                bool isProgrammer = roleId == BuiltInAgentRoleIds.Programmer;
+                bool smartCompaction = !isProgrammer;
+                // Programmer keeps history off by default; chat-source runs enable it per-run
+                // without mutating global policy (see AiOrchestratorHistoryEditModeTests).
                 _roleConfigs[roleId] = new RoleMemoryConfig(
                     true,
                     MemoryToolAction.Append,
+                    withChatHistory: !isProgrammer,
                     useLlmContextCompaction: smartCompaction);
             }
 
