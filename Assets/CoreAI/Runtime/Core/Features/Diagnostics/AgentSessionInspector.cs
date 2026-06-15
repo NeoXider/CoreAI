@@ -443,7 +443,8 @@ namespace CoreAI.Diagnostics
                 EstimatedUserTokens = _tokenEstimator.EstimateText(userPayload ?? ""),
                 EstimatedToolsTokens = EstimateToolsTokens(tools),
                 EstimatedStoredChatHistoryTokens = EstimateMessages(storedHistory),
-                EstimatedRequestChatHistoryTokens = EstimateMessages(requestHistoryEstimate)
+                EstimatedRequestChatHistoryTokens = EstimateMessages(requestHistoryEstimate),
+                TokenEstimateScale = ResolveTokenEstimateScale(_tokenEstimator)
             };
         }
 
@@ -467,8 +468,16 @@ namespace CoreAI.Diagnostics
                 EstimatedUserTokens = tokenEstimator.EstimateText(userPayload ?? ""),
                 EstimatedToolsTokens = EstimateToolsTokens(tools, tokenEstimator),
                 EstimatedStoredChatHistoryTokens = EstimateMessages(storedHistory, tokenEstimator),
-                EstimatedRequestChatHistoryTokens = EstimateMessages(requestHistoryEstimate, tokenEstimator)
+                EstimatedRequestChatHistoryTokens = EstimateMessages(requestHistoryEstimate, tokenEstimator),
+                TokenEstimateScale = ResolveTokenEstimateScale(tokenEstimator)
             };
+        }
+
+        private static double ResolveTokenEstimateScale(ITokenEstimator tokenEstimator)
+        {
+            return tokenEstimator is ICalibratingTokenEstimator calibrating
+                ? calibrating.CurrentScale
+                : 1.0d;
         }
 
         private int EstimateToolsTokens(IReadOnlyList<ILlmTool> tools)

@@ -317,6 +317,11 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool enableLlmContextCompaction = false;
 
+        [Tooltip(
+            "When true, the pre-flight token estimate is nudged toward observed real prompt tokens (bounded). The script-aware base estimate always applies.")]
+        [SerializeField]
+        private bool enableTokenCalibration = CoreAISettings.DefaultEnableTokenCalibration;
+
         [Header("Offline mode")]
         [Tooltip("Serve a fixed string instead of per-role stubs when Offline mode is active.")]
         [SerializeField]
@@ -629,6 +634,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Optional LLM-assisted memory compaction flag.</summary>
         public bool EnableLlmContextCompaction => enableLlmContextCompaction;
 
+        /// <inheritdoc cref="ICoreAISettings.EnableTokenCalibration"/>
+        public bool EnableTokenCalibration => enableTokenCalibration;
+
         /// <summary>When false, skip rolling history partition into summary + recent tail.</summary>
         public bool EnableConversationHistorySummarization => enableConversationHistorySummarization;
 
@@ -756,6 +764,7 @@ namespace CoreAI.Infrastructure.Llm
             enableStreaming = options.EnableStreaming;
             maxTokens = options.MaxTokens <= 0 ? 2048 : options.MaxTokens;
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
+            enableTokenCalibration = options.EnableTokenCalibration;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
             placeLiveContextInTail = options.PlaceLiveContextInTail;
             conversationHistoryRecentTokenBudgetOverride =

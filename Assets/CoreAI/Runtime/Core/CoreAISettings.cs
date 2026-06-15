@@ -54,6 +54,7 @@
         private static bool? _allowDuplicateToolCalls;
         private static bool? _enableStreaming;
         private static bool? _enableLlmContextCompaction;
+        private static bool? _enableTokenCalibration;
         private static bool? _placeLiveContextInTail;
         private static int? _maxToolResultChars;
         private static int? _defaultToolTimeoutMs;
@@ -85,6 +86,7 @@
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
         private const bool DefaultEnableLlmContextCompaction = false;
+        public const bool DefaultEnableTokenCalibration = true;
         public const bool DefaultPlaceLiveContextInTail = false;
         private const int DefaultMaxToolResultChars = 8000;
         private const int DefaultDefaultToolTimeoutMs = 30000;
@@ -283,6 +285,19 @@
         }
 
         /// <summary>
+        /// When true, the pre-flight token estimate is nudged toward observed real prompt tokens (bounded).
+        /// The script-aware base estimate always applies.
+        /// </summary>
+        public static bool EnableTokenCalibration
+        {
+            get =>
+                _enableTokenCalibration ??
+                Instance?.EnableTokenCalibration ??
+                DefaultEnableTokenCalibration;
+            set => _enableTokenCalibration = value;
+        }
+
+        /// <summary>
         /// When true, volatile live context is sent in chat history instead of rewriting the system prefix.
         /// </summary>
         public static bool PlaceLiveContextInTail
@@ -375,6 +390,7 @@
                 _allowDuplicateToolCalls = null;
                 _enableStreaming = null;
                 _enableLlmContextCompaction = null;
+                _enableTokenCalibration = null;
                 _placeLiveContextInTail = null;
                 _maxToolResultChars = null;
                 _defaultToolTimeoutMs = null;

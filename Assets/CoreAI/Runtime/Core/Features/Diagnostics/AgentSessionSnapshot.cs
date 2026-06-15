@@ -75,6 +75,7 @@ namespace CoreAI.Diagnostics
             sb.AppendLine($"Tools tokens estimate: {Budget.EstimatedToolsTokens}");
             sb.AppendLine($"Stored chat history tokens estimate: {Budget.EstimatedStoredChatHistoryTokens}");
             sb.AppendLine($"Estimated request chat history tokens: {Budget.EstimatedRequestChatHistoryTokens}");
+            sb.AppendLine($"Token estimate scale: {Budget.TokenEstimateScale:0.###}");
             sb.AppendLine();
 
             if (!string.IsNullOrWhiteSpace(SnapshotSource))
@@ -243,5 +244,6 @@ namespace CoreAI.Diagnostics
         public int EstimatedToolsTokens;
         public int EstimatedStoredChatHistoryTokens;
         public int EstimatedRequestChatHistoryTokens;
+        public double TokenEstimateScale;
     }
 }

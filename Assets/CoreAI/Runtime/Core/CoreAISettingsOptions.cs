@@ -31,6 +31,7 @@ namespace CoreAI
         public bool EnableStreaming { get; set; } = true;
         public int MaxTokens { get; set; } = 2048;
         public bool EnableLlmContextCompaction { get; set; }
+        public bool EnableTokenCalibration { get; set; } = CoreAISettings.DefaultEnableTokenCalibration;
         public bool EnableConversationHistorySummarization { get; set; } = true;
         public bool PlaceLiveContextInTail { get; set; } = CoreAISettings.DefaultPlaceLiveContextInTail;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
@@ -73,6 +74,7 @@ namespace CoreAI
                 EnableStreaming = source.EnableStreaming,
                 MaxTokens = source.MaxTokens,
                 EnableLlmContextCompaction = source.EnableLlmContextCompaction,
+                EnableTokenCalibration = source.EnableTokenCalibration,
                 EnableConversationHistorySummarization = source.EnableConversationHistorySummarization,
                 PlaceLiveContextInTail = source.PlaceLiveContextInTail,
                 ConversationHistoryRecentTokenBudgetOverride = source.ConversationHistoryRecentTokenBudgetOverride,

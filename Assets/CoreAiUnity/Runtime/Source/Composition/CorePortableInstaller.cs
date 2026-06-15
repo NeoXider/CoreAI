@@ -59,7 +59,9 @@ namespace CoreAI.Composition
             builder.Register<AgentSessionInspector>(Lifetime.Singleton);
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
             builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
-            builder.Register<HeuristicTokenEstimator>(Lifetime.Singleton).As<ITokenEstimator>();
+            builder.Register<CalibratingTokenEstimator>(Lifetime.Singleton)
+                .As<ITokenEstimator>()
+                .As<ICalibratingTokenEstimator>();
             builder.Register<DefaultConversationCompactionCoordinator>(Lifetime.Singleton)
                 .As<IConversationCompactionCoordinator>();
 

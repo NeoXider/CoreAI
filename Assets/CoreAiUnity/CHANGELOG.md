@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Token accounting calibration.** CoreAI Unity now registers the portable `CalibratingTokenEstimator` as
+  the shared pre-flight token estimator, exposes `EnableTokenCalibration` on `CoreAISettingsAsset` (default
+  true), and reports the current estimate scale in Agent Session Inspector diagnostics.
 - **Tool result memory policy.** Core chat history can now persist executed tool results per role
   (`None`, `ErrorsOnly`, `CompactSummary`, `Full`) with default compact summaries, intra-turn
   de-duplication, and provider-safe replay as user observations.

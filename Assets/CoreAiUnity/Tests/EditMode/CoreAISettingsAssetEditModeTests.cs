@@ -42,6 +42,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(false, settings.EnableMeaiDebugLogging);
             Assert.AreEqual(false, settings.EnableHttpDebugLogging);
             Assert.AreEqual(true, settings.EnableStreaming, "Streaming is enabled by default");
+            Assert.AreEqual(true, settings.EnableTokenCalibration, "Token calibration is enabled by default");
             Assert.AreEqual(true, settings.WebGlNativeStreaming, "WebGL native SSE is enabled by default");
             Assert.AreEqual(false, settings.SameOriginCredentials);
             Assert.AreEqual(false, settings.OfflineUseCustomResponse);

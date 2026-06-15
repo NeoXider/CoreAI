@@ -119,6 +119,12 @@ namespace CoreAI
         bool EnableLlmContextCompaction => false;
 
         /// <summary>
+        /// When true, the pre-flight token estimate is nudged toward observed real prompt tokens (bounded).
+        /// The script-aware base estimate always applies.
+        /// </summary>
+        bool EnableTokenCalibration => true;
+
+        /// <summary>
         /// When false, the orchestrator does not cap chat history with a rolling summary partition (full loaded transcript stays in the MEAI tail; risk of context overflow).
         /// </summary>
         bool EnableConversationHistorySummarization => true;

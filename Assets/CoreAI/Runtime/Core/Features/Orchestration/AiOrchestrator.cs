@@ -114,6 +114,8 @@ namespace CoreAI.Ai
 
             ConversationContextBuildArgs ctxBuildArgs = null;
             int? resolvedMaxOutput = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
+            ContextBudget budget = default;
+            bool hasBudget = false;
             if (roleConfig.WithChatHistory && _memoryStore != null)
             {
                 ContextBudgetRequest budgetRequest = new()
@@ -125,7 +127,8 @@ namespace CoreAI.Ai
                     MaxOutputTokens = resolvedMaxOutput,
                     ContextRetryLevel = contextRetryPass
                 };
-                ContextBudget budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
+                hasBudget = true;
                 int historyBudget = budget.HistoryTokenBudget;
                 if (!_settings.EnableConversationHistorySummarization)
                 {
@@ -151,6 +154,12 @@ namespace CoreAI.Ai
                 await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
                     .ConfigureAwait(false);
             system = updatedSystem;
+            int estimatedPromptTokens = hasBudget
+                ? budget.EstimatedFixedPromptTokens + EstimateChatHistoryTokens(chatHistory)
+                : _tokenEstimator.EstimateText(system ?? "") +
+                  _tokenEstimator.EstimateText(user ?? "") +
+                  EstimateToolsTokens(tools) +
+                  EstimateChatHistoryTokens(chatHistory);
 
             return new RequestBundle
             {
@@ -165,7 +174,8 @@ namespace CoreAI.Ai
                 Task = task,
                 ContextWindowTokens = contextWindowTokens,
                 HistoryTokenBudget = ctxBuildArgs?.HistoryTokenBudget ?? 0,
-                ChatHistoryMessageCount = chatHistory?.Count ?? 0
+                ChatHistoryMessageCount = chatHistory?.Count ?? 0,
+                EstimatedPromptTokens = estimatedPromptTokens
             };
         }
 
@@ -339,6 +349,7 @@ namespace CoreAI.Ai
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
                 {
                     RecordTrace(bundle, second, content, "structured validation failed");
+                    RecordTokenObservation(bundle, second);
                     string validFail =
                         UserFacingChatFailureOrNull(task, "Structured response validation failed.");
                     if (validFail != null)
@@ -348,6 +359,8 @@ namespace CoreAI.Ai
 
                     return null;
                 }
+
+                result = second;
             }
 
             content = SanitizeAndPublish(bundle, task, content, user, result);
@@ -378,6 +391,7 @@ namespace CoreAI.Ai
             string terminalError = null;
             IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
             LlmStreamChunk pendingToolOnlyTerminalChunk = null;
+            int? promptTokens = null;
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
@@ -465,6 +479,11 @@ namespace CoreAI.Ai
                         executedToolCalls = current.ExecutedToolCalls;
                     }
 
+                    if (current?.PromptTokens > 0)
+                    {
+                        promptTokens = current.PromptTokens;
+                    }
+
                     if (current != null &&
                         current.IsDone &&
                         string.IsNullOrEmpty(current.Error) &&
@@ -526,6 +545,7 @@ namespace CoreAI.Ai
                 }
 
                 content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, null);
+                RecordTokenObservation(bundle, promptTokens);
             }
             else if (!string.IsNullOrEmpty(terminalError))
             {
@@ -553,6 +573,7 @@ namespace CoreAI.Ai
             public int ContextWindowTokens;
             public int HistoryTokenBudget;
             public int ChatHistoryMessageCount;
+            public int EstimatedPromptTokens;
         }
 
         private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory)>
@@ -656,6 +677,30 @@ namespace CoreAI.Ai
             });
         }
 
+        private void RecordTokenObservation(RequestBundle bundle, LlmCompletionResult result)
+        {
+            if (result == null || !result.Ok)
+            {
+                return;
+            }
+
+            RecordTokenObservation(bundle, result?.PromptTokens);
+        }
+
+        private void RecordTokenObservation(RequestBundle bundle, int? promptTokens)
+        {
+            if (bundle == null ||
+                !_settings.EnableTokenCalibration ||
+                bundle.EstimatedPromptTokens <= 0 ||
+                promptTokens.GetValueOrDefault() <= 0 ||
+                _tokenEstimator is not ICalibratingTokenEstimator calibrating)
+            {
+                return;
+            }
+
+            calibrating.RecordObservation(bundle.EstimatedPromptTokens, promptTokens.Value);
+        }
+
         /// <summary>
         /// ARCH-3 (partial): Shared post-processing for both sync and streaming paths.
         /// Sanitizes tool-call JSON, persists chat history, publishes the game command envelope.
@@ -711,6 +756,7 @@ namespace CoreAI.Ai
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             });
             _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
+            RecordTokenObservation(bundle, result);
             RecordTrace(bundle, result, content, null);
             return content;
         }
@@ -843,6 +889,47 @@ namespace CoreAI.Ai
             }
 
             return normalized;
+        }
+
+        private int EstimateChatHistoryTokens(IReadOnlyList<Microsoft.Extensions.AI.ChatMessage> chatHistory)
+        {
+            if (chatHistory == null || chatHistory.Count == 0)
+            {
+                return 0;
+            }
+
+            int sum = 0;
+            for (int i = 0; i < chatHistory.Count; i++)
+            {
+                sum += _tokenEstimator.EstimateText(chatHistory[i]?.Text ?? "");
+            }
+
+            return sum;
+        }
+
+        private int EstimateToolsTokens(IReadOnlyList<ILlmTool> tools)
+        {
+            if (tools == null || tools.Count == 0)
+            {
+                return 0;
+            }
+
+            int sum = 0;
+            for (int i = 0; i < tools.Count; i++)
+            {
+                ILlmTool tool = tools[i];
+                if (tool == null)
+                {
+                    continue;
+                }
+
+                sum += _tokenEstimator.EstimateText(tool.Name ?? "");
+                sum += _tokenEstimator.EstimateText(tool.Description ?? "");
+                sum += _tokenEstimator.EstimateText(tool.ParametersSchema ?? "");
+                sum += 8;
+            }
+
+            return sum;
         }
 
         private static string BuildToolResultsMemoryBlock(

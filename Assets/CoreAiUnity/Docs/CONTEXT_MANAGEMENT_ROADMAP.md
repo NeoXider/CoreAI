@@ -74,9 +74,10 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   `TotalTokenCount`) — captured in `MeaiLlmClient` for both non-streaming and streaming paths, and surfaced
   via `LlmUsageRecord`. The provider `UsageDetails.AdditionalCounts` carries extras (e.g. `cache_read` /
   `cache_write` tokens). So the "fact" half is **done**; this is NOT a hand-rolled token parser.
-- Remaining T3 work = **calibrate** the *pre-flight* chars→tokens ratio from those observed real usages
-  (and raise the ratio for Cyrillic/CJK, ~2.5–3 chars/token). Do **not** remove `HeuristicTokenEstimator`
-  (`chars/4`): it is the necessary *pre-send* estimate (real tokens do not exist until the response returns).
+- **Implemented:** the pre-flight estimator now uses a script-aware base (Latin/ASCII/punctuation/whitespace
+  preserve legacy `chars/4`; Cyrillic/CJK use a denser ~0.4 token/char bucket) plus bounded EMA calibration
+  from observed real prompt tokens. `HeuristicTokenEstimator` remains in the codebase as the simple
+  pre-send fallback.
 - CoreAiPro's `ServerUsageSink` consumes the same `LlmUsageRecord`; sourcing it from `UsageDetails` keeps
   `Estimated = TotalTokens == 0` honest. Preserve the `ILlmUsageSink` contract — do not replace the sink.
 

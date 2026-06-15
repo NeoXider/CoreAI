@@ -438,6 +438,10 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Enable LLM context compaction (global)",
                         "When on, roles with UseLlmContextCompaction may call an auxiliary LLM to fold long transcripts. When off, only deterministic bullet rollup runs."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTokenCalibration"),
+                    new GUIContent(
+                        "Enable token calibration",
+                        "When true, pre-flight token estimates are nudged toward observed real prompt tokens. The script-aware base estimate always applies."));
                 EditorGUILayout.HelpBox(
                     "Per-role compaction is still controlled by AgentBuilder / AgentMemoryPolicy (UseLlmContextCompaction).",
                     MessageType.None);

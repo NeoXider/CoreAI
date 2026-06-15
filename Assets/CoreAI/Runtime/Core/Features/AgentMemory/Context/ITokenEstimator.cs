@@ -8,4 +8,18 @@ namespace CoreAI.Ai
         /// <summary>Estimated tokens for plain text (minimum 0).</summary>
         int EstimateText(string text);
     }
+
+    /// <summary>
+    /// Token estimator that can adjust future pre-flight estimates from observed provider usage.
+    /// </summary>
+    public interface ICalibratingTokenEstimator : ITokenEstimator
+    {
+        /// <summary>
+        /// Records one completed prompt observation. Values must be positive provider-visible prompt token counts.
+        /// </summary>
+        void RecordObservation(int estimatedPromptTokens, int realPromptTokens);
+
+        /// <summary>Current bounded multiplier applied to the script-aware base estimate.</summary>
+        double CurrentScale { get; }
+    }
 }

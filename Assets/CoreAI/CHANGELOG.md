@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Token accounting calibration.** Added a portable `CalibratingTokenEstimator` registered as the default
+  `ITokenEstimator`, with Latin-preserving script-aware estimates, higher Cyrillic/CJK density, and bounded
+  EMA calibration from observed real prompt-token usage behind `ICoreAISettings.EnableTokenCalibration`
+  (default true). `HeuristicTokenEstimator` remains as the simple fallback.
 - **Tool result memory policy.** Added per-role `ToolResultMemoryPolicy` with default
   `CompactSummary`; executed tool results can now persist into chat history as one `tool` entry and
   replay as provider-safe user observations on later turns.

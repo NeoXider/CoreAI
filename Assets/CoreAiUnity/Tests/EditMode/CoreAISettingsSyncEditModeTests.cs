@@ -42,6 +42,7 @@ namespace CoreAI.Tests.EditMode
                 UniversalSystemPromptPrefix = "TEST PREFIX",
                 Temperature = 0.99f,
                 OverrideTemperature = true,
+                EnableTokenCalibration = false,
                 LogToolCalls = false,
                 LogToolCallArguments = false,
                 LogToolCallResults = false,
@@ -59,6 +60,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("TEST PREFIX", CoreAISettings.UniversalSystemPromptPrefix);
             Assert.AreEqual(0.99f, CoreAISettings.Temperature);
             Assert.IsTrue(CoreAISettings.OverrideTemperature);
+            Assert.IsFalse(CoreAISettings.EnableTokenCalibration);
             Assert.AreEqual(false, CoreAISettings.LogToolCalls);
             Assert.AreEqual(false, CoreAISettings.LogToolCallArguments);
             Assert.AreEqual(false, CoreAISettings.LogToolCallResults);
@@ -117,6 +119,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
             Assert.IsFalse(CoreAISettings.OverrideTemperature);
+            Assert.IsTrue(CoreAISettings.EnableTokenCalibration);
             Assert.AreEqual(false, CoreAISettings.EnableMeaiDebugLogging);
             Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, CoreAISettings.ContextWindowTokens);
         }

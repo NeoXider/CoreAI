@@ -1,6 +1,6 @@
 ﻿# TODO
 
-> Updated 2026-06-14. Completed v4.0.0 work is in `CHANGELOG.md` (both packages) and the git log. This file lists only open tasks.
+> Updated 2026-06-15. Completed v4.0.0 work is in `CHANGELOG.md` (both packages) and the git log. This file lists only open tasks.
 
 ## v4.0.0 - done (2026-06-12)
 
@@ -42,7 +42,7 @@
 - [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
       persist tool results into history, collapse intra-turn duplicate results, head/tail-truncate large outputs.
       Cross-turn pruning of outdated/superseded results remains in *Context editing (prune)*.
-- [ ] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
+- [x] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
       (see `Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md`); `HeuristicTokenEstimator` stays a pre-flight
       fallback only, with a higher ratio for Cyrillic/CJK.
 - [ ] **Emergency overflow fallback.** On "context exceeded", drop ~25% oldest + retry (bounded); extend
