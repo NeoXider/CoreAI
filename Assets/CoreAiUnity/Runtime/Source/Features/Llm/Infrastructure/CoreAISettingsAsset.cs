@@ -319,6 +319,17 @@ namespace CoreAI.Infrastructure.Llm
         private int conversationRolledSummaryMaxTokens;
 
         [Tooltip(
+            "Roadmap §7: prune stale/superseded prompt-history entries before compaction. Operates only on the in-memory request copy; durable chat history on disk is untouched.")]
+        [SerializeField]
+        private bool enableContextPruning = CoreAISettings.DefaultEnableContextPruning;
+
+        [Tooltip(
+            "Roadmap §7: newest durable tool-result messages (role 'tool', headed ## Tool Results) retained in the prompt history copy before compaction.")]
+        [SerializeField]
+        [Min(0)]
+        private int maxRetainedToolResultMessages = CoreAISettings.DefaultMaxRetainedToolResultMessages;
+
+        [Tooltip(
             "Optional auxiliary LLM to fold evicted transcript (costlier than deterministic rollup; off by default). Still requires per-role UseLlmContextCompaction.")]
         [SerializeField]
         private bool enableLlmContextCompaction = false;
@@ -660,6 +671,13 @@ namespace CoreAI.Infrastructure.Llm
         public int ConversationRolledSummaryMaxTokens =>
             conversationRolledSummaryMaxTokens < 0 ? 0 : conversationRolledSummaryMaxTokens;
 
+        /// <inheritdoc cref="ICoreAISettings.EnableContextPruning"/>
+        public bool EnableContextPruning => enableContextPruning;
+
+        /// <inheritdoc cref="ICoreAISettings.MaxRetainedToolResultMessages"/>
+        public int MaxRetainedToolResultMessages =>
+            maxRetainedToolResultMessages < 0 ? 0 : maxRetainedToolResultMessages;
+
         /// <summary>Max chars per tool result before truncation. 0 = no truncation.</summary>
         public int MaxToolResultChars => maxToolResultChars < 0 ? 0 : maxToolResultChars;
 
@@ -784,6 +802,9 @@ namespace CoreAI.Infrastructure.Llm
                     : options.ConversationHistoryRecentTokenBudgetOverride;
             conversationRolledSummaryMaxTokens =
                 options.ConversationRolledSummaryMaxTokens < 0 ? 0 : options.ConversationRolledSummaryMaxTokens;
+            enableContextPruning = options.EnableContextPruning;
+            maxRetainedToolResultMessages =
+                options.MaxRetainedToolResultMessages < 0 ? 0 : options.MaxRetainedToolResultMessages;
             maxToolResultChars = options.MaxToolResultChars < 0 ? 0 : options.MaxToolResultChars;
             defaultToolTimeoutMs = options.DefaultToolTimeoutMs < 0 ? 0 : options.DefaultToolTimeoutMs;
             maxResponseChars = options.MaxResponseChars < 0 ? 0 : options.MaxResponseChars;
@@ -1042,6 +1063,11 @@ namespace CoreAI.Infrastructure.Llm
             if (conversationRolledSummaryMaxTokens < 0)
             {
                 conversationRolledSummaryMaxTokens = 0;
+            }
+
+            if (maxRetainedToolResultMessages < 0)
+            {
+                maxRetainedToolResultMessages = CoreAISettings.DefaultMaxRetainedToolResultMessages;
             }
 
             if (llmRequestTimeoutSeconds < 0f)

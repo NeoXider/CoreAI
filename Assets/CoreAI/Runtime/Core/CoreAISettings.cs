@@ -57,6 +57,8 @@
         private static bool? _enableLlmContextCompaction;
         private static bool? _enableTokenCalibration;
         private static bool? _placeLiveContextInTail;
+        private static bool? _enableContextPruning;
+        private static int? _maxRetainedToolResultMessages;
         private static int? _maxToolResultChars;
         private static int? _defaultToolTimeoutMs;
         private static int? _maxResponseChars;
@@ -90,6 +92,8 @@
         private const bool DefaultEnableLlmContextCompaction = false;
         public const bool DefaultEnableTokenCalibration = true;
         public const bool DefaultPlaceLiveContextInTail = false;
+        public const bool DefaultEnableContextPruning = true;
+        public const int DefaultMaxRetainedToolResultMessages = 3;
         private const int DefaultMaxToolResultChars = 8000;
         private const int DefaultDefaultToolTimeoutMs = 30000;
         private const int DefaultMaxResponseChars = 0;
@@ -322,6 +326,30 @@
         }
 
         /// <summary>
+        /// Whether roadmap §7 context editing prunes stale prompt-history entries before compaction.
+        /// </summary>
+        public static bool EnableContextPruning
+        {
+            get =>
+                _enableContextPruning ??
+                Instance?.EnableContextPruning ??
+                DefaultEnableContextPruning;
+            set => _enableContextPruning = value;
+        }
+
+        /// <summary>
+        /// Newest durable tool-result messages retained in the prompt history copy during roadmap §7 pruning.
+        /// </summary>
+        public static int MaxRetainedToolResultMessages
+        {
+            get => MathMaxZero(
+                _maxRetainedToolResultMessages ??
+                Instance?.MaxRetainedToolResultMessages ??
+                DefaultMaxRetainedToolResultMessages);
+            set => _maxRetainedToolResultMessages = value;
+        }
+
+        /// <summary>
         /// Max chars per tool result sent to the model. 0 = no truncation.
         /// Default: 8000 (~2000 tokens).
         /// </summary>
@@ -405,12 +433,19 @@
                 _enableLlmContextCompaction = null;
                 _enableTokenCalibration = null;
                 _placeLiveContextInTail = null;
+                _enableContextPruning = null;
+                _maxRetainedToolResultMessages = null;
                 _maxToolResultChars = null;
                 _defaultToolTimeoutMs = null;
                 _maxResponseChars = null;
                 _maxToolCallRoundtrips = null;
                 _maxToolCallHistoryMessages = null;
             }
+        }
+
+        private static int MathMaxZero(int value)
+        {
+            return value < 0 ? 0 : value;
         }
     }
 }

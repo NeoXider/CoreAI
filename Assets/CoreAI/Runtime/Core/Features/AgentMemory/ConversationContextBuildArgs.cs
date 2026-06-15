@@ -19,5 +19,15 @@ namespace CoreAI.Ai
         /// When greater than zero, caps rolled summary text to roughly this many estimated tokens before persistence.
         /// </summary>
         public int MaxRolledSummaryTokens { get; set; }
+
+        /// <summary>
+        /// When true, roadmap §7 context editing prunes stale prompt-history entries before budget partitioning.
+        /// </summary>
+        public bool EnableContextPruning { get; set; }
+
+        /// <summary>
+        /// Maximum newest durable <c>tool</c> / <c>## Tool Results</c> messages retained in the prompt history copy.
+        /// </summary>
+        public int MaxRetainedToolResultMessages { get; set; }
     }
 }

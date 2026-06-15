@@ -44,6 +44,8 @@ namespace CoreAI.Tests.EditMode
                 Temperature = 0.99f,
                 OverrideTemperature = true,
                 EnableTokenCalibration = false,
+                EnableContextPruning = false,
+                MaxRetainedToolResultMessages = 7,
                 LogToolCalls = false,
                 LogToolCallArguments = false,
                 LogToolCallResults = false,
@@ -63,6 +65,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0.99f, CoreAISettings.Temperature);
             Assert.IsTrue(CoreAISettings.OverrideTemperature);
             Assert.IsFalse(CoreAISettings.EnableTokenCalibration);
+            Assert.IsFalse(CoreAISettings.EnableContextPruning);
+            Assert.AreEqual(7, CoreAISettings.MaxRetainedToolResultMessages);
             Assert.AreEqual(false, CoreAISettings.LogToolCalls);
             Assert.AreEqual(false, CoreAISettings.LogToolCallArguments);
             Assert.AreEqual(false, CoreAISettings.LogToolCallResults);
@@ -123,6 +127,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
             Assert.IsFalse(CoreAISettings.OverrideTemperature);
             Assert.IsTrue(CoreAISettings.EnableTokenCalibration);
+            Assert.IsTrue(CoreAISettings.EnableContextPruning);
+            Assert.AreEqual(3, CoreAISettings.MaxRetainedToolResultMessages);
             Assert.AreEqual(false, CoreAISettings.EnableMeaiDebugLogging);
             Assert.AreEqual(CoreAISettings.DefaultContextWindowTokens, CoreAISettings.ContextWindowTokens);
         }

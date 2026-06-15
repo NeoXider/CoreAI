@@ -37,6 +37,9 @@ namespace CoreAI
         public bool PlaceLiveContextInTail { get; set; } = CoreAISettings.DefaultPlaceLiveContextInTail;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
         public int ConversationRolledSummaryMaxTokens { get; set; }
+        public bool EnableContextPruning { get; set; } = CoreAISettings.DefaultEnableContextPruning;
+        public int MaxRetainedToolResultMessages { get; set; } =
+            CoreAISettings.DefaultMaxRetainedToolResultMessages;
         public ILlmAsyncMarshaler ToolInvocationMarshaler { get; set; } = PassThroughLlmAsyncMarshaler.Instance;
         public int MaxToolResultChars { get; set; } = 8000;
         public int DefaultToolTimeoutMs { get; set; } = 30000;
@@ -81,6 +84,8 @@ namespace CoreAI
                 PlaceLiveContextInTail = source.PlaceLiveContextInTail,
                 ConversationHistoryRecentTokenBudgetOverride = source.ConversationHistoryRecentTokenBudgetOverride,
                 ConversationRolledSummaryMaxTokens = source.ConversationRolledSummaryMaxTokens,
+                EnableContextPruning = source.EnableContextPruning,
+                MaxRetainedToolResultMessages = source.MaxRetainedToolResultMessages,
                 ToolInvocationMarshaler = source.ToolInvocationMarshaler,
                 MaxToolResultChars = source.MaxToolResultChars,
                 DefaultToolTimeoutMs = source.DefaultToolTimeoutMs,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Context editing before compaction.** Added `ConversationHistoryPruner` and roadmap §7 settings
+  (`EnableContextPruning`, `MaxRetainedToolResultMessages`) so prompt-history copies collapse exact
+  consecutive duplicates and retain only the newest durable `tool` / `## Tool Results` observations before
+  budget partitioning. Durable chat history stores are not modified.
 - **Emergency context-overflow recovery.** `AiOrchestrator.RunTaskAsync` now performs bounded
   multi-pass recovery for `LlmErrorCode.ContextLengthExceeded`: `ICoreAISettings.MaxContextOverflowRetries`
   defaults to `3` (`0` disables), retry passes advance `ContextBudgetRequest.ContextRetryLevel`, and

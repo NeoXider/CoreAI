@@ -434,6 +434,14 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Max rolled summary (tokens)",
                         "0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("enableContextPruning"),
+                    new GUIContent(
+                        "Enable context pruning",
+                        "Roadmap §7. Prunes duplicate/stale prompt-history entries before summarization, only from the in-memory request copy; stored chat history remains intact."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxRetainedToolResultMessages"),
+                    new GUIContent(
+                        "Max retained tool results",
+                        "Newest durable ## Tool Results messages retained in the prompt history copy before compaction. Older tool observations are superseded and omitted from the request."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableLlmContextCompaction"),
                     new GUIContent(
                         "Enable LLM context compaction (global)",

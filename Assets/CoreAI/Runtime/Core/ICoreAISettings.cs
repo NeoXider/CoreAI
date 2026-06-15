@@ -152,6 +152,18 @@ namespace CoreAI
         int ConversationRolledSummaryMaxTokens => 0;
 
         /// <summary>
+        /// When true, roadmap §7 context editing prunes stale prompt-history entries before compaction.
+        /// This operates only on the in-memory request copy, never on durable chat history.
+        /// </summary>
+        bool EnableContextPruning => true;
+
+        /// <summary>
+        /// Number of newest durable <c>tool</c> / <c>## Tool Results</c> messages retained in prompt history
+        /// by roadmap §7 context pruning.
+        /// </summary>
+        int MaxRetainedToolResultMessages => 3;
+
+        /// <summary>
         /// Tool invocation marshaler.
         /// </summary>
         ILlmAsyncMarshaler ToolInvocationMarshaler => PassThroughLlmAsyncMarshaler.Instance;

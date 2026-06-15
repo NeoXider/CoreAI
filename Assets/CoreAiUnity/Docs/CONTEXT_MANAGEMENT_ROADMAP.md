@@ -66,7 +66,7 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
 - Tool-call results are persisted into history per policy as one `tool` chat-history entry headed
   `## Tool Results`; stored tool entries replay as provider-safe user observations.
 - Intra-turn duplicate results are collapsed by tool name + normalized detail. Cross-turn pruning of
-  outdated/superseded results remains planned for §7.
+  outdated/superseded results is now handled by §7 context editing before compaction.
 - **Truncate large outputs** (head/tail, byte/line cap) instead of dropping them whole.
 
 ### 4. Token accounting from the API, estimate only as fallback
@@ -129,6 +129,10 @@ only the minimal contract guidance because the schema is already sent in the nat
 tokens and keeps the prefix lean while remaining deterministic for caching.
 
 ### 7. Context editing (prune) alongside compaction (summarize)
+- Status: **implemented** for prompt-history copies. `ConversationHistoryPruner` runs before
+  `ConversationHistoryPartition.PartitionByBudget`, collapses exact consecutive duplicates, and keeps only the
+  newest configured `tool` / `## Tool Results` observations. This completes the cross-turn
+  superseded-tool-result pruning deferred by `ToolResultMemoryPolicy`; durable chat history on disk is not edited.
 - Two complementary levers, like Claude Code: **compaction** summarizes old turns when near the limit (§2);
   **context editing** *prunes* stale content without summarizing — drop superseded tool results / old thinking
   blocks once they no longer matter. Prune first (cheap, lossless-ish), summarize only when still over budget.

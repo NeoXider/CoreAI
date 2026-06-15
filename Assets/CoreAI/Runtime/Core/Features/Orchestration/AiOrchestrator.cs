@@ -146,7 +146,9 @@ namespace CoreAI.Ai
                     SourceBudget = budget,
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
-                    MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0
+                    MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0,
+                    EnableContextPruning = _settings.EnableContextPruning,
+                    MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages
                 };
             }
 
@@ -995,7 +997,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            // TODO: Roadmap §3/§7 will prune superseded cross-turn tool results before compaction.
+            // Roadmap §7 cross-turn stale tool results are pruned from the prompt copy before compaction.
             return wroteEntry ? sb.ToString().TrimEnd() : "";
         }
 

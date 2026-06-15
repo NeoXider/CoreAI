@@ -41,7 +41,7 @@
       limit; re-summarize infrequently so the cached prefix survives.
 - [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
       persist tool results into history, collapse intra-turn duplicate results, head/tail-truncate large outputs.
-      Cross-turn pruning of outdated/superseded results remains in *Context editing (prune)*.
+      Cross-turn pruning of outdated/superseded results is handled by *Context editing (prune)*.
 - [x] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
       (see `Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md`); `HeuristicTokenEstimator` stays a pre-flight
       fallback only, with a higher ratio for Cyrillic/CJK.
@@ -51,7 +51,7 @@
       backends add `cache_control` breakpoints on the frozen prefix.
 - [x] **6a Conditional tool contract.** Native tool-calling backends use a minimal prompt contract; text-shaped
       local backends keep the full tool list, schema, and JSON-call guidance.
-- [ ] **Context editing (prune) on top of compaction.** Prune superseded tool results / stale thinking first
+- [x] **Context editing (prune) on top of compaction.** Prune superseded tool results / stale thinking first
       (lossless), summarize only when still over budget.
 - [x] **Persistent memory — incremental & versioned.** `append/str_replace/insert/delete` (agent-decided, not
       overwrite) + per-mutation versions for audit/rollback; layered scopes (global=prefix, per-user/per-session=tail).

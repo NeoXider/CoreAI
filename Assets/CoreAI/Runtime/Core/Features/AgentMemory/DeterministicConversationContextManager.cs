@@ -36,6 +36,12 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
+            history = PruneIfEnabled(history, buildArgs);
+            if (history == null || history.Length == 0)
+            {
+                return new ConversationContextSnapshot();
+            }
+
             int historyBudget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
 
             (int splitExclusive, List<ChatMessage> recent) =
@@ -88,6 +94,16 @@ namespace CoreAI.Ai
             }
 
             return ConversationRolledSummaryLimiter.Apply(summary, _estimator, cap);
+        }
+
+        private static ChatMessage[] PruneIfEnabled(ChatMessage[] history, ConversationContextBuildArgs buildArgs)
+        {
+            if (buildArgs == null || !buildArgs.EnableContextPruning)
+            {
+                return history;
+            }
+
+            return ConversationHistoryPruner.Prune(history, buildArgs.MaxRetainedToolResultMessages);
         }
     }
 }

@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Context editing before compaction.** Unity settings now expose `EnableContextPruning` (default on)
+  and `MaxRetainedToolResultMessages` (default `3`). CoreAI prunes only the in-memory prompt history copy
+  before summarization, dropping stale cross-turn `## Tool Results` observations while leaving stored chat
+  history intact.
 - **Emergency context-overflow recovery.** CoreAI Unity exposes `MaxContextOverflowRetries` on
   `CoreAISettingsAsset` (default `3`, `0` disables). The orchestrator now retries bounded
   context-length-overflow failures across multiple `ContextRetryLevel` passes, with each pass using the
