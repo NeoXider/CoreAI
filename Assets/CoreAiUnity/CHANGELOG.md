@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage plus an EditMode guard
+  test so Unity/source text and binary asset classifications stay stable across contributors.
+
 ## 4.4.0 - 2026-06-15
 
 > Context management overhaul (Claude Code / Cline / Kilo-grade) + tool-call/memory/Lua fixes. Depends on `com.nexoider.coreai` 4.4.0. See entries below.

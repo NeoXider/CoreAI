@@ -1,2 +1,88 @@
-# Auto detect text files and perform LF normalization
+# Auto-detect text files; explicit Unity/source rules below prevent
+# editor-dependent CRLF/LF churn and binary asset phantom diffs.
 * text=auto
+.gitattributes text eol=lf
+
+# Source and docs.
+*.cs text eol=lf diff=csharp
+*.asmdef text eol=lf
+*.asmref text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.uxml text eol=lf
+*.uss text eol=lf
+*.shader text eol=lf
+*.hlsl text eol=lf
+*.cginc text eol=lf
+*.compute text eol=lf
+
+# Visual Studio / Unity generated project files are Windows-native.
+*.sln text eol=crlf
+*.csproj text eol=crlf
+
+# Unity YAML assets.
+*.meta text eol=lf
+*.unity text eol=lf
+*.prefab text eol=lf
+*.asset text eol=lf
+*.mat text eol=lf
+*.anim text eol=lf
+*.controller text eol=lf
+*.overrideController text eol=lf
+*.physicMaterial text eol=lf
+*.physicsMaterial2D text eol=lf
+*.playable text eol=lf
+*.mask text eol=lf
+*.renderTexture text eol=lf
+*.terrainlayer text eol=lf
+*.lighting text eol=lf
+*.guiskin text eol=lf
+*.preset text eol=lf
+
+# Common binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.tga binary
+*.tif binary
+*.tiff binary
+*.psd binary
+*.exr binary
+*.hdr binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.fbx binary
+*.blend binary
+*.obj binary
+*.dae binary
+*.3ds binary
+*.max binary
+*.mb binary
+*.ma binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.dll binary
+*.pdb binary
+*.so binary
+*.dylib binary
+*.bundle binary
+*.a binary
+*.lib binary
+*.unitypackage binary
+*.zip binary
+*.7z binary
+*.rar binary
+*.gz binary

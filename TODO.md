@@ -73,7 +73,7 @@
 - [ ] **Run EditMode + targeted PlayMode after wave 2.** Agent-authored wave-2 tests compile but have not been
       run in Unity yet (wave 1 needed 3 fixes after a real run). Run the EditMode suite + a small PlayMode subset
       (e.g. `AiOrchestrator*`, role/history tests) and fix any regression before flipping defaults.
-- [ ] **`.gitattributes` line-ending normalization.** Add a Unity-standard `.gitattributes` (`* text=auto` +
+- [x] **`.gitattributes` line-ending normalization.** Add a Unity-standard `.gitattributes` (`* text=auto` +
       binary/asset rules) — every commit currently warns `LF will be replaced by CRLF`; risks phantom diffs.
 - [ ] **Memory deltas in tail + boundary consolidation (roadmap §6 placement).** Mid-session memory edits go into
       a small `## Memory (updates)` tail block; at a boundary (session start / after summarization / explicit

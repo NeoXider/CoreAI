@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage for source, YAML assets,
+  Visual Studio project files, and common binary assets to prevent CRLF/LF churn and binary phantom diffs.
+
 ## 4.4.0 - 2026-06-15
 
 > Context management overhaul (Claude Code / Cline / Kilo-grade): prefix/tail placement, threshold compaction, tool-result policy, API-token calibration, bounded overflow recovery, context pruning, world-state tail, deterministic prefix, prompt-cache verification + tool-call/memory fixes. See entries below.
