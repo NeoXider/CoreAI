@@ -284,6 +284,10 @@ Per-role behavior is configured through `AgentBuilder.With*` methods and the mat
 | Duplicate tool calls | `WithAllowDuplicateToolCalls(bool)` | `ConfigureRole(allowDuplicateToolCalls: ...)` |
 | Universal prefix opt-out | `WithOverrideUniversalPrefix(bool)` | `SetOverrideUniversalPrefix(roleId, bool)` |
 
+Built-in tool result defaults: `Programmer` and `CoreMechanicAI` use `ToolResultMemoryPolicy.Full`
+because their iterative code/mechanics correctness depends on exact tool output across turns. `Creator`,
+`Analyzer`, `AINpc`, `Merchant`, `PlainChat`, and `SmartChat` keep the `CompactSummary` default.
+
 Global settings still gate some features: `EnableLlmContextCompaction` must be on before a role can use LLM-assisted compaction, `EnableStreaming` is the fallback when no role override exists, and temperature is sent only when temperature overriding is enabled.
 
 #### Universal system prompt prefix

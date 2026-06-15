@@ -40,6 +40,7 @@
       limit; re-summarize infrequently so the cached prefix survives.
 - [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
       persist tool results into history, collapse intra-turn duplicate results, head/tail-truncate large outputs.
+      Built-in Programmer and CoreMechanicAI default to `Full`; other built-in roles keep `CompactSummary`.
       Cross-turn pruning of outdated/superseded results is handled by *Context editing (prune)*.
 - [x] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
       (see `Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md`); `HeuristicTokenEstimator` stays a pre-flight

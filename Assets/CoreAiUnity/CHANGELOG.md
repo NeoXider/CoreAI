@@ -5,6 +5,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 ## [Unreleased]
 
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
+- **Tool result memory defaults.** Built-in `Programmer` and `CoreMechanicAI` now default to full tool-result retention; other built-in roles keep compact summaries.
 - **Prompt-cache usage verification.** CoreAI Unity now reads provider cache read/write token counts from
   MEAI `UsageDetails.AdditionalCounts` in both non-streaming and streaming paths, publishes them through
   `LlmUsageReported`, and documents that the current OpenAI/DeepSeek-compatible backend auto-caches a stable

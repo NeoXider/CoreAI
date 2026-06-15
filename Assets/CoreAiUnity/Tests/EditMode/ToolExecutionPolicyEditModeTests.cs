@@ -292,6 +292,9 @@ namespace CoreAI.Tests.EditMode
                 await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
             Assert.IsTrue(result.Succeeded);
             Assert.IsNotNull(result.Result);
+            Assert.AreEqual("world", result.Result.Result.ToString());
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("world", policy.ExecutedTraces[0].Detail);
         }
 
         [Test]
@@ -448,6 +451,7 @@ namespace CoreAI.Tests.EditMode
             ToolExecutionPolicy.BatchToolCallResult batch =
                 await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
             Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual("ok", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
             Assert.AreEqual(0, policy.ConsecutiveErrors, "Success should reset error counter");
         }
 

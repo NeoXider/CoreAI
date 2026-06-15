@@ -85,6 +85,8 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
 
 ### 3. Tool-result hygiene before truncation (`ToolResultMemoryPolicy`) - implemented
 - New per-role policy: `None | ErrorsOnly | CompactSummary | Full` (default `CompactSummary`).
+- Built-in defaults: `Programmer` and `CoreMechanicAI` use `Full` so exact code/mechanics tool output
+  survives across turns; all other built-in roles keep `CompactSummary`.
 - Tool-call results are persisted into history per policy as one `tool` chat-history entry headed
   `## Tool Results`; stored tool entries replay as provider-safe user observations.
 - Intra-turn duplicate results are collapsed by tool name + normalized detail. Cross-turn pruning of

@@ -219,13 +219,18 @@ namespace CoreAI.Ai
             foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
             {
                 bool isProgrammer = roleId == BuiltInAgentRoleIds.Programmer;
+                bool needsExactToolOutput = isProgrammer || roleId == BuiltInAgentRoleIds.CoreMechanic;
                 bool smartCompaction = !isProgrammer;
                 // Programmer keeps history off by default; chat-source runs enable it per-run
                 // without mutating global policy (see AiOrchestratorHistoryEditModeTests).
+                // Code/mechanics agents need exact tool output across turns for iterative correctness.
                 _roleConfigs[roleId] = new RoleMemoryConfig(
                     true,
                     MemoryToolAction.Append,
                     withChatHistory: !isProgrammer,
+                    toolResultMemory: needsExactToolOutput
+                        ? ToolResultMemoryPolicy.Full
+                        : ToolResultMemoryPolicy.CompactSummary,
                     useLlmContextCompaction: smartCompaction);
             }
 

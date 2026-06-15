@@ -171,6 +171,25 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void AgentMemoryPolicy_Default_ToolResultMemory_ByBuiltInRole()
+        {
+            AgentMemoryPolicy policy = new();
+
+            Assert.AreEqual(ToolResultMemoryPolicy.Full,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.Programmer).ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.Full,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.CoreMechanic).ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.Merchant).ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.AiNpc).ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.Creator).ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary,
+                policy.GetRoleConfig(BuiltInAgentRoleIds.SmartChat).ToolResultMemory);
+        }
+
+        [Test]
         public void WithChatHistory_OnlyPersist_ShouldUseDefaultTokens()
         {
             AgentConfig config = new AgentBuilder("TestAgent")

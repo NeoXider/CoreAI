@@ -372,7 +372,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
-                    succeeded ? "" : resultText));
+                    resultText));
                 LogCallLine(fc, succeeded, elapsedMs, resultText);
 
                 // Notify subscribers

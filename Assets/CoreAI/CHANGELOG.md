@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
+- **Tool result memory defaults.** Built-in `Programmer` and `CoreMechanicAI` now default to `ToolResultMemoryPolicy.Full`; other built-in roles keep `CompactSummary`.
 - **Prompt-cache usage verification.** Added cache read/write token counters to LLM completion/stream
   results, `LlmUsageRecord`, `LlmUsageReported`, and turn diagnostics, with MEAI
   `UsageDetails.AdditionalCounts` parsing for provider cache counters.

@@ -379,6 +379,55 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(noneMemory.Appended.Exists(m => m.Role == "tool"));
         }
 
+        [Test]
+        public async Task RunTaskAsync_FullToolResultMemory_PersistsCompleteOutput_CompactKeepsSummary()
+        {
+            string completeOutput = "summary " + new string('a', 260) +
+                                    "\nFULL_SENTINEL: exact tool output line";
+            LlmToolCallTrace[] traces =
+            {
+                new("inspect_scene", true, 7d, "native", completeOutput)
+            };
+
+            TestMemoryStore fullMemory = new();
+            ToolTraceLlmClient fullLlm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = "Done",
+                ExecutedToolCalls = traces
+            });
+            AgentMemoryPolicy fullPolicy = BuildToolResultPolicy("full_tool_role");
+            fullPolicy.SetToolResultMemoryPolicy("full_tool_role", ToolResultMemoryPolicy.Full);
+            AiOrchestrator fullOrchestrator = BuildOrchestrator(fullLlm, fullMemory, fullPolicy);
+
+            await fullOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "full_tool_role", Hint = "tools" });
+
+            string fullToolMessage = fullMemory.Appended[2].Content;
+            StringAssert.Contains("## Tool Results", fullToolMessage);
+            StringAssert.Contains("Detail:", fullToolMessage);
+            StringAssert.Contains("FULL_SENTINEL: exact tool output line", fullToolMessage);
+
+            TestMemoryStore compactMemory = new();
+            ToolTraceLlmClient compactLlm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = "Done",
+                ExecutedToolCalls = traces
+            });
+            AgentMemoryPolicy compactPolicy = BuildToolResultPolicy("compact_tool_role");
+            AiOrchestrator compactOrchestrator = BuildOrchestrator(compactLlm, compactMemory, compactPolicy);
+
+            await compactOrchestrator.RunTaskAsync(new AiTaskRequest
+                { RoleId = "compact_tool_role", Hint = "tools" });
+
+            string compactToolMessage = compactMemory.Appended[2].Content;
+            StringAssert.Contains("## Tool Results", compactToolMessage);
+            StringAssert.DoesNotContain("Detail:", compactToolMessage);
+            StringAssert.DoesNotContain("FULL_SENTINEL: exact tool output line", compactToolMessage);
+            Assert.AreEqual(2, compactToolMessage.Split('\n').Length,
+                "CompactSummary should persist the heading plus one compact line for one tool call.");
+        }
+
         private static AgentMemoryPolicy BuildToolResultPolicy(string roleId)
         {
             AgentMemoryPolicy policy = new();

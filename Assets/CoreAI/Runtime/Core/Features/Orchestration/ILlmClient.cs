@@ -202,7 +202,7 @@ namespace CoreAI.Ai
         /// <summary>How this call was discovered: <c>native</c> (FunctionCallContent), <c>text</c> (extracted JSON), or <c>duplicate</c> / <c>missing</c>.</summary>
         public string Source { get; }
 
-        /// <summary>Short result or failure detail for UI fallback and diagnostics.</summary>
+        /// <summary>Tool result or failure detail for UI fallback, diagnostics, and durable tool-result memory.</summary>
         public string Detail { get; }
     }
 
