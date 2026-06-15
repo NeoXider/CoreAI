@@ -178,6 +178,56 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ExtractCacheTokenCounts_MatchesProviderKeyVariants()
+        {
+            (int nullRead, int nullWrite) = MeaiLlmClient.ExtractCacheTokenCounts(null);
+            Assert.AreEqual(0, nullRead);
+            Assert.AreEqual(0, nullWrite);
+
+            MEAI.AdditionalPropertiesDictionary<long> counts = new()
+            {
+                ["cache_read_input_tokens"] = 11,
+                ["CachedTokens"] = 7,
+                ["cache_creation_input_tokens"] = 13,
+                ["cache_create_tokens"] = 3,
+                ["cache_write_tokens"] = 5,
+                ["input_tokens"] = 999,
+                ["prompt_cache_miss_tokens"] = 17
+            };
+
+            (int cacheRead, int cacheWrite) = MeaiLlmClient.ExtractCacheTokenCounts(counts);
+
+            Assert.AreEqual(18, cacheRead);
+            Assert.AreEqual(21, cacheWrite);
+        }
+
+        [Test]
+        public async Task CompleteAsync_MapsAdditionalCountsCacheTokens()
+        {
+            UsageChatClient inner = new(
+                promptTokens: 100,
+                completionTokens: 12,
+                totalTokens: 112,
+                cacheReadTokens: 80,
+                cacheWriteTokens: 20);
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi"
+            }, CancellationToken.None);
+
+            Assert.IsTrue(result.Ok);
+            Assert.AreEqual(100, result.PromptTokens);
+            Assert.AreEqual(12, result.CompletionTokens);
+            Assert.AreEqual(112, result.TotalTokens);
+            Assert.AreEqual(80, result.CacheReadTokens);
+            Assert.AreEqual(20, result.CacheWriteTokens);
+        }
+
+        [Test]
         public async Task CompleteStreamingAsync_NoTools_YieldsOneChunkPerInnerUpdateBeforeTerminal()
         {
             StreamingScriptedChatClient inner = new(new[] { "a", "bb", "ccc" });
@@ -594,6 +644,69 @@ namespace CoreAI.Tests.EditMode
                 MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
             {
                 return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "x");
+                await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>Minimal MEAI client that returns usage details with provider-specific cache counts.</summary>
+        private sealed class UsageChatClient : MEAI.IChatClient
+        {
+            private readonly int _promptTokens;
+            private readonly int _completionTokens;
+            private readonly int _totalTokens;
+            private readonly int _cacheReadTokens;
+            private readonly int _cacheWriteTokens;
+
+            public UsageChatClient(
+                int promptTokens,
+                int completionTokens,
+                int totalTokens,
+                int cacheReadTokens,
+                int cacheWriteTokens)
+            {
+                _promptTokens = promptTokens;
+                _completionTokens = completionTokens;
+                _totalTokens = totalTokens;
+                _cacheReadTokens = cacheReadTokens;
+                _cacheWriteTokens = cacheWriteTokens;
+            }
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                MEAI.ChatResponse response = new(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok"))
+                {
+                    Usage = new MEAI.UsageDetails
+                    {
+                        InputTokenCount = _promptTokens,
+                        OutputTokenCount = _completionTokens,
+                        TotalTokenCount = _totalTokens,
+                        AdditionalCounts = new MEAI.AdditionalPropertiesDictionary<long>
+                        {
+                            ["cache_read_input_tokens"] = _cacheReadTokens,
+                            ["cache_creation_input_tokens"] = _cacheWriteTokens
+                        }
+                    }
+                };
+                return Task.FromResult(response);
             }
 
             public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(

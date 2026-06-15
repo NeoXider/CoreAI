@@ -181,12 +181,28 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void UsageRecord_Add_AggregatesTokenCounts()
         {
-            LlmUsageRecord total = new() { PromptTokens = 10, CompletionTokens = 5, TotalTokens = 15 };
-            total.Add(new LlmUsageRecord { PromptTokens = 3, CompletionTokens = 2, TotalTokens = 5 });
+            LlmUsageRecord total = new()
+            {
+                PromptTokens = 10,
+                CompletionTokens = 5,
+                TotalTokens = 15,
+                CacheReadTokens = 8,
+                CacheWriteTokens = 4
+            };
+            total.Add(new LlmUsageRecord
+            {
+                PromptTokens = 3,
+                CompletionTokens = 2,
+                TotalTokens = 5,
+                CacheReadTokens = 7,
+                CacheWriteTokens = 6
+            });
 
             Assert.AreEqual(13, total.PromptTokens);
             Assert.AreEqual(7, total.CompletionTokens);
             Assert.AreEqual(20, total.TotalTokens);
+            Assert.AreEqual(15, total.CacheReadTokens);
+            Assert.AreEqual(10, total.CacheWriteTokens);
         }
 
         [Test]

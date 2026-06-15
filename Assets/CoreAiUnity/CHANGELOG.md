@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Prompt-cache usage verification.** CoreAI Unity now reads provider cache read/write token counts from
+  MEAI `UsageDetails.AdditionalCounts` in both non-streaming and streaming paths, publishes them through
+  `LlmUsageReported`, and documents that the current OpenAI/DeepSeek-compatible backend auto-caches a stable
+  prefix without explicit `cache_control` markers.
 - **Compaction by threshold.** `CoreAISettingsAsset` now exposes **Compaction trigger ratio** (default `0.8`)
   under Chat history summarization. Below `historyBudget * ratio`, CoreAI keeps all history verbatim and
   does not rewrite the stored rolling summary; `0`/invalid values use legacy over-budget compaction.

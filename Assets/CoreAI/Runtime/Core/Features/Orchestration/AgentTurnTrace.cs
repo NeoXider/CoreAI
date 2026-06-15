@@ -38,6 +38,12 @@ namespace CoreAI.Ai
         /// <summary>Total tokens.</summary>
         public int TotalTokens { get; set; }
 
+        /// <summary>Provider-reported prompt/input tokens read from cache.</summary>
+        public int CacheReadTokens { get; set; }
+
+        /// <summary>Provider-reported prompt/input tokens written to cache.</summary>
+        public int CacheWriteTokens { get; set; }
+
         /// <summary>Estimated history budget last applied (0 when chat history off).</summary>
         public int HistoryTokenBudget { get; set; }
 

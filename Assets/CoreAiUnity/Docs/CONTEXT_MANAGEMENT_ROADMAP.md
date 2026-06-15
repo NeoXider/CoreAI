@@ -59,6 +59,22 @@ survives.** Caching is not the priority — but this placement costs nothing ext
 (we stop rewriting the prefix and keep recent turns verbatim). Cache *tiers* help too: a `system` change
 invalidates system+messages but **not** tools; a tail-only `messages` change invalidates neither tools nor system.
 
+### 1a caching вЂ” verification & provider notes
+- Status: **verification implemented.** Provider cache token counts now flow from
+  `UsageDetails.AdditionalCounts` into `LlmCompletionResult` / `LlmStreamChunk`,
+  `LlmUsageRecord`, `LlmUsageReported`, and turn diagnostics as `CacheReadTokens` /
+  `CacheWriteTokens`. Confirm prompt caching by watching non-zero cache-read tokens
+  after repeated stable-prefix requests; cache-write tokens show cache creation when a
+  provider reports them.
+- Current OpenAI/DeepSeek-compatible server backend: no explicit Anthropic-style
+  `cache_control` breakpoint is required. The server auto-caches a stable prefix, so
+  CoreAI's cooperation work is keeping persona/tool prefix serialization deterministic
+  and moving volatile summary/world-state data to the tail.
+- TODO for a future Anthropic-style backend: attach `cache_control` breakpoints on the
+  frozen prefix through `ChatOptions.AdditionalProperties` / `RawRepresentationFactory`
+  in that backend's transport adapter. Do not add those markers to the current
+  OpenAI-compatible transport.
+
 ### 2. Compaction by threshold (not every turn)
 - Status: **implemented.** `ConversationCompactionTriggerRatio` defaults to `0.8`; invalid/unset per-request
   values use the legacy budget boundary. Below the trigger, the prompt keeps all history verbatim and does not

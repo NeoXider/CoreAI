@@ -47,8 +47,9 @@
       fallback only, with a higher ratio for Cyrillic/CJK.
 - [x] **Emergency overflow fallback.** On "context exceeded", drop ~25% oldest + retry (bounded); extend
       `ContextRetryLevel`.
-- [ ] **Prompt-caching cooperation.** Verify provider caching via `usage.cache_read_*`; for Anthropic-style
-      backends add `cache_control` breakpoints on the frozen prefix.
+- [x] **Prompt-caching cooperation verification.** Surface provider cache read/write token counts from MEAI
+      `UsageDetails.AdditionalCounts` into usage records/events and diagnostics. Current OpenAI/DeepSeek-compatible
+      backend auto-caches the stable prefix; Anthropic-style `cache_control` breakpoint notes live in the roadmap.
 - [x] **6a Conditional tool contract.** Native tool-calling backends use a minimal prompt contract; text-shaped
       local backends keep the full tool list, schema, and JSON-call guidance.
 - [x] **Context editing (prune) on top of compaction.** Prune superseded tool results / stale thinking first

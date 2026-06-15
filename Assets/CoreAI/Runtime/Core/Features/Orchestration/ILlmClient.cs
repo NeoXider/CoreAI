@@ -242,6 +242,12 @@ namespace CoreAI.Ai
         /// <summary>Total tokens from usage (HTTP).</summary>
         public int? TotalTokens { get; set; }
 
+        /// <summary>Provider-reported prompt/input tokens read from cache.</summary>
+        public int CacheReadTokens { get; set; }
+
+        /// <summary>Provider-reported prompt/input tokens written to cache.</summary>
+        public int CacheWriteTokens { get; set; }
+
         /// <summary>
         /// Tool calls observed during this turn (native + text-extracted, in execution order).
         /// Empty when the model produced only text. Used by <see cref="LoggingLlmClientDecorator"/>
@@ -279,6 +285,12 @@ namespace CoreAI.Ai
 
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
+
+        /// <summary>Provider-reported prompt/input tokens read from cache.</summary>
+        public int CacheReadTokens { get; set; }
+
+        /// <summary>Provider-reported prompt/input tokens written to cache.</summary>
+        public int CacheWriteTokens { get; set; }
 
         /// <summary>
         /// Tool calls executed in this streaming turn (final chunk only). Empty for intermediate
@@ -375,6 +387,8 @@ namespace CoreAI.Ai
                 PromptTokens = result.PromptTokens,
                 CompletionTokens = result.CompletionTokens,
                 TotalTokens = result.TotalTokens,
+                CacheReadTokens = result.CacheReadTokens,
+                CacheWriteTokens = result.CacheWriteTokens,
                 Model = result.Model,
                 ExecutedToolCalls = result.ExecutedToolCalls
             };

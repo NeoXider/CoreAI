@@ -157,7 +157,11 @@ namespace CoreAI.Infrastructure.Llm
                         errorCode = chunk.ErrorCode;
                     }
 
-                    if (chunk.PromptTokens.HasValue || chunk.CompletionTokens.HasValue || chunk.TotalTokens.HasValue)
+                    if (chunk.PromptTokens.HasValue ||
+                        chunk.CompletionTokens.HasValue ||
+                        chunk.TotalTokens.HasValue ||
+                        chunk.CacheReadTokens > 0 ||
+                        chunk.CacheWriteTokens > 0)
                     {
                         lastUsageChunk = chunk;
                     }
@@ -216,7 +220,11 @@ namespace CoreAI.Infrastructure.Llm
         private void PublishUsage(LlmCompletionRequest request, bool streaming, LlmCompletionResult result)
         {
             if (result == null ||
-                (!result.PromptTokens.HasValue && !result.CompletionTokens.HasValue && !result.TotalTokens.HasValue))
+                (!result.PromptTokens.HasValue &&
+                 !result.CompletionTokens.HasValue &&
+                 !result.TotalTokens.HasValue &&
+                 result.CacheReadTokens <= 0 &&
+                 result.CacheWriteTokens <= 0))
             {
                 return;
             }
@@ -231,7 +239,9 @@ namespace CoreAI.Infrastructure.Llm
                 result.CompletionTokens,
                 result.TotalTokens,
                 streaming,
-                result.Ok));
+                result.Ok,
+                result.CacheReadTokens,
+                result.CacheWriteTokens));
         }
 
         private void PublishUsage(LlmCompletionRequest request, bool streaming, LlmStreamChunk chunk, bool success)
@@ -251,7 +261,9 @@ namespace CoreAI.Infrastructure.Llm
                 chunk.CompletionTokens,
                 chunk.TotalTokens,
                 streaming,
-                success));
+                success,
+                chunk.CacheReadTokens,
+                chunk.CacheWriteTokens));
         }
 
         private static string DescribeInner(ILlmClient inner)

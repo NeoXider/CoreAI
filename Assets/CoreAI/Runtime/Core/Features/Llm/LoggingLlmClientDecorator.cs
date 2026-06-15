@@ -410,6 +410,8 @@ namespace CoreAI.Infrastructure.Llm
             int? promptTokens = null;
             int? completionTokens = null;
             int? totalTokens = null;
+            int cacheReadTokens = 0;
+            int cacheWriteTokens = 0;
             string terminalError = null;
             IReadOnlyList<LlmToolCallTrace> executedTools = Array.Empty<LlmToolCallTrace>();
 
@@ -506,6 +508,16 @@ namespace CoreAI.Infrastructure.Llm
                             totalTokens = current.TotalTokens;
                         }
 
+                        if (current.CacheReadTokens > 0)
+                        {
+                            cacheReadTokens = current.CacheReadTokens;
+                        }
+
+                        if (current.CacheWriteTokens > 0)
+                        {
+                            cacheWriteTokens = current.CacheWriteTokens;
+                        }
+
                         if (!string.IsNullOrEmpty(current.Error))
                         {
                             terminalError = current.Error;
@@ -544,6 +556,8 @@ namespace CoreAI.Infrastructure.Llm
                     PromptTokens = promptTokens,
                     CompletionTokens = completionTokens,
                     TotalTokens = totalTokens,
+                    CacheReadTokens = cacheReadTokens,
+                    CacheWriteTokens = cacheWriteTokens,
                     Error = terminalError ?? "",
                     ExecutedToolCalls = executedTools
                 };
@@ -625,17 +639,27 @@ namespace CoreAI.Infrastructure.Llm
             {
                 double tps = result.CompletionTokens.Value / (wallMs / 1000.0);
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | out~{tps:F1} tok/s (completion){outWordsPart}{budgetSuffix}";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)}{FormatCachePart(result)} | out~{tps:F1} tok/s (completion){outWordsPart}{budgetSuffix}";
             }
 
             if (result.TotalTokens.HasValue)
             {
                 return
-                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)} | tok/s n/a{outWordsPart}{budgetSuffix}";
+                    $"tokens in/out/total={Fmt(result.PromptTokens)}/{Fmt(result.CompletionTokens)}/{Fmt(result.TotalTokens)}{FormatCachePart(result)} | tok/s n/a{outWordsPart}{budgetSuffix}";
             }
 
             return
                 $"tokens n/a (backend did not return usage for this response - common for streaming/local clients and some Chat API responses) | outChars={outChars} | speed estimate n/a{outWordsPart}{budgetSuffix}";
+        }
+
+        private static string FormatCachePart(LlmCompletionResult result)
+        {
+            if (result == null || (result.CacheReadTokens <= 0 && result.CacheWriteTokens <= 0))
+            {
+                return "";
+            }
+
+            return $" cache(read/write)={result.CacheReadTokens}/{result.CacheWriteTokens}";
         }
 
         /// <summary>

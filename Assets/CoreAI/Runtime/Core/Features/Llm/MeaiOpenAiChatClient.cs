@@ -1050,12 +1050,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (root["usage"] is JObject usage)
                 {
-                    response.Usage = new MEAI.UsageDetails
-                    {
-                        InputTokenCount = usage["prompt_tokens"]?.ToObject<int>() ?? 0,
-                        OutputTokenCount = usage["completion_tokens"]?.ToObject<int>() ?? 0,
-                        TotalTokenCount = usage["total_tokens"]?.ToObject<int>() ?? 0
-                    };
+                    response.Usage = BuildUsageDetailsFromOpenAiUsageObject(usage);
                 }
 
                 return response;
@@ -1345,7 +1340,8 @@ namespace CoreAI.Infrastructure.Llm
             int prompt = usage["prompt_tokens"]?.ToObject<int>() ?? 0;
             int completion = usage["completion_tokens"]?.ToObject<int>() ?? 0;
             int total = usage["total_tokens"]?.ToObject<int>() ?? 0;
-            if (prompt == 0 && completion == 0 && total == 0)
+            MEAI.AdditionalPropertiesDictionary<long> additionalCounts = BuildAdditionalUsageCounts(usage);
+            if (prompt == 0 && completion == 0 && total == 0 && (additionalCounts == null || additionalCounts.Count == 0))
             {
                 return null;
             }
@@ -1359,8 +1355,59 @@ namespace CoreAI.Infrastructure.Llm
             {
                 InputTokenCount = prompt,
                 OutputTokenCount = completion,
-                TotalTokenCount = total
+                TotalTokenCount = total,
+                AdditionalCounts = additionalCounts
             };
+        }
+
+        private static MEAI.AdditionalPropertiesDictionary<long> BuildAdditionalUsageCounts(JObject usage)
+        {
+            if (usage == null)
+            {
+                return null;
+            }
+
+            MEAI.AdditionalPropertiesDictionary<long> counts = new();
+            AddAdditionalUsageCounts(counts, usage, "");
+            return counts.Count > 0 ? counts : null;
+        }
+
+        private static void AddAdditionalUsageCounts(
+            MEAI.AdditionalPropertiesDictionary<long> counts,
+            JToken token,
+            string prefix)
+        {
+            if (counts == null || token == null)
+            {
+                return;
+            }
+
+            if (token is JObject obj)
+            {
+                foreach (JProperty property in obj.Properties())
+                {
+                    string childPrefix = string.IsNullOrEmpty(prefix)
+                        ? property.Name
+                        : prefix + "." + property.Name;
+                    AddAdditionalUsageCounts(counts, property.Value, childPrefix);
+                }
+
+                return;
+            }
+
+            if (token.Type != JTokenType.Integer || string.IsNullOrEmpty(prefix))
+            {
+                return;
+            }
+
+            long value = token.Value<long>();
+            if (value > 0 &&
+                !string.Equals(prefix, "prompt_tokens", StringComparison.Ordinal) &&
+                !string.Equals(prefix, "completion_tokens", StringComparison.Ordinal) &&
+                !string.Equals(prefix, "total_tokens", StringComparison.Ordinal))
+            {
+                counts[prefix] = value;
+            }
         }
 
         internal static MEAI.ChatResponseUpdate ParseSseDataLineForTests(string dataJson)

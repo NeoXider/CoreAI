@@ -20,7 +20,9 @@ namespace CoreAI.Messaging
             int? completionTokens,
             int? totalTokens,
             bool streaming,
-            bool success)
+            bool success,
+            int? cacheReadTokens = null,
+            int? cacheWriteTokens = null)
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
@@ -30,6 +32,8 @@ namespace CoreAI.Messaging
             PromptTokens = promptTokens;
             CompletionTokens = completionTokens;
             TotalTokens = totalTokens;
+            CacheReadTokens = cacheReadTokens;
+            CacheWriteTokens = cacheWriteTokens;
             Streaming = streaming;
             Success = success;
         }
@@ -57,6 +61,12 @@ namespace CoreAI.Messaging
 
         /// <summary>Total token count.</summary>
         public int? TotalTokens { get; }
+
+        /// <summary>Prompt/input tokens read from a provider cache.</summary>
+        public int? CacheReadTokens { get; }
+
+        /// <summary>Prompt/input tokens written to a provider cache.</summary>
+        public int? CacheWriteTokens { get; }
 
         /// <summary>Whether the request used streaming completion.</summary>
         public bool Streaming { get; }

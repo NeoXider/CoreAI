@@ -410,6 +410,10 @@ namespace CoreAI.Ai
             IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
             LlmStreamChunk pendingToolOnlyTerminalChunk = null;
             int? promptTokens = null;
+            int? completionTokens = null;
+            int? totalTokens = null;
+            int cacheReadTokens = 0;
+            int cacheWriteTokens = 0;
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
@@ -502,6 +506,29 @@ namespace CoreAI.Ai
                         promptTokens = current.PromptTokens;
                     }
 
+                    if (current?.CompletionTokens > 0)
+                    {
+                        completionTokens = current.CompletionTokens;
+                    }
+
+                    if (current?.TotalTokens > 0)
+                    {
+                        totalTokens = current.TotalTokens;
+                    }
+
+                    if (current != null)
+                    {
+                        if (current.CacheReadTokens > 0)
+                        {
+                            cacheReadTokens = current.CacheReadTokens;
+                        }
+
+                        if (current.CacheWriteTokens > 0)
+                        {
+                            cacheWriteTokens = current.CacheWriteTokens;
+                        }
+                    }
+
                     if (current != null &&
                         current.IsDone &&
                         string.IsNullOrEmpty(current.Error) &&
@@ -562,7 +589,18 @@ namespace CoreAI.Ai
                     yield break;
                 }
 
-                content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, null);
+                LlmCompletionResult streamResult = new()
+                {
+                    Ok = true,
+                    Content = content,
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                    TotalTokens = totalTokens,
+                    CacheReadTokens = cacheReadTokens,
+                    CacheWriteTokens = cacheWriteTokens,
+                    ExecutedToolCalls = executedToolCalls
+                };
+                content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
                 RecordTokenObservation(bundle, promptTokens);
             }
             else if (!string.IsNullOrEmpty(terminalError))
@@ -705,6 +743,8 @@ namespace CoreAI.Ai
                 PromptTokens = result?.PromptTokens ?? 0,
                 CompletionTokens = result?.CompletionTokens ?? 0,
                 TotalTokens = result?.TotalTokens ?? 0,
+                CacheReadTokens = result?.CacheReadTokens ?? 0,
+                CacheWriteTokens = result?.CacheWriteTokens ?? 0,
                 HistoryTokenBudget = bundle.HistoryTokenBudget,
                 ChatHistoryMessageCount = bundle.ChatHistoryMessageCount
             });

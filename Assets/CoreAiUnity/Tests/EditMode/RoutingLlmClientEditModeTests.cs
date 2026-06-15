@@ -39,7 +39,9 @@ namespace CoreAI.Tests.EditMode
                     Model = "test-model",
                     PromptTokens = 10,
                     CompletionTokens = 5,
-                    TotalTokens = 15
+                    TotalTokens = 15,
+                    CacheReadTokens = 8,
+                    CacheWriteTokens = 4
                 });
             }
 
@@ -62,7 +64,9 @@ namespace CoreAI.Tests.EditMode
                     Model = "test-model",
                     PromptTokens = 10,
                     CompletionTokens = 5,
-                    TotalTokens = 15
+                    TotalTokens = 15,
+                    CacheReadTokens = 8,
+                    CacheWriteTokens = 4
                 };
             }
         }
@@ -281,6 +285,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, selected.Messages[0].ExecutionMode);
             Assert.IsTrue(completed.Messages[0].Success);
             Assert.AreEqual(15, usage.Messages[0].TotalTokens);
+            Assert.AreEqual(8, usage.Messages[0].CacheReadTokens);
+            Assert.AreEqual(4, usage.Messages[0].CacheWriteTokens);
             Assert.AreEqual("test-model", usage.Messages[0].Model);
         }
     }

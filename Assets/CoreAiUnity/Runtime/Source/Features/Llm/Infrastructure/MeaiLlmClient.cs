@@ -290,6 +290,8 @@ namespace CoreAI.Infrastructure.Llm
                 result.PromptTokens = (int)(response.Usage.InputTokenCount ?? 0);
                 result.CompletionTokens = (int)(response.Usage.OutputTokenCount ?? 0);
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
+                (result.CacheReadTokens, result.CacheWriteTokens) =
+                    ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
             }
 
             // Carry the tool-call diagnostic out of the smart-tool client so the logging
@@ -983,10 +985,61 @@ namespace CoreAI.Infrastructure.Llm
             chunk.PromptTokens = (int)(usage.InputTokenCount ?? 0);
             chunk.CompletionTokens = (int)(usage.OutputTokenCount ?? 0);
             chunk.TotalTokens = (int)(usage.TotalTokenCount ?? 0);
+            (chunk.CacheReadTokens, chunk.CacheWriteTokens) =
+                ExtractCacheTokenCounts(usage.AdditionalCounts);
             if (!string.IsNullOrEmpty(model))
             {
                 chunk.Model = model;
             }
+        }
+
+        internal static (int CacheReadTokens, int CacheWriteTokens) ExtractCacheTokenCounts(
+            MEAI.AdditionalPropertiesDictionary<long>? additionalCounts)
+        {
+            if (additionalCounts == null || additionalCounts.Count == 0)
+            {
+                return (0, 0);
+            }
+
+            long cacheRead = 0;
+            long cacheWrite = 0;
+            foreach (KeyValuePair<string, long> count in additionalCounts)
+            {
+                string key = count.Key;
+                if (string.IsNullOrEmpty(key) ||
+                    key.IndexOf("cache", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                bool isRead = key.IndexOf("read", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              key.IndexOf("cached", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isWrite = key.IndexOf("write", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                               key.IndexOf("creation", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                               key.IndexOf("create", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (isRead)
+                {
+                    cacheRead += Math.Max(0, count.Value);
+                }
+
+                if (isWrite)
+                {
+                    cacheWrite += Math.Max(0, count.Value);
+                }
+            }
+
+            return (ClampTokenCount(cacheRead), ClampTokenCount(cacheWrite));
+        }
+
+        private static int ClampTokenCount(long value)
+        {
+            if (value <= 0)
+            {
+                return 0;
+            }
+
+            return value > int.MaxValue ? int.MaxValue : (int)value;
         }
 
         /// <summary>

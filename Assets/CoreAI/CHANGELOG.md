@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **Prompt-cache usage verification.** Added cache read/write token counters to LLM completion/stream
+  results, `LlmUsageRecord`, `LlmUsageReported`, and turn diagnostics, with MEAI
+  `UsageDetails.AdditionalCounts` parsing for provider cache counters.
 - **Compaction by threshold.** Added `ICoreAISettings.ConversationCompactionTriggerRatio` (default `0.8`)
   and `ConversationContextBuildArgs.CompactionTriggerRatio`. Deterministic and LLM-assisted context managers
   now leave all history verbatim and do not call `SaveSummary` while estimated history tokens are below

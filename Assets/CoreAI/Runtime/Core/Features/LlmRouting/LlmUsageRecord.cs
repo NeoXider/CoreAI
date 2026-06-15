@@ -29,6 +29,12 @@ namespace CoreAI.Ai
         /// <summary>Total token count.</summary>
         public int TotalTokens { get; set; }
 
+        /// <summary>Prompt/input tokens read from a provider cache.</summary>
+        public int CacheReadTokens { get; set; }
+
+        /// <summary>Prompt/input tokens written to a provider cache.</summary>
+        public int CacheWriteTokens { get; set; }
+
         /// <summary>True when the request used streaming.</summary>
         public bool Streaming { get; set; }
 
@@ -46,6 +52,8 @@ namespace CoreAI.Ai
             PromptTokens += other.PromptTokens;
             CompletionTokens += other.CompletionTokens;
             TotalTokens += other.TotalTokens;
+            CacheReadTokens += other.CacheReadTokens;
+            CacheWriteTokens += other.CacheWriteTokens;
         }
     }
 }
