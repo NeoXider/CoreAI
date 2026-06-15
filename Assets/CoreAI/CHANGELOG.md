@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Dynamic world-state observation placement.** `AiPromptComposer.BuildRuntimeContext` now exposes the
+  per-role/global runtime context section independently, and `PlaceLiveContextInTail` can send it as the last
+  system-role chat-history message headed `## World State`; legacy flag-off placement in the system prompt is
+  unchanged.
 - **Context editing before compaction.** Added `ConversationHistoryPruner` and roadmap §7 settings
   (`EnableContextPruning`, `MaxRetainedToolResultMessages`) so prompt-history copies collapse exact
   consecutive duplicates and retain only the newest durable `tool` / `## Tool Results` observations before

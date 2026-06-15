@@ -88,7 +88,15 @@ namespace CoreAI.Ai
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
             string systemBase = _promptComposer.GetSystemPrompt(roleId);
-            systemBase = _promptComposer.AppendRuntimeContext(systemBase, task, roleId, traceId);
+            string worldState = "";
+            if (_settings.PlaceLiveContextInTail)
+            {
+                worldState = _promptComposer.BuildRuntimeContext(task, roleId, traceId);
+            }
+            else
+            {
+                systemBase = _promptComposer.AppendRuntimeContext(systemBase, task, roleId, traceId);
+            }
 
             string system = systemBase;
             bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
@@ -156,6 +164,7 @@ namespace CoreAI.Ai
                 await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
                     .ConfigureAwait(false);
             system = updatedSystem;
+            AppendWorldStateTailMessage(ref chatHistory, worldState);
             int estimatedPromptTokens = hasBudget
                 ? budget.EstimatedFixedPromptTokens + EstimateChatHistoryTokens(chatHistory)
                 : _tokenEstimator.EstimateText(system ?? "") +
@@ -657,6 +666,21 @@ namespace CoreAI.Ai
             }
 
             return (resultSystem, chatHistory);
+        }
+
+        private static void AppendWorldStateTailMessage(
+            ref List<Microsoft.Extensions.AI.ChatMessage> chatHistory,
+            string worldState)
+        {
+            if (string.IsNullOrWhiteSpace(worldState))
+            {
+                return;
+            }
+
+            chatHistory ??= new List<Microsoft.Extensions.AI.ChatMessage>(1);
+            chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.System,
+                "## World State\n" + worldState.Trim()));
         }
 
         private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse,

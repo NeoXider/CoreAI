@@ -489,6 +489,14 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class SlideRuntimeContextProvider : IAgentRuntimeContextProvider
+        {
+            public string BuildContext(AiTaskRequest request, string roleId, string traceId)
+            {
+                return "CURRENT SLIDE: 3";
+            }
+        }
+
         private sealed class StubTool : ILlmTool
         {
             public StubTool(string name)
@@ -664,6 +672,47 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task RunTaskAsync_PlaceLiveContextInTail_MovesWorldStateToLastTailMessage()
+        {
+            TestLlmClient legacyLlm = new();
+            await RunWorldStatePlacementRequestAsync(legacyLlm, placeLiveContextInTail: false);
+
+            Assert.IsNotNull(legacyLlm.LastRequest);
+            StringAssert.Contains("CURRENT SLIDE: 3", legacyLlm.LastRequest.SystemPrompt);
+            Assert.IsNull(legacyLlm.LastRequest.ChatHistory);
+
+            TestLlmClient tailLlm = new();
+            await RunWorldStatePlacementRequestAsync(tailLlm, placeLiveContextInTail: true);
+
+            Assert.IsNotNull(tailLlm.LastRequest);
+            Assert.IsFalse(
+                tailLlm.LastRequest.SystemPrompt.Contains("CURRENT SLIDE: 3"),
+                "Tail mode should keep live world-state out of the stable system prefix.");
+            Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
+            Assert.AreEqual(1, tailLlm.LastRequest.ChatHistory.Count);
+            Microsoft.Extensions.AI.ChatMessage worldState = tailLlm.LastRequest.ChatHistory[^1];
+            Assert.AreEqual(ChatRole.System, worldState.Role);
+            StringAssert.Contains("## World State", worldState.Text);
+            StringAssert.Contains("CURRENT SLIDE: 3", worldState.Text);
+
+            TestLlmClient summaryTailLlm = new();
+            await RunSummaryAndWorldStatePlacementRequestAsync(summaryTailLlm);
+
+            Assert.IsNotNull(summaryTailLlm.LastRequest);
+            Assert.IsFalse(summaryTailLlm.LastRequest.SystemPrompt.Contains("CURRENT SLIDE: 3"));
+            Assert.IsNotNull(summaryTailLlm.LastRequest.ChatHistory);
+            Assert.GreaterOrEqual(summaryTailLlm.LastRequest.ChatHistory.Count, 3);
+            Microsoft.Extensions.AI.ChatMessage summary = summaryTailLlm.LastRequest.ChatHistory[0];
+            Assert.AreEqual(ChatRole.System, summary.Role);
+            StringAssert.Contains("## Conversation Summary", summary.Text);
+            Microsoft.Extensions.AI.ChatMessage last = summaryTailLlm.LastRequest.ChatHistory[^1];
+            Assert.AreEqual(ChatRole.System, last.Role);
+            StringAssert.Contains("## World State", last.Text);
+            StringAssert.Contains("CURRENT SLIDE: 3", last.Text);
+            Assert.AreNotEqual(ChatRole.System, summaryTailLlm.LastRequest.ChatHistory[1].Role);
+        }
+
+        [Test]
         public async Task RunTaskAsync_DisableHistorySummarization_KeepsFullChatTail()
         {
             TestLlmClient llm = new();
@@ -722,6 +771,49 @@ namespace CoreAI.Tests.EditMode
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
+        }
+
+        private static async Task RunWorldStatePlacementRequestAsync(
+            TestLlmClient llm,
+            bool placeLiveContextInTail)
+        {
+            AgentMemoryPolicy policy = new();
+            policy.SetRuntimeContextProvider("Teacher", new SlideRuntimeContextProvider());
+            TestSettings settings = new() { PlaceLiveContextInTail = placeLiveContextInTail };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "slide?" });
+        }
+
+        private static async Task RunSummaryAndWorldStatePlacementRequestAsync(TestLlmClient llm)
+        {
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            policy.SetRuntimeContextProvider("Teacher", new SlideRuntimeContextProvider());
+
+            for (int i = 0; i < 10; i++)
+            {
+                string content = $"old-context-{i}-".PadRight(90, 'x');
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = content
+                });
+            }
+
+            policy.ConfigureChatHistory("Teacher", true, 60, false, 50);
+
+            TestSettings settings = new() { PlaceLiveContextInTail = true };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
         }
 
         [Test]

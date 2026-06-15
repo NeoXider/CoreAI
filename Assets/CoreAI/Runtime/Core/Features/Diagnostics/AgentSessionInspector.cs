@@ -84,14 +84,14 @@ namespace CoreAI.Diagnostics
             AgentMemoryPolicy.RoleMemoryConfig roleConfig = _memoryPolicy.GetRoleConfig(resolvedRoleId);
             string traceId = "agent-session-inspector";
             string resolvedSystem = _promptComposer.GetSystemPrompt(resolvedRoleId);
-            string systemWithRuntime = _promptComposer.AppendRuntimeContext(
-                resolvedSystem,
-                inspectRequest,
-                resolvedRoleId,
-                traceId);
+            string runtimeContext = _promptComposer.BuildRuntimeContext(inspectRequest, resolvedRoleId, traceId);
+            string systemWithRuntime = string.IsNullOrWhiteSpace(runtimeContext)
+                ? resolvedSystem
+                : resolvedSystem.TrimEnd() + "\n\n" + runtimeContext.Trim();
+            string systemPrefix = _settings.PlaceLiveContextInTail ? resolvedSystem : systemWithRuntime;
 
             string memoryText = "";
-            string systemWithMemory = systemWithRuntime;
+            string systemWithMemory = systemPrefix;
             if (_memoryPolicy.IsMemoryEnabled(resolvedRoleId) &&
                 _memoryStore != null &&
                 _memoryStore.TryLoad(resolvedRoleId, out AgentMemoryState state) &&

@@ -90,9 +90,23 @@ namespace CoreAI.Ai
         /// </summary>
         public string AppendRuntimeContext(string systemPrompt, AiTaskRequest request, string roleId, string traceId)
         {
-            if (_contextProviders == null)
+            string runtimeContext = BuildRuntimeContext(request, roleId, traceId);
+            if (runtimeContext.Length == 0)
             {
                 return systemPrompt ?? "";
+            }
+
+            return (systemPrompt ?? "").TrimEnd() + "\n\n" + runtimeContext;
+        }
+
+        /// <summary>
+        /// Builds runtime prompt context sections for a single request without appending them to a system prompt.
+        /// </summary>
+        public string BuildRuntimeContext(AiTaskRequest request, string roleId, string traceId)
+        {
+            if (_contextProviders == null)
+            {
+                return "";
             }
 
             StringBuilder sections = new();
@@ -115,10 +129,10 @@ namespace CoreAI.Ai
 
             if (sections.Length == 0)
             {
-                return systemPrompt ?? "";
+                return "";
             }
 
-            return (systemPrompt ?? "").TrimEnd() + "\n\n" + sections.ToString().TrimEnd();
+            return sections.ToString().TrimEnd();
         }
 
         private static void AppendContextSection(StringBuilder sections, string section)

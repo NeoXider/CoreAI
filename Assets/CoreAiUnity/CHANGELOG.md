@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Dynamic world-state observation placement.** The existing `PlaceLiveContextInTail` flag now also keeps
+  per-role runtime/world-state context out of the stable system prefix by appending a final system-role
+  `## World State` chat-history message after recent turns; flag-off behavior remains legacy system placement.
 - **Context editing before compaction.** Unity settings now expose `EnableContextPruning` (default on)
   and `MaxRetainedToolResultMessages` (default `3`). CoreAI prunes only the in-memory prompt history copy
   before summarization, dropping stale cross-turn `## Tool Results` observations while leaving stored chat

@@ -27,7 +27,8 @@ Reference implementations we are aligning with:
 ### 1. Transcript model + stable cacheable prefix
 - Status: **partially implemented behind `PlaceLiveContextInTail` (default off)** for `## Conversation Summary`
   only. The summary is prepended as the first tail message because it represents the evicted oldest turns;
-  recent turns already remain verbatim after it. Memory deltas and world-state tail placement are still pending.
+  recent turns already remain verbatim after it. Dynamic world-state observation (§8) is implemented as the
+  final tail message. Memory deltas are still pending.
 - Keep recent turns as **real `user`/`assistant`/`tool` messages** in the tail; do **not** rewrite the
   `system`/`tools` prefix each turn. The frozen prefix is what the provider caches.
 - Volatile, per-turn content goes at the **end**, after the cache breakpoint.
@@ -36,7 +37,9 @@ Reference implementations we are aligning with:
 - Status: **summary-to-tail implemented behind `PlaceLiveContextInTail` (default off)**. When enabled,
   `AiOrchestrator.BuildChatHistoryAsync` emits `## Conversation Summary` as the first system-role
   `ChatHistory` message, before recent verbatim turns, instead of appending it to the system prefix.
-  `## Memory` remains in the prefix for now; memory deltas/world-state are later steps near the end of the tail.
+  Runtime/world-state context from the existing per-role/global context providers is emitted as the final
+  system-role `## World State` tail message. `## Memory` remains in the prefix for now; memory deltas are a
+  later step near the end of the tail.
 
 The reason today's design breaks caching is **placement, not content**: the `## Memory` block and
 `## Conversation Summary` are injected into the **top-level `system`** (the prefix), so every memory update or
@@ -138,6 +141,11 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
   blocks once they no longer matter. Prune first (cheap, lossless-ish), summarize only when still over budget.
 
 ### 8. Dynamic world-state observation (universal / game agent — beyond Claude Code/Cursor)
+- Status: **implemented behind `PlaceLiveContextInTail` (default off)**. Existing per-role
+  `IAgentRuntimeContextProvider` and global `IAiPromptContextProvider` output is still assembled by
+  `AiPromptComposer`, but when tail placement is enabled it is appended as the final system-role
+  `## World State` chat-history message after the summary and recent verbatim turns. Flag-off behavior keeps
+  the legacy system prompt placement.
 - This agent is not just a coder: it also drives **game mechanics, NPCs, lesson briefings**. Give it, each turn,
   a compact **world-state observation** in the tail — current scene, relevant NPC/quest/player state, the
   "current slide" in a briefing, etc. This is the game analog of Claude Code's file-context, but for live state.

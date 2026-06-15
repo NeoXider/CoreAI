@@ -56,7 +56,7 @@
 - [x] **Persistent memory — incremental & versioned.** `append/str_replace/insert/delete` (agent-decided, not
       overwrite) + per-mutation versions for audit/rollback; layered scopes (global=prefix, per-user/per-session=tail).
       Pairs with RedoSchool `MVP_TODO.md` → *2.2 Персональная память ученика*.
-- [ ] **Dynamic world-state observation (universal/game agent).** Per-role provider injects a compact live
+- [x] **Dynamic world-state observation (universal/game agent).** Per-role provider injects a compact live
       world/scene/NPC/quest/slide block into the **tail** each turn (read-only observation, model still decides) —
       the game analog of Claude Code's file-context. Cache-safe because it's in the tail.
 - [ ] **Deterministic serialization + per-role policy.** Stable tool order, sorted JSON keys, no timestamps/UUIDs
