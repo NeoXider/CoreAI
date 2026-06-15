@@ -45,7 +45,7 @@
 - [x] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
       (see `Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md`); `HeuristicTokenEstimator` stays a pre-flight
       fallback only, with a higher ratio for Cyrillic/CJK.
-- [ ] **Emergency overflow fallback.** On "context exceeded", drop ~25% oldest + retry (bounded); extend
+- [x] **Emergency overflow fallback.** On "context exceeded", drop ~25% oldest + retry (bounded); extend
       `ContextRetryLevel`.
 - [ ] **Prompt-caching cooperation.** Verify provider caching via `usage.cache_read_*`; for Anthropic-style
       backends add `cache_control` breakpoints on the frozen prefix.

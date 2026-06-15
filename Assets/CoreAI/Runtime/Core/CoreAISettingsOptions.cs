@@ -10,6 +10,7 @@ namespace CoreAI
         public bool EnableMeaiDebugLogging { get; set; }
         public float LlmRequestTimeoutSeconds { get; set; } = 120f;
         public int MaxLlmRequestRetries { get; set; } = 1;
+        public int MaxContextOverflowRetries { get; set; } = 3;
         public bool EnableHttpDebugLogging { get; set; }
         public bool LogTokenUsage { get; set; } = true;
         public bool LogLlmLatency { get; set; } = true;
@@ -56,6 +57,7 @@ namespace CoreAI
                 EnableMeaiDebugLogging = source.EnableMeaiDebugLogging,
                 LlmRequestTimeoutSeconds = source.LlmRequestTimeoutSeconds,
                 MaxLlmRequestRetries = source.MaxLlmRequestRetries,
+                MaxContextOverflowRetries = source.MaxContextOverflowRetries,
                 EnableHttpDebugLogging = source.EnableHttpDebugLogging,
                 LogTokenUsage = source.LogTokenUsage,
                 LogLlmLatency = source.LogLlmLatency,

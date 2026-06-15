@@ -5,14 +5,14 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Reserves completion headroom plus fixed prompt, assigns remaining tokens to chat history.
-    /// On <see cref="ContextBudgetRequest.ContextRetryLevel"/> &gt;= 1, halves history budget (minimum floor).
+    /// On each <see cref="ContextBudgetRequest.ContextRetryLevel"/>, drops roughly 25% more oldest history.
     /// </summary>
     public sealed class DefaultContextBudgetPolicy : IContextBudgetPolicy
     {
         private const int MinHistoryBudget = 32;
-        private const int AbsoluteMinHistoryBudgetOnRetry = 16;
         private const int MinCompletionReserve = 64;
         private const int SlackDefault = 64;
+        private const double ContextRetryHistoryFactor = 0.75d;
 
         /// <inheritdoc />
         public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator)
@@ -44,7 +44,8 @@ namespace CoreAI.Ai
             int historyBudget = Math.Max(MinHistoryBudget, usable);
             if (request.ContextRetryLevel >= 1)
             {
-                historyBudget = Math.Max(AbsoluteMinHistoryBudgetOnRetry, historyBudget / 2);
+                double retryFactor = Math.Pow(ContextRetryHistoryFactor, request.ContextRetryLevel);
+                historyBudget = Math.Max(MinHistoryBudget, (int)Math.Round(historyBudget * retryFactor));
             }
 
             return new ContextBudget(

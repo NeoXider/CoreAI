@@ -510,6 +510,10 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         "Maximum Lua repair attempts for the Programmer role."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("maxToolCallRetries"),
                     new GUIContent("Tool Call Retries", "Maximum consecutive failed tool calls before stopping."));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("maxContextOverflowRetries"),
+                    new GUIContent(
+                        "Context Overflow Retries",
+                        "Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history. 0 disables overflow recovery."));
             }
 
             EditorGUILayout.EndFoldoutHeaderGroup();

@@ -82,8 +82,10 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   `Estimated = TotalTokens == 0` honest. Preserve the `ILlmUsageSink` contract — do not replace the sink.
 
 ### 5. Emergency overflow fallback
-- On provider "context length exceeded" error: drop ~25% of the oldest context and retry (bounded, e.g. 3x).
-  Extends today's `ContextRetryLevel` halving into the Cline/Roo recovery pattern.
+- **Implemented:** on provider "context length exceeded" error, `AiOrchestrator.RunTaskAsync` rebuilds the
+  request with a tighter `ContextRetryLevel` and retries up to `ICoreAISettings.MaxContextOverflowRetries`
+  times (default 3, 0 disables). Each retry level applies a `0.75^level` history-budget factor, dropping
+  roughly 25% more of the oldest context per pass, then fails normally after the bounded attempts.
 
 ### 6. Persistent memory — incremental, versioned, boundary-consolidated
 Today the `memory` tool is coarse — `write / append / clear` (confirmed via the Agent Session Inspector).

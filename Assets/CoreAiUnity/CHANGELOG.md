@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Emergency context-overflow recovery.** CoreAI Unity exposes `MaxContextOverflowRetries` on
+  `CoreAISettingsAsset` (default `3`, `0` disables). The orchestrator now retries bounded
+  context-length-overflow failures across multiple `ContextRetryLevel` passes, with each pass using the
+  portable `0.75^level` history-budget rule.
 - **Token accounting calibration.** CoreAI Unity now registers the portable `CalibratingTokenEstimator` as
   the shared pre-flight token estimator, exposes `EnableTokenCalibration` on `CoreAISettingsAsset` (default
   true), and reports the current estimate scale in Agent Session Inspector diagnostics.

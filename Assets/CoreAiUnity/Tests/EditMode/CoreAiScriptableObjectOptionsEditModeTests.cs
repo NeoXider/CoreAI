@@ -77,6 +77,7 @@ namespace CoreAI.Tests.EditMode
                     EnableMeaiDebugLogging = true,
                     LlmRequestTimeoutSeconds = 77f,
                     MaxLlmRequestRetries = 3,
+                    MaxContextOverflowRetries = 2,
                     EnableHttpDebugLogging = true,
                     LogTokenUsage = false,
                     ContextWindowTokens = 16384,
@@ -99,6 +100,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(5, options.MaxLuaRepairRetries);
                 Assert.IsTrue(options.EnableMeaiDebugLogging);
                 Assert.AreEqual(77f, options.LlmRequestTimeoutSeconds);
+                Assert.AreEqual(2, options.MaxContextOverflowRetries);
                 Assert.AreEqual(16384, options.ContextWindowTokens);
                 Assert.AreEqual("Prefix", options.UniversalSystemPromptPrefix);
                 Assert.AreEqual("Contract", options.ToolContractAdditionalInstructions);

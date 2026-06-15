@@ -37,6 +37,7 @@
         private static bool? _enableMeaiDebugLogging;
         private static int? _llmRequestTimeoutSeconds;
         private static int? _maxLlmRequestRetries;
+        private static int? _maxContextOverflowRetries;
         private static bool? _enableHttpDebugLogging;
         private static bool? _logTokenUsage;
         private static bool? _logLlmLatency;
@@ -70,6 +71,7 @@
         private const bool DefaultEnableMeaiDebugLogging = false;
         private const int DefaultLlmRequestTimeoutSeconds = 300;
         private const int DefaultMaxLlmRequestRetries = 1;
+        private const int DefaultMaxContextOverflowRetries = 3;
         private const bool DefaultEnableHttpDebugLogging = false;
         private const bool DefaultLogTokenUsage = true;
         private const bool DefaultLogLlmLatency = true;
@@ -136,6 +138,16 @@
         {
             get => _maxLlmRequestRetries ?? Instance?.MaxLlmRequestRetries ?? DefaultMaxLlmRequestRetries;
             set => _maxLlmRequestRetries = value;
+        }
+
+        /// <summary>
+        /// Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history (roadmap §5). 0 disables overflow recovery.
+        /// </summary>
+        public static int MaxContextOverflowRetries
+        {
+            get => _maxContextOverflowRetries ??
+                   Instance?.MaxContextOverflowRetries ?? DefaultMaxContextOverflowRetries;
+            set => _maxContextOverflowRetries = value;
         }
 
         /// <summary>
@@ -373,6 +385,7 @@
                 _enableMeaiDebugLogging = null;
                 _llmRequestTimeoutSeconds = null;
                 _maxLlmRequestRetries = null;
+                _maxContextOverflowRetries = null;
                 _enableHttpDebugLogging = null;
                 _logTokenUsage = null;
                 _logLlmLatency = null;

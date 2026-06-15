@@ -433,6 +433,7 @@ namespace CoreAI.Tests.EditMode
             public float Temperature => 0.7f;
             public int ContextWindowTokens => 8192;
             public int MaxLlmRequestRetries => 1;
+            public int MaxContextOverflowRetries { get; set; } = 3;
             public float LlmRequestTimeoutSeconds => 30f;
             public int MaxToolCallRetries => 1;
             public bool AllowDuplicateToolCalls => false;
@@ -499,6 +500,19 @@ namespace CoreAI.Tests.EditMode
             public string Description => "stub";
             public string ParametersSchema => "{}";
             public bool AllowDuplicates => false;
+        }
+
+        private sealed class RecordingBudgetPolicy : IContextBudgetPolicy
+        {
+            private readonly DefaultContextBudgetPolicy _inner = new();
+
+            public List<int> RetryLevels { get; } = new();
+
+            public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator)
+            {
+                RetryLevels.Add(request.ContextRetryLevel);
+                return _inner.Compute(request, estimator);
+            }
         }
 
         [Test]
@@ -901,9 +915,19 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
         }
 
-        private sealed class ContextFailThenOkLlm : ILlmClient
+        private sealed class FailsThenOkLlm : ILlmClient
         {
-            public int Calls { get; private set; }
+            private readonly int _failuresBeforeSuccess;
+            private readonly LlmErrorCode _failureCode;
+
+            public FailsThenOkLlm(int failuresBeforeSuccess, LlmErrorCode failureCode)
+            {
+                _failuresBeforeSuccess = failuresBeforeSuccess;
+                _failureCode = failureCode;
+            }
+
+            public List<LlmCompletionRequest> Requests { get; } = new();
+            public int Calls => Requests.Count;
 
             public void SetTools(IReadOnlyList<ILlmTool> tools)
             {
@@ -912,14 +936,14 @@ namespace CoreAI.Tests.EditMode
             public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
             {
-                Calls++;
-                if (Calls == 1)
+                Requests.Add(request);
+                if (Calls <= _failuresBeforeSuccess)
                 {
                     return Task.FromResult(new LlmCompletionResult
                     {
                         Ok = false,
-                        Error = "context_length_exceeded",
-                        ErrorCode = LlmErrorCode.ContextLengthExceeded
+                        Error = _failureCode.ToString(),
+                        ErrorCode = _failureCode
                     });
                 }
 
@@ -928,11 +952,12 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task RunTaskAsync_RetriesOnce_OnContextLengthExceeded()
+        public async Task RunTaskAsync_RetriesTwice_OnContextLengthExceeded()
         {
-            ContextFailThenOkLlm llm = new();
+            FailsThenOkLlm llm = new(2, LlmErrorCode.ContextLengthExceeded);
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
+            RecordingBudgetPolicy budgetPolicy = new();
             for (int i = 0; i < 24; i++)
             {
                 memory.FakeHistory.Add(new Ai.ChatMessage
@@ -949,12 +974,60 @@ namespace CoreAI.Tests.EditMode
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
                 memory, policy, null, null, settings,
-                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()),
+                contextBudgetPolicy: budgetPolicy);
+
+            string content = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "role_ctx", Hint = "Hi" });
+
+            Assert.AreEqual(3, llm.Calls);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2 }, budgetPolicy.RetryLevels);
+            Assert.AreEqual("after-compact", content);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_GivesUpAfterMaxContextOverflowRetries()
+        {
+            FailsThenOkLlm llm = new(2, LlmErrorCode.ContextLengthExceeded);
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            RecordingBudgetPolicy budgetPolicy = new();
+            policy.ConfigureChatHistory("role_ctx", true, 2048, false, 50);
+            TestSettings settings = new() { MaxContextOverflowRetries = 1 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()),
+                contextBudgetPolicy: budgetPolicy);
 
             string content = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "role_ctx", Hint = "Hi" });
 
             Assert.AreEqual(2, llm.Calls);
-            Assert.AreEqual("after-compact", content);
+            CollectionAssert.AreEqual(new[] { 0, 1 }, budgetPolicy.RetryLevels);
+            Assert.IsNull(content);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_DoesNotRetry_NonOverflowFailure()
+        {
+            FailsThenOkLlm llm = new(1, LlmErrorCode.ProviderError);
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            RecordingBudgetPolicy budgetPolicy = new();
+            policy.ConfigureChatHistory("role_ctx", true, 2048, false, 50);
+            TestSettings settings = new() { MaxContextOverflowRetries = 3 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()),
+                contextBudgetPolicy: budgetPolicy);
+
+            string content = await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "role_ctx", Hint = "Hi" });
+
+            Assert.AreEqual(1, llm.Calls);
+            CollectionAssert.AreEqual(new[] { 0 }, budgetPolicy.RetryLevels);
+            Assert.IsNull(content);
         }
 
         [Test]

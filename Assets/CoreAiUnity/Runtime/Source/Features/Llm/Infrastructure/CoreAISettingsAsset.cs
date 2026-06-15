@@ -229,6 +229,12 @@ namespace CoreAI.Infrastructure.Llm
         [Min(1)]
         private int maxLlmRequestRetries = 1;
 
+        [Tooltip(
+            "Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history (roadmap §5). 0 disables overflow recovery.")]
+        [SerializeField]
+        [Min(0)]
+        private int maxContextOverflowRetries = 3;
+
         [Tooltip("Default context-window hint in tokens.")] [SerializeField] [Min(256)]
         private int contextWindowTokens = CoreAISettings.DefaultContextWindowTokens;
 
@@ -617,6 +623,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Clamp for decorator-level HTTP retries.</summary>
         public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 1 : maxLlmRequestRetries;
 
+        /// <inheritdoc cref="ICoreAISettings.MaxContextOverflowRetries"/>
+        public int MaxContextOverflowRetries => maxContextOverflowRetries < 0 ? 0 : maxContextOverflowRetries;
+
         /// <summary>Estimated context-window tokens exposed to budgeting.</summary>
         public int ContextWindowTokens => contextWindowTokens < 256
             ? CoreAISettings.DefaultContextWindowTokens
@@ -744,6 +753,8 @@ namespace CoreAI.Infrastructure.Llm
             enableMeaiDebugLogging = options.EnableMeaiDebugLogging;
             llmRequestTimeoutSeconds = options.LlmRequestTimeoutSeconds < 0f ? 120f : options.LlmRequestTimeoutSeconds;
             maxLlmRequestRetries = options.MaxLlmRequestRetries < 1 ? 1 : options.MaxLlmRequestRetries;
+            maxContextOverflowRetries =
+                options.MaxContextOverflowRetries < 0 ? 0 : options.MaxContextOverflowRetries;
             enableHttpDebugLogging = options.EnableHttpDebugLogging;
             logTokenUsage = options.LogTokenUsage;
             logLlmLatency = options.LogLlmLatency;

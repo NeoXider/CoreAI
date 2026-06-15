@@ -204,9 +204,10 @@ namespace CoreAI.Ai
             int? maxOutputTokens;
             LlmCompletionResult result = null;
             int contextPass = 0;
-            bool contextCompactionApplied = false;
+            int contextOverflowPasses = 0;
+            int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
 
-            // Single invocation for non-context failures; one optional tighter-history rebuild when the
+            // Single invocation for non-context failures; bounded tighter-history rebuilds when the
             // provider reports context-length overflow. Network retries remain in LoggingLlmClientDecorator.
             try
             {
@@ -263,7 +264,21 @@ namespace CoreAI.Ai
                         }
                     }
 
-                    if (contextCompactionApplied)
+                    bool isContextOverflow = result != null &&
+                                             result.ErrorCode == LlmErrorCode.ContextLengthExceeded;
+                    bool canRetryContextOverflow = isContextOverflow &&
+                                                   _compactionCoordinator.ShouldRetryAfterContextOverflow(
+                                                       result,
+                                                       contextOverflowPasses,
+                                                       maxContextOverflowRetries);
+                    if (canRetryContextOverflow)
+                    {
+                        contextOverflowPasses++;
+                        contextPass = contextOverflowPasses;
+                        continue;
+                    }
+
+                    if (contextOverflowPasses > 0 && isContextOverflow)
                     {
                         RecordTrace(bundle, result, null, result?.Error ?? "empty response");
                         string compactionFail = UserFacingChatFailureOrNull(task, result?.Error ?? "empty response");
@@ -273,15 +288,6 @@ namespace CoreAI.Ai
                         }
 
                         return null;
-                    }
-
-                    if (result != null &&
-                        _compactionCoordinator.ShouldRetryOnceAfterContextOverflow(result,
-                            contextCompactionApplied))
-                    {
-                        contextCompactionApplied = true;
-                        contextPass = 1;
-                        continue;
                     }
 
                     RecordTrace(bundle, result, null, result?.Error ?? "empty response");

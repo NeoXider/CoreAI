@@ -47,6 +47,11 @@ namespace CoreAI
         /// </summary>
         int MaxLlmRequestRetries { get; }
 
+        /// <summary>
+        /// Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history (roadmap §5). 0 disables overflow recovery.
+        /// </summary>
+        int MaxContextOverflowRetries => 3;
+
         /// <summary>Low-level HTTP request/response logging.</summary>
         bool EnableHttpDebugLogging { get; }
 

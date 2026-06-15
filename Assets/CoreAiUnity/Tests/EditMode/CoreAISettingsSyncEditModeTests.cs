@@ -37,6 +37,7 @@ namespace CoreAI.Tests.EditMode
             {
                 MaxLuaRepairRetries = 99,
                 MaxToolCallRetries = 77,
+                MaxContextOverflowRetries = 2,
                 EnableMeaiDebugLogging = true,
                 ContextWindowTokens = 12345,
                 UniversalSystemPromptPrefix = "TEST PREFIX",
@@ -55,6 +56,7 @@ namespace CoreAI.Tests.EditMode
             // Assert: static properties delegate to Instance.
             Assert.AreEqual(99, CoreAISettings.MaxLuaRepairRetries);
             Assert.AreEqual(77, CoreAISettings.MaxToolCallRetries);
+            Assert.AreEqual(2, CoreAISettings.MaxContextOverflowRetries);
             Assert.AreEqual(true, CoreAISettings.EnableMeaiDebugLogging);
             Assert.AreEqual(12345, CoreAISettings.ContextWindowTokens);
             Assert.AreEqual("TEST PREFIX", CoreAISettings.UniversalSystemPromptPrefix);
@@ -117,6 +119,7 @@ namespace CoreAI.Tests.EditMode
         {
             // Without Instance, defaults are used.
             Assert.AreEqual(3, CoreAISettings.MaxLuaRepairRetries);
+            Assert.AreEqual(3, CoreAISettings.MaxContextOverflowRetries);
             Assert.AreEqual(0.1f, CoreAISettings.Temperature);
             Assert.IsFalse(CoreAISettings.OverrideTemperature);
             Assert.IsTrue(CoreAISettings.EnableTokenCalibration);

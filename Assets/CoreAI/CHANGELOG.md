@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Emergency context-overflow recovery.** `AiOrchestrator.RunTaskAsync` now performs bounded
+  multi-pass recovery for `LlmErrorCode.ContextLengthExceeded`: `ICoreAISettings.MaxContextOverflowRetries`
+  defaults to `3` (`0` disables), retry passes advance `ContextBudgetRequest.ContextRetryLevel`, and
+  `DefaultContextBudgetPolicy` applies a `0.75^level` history-budget factor instead of the old one-shot
+  halving.
 - **Token accounting calibration.** Added a portable `CalibratingTokenEstimator` registered as the default
   `ITokenEstimator`, with Latin-preserving script-aware estimates, higher Cyrillic/CJK density, and bounded
   EMA calibration from observed real prompt-token usage behind `ICoreAISettings.EnableTokenCalibration`
