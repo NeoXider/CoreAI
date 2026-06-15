@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.4.0 - 2026-06-15
+
+> Context management overhaul (Claude Code / Cline / Kilo-grade) + tool-call/memory/Lua fixes. Depends on `com.nexoider.coreai` 4.4.0. See entries below.
+
 - GameMaster Lua mechanics test now advertises the logic_* slot API, matching the crafting test.
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
 - **Tool result memory defaults.** Built-in `Programmer` and `CoreMechanicAI` now default to full tool-result retention; other built-in roles keep compact summaries.

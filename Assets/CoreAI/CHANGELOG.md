@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 4.4.0 - 2026-06-15
+
+> Context management overhaul (Claude Code / Cline / Kilo-grade): prefix/tail placement, threshold compaction, tool-result policy, API-token calibration, bounded overflow recovery, context pruning, world-state tail, deterministic prefix, prompt-cache verification + tool-call/memory fixes. See entries below.
+
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
 - **Tool result memory defaults.** Built-in `Programmer` and `CoreMechanicAI` now default to `ToolResultMemoryPolicy.Full`; other built-in roles keep `CompactSummary`.
 - **Prompt-cache usage verification.** Added cache read/write token counters to LLM completion/stream
