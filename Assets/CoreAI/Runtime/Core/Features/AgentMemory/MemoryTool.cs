@@ -106,7 +106,7 @@ namespace CoreAI.Ai
                         return Task.FromResult(SaveMutation(action, newMemory, "Content appended"));
 
                     case "clear":
-                        return Task.FromResult(SaveMutation(action, "", "Memory cleared"));
+                        return Task.FromResult(ClearMemory());
 
                     case "str_replace":
                         return Task.FromResult(ExecuteStrReplace(old_text, new_text ?? content, replace_all));
@@ -253,6 +253,26 @@ namespace CoreAI.Ai
                 Message = $"DONE: {messagePrefix} for {_roleId}.",
                 Version = snapshot.Version,
                 MemoryLength = state.Memory.Length
+            });
+        }
+
+        private string ClearMemory()
+        {
+            // Clear is destructive and not version-tracked because it removes the role key.
+            // Undoable clear would need a separate restore feature.
+            _store.Clear(_roleId);
+
+            if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+            {
+                Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory cleared for {_roleId}",
+                    LogTag.Memory);
+            }
+
+            return SerializeResult(new MemoryResult
+            {
+                Success = true,
+                Message = $"DONE: Memory cleared for {_roleId}.",
+                MemoryLength = 0
             });
         }
 

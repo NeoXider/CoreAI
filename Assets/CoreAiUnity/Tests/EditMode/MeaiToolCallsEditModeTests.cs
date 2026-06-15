@@ -71,8 +71,7 @@ namespace CoreAI.Tests.EditMode
             MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
 
             Assert.IsTrue(result.Success);
-            Assert.IsTrue(store.States.ContainsKey("TestRole"));
-            Assert.AreEqual("", store.States["TestRole"].Memory);
+            Assert.IsFalse(store.TryLoad("TestRole", out _), "Clear removes the role memory row.");
         }
 
         [Test]

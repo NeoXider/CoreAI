@@ -255,19 +255,15 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             try
             {
+                _ephemeralHistory.Remove(roleId);
+                _transcripts.Remove(roleId);
+                _loadedRoles.Remove(roleId);
+
                 string path = GetPath(roleId);
                 if (File.Exists(path))
                 {
-                    string existingJson = File.ReadAllText(path);
-                    Persisted p = JsonUtility.FromJson<Persisted>(existingJson);
-                    if (p != null)
-                    {
-                        p.memory = "";
-                        p.lastSystemPrompt =
-                            ""; // Clear previous system prompt cache entry to avoid leaking across sessions.
-                        AtomicWriteAllText(path, JsonUtility.ToJson(p, true));
-                        PersistFsForWebGl();
-                    }
+                    File.Delete(path);
+                    PersistFsForWebGl();
                 }
             }
             catch (Exception ex)

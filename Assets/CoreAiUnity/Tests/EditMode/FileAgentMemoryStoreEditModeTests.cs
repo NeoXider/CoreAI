@@ -12,7 +12,8 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// Disk layout: <see cref="FileAgentMemoryStore"/> keeps MemoryTool text in <c>memory</c> and chat in
-    /// <c>chatHistoryJson</c>. Clearing one must not wipe the other (prod chat UI vs long-term facts).
+    /// <c>chatHistoryJson</c>. Chat-history clear preserves long-term memory; memory clear removes the
+    /// role file to match <see cref="IAgentMemoryStore.Clear"/>.
     /// </summary>
     public sealed class FileAgentMemoryStoreEditModeTests
     {
@@ -81,7 +82,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Clear_MemoryTool_OnDisk_Preserves_ChatHistory_Field()
+        public void Clear_MemoryTool_OnDisk_Removes_Role_Row()
         {
             FileAgentMemoryStore store = new();
             store.Save(_roleId, new AgentMemoryState { Memory = "will_clear", LastSystemPrompt = "s" });
@@ -91,12 +92,10 @@ namespace CoreAI.Tests.EditMode
 
             // New store instance forces reload from disk (same process would keep ephemeral cache).
             FileAgentMemoryStore store2 = new();
-            ChatMessage[] history = store2.GetChatHistory(_roleId);
-            Assert.GreaterOrEqual(history.Length, 1, "Chat lines should survive memory Clear() on disk");
-            Assert.That(history[0].Content, Does.Contain("line1"));
-
-            Assert.IsTrue(store2.TryLoad(_roleId, out AgentMemoryState mem));
-            Assert.IsTrue(string.IsNullOrEmpty(mem.Memory), "Memory field should be empty after Clear()");
+            Assert.IsFalse(store2.TryLoad(_roleId, out _), "Clear() should delete the role memory row.");
+            Assert.AreEqual(0, store2.GetChatHistory(_roleId).Length,
+                "Clear() removes all persisted state for the role.");
+            Assert.IsFalse(File.Exists(_filePath), "Clear() should remove the role file.");
         }
 
         [Serializable]
