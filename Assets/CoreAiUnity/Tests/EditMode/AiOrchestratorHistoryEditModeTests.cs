@@ -82,6 +82,34 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class ToolTraceLlmClient : ILlmClient
+        {
+            private readonly Queue<LlmCompletionResult> _results;
+
+            public ToolTraceLlmClient(params LlmCompletionResult[] results)
+            {
+                _results = new Queue<LlmCompletionResult>(results ?? Array.Empty<LlmCompletionResult>());
+            }
+
+            public LlmCompletionRequest LastRequest { get; private set; }
+
+            public void SetTools(IReadOnlyList<ILlmTool> tools)
+            {
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                LastRequest = request;
+                if (_results.Count > 0)
+                {
+                    return Task.FromResult(_results.Dequeue());
+                }
+
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "Next" });
+            }
+        }
+
         private sealed class TestMemoryStore : IAgentMemoryStore
         {
             public List<Ai.ChatMessage> FakeHistory { get; set; } = new();
@@ -258,6 +286,131 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(sawFallbackBeforeDone, "Fallback text must arrive before IsDone for collect helpers.");
             StringAssert.Contains("Tool call failed: manage_mods", text);
             StringAssert.Contains("attempt to index a function value", text);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_PersistsToolResults_ByPolicy_AndReplaysAsUserHistory()
+        {
+            LlmToolCallTrace[] traces =
+            {
+                new("lookup_inventory", true, 3d, "native", "{\"message\":\"found sword\"}"),
+                new("lookup_inventory", true, 4d, "native", "{\"message\":\"found sword\"}"),
+                new("write_memory", false, 5d, "native", "{\"error\":\"permission denied\"}")
+            };
+
+            TestMemoryStore compactMemory = new();
+            ToolTraceLlmClient compactLlm = new(
+                new LlmCompletionResult
+                {
+                    Ok = true,
+                    Content = "Done",
+                    ExecutedToolCalls = traces
+                },
+                new LlmCompletionResult { Ok = true, Content = "Next" });
+            AgentMemoryPolicy compactPolicy = BuildToolResultPolicy("tool_role");
+            AiOrchestrator compactOrchestrator = BuildOrchestrator(compactLlm, compactMemory, compactPolicy);
+
+            await compactOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "tool_role", Hint = "tools" });
+
+            Assert.AreEqual(3, compactMemory.Appended.Count);
+            Assert.AreEqual("tool", compactMemory.Appended[2].Role);
+            string compactToolMessage = compactMemory.Appended[2].Content;
+            StringAssert.Contains("## Tool Results", compactToolMessage);
+            StringAssert.Contains("lookup_inventory", compactToolMessage);
+            StringAssert.Contains("write_memory", compactToolMessage);
+            Assert.AreEqual(1, CountOccurrences(compactToolMessage, "lookup_inventory"),
+                "Duplicate tool traces in one turn should be collapsed.");
+
+            foreach ((string role, string content, bool _) in compactMemory.Appended)
+            {
+                compactMemory.FakeHistory.Add(new Ai.ChatMessage { Role = role, Content = content });
+            }
+
+            await compactOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "tool_role", Hint = "next" });
+
+            Assert.IsNotNull(compactLlm.LastRequest.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage replayedToolMessage = null;
+            foreach (Microsoft.Extensions.AI.ChatMessage message in compactLlm.LastRequest.ChatHistory)
+            {
+                if ((message.Text ?? "").Contains("## Tool Results"))
+                {
+                    replayedToolMessage = message;
+                    break;
+                }
+            }
+
+            Assert.IsNotNull(replayedToolMessage);
+            Assert.AreEqual(ChatRole.User, replayedToolMessage.Role,
+                "Stored tool results must replay as provider-safe user observations.");
+
+            TestMemoryStore errorsOnlyMemory = new();
+            ToolTraceLlmClient errorsOnlyLlm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = "Done",
+                ExecutedToolCalls = traces
+            });
+            AgentMemoryPolicy errorsOnlyPolicy = BuildToolResultPolicy("tool_role");
+            errorsOnlyPolicy.SetToolResultMemoryPolicy("tool_role", ToolResultMemoryPolicy.ErrorsOnly);
+            AiOrchestrator errorsOnlyOrchestrator =
+                BuildOrchestrator(errorsOnlyLlm, errorsOnlyMemory, errorsOnlyPolicy);
+
+            await errorsOnlyOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "tool_role", Hint = "tools" });
+
+            Assert.AreEqual(3, errorsOnlyMemory.Appended.Count);
+            string errorsOnlyToolMessage = errorsOnlyMemory.Appended[2].Content;
+            StringAssert.Contains("write_memory", errorsOnlyToolMessage);
+            StringAssert.DoesNotContain("lookup_inventory", errorsOnlyToolMessage);
+
+            TestMemoryStore noneMemory = new();
+            ToolTraceLlmClient noneLlm = new(new LlmCompletionResult
+            {
+                Ok = true,
+                Content = "Done",
+                ExecutedToolCalls = traces
+            });
+            AgentMemoryPolicy nonePolicy = BuildToolResultPolicy("tool_role");
+            nonePolicy.SetToolResultMemoryPolicy("tool_role", ToolResultMemoryPolicy.None);
+            AiOrchestrator noneOrchestrator = BuildOrchestrator(noneLlm, noneMemory, nonePolicy);
+
+            await noneOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "tool_role", Hint = "tools" });
+
+            Assert.AreEqual(2, noneMemory.Appended.Count);
+            Assert.IsFalse(noneMemory.Appended.Exists(m => m.Role == "tool"));
+        }
+
+        private static AgentMemoryPolicy BuildToolResultPolicy(string roleId)
+        {
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory(roleId, true, 8192, false, 10);
+            policy.DisableMemoryTool(roleId);
+            policy.SetToolsForRole(roleId, Array.Empty<ILlmTool>());
+            return policy;
+        }
+
+        private static AiOrchestrator BuildOrchestrator(
+            ILlmClient llm,
+            TestMemoryStore memory,
+            AgentMemoryPolicy policy)
+        {
+            TestSettings settings = new();
+            return new AiOrchestrator(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings);
+        }
+
+        private static int CountOccurrences(string value, string needle)
+        {
+            int count = 0;
+            int index = 0;
+            while ((index = value.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += needle.Length;
+            }
+
+            return count;
         }
 
         private sealed class TestSink : IAiGameCommandSink

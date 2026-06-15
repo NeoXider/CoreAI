@@ -60,6 +60,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(4096, snapshot.RoleConfig.ContextTokens);
             Assert.AreEqual(12, snapshot.RoleConfig.MaxChatHistoryMessages);
             Assert.AreEqual(512, snapshot.RoleConfig.MaxOutputTokens);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary, snapshot.RoleConfig.ToolResultMemory);
             Assert.AreEqual(4096, snapshot.Budget.ContextWindowTokens);
             Assert.AreEqual(512, snapshot.Budget.ReservedForCompletionTokens);
             Assert.Greater(snapshot.Budget.EstimatedSystemTokens, 0);
@@ -101,6 +102,7 @@ namespace CoreAI.Tests.EditMode
                     ContextTokens = 4096,
                     MaxChatHistoryMessages = 12,
                     MaxOutputTokens = 512,
+                    ToolResultMemory = ToolResultMemoryPolicy.CompactSummary,
                     Temperature = 0.1f,
                     UseLlmContextCompaction = true
                 },

@@ -56,6 +56,7 @@ namespace CoreAI.Diagnostics
             sb.AppendLine($"ContextTokens: {RoleConfig.ContextTokens}");
             sb.AppendLine($"MaxChatHistoryMessages: {RoleConfig.MaxChatHistoryMessages}");
             sb.AppendLine($"UseMemoryTool: {RoleConfig.UseMemoryTool}");
+            sb.AppendLine($"ToolResultMemory: {RoleConfig.ToolResultMemory}");
             sb.AppendLine($"UseLlmContextCompaction: {RoleConfig.UseLlmContextCompaction}");
             sb.AppendLine($"MaxOutputTokens: {NullableToString(RoleConfig.MaxOutputTokens)}");
             sb.AppendLine($"Temperature: {NullableToString(RoleConfig.Temperature)}");
@@ -224,6 +225,7 @@ namespace CoreAI.Diagnostics
         public int ContextTokens;
         public int MaxChatHistoryMessages;
         public int? MaxOutputTokens;
+        public ToolResultMemoryPolicy ToolResultMemory;
         public float? Temperature;
         public bool UseLlmContextCompaction;
     }

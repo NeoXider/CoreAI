@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Tool result memory policy.** Core chat history can now persist executed tool results per role
+  (`None`, `ErrorsOnly`, `CompactSummary`, `Full`) with default compact summaries, intra-turn
+  de-duplication, and provider-safe replay as user observations.
 - **Context prefix stability flag.** `CoreAISettingsAsset` now exposes `PlaceLiveContextInTail` (default
   off), letting `## Conversation Summary` travel as the first system-role chat-history message before
   recent verbatim turns while preserving legacy prefix placement unless opted in.

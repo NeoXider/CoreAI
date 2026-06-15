@@ -61,10 +61,12 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   **oldest** turns; keep the most recent N turns verbatim while they fit.
 - Re-summarize infrequently so the cached prefix survives across turns.
 
-### 3. Tool-result hygiene before truncation (`ToolResultMemoryPolicy`)
-- New per-role policy: `None | ErrorsOnly | CompactSummary | Full` (default `CompactSummary` for chat agents).
-- Persist tool-call results into history per policy. Remove **outdated/duplicate** results first
-  (e.g. superseded file reads) — Cline's "narrative integrity" approach — before dropping any conversational turns.
+### 3. Tool-result hygiene before truncation (`ToolResultMemoryPolicy`) - implemented
+- New per-role policy: `None | ErrorsOnly | CompactSummary | Full` (default `CompactSummary`).
+- Tool-call results are persisted into history per policy as one `tool` chat-history entry headed
+  `## Tool Results`; stored tool entries replay as provider-safe user observations.
+- Intra-turn duplicate results are collapsed by tool name + normalized detail. Cross-turn pruning of
+  outdated/superseded results remains planned for §7.
 - **Truncate large outputs** (head/tail, byte/line cap) instead of dropping them whole.
 
 ### 4. Token accounting from the API, estimate only as fallback

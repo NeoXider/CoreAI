@@ -534,6 +534,7 @@ namespace CoreAI.Diagnostics
                 ContextTokens = config.ContextTokens,
                 MaxChatHistoryMessages = config.MaxChatHistoryMessages,
                 MaxOutputTokens = config.MaxOutputTokens,
+                ToolResultMemory = config.ToolResultMemory,
                 Temperature = config.Temperature,
                 UseLlmContextCompaction = config.UseLlmContextCompaction
             };

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **Tool result memory policy.** Added per-role `ToolResultMemoryPolicy` with default
+  `CompactSummary`; executed tool results can now persist into chat history as one `tool` entry and
+  replay as provider-safe user observations on later turns.
 - **Context prefix stability flag.** Added `ICoreAISettings.PlaceLiveContextInTail` (default `false`) so
   `## Conversation Summary` can be sent as the first system-role chat-history message, before recent
   verbatim turns, instead of rewriting the system prompt prefix; legacy placement remains the default.

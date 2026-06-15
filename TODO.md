@@ -39,8 +39,9 @@
       (`AiOrchestrator.BuildChatHistoryAsync`, `DeterministicConversationContextManager`).
 - [ ] **Compaction by threshold, not every turn.** Anchored summary replaces only the oldest turns when near the
       limit; re-summarize infrequently so the cached prefix survives.
-- [ ] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
-      persist tool results into history, drop outdated/duplicate results first, head/tail-truncate large outputs.
+- [x] **`ToolResultMemoryPolicy { None | ErrorsOnly | CompactSummary | Full }`** (per-role, default `CompactSummary`):
+      persist tool results into history, collapse intra-turn duplicate results, head/tail-truncate large outputs.
+      Cross-turn pruning of outdated/superseded results remains in *Context editing (prune)*.
 - [ ] **Token accounting from API.** Calibrate chars→tokens from real `usage.prompt_tokens`
       (see `Assets/CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md`); `HeuristicTokenEstimator` stays a pre-flight
       fallback only, with a higher ratio for Cyrillic/CJK.

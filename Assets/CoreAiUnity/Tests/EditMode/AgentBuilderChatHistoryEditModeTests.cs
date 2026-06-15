@@ -85,6 +85,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(config.WithChatHistory);
             Assert.IsFalse(config.PersistChatHistoryBetweenSessions);
             Assert.AreEqual(30, config.MaxChatHistoryMessages);
+            Assert.AreEqual(ToolResultMemoryPolicy.CompactSummary, config.ToolResultMemory);
         }
 
         [Test]
@@ -180,6 +181,21 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(config.WithChatHistory);
             Assert.AreEqual(CoreAISettings.ContextWindowTokens, config.ContextWindowTokens);
             Assert.IsTrue(config.PersistChatHistoryBetweenSessions);
+        }
+
+        [Test]
+        public void WithToolResultMemoryPolicy_ShouldFlowToPolicy()
+        {
+            AgentConfig config = new AgentBuilder("ToolMemoryAgent")
+                .WithSystemPrompt("Test prompt")
+                .WithToolResultMemoryPolicy(ToolResultMemoryPolicy.ErrorsOnly)
+                .BuildDetached();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+
+            Assert.AreEqual(ToolResultMemoryPolicy.ErrorsOnly, config.ToolResultMemory);
+            Assert.AreEqual(ToolResultMemoryPolicy.ErrorsOnly,
+                policy.GetRoleConfig("ToolMemoryAgent").ToolResultMemory);
         }
 
         [Test]

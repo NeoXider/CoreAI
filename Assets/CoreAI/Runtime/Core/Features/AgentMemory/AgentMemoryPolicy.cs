@@ -139,6 +139,9 @@ namespace CoreAI.Ai
             /// <summary>Per-role LLM response token cap; null = use per-call/global/provider fallback.</summary>
             public int? MaxOutputTokens;
 
+            /// <summary>Controls how observed tool results are persisted into chat history.</summary>
+            public ToolResultMemoryPolicy ToolResultMemory;
+
             /// <summary>
             /// Per-role sampling temperature override; null = use global <see cref="ICoreAISettings.Temperature"/>.
             /// Set via <see cref="AgentBuilder.WithTemperature"/>.
@@ -154,7 +157,8 @@ namespace CoreAI.Ai
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
                 bool withChatHistory = true, bool persistChatHistory = false, int contextTokens = 0,
                 bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
-                bool useLlmContextCompaction = true, float? temperature = null)
+                bool useLlmContextCompaction = true, float? temperature = null,
+                ToolResultMemoryPolicy toolResultMemory = ToolResultMemoryPolicy.CompactSummary)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -166,6 +170,7 @@ namespace CoreAI.Ai
                 MaxOutputTokens = maxOutputTokens;
                 UseLlmContextCompaction = useLlmContextCompaction;
                 Temperature = temperature;
+                ToolResultMemory = toolResultMemory;
             }
         }
 
@@ -355,6 +360,7 @@ namespace CoreAI.Ai
                     ContextTokens = existing.ContextTokens,
                     MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
                     MaxOutputTokens = existing.MaxOutputTokens,
+                    ToolResultMemory = existing.ToolResultMemory,
                     Temperature = existing.Temperature,
                     UseLlmContextCompaction = existing.UseLlmContextCompaction
                 };
@@ -397,6 +403,25 @@ namespace CoreAI.Ai
             {
                 RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
                 existing.Temperature = temperature;
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        /// <summary>
+        /// Set how tool results are persisted into chat history for a role.
+        /// </summary>
+        public void SetToolResultMemoryPolicy(string roleId, ToolResultMemoryPolicy policy)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.ToolResultMemory = policy;
                 _roleConfigs[roleId] = existing;
             }
         }

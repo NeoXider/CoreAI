@@ -623,9 +623,7 @@ namespace CoreAI.Ai
 
             foreach (ChatMessage msg in recent)
             {
-                Microsoft.Extensions.AI.ChatRole aiRole = msg.Role == "user"
-                    ? Microsoft.Extensions.AI.ChatRole.User
-                    : Microsoft.Extensions.AI.ChatRole.Assistant;
+                Microsoft.Extensions.AI.ChatRole aiRole = ResolveChatHistoryRole(msg.Role);
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
             }
 
@@ -690,6 +688,14 @@ namespace CoreAI.Ai
                     bundle.RoleConfig.PersistChatHistory);
                 _memoryStore.AppendChatMessage(bundle.RoleId, "assistant", content,
                     bundle.RoleConfig.PersistChatHistory);
+                string toolResultsBlock = BuildToolResultsMemoryBlock(
+                    result?.ExecutedToolCalls,
+                    bundle.RoleConfig.ToolResultMemory);
+                if (!string.IsNullOrWhiteSpace(toolResultsBlock))
+                {
+                    _memoryStore.AppendChatMessage(bundle.RoleId, "tool", toolResultsBlock,
+                        bundle.RoleConfig.PersistChatHistory);
+                }
             }
 
             _commandSink.Publish(new ApplyAiGameCommand
@@ -707,6 +713,21 @@ namespace CoreAI.Ai
             _metrics.RecordCommandPublished(bundle.RoleId, bundle.TraceId);
             RecordTrace(bundle, result, content, null);
             return content;
+        }
+
+        private static Microsoft.Extensions.AI.ChatRole ResolveChatHistoryRole(string role)
+        {
+            if (string.Equals(role, "user", StringComparison.Ordinal))
+            {
+                return Microsoft.Extensions.AI.ChatRole.User;
+            }
+
+            if (string.Equals(role, "tool", StringComparison.Ordinal))
+            {
+                return Microsoft.Extensions.AI.ChatRole.User;
+            }
+
+            return Microsoft.Extensions.AI.ChatRole.Assistant;
         }
 
         private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
@@ -822,6 +843,114 @@ namespace CoreAI.Ai
             }
 
             return normalized;
+        }
+
+        private static string BuildToolResultsMemoryBlock(
+            IReadOnlyList<LlmToolCallTrace> executedToolCalls,
+            ToolResultMemoryPolicy policy)
+        {
+            if (policy == ToolResultMemoryPolicy.None ||
+                executedToolCalls == null ||
+                executedToolCalls.Count == 0)
+            {
+                return "";
+            }
+
+            StringBuilder sb = new();
+            HashSet<string> seen = new(StringComparer.Ordinal);
+            bool wroteEntry = false;
+            sb.AppendLine("## Tool Results");
+
+            for (int i = 0; i < executedToolCalls.Count; i++)
+            {
+                LlmToolCallTrace trace = executedToolCalls[i];
+                if (policy == ToolResultMemoryPolicy.ErrorsOnly && trace.Success)
+                {
+                    continue;
+                }
+
+                string name = string.IsNullOrWhiteSpace(trace.Name) ? "tool" : trace.Name.Trim();
+                string normalizedDetail = NormalizeToolResultDetail(trace.Detail);
+                string dedupeKey = name + "\n" + normalizedDetail;
+                if (!seen.Add(dedupeKey))
+                {
+                    continue;
+                }
+
+                wroteEntry = true;
+                string status = trace.Success ? "ok" : "FAILED";
+                switch (policy)
+                {
+                    case ToolResultMemoryPolicy.Full:
+                        sb.Append("- ").Append(name).Append(": ").AppendLine(status);
+                        sb.AppendLine("  Detail:");
+                        sb.AppendLine(IndentToolResultDetail(TruncateHeadTail(normalizedDetail, 2000), "  "));
+                        break;
+                    case ToolResultMemoryPolicy.ErrorsOnly:
+                    case ToolResultMemoryPolicy.CompactSummary:
+                    default:
+                        string shortDetail = ExtractToolTraceMessage(trace.Detail);
+                        shortDetail = SingleLine(shortDetail, 240);
+                        sb.Append("- ").Append(name).Append(": ").Append(status);
+                        if (!string.IsNullOrWhiteSpace(shortDetail))
+                        {
+                            sb.Append(' ').Append(shortDetail);
+                        }
+
+                        sb.AppendLine();
+                        break;
+                }
+            }
+
+            // TODO: Roadmap §3/§7 will prune superseded cross-turn tool results before compaction.
+            return wroteEntry ? sb.ToString().TrimEnd() : "";
+        }
+
+        private static string NormalizeToolResultDetail(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                return "";
+            }
+
+            return detail.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        }
+
+        private static string IndentToolResultDetail(string detail, string indent)
+        {
+            if (string.IsNullOrEmpty(detail))
+            {
+                return indent + "(empty)";
+            }
+
+            string[] lines = detail.Split('\n');
+            StringBuilder sb = new();
+            for (int i = 0; i < lines.Length; i++)
+            {
+                sb.Append(indent).Append(lines[i]);
+                if (i < lines.Length - 1)
+                {
+                    sb.AppendLine();
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static string TruncateHeadTail(string value, int maxChars)
+        {
+            if (string.IsNullOrEmpty(value) || maxChars <= 0 || value.Length <= maxChars)
+            {
+                return value ?? "";
+            }
+
+            const string marker = "\n...[truncated]...\n";
+            int available = Math.Max(0, maxChars - marker.Length);
+            int head = available / 2;
+            int tail = available - head;
+            return value.Substring(0, head).TrimEnd() +
+                   marker +
+                   value.Substring(value.Length - tail).TrimStart();
         }
 
         private static int? ResolveMaxOutputTokens(int? perCall, int? perAgent)

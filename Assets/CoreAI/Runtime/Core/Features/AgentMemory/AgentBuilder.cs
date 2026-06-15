@@ -37,6 +37,7 @@ namespace CoreAI.Ai
         private int _maxChatHistoryMessages = 30;
         private float? _temperature;
         private int? _maxOutputTokens;
+        private ToolResultMemoryPolicy _toolResultMemory = ToolResultMemoryPolicy.CompactSummary;
         private bool? _allowDuplicateToolCalls;
         private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
@@ -261,6 +262,15 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Sets how this agent persists observed tool results into chat history.
+        /// </summary>
+        public AgentBuilder WithToolResultMemoryPolicy(ToolResultMemoryPolicy policy)
+        {
+            _toolResultMemory = policy;
+            return this;
+        }
+
+        /// <summary>
         /// Per-agent override for duplicate tool-call detection. Default behaviour is to <b>reject</b>
         /// a tool call whose <c>(name, args)</c> signature exactly matches a previous one within the
         /// same model turn.
@@ -380,6 +390,7 @@ namespace CoreAI.Ai
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = _temperature,
                 MaxOutputTokens = _maxOutputTokens,
+                ToolResultMemory = _toolResultMemory,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 EnableStreaming = _enableStreaming,
                 MemoryDefaultAction = _memoryDefaultAction,
@@ -498,6 +509,7 @@ namespace CoreAI.Ai
         public int MaxChatHistoryMessages { get; internal set; }
         public float? Temperature { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
+        public ToolResultMemoryPolicy ToolResultMemory { get; internal set; } = ToolResultMemoryPolicy.CompactSummary;
         public bool? AllowDuplicateToolCalls { get; internal set; }
 
         /// <summary>Whether this agent prefers streaming responses when supported.</summary>
@@ -535,6 +547,7 @@ namespace CoreAI.Ai
             policy.ConfigureLlmContextCompaction(RoleId, UseLlmContextCompaction);
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
             policy.SetTemperature(RoleId, Temperature);
+            policy.SetToolResultMemoryPolicy(RoleId, ToolResultMemory);
 
             if (!string.IsNullOrWhiteSpace(SystemPrompt))
             {
