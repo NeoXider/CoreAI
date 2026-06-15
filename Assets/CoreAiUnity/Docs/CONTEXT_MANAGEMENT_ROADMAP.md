@@ -153,6 +153,11 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
   **tail** so it stays cache-safe, and is built via a per-role provider so each role exposes only what it needs.
 
 ### 9. Deterministic serialization & per-role policy
+- Status: **implemented** for the frozen prefix/tool contract. Tool rendering and MEAI native tool arrays use
+  ordinal-by-name ordering, text-shaped tool schemas are compacted with recursively sorted object keys, and
+  EditMode regressions guard identical fixed-input system prefixes from generated GUID/timestamp leakage.
+  Per-role policy is provided by existing `AgentBuilder` / `AgentMemoryPolicy` knobs; see
+  `COREAI_SETTINGS.md` ("Per-role policy").
 - **Deterministic prefix**: stable tool ordering, sorted JSON keys, no timestamps/UUIDs in the frozen prefix —
   otherwise the cache is silently busted every request.
 - **Per-role policy**: history depth, memory scope, `ToolResultMemoryPolicy`, world-state provider, and

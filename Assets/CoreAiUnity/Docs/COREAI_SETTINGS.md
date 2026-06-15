@@ -266,6 +266,25 @@ Portable contract: `ICoreAISettings.EnableConversationHistorySummarization`, `Co
 
 > 📝 **`Max Output Tokens` priority chain (0.25.9+):** `LlmCompletionRequest.MaxOutputTokens` (per-request, direct client call) → `AiTaskRequest.MaxOutputTokens` (per-call via orchestrator) → `AgentBuilder.WithMaxOutputTokens` / `AgentMemoryPolicy.RoleMemoryConfig.MaxOutputTokens` (per-agent) → `ICoreAISettings.MaxTokens` (global default in this asset) → provider default (LM Studio: usually unbounded; OpenAI: model-specific). Set the asset value to `0` to opt out of the global fallback for both backends.
 
+#### Per-role policy
+
+Per-role behavior is configured through `AgentBuilder.With*` methods and the matching `AgentMemoryPolicy.Set*` / `Configure*` methods:
+
+| Policy area | AgentBuilder | AgentMemoryPolicy |
+|------|------|------|
+| Chat history depth/window | `WithChatHistory(contextWindowTokens, persistBetweenSessions, maxChatHistoryMessages)`, `WithoutChatHistory()` | `ConfigureChatHistory(roleId, enabled, tokens, persist, maxChatHistoryMessages)` |
+| Memory tool and default action | `WithMemory(defaultAction)` or omit memory for chat-only roles | `EnableMemoryTool`, `DisableMemoryTool`, `ConfigureRole(useMemoryTool, defaultAction)` |
+| Tool result retention | `WithToolResultMemoryPolicy(ToolResultMemoryPolicy)` | `SetToolResultMemoryPolicy(roleId, policy)` |
+| Runtime/world-state context | self-service skills install a role context provider; custom code can register one after build | `SetRuntimeContextProvider(roleId, provider)`, `ClearRuntimeContextProvider(roleId)` |
+| LLM-assisted compaction | `WithLlmContextCompaction(bool)` | `ConfigureLlmContextCompaction(roleId, enabled)` |
+| Streaming | `WithStreaming(bool)` | `SetStreamingEnabled(roleId, bool?)` |
+| Temperature | `WithTemperature(float)` | `SetTemperature(roleId, float?)` |
+| Max output tokens | `WithMaxOutputTokens(int?)` | `SetMaxOutputTokens(roleId, int?)` |
+| Duplicate tool calls | `WithAllowDuplicateToolCalls(bool)` | `ConfigureRole(allowDuplicateToolCalls: ...)` |
+| Universal prefix opt-out | `WithOverrideUniversalPrefix(bool)` | `SetOverrideUniversalPrefix(roleId, bool)` |
+
+Global settings still gate some features: `EnableLlmContextCompaction` must be on before a role can use LLM-assisted compaction, `EnableStreaming` is the fallback when no role override exists, and temperature is sent only when temperature overriding is enabled.
+
 #### Universal system prompt prefix
 
 The universal opening prompt sets **shared rules for all models** — it is prepended to the **start** of each agent’s system prompt (built-in and custom via AgentBuilder).

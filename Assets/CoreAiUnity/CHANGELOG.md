@@ -4,6 +4,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **Deterministic provider tool ordering.** MEAI native tool arrays now use the shared CoreAI
+  ordinal-by-name tool order, matching the text-shaped tool contract order so identical role/tool inputs
+  do not churn provider prompt-cache prefixes.
 - **Dynamic world-state observation placement.** The existing `PlaceLiveContextInTail` flag now also keeps
   per-role runtime/world-state context out of the stable system prefix by appending a final system-role
   `## World State` chat-history message after recent turns; flag-off behavior remains legacy system placement.

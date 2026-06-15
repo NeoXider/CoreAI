@@ -59,7 +59,7 @@
 - [x] **Dynamic world-state observation (universal/game agent).** Per-role provider injects a compact live
       world/scene/NPC/quest/slide block into the **tail** each turn (read-only observation, model still decides) —
       the game analog of Claude Code's file-context. Cache-safe because it's in the tail.
-- [ ] **Deterministic serialization + per-role policy.** Stable tool order, sorted JSON keys, no timestamps/UUIDs
+- [x] **Deterministic serialization + per-role policy.** Stable tool order, sorted JSON keys, no timestamps/UUIDs
       in the frozen prefix; history depth / memory scope / tool-result policy / world-state / compaction thresholds
       configured per role (Teacher / NPC / mechanics agent).
 

@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
@@ -47,7 +51,8 @@ namespace CoreAI.Ai
             }
 
             bool hasMemoryTool = false;
-            foreach (ILlmTool tool in tools)
+            IReadOnlyList<ILlmTool> canonicalTools = AiToolOrder.Canonical(tools);
+            foreach (ILlmTool tool in canonicalTools)
             {
                 if (tool != null &&
                     string.Equals(tool.Name?.Trim(), "memory", StringComparison.OrdinalIgnoreCase))
@@ -66,7 +71,7 @@ namespace CoreAI.Ai
             AppendForcedToolInstruction(sb, task);
 
             sb.AppendLine("Available tools:");
-            foreach (ILlmTool tool in tools)
+            foreach (ILlmTool tool in canonicalTools)
             {
                 if (tool == null || string.IsNullOrWhiteSpace(tool.Name))
                 {
@@ -86,7 +91,7 @@ namespace CoreAI.Ai
                 if (!string.IsNullOrWhiteSpace(tool.ParametersSchema) && tool.ParametersSchema.Trim() != "{}")
                 {
                     sb.Append("  schema: ");
-                    sb.AppendLine(SingleLine(tool.ParametersSchema, 800));
+                    sb.AppendLine(SingleLine(CanonicalizeSchemaOrRaw(tool.ParametersSchema), 800));
                 }
             }
 
@@ -125,6 +130,64 @@ namespace CoreAI.Ai
             }
 
             return normalized;
+        }
+
+        internal static string CanonicalizeSchemaOrRaw(string schema)
+        {
+            if (string.IsNullOrWhiteSpace(schema))
+            {
+                return schema ?? "";
+            }
+
+            try
+            {
+                JToken token = JToken.Parse(schema);
+                JToken sorted = SortObjectKeys(token);
+                using StringWriter stringWriter = new(CultureInfo.InvariantCulture);
+                using JsonTextWriter jsonWriter = new(stringWriter)
+                {
+                    Formatting = Formatting.None,
+                    Culture = CultureInfo.InvariantCulture
+                };
+
+                sorted.WriteTo(jsonWriter);
+                return stringWriter.ToString();
+            }
+            catch
+            {
+                return schema;
+            }
+        }
+
+        private static JToken SortObjectKeys(JToken token)
+        {
+            switch (token)
+            {
+                case JObject obj:
+                {
+                    JObject sorted = new();
+                    List<JProperty> properties = new(obj.Properties());
+                    properties.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+                    foreach (JProperty property in properties)
+                    {
+                        sorted.Add(property.Name, SortObjectKeys(property.Value));
+                    }
+
+                    return sorted;
+                }
+                case JArray array:
+                {
+                    JArray sorted = new();
+                    foreach (JToken item in array)
+                    {
+                        sorted.Add(SortObjectKeys(item));
+                    }
+
+                    return sorted;
+                }
+                default:
+                    return token.DeepClone();
+            }
         }
     }
 }

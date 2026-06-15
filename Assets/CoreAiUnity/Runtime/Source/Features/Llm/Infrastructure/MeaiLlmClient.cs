@@ -1590,7 +1590,7 @@ namespace CoreAI.Infrastructure.Llm
                 return result;
             }
 
-            foreach (ILlmTool tool in tools)
+            foreach (ILlmTool tool in AiToolOrder.Canonical(tools))
             {
                 try
                 {

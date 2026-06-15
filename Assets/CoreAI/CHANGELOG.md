@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Deterministic tool contract prefix.** Added shared ordinal-by-name tool ordering, canonical
+  Newtonsoft JSON schema rendering with recursively sorted object keys for text-shaped tool contracts,
+  and EditMode regression coverage that guards stable fixed-input system prefixes from generated
+  GUID/timestamp leakage.
 - **Dynamic world-state observation placement.** `AiPromptComposer.BuildRuntimeContext` now exposes the
   per-role/global runtime context section independently, and `PlaceLiveContextInTail` can send it as the last
   system-role chat-history message headed `## World State`; legacy flag-off placement in the system prompt is

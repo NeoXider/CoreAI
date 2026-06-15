@@ -96,6 +96,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_NativeTools_AreCanonicalOrdinalByName()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "sys",
+                UserPayload = "hi",
+                Tools = new List<ILlmTool>
+                {
+                    new ExplicitFunctionTool("z_tool"),
+                    new ExplicitFunctionTool("a_tool")
+                }
+            }, CancellationToken.None);
+
+            Assert.IsNotNull(inner.LastOptions?.Tools);
+            CollectionAssert.AreEqual(
+                new[] { "a_tool", "z_tool" },
+                inner.LastOptions.Tools.Select(t => t.Name).ToArray());
+        }
+
+        [Test]
         public async Task CompleteAsync_DoesNotBindLegacyDuckTypedCreateAIFunctionTool()
         {
             CapturingChatClient inner = new();
