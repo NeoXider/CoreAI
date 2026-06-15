@@ -4,6 +4,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- GameMaster Lua mechanics test now advertises the logic_* slot API, matching the crafting test.
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
 - **Tool result memory defaults.** Built-in `Programmer` and `CoreMechanicAI` now default to full tool-result retention; other built-in roles keep compact summaries.
 - **Prompt-cache usage verification.** CoreAI Unity now reads provider cache read/write token counts from

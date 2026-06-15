@@ -195,8 +195,8 @@ end
 
                 // 3.   : " ,   .    5 ."
                 string prompt = "Players are complaining that the game is too hard. " +
-                                "The game exposes a runtime rule slot named calculate_damage. " +
-                                "Change that rule so the current damage result becomes 50 instead of 10.\n" +
+                                "The game exposes a runtime logic slot named calculate_damage through the logic_* Lua API. " +
+                                "Change that slot so the current damage result becomes 50 instead of 10.\n" +
                                 "Apply the change through the available Lua execution tool.";
 
                 Debug.Log($"[LuaDynamic]  PROMPT: {prompt}");

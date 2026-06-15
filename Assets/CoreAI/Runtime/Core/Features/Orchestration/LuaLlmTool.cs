@@ -26,30 +26,13 @@ namespace CoreAI.Ai
         }
 
         /// <inheritdoc />
-        public string Name => "execute_lua";
+        public string Name => LuaTool.ExecuteLuaToolName;
 
         /// <inheritdoc />
         public bool AllowDuplicates => true;
 
         /// <inheritdoc />
-        public string Description =>
-            "Execute sandboxed Lua code using only globals exposed by the current game. " +
-            "For game-rule changes, call logic_list() when unsure, then use " +
-            "logic_define('slot_name', function(...) return value end); for example " +
-            "logic_define('loot_formula', function(bossMaxHp) return 1000 end). " +
-            "Full Lua Mode skill: when Full is enabled, first run a diagnostic script and return a compact string/JSON from Output; " +
-            "then use manage_mods for persistent hooks. Full scene APIs include unity_list_objects(max), " +
-            "unity_find_all(pattern,max), unity_find_by_tag(tag,max), unity_find_by_component(type,max), " +
-            "unity_describe_object(id), unity_get_transform(id), unity_set_position(id,x,y,z), " +
-            "unity_set_rotation_euler(id,x,y,z), unity_set_scale(id,x,y,z), unity_parent(child,parent,worldPositionStays), " +
-            "unity_get_children(id), unity_list_components(id), unity_get_member(id,component,member), " +
-            "unity_set_member(id,component,member,value), and unity_call(id,component,method,args). " +
-            "WorldEdit APIs do not require Full mode: use coreai_world_spawn, coreai_world_move, coreai_world_rotate, coreai_world_set_transform, coreai_world_destroy, coreai_world_parent, and coreai_world_set_props for safe scene edits. " +
-            "For visible spawns, call coreai_world_list_prefabs first, then coreai_world_spawn/coreai_world_spawn_batch with a real prefab key; report() alone is not a spawn. " +
-            "Do not hard-code visual recipes; inspect the scene/components first, then use the smallest real API that matches the host. " +
-            "Use report(message) to describe the applied change. Do not invent helper globals; " +
-            "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
-            "Never call invented APIs such as game.enemies, game.create, game.destroy, or GameObject.Find from Lua.";
+        public string Description => LuaTool.ExecuteLuaDescription;
 
         /// <inheritdoc />
         public string ParametersSchema =>

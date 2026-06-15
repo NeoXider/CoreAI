@@ -112,7 +112,7 @@
 - [ ] Capability tier from AI role config + optional player confirmation for dangerous levels.
 - [ ] Bridge `ModEventEmitted` -> MessagePipe.
 - [ ] World-command budget per tick for mods.
-- [ ] **Lua skill by access mode.** Create an agent-facing Lua guide/skill that routes tasks to the right API surface: Safe/Logic (`logic_define`, `report`), Mods (`manage_mods`, `hooks_on`, `hooks_every`, `store_get/set`), WorldEdit (`coreai_world_*`), and Full (`unity_*`). It must explicitly forbid hallucinated APIs such as `game.enemies`, `game.create`, `game.destroy` unless a host game registers them.
+- [ ] **Lua skill by access mode.** Create an agent-facing Lua guide/skill that routes tasks to the right API surface: Safe/Logic (`logic_define`, `report`), Mods (`manage_mods`, `hooks_on`, `hooks_every`, `store_get/set`), WorldEdit (`coreai_world_*`), and Full (`unity_*`). It must explicitly forbid hallucinated APIs such as `game.rules`, `game_rules`, `game.enemies`, `game.create`, `game.destroy` unless a host game registers them.
 - [ ] **Reusable file-backed Lua mods.** Design a portable mod package layout for games, e.g. `Mods/<mod_id>/manifest.json` + `main.lua`, with `id`, `name`, `description`, `version`, `capabilities`, `entry`, `author`, and `active`. The runtime/panel should load, activate/deactivate, reload, and forget mods from files instead of only `ILuaScriptVersionStore`.
 
 ## [P2] WebGL: Lua in the web build (research)
