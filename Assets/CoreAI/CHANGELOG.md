@@ -4,6 +4,9 @@
 
 - **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage for source, YAML assets,
   Visual Studio project files, and common binary assets to prevent CRLF/LF churn and binary phantom diffs.
+- **Streaming context-overflow recovery.** `AiOrchestrator.RunStreamingAsync` now mirrors the bounded
+  `MaxContextOverflowRetries` recovery path from `RunTaskAsync`, rebuilding the request with increasing
+  `ContextRetryLevel` before any visible stream text is emitted.
 
 ## 4.4.0 - 2026-06-15
 

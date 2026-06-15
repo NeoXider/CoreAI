@@ -1092,6 +1092,54 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class StreamingFailsThenOkLlm : ILlmClient
+        {
+            private readonly int _failuresBeforeSuccess;
+
+            public StreamingFailsThenOkLlm(int failuresBeforeSuccess)
+            {
+                _failuresBeforeSuccess = failuresBeforeSuccess;
+            }
+
+            public List<LlmCompletionRequest> Requests { get; } = new();
+            public int Calls => Requests.Count;
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Assert.Fail("Streaming retry test must use CompleteStreamingAsync.");
+                return Task.FromResult<LlmCompletionResult>(null);
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                await Task.Yield();
+                if (Calls <= _failuresBeforeSuccess)
+                {
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = "context overflow",
+                        ErrorCode = LlmErrorCode.ContextLengthExceeded
+                    };
+                    yield break;
+                }
+
+                yield return new LlmStreamChunk { Text = "after-compact" };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    PromptTokens = 123,
+                    TotalTokens = 130
+                };
+            }
+        }
+
         [Test]
         public async Task RunTaskAsync_RetriesTwice_OnContextLengthExceeded()
         {
@@ -1123,6 +1171,45 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, llm.Calls);
             CollectionAssert.AreEqual(new[] { 0, 1, 2 }, budgetPolicy.RetryLevels);
             Assert.AreEqual("after-compact", content);
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_RetriesTwice_OnContextLengthExceeded()
+        {
+            StreamingFailsThenOkLlm llm = new(2);
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            RecordingBudgetPolicy budgetPolicy = new();
+            for (int i = 0; i < 24; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = new string('s', 80) + i
+                });
+            }
+
+            policy.ConfigureChatHistory("role_ctx", true, 2048, false, 50);
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()),
+                contextBudgetPolicy: budgetPolicy);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "role_ctx", Hint = "Hi" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.AreEqual(3, llm.Calls);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2 }, budgetPolicy.RetryLevels);
+            Assert.AreEqual("after-compact", string.Concat(chunks.ConvertAll(static c => c.Text ?? "")));
+            Assert.IsFalse(chunks.Exists(static c => c.ErrorCode == LlmErrorCode.ContextLengthExceeded),
+                "Retryable overflow chunks must not leak to the caller before the successful retry.");
         }
 
         [Test]

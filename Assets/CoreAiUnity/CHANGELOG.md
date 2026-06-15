@@ -6,6 +6,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 - **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage plus an EditMode guard
   test so Unity/source text and binary asset classifications stay stable across contributors.
+- **Streaming context-overflow recovery.** Added EditMode coverage for streaming context overflow: two retryable
+  `ContextLengthExceeded` terminal chunks are hidden from callers while the orchestrator rebuilds with tighter
+  `ContextRetryLevel` budgets and then streams the successful response.
 
 ## 4.4.0 - 2026-06-15
 

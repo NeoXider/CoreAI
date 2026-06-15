@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using CoreAI.Logging;
 using System.Diagnostics;
@@ -403,215 +403,344 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            RequestBundle bundle = await BuildRequestAsync(task, 0, cancellationToken).ConfigureAwait(false);
-            StringBuilder accumulated = new();
-            int chunkCount = 0;
-            string terminalError = null;
-            IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
-            LlmStreamChunk pendingToolOnlyTerminalChunk = null;
-            int? promptTokens = null;
-            int? completionTokens = null;
-            int? totalTokens = null;
-            int cacheReadTokens = 0;
-            int cacheWriteTokens = 0;
+            int contextPass = 0;
+            int contextOverflowPasses = 0;
+            int maxContextOverflowRetries = Math.Max(0, _settings.MaxContextOverflowRetries);
 
-            // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
-
-            LlmCompletionRequest req = BuildCompletionRequest(
-                bundle, task, bundle.UserPayload,
-                ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens));
-
-            Stopwatch sw = Stopwatch.StartNew();
-            IAsyncEnumerator<LlmStreamChunk> enumerator = null;
-            string initError = null;
-            try
+            while (true)
             {
-                enumerator = _llm.CompleteStreamingAsync(req, cancellationToken).GetAsyncEnumerator(cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                initError = ex.Message;
-            }
+                RequestBundle bundle = await BuildRequestAsync(task, contextPass, cancellationToken)
+                    .ConfigureAwait(false);
+                StringBuilder accumulated = new();
+                int chunkCount = 0;
+                string terminalError = null;
+                LlmErrorCode terminalErrorCode = LlmErrorCode.None;
+                int? terminalHttpStatus = null;
+                int? terminalRetryAfterSeconds = null;
+                IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
+                LlmStreamChunk pendingToolOnlyTerminalChunk = null;
+                int? promptTokens = null;
+                int? completionTokens = null;
+                int? totalTokens = null;
+                int cacheReadTokens = 0;
+                int cacheWriteTokens = 0;
+                LlmCompletionResult contextOverflowFailure = null;
 
-            if (initError != null)
-            {
-                yield return new LlmStreamChunk { IsDone = true, Error = initError };
-                yield break;
-            }
+                // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
 
-            try
-            {
-                while (true)
+                LlmCompletionRequest req = BuildCompletionRequest(
+                    bundle, task, bundle.UserPayload,
+                    ResolveMaxOutputTokens(task.MaxOutputTokens, bundle.RoleConfig.MaxOutputTokens));
+
+                Stopwatch sw = Stopwatch.StartNew();
+                IAsyncEnumerator<LlmStreamChunk> enumerator = null;
+                string initError = null;
+                LlmErrorCode initErrorCode = LlmErrorCode.ProviderError;
+                int? initHttpStatus = null;
+                int? initRetryAfterSeconds = null;
+                try
                 {
-                    bool hasNext;
-                    LlmStreamChunk current = null;
-                    string exceptionMessage = null;
-                    bool wasCancelled = false;
+                    enumerator = _llm.CompleteStreamingAsync(req, cancellationToken)
+                        .GetAsyncEnumerator(cancellationToken);
+                }
+                catch (LlmClientException ex)
+                {
+                    initError = ex.Message;
+                    initErrorCode = ex.ErrorCode;
+                    initHttpStatus = ex.HttpStatus;
+                    initRetryAfterSeconds = ex.RetryAfterSeconds;
+                }
+                catch (Exception ex)
+                {
+                    initError = ex.Message;
+                }
 
-                    try
+                if (initError != null)
+                {
+                    LlmCompletionResult initFailure = BuildFailureResult(
+                        initError,
+                        initErrorCode,
+                        initHttpStatus,
+                        initRetryAfterSeconds);
+                    bool canRetryInitOverflow = _compactionCoordinator.ShouldRetryAfterContextOverflow(
+                        initFailure,
+                        contextOverflowPasses,
+                        maxContextOverflowRetries);
+                    if (canRetryInitOverflow)
                     {
-                        // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
-                        // continuation must come back through UnitySynchronizationContext.
-                        hasNext = await enumerator.MoveNextAsync();
-                        current = hasNext ? enumerator.Current : null;
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        terminalError = "cancelled";
-                        wasCancelled = true;
-                        hasNext = false;
-                    }
-                    catch (Exception ex)
-                    {
-                        exceptionMessage = ex.Message;
-                        hasNext = false;
-                    }
-
-                    if (wasCancelled)
-                    {
-                        yield return new LlmStreamChunk { IsDone = true, Error = terminalError };
-                        yield break;
-                    }
-
-                    if (exceptionMessage != null)
-                    {
-                        terminalError = exceptionMessage;
-                        yield return new LlmStreamChunk { IsDone = true, Error = exceptionMessage };
-                        yield break;
-                    }
-
-                    if (!hasNext)
-                    {
-                        break;
-                    }
-
-                    if (current != null && !string.IsNullOrEmpty(current.Text))
-                    {
-                        accumulated.Append(current.Text);
-                        chunkCount++;
-                    }
-
-                    if (current != null && !string.IsNullOrEmpty(current.Error))
-                    {
-                        terminalError = current.Error;
-                    }
-
-                    if (current?.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
-                    {
-                        executedToolCalls = current.ExecutedToolCalls;
-                    }
-
-                    if (current?.PromptTokens > 0)
-                    {
-                        promptTokens = current.PromptTokens;
-                    }
-
-                    if (current?.CompletionTokens > 0)
-                    {
-                        completionTokens = current.CompletionTokens;
-                    }
-
-                    if (current?.TotalTokens > 0)
-                    {
-                        totalTokens = current.TotalTokens;
-                    }
-
-                    if (current != null)
-                    {
-                        if (current.CacheReadTokens > 0)
-                        {
-                            cacheReadTokens = current.CacheReadTokens;
-                        }
-
-                        if (current.CacheWriteTokens > 0)
-                        {
-                            cacheWriteTokens = current.CacheWriteTokens;
-                        }
-                    }
-
-                    if (current != null &&
-                        current.IsDone &&
-                        string.IsNullOrEmpty(current.Error) &&
-                        string.IsNullOrWhiteSpace(current.Text) &&
-                        current.ExecutedToolCalls != null &&
-                        current.ExecutedToolCalls.Count > 0)
-                    {
-                        pendingToolOnlyTerminalChunk = current;
+                        _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId, false, 0d);
+                        contextOverflowPasses++;
+                        contextPass = contextOverflowPasses;
                         continue;
                     }
 
-                    yield return current;
-                }
-            }
-            finally
-            {
-                sw.Stop();
-                if (enumerator != null)
-                {
-                    try
-                    {
-                        await enumerator.DisposeAsync();
-                    }
-                    catch
-                    {
-                        /* swallow */
-                    }
-                }
-
-                _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
-                    string.IsNullOrEmpty(terminalError),
-                    sw.Elapsed.TotalMilliseconds);
-            }
-
-            string content = accumulated.ToString();
-            bool synthesizedToolOnlyContent = string.IsNullOrWhiteSpace(content);
-            string toolOnlyContent = ResolveToolOnlyCompletionContent(content, executedToolCalls);
-            if (!string.IsNullOrEmpty(toolOnlyContent))
-            {
-                content = toolOnlyContent;
-                if (synthesizedToolOnlyContent)
-                {
-                    yield return new LlmStreamChunk { Text = content };
-                }
-            }
-
-            if (string.IsNullOrEmpty(terminalError) && !string.IsNullOrEmpty(content))
-            {
-                if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
-                    !_structuredPolicy.TryValidate(bundle.RoleId, content, out string failReason))
-                {
-                    _metrics.RecordStructuredRetry(bundle.RoleId, bundle.TraceId, failReason ?? "");
+                    RecordTrace(bundle, initFailure, null, initError);
                     yield return new LlmStreamChunk
                     {
                         IsDone = true,
-                        Error = "structured validation failed: " + (failReason ?? "")
+                        Error = initError,
+                        ErrorCode = initErrorCode,
+                        HttpStatus = initHttpStatus,
+                        RetryAfterSeconds = initRetryAfterSeconds
                     };
                     yield break;
                 }
 
-                LlmCompletionResult streamResult = new()
+                try
                 {
-                    Ok = true,
-                    Content = content,
-                    PromptTokens = promptTokens,
-                    CompletionTokens = completionTokens,
-                    TotalTokens = totalTokens,
-                    CacheReadTokens = cacheReadTokens,
-                    CacheWriteTokens = cacheWriteTokens,
-                    ExecutedToolCalls = executedToolCalls
-                };
-                content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
-                RecordTokenObservation(bundle, promptTokens);
-            }
-            else if (!string.IsNullOrEmpty(terminalError))
-            {
-                RecordTrace(bundle, null, null, terminalError);
-            }
+                    while (true)
+                    {
+                        bool hasNext;
+                        LlmStreamChunk current = null;
+                        string exceptionMessage = null;
+                        LlmErrorCode exceptionCode = LlmErrorCode.ProviderError;
+                        int? exceptionHttpStatus = null;
+                        int? exceptionRetryAfterSeconds = null;
+                        bool wasCancelled = false;
 
-            if (pendingToolOnlyTerminalChunk != null)
-            {
-                pendingToolOnlyTerminalChunk.Text = "";
-                yield return pendingToolOnlyTerminalChunk;
+                        try
+                        {
+                            // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
+                            // continuation must come back through UnitySynchronizationContext.
+                            hasNext = await enumerator.MoveNextAsync();
+                            current = hasNext ? enumerator.Current : null;
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            terminalError = "cancelled";
+                            terminalErrorCode = LlmErrorCode.Cancelled;
+                            wasCancelled = true;
+                            hasNext = false;
+                        }
+                        catch (LlmClientException ex)
+                        {
+                            exceptionMessage = ex.Message;
+                            exceptionCode = ex.ErrorCode;
+                            exceptionHttpStatus = ex.HttpStatus;
+                            exceptionRetryAfterSeconds = ex.RetryAfterSeconds;
+                            hasNext = false;
+                        }
+                        catch (Exception ex)
+                        {
+                            exceptionMessage = ex.Message;
+                            hasNext = false;
+                        }
+
+                        if (wasCancelled)
+                        {
+                            yield return new LlmStreamChunk
+                            {
+                                IsDone = true,
+                                Error = terminalError,
+                                ErrorCode = terminalErrorCode
+                            };
+                            yield break;
+                        }
+
+                        if (exceptionMessage != null)
+                        {
+                            terminalError = exceptionMessage;
+                            terminalErrorCode = exceptionCode;
+                            terminalHttpStatus = exceptionHttpStatus;
+                            terminalRetryAfterSeconds = exceptionRetryAfterSeconds;
+                            if (exceptionCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0)
+                            {
+                                contextOverflowFailure = BuildFailureResult(
+                                    exceptionMessage,
+                                    exceptionCode,
+                                    exceptionHttpStatus,
+                                    exceptionRetryAfterSeconds);
+                                break;
+                            }
+
+                            yield return new LlmStreamChunk
+                            {
+                                IsDone = true,
+                                Error = exceptionMessage,
+                                ErrorCode = exceptionCode,
+                                HttpStatus = exceptionHttpStatus,
+                                RetryAfterSeconds = exceptionRetryAfterSeconds
+                            };
+                            yield break;
+                        }
+
+                        if (!hasNext)
+                        {
+                            break;
+                        }
+
+                        if (current != null && !string.IsNullOrEmpty(current.Text))
+                        {
+                            accumulated.Append(current.Text);
+                            chunkCount++;
+                        }
+
+                        if (current != null && !string.IsNullOrEmpty(current.Error))
+                        {
+                            terminalError = current.Error;
+                            terminalErrorCode = current.ErrorCode;
+                            terminalHttpStatus = current.HttpStatus;
+                            terminalRetryAfterSeconds = current.RetryAfterSeconds;
+                            if (current.ErrorCode == LlmErrorCode.ContextLengthExceeded && chunkCount == 0)
+                            {
+                                contextOverflowFailure = BuildFailureResult(
+                                    current.Error,
+                                    current.ErrorCode,
+                                    current.HttpStatus,
+                                    current.RetryAfterSeconds);
+                                break;
+                            }
+                        }
+
+                        if (current?.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
+                        {
+                            executedToolCalls = current.ExecutedToolCalls;
+                        }
+
+                        if (current?.PromptTokens > 0)
+                        {
+                            promptTokens = current.PromptTokens;
+                        }
+
+                        if (current?.CompletionTokens > 0)
+                        {
+                            completionTokens = current.CompletionTokens;
+                        }
+
+                        if (current?.TotalTokens > 0)
+                        {
+                            totalTokens = current.TotalTokens;
+                        }
+
+                        if (current != null)
+                        {
+                            if (current.CacheReadTokens > 0)
+                            {
+                                cacheReadTokens = current.CacheReadTokens;
+                            }
+
+                            if (current.CacheWriteTokens > 0)
+                            {
+                                cacheWriteTokens = current.CacheWriteTokens;
+                            }
+                        }
+
+                        if (current != null &&
+                            current.IsDone &&
+                            string.IsNullOrEmpty(current.Error) &&
+                            string.IsNullOrWhiteSpace(current.Text) &&
+                            current.ExecutedToolCalls != null &&
+                            current.ExecutedToolCalls.Count > 0)
+                        {
+                            pendingToolOnlyTerminalChunk = current;
+                            continue;
+                        }
+
+                        yield return current;
+                    }
+                }
+                finally
+                {
+                    sw.Stop();
+                    if (enumerator != null)
+                    {
+                        try
+                        {
+                            await enumerator.DisposeAsync();
+                        }
+                        catch
+                        {
+                            /* swallow */
+                        }
+                    }
+
+                    _metrics.RecordLlmCompletion(bundle.RoleId, bundle.TraceId,
+                        string.IsNullOrEmpty(terminalError),
+                        sw.Elapsed.TotalMilliseconds);
+                }
+
+                if (contextOverflowFailure != null)
+                {
+                    bool canRetryContextOverflow = _compactionCoordinator.ShouldRetryAfterContextOverflow(
+                        contextOverflowFailure,
+                        contextOverflowPasses,
+                        maxContextOverflowRetries);
+                    if (canRetryContextOverflow)
+                    {
+                        contextOverflowPasses++;
+                        contextPass = contextOverflowPasses;
+                        continue;
+                    }
+
+                    RecordTrace(bundle, contextOverflowFailure, null, contextOverflowFailure.Error);
+                    yield return new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = contextOverflowFailure.Error,
+                        ErrorCode = contextOverflowFailure.ErrorCode,
+                        HttpStatus = contextOverflowFailure.HttpStatus,
+                        RetryAfterSeconds = contextOverflowFailure.RetryAfterSeconds
+                    };
+                    yield break;
+                }
+
+                string content = accumulated.ToString();
+                bool synthesizedToolOnlyContent = string.IsNullOrWhiteSpace(content);
+                string toolOnlyContent = ResolveToolOnlyCompletionContent(content, executedToolCalls);
+                if (!string.IsNullOrEmpty(toolOnlyContent))
+                {
+                    content = toolOnlyContent;
+                    if (synthesizedToolOnlyContent)
+                    {
+                        yield return new LlmStreamChunk { Text = content };
+                    }
+                }
+
+                if (string.IsNullOrEmpty(terminalError) && !string.IsNullOrEmpty(content))
+                {
+                    if (_structuredPolicy.ShouldValidate(bundle.RoleId) &&
+                        !_structuredPolicy.TryValidate(bundle.RoleId, content, out string failReason))
+                    {
+                        _metrics.RecordStructuredRetry(bundle.RoleId, bundle.TraceId, failReason ?? "");
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = "structured validation failed: " + (failReason ?? "")
+                        };
+                        yield break;
+                    }
+
+                    LlmCompletionResult streamResult = new()
+                    {
+                        Ok = true,
+                        Content = content,
+                        PromptTokens = promptTokens,
+                        CompletionTokens = completionTokens,
+                        TotalTokens = totalTokens,
+                        CacheReadTokens = cacheReadTokens,
+                        CacheWriteTokens = cacheWriteTokens,
+                        ExecutedToolCalls = executedToolCalls
+                    };
+                    content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
+                    RecordTokenObservation(bundle, promptTokens);
+                }
+                else if (!string.IsNullOrEmpty(terminalError))
+                {
+                    LlmCompletionResult failure = BuildFailureResult(
+                        terminalError,
+                        terminalErrorCode,
+                        terminalHttpStatus,
+                        terminalRetryAfterSeconds);
+                    RecordTrace(bundle, failure, null, terminalError);
+                }
+
+                if (pendingToolOnlyTerminalChunk != null)
+                {
+                    pendingToolOnlyTerminalChunk.Text = "";
+                    yield return pendingToolOnlyTerminalChunk;
+                }
+
+                yield break;
             }
         }
 
@@ -1220,6 +1349,22 @@ namespace CoreAI.Ai
 
             const int maxChars = 240;
             return trimmed.Length <= maxChars ? trimmed : trimmed.Substring(0, maxChars) + "...";
+        }
+
+        private static LlmCompletionResult BuildFailureResult(
+            string error,
+            LlmErrorCode errorCode,
+            int? httpStatus,
+            int? retryAfterSeconds)
+        {
+            return new LlmCompletionResult
+            {
+                Ok = false,
+                Error = error ?? "",
+                ErrorCode = errorCode,
+                HttpStatus = httpStatus,
+                RetryAfterSeconds = retryAfterSeconds
+            };
         }
 
         /// <summary>
