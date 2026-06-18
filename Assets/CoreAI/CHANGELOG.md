@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 4.6.2 - 2026-06-18
+
+- **Version alignment.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.2 for UPM consumers that pin
+  matching package versions.
+
 ## 4.6.1 - 2026-06-18
 
 - **NoLua package compile fix.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.1 so UPM consumers can

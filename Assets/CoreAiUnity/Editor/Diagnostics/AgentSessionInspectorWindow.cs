@@ -384,6 +384,8 @@ namespace CoreAI.Editor.Diagnostics
                 return false;
             }
 
+            AgentSessionInspector bestInspector = null;
+            int bestScore = int.MinValue;
             foreach (LifetimeScope scope in scopes)
             {
                 if (scope == null || scope.Container == null)
@@ -396,8 +398,12 @@ namespace CoreAI.Editor.Diagnostics
                     if (scope.Container.TryResolve(typeof(AgentSessionInspector), out object resolved) &&
                         resolved is AgentSessionInspector found)
                     {
-                        inspector = found;
-                        return true;
+                        int score = ComputeInspectorCandidateScore(found, GetScopeDepth(scope.transform));
+                        if (bestInspector == null || score >= bestScore)
+                        {
+                            bestInspector = found;
+                            bestScore = score;
+                        }
                     }
                 }
                 catch (Exception)
@@ -406,8 +412,43 @@ namespace CoreAI.Editor.Diagnostics
                 }
             }
 
+            if (bestInspector != null)
+            {
+                inspector = bestInspector;
+                return true;
+            }
+
             error = "Found LifetimeScope(s) but none register AgentSessionInspector. Ensure the scene boots CoreAI (RegisterCorePortable) and is in Play Mode.";
             return false;
+        }
+
+        private static int ComputeInspectorCandidateScore(AgentSessionInspector inspector, int scopeDepth)
+        {
+            int roleCount = 0;
+            try
+            {
+                roleCount = inspector?.GetKnownRoleIds()?.Count ?? 0;
+            }
+            catch (Exception)
+            {
+                roleCount = 0;
+            }
+
+            // Project child scopes commonly add game-specific agents/tools over the parent CoreAI scope.
+            // Prefer the inspector with the richest role set; use hierarchy depth as a stable tie-breaker.
+            return roleCount * 1000 + Mathf.Max(0, scopeDepth);
+        }
+
+        private static int GetScopeDepth(Transform transform)
+        {
+            int depth = 0;
+            while (transform != null)
+            {
+                depth++;
+                transform = transform.parent;
+            }
+
+            return depth;
         }
 
         private static bool TryBuildEditModeContext(

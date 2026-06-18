@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.6.2 - 2026-06-18
+
+- **Agent Session Inspector scope selection.** In Play Mode the editor window now prefers the live scope with the
+  richest role set, so game child scopes such as RedoSchool's `GameLifetimeScope` expose project agents and tools
+  instead of falling back to the parent CoreAI scope.
+
 ## 4.6.1 - 2026-06-18
 
 - **NoLua compile fix.** `IFullLuaAccessBlacklistPolicy` is now available outside the Lua/MoonSharp compile guards,

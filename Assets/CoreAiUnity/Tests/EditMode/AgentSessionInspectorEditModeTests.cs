@@ -219,6 +219,67 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.Contains(inspector.GetKnownRoleIds(), "Teacher");
         }
 
+        [Test]
+        public void InspectorCandidateScore_PrefersRicherProjectScope()
+        {
+            AgentSessionInspector coreInspector = CreateInspectorWithPromptRole(null);
+            AgentSessionInspector gameInspector = CreateInspectorWithPromptRole("Teacher");
+
+            int coreScore = InvokeCandidateScore(coreInspector, scopeDepth: 2);
+            int gameScore = InvokeCandidateScore(gameInspector, scopeDepth: 3);
+            int deeperCoreScore = InvokeCandidateScore(coreInspector, scopeDepth: 3);
+
+            Assert.Greater(gameScore, coreScore);
+            Assert.Greater(deeperCoreScore, coreScore);
+        }
+
+        private static AgentSessionInspector CreateInspectorWithPromptRole(string roleId)
+        {
+            CoreAISettingsOptions settings = new()
+            {
+                UniversalSystemPromptPrefix = "Universal prefix."
+            };
+            AgentPromptsDefinition prompts = new();
+            if (!string.IsNullOrWhiteSpace(roleId))
+            {
+                prompts.CustomAgents.Add(new AgentPromptEntryDefinition
+                {
+                    RoleId = roleId,
+                    SystemPrompt = roleId + " prompt."
+                });
+            }
+
+            IAgentSystemPromptProvider systemProvider = new ChainedAgentSystemPromptProvider(
+                new IAgentSystemPromptProvider[]
+                {
+                    new ManifestAgentSystemPromptProvider(prompts),
+                    new BuiltInDefaultAgentSystemPromptProvider()
+                });
+            AgentMemoryPolicy policy = new();
+            return new AgentSessionInspector(
+                new AiPromptComposer(
+                    systemProvider,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(),
+                    null,
+                    policy,
+                    settings),
+                systemProvider,
+                null,
+                null,
+                policy,
+                settings);
+        }
+
+        private static int InvokeCandidateScore(AgentSessionInspector inspector, int scopeDepth)
+        {
+            System.Reflection.MethodInfo method = typeof(AgentSessionInspectorWindow).GetMethod(
+                "ComputeInspectorCandidateScore",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(method);
+            return (int)method.Invoke(null, new object[] { inspector, scopeDepth });
+        }
+
         private sealed class ReadOnlyMemoryStore : IAgentMemoryStore
         {
             private readonly string _memory;
