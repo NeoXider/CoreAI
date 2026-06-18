@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 4.6.1 - 2026-06-18
+
+- **NoLua package compile fix.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.1 so UPM consumers can
+  pin matching versions when Lua is disabled.
+
 ## 4.6.0 - 2026-06-18
 
 - **SkillSet tool execution hardening.** `read_skill` / `call_skill_tool` now share a resolver that supports

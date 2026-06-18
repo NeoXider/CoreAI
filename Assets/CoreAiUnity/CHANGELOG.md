@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.6.1 - 2026-06-18
+
+- **NoLua compile fix.** `IFullLuaAccessBlacklistPolicy` is now available outside the Lua/MoonSharp compile guards,
+  so `WorldCommandsInstaller.RegisterWorldCommands(...)` keeps a stable public signature and projects with
+  `COREAI_NO_LUA` compile without requiring Lua-only runtime bindings.
+
 ## 4.6.0 - 2026-06-18
 
 - **OpenAI-compatible system-tail safety.** Non-leading system-role context messages are converted into
