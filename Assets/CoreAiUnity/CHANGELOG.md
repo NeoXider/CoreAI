@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.7.0 - 2026-06-18
+
+- **Skill authoring updates.** `SkillSetAsset.ApplyDefinition(...)` lets editor/bootstrap code create or update
+  designer-authored skill assets from portable `SkillSetDefinition` snapshots without private-field reflection.
+- **Skill proxy regression coverage.** EditMode tests now cover skill actions returning explicit success, direct
+  `IJsonInvocableLlmTool` invocation through `call_skill_tool`, skill-only agent validation, and
+  `SkillSetAsset` create/update mapping.
+
 ## 4.6.2 - 2026-06-18
 
 - **Agent Session Inspector scope selection.** In Play Mode the editor window now prefers the live scope with the

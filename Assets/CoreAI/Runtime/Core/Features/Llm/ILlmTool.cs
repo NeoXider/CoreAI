@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 
 namespace CoreAI.Ai
@@ -41,6 +43,19 @@ namespace CoreAI.Ai
     {
         /// <summary>Creates the MEAI function bindings for this tool.</summary>
         IEnumerable<AIFunction> CreateAIFunctions();
+    }
+
+    /// <summary>
+    /// LLM tool that can be invoked by a skill proxy from raw JSON arguments without using reflection.
+    /// This is the preferred runtime contract for tools that live behind <c>call_skill_tool</c>.
+    /// </summary>
+    public interface IJsonInvocableLlmTool : ILlmTool
+    {
+        /// <summary>
+        /// Invokes the tool with a JSON object string containing the tool arguments.
+        /// The returned value is serialized and delivered back to the model as the tool result.
+        /// </summary>
+        Task<object> InvokeJsonAsync(string argumentsJson, CancellationToken cancellationToken = default);
     }
 
     /// <summary>

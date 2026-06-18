@@ -43,6 +43,12 @@ var combat = new SkillSet("Combat", "Fight enemies",
     new DelegateLlmTool("attack", "Attack target", (string target) => ...));
 ```
 
+Skill tools may be normal tools or actions. A `DelegateLlmTool` backed by `Action`, `Func<T>`, or an async delegate can
+live inside a `SkillSet`; the model still calls it through `call_skill_tool`. Void actions return
+`{"success":true}` so the next model step receives an explicit tool result. For hosts that need a fully explicit
+JSON contract, implement `IJsonInvocableLlmTool`; the skill proxy invokes that interface directly instead of using
+manual reflection.
+
 ### From file
 
 ```csharp
@@ -81,6 +87,17 @@ void Start()
 }
 ```
 
+Editor and bootstrap tooling can also create or update the asset from a portable definition:
+
+```csharp
+craftingAsset.ApplyDefinition(new SkillSetDefinition
+{
+    Name = "Crafting",
+    Description = "Forge weapons and armor",
+    Instructions = "Read recipes, check inventory, then craft."
+});
+```
+
 ### Registering skills
 
 ```csharp
@@ -113,6 +130,8 @@ await orch.RunTaskAsync(new AiTaskRequest {
 3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
 4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
 5. Token overhead: **constant** (2 meta-tools) regardless of skill/tool count
+6. Tool results are returned to the model as normal tool output; empty or void action results become
+   `{"success":true}` instead of disappearing.
 
 ### API
 
@@ -126,6 +145,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 | `MergeToolNames(params SkillSet[])` | Merge names from multiple skills |
 | `FromFile(name, desc, path, tools)` | Create from file |
 | `FromTextContent(name, desc, text, tools)` | Create from text |
+| `IJsonInvocableLlmTool` | Optional direct JSON invocation contract for skill proxy tools |
 
 ### Best practices — when to use skills vs direct tools
 
@@ -166,6 +186,10 @@ var agent = new AgentBuilder("GameMaster")
 - **Saving: ~91%** of tool-related context
 
 ### How the proxy works (for advanced users)
+
+The proxy does not manually reflect delegate parameters or `Task.Result`. It first uses `IJsonInvocableLlmTool`
+when the tool implements it; otherwise it falls back to the existing MEAI `AIFunction` contract exposed by
+`IAIFunctionLlmTool` / `IAIFunctionsLlmTool`.
 
 ```
 User: "Craft me an iron sword"

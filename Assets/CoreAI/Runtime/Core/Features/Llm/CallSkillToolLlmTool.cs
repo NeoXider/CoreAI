@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
@@ -128,8 +126,8 @@ namespace CoreAI.Ai
 
             try
             {
-                object result = descriptor.DelegateTool != null
-                    ? await InvokeDelegateWithJsonAsync(descriptor.DelegateTool, argumentsJson ?? "{}")
+                object result = descriptor.JsonTool != null
+                    ? await descriptor.JsonTool.InvokeJsonAsync(argumentsJson ?? "{}", cancellationToken)
                         .ConfigureAwait(false)
                     : await descriptor.Function
                         .InvokeAsync(SkillSetToolResolver.CreateArguments(argumentsJson ?? "{}"), cancellationToken)
@@ -145,102 +143,6 @@ namespace CoreAI.Ai
             {
                 return SkillSetToolResolver.SerializeFailure($"Tool execution failed: {Unwrap(ex).Message}");
             }
-        }
-
-        /// <summary>
-        /// Invoke a DelegateLlmTool by parsing JSON arguments and mapping them to the delegate's parameters.
-        /// </summary>
-        private static async Task<object> InvokeDelegateWithJsonAsync(DelegateLlmTool tool, string json)
-        {
-            Delegate action = tool.ActionDelegate;
-            ParameterInfo[] parameters = action.Method.GetParameters();
-
-            if (parameters.Length == 0)
-            {
-                return await AwaitIfTask(action.DynamicInvoke()).ConfigureAwait(false);
-            }
-
-            JObject args;
-            try
-            {
-                args = JObject.Parse(json);
-            }
-            catch
-            {
-                // Try treating the whole string as a single argument
-                if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string))
-                {
-                    return await AwaitIfTask(action.DynamicInvoke(json)).ConfigureAwait(false);
-                }
-
-                throw new JsonReaderException($"Invalid JSON: {json}");
-            }
-
-            object[] invokeArgs = new object[parameters.Length];
-            for (int i = 0; i < parameters.Length; i++)
-            {
-                ParameterInfo param = parameters[i];
-                JToken token = null;
-
-                // Try exact name match, then case-insensitive
-                foreach (KeyValuePair<string, JToken> prop in args)
-                {
-                    if (string.Equals(prop.Key, param.Name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        token = prop.Value;
-                        break;
-                    }
-                }
-
-                if (token != null && token.Type != JTokenType.Null)
-                {
-                    // When the delegate expects a string but the model passes a JSON object/array
-                    // (e.g. call_skill_tool's arguments_json parameter), serialize to string.
-                    if (param.ParameterType == typeof(string) &&
-                        (token.Type == JTokenType.Object || token.Type == JTokenType.Array))
-                    {
-                        invokeArgs[i] = token.ToString(Formatting.None);
-                    }
-                    else
-                    {
-                        invokeArgs[i] = token.ToObject(param.ParameterType);
-                    }
-                }
-                else if (param.HasDefaultValue)
-                {
-                    invokeArgs[i] = param.DefaultValue;
-                }
-                else if (param.ParameterType == typeof(string))
-                {
-                    invokeArgs[i] = null;
-                }
-                else
-                {
-                    invokeArgs[i] = param.ParameterType.IsValueType
-                        ? Activator.CreateInstance(param.ParameterType)
-                        : null;
-                }
-            }
-
-            return await AwaitIfTask(action.DynamicInvoke(invokeArgs)).ConfigureAwait(false);
-        }
-
-        private static async Task<object> AwaitIfTask(object result)
-        {
-            if (result is Task task)
-            {
-                await task.ConfigureAwait(false);
-                Type taskType = task.GetType();
-                if (taskType.IsGenericType)
-                {
-                    PropertyInfo resultProperty = taskType.GetProperty("Result");
-                    return resultProperty?.GetValue(task);
-                }
-
-                return null;
-            }
-
-            return result;
         }
 
         private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
@@ -263,9 +165,7 @@ namespace CoreAI.Ai
 
         private static Exception Unwrap(Exception ex)
         {
-            return ex is TargetInvocationException tie && tie.InnerException != null
-                ? tie.InnerException
-                : ex;
+            return ex.InnerException ?? ex;
         }
     }
 }

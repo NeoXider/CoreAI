@@ -69,6 +69,23 @@ namespace CoreAI.Unity
         }
 
         /// <summary>
+        /// Updates this authoring asset from a portable skill definition.
+        /// Use this from editor tooling or import pipelines when creating or modifying skills programmatically.
+        /// </summary>
+        public void ApplyDefinition(SkillSetDefinition definition)
+        {
+            if (definition == null)
+            {
+                throw new System.ArgumentNullException(nameof(definition));
+            }
+
+            skillName = string.IsNullOrWhiteSpace(definition.Name) ? "NewSkill" : definition.Name.Trim();
+            description = definition.Description ?? "";
+            inlineInstructions = definition.Instructions ?? "";
+            instructionsAsset = null;
+        }
+
+        /// <summary>
         /// Builds a <see cref="SkillSet"/> from this asset's configuration and the provided tools.
         /// </summary>
         /// <param name="tools">Tools that belong to this skill.</param>

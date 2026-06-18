@@ -519,12 +519,14 @@ namespace CoreAI.Ai
                 }
             }
 
-            if ((_mode == AgentMode.ToolsAndChat || _mode == AgentMode.ToolsOnly) && _tools.Count == 0)
+            if ((_mode == AgentMode.ToolsAndChat || _mode == AgentMode.ToolsOnly) &&
+                _tools.Count == 0 &&
+                _skills.Count == 0)
             {
                 issues.Add(new AgentBuilderIssue(
                     AgentBuilderIssueCode.NoToolsForToolMode,
-                    $"Mode is {_mode} but no tools were registered. " +
-                    "Add tools with WithTool(...), WithAction(...), WithEventTool(...), or WithMemory(), " +
+                    $"Mode is {_mode} but no tools or skills were registered. " +
+                    "Add tools with WithTool(...), WithAction(...), WithEventTool(...), WithMemory(), or WithSkill(), " +
                     "or switch to AgentMode.ChatOnly."));
             }
 

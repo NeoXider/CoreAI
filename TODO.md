@@ -109,6 +109,10 @@
 - [x] **EditMode test integrity audit** - project-wide rules are documented in
       `Assets/CoreAiUnity/Docs/ARCHITECTURE.md` and `Assets/CoreAiUnity/Tests/README.md`; the old
       separate audit log was removed.
+- [x] **Skill creation/editing + action/toolcall support** - `SkillSetAsset.ApplyDefinition(...)` lets editor and
+      bootstrap code create/update skill definitions without private-field reflection; skills can contain
+      delegate-backed actions/tools and direct `IJsonInvocableLlmTool` implementations, and `call_skill_tool`
+      returns explicit results to the model for void actions.
 - [x] **Crafting determinism PlayMode test** - added a separate targeted repeat-ingredients
       `CraftingMemoryOpenAi_RepeatIngredients_SecondMatchesFirst` check and a fast normalization
       contract test so determinism is not hidden inside `ThreeCrafts_AllUnique`.

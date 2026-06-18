@@ -22,10 +22,20 @@ CoreAI uses **Options + ScriptableObject wrapper** for Unity-authored settings.
 | `AiPermissionsAsset` | CoreAiUnity | `IAiPermissions`, `AiPermissionsOptions`, `ToOptions()`, `ApplyOptions(...)` | Dashboard/runtime code can use the interface/options. |
 | `LlmRoutingManifest` | CoreAiUnity | `LlmRouteTable`, `ToRouteTable()`, `ToOptions()` | Manifest stays Unity authoring storage. Runtime routing uses the portable route table. Backend construction may still use Unity profile entries in composition. |
 | `AgentPromptsManifest` | CoreAiUnity | `AgentPromptsDefinition`, `ToDefinition()` | Reads `TextAsset.text` into plain strings. Prompt providers consume the snapshot. |
-| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. |
+| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()`, `ApplyDefinition(...)` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. `ApplyDefinition(...)` lets editor/bootstrap code create or update skill assets without private-field reflection. |
 | `CoreAiPrefabRegistryAsset` | CoreAiUnity | `ICoreAiPrefabRegistry` | Not portable because it stores `GameObject` prefab references. Consumers depend on the Unity-side interface. |
 
 ## How to use from runtime code
+
+Skill assets follow the same rule in both directions:
+
+```csharp
+SkillSetDefinition definition = skillSetAsset.ToSkillDefinition();
+skillSetAsset.ApplyDefinition(definition);
+```
+
+Tools and actions are still supplied by code when building the runtime `SkillSet`; the asset owns the skill name,
+description and instructions only.
 
 Prefer constructor/DI parameters typed as interfaces or options:
 

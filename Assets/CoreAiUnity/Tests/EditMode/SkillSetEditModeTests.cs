@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -330,6 +331,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CallSkillTool_Execute_DelegateAction_ReturnsExplicitSuccess()
+        {
+            bool called = false;
+            DelegateLlmTool inner = new("mark_done", "Marks the action done", new Action(() => called = true));
+            SkillSet skill = new("Actions", "Action tools", "Use mark_done when ready.", inner);
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
+            string json = await InvokeCallSkillToolAsync(proxy, "mark_done", "{}");
+
+            Assert.IsTrue(called, "Action tool should have been called.");
+            Assert.IsTrue(JObject.Parse(json).Value<bool>("success"),
+                "Void/empty action results must still produce an explicit model-visible success result.");
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_JsonInvocableTool_InvokesWithoutFunctionBinding()
+        {
+            JsonInvocableSkillTool inner = new();
+            SkillSet skill = new("JsonActions", "JSON action tools", "Use json_action with payload.", inner);
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
+            string json = await InvokeCallSkillToolAsync(proxy, "json_action", "{\"value\":\"payload\"}");
+
+            Assert.IsTrue(inner.Called, "IJsonInvocableLlmTool should be invoked directly by the skill proxy.");
+            Assert.That(json, Does.Contain("payload"));
+        }
+
+        [Test]
         public async Task CallSkillTool_Execute_AIFunctionTool_Invokes()
         {
             ExplicitFunctionSkillTool inner = new("explicit_tool");
@@ -378,6 +407,23 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0, config.Tools.Count);
             Assert.IsNotNull(config.Skills);
             Assert.AreEqual(2, config.Skills.Count);
+        }
+
+        [Test]
+        public void AgentBuilder_WithOnlySkills_DoesNotWarnNoToolsForToolMode()
+        {
+            SkillSet crafting = MakeCraftingSkill();
+            AgentBuilder builder = new AgentBuilder("skill_only_agent")
+                {
+                    SuppressBuildWarnings = true
+                }
+                .WithSkill(crafting)
+                .WithMode(AgentMode.ToolsAndChat);
+
+            IReadOnlyList<AgentBuilderIssue> issues = builder.ValidateOnBuild();
+
+            Assert.IsFalse(issues.Any(i => i.Code == AgentBuilderIssueCode.NoToolsForToolMode),
+                "Skill-only agents receive read_skill/call_skill_tool during ApplyToPolicy and must not warn as tool-less.");
         }
 
         [Test]
@@ -558,6 +604,26 @@ namespace CoreAI.Tests.EditMode
             private string GetHierarchy(int rootId)
             {
                 return JsonConvert.SerializeObject(new { success = true, rootId });
+            }
+        }
+
+        private sealed class JsonInvocableSkillTool : LlmToolBase, IJsonInvocableLlmTool
+        {
+            public bool Called { get; private set; }
+            public override string Name => "json_action";
+            public override string Description => "Direct JSON skill action.";
+            public override string ParametersSchema =>
+                "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}";
+
+            public Task<object> InvokeJsonAsync(string argumentsJson, CancellationToken cancellationToken = default)
+            {
+                Called = true;
+                JObject args = JObject.Parse(argumentsJson);
+                return Task.FromResult<object>(new
+                {
+                    success = true,
+                    echo = args.Value<string>("value")
+                });
             }
         }
     }

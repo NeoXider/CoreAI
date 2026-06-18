@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## 4.7.0 - 2026-06-18
+
+- **Reflection-free skill proxy path.** `call_skill_tool` no longer manually reflects delegates, `Task.Result`, or
+  parameter metadata. The proxy now invokes skill tools through `IJsonInvocableLlmTool` when available, or through
+  the existing MEAI `AIFunction` contract.
+- **Skill actions and tool calls.** `DelegateLlmTool` now exposes both `IAIFunctionLlmTool` and
+  `IJsonInvocableLlmTool`, so delegate-backed tools and void actions can be placed inside `SkillSet` and called via
+  `call_skill_tool`; empty/void results return an explicit `{"success":true}` payload to the model.
+- **Skill-only agents validate correctly.** `AgentBuilder.ValidateOnBuild()` now treats registered skills as a valid
+  tool source for `ToolsAndChat` / `ToolsOnly` agents instead of warning that no tools are present.
+
 ## 4.6.2 - 2026-06-18
 
 - **Version alignment.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.2 for UPM consumers that pin

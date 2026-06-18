@@ -21,7 +21,7 @@ namespace CoreAI.Ai
             string name,
             string description,
             string parametersSchema,
-            DelegateLlmTool delegateTool,
+            IJsonInvocableLlmTool jsonTool,
             AIFunction function)
         {
             Skill = skill;
@@ -29,7 +29,7 @@ namespace CoreAI.Ai
             Name = name;
             Description = description;
             ParametersSchema = parametersSchema;
-            DelegateTool = delegateTool;
+            JsonTool = jsonTool;
             Function = function;
         }
 
@@ -38,9 +38,9 @@ namespace CoreAI.Ai
         public string Name { get; }
         public string Description { get; }
         public string ParametersSchema { get; }
-        public DelegateLlmTool DelegateTool { get; }
+        public IJsonInvocableLlmTool JsonTool { get; }
         public AIFunction Function { get; }
-        public bool CanInvoke => DelegateTool != null || Function != null;
+        public bool CanInvoke => JsonTool != null || Function != null;
     }
 
     internal static class SkillSetToolResolver
@@ -118,12 +118,14 @@ namespace CoreAI.Ai
         {
             if (result == null)
             {
-                return "";
+                return JsonConvert.SerializeObject(new { success = true });
             }
 
             if (result is string text)
             {
-                return text;
+                return string.IsNullOrWhiteSpace(text)
+                    ? JsonConvert.SerializeObject(new { success = true })
+                    : text;
             }
 
             if (result is JsonDocument document)
@@ -153,12 +155,6 @@ namespace CoreAI.Ai
         {
             if (tool == null)
             {
-                yield break;
-            }
-
-            if (tool is DelegateLlmTool)
-            {
-                yield return tool.Name;
                 yield break;
             }
 
@@ -196,20 +192,6 @@ namespace CoreAI.Ai
         {
             if (tool == null || string.IsNullOrWhiteSpace(tool.Name))
             {
-                return;
-            }
-
-            if (tool is DelegateLlmTool delegateTool)
-            {
-                AIFunction function = CreateDelegateFunction(delegateTool);
-                descriptors.Add(new SkillToolDescriptor(
-                    skill,
-                    tool,
-                    tool.Name,
-                    tool.Description,
-                    SafeSchema(function, tool.ParametersSchema),
-                    delegateTool,
-                    null));
                 return;
             }
 
@@ -253,7 +235,7 @@ namespace CoreAI.Ai
                         function.Name,
                         string.IsNullOrWhiteSpace(function.Description) ? tool.Description : function.Description,
                         SafeSchema(function, tool.ParametersSchema),
-                        null,
+                        tool as IJsonInvocableLlmTool,
                         function));
                 }
                 else
@@ -261,6 +243,19 @@ namespace CoreAI.Ai
                     descriptors.Add(UninvocableDescriptor(skill, tool));
                 }
 
+                return;
+            }
+
+            if (tool is IJsonInvocableLlmTool jsonTool)
+            {
+                descriptors.Add(new SkillToolDescriptor(
+                    skill,
+                    tool,
+                    tool.Name,
+                    tool.Description,
+                    tool.ParametersSchema,
+                    jsonTool,
+                    null));
                 return;
             }
 
@@ -277,18 +272,6 @@ namespace CoreAI.Ai
                 tool.ParametersSchema,
                 null,
                 null);
-        }
-
-        private static AIFunction CreateDelegateFunction(DelegateLlmTool tool)
-        {
-            try
-            {
-                return AIFunctionFactory.Create(tool.ActionDelegate, tool.Name, tool.Description);
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private static AIFunction SafeCreateFunction(ILlmTool tool, IAIFunctionLlmTool functionTool)

@@ -285,9 +285,12 @@ namespace CoreAI.Tests.EditMode
             SkillSetAsset asset = ScriptableObject.CreateInstance<SkillSetAsset>();
             try
             {
-                SetField(asset, "skillName", "Crafting");
-                SetField(asset, "description", "Craft items");
-                SetField(asset, "inlineInstructions", "Use crafting tools");
+                asset.ApplyDefinition(new SkillSetDefinition
+                {
+                    Name = "Crafting",
+                    Description = "Craft items",
+                    Instructions = "Use crafting tools"
+                });
 
                 SkillSetDefinition definition = asset.ToSkillDefinition();
                 SkillSet skill = definition.BuildSkillSet();
@@ -296,6 +299,18 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual("Craft items", definition.Description);
                 Assert.AreEqual("Use crafting tools", definition.Instructions);
                 Assert.AreEqual("Crafting", skill.Name);
+
+                asset.ApplyDefinition(new SkillSetDefinition
+                {
+                    Name = "CraftingV2",
+                    Description = "Updated craft items",
+                    Instructions = "Use updated crafting tools"
+                });
+                SkillSetDefinition updated = asset.ToSkillDefinition();
+
+                Assert.AreEqual("CraftingV2", updated.Name);
+                Assert.AreEqual("Updated craft items", updated.Description);
+                Assert.AreEqual("Use updated crafting tools", updated.Instructions);
             }
             finally
             {
