@@ -37,6 +37,9 @@ Configure in the Inspector:
 - **Enable Streaming** — streamed generation of replies
 - **Enable Stop Generation** — when off, the send button is disabled while the AI is replying and never switches to `X`; Esc does not stop the active request.
 - **Show Clear Button** — when off, the header clear button is hidden. `CoreAiChatPanel.ClearChat(...)` remains available from code.
+- **UI Text Overrides** — optional copy for panel controls: `SendButtonText` (default `>`), `StopButtonText`,
+  send/stop tooltips, clear/collapse/open-chat labels and tooltips, and the FAB fallback text. Empty strings are
+  respected; older runtime options that do not implement `ICoreAiChatTextOptions` use package defaults.
 - **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**). **Default window size (package template + new `CoreAiChatConfig` assets):** **650×910** logical px (~**+30%** vs the legacy **500×700**). Existing `.asset` files keep their serialized width/height until you change them in the Inspector.
 - **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
 - **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)

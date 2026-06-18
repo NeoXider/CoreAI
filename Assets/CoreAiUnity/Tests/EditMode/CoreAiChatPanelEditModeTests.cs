@@ -88,6 +88,18 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void GetSendButtonPresentation_CustomTexts_UsesOverrides()
+        {
+            Assert.AreEqual("Send", CoreAiChatPanel.GetSendButtonText(false, true, "Send", "Stop"));
+            Assert.AreEqual("Stop", CoreAiChatPanel.GetSendButtonText(true, true, "Send", "Stop"));
+            Assert.AreEqual("Send", CoreAiChatPanel.GetSendButtonText(true, false, "Send", "Stop"));
+            Assert.AreEqual("Send tooltip",
+                CoreAiChatPanel.GetSendButtonTooltip(false, true, "Send tooltip", "Stop tooltip"));
+            Assert.AreEqual("Stop tooltip",
+                CoreAiChatPanel.GetSendButtonTooltip(true, true, "Send tooltip", "Stop tooltip"));
+        }
+
+        [Test]
         public void IsChatInputLocked_WhenStoppingOrClearing_ReturnsTrue()
         {
             Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(

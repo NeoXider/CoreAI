@@ -6,7 +6,7 @@ namespace CoreAI.Chat
     /// ScriptableObject configuration for the CoreAI chat UI and runtime behavior.
     /// </summary>
     [CreateAssetMenu(fileName = "CoreAiChatConfig", menuName = "CoreAI/Chat Config")]
-    public class CoreAiChatConfig : ScriptableObject, ICoreAiChatOptions
+    public class CoreAiChatConfig : ScriptableObject, ICoreAiChatOptions, ICoreAiChatTextOptions
     {
         [Header("Agent")] [Tooltip("Agent role id used for prompt routing and chat history.")] [SerializeField]
         private string _roleId = Ai.BuiltInAgentRoleIds.SmartChat;
@@ -16,6 +16,33 @@ namespace CoreAI.Chat
 
         [Header("UI - Welcome")] [SerializeField]
         private string _welcomeMessage = "How can I help?";
+
+        [Header("UI - Text Overrides")] [SerializeField]
+        private string _sendButtonText = CoreAiChatOptions.DefaultSendButtonText;
+
+        [SerializeField] private string _stopButtonText = CoreAiChatOptions.DefaultStopButtonText;
+
+        [SerializeField] private string _sendButtonTooltip = CoreAiChatOptions.DefaultSendButtonTooltip;
+
+        [SerializeField] private string _stopButtonTooltip = CoreAiChatOptions.DefaultStopButtonTooltip;
+
+        [SerializeField] private string _clearButtonText = CoreAiChatOptions.DefaultClearButtonText;
+
+        [SerializeField] private string _clearButtonTooltip = CoreAiChatOptions.DefaultClearButtonTooltip;
+
+        [SerializeField] private string _collapseButtonText = CoreAiChatOptions.DefaultCollapseButtonText;
+
+        [SerializeField] private string _collapseButtonTooltip = CoreAiChatOptions.DefaultCollapseButtonTooltip;
+
+        [SerializeField] private string _collapseButtonWithEscTooltip =
+            CoreAiChatOptions.DefaultCollapseButtonWithEscTooltip;
+
+        [SerializeField] private string _openChatTooltip = CoreAiChatOptions.DefaultOpenChatTooltip;
+
+        [Tooltip("Use {hotkey} for the resolved open-chat key.")] [SerializeField]
+        private string _openChatWithHotkeyTooltipFormat = CoreAiChatOptions.DefaultOpenChatWithHotkeyTooltipFormat;
+
+        [SerializeField] private string _fabFallbackText = CoreAiChatOptions.DefaultFabFallbackText;
 
         [Tooltip("Load persisted chat history when the panel starts.")] [SerializeField]
         private bool _loadPersistedChatOnStartup = true;
@@ -101,6 +128,18 @@ namespace CoreAI.Chat
         public string RoleId => _roleId;
         public string HeaderTitle => _headerTitle;
         public string WelcomeMessage => _welcomeMessage;
+        public string SendButtonText => _sendButtonText;
+        public string StopButtonText => _stopButtonText;
+        public string SendButtonTooltip => _sendButtonTooltip;
+        public string StopButtonTooltip => _stopButtonTooltip;
+        public string ClearButtonText => _clearButtonText;
+        public string ClearButtonTooltip => _clearButtonTooltip;
+        public string CollapseButtonText => _collapseButtonText;
+        public string CollapseButtonTooltip => _collapseButtonTooltip;
+        public string CollapseButtonWithEscTooltip => _collapseButtonWithEscTooltip;
+        public string OpenChatTooltip => _openChatTooltip;
+        public string OpenChatWithHotkeyTooltipFormat => _openChatWithHotkeyTooltipFormat;
+        public string FabFallbackText => _fabFallbackText;
         public bool LoadPersistedChatOnStartup => _loadPersistedChatOnStartup;
         public int MaxPersistedMessagesForUi => _maxPersistedMessagesForUi < 0 ? 0 : _maxPersistedMessagesForUi;
         public Sprite AiAvatarIcon => _aiAvatarIcon;
@@ -139,6 +178,24 @@ namespace CoreAI.Chat
             _roleId = options.RoleId;
             _headerTitle = options.HeaderTitle;
             _welcomeMessage = options.WelcomeMessage;
+
+            ICoreAiChatTextOptions textOptions = options as ICoreAiChatTextOptions;
+            _sendButtonText = textOptions?.SendButtonText ?? CoreAiChatOptions.DefaultSendButtonText;
+            _stopButtonText = textOptions?.StopButtonText ?? CoreAiChatOptions.DefaultStopButtonText;
+            _sendButtonTooltip = textOptions?.SendButtonTooltip ?? CoreAiChatOptions.DefaultSendButtonTooltip;
+            _stopButtonTooltip = textOptions?.StopButtonTooltip ?? CoreAiChatOptions.DefaultStopButtonTooltip;
+            _clearButtonText = textOptions?.ClearButtonText ?? CoreAiChatOptions.DefaultClearButtonText;
+            _clearButtonTooltip = textOptions?.ClearButtonTooltip ?? CoreAiChatOptions.DefaultClearButtonTooltip;
+            _collapseButtonText = textOptions?.CollapseButtonText ?? CoreAiChatOptions.DefaultCollapseButtonText;
+            _collapseButtonTooltip =
+                textOptions?.CollapseButtonTooltip ?? CoreAiChatOptions.DefaultCollapseButtonTooltip;
+            _collapseButtonWithEscTooltip =
+                textOptions?.CollapseButtonWithEscTooltip ?? CoreAiChatOptions.DefaultCollapseButtonWithEscTooltip;
+            _openChatTooltip = textOptions?.OpenChatTooltip ?? CoreAiChatOptions.DefaultOpenChatTooltip;
+            _openChatWithHotkeyTooltipFormat =
+                textOptions?.OpenChatWithHotkeyTooltipFormat ??
+                CoreAiChatOptions.DefaultOpenChatWithHotkeyTooltipFormat;
+            _fabFallbackText = textOptions?.FabFallbackText ?? CoreAiChatOptions.DefaultFabFallbackText;
             _loadPersistedChatOnStartup = options.LoadPersistedChatOnStartup;
             _maxPersistedMessagesForUi = options.MaxPersistedMessagesForUi;
             _enableStreaming = options.EnableStreaming;

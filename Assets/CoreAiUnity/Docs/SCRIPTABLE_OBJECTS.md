@@ -15,7 +15,7 @@ CoreAI uses **Options + ScriptableObject wrapper** for Unity-authored settings.
 
 | Asset | Layer | Runtime contract | Notes |
 | --- | --- | --- | --- |
-| `CoreAiChatConfig` | CoreAiUnity | `ICoreAiChatOptions`, `CoreAiChatOptions`, `ToOptions()`, `ApplyOptions(...)` | Unity-only view fields such as `Sprite` and `KeyCode` stay on the asset. `CoreAiChatPanel.SetRuntimeOptions(...)` allows tests/bootstrap without SO mutation. |
+| `CoreAiChatConfig` | CoreAiUnity | `ICoreAiChatOptions`, optional `ICoreAiChatTextOptions`, `CoreAiChatOptions`, `ToOptions()`, `ApplyOptions(...)` | Unity-only view fields such as `Sprite` and `KeyCode` stay on the asset. The text override block controls send/stop/clear/collapse/open labels and tooltips, including default `SendButtonText = ">"`. `CoreAiChatPanel.SetRuntimeOptions(...)` allows tests/bootstrap without SO mutation. |
 | `CoreAISettingsAsset` | CoreAiUnity | `ICoreAISettings`, `CoreAISettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | Singleton/resource loading remains Unity-only. Portable host settings live in CoreAI. |
 | `OpenAiHttpLlmSettings` | CoreAiUnity | `IOpenAiHttpSettings`, `OpenAiHttpOptions`, `ToOptions()`, `ApplyOptions(...)` | HTTP clients consume `IOpenAiHttpSettings`; the asset is an Inspector profile. |
 | `GameLogSettingsAsset` | CoreAiUnity | `IGameLogSettings`, `GameLogSettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | `GameLogFeature` and `GameLogLevel` are portable because they do not depend on Unity. |

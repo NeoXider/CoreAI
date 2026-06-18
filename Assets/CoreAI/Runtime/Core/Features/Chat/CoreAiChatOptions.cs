@@ -31,13 +31,45 @@ namespace CoreAI.Chat
     }
 
     /// <summary>
+    /// Optional UI copy overrides for the built-in chat panel.
+    /// Kept separate from <see cref="ICoreAiChatOptions"/> so existing custom options remain source-compatible.
+    /// </summary>
+    public interface ICoreAiChatTextOptions
+    {
+        string SendButtonText { get; }
+        string StopButtonText { get; }
+        string SendButtonTooltip { get; }
+        string StopButtonTooltip { get; }
+        string ClearButtonText { get; }
+        string ClearButtonTooltip { get; }
+        string CollapseButtonText { get; }
+        string CollapseButtonTooltip { get; }
+        string CollapseButtonWithEscTooltip { get; }
+        string OpenChatTooltip { get; }
+        string OpenChatWithHotkeyTooltipFormat { get; }
+        string FabFallbackText { get; }
+    }
+
+    /// <summary>
     /// Mutable runtime chat settings for tests, bootstrap code, and non-asset configuration.
     /// </summary>
-    public sealed class CoreAiChatOptions : ICoreAiChatOptions
+    public sealed class CoreAiChatOptions : ICoreAiChatOptions, ICoreAiChatTextOptions
     {
         public const string DefaultRoleId = Ai.BuiltInAgentRoleIds.SmartChat;
         public const string DefaultHeaderTitle = "AI Chat";
         public const string DefaultWelcomeMessage = "Hello! How can I help?";
+        public const string DefaultSendButtonText = ">";
+        public const string DefaultStopButtonText = "X";
+        public const string DefaultSendButtonTooltip = "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435";
+        public const string DefaultStopButtonTooltip = "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u044e (Esc)";
+        public const string DefaultClearButtonText = "C";
+        public const string DefaultClearButtonTooltip = "\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442";
+        public const string DefaultCollapseButtonText = "-";
+        public const string DefaultCollapseButtonTooltip = "Collapse chat";
+        public const string DefaultCollapseButtonWithEscTooltip = "Collapse chat (Esc)";
+        public const string DefaultOpenChatTooltip = "Open chat";
+        public const string DefaultOpenChatWithHotkeyTooltipFormat = "Open chat ({hotkey})";
+        public const string DefaultFabFallbackText = "...";
         public const string DefaultStreamingToolProgressHint = "Processing...";
         public const string DefaultLongRequestHintFormat = "Response is still being generated... ~{elapsed}s";
         public const string DefaultErrorMessagePrefix = "Error: ";
@@ -47,6 +79,18 @@ namespace CoreAI.Chat
         public string RoleId { get; set; } = DefaultRoleId;
         public string HeaderTitle { get; set; } = DefaultHeaderTitle;
         public string WelcomeMessage { get; set; } = DefaultWelcomeMessage;
+        public string SendButtonText { get; set; } = DefaultSendButtonText;
+        public string StopButtonText { get; set; } = DefaultStopButtonText;
+        public string SendButtonTooltip { get; set; } = DefaultSendButtonTooltip;
+        public string StopButtonTooltip { get; set; } = DefaultStopButtonTooltip;
+        public string ClearButtonText { get; set; } = DefaultClearButtonText;
+        public string ClearButtonTooltip { get; set; } = DefaultClearButtonTooltip;
+        public string CollapseButtonText { get; set; } = DefaultCollapseButtonText;
+        public string CollapseButtonTooltip { get; set; } = DefaultCollapseButtonTooltip;
+        public string CollapseButtonWithEscTooltip { get; set; } = DefaultCollapseButtonWithEscTooltip;
+        public string OpenChatTooltip { get; set; } = DefaultOpenChatTooltip;
+        public string OpenChatWithHotkeyTooltipFormat { get; set; } = DefaultOpenChatWithHotkeyTooltipFormat;
+        public string FabFallbackText { get; set; } = DefaultFabFallbackText;
         public bool LoadPersistedChatOnStartup { get; set; } = true;
         public int MaxPersistedMessagesForUi { get; set; }
         public bool EnableStreaming { get; set; } = true;
@@ -79,11 +123,27 @@ namespace CoreAI.Chat
                 return CreateDefault();
             }
 
+            ICoreAiChatTextOptions text = source as ICoreAiChatTextOptions;
+
             return new CoreAiChatOptions
             {
                 RoleId = source.RoleId,
                 HeaderTitle = source.HeaderTitle,
                 WelcomeMessage = source.WelcomeMessage,
+                SendButtonText = text?.SendButtonText ?? DefaultSendButtonText,
+                StopButtonText = text?.StopButtonText ?? DefaultStopButtonText,
+                SendButtonTooltip = text?.SendButtonTooltip ?? DefaultSendButtonTooltip,
+                StopButtonTooltip = text?.StopButtonTooltip ?? DefaultStopButtonTooltip,
+                ClearButtonText = text?.ClearButtonText ?? DefaultClearButtonText,
+                ClearButtonTooltip = text?.ClearButtonTooltip ?? DefaultClearButtonTooltip,
+                CollapseButtonText = text?.CollapseButtonText ?? DefaultCollapseButtonText,
+                CollapseButtonTooltip = text?.CollapseButtonTooltip ?? DefaultCollapseButtonTooltip,
+                CollapseButtonWithEscTooltip =
+                    text?.CollapseButtonWithEscTooltip ?? DefaultCollapseButtonWithEscTooltip,
+                OpenChatTooltip = text?.OpenChatTooltip ?? DefaultOpenChatTooltip,
+                OpenChatWithHotkeyTooltipFormat =
+                    text?.OpenChatWithHotkeyTooltipFormat ?? DefaultOpenChatWithHotkeyTooltipFormat,
+                FabFallbackText = text?.FabFallbackText ?? DefaultFabFallbackText,
                 LoadPersistedChatOnStartup = source.LoadPersistedChatOnStartup,
                 MaxPersistedMessagesForUi = source.MaxPersistedMessagesForUi,
                 EnableStreaming = source.EnableStreaming,

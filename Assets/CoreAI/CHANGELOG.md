@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 4.8.0 - 2026-06-18
+
+- **Chat UI text options.** Added optional `ICoreAiChatTextOptions` and matching `CoreAiChatOptions` fields for
+  send/stop/clear/collapse/open-chat labels and tooltips. The original `ICoreAiChatOptions` contract remains
+  source-compatible for host projects that provide custom options.
+
 ## 4.7.0 - 2026-06-18
 
 - **Reflection-free skill proxy path.** `call_skill_tool` no longer manually reflects delegates, `Task.Result`, or

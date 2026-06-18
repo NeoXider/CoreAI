@@ -165,6 +165,7 @@ namespace CoreAI.Chat
         private CoreAi.ToolExecutedHandler? _toolExecutedChatHandler;
 
         private ICoreAiChatOptions Options => _runtimeOptions ?? (config != null ? config : DefaultOptions);
+        private ICoreAiChatTextOptions TextOptions => Options as ICoreAiChatTextOptions ?? DefaultOptions;
 
         public void SetRuntimeOptions(ICoreAiChatOptions options)
         {
@@ -389,9 +390,29 @@ namespace CoreAI.Chat
                 ApplyResponsiveSize(ChatContainer);
             }
 
-
+            ApplyStaticControlTexts();
             ApplyClearButtonVisibility();
             ApplyShortcutTooltips();
+        }
+
+        private void ApplyStaticControlTexts()
+        {
+            ICoreAiChatTextOptions textOptions = TextOptions;
+
+            if (ClearButton != null)
+            {
+                ClearButton.text = TextOrDefault(textOptions.ClearButtonText, CoreAiChatOptions.DefaultClearButtonText);
+                ClearButton.tooltip =
+                    TextOrDefault(textOptions.ClearButtonTooltip, CoreAiChatOptions.DefaultClearButtonTooltip);
+            }
+
+            if (CollapseButton != null)
+            {
+                CollapseButton.text =
+                    TextOrDefault(textOptions.CollapseButtonText, CoreAiChatOptions.DefaultCollapseButtonText);
+            }
+
+            UpdateSendButtonVisualState();
         }
 
         private void ApplyClearButtonVisibility()
@@ -412,15 +433,20 @@ namespace CoreAI.Chat
             if (FabButton != null)
             {
                 FabButton.tooltip = IsOpenChatKeyboardShortcutEnabled()
-                    ? $"Open chat ({FormatHotkeyForTooltip(ResolvedOpenChatHotkey())})"
-                    : "Open chat";
+                    ? FormatTemplate(
+                        TextOptions.OpenChatWithHotkeyTooltipFormat,
+                        CoreAiChatOptions.DefaultOpenChatWithHotkeyTooltipFormat,
+                        "{hotkey}",
+                        FormatHotkeyForTooltip(ResolvedOpenChatHotkey()))
+                    : TextOrDefault(TextOptions.OpenChatTooltip, CoreAiChatOptions.DefaultOpenChatTooltip);
             }
 
             if (CollapseButton != null)
             {
                 CollapseButton.tooltip = IsEscapeChatShortcutEnabled()
-                    ? "Collapse chat (Esc)"
-                    : "Collapse chat";
+                    ? TextOrDefault(TextOptions.CollapseButtonWithEscTooltip,
+                        CoreAiChatOptions.DefaultCollapseButtonWithEscTooltip)
+                    : TextOrDefault(TextOptions.CollapseButtonTooltip, CoreAiChatOptions.DefaultCollapseButtonTooltip);
             }
 
             Label fabIcon = Root?.Q<Label>("coreai-chat-fab-icon");
@@ -428,8 +454,18 @@ namespace CoreAI.Chat
             {
                 fabIcon.text = IsOpenChatKeyboardShortcutEnabled()
                     ? FormatHotkeyFabGlyph(ResolvedOpenChatHotkey())
-                    : "...";
+                    : TextOrDefault(TextOptions.FabFallbackText, CoreAiChatOptions.DefaultFabFallbackText);
             }
+        }
+
+        private static string TextOrDefault(string text, string fallback)
+        {
+            return text ?? fallback;
+        }
+
+        private static string FormatTemplate(string template, string fallback, string token, string value)
+        {
+            return TextOrDefault(template, fallback).Replace(token, value ?? string.Empty);
         }
 
         private bool IsOpenChatKeyboardShortcutEnabled()
@@ -2046,8 +2082,14 @@ namespace CoreAI.Chat
 
             bool isBusy = IsRequestInProgress();
             bool stopEnabled = Options.EnableStopGeneration;
-            SendButton.text = GetSendButtonText(isBusy, stopEnabled);
-            SendButton.tooltip = GetSendButtonTooltip(isBusy, stopEnabled);
+            ICoreAiChatTextOptions textOptions = TextOptions;
+            SendButton.text =
+                GetSendButtonText(isBusy, stopEnabled, textOptions.SendButtonText, textOptions.StopButtonText);
+            SendButton.tooltip = GetSendButtonTooltip(
+                isBusy,
+                stopEnabled,
+                textOptions.SendButtonTooltip,
+                textOptions.StopButtonTooltip);
             SendButton.SetEnabled(ShouldSendButtonBeEnabled(
                 _isSending,
                 _isStreaming,
@@ -2072,7 +2114,22 @@ namespace CoreAI.Chat
 
         internal static string GetSendButtonText(bool isBusy, bool stopGenerationEnabled)
         {
-            return isBusy && stopGenerationEnabled ? "X" : ">";
+            return GetSendButtonText(
+                isBusy,
+                stopGenerationEnabled,
+                CoreAiChatOptions.DefaultSendButtonText,
+                CoreAiChatOptions.DefaultStopButtonText);
+        }
+
+        internal static string GetSendButtonText(
+            bool isBusy,
+            bool stopGenerationEnabled,
+            string sendText,
+            string stopText)
+        {
+            return isBusy && stopGenerationEnabled
+                ? TextOrDefault(stopText, CoreAiChatOptions.DefaultStopButtonText)
+                : TextOrDefault(sendText, CoreAiChatOptions.DefaultSendButtonText);
         }
 
         internal static string GetSendButtonTooltip(bool isBusy)
@@ -2082,9 +2139,22 @@ namespace CoreAI.Chat
 
         internal static string GetSendButtonTooltip(bool isBusy, bool stopGenerationEnabled)
         {
+            return GetSendButtonTooltip(
+                isBusy,
+                stopGenerationEnabled,
+                CoreAiChatOptions.DefaultSendButtonTooltip,
+                CoreAiChatOptions.DefaultStopButtonTooltip);
+        }
+
+        internal static string GetSendButtonTooltip(
+            bool isBusy,
+            bool stopGenerationEnabled,
+            string sendTooltip,
+            string stopTooltip)
+        {
             return isBusy && stopGenerationEnabled
-                ? "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u044e (Esc)"
-                : "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435";
+                ? TextOrDefault(stopTooltip, CoreAiChatOptions.DefaultStopButtonTooltip)
+                : TextOrDefault(sendTooltip, CoreAiChatOptions.DefaultSendButtonTooltip);
         }
 
         internal static bool ShouldSendButtonBeEnabled(bool isSending, bool isStreaming, bool isStopping,

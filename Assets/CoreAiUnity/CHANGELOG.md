@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.8.0 - 2026-06-18
+
+- **Chat config text overrides.** `CoreAiChatConfig` now exposes Inspector/runtime overrides for the chat panel's
+  send/stop/clear/collapse/open labels and tooltips, including the default `>` send button text.
+- **Chat panel copy mapping.** `CoreAiChatPanel` applies the new text overrides from assets or runtime options while
+  preserving defaults for older `ICoreAiChatOptions` implementations; EditMode coverage verifies defaults,
+  round-tripping, and custom send/stop labels.
+
 ## 4.7.0 - 2026-06-18
 
 - **Skill authoring updates.** `SkillSetAsset.ApplyDefinition(...)` lets editor/bootstrap code create or update
