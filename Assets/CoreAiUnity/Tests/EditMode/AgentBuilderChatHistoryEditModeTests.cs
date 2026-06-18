@@ -218,6 +218,67 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void WithCompactionTriggerRatio_ShouldFlowToPolicy()
+        {
+            AgentConfig config = new AgentBuilder("CompactionRatioAgent")
+                .WithSystemPrompt("Test prompt")
+                .WithCompactionTriggerRatio(0.6f)
+                .BuildDetached();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+
+            Assert.AreEqual(0.6f, config.CompactionTriggerRatio);
+            Assert.AreEqual(0.6f, policy.GetRoleConfig("CompactionRatioAgent").CompactionTriggerRatio);
+        }
+
+        [Test]
+        public void WithCompactionTriggerRatio_InvalidValue_ShouldClearOverride()
+        {
+            AgentConfig config = new AgentBuilder("CompactionRatioAgent")
+                .WithSystemPrompt("Test prompt")
+                .WithCompactionTriggerRatio(2f)
+                .BuildDetached();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+
+            Assert.IsNull(config.CompactionTriggerRatio);
+            Assert.IsNull(policy.GetRoleConfig("CompactionRatioAgent").CompactionTriggerRatio);
+        }
+
+        [Test]
+        public void WithSystemPrompt_DefaultMode_ShouldReplacePreviousPrompt()
+        {
+            AgentConfig config = new AgentBuilder("PromptAgent")
+                .WithSystemPrompt("first")
+                .WithSystemPrompt("second")
+                .BuildDetached();
+
+            Assert.AreEqual("second", config.SystemPrompt);
+        }
+
+        [Test]
+        public void AppendSystemPrompt_ShouldPreservePreviousPrompt()
+        {
+            AgentConfig config = new AgentBuilder("PromptAgent")
+                .WithSystemPrompt("first")
+                .AppendSystemPrompt("second")
+                .BuildDetached();
+
+            Assert.AreEqual("first\n\nsecond", config.SystemPrompt);
+        }
+
+        [Test]
+        public void WithSystemPrompt_AppendMode_ShouldPreservePreviousPrompt()
+        {
+            AgentConfig config = new AgentBuilder("PromptAgent")
+                .WithSystemPrompt("first")
+                .WithSystemPrompt("second", SystemPromptWriteMode.Append)
+                .BuildDetached();
+
+            Assert.AreEqual("first\n\nsecond", config.SystemPrompt);
+        }
+
+        [Test]
         public void Builder_Chaining_ShouldWorkCorrectly()
         {
             AgentConfig config = new AgentBuilder("Merchant")

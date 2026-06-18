@@ -2,6 +2,9 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Lua;
+using CoreAI.Messaging;
+using MessagePipe;
 using MoonSharp.Interpreter;
 using NUnit.Framework;
 
@@ -164,6 +167,21 @@ namespace CoreAI.Tests.EditMode
 
             runtime.Tick(0);
             Assert.AreEqual("hello", store.Get("b", "received"));
+        }
+
+        [Test]
+        public void LuaModRuntimeTicker_ModEventEmitted_PublishesMessagePipeEvent()
+        {
+            LuaModRuntime runtime = new();
+            CapturingPublisher publisher = new();
+            _ = new LuaModRuntimeTicker(runtime, null, publisher);
+
+            runtime.LoadMod("a", "events_emit('quest_event', 'payload')");
+
+            Assert.AreEqual(1, publisher.Events.Count);
+            Assert.AreEqual("a", publisher.Events[0].ModId);
+            Assert.AreEqual("quest_event", publisher.Events[0].EventName);
+            Assert.AreEqual("payload", publisher.Events[0].Payload);
         }
 
         [Test]
@@ -354,6 +372,16 @@ namespace CoreAI.Tests.EditMode
             public void RegisterGameplayApis(Sandbox.LuaApiRegistry registry)
             {
                 registry.Register("stub_edit", new Func<double>(() => 2d));
+            }
+        }
+
+        private sealed class CapturingPublisher : IPublisher<LuaModEventEmitted>
+        {
+            public readonly List<LuaModEventEmitted> Events = new();
+
+            public void Publish(LuaModEventEmitted message)
+            {
+                Events.Add(message);
             }
         }
 

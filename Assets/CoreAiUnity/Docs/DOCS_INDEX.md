@@ -88,6 +88,7 @@ Package manifests:
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for both packages. |
+| [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 
 ## Tests
@@ -116,4 +117,4 @@ Package manifests:
 
 ## Roadmap
 
-Live backlog and recently closed documentation debt: [../../../TODO.md](../../../TODO.md).
+Current closure log: [../../../TODO.md](../../../TODO.md). Future non-blocking work: [BACKLOG.md](BACKLOG.md).

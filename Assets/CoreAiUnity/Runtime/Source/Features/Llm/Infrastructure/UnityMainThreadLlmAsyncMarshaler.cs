@@ -30,9 +30,12 @@ namespace CoreAI.Infrastructure.Llm
             {
                 return await factory().ConfigureAwait(false);
             }
-#endif
+
+            return await InvokeFactoryOnEditorUnityMainThreadAsync(factory, cancellationToken).ConfigureAwait(false);
+#else
             await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(cancellationToken);
             return await factory();
+#endif
         }
 
 #if UNITY_EDITOR
@@ -43,6 +46,8 @@ namespace CoreAI.Infrastructure.Llm
         private static int _editorMirrorIsPlaying = -1;
 
         private static int _editorMirroredUnityMainManagedThreadId = -1;
+
+        private static SynchronizationContext _editorMirroredUnityMainSynchronizationContext;
 
         private static int _editorRuntimePlayModeEntered;
 
@@ -131,6 +136,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, ResolveUnityMainManagedThreadId());
+                CaptureEditorUnitySynchronizationContext();
                 bool isPlaying = Application.isPlaying;
                 Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
                 if (isPlaying)
@@ -148,6 +154,7 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 Volatile.Write(ref _editorMirroredUnityMainManagedThreadId, ResolveUnityMainManagedThreadId());
+                CaptureEditorUnitySynchronizationContext();
                 bool isPlaying = EditorApplication.isPlaying || EditorApplication.isPlayingOrWillChangePlaymode;
                 Volatile.Write(ref _editorMirrorIsPlaying, isPlaying ? 1 : 0);
                 if (isPlaying)
@@ -186,6 +193,15 @@ namespace CoreAI.Infrastructure.Llm
             Volatile.Write(ref _editorMirrorIsPlaying, 1);
         }
 
+        private static void CaptureEditorUnitySynchronizationContext()
+        {
+            SynchronizationContext context = SynchronizationContext.Current;
+            if (context != null)
+            {
+                Interlocked.Exchange(ref _editorMirroredUnityMainSynchronizationContext, context);
+            }
+        }
+
         /// <summary>
         /// Refreshes the editor play-state mirror from a known Unity thread. Test Runner suites can
         /// transition between PlayMode fixtures without a domain reload, so a previous callback may
@@ -195,7 +211,58 @@ namespace CoreAI.Infrastructure.Llm
         public static void RefreshEditorPlayModeMirrorForCurrentThread()
         {
             EnsureEditorIsPlayingMirrorHook();
+            MarkEditorRuntimePlayModeEntered();
+            CaptureEditorUnitySynchronizationContext();
             UpdateEditorIsPlayingMirror();
+        }
+
+        private static async Task<T> InvokeFactoryOnEditorUnityMainThreadAsync<T>(
+            Func<Task<T>> factory,
+            CancellationToken cancellationToken)
+        {
+            int mirroredMainId = Volatile.Read(ref _editorMirroredUnityMainManagedThreadId);
+            if (mirroredMainId >= 0 && Thread.CurrentThread.ManagedThreadId == mirroredMainId)
+            {
+                return await factory();
+            }
+
+            SynchronizationContext context = Volatile.Read(ref _editorMirroredUnityMainSynchronizationContext);
+            if (context == null)
+            {
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(cancellationToken);
+                return await factory();
+            }
+
+            TaskCompletionSource<T> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            CancellationTokenRegistration cancellationRegistration = default;
+            if (cancellationToken.CanBeCanceled)
+            {
+                cancellationRegistration = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+            }
+
+            context.Post(async _ =>
+            {
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    T result = await factory();
+                    tcs.TrySetResult(result);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    tcs.TrySetCanceled(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+                finally
+                {
+                    cancellationRegistration.Dispose();
+                }
+            }, null);
+
+            return await tcs.Task.ConfigureAwait(false);
         }
 
         /// <summary>

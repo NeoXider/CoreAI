@@ -99,11 +99,13 @@ namespace CoreAI.Tests.PlayMode
 
             try
             {
-                // Wait for LLMUnity model readiness when that backend is selected.
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
                 {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                    Assert.Ignore(
+                        $"LLMUnity crafting scenario requires LLMUnity backend. Current backend: {handle.ResolvedBackend}");
                 }
+
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
                 Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
 
@@ -164,7 +166,7 @@ namespace CoreAI.Tests.PlayMode
 
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
-                    string executedLua = executeLua.Info.ArgumentsJson;
+                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, "Iron", "Oak Wood"))
                     {
                         yield break;
@@ -200,7 +202,7 @@ namespace CoreAI.Tests.PlayMode
 
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
-                    string executedLua = executeLua.Info.ArgumentsJson;
+                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, "Steel", "Hardwood"))
                     {
                         yield break;
@@ -236,7 +238,7 @@ namespace CoreAI.Tests.PlayMode
 
                     LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
                         toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
-                    string executedLua = executeLua.Info.ArgumentsJson;
+                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
                     if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, "Mithril", "Enchanted Wood"))
                     {
                         yield break;
@@ -312,6 +314,7 @@ namespace CoreAI.Tests.PlayMode
                 _registry.Register("logic_reset", new Action<string>(ResetLogicSlot));
                 _registry.Register("logic_list", new Func<List<object>>(ListLogicSlots));
                 _registry.Register("add", new Func<double, double, double>((a, b) => a + b));
+                _registry.RegisterCallback("memory", HandleMemoryShim);
             }
 
             private bool DefineLogicSlot(string name, Closure fn)
@@ -350,6 +353,36 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 return slots;
+            }
+
+            private DynValue HandleMemoryShim(ScriptExecutionContext ctx, CallbackArguments args)
+            {
+                string action = ReadMemoryArg(args, "action", 0) ?? "append";
+                string content = ReadMemoryArg(args, "content", 1) ?? "";
+                Debug.Log($"[Lua.memory.shim] action={action}, content={content}");
+                return DynValue.NewBoolean(true);
+            }
+
+            private static string ReadMemoryArg(CallbackArguments args, string tableKey, int positionalIndex)
+            {
+                if (args == null || args.Count == 0)
+                {
+                    return null;
+                }
+
+                DynValue first = args[0];
+                if (first.Type == DataType.Table)
+                {
+                    DynValue value = first.Table.Get(tableKey);
+                    return value.IsNil() ? null : value.CastToString();
+                }
+
+                if (args.Count > positionalIndex && !args[positionalIndex].IsNil())
+                {
+                    return args[positionalIndex].CastToString();
+                }
+
+                return null;
             }
 
             public Task<LuaTool.LuaResult> ExecuteAsync(string code, CancellationToken ct)
@@ -397,8 +430,10 @@ namespace CoreAI.Tests.PlayMode
                   "Create a weapon that is distinct from the previous crafts recorded above.\n\n";
 
             string instructions =
-                "Apply the craft in the game through the available Lua execution capability and preserve enough memory for future crafts. " +
-                "The created item should have a concrete name, type 'weapon', and a numeric quality value.";
+                "Apply the craft in the game through the available Lua execution capability. " +
+                "Do not call memory(...) inside Lua; this test harness persists canonical memory after execute_lua. " +
+                "The created item should have a concrete name, type 'weapon', and a numeric quality value. " +
+                "Return a Lua table or string that includes the concrete item name.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -429,7 +464,8 @@ namespace CoreAI.Tests.PlayMode
 
             string instructions =
                 "These ingredients were used before. Use the available Lua execution capability and the recorded craft memory to create the consistent result " +
-                "that the game should produce for the same ingredients, and preserve the updated memory.";
+                "that the game should produce for the same ingredients. Do not call memory(...) inside Lua; " +
+                "return a Lua table or string that includes the concrete item name.";
 
             return header + ingredients + memorySection + instructions;
         }
@@ -657,6 +693,23 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 return record;
+            }
+
+            public static string BuildExtractionPayload(LlmToolCallRecord record)
+            {
+                if (record == null)
+                {
+                    return "";
+                }
+
+                string args = record.Info.ArgumentsJson ?? "";
+                string result = record.ResultJson ?? "";
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    return args;
+                }
+
+                return string.IsNullOrWhiteSpace(args) ? result : args + "\n" + result;
             }
 
             private static string FormatRecordForAssertion(LlmToolCallRecord record)

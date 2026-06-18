@@ -2,11 +2,47 @@
 
 ## [Unreleased]
 
+## 4.6.0 - 2026-06-18
+
+- **SkillSet tool execution hardening.** `read_skill` / `call_skill_tool` now share a resolver that supports
+  `DelegateLlmTool`, `IAIFunctionLlmTool`, and `IAIFunctionsLlmTool`, serializes structured MEAI results
+  consistently, and returns explicit tool results or errors back to the model.
+- **Skill meta-tools respect allowlists.** Restricted tool runs keep the SkillSet meta-tools when the allowlist
+  intersects a skill's inner tool names, so agents can still call allowed tools through `call_skill_tool`.
+- **Required-tool retry.** Smart tool calling retries a required tool when the model emits plain text or omits
+  the call, then switches back to auto tool choice after the forced call succeeds.
+- **Agent session diagnostics split.** `AgentSessionSnapshot` now exposes separate system-prompt and history-only
+  text views, and live role discovery can include prompt-provider roles from manifests in addition to policy roles.
+- **Memory tool argument tolerance.** `memory` write/append/insert/delete/rename operations accept `new_text` as a
+  fallback content field when a model fills the edit field instead of `content`.
+- **Lua access-mode docs cleanup.** Replaced the old access-mode audit artifact with `LUA_ACCESS_MODES.md` and
+  moved non-blocking future Lua/world work into the Unity backlog.
+
+## 4.5.0 - 2026-06-18
+
 - **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage for source, YAML assets,
   Visual Studio project files, and common binary assets to prevent CRLF/LF churn and binary phantom diffs.
 - **Streaming context-overflow recovery.** `AiOrchestrator.RunStreamingAsync` now mirrors the bounded
   `MaxContextOverflowRetries` recovery path from `RunTaskAsync`, rebuilding the request with increasing
   `ContextRetryLevel` before any visible stream text is emitted.
+- **Cache-safe memory placement.** Tail placement is now the only runtime path, and the old prefix-placement
+  setting was removed. The stable `## Memory` system-prefix block is a cached snapshot; mid-session memory edits
+  are sent as a separate `## Memory (updates)` system-role tail message, then consolidated back into the prefix
+  only at a cold-cache boundary: initial snapshot, conversation compaction, or context-overflow retry.
+- **Memory read action.** The built-in `memory` tool now supports `action = "read"` and returns the current durable
+  memory document, length, and latest version without mutating the store.
+- **Wait tool.** Added portable `WaitLlmTool` and `AgentBuilder.WithWaitTool(...)` so an agent can intentionally
+  pause for a bounded number of seconds, receive a normal tool result, and continue the same tool-calling loop.
+- **Tool-result pairing regression coverage.** EditMode tests now guard that native tool calls are followed by
+  `FunctionResultContent` with the original call id, so the next model iteration receives the actual tool result.
+- **Empty tool-result normalization.** A tool that returns `null` or an empty payload is now converted into an
+  explicit successful JSON tool result instead of silently looking like a missing return.
+- **Token calibration persistence.** Added `ITokenCalibrationStore`; Unity hosts persist calibration scale per model
+  while portable hosts keep a no-op default store.
+- **Full Lua blacklist policy.** Full-tier reflection bindings can now receive an `IFullLuaAccessBlacklistPolicy`
+  so host games can deny selected component types or members even when Full Lua access is enabled.
+- **Lua mod MessagePipe bridge.** `LuaModRuntimeTicker` publishes `LuaModEventEmitted` through MessagePipe for host
+  UI/telemetry/repair flows that should observe persistent mod `report()` output without polling the runtime.
 
 ## 4.4.0 - 2026-06-15
 
@@ -20,15 +56,15 @@
 - **Compaction by threshold.** Added `ICoreAISettings.ConversationCompactionTriggerRatio` (default `0.8`)
   and `ConversationContextBuildArgs.CompactionTriggerRatio`. Deterministic and LLM-assisted context managers
   now leave all history verbatim and do not call `SaveSummary` while estimated history tokens are below
-  `historyBudget * ratio`; unset/invalid request ratios preserve legacy over-budget compaction.
+  `historyBudget * ratio`; unset/invalid request ratios fall back to the CoreAI default threshold.
 - **Deterministic tool contract prefix.** Added shared ordinal-by-name tool ordering, canonical
   Newtonsoft JSON schema rendering with recursively sorted object keys for text-shaped tool contracts,
   and EditMode regression coverage that guards stable fixed-input system prefixes from generated
   GUID/timestamp leakage.
 - **Dynamic world-state observation placement.** `AiPromptComposer.BuildRuntimeContext` now exposes the
-  per-role/global runtime context section independently, and `PlaceLiveContextInTail` can send it as the last
-  system-role chat-history message headed `## World State`; legacy flag-off placement in the system prompt is
-  unchanged.
+  per-role/global runtime context section independently, and the tail-placement path can send it as the last
+  system-role chat-history message headed `## World State`; flag-off placement in the system prompt was removed
+  in 4.5.0.
 - **Context editing before compaction.** Added `ConversationHistoryPruner` and roadmap §7 settings
   (`EnableContextPruning`, `MaxRetainedToolResultMessages`) so prompt-history copies collapse exact
   consecutive duplicates and retain only the newest durable `tool` / `## Tool Results` observations before
@@ -45,9 +81,9 @@
 - **Tool result memory policy.** Added per-role `ToolResultMemoryPolicy` with default
   `CompactSummary`; executed tool results can now persist into chat history as one `tool` entry and
   replay as provider-safe user observations on later turns.
-- **Context prefix stability flag.** Added `ICoreAISettings.PlaceLiveContextInTail` (default `false`) so
-  `## Conversation Summary` can be sent as the first system-role chat-history message, before recent
-  verbatim turns, instead of rewriting the system prompt prefix; legacy placement remains the default.
+- **Context prefix stability flag.** Added an opt-in setting so `## Conversation Summary` can be sent as the first
+  system-role chat-history message, before recent verbatim turns, instead of rewriting the system prompt prefix.
+  The opt-in flag was later removed when tail placement became the only supported path.
 - **Default context window raised to 128K.** `CoreAISettings.ContextWindowTokens` and related
   last-resort context-budget defaults now use `131072` tokens instead of `8192`; per-role
   `RoleMemoryConfig.ContextTokens` defaults to `0`, meaning inherit the global
@@ -152,7 +188,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Docs
 
-- `LUA_GAME_API.md`, `LUA_BEST_PRACTICES_RU.md`, `MOONSHARP_NATIVE_APIS_RU.md`, `LUA_ACCESS_MODES_AUDIT_RU.md`, demo READMEs, perf review.
+- `LUA_GAME_API.md`, `LUA_BEST_PRACTICES_RU.md`, `MOONSHARP_NATIVE_APIS_RU.md`, `LUA_ACCESS_MODES.md`, demo READMEs, perf review.
 
 ## [v3.2.0] - 2026-06-11
 
@@ -412,7 +448,7 @@ Introduces **`SkillSet`** — named groups of tools with dedicated prompt instru
   - `BuildActiveInstructions(params SkillSet[])` — compose `## Skill: {Name}` prompt sections from active skills.
 - **`AgentBuilder.WithSkill(SkillSet)`** / **`WithSkills(params SkillSet[])`** — register skill tools and instructions in the fluent builder. Tools are added to the agent's tool list; skills are stored on `AgentConfig.Skills`.
 - **`AgentConfig.Skills`** (`IReadOnlyList<SkillSet>`) — skills registered via `WithSkill`. Null when no skills.
-- **`SkillRuntimeContextProvider`** (internal) — `IAgentRuntimeContextProvider` that reads `AiTaskRequest.AllowedToolNames` and injects only the matching skills' `Instructions` into the system prompt. Registered automatically by `AgentConfig.ApplyToPolicy()` when skills have non-empty instructions.
+- **Skill runtime context provider** (internal at the time) — previously injected only the matching skills' instructions into the system prompt. Current builds keep the lightweight skill catalog in the stable system prefix and load full instructions through `read_skill`.
 
 #### Design
 
@@ -453,7 +489,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 #### Tests
 
-- **`SkillSetEditModeTests`** — 16 tests covering: SkillSet construction, instruction injection, per-request filtering, MergeToolNames, AgentBuilder.WithSkill integration, SkillRuntimeContextProvider activation.
+- **`SkillSetEditModeTests`** — tests covering: SkillSet construction, instruction injection, per-request filtering, MergeToolNames, and AgentBuilder.WithSkill integration.
 
 ### Semver
 

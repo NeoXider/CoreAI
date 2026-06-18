@@ -52,6 +52,48 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Prune_DropsOlderToolResult_WhenNewerResultForSameToolExists()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok old"),
+                Msg("assistant", "noted"),
+                Msg("tool", "## Tool Results\n- call_skill_tool: ok moved"),
+                Msg("user", "continue"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok fresh"),
+                Msg("assistant", "done")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreEqual(6, pruned.Length);
+            Assert.AreEqual("opening", pruned[0].Content);
+            Assert.AreEqual("noted", pruned[1].Content);
+            Assert.AreEqual("## Tool Results\n- call_skill_tool: ok moved", pruned[2].Content);
+            Assert.AreEqual("continue", pruned[3].Content);
+            Assert.AreEqual("## Tool Results\n- spawn_quiz: ok fresh", pruned[4].Content);
+            Assert.AreEqual("done", pruned[5].Content);
+        }
+
+        [Test]
+        public void Prune_KeepsOlderMixedToolBlock_WhenOnlyPartiallySuperseded()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "opening"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok old\n- call_skill_tool: ok moved"),
+                Msg("assistant", "noted"),
+                Msg("tool", "## Tool Results\n- spawn_quiz: ok fresh"),
+                Msg("user", "continue")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreSame(history, pruned);
+        }
+
+        [Test]
         public void Prune_WhenNothingRemoved_ReturnsOriginalArrayReference()
         {
             ChatMessage[] history =

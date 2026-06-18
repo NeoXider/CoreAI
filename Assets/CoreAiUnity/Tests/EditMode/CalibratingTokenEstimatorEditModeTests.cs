@@ -6,6 +6,21 @@ namespace CoreAI.Tests.EditMode
 {
     public sealed class CalibratingTokenEstimatorEditModeTests
     {
+        private sealed class MemoryCalibrationStore : ITokenCalibrationStore
+        {
+            public readonly System.Collections.Generic.Dictionary<string, double> Values = new();
+
+            public bool TryLoadScale(string modelKey, out double scale)
+            {
+                return Values.TryGetValue(modelKey, out scale);
+            }
+
+            public void SaveScale(string modelKey, double scale)
+            {
+                Values[modelKey] = scale;
+            }
+        }
+
         [Test]
         public void EstimateText_AllLatin_EqualsLegacyCharsDivFour()
         {
@@ -63,6 +78,24 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(
                 (int)Math.Ceiling(legacy * estimator.CurrentScale),
                 estimator.EstimateText(text));
+        }
+
+        [Test]
+        public void Constructor_WithPersistedScale_LoadsModelSpecificCalibration()
+        {
+            MemoryCalibrationStore store = new();
+            CoreAISettingsOptions settings = new()
+            {
+                TokenCalibrationModelKey = "qwen-test"
+            };
+
+            CalibratingTokenEstimator first = new(settings, store);
+            first.RecordObservation(100, 200);
+            double saved = store.Values["qwen-test"];
+
+            CalibratingTokenEstimator second = new(settings, store);
+
+            Assert.AreEqual(saved, second.CurrentScale, 0.0001d);
         }
 
         private static int LegacyEstimate(string text)

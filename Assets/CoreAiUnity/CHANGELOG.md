@@ -4,11 +4,44 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.6.0 - 2026-06-18
+
+- **OpenAI-compatible system-tail safety.** Non-leading system-role context messages are converted into
+  provider-safe context text before the OpenAI-compatible payload is sent, while the stable first system prompt
+  remains cacheable.
+- **World audio tool contract.** `world_command play_sound` now requires both `targetName` and clip name
+  (`stringValue`) and preserves the requested volume in the emitted world-command envelope; EditMode tests cover
+  success and missing-argument errors for audio commands.
+- **Scenario test decomposition.** Added targeted merchant economy tests for insufficient-gold no-mutation and
+  discount-enabled purchase, plus a separate repeat-ingredients crafting determinism probe so long live-model
+  scenarios are easier to diagnose.
+- **Agent Session Inspector split views.** The editor window can copy/view the full session, system prompt, or
+  history without system messages separately, and Play Mode role discovery refreshes manifest-defined custom roles
+  such as `Teacher`.
+- **Audit cleanup and backlog split.** Removed tracked audit documents, replaced Lua access-mode references with
+  `LUA_ACCESS_MODES.md`, added `BACKLOG.md` for non-MVP future work, and updated release/funding metadata.
+
+## 4.5.0 - 2026-06-18
+
 - **Repository line-ending normalization.** Added Unity-friendly `.gitattributes` coverage plus an EditMode guard
   test so Unity/source text and binary asset classifications stay stable across contributors.
 - **Streaming context-overflow recovery.** Added EditMode coverage for streaming context overflow: two retryable
   `ContextLengthExceeded` terminal chunks are hidden from callers while the orchestrator rebuilds with tighter
   `ContextRetryLevel` budgets and then streams the successful response.
+- **Tail placement is mandatory.** The old `CoreAISettingsAsset` prefix-placement toggle and Inspector field were
+  removed: summaries, world-state, and memory updates stay out of the stable system prefix until compaction or
+  context-overflow retry creates a natural cache boundary.
+- **Persistent token calibration store.** `CoreAILifetimeScope` registers `FileTokenCalibrationStore` on non-WebGL
+  targets and keys calibration by the active model name.
+- **Memory/read, wait, and tool-result tests.** EditMode coverage now includes `memory action=read`, the portable
+  `wait` tool, tool-result call-id pairing, memory tail consolidation on summarization, and consolidation on
+  context-overflow retry.
+- **Empty tool-result normalization.** Tests cover the execution-policy guard that turns `null` tool output into
+  an explicit payload while preserving the original call id.
+- **Full Lua blacklist hook.** `WorldCommandsInstaller.RegisterWorldCommands(...)` can pass an
+  `IFullLuaAccessBlacklistPolicy` into Full Lua reflection bindings; tests cover denied members and component types.
+- **Lua mod events through MessagePipe.** Unity composition registers and publishes `LuaModEventEmitted`, making
+  persistent mod events visible to MessagePipe subscribers in the same way LLM/tool diagnostics are.
 
 ## 4.4.0 - 2026-06-15
 
@@ -23,13 +56,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   prefix without explicit `cache_control` markers.
 - **Compaction by threshold.** `CoreAISettingsAsset` now exposes **Compaction trigger ratio** (default `0.8`)
   under Chat history summarization. Below `historyBudget * ratio`, CoreAI keeps all history verbatim and
-  does not rewrite the stored rolling summary; `0`/invalid values use legacy over-budget compaction.
+  does not rewrite the stored rolling summary; `0`/invalid values fall back to the CoreAI default threshold.
 - **Deterministic provider tool ordering.** MEAI native tool arrays now use the shared CoreAI
   ordinal-by-name tool order, matching the text-shaped tool contract order so identical role/tool inputs
   do not churn provider prompt-cache prefixes.
-- **Dynamic world-state observation placement.** The existing `PlaceLiveContextInTail` flag now also keeps
-  per-role runtime/world-state context out of the stable system prefix by appending a final system-role
-  `## World State` chat-history message after recent turns; flag-off behavior remains legacy system placement.
+- **Dynamic world-state observation placement.** Tail placement now keeps per-role runtime/world-state context out
+  of the stable system prefix by appending a final system-role `## World State` chat-history message after recent
+  turns; the old flag-off system-prefix behavior was removed in 4.5.0.
 - **Context editing before compaction.** Unity settings now expose `EnableContextPruning` (default on)
   and `MaxRetainedToolResultMessages` (default `3`). CoreAI prunes only the in-memory prompt history copy
   before summarization, dropping stale cross-turn `## Tool Results` observations while leaving stored chat
@@ -44,9 +77,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **Tool result memory policy.** Core chat history can now persist executed tool results per role
   (`None`, `ErrorsOnly`, `CompactSummary`, `Full`) with default compact summaries, intra-turn
   de-duplication, and provider-safe replay as user observations.
-- **Context prefix stability flag.** `CoreAISettingsAsset` now exposes `PlaceLiveContextInTail` (default
-  off), letting `## Conversation Summary` travel as the first system-role chat-history message before
-  recent verbatim turns while preserving legacy prefix placement unless opted in.
+- **Context prefix stability flag.** `CoreAISettingsAsset` gained an opt-in cache-stability setting, letting
+  `## Conversation Summary` travel as the first system-role chat-history message before recent verbatim turns.
+  That toggle was later removed when tail placement became mandatory.
 - **Agent Session Inspector JSON export.** Added a `Copy JSON` button that copies the full inspected `AgentSessionSnapshot` as indented JSON.
 - **Default context window raised to 128K.** Unity settings assets, route profiles, and routing
   fallbacks now inherit the shared `131072` token default instead of `8192`; per-role
@@ -545,8 +578,8 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Major — Lockstep with CoreAI 2.0.0 (SkillSet)
 
-- **Dependency:** **`com.nexoider.coreai` `2.0.0`** — **SkillSet** (named tool+instruction groups with per-request activation). No Unity-layer API changes; all new types (`SkillSet`, `SkillRuntimeContextProvider`, `AgentConfig.Skills`, `AgentBuilder.WithSkill/WithSkills`) live in the portable **`CoreAI.Core`** assembly.
-- **Tests:** **`SkillSetEditModeTests`** — 16 tests covering construction, instruction injection, per-request filtering, `MergeToolNames`, `AgentBuilder.WithSkill` integration, `SkillRuntimeContextProvider` activation via `ApplyToPolicy`.
+- **Dependency:** **`com.nexoider.coreai` `2.0.0`** — **SkillSet** (named tool+instruction groups with per-request activation). No Unity-layer API changes; all public SkillSet types live in the portable **`CoreAI.Core`** assembly.
+- **Tests:** **`SkillSetEditModeTests`** — tests covering construction, instruction injection, per-request filtering, `MergeToolNames`, and `AgentBuilder.WithSkill` integration.
 
 #### Package **`2.0.0`** — dependency **`com.nexoider.coreai` `2.0.0`**.
 

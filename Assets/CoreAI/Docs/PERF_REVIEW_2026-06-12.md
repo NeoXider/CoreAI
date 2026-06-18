@@ -38,6 +38,6 @@ FastNoLlm PlayMode 24 passed, `LuaDynamicGameMechanicsTests` with LM Studio pass
 
 ## Related Documents
 
-- `LUA_ACCESS_MODES_AUDIT.md` - access modes and Full
+- `LUA_ACCESS_MODES.md` - access modes and Full
 - `LUA_SANDBOX_SECURITY.md` - sandbox limits
 

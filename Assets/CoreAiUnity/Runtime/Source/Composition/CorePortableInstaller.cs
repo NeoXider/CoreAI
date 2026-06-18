@@ -29,7 +29,8 @@ namespace CoreAI.Composition
         /// </summary>
         public static void RegisterCorePortable(this IContainerBuilder builder,
             bool suppressDefaultConversationSummaryStore = false,
-            bool suppressDefaultAgentMemoryStore = false)
+            bool suppressDefaultAgentMemoryStore = false,
+            bool suppressDefaultTokenCalibrationStore = false)
         {
             if (!suppressDefaultConversationSummaryStore)
             {
@@ -59,6 +60,11 @@ namespace CoreAI.Composition
             builder.Register<AgentSessionInspector>(Lifetime.Singleton);
             builder.Register<DefaultAgentMemoryScopeProvider>(Lifetime.Singleton).As<IAgentMemoryScopeProvider>();
             builder.Register<DefaultContextBudgetPolicy>(Lifetime.Singleton).As<IContextBudgetPolicy>();
+            if (!suppressDefaultTokenCalibrationStore)
+            {
+                builder.RegisterInstance<ITokenCalibrationStore>(NullTokenCalibrationStore.Instance);
+            }
+
             builder.Register<CalibratingTokenEstimator>(Lifetime.Singleton)
                 .As<ITokenEstimator>()
                 .As<ICalibratingTokenEstimator>();

@@ -123,6 +123,28 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class CapturingContextManager : IConversationContextManager
+        {
+            public int BuildCalls { get; private set; }
+            public ConversationContextBuildArgs LastBuildArgs { get; private set; }
+            public AgentMemoryPolicy.RoleMemoryConfig LastRoleConfig { get; private set; }
+
+            public ConversationContextSnapshot BuildSnapshot(
+                string roleId,
+                ChatMessage[] history,
+                AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+                ConversationContextBuildArgs buildArgs = null)
+            {
+                BuildCalls++;
+                LastRoleConfig = roleConfig;
+                LastBuildArgs = buildArgs;
+                return new ConversationContextSnapshot
+                {
+                    RecentMessages = history ?? Array.Empty<ChatMessage>()
+                };
+            }
+        }
+
         private sealed class TestSink : IAiGameCommandSink
         {
             public void Publish(ApplyAiGameCommand command)
@@ -177,6 +199,7 @@ namespace CoreAI.Tests.EditMode
             public bool LogMeaiToolCallingSteps => false;
             public bool AllowDuplicateToolCalls => false;
             public bool EnableStreaming => false;
+            public float ConversationCompactionTriggerRatio { get; set; } = 0.8f;
         }
 
         private static AgentMemoryPolicy MakePolicyForRole(string roleId, bool chatHistory = true)
@@ -308,6 +331,75 @@ namespace CoreAI.Tests.EditMode
                 0,
                 counting2.CompactionCompletes,
                 "Programmer role should skip LLM compaction by default.");
+        }
+
+        [Test]
+        public async Task Orchestrator_PerRole_CompactionTriggerRatio_OverridesGlobalRatio()
+        {
+            const string globalRole = "global_threshold_role";
+            const string overrideRole = "override_threshold_role";
+            StubCoreSettingsWithCompaction settings = new() { ConversationCompactionTriggerRatio = 0.8f };
+
+            TestMemoryStore globalMem = new();
+            SeedHistory(globalMem, 2);
+            CapturingContextManager globalCtxMgr = new();
+            AgentMemoryPolicy globalPolicy = MakePolicyForRole(globalRole);
+            AiOrchestrator globalOrchestrator = new(
+                new TestAuthority(),
+                new StubLlmClient(),
+                new TestSink(),
+                new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, globalPolicy, settings),
+                globalMem,
+                globalPolicy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                globalCtxMgr,
+                null,
+                new FixedHistoryBudgetPolicy(25));
+
+            await globalOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = globalRole, Hint = "hi" })
+                .ConfigureAwait(false);
+            Assert.AreEqual(1, globalCtxMgr.BuildCalls);
+            Assert.IsNotNull(globalCtxMgr.LastBuildArgs);
+            Assert.AreEqual(
+                0.8f,
+                globalCtxMgr.LastBuildArgs.CompactionTriggerRatio,
+                "Global ratio should be used when the role has no override.");
+            Assert.IsNull(globalCtxMgr.LastRoleConfig.CompactionTriggerRatio);
+
+            TestMemoryStore overrideMem = new();
+            SeedHistory(overrideMem, 2);
+            CapturingContextManager overrideCtxMgr = new();
+            AgentMemoryPolicy overridePolicy = MakePolicyForRole(overrideRole);
+            overridePolicy.SetCompactionTriggerRatio(overrideRole, 1f);
+            AiOrchestrator overrideOrchestrator = new(
+                new TestAuthority(),
+                new StubLlmClient(),
+                new TestSink(),
+                new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, overridePolicy, settings),
+                overrideMem,
+                overridePolicy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                overrideCtxMgr,
+                null,
+                new FixedHistoryBudgetPolicy(25));
+
+            await overrideOrchestrator.RunTaskAsync(new AiTaskRequest { RoleId = overrideRole, Hint = "hi" })
+                .ConfigureAwait(false);
+            Assert.AreEqual(
+                1,
+                overrideCtxMgr.BuildCalls);
+            Assert.IsNotNull(overrideCtxMgr.LastBuildArgs);
+            Assert.AreEqual(
+                1f,
+                overrideCtxMgr.LastBuildArgs.CompactionTriggerRatio,
+                "Per-role ratio should override the global ratio for this request.");
+            Assert.AreEqual(1f, overrideCtxMgr.LastRoleConfig.CompactionTriggerRatio);
         }
     }
 }

@@ -21,6 +21,18 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
+    /// Controls how <see cref="AgentBuilder.WithSystemPrompt"/> combines role prompt fragments.
+    /// </summary>
+    public enum SystemPromptWriteMode
+    {
+        /// <summary>Replace the current builder-level prompt fragment.</summary>
+        Replace = 0,
+
+        /// <summary>Append the new fragment after the existing builder-level prompt fragment.</summary>
+        Append = 1
+    }
+
+    /// <summary>
     /// Fluent builder for configuring CoreAI agents, memory, tools, and prompt behavior.
     /// </summary>
     public sealed class AgentBuilder
@@ -38,6 +50,7 @@ namespace CoreAI.Ai
         private float? _temperature;
         private int? _maxOutputTokens;
         private ToolResultMemoryPolicy _toolResultMemory = ToolResultMemoryPolicy.CompactSummary;
+        private float? _compactionTriggerRatio;
         private bool? _allowDuplicateToolCalls;
         private bool? _enableStreaming;
         private MemoryToolAction _memoryDefaultAction = MemoryToolAction.Append;
@@ -55,7 +68,7 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Adds role-specific prompt text that is appended to the composed system prompt.
+        /// Sets role-specific prompt text that is appended to the composed system prompt.
         /// </summary>
         /// <remarks>
         /// <para>The final system prompt sent to the model is composed of THREE layers, in order:</para>
@@ -69,10 +82,31 @@ namespace CoreAI.Ai
         /// composed prompt at runtime, enable <c>logLlmInput</c> on <c>CoreAISettingsAsset</c> or read
         /// <c>AgentTurnTrace.SystemPrompt</c>.</para>
         /// </remarks>
-        public AgentBuilder WithSystemPrompt(string prompt)
+        public AgentBuilder WithSystemPrompt(string prompt, SystemPromptWriteMode mode = SystemPromptWriteMode.Replace)
         {
-            _systemPrompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
+            if (prompt == null)
+            {
+                throw new ArgumentNullException(nameof(prompt));
+            }
+
+            if (mode == SystemPromptWriteMode.Append && !string.IsNullOrWhiteSpace(_systemPrompt))
+            {
+                _systemPrompt = _systemPrompt.TrimEnd() + "\n\n" + prompt.Trim();
+            }
+            else
+            {
+                _systemPrompt = prompt;
+            }
+
             return this;
+        }
+
+        /// <summary>
+        /// Appends role-specific prompt text without replacing an earlier builder-level prompt fragment.
+        /// </summary>
+        public AgentBuilder AppendSystemPrompt(string prompt)
+        {
+            return WithSystemPrompt(prompt, SystemPromptWriteMode.Append);
         }
 
         /// <summary>
@@ -209,6 +243,16 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Adds the built-in <c>wait</c> tool so the model can pause briefly before continuing
+        /// the same tool-calling turn.
+        /// </summary>
+        public AgentBuilder WithWaitTool(double maxSeconds = WaitLlmTool.DefaultMaxSeconds)
+        {
+            _tools.Add(new WaitLlmTool(maxSeconds));
+            return this;
+        }
+
+        /// <summary>
         /// Adds a delegate-backed tool that invokes the supplied C# action or function.
         /// </summary>
         public AgentBuilder WithAction(string name, string description, Delegate action)
@@ -267,6 +311,16 @@ namespace CoreAI.Ai
         public AgentBuilder WithToolResultMemoryPolicy(ToolResultMemoryPolicy policy)
         {
             _toolResultMemory = policy;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets a per-agent compaction trigger ratio for chat history summarization.
+        /// Null or invalid values clear the override and fall back to global settings.
+        /// </summary>
+        public AgentBuilder WithCompactionTriggerRatio(float? ratio)
+        {
+            _compactionTriggerRatio = NormalizeCompactionTriggerRatio(ratio);
             return this;
         }
 
@@ -391,6 +445,7 @@ namespace CoreAI.Ai
                 Temperature = _temperature,
                 MaxOutputTokens = _maxOutputTokens,
                 ToolResultMemory = _toolResultMemory,
+                CompactionTriggerRatio = _compactionTriggerRatio,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
                 EnableStreaming = _enableStreaming,
                 MemoryDefaultAction = _memoryDefaultAction,
@@ -430,6 +485,22 @@ namespace CoreAI.Ai
             {
                 log.Warn($"[AgentBuilder:{_roleId}] {issue.Code}: {issue.Message}", LogTag.Core);
             }
+        }
+
+        private static float? NormalizeCompactionTriggerRatio(float? ratio)
+        {
+            if (!ratio.HasValue)
+            {
+                return null;
+            }
+
+            float value = ratio.Value;
+            if (value <= 0f || value > 1f || float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return null;
+            }
+
+            return value;
         }
 
         private void CollectIssues(List<AgentBuilderIssue> issues)
@@ -510,6 +581,7 @@ namespace CoreAI.Ai
         public float? Temperature { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
         public ToolResultMemoryPolicy ToolResultMemory { get; internal set; } = ToolResultMemoryPolicy.CompactSummary;
+        public float? CompactionTriggerRatio { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
 
         /// <summary>Whether this agent prefers streaming responses when supported.</summary>
@@ -548,11 +620,9 @@ namespace CoreAI.Ai
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
             policy.SetTemperature(RoleId, Temperature);
             policy.SetToolResultMemoryPolicy(RoleId, ToolResultMemory);
+            policy.SetCompactionTriggerRatio(RoleId, CompactionTriggerRatio);
 
-            if (!string.IsNullOrWhiteSpace(SystemPrompt))
-            {
-                policy.SetAdditionalSystemPrompt(RoleId, SystemPrompt);
-            }
+            string additionalPrompt = SystemPrompt;
 
             if (OverrideUniversalPrefix)
             {
@@ -575,14 +645,26 @@ namespace CoreAI.Ai
             // This keeps the model's visible tool count at exactly 2 regardless of skill count.
             if (Skills != null && Skills.Count > 0)
             {
-                // Inject lightweight catalog into system prompt
-                policy.SetRuntimeContextProvider(RoleId, new SkillRuntimeContextProvider(Skills));
+                // Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
+                // per agent build, unlike live world-state context, so it should remain cacheable.
+                string catalog = SkillSet.BuildCatalog(Skills);
+                if (!string.IsNullOrWhiteSpace(catalog))
+                {
+                    additionalPrompt = string.IsNullOrWhiteSpace(additionalPrompt)
+                        ? catalog
+                        : additionalPrompt.TrimEnd() + "\n\n" + catalog.Trim();
+                }
 
                 // Register read_skill meta-tool (loads instructions + tool schemas)
                 policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(Skills));
 
                 // Register call_skill_tool proxy (routes to real skill tools)
                 policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(Skills));
+            }
+
+            if (!string.IsNullOrWhiteSpace(additionalPrompt))
+            {
+                policy.SetAdditionalSystemPrompt(RoleId, additionalPrompt);
             }
         }
 

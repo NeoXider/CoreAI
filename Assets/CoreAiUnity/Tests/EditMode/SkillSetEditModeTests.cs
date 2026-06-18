@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.AgentMemory;
+using Microsoft.Extensions.AI;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -17,6 +22,31 @@ namespace CoreAI.Tests.EditMode
         private static DelegateLlmTool MakeTool(string name)
         {
             return new DelegateLlmTool(name, $"Test tool: {name}", new Action(() => { }));
+        }
+
+        private static async Task<string> InvokeReadSkillAsync(ILlmTool tool, string skillName)
+        {
+            AIFunction function = ((IAIFunctionLlmTool)tool).CreateAIFunction();
+            object result = await function.InvokeAsync(
+                new AIFunctionArguments(new Dictionary<string, object>
+                {
+                    ["skill_name"] = skillName
+                }),
+                CancellationToken.None);
+            return result?.ToString();
+        }
+
+        private static async Task<string> InvokeCallSkillToolAsync(ILlmTool tool, string toolName, string argumentsJson)
+        {
+            AIFunction function = ((IAIFunctionLlmTool)tool).CreateAIFunction();
+            object result = await function.InvokeAsync(
+                new AIFunctionArguments(new Dictionary<string, object>
+                {
+                    ["tool_name"] = toolName,
+                    ["arguments_json"] = argumentsJson
+                }),
+                CancellationToken.None);
+            return result?.ToString();
         }
 
         private static SkillSet MakeCraftingSkill()
@@ -67,6 +97,14 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Simple", skill.Name);
             Assert.AreEqual("A simple skill", skill.Description);
             Assert.AreEqual("", skill.Instructions);
+        }
+
+        [Test]
+        public void Constructor_AIFunctionsToolNames_UsesCallableFunctionNames()
+        {
+            SkillSet skill = new("Scene", "Scene access", "instructions", new MultiFunctionSkillTool());
+
+            CollectionAssert.AreEqual(new[] { "find_objects", "get_hierarchy" }, skill.ToolNames);
         }
 
         [Test]
@@ -175,27 +213,24 @@ namespace CoreAI.Tests.EditMode
         // ══════════════════════════════════════════════════════════════════════
 
         [Test]
-        public void ReadSkillTool_Create_ReturnsDelegateLlmTool()
+        public void ReadSkillTool_Create_ReturnsInvocableMetaTool()
         {
             List<SkillSet> skills = new() { MakeCraftingSkill(), MakeCombatSkill() };
-            DelegateLlmTool tool = ReadSkillLlmTool.Create(skills);
+            ILlmTool tool = ReadSkillLlmTool.Create(skills);
 
             Assert.AreEqual("read_skill", tool.Name);
             Assert.IsTrue(tool.AllowDuplicates);
-            Assert.IsNotNull(tool.ActionDelegate);
+            Assert.IsInstanceOf<IAIFunctionLlmTool>(tool);
         }
 
         [Test]
-        public void ReadSkillTool_Execute_KnownSkill_ReturnsInstructions()
+        public async Task ReadSkillTool_Execute_KnownSkill_ReturnsInstructions()
         {
             SkillSet crafting = MakeCraftingSkill();
-            DelegateLlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { crafting });
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { crafting });
 
-            // Invoke the delegate
-            Func<string, object> fn = (Func<string, object>)tool.ActionDelegate;
-            object result = fn("Crafting");
+            string json = await InvokeReadSkillAsync(tool, "Crafting");
 
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
             Assert.That(json, Does.Contain("Crafting"));
             Assert.That(json, Does.Contain("get_recipes"));
             Assert.That(json, Does.Contain("instructions"));
@@ -204,38 +239,49 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ReadSkillTool_Execute_UnknownSkill_ReturnsError()
+        public async Task ReadSkillTool_Execute_AIFunctionsTool_ListsCallableFunctionNames()
         {
-            DelegateLlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
-            Func<string, object> fn = (Func<string, object>)tool.ActionDelegate;
-            object result = fn("NonExistent");
+            SkillSet skill = new("Scene", "Scene access", "Use scene tools.", new MultiFunctionSkillTool());
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { skill });
 
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
-            Assert.That(json, Does.Contain("error"));
-            Assert.That(json, Does.Contain("not found"));
+            string json = await InvokeReadSkillAsync(tool, "Scene");
+
+            Assert.That(json, Does.Contain("find_objects"));
+            Assert.That(json, Does.Contain("get_hierarchy"));
+            Assert.That(json, Does.Not.Contain("\"tool_name\":\"scene_tool\""),
+                "read_skill must expose callable function names, not only the multi-tool container name.");
+            Assert.That(json, Does.Contain("parameters_schema"));
         }
 
         [Test]
-        public void ReadSkillTool_Execute_CaseInsensitive()
+        public async Task ReadSkillTool_Execute_UnknownSkill_ReturnsError()
         {
-            DelegateLlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
-            Func<string, object> fn = (Func<string, object>)tool.ActionDelegate;
-            object result = fn("crafting"); // lowercase
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
+            string json = await InvokeReadSkillAsync(tool, "NonExistent");
 
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
+            Assert.That(json, Does.Contain("error"));
+            Assert.That(json, Does.Contain("not found"));
+            Assert.IsFalse(JObject.Parse(json).Value<bool>("success"));
+        }
+
+        [Test]
+        public async Task ReadSkillTool_Execute_CaseInsensitive()
+        {
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
+            string json = await InvokeReadSkillAsync(tool, "crafting"); // lowercase
+
             Assert.That(json, Does.Contain("Crafting"));
             Assert.That(json, Does.Contain("instructions"));
         }
 
         [Test]
-        public void ReadSkillTool_Execute_EmptyName_ReturnsError()
+        public async Task ReadSkillTool_Execute_EmptyName_ReturnsError()
         {
-            DelegateLlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
-            Func<string, object> fn = (Func<string, object>)tool.ActionDelegate;
-            object result = fn("");
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
+            string json = await InvokeReadSkillAsync(tool, "");
 
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
             Assert.That(json, Does.Contain("error"));
+            Assert.IsFalse(JObject.Parse(json).Value<bool>("success"));
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -243,29 +289,29 @@ namespace CoreAI.Tests.EditMode
         // ══════════════════════════════════════════════════════════════════════
 
         [Test]
-        public void CallSkillTool_Create_ReturnsDelegateLlmTool()
+        public void CallSkillTool_Create_ReturnsInvocableMetaTool()
         {
             List<SkillSet> skills = new() { MakeCraftingSkill() };
-            DelegateLlmTool tool = CallSkillToolLlmTool.Create(skills);
+            ILlmTool tool = CallSkillToolLlmTool.Create(skills);
 
             Assert.AreEqual("call_skill_tool", tool.Name);
             Assert.IsTrue(tool.AllowDuplicates);
+            Assert.IsInstanceOf<IAIFunctionLlmTool>(tool);
         }
 
         [Test]
-        public void CallSkillTool_Execute_UnknownTool_ReturnsError()
+        public async Task CallSkillTool_Execute_UnknownTool_ReturnsError()
         {
-            DelegateLlmTool tool = CallSkillToolLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
-            Func<string, string, object> fn = (Func<string, string, object>)tool.ActionDelegate;
-            object result = fn("nonexistent", "{}");
+            ILlmTool tool = CallSkillToolLlmTool.Create(new List<SkillSet> { MakeCraftingSkill() });
+            string json = await InvokeCallSkillToolAsync(tool, "nonexistent", "{}");
 
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
             Assert.That(json, Does.Contain("error"));
             Assert.That(json, Does.Contain("not found"));
+            Assert.IsFalse(JObject.Parse(json).Value<bool>("success"));
         }
 
         [Test]
-        public void CallSkillTool_Execute_KnownTool_Invokes()
+        public async Task CallSkillTool_Execute_KnownTool_Invokes()
         {
             bool called = false;
             DelegateLlmTool inner = new("test_tool", "A test",
@@ -276,13 +322,37 @@ namespace CoreAI.Tests.EditMode
                 }));
             SkillSet skill = new("TestSkill", "Test", "instructions", inner);
 
-            DelegateLlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
-            Func<string, string, object> fn = (Func<string, string, object>)proxy.ActionDelegate;
-            object result = fn("test_tool", "{\"x\": \"hello\"}");
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
+            string json = await InvokeCallSkillToolAsync(proxy, "test_tool", "{\"x\": \"hello\"}");
 
             Assert.IsTrue(called, "Inner tool should have been called.");
-            string json = Newtonsoft.Json.JsonConvert.SerializeObject(result);
             Assert.That(json, Does.Contain("hello"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_AIFunctionTool_Invokes()
+        {
+            ExplicitFunctionSkillTool inner = new("explicit_tool");
+            SkillSet skill = new("TestSkill", "Test", "instructions", inner);
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
+            string json = await InvokeCallSkillToolAsync(proxy, "explicit_tool", "{\"value\":\"hello\"}");
+
+            Assert.IsTrue(inner.Called, "Explicit IAIFunctionLlmTool should have been called.");
+            Assert.That(json, Does.Contain("hello"));
+        }
+
+        [Test]
+        public async Task CallSkillTool_Execute_AIFunctionsTool_InvokesFunctionName()
+        {
+            MultiFunctionSkillTool inner = new();
+            SkillSet skill = new("Scene", "Scene access", "instructions", inner);
+
+            ILlmTool proxy = CallSkillToolLlmTool.Create(new List<SkillSet> { skill });
+            string json = await InvokeCallSkillToolAsync(proxy, "find_objects", "{\"query\":\"Player\"}");
+
+            Assert.IsTrue(inner.FindObjectsCalled, "IAIFunctionsLlmTool function should have been called by function name.");
+            Assert.That(json, Does.Contain("Player"));
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -373,7 +443,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ApplyToPolicy_WithSkills_RegistersCatalogProvider()
+        public void ApplyToPolicy_WithSkills_AddsCatalogToStableSystemPrompt()
         {
             SkillSet crafting = MakeCraftingSkill();
             SkillSet combat = MakeCombatSkill();
@@ -388,12 +458,10 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy = new();
             config.ApplyToPolicy(policy);
 
-            // RuntimeContextProvider should produce catalog
+            // Skill catalog is static per agent build, so it belongs in the stable prompt prefix.
             Assert.IsTrue(
-                policy.TryGetRuntimeContextProvider("test_catalog", out IAgentRuntimeContextProvider provider),
-                "RuntimeContextProvider should be registered.");
-            string context = provider.BuildContext(
-                new AiTaskRequest { RoleId = "test_catalog" }, "test_catalog", "trace");
+                policy.TryGetAdditionalSystemPrompt("test_catalog", out string context),
+                "Additional system prompt should include the skill catalog.");
 
             Assert.That(context, Does.Contain("Available Skills"));
             Assert.That(context, Does.Contain("Crafting"));
@@ -422,6 +490,75 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.Throws<ArgumentException>(() =>
                 SkillSet.FromFile("Test", "desc", null, MakeTool("t")));
+        }
+
+        private sealed class ExplicitFunctionSkillTool : LlmToolBase, IAIFunctionLlmTool
+        {
+            public ExplicitFunctionSkillTool(string name)
+            {
+                NameValue = name;
+            }
+
+            private string NameValue { get; }
+            public bool Called { get; private set; }
+            public override string Name => NameValue;
+            public override string Description => "Explicit function skill tool.";
+
+            public AIFunction CreateAIFunction()
+            {
+                return AIFunctionFactory.Create(
+                    (Func<string, string>)Execute,
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = Name,
+                        Description = Description
+                    });
+            }
+
+            private string Execute(string value)
+            {
+                Called = true;
+                return JsonConvert.SerializeObject(new { success = true, echo = value });
+            }
+        }
+
+        private sealed class MultiFunctionSkillTool : ILlmTool, IAIFunctionsLlmTool
+        {
+            public string Name => "scene_tool";
+            public string Description => "Scene functions.";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+            public bool FindObjectsCalled { get; private set; }
+
+            public IEnumerable<AIFunction> CreateAIFunctions()
+            {
+                yield return AIFunctionFactory.Create(
+                    (Func<string, string>)FindObjects,
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = "find_objects",
+                        Description = "Find objects."
+                    });
+
+                yield return AIFunctionFactory.Create(
+                    (Func<int, string>)GetHierarchy,
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = "get_hierarchy",
+                        Description = "Get hierarchy."
+                    });
+            }
+
+            private string FindObjects(string query)
+            {
+                FindObjectsCalled = true;
+                return JsonConvert.SerializeObject(new { success = true, query });
+            }
+
+            private string GetHierarchy(int rootId)
+            {
+                return JsonConvert.SerializeObject(new { success = true, rootId });
+            }
         }
     }
 }

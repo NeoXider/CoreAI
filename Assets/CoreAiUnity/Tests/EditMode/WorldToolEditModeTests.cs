@@ -106,7 +106,6 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(result.Success);
             Assert.IsTrue(result.Message.Contains("Unknown action"));
         }
-        // TODO: Keep play_animation focused test here; add dedicated audio coverage when WorldLlmTool exposes sound actions.
 
         [Test]
         public async Task WorldLlmTool_ExecuteAsync_PlayAnimation_ReturnsSuccess()
@@ -122,6 +121,64 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("play_animation", result.Action);
             Assert.IsTrue(executor.LastCommandJson.Contains("play_animation"));
             Assert.IsTrue(executor.LastCommandJson.Contains("attack"));
+        }
+
+        [Test]
+        public async Task WorldLlmTool_ExecuteAsync_PlaySound_ReturnsSuccess()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+            string resultJson = await tool.ExecuteAsync("play_sound", targetName: "speaker1",
+                stringValue: "bell", volume: 0.35f);
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("play_sound", result.Action);
+            Assert.AreEqual("play_sound", envelope.action);
+            Assert.AreEqual("speaker1", envelope.targetName);
+            Assert.AreEqual("bell", envelope.stringValue);
+            Assert.AreEqual(0.35f, envelope.floatValue, 0.0001f);
+        }
+
+        [Test]
+        public async Task WorldLlmTool_ExecuteAsync_PlaySoundWithoutClip_ReturnsHelpfulError()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+            string resultJson = await tool.ExecuteAsync("play_sound", targetName: "speaker1");
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("play_sound", result.Action);
+            StringAssert.Contains("targetName", result.Message);
+            StringAssert.Contains("stringValue", result.Message);
+            Assert.IsNull(executor.LastCommandJson,
+                "Executor should not run when required audio-command args are missing.");
+        }
+
+        [Test]
+        public async Task WorldLlmTool_ExecuteAsync_SetVolume_ReturnsSuccess()
+        {
+            TestWorldExecutor executor = new();
+            WorldLlmTool tool = new(executor, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                Infrastructure.Logging.GameLoggerUnscopedFallback.Instance);
+
+            string resultJson = await tool.ExecuteAsync("set_volume", targetName: "speaker1", volume: 0.25f);
+            WorldLlmTool.WorldResult result = JsonConvert.DeserializeObject<WorldLlmTool.WorldResult>(resultJson);
+            CoreAiWorldCommandEnvelope envelope =
+                JsonConvert.DeserializeObject<CoreAiWorldCommandEnvelope>(executor.LastCommandJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("set_volume", result.Action);
+            Assert.AreEqual("set_volume", envelope.action);
+            Assert.AreEqual("speaker1", envelope.targetName);
+            Assert.AreEqual(0.25f, envelope.floatValue, 0.0001f);
         }
 
         [Test]

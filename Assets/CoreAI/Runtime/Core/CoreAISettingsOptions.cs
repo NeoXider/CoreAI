@@ -33,8 +33,8 @@ namespace CoreAI
         public int MaxTokens { get; set; } = 2048;
         public bool EnableLlmContextCompaction { get; set; }
         public bool EnableTokenCalibration { get; set; } = CoreAISettings.DefaultEnableTokenCalibration;
+        public string TokenCalibrationModelKey { get; set; } = "default";
         public bool EnableConversationHistorySummarization { get; set; } = true;
-        public bool PlaceLiveContextInTail { get; set; } = CoreAISettings.DefaultPlaceLiveContextInTail;
         public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
         public int ConversationRolledSummaryMaxTokens { get; set; }
         public float ConversationCompactionTriggerRatio { get; set; } =
@@ -82,8 +82,8 @@ namespace CoreAI
                 MaxTokens = source.MaxTokens,
                 EnableLlmContextCompaction = source.EnableLlmContextCompaction,
                 EnableTokenCalibration = source.EnableTokenCalibration,
+                TokenCalibrationModelKey = source.TokenCalibrationModelKey,
                 EnableConversationHistorySummarization = source.EnableConversationHistorySummarization,
-                PlaceLiveContextInTail = source.PlaceLiveContextInTail,
                 ConversationHistoryRecentTokenBudgetOverride = source.ConversationHistoryRecentTokenBudgetOverride,
                 ConversationRolledSummaryMaxTokens = source.ConversationRolledSummaryMaxTokens,
                 ConversationCompactionTriggerRatio = source.ConversationCompactionTriggerRatio,

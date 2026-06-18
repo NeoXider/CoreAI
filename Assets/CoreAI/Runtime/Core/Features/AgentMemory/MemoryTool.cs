@@ -31,7 +31,7 @@ namespace CoreAI.Ai
             AIFunctionFactoryOptions options = new()
             {
                 Name = "memory",
-                Description = "Store, append, clear, or granularly edit persistent memory for agent recall across sessions."
+                Description = "Read, store, append, clear, or granularly edit persistent memory for agent recall across sessions."
             };
             return AIFunctionFactory.Create(func, options);
         }
@@ -53,9 +53,11 @@ namespace CoreAI.Ai
                 Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
             }
 
-            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) && content != null)
+            string mutationContent = string.IsNullOrEmpty(content) ? new_text : content;
+
+            if ((_settings?.LogToolCallArguments ?? CoreAISettings.LogToolCallArguments) && mutationContent != null)
             {
-                string preview = content.Length > 200 ? content.Substring(0, 200) : content;
+                string preview = mutationContent.Length > 200 ? mutationContent.Substring(0, 200) : mutationContent;
                 Log.Instance.Info($"  content: {preview}", LogTag.Memory);
             }
 
@@ -71,25 +73,28 @@ namespace CoreAI.Ai
             {
                 switch (action)
                 {
+                    case "read":
+                        return Task.FromResult(ReadMemory());
+
                     case "write":
-                        if (string.IsNullOrEmpty(content))
+                        if (string.IsNullOrEmpty(mutationContent))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
-                                { Success = false, Error = "Content is required for write action" }));
+                                { Success = false, Error = "content or new_text is required for write action" }));
                         }
 
-                        return Task.FromResult(SaveMutation(action, content, "Memory saved"));
+                        return Task.FromResult(SaveMutation(action, mutationContent, "Memory saved"));
 
                     case "append":
-                        if (string.IsNullOrEmpty(content))
+                        if (string.IsNullOrEmpty(mutationContent))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
-                                { Success = false, Error = "Content is required for append action" }));
+                                { Success = false, Error = "content or new_text is required for append action" }));
                         }
 
                         string currentState = LoadMemory(out _);
 
-                        if (currentState.Contains(content, StringComparison.OrdinalIgnoreCase))
+                        if (currentState.Contains(mutationContent, StringComparison.OrdinalIgnoreCase))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
                             {
@@ -100,8 +105,8 @@ namespace CoreAI.Ai
                         }
 
                         string newMemory = string.IsNullOrEmpty(currentState)
-                            ? content
-                            : currentState + "\n" + content;
+                            ? mutationContent
+                            : currentState + "\n" + mutationContent;
 
                         return Task.FromResult(SaveMutation(action, newMemory, "Content appended"));
 
@@ -109,23 +114,23 @@ namespace CoreAI.Ai
                         return Task.FromResult(ClearMemory());
 
                     case "str_replace":
-                        return Task.FromResult(ExecuteStrReplace(old_text, new_text ?? content, replace_all));
+                        return Task.FromResult(ExecuteStrReplace(old_text, mutationContent, replace_all));
 
                     case "insert":
-                        return Task.FromResult(ExecuteInsert(content, anchor, line));
+                        return Task.FromResult(ExecuteInsert(mutationContent, anchor, line));
 
                     case "delete":
-                        return Task.FromResult(ExecuteDelete(old_text ?? content, replace_all));
+                        return Task.FromResult(ExecuteDelete(old_text ?? mutationContent, replace_all));
 
                     case "rename":
-                        return Task.FromResult(ExecuteRename(old_text, new_text ?? content));
+                        return Task.FromResult(ExecuteRename(old_text, mutationContent));
 
                     default:
                         return Task.FromResult(SerializeResult(new MemoryResult
                         {
                             Success = false,
                             Error =
-                                $"Unknown action: '{action}'. Valid actions: write, append, clear, str_replace, insert, delete, rename"
+                                $"Unknown action: '{action}'. Valid actions: read, write, append, clear, str_replace, insert, delete, rename"
                         }));
                 }
             }
@@ -142,6 +147,40 @@ namespace CoreAI.Ai
                     Error = $"Memory operation failed: {ex.Message}"
                 }));
             }
+        }
+
+        private string ReadMemory()
+        {
+            string current = LoadMemory(out AgentMemoryState state);
+            int latestVersion = 0;
+            AgentMemoryVersionSnapshot[] versions = state?.Versions;
+            if (versions != null)
+            {
+                for (int i = 0; i < versions.Length; i++)
+                {
+                    if (versions[i] != null && versions[i].Version > latestVersion)
+                    {
+                        latestVersion = versions[i].Version;
+                    }
+                }
+            }
+
+            if (_settings?.LogToolCallResults ?? CoreAISettings.LogToolCallResults)
+            {
+                Log.Instance.Info($"[Tool Call] memory: SUCCESS - Memory read for {_roleId}",
+                    LogTag.Memory);
+            }
+
+            return SerializeResult(new MemoryResult
+            {
+                Success = true,
+                Message = string.IsNullOrEmpty(current)
+                    ? $"DONE: Memory is empty for {_roleId}."
+                    : $"DONE: Memory read for {_roleId}.",
+                Version = latestVersion,
+                MemoryLength = current.Length,
+                Memory = current
+            });
         }
 
         private string ExecuteStrReplace(string oldText, string newText, bool replaceAll)
@@ -454,6 +493,7 @@ namespace CoreAI.Ai
             public string Error { get; set; }
             public int Version { get; set; }
             public int MemoryLength { get; set; }
+            public string Memory { get; set; }
         }
     }
 }

@@ -15,11 +15,21 @@ namespace CoreAI.Ai
 
         private readonly object _lock = new();
         private readonly ICoreAISettings _settings;
+        private readonly ITokenCalibrationStore _store;
+        private readonly string _modelKey;
         private double _scale = 1.0d;
 
-        public CalibratingTokenEstimator(ICoreAISettings settings = null)
+        public CalibratingTokenEstimator(
+            ICoreAISettings settings = null,
+            ITokenCalibrationStore store = null)
         {
             _settings = settings;
+            _store = store ?? NullTokenCalibrationStore.Instance;
+            _modelKey = NormalizeModelKey(settings?.TokenCalibrationModelKey);
+            if (_store.TryLoadScale(_modelKey, out double persisted))
+            {
+                _scale = Clamp(persisted, MinScale, MaxScale);
+            }
         }
 
         /// <inheritdoc />
@@ -71,6 +81,7 @@ namespace CoreAI.Ai
                 // toward real/baseEstimate, not sqrt(real/baseEstimate).
                 double targetScale = _scale * realPromptTokens / estimatedPromptTokens;
                 _scale = Clamp((_scale * (1d - Alpha)) + (targetScale * Alpha), MinScale, MaxScale);
+                _store.SaveScale(_modelKey, _scale);
             }
         }
 
@@ -109,6 +120,11 @@ namespace CoreAI.Ai
             }
 
             return value > max ? max : value;
+        }
+
+        private static string NormalizeModelKey(string modelKey)
+        {
+            return string.IsNullOrWhiteSpace(modelKey) ? "default" : modelKey.Trim();
         }
     }
 }

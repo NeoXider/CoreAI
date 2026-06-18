@@ -24,14 +24,20 @@ namespace CoreAI.Editor.Diagnostics
     public sealed class AgentSessionInspectorWindow : EditorWindow
     {
         private Vector2 _statsScroll;
-        private Vector2 _sessionScroll;
+        private Vector2 _detailScroll;
         private string[] _roleIds = Array.Empty<string>();
         private int _selectedRoleIndex;
+        private int _detailViewIndex;
         private string _manualRoleId = "";
         private AgentSessionSnapshot _snapshot;
         private string _statsText = "";
         private string _sessionText = "No snapshot loaded.";
+        private string _systemText = "No snapshot loaded.";
+        private string _historyText = "No snapshot loaded.";
         private string _status = "Pick a role and inspect the live CoreAI container, or the active scene's serialized CoreAILifetimeScope in Edit Mode.";
+        private double _nextKnownRolesRefreshTime;
+
+        private static readonly string[] DetailViewLabels = { "Session", "System", "History" };
 
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
@@ -62,6 +68,21 @@ namespace CoreAI.Editor.Diagnostics
             if (change == PlayModeStateChange.EnteredPlayMode || change == PlayModeStateChange.ExitingPlayMode)
             {
                 RefreshRolesAndSnapshot();
+            }
+        }
+
+        private void OnInspectorUpdate()
+        {
+            if (!Application.isPlaying || EditorApplication.timeSinceStartup < _nextKnownRolesRefreshTime)
+            {
+                return;
+            }
+
+            _nextKnownRolesRefreshTime = EditorApplication.timeSinceStartup + 1.0d;
+            if (TryResolveInspector(out AgentSessionInspector inspector, out _) &&
+                UpdateKnownRoles(inspector.GetKnownRoleIds()))
+            {
+                Repaint();
             }
         }
 
@@ -118,7 +139,17 @@ namespace CoreAI.Editor.Diagnostics
                     EditorGUIUtility.systemCopyBuffer = _sessionText ?? "";
                 }
 
-                if (GUILayout.Button("Copy both", GUILayout.Width(90)))
+                if (GUILayout.Button("Copy system", GUILayout.Width(100)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = _systemText ?? "";
+                }
+
+                if (GUILayout.Button("Copy history", GUILayout.Width(100)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = _historyText ?? "";
+                }
+
+                if (GUILayout.Button("Copy stats+session", GUILayout.Width(130)))
                 {
                     EditorGUIUtility.systemCopyBuffer = (_statsText ?? "") + "\n" + (_sessionText ?? "");
                 }
@@ -134,12 +165,35 @@ namespace CoreAI.Editor.Diagnostics
                 }
             }
 
-            float available = Mathf.Max(120f, position.height - 200f);
+            float available = Mathf.Max(120f, position.height - 220f);
             EditorGUILayout.LabelField("Statistics", EditorStyles.boldLabel);
             _statsScroll = DrawTextPanel(_statsText, _statsScroll, available * 0.38f);
             GUILayout.Space(4);
-            EditorGUILayout.LabelField("Session (what the model sees)", EditorStyles.boldLabel);
-            _sessionScroll = DrawTextPanel(_sessionText, _sessionScroll, available * 0.62f);
+            _detailViewIndex = GUILayout.Toolbar(
+                Mathf.Clamp(_detailViewIndex, 0, DetailViewLabels.Length - 1),
+                DetailViewLabels);
+            EditorGUILayout.LabelField(GetDetailTitle(), EditorStyles.boldLabel);
+            _detailScroll = DrawTextPanel(GetDetailText(), _detailScroll, available * 0.62f);
+        }
+
+        private string GetDetailTitle()
+        {
+            return _detailViewIndex switch
+            {
+                1 => "System prompt, memory tails, summary, and tools",
+                2 => "History without system prompt messages",
+                _ => "Session (what the model sees)"
+            };
+        }
+
+        private string GetDetailText()
+        {
+            return _detailViewIndex switch
+            {
+                1 => _systemText,
+                2 => _historyText,
+                _ => _sessionText
+            };
         }
 
         private Vector2 DrawTextPanel(string text, Vector2 scroll, float height)
@@ -175,6 +229,8 @@ namespace CoreAI.Editor.Diagnostics
                     _snapshot = null;
                     _statsText = "";
                     _sessionText = "";
+                    _systemText = "";
+                    _historyText = "";
                     _status = $"{error}\n{editError}";
                     Repaint();
                     return;
@@ -183,16 +239,12 @@ namespace CoreAI.Editor.Diagnostics
                 IReadOnlyList<string> editKnown = AgentSessionInspector.GetKnownRoleIds(
                     editContext.Policy,
                     editContext.PromptsDefinition);
-                _roleIds = ToArray(editKnown);
-                ApplyRoleSelection();
+                UpdateKnownRoles(editKnown);
                 RefreshSnapshotOnly(editContext);
                 return;
             }
 
-            IReadOnlyList<string> known = inspector.GetKnownRoleIds();
-            _roleIds = ToArray(known);
-            ApplyRoleSelection();
-
+            UpdateKnownRoles(inspector.GetKnownRoleIds());
             RefreshSnapshotOnly(inspector);
         }
 
@@ -214,11 +266,14 @@ namespace CoreAI.Editor.Diagnostics
             _snapshot = null;
             _statsText = "";
             _sessionText = "";
+            _systemText = "";
+            _historyText = "";
             Repaint();
         }
 
         private void RefreshSnapshotOnly(AgentSessionInspector inspector)
         {
+            UpdateKnownRoles(inspector.GetKnownRoleIds());
             string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
                 ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
                 : _manualRoleId.Trim();
@@ -229,6 +284,8 @@ namespace CoreAI.Editor.Diagnostics
                 _snapshot = null;
                 _statsText = "";
                 _sessionText = "";
+                _systemText = "";
+                _historyText = "";
                 Repaint();
                 return;
             }
@@ -236,8 +293,7 @@ namespace CoreAI.Editor.Diagnostics
             try
             {
                 _snapshot = inspector.Inspect(roleId);
-                _statsText = _snapshot.ToStatsText();
-                _sessionText = _snapshot.ToSessionText();
+                ApplySnapshotTexts();
                 _status = $"Snapshot refreshed for role '{roleId}' via live container.";
             }
             catch (Exception ex)
@@ -246,6 +302,8 @@ namespace CoreAI.Editor.Diagnostics
                 _snapshot = null;
                 _statsText = "";
                 _sessionText = ex.ToString();
+                _systemText = ex.ToString();
+                _historyText = ex.ToString();
             }
 
             Repaint();
@@ -253,6 +311,7 @@ namespace CoreAI.Editor.Diagnostics
 
         private void RefreshSnapshotOnly(EditModeInspectorContext context)
         {
+            UpdateKnownRoles(AgentSessionInspector.GetKnownRoleIds(context.Policy, context.PromptsDefinition));
             string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
                 ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
                 : _manualRoleId.Trim();
@@ -263,6 +322,8 @@ namespace CoreAI.Editor.Diagnostics
                 _snapshot = null;
                 _statsText = "";
                 _sessionText = "";
+                _systemText = "";
+                _historyText = "";
                 Repaint();
                 return;
             }
@@ -277,8 +338,7 @@ namespace CoreAI.Editor.Diagnostics
                     context.MemoryStore,
                     context.SummaryStore,
                     context.FallbackSystemPrompts);
-                _statsText = _snapshot.ToStatsText();
-                _sessionText = _snapshot.ToSessionText();
+                ApplySnapshotTexts();
                 _status = $"Snapshot refreshed for role '{roleId}' via edit-mode (serialized scene) from '{context.ScopeName}'.";
             }
             catch (Exception ex)
@@ -287,9 +347,19 @@ namespace CoreAI.Editor.Diagnostics
                 _snapshot = null;
                 _statsText = "";
                 _sessionText = ex.ToString();
+                _systemText = ex.ToString();
+                _historyText = ex.ToString();
             }
 
             Repaint();
+        }
+
+        private void ApplySnapshotTexts()
+        {
+            _statsText = _snapshot?.ToStatsText() ?? "";
+            _sessionText = _snapshot?.ToSessionText() ?? "";
+            _systemText = _snapshot?.ToSystemPromptText() ?? "";
+            _historyText = _snapshot?.ToHistoryText() ?? "";
         }
 
         private static bool TryResolveInspector(out AgentSessionInspector inspector, out string error)
@@ -437,6 +507,42 @@ namespace CoreAI.Editor.Diagnostics
                     return;
                 }
             }
+        }
+
+        private bool UpdateKnownRoles(IReadOnlyList<string> knownRoles)
+        {
+            string[] next = ToArray(knownRoles);
+            if (ArraysEqual(_roleIds, next))
+            {
+                return false;
+            }
+
+            _roleIds = next;
+            ApplyRoleSelection();
+            return true;
+        }
+
+        private static bool ArraysEqual(string[] a, string[] b)
+        {
+            if (ReferenceEquals(a, b))
+            {
+                return true;
+            }
+
+            if (a == null || b == null || a.Length != b.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (!string.Equals(a[i], b[i], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static string[] ToArray(IReadOnlyList<string> values)

@@ -25,11 +25,16 @@ namespace CoreAI.Infrastructure.Lua
 
         private readonly IGameLogger _logger;
         private readonly bool _allowNonPublic;
+        private readonly IFullLuaAccessBlacklistPolicy _blacklistPolicy;
 
-        public CoreAiFullUnityLuaRuntimeBindings(IGameLogger logger = null, bool allowNonPublicMembers = false)
+        public CoreAiFullUnityLuaRuntimeBindings(
+            IGameLogger logger = null,
+            bool allowNonPublicMembers = false,
+            IFullLuaAccessBlacklistPolicy blacklistPolicy = null)
         {
             _logger = logger;
             _allowNonPublic = allowNonPublicMembers;
+            _blacklistPolicy = blacklistPolicy ?? AllowAllFullLuaAccessBlacklistPolicy.Instance;
         }
 
         private BindingFlags MemberFlags()
@@ -151,14 +156,14 @@ namespace CoreAI.Infrastructure.Lua
             return go != null ? go.GetInstanceID() : 0;
         }
 
-        private static List<object> ListObjects(int max)
+        private List<object> ListObjects(int max)
         {
             List<object> results = new();
             CollectSceneObjects("", ClampMax(max), results, MatchAny);
             return results;
         }
 
-        private static List<object> FindAll(string pattern, int max)
+        private List<object> FindAll(string pattern, int max)
         {
             string search = (pattern ?? "").Trim();
             List<object> results = new();
@@ -166,7 +171,7 @@ namespace CoreAI.Infrastructure.Lua
             return results;
         }
 
-        private static List<object> FindByTag(string tag, int max)
+        private List<object> FindByTag(string tag, int max)
         {
             string targetTag = (tag ?? "").Trim();
             List<object> results = new();
@@ -180,11 +185,13 @@ namespace CoreAI.Infrastructure.Lua
             return results;
         }
 
-        private static List<object> FindByComponent(string componentType, int max)
+        private List<object> FindByComponent(string componentType, int max)
         {
             Type type = ResolveType((componentType ?? "").Trim());
             List<object> results = new();
-            if (type == null || !typeof(Component).IsAssignableFrom(type))
+            if (type == null ||
+                !typeof(Component).IsAssignableFrom(type) ||
+                !IsTypeAllowed(type))
             {
                 return results;
             }
@@ -194,7 +201,7 @@ namespace CoreAI.Infrastructure.Lua
             return results;
         }
 
-        private static object DescribeObject(int instanceId)
+        private object DescribeObject(int instanceId)
         {
             GameObject go = Resolve(instanceId);
             return go == null ? null : BuildObjectSummary(go, includeTransform: true, includeComponents: true);
@@ -283,7 +290,7 @@ namespace CoreAI.Infrastructure.Lua
             return true;
         }
 
-        private static List<object> GetChildren(int instanceId)
+        private List<object> GetChildren(int instanceId)
         {
             List<object> children = new();
             GameObject go = Resolve(instanceId);
@@ -302,7 +309,7 @@ namespace CoreAI.Infrastructure.Lua
             return children;
         }
 
-        private static List<string> ListComponents(int instanceId)
+        private List<string> ListComponents(int instanceId)
         {
             GameObject go = Resolve(instanceId);
             List<string> names = new();
@@ -315,7 +322,7 @@ namespace CoreAI.Infrastructure.Lua
             for (int i = 0; i < components.Length; i++)
             {
                 Component c = components[i];
-                if (c != null)
+                if (c != null && IsTypeAllowed(c.GetType()))
                 {
                     names.Add(c.GetType().Name);
                 }
@@ -382,6 +389,7 @@ namespace CoreAI.Infrastructure.Lua
             {
                 throw new ScriptRuntimeException($"unity_call: method '{methodName}' not found on {type.Name}.");
             }
+            EnsureMemberAllowed(method);
 
             ParameterInfo[] parameters = method.GetParameters();
             if (parameters.Length != (args?.Length ?? 0))
@@ -423,7 +431,7 @@ namespace CoreAI.Infrastructure.Lua
 
         private delegate bool ObjectMatch(GameObject go, string search);
 
-        private static void CollectSceneObjects(
+        private void CollectSceneObjects(
             string search,
             int max,
             List<object> results,
@@ -447,7 +455,7 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
-        private static void CollectObjectRecursive(
+        private void CollectObjectRecursive(
             GameObject go,
             string search,
             int max,
@@ -492,7 +500,7 @@ namespace CoreAI.Infrastructure.Lua
             return Math.Max(1, Math.Min(max <= 0 ? 100 : max, 500));
         }
 
-        private static Dictionary<string, object> BuildObjectSummary(
+        private Dictionary<string, object> BuildObjectSummary(
             GameObject go,
             bool includeTransform,
             bool includeComponents)
@@ -566,7 +574,7 @@ namespace CoreAI.Infrastructure.Lua
             return string.Join("/", names);
         }
 
-        private static object ResolveComponent(int instanceId, string componentTypeName)
+        private object ResolveComponent(int instanceId, string componentTypeName)
         {
             GameObject go = Resolve(instanceId);
             if (go == null || string.IsNullOrWhiteSpace(componentTypeName))
@@ -578,6 +586,11 @@ namespace CoreAI.Infrastructure.Lua
             if (type == null)
             {
                 return null;
+            }
+
+            if (!IsTypeAllowed(type))
+            {
+                throw new ScriptRuntimeException($"Full Lua access to type '{type.Name}' is denied by host policy.");
             }
 
             return go.GetComponent(type);
@@ -621,6 +634,7 @@ namespace CoreAI.Infrastructure.Lua
             (Type, string, bool) key = (type, memberName, _allowNonPublic);
             if (MemberCache.TryGetValue(key, out MemberInfo cached))
             {
+                EnsureMemberAllowed(cached);
                 return cached;
             }
 
@@ -632,8 +646,28 @@ namespace CoreAI.Infrastructure.Lua
                 throw new ScriptRuntimeException($"Member '{memberName}' not found on {type.Name}.");
             }
 
+            EnsureMemberAllowed(member);
             MemberCache[key] = member;
             return member;
+        }
+
+        private bool IsTypeAllowed(Type type)
+        {
+            return type != null && (_blacklistPolicy?.IsTypeAllowed(type) ?? true);
+        }
+
+        private void EnsureMemberAllowed(MemberInfo member)
+        {
+            if (member == null)
+            {
+                return;
+            }
+
+            if (!(_blacklistPolicy?.IsMemberAllowed(member) ?? true))
+            {
+                throw new ScriptRuntimeException(
+                    $"Full Lua access to member '{member.DeclaringType?.Name}.{member.Name}' is denied by host policy.");
+            }
         }
 
         private static DynValue ToDyn(object value)

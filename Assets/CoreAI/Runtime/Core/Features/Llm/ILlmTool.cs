@@ -23,6 +23,8 @@ namespace CoreAI.Ai
 
     /// <summary>
     /// LLM tool that can expose itself as a single Microsoft.Extensions.AI function without reflection.
+    /// The returned function must complete with a serializable result for the model; null or empty payloads
+    /// are normalized by the tool execution policy into an explicit tool-result message.
     /// </summary>
     public interface IAIFunctionLlmTool : ILlmTool
     {
@@ -32,6 +34,8 @@ namespace CoreAI.Ai
 
     /// <summary>
     /// LLM tool that expands into several Microsoft.Extensions.AI functions without reflection.
+    /// Each returned function must complete with a serializable result for the model; null or empty payloads
+    /// are normalized by the tool execution policy into an explicit tool-result message.
     /// </summary>
     public interface IAIFunctionsLlmTool : ILlmTool
     {

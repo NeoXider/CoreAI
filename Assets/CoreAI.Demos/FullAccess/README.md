@@ -67,5 +67,5 @@ return '{"found":true,"path":"' .. desc.path .. '","children":' .. desc.child_co
 Full access is **opt-in** and gated behind the Full capability tier. Public-only is the
 default member surface (see above). The MoonSharp sandbox (no `io`/`os`/`load`),
 instruction and time limits, and the auto-unload-on-repeated-errors policy still apply.
-A type/member blacklist is **not** implemented yet — see
-`Assets/CoreAI/Docs/LUA_ACCESS_MODES_AUDIT.md` (Planned section).
+A type/member blacklist is available through `IFullLuaAccessBlacklistPolicy`; see
+`Assets/CoreAI/Docs/LUA_ACCESS_MODES.md`.

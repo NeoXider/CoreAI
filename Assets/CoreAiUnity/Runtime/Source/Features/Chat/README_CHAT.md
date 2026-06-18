@@ -339,6 +339,8 @@ chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
 
 Final prompt = `Layer 1` + `\n` + `Layer 2` + `\n\n` + `Layer 3`
 
+`WithSystemPrompt(...)` replaces the current builder-owned Layer 3 fragment by default. Use `AppendSystemPrompt(...)` or `WithSystemPrompt(..., SystemPromptWriteMode.Append)` only when several code-owned prompt fragments should be intentionally combined.
+
 ### Overriding universalPrefix
 
 By default **universalPrefix applies to all roles**. For a fully custom prompt without shared rules, use `.WithOverrideUniversalPrefix()`:

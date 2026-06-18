@@ -164,7 +164,7 @@ namespace CoreAI.Infrastructure.Llm
                     "play_animation" => CreatePlayAnimationCommand(targetName, animationName ?? stringValue),
                     "stop_animation" => CreateStopAnimationCommand(targetName),
                     "list_animations" => CreateListAnimationsCommand(targetName),
-                    "play_sound" => CreatePlaySoundCommand(targetName, stringValue),
+                    "play_sound" => CreatePlaySoundCommand(targetName, stringValue, volume),
                     "set_volume" => CreateSetVolumeCommand(targetName, volume),
                     "show_text" => CreateShowTextCommand(targetName, textToDisplay ?? stringValue),
                     "hide_panel" => CreateHidePanelCommand(targetName),
@@ -357,14 +357,15 @@ namespace CoreAI.Infrastructure.Llm
             return CoreAiWorldCommandEnvelope.StopAnimation(targetName);
         }
 
-        private static CoreAiWorldCommandEnvelope CreatePlaySoundCommand(string? targetName, string? clipName)
+        private static CoreAiWorldCommandEnvelope CreatePlaySoundCommand(string? targetName, string? clipName,
+            float volume)
         {
-            if (string.IsNullOrEmpty(targetName))
+            if (string.IsNullOrEmpty(targetName) || string.IsNullOrEmpty(clipName))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.PlaySound(targetName, clipName ?? "", 1f);
+            return CoreAiWorldCommandEnvelope.PlaySound(targetName, clipName, volume);
         }
 
         private static CoreAiWorldCommandEnvelope CreateSetVolumeCommand(string? targetName, float volume)

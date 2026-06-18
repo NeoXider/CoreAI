@@ -93,4 +93,4 @@ during mod ticks, which the `LuaModRuntime` ticker guarantees.
 
 - `Assets/CoreAI/Docs/LUA_GAME_API.md` — full Lua game API.
 - `Assets/CoreAI.Demos/LiveMechanicsMods/README.md` — Wave Auto-Battler (number-tuning mods).
-- `Assets/CoreAI/Docs/LUA_ACCESS_MODES_AUDIT.md` — capability tiers (Read → Full).
+- `Assets/CoreAI/Docs/LUA_ACCESS_MODES.md` — capability tiers (Read → Full).

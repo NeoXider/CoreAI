@@ -302,11 +302,6 @@ namespace CoreAI.Infrastructure.Llm
         private bool enableConversationHistorySummarization = true;
 
         [Tooltip(
-            "When true, the conversation summary is prepended as the first tail message before recent verbatim turns instead of placed in the system prefix, so the cached prefix stays stable (roadmap §1a). Later memory deltas/world-state still belong near the end of the tail. Default false = legacy behaviour.")]
-        [SerializeField]
-        private bool placeLiveContextInTail = CoreAISettings.DefaultPlaceLiveContextInTail;
-
-        [Tooltip(
             "When greater than zero, overrides the orchestrator's computed recent-history token budget (heuristic). Zero keeps automatic budgeting from context window minus system/tools.")]
         [SerializeField]
         [Min(0)]
@@ -319,7 +314,7 @@ namespace CoreAI.Infrastructure.Llm
         private int conversationRolledSummaryMaxTokens;
 
         [Tooltip(
-            "Roadmap §2: compaction only triggers once estimated history tokens reach this fraction of the history budget. Below it, all turns stay verbatim and the stored summary is left untouched. Values <= 0 or > 1 preserve legacy budget-boundary behavior.")]
+            "Roadmap §2: compaction only triggers once estimated history tokens reach this fraction of the history budget. Below it, all turns stay verbatim and the stored summary is left untouched. Invalid values fall back to the CoreAI default.")]
         [SerializeField]
         [Range(0f, 1f)]
         private float conversationCompactionTriggerRatio = CoreAISettings.DefaultConversationCompactionTriggerRatio;
@@ -663,11 +658,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc cref="ICoreAISettings.EnableTokenCalibration"/>
         public bool EnableTokenCalibration => enableTokenCalibration;
 
+        /// <inheritdoc cref="ICoreAISettings.TokenCalibrationModelKey"/>
+        public string TokenCalibrationModelKey => ModelName;
+
         /// <summary>When false, skip rolling history partition into summary + recent tail.</summary>
         public bool EnableConversationHistorySummarization => enableConversationHistorySummarization;
-
-        /// <inheritdoc cref="ICoreAISettings.PlaceLiveContextInTail"/>
-        public bool PlaceLiveContextInTail => placeLiveContextInTail;
 
         /// <summary>Zero = use automatic history budget; positive = override recent tail token budget.</summary>
         public int ConversationHistoryRecentTokenBudgetOverride =>
@@ -804,7 +799,6 @@ namespace CoreAI.Infrastructure.Llm
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
             enableTokenCalibration = options.EnableTokenCalibration;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
-            placeLiveContextInTail = options.PlaceLiveContextInTail;
             conversationHistoryRecentTokenBudgetOverride =
                 options.ConversationHistoryRecentTokenBudgetOverride < 0
                     ? 0

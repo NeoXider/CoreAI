@@ -168,6 +168,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Builder_WithWaitTool_AddsWaitTool()
+        {
+            AgentConfig config = new AgentBuilder("WaitAgent")
+                .WithSystemPrompt("You can wait for external state.")
+                .WithWaitTool(5d)
+                .Build();
+
+            Assert.AreEqual(1, config.Tools.Count);
+            Assert.AreEqual("wait", config.Tools[0].Name);
+            Assert.IsTrue(config.Tools[0].AllowDuplicates);
+        }
+
+        [Test]
         public void Builder_WithMode_SetsCorrectMode()
         {
             AgentConfig toolsOnly = new AgentBuilder("ToolsOnly")

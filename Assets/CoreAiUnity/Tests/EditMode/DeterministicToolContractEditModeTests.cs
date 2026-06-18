@@ -23,8 +23,8 @@ namespace CoreAI.Tests.EditMode
 
             AgentMemoryPolicy firstPolicy = BuildPolicy(new StubTool("z_tool"), new StubTool("a_tool"));
             AgentMemoryPolicy secondPolicy = BuildPolicy(new StubTool("a_tool"), new StubTool("z_tool"));
-            TestSettings firstSettings = new() { PlaceLiveContextInTail = true };
-            TestSettings secondSettings = new() { PlaceLiveContextInTail = true };
+            TestSettings firstSettings = new();
+            TestSettings secondSettings = new();
 
             AiOrchestrator first = BuildOrchestrator(firstLlm, firstPolicy, firstSettings);
             AiOrchestrator second = BuildOrchestrator(secondLlm, secondPolicy, secondSettings);
@@ -72,7 +72,7 @@ namespace CoreAI.Tests.EditMode
         public async Task BuildRequest_FixedInputs_ProduceIdenticalSystemPrefixWithoutGeneratedIds()
         {
             AgentMemoryPolicy policy = BuildPolicy(new StubTool("z_tool"), new StubTool("a_tool"));
-            TestSettings settings = new() { PlaceLiveContextInTail = true };
+            TestSettings settings = new();
             CapturingLlmClient llm = new();
             AiOrchestrator orchestrator = BuildOrchestrator(llm, policy, settings);
 
@@ -247,7 +247,6 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallArguments => false;
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
-            public bool PlaceLiveContextInTail { get; set; }
         }
     }
 }

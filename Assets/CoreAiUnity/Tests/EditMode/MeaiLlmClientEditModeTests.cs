@@ -178,6 +178,64 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_NormalizesTailSystemMessages_ForProviderCompatibility()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = "Role",
+                SystemPrompt = "root system",
+                UserPayload = "current user",
+                ChatHistory = new List<MEAI.ChatMessage>
+                {
+                    new(MEAI.ChatRole.User, "previous user"),
+                    new(MEAI.ChatRole.System, "## Memory\nstable facts"),
+                    new(MEAI.ChatRole.Assistant, "previous assistant")
+                }
+            }, CancellationToken.None);
+
+            Assert.IsNotNull(inner.LastMessages);
+            Assert.AreEqual(MEAI.ChatRole.System, inner.LastMessages[0].Role);
+            Assert.AreEqual("root system", inner.LastMessages[0].Text);
+            Assert.IsFalse(inner.LastMessages.Skip(1).Any(m => m.Role == MEAI.ChatRole.System),
+                "OpenAI-compatible chat templates may reject system messages outside the first position.");
+            Assert.AreEqual(MEAI.ChatRole.User, inner.LastMessages[2].Role);
+            StringAssert.Contains("System context update:", inner.LastMessages[2].Text);
+            StringAssert.Contains("## Memory", inner.LastMessages[2].Text);
+            Assert.AreEqual("current user", inner.LastMessages[^1].Text);
+        }
+
+        [Test]
+        public async Task CompleteStreamingAsync_NormalizesTailSystemMessages_ForProviderCompatibility()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "root system",
+                               UserPayload = "current user",
+                               ChatHistory = new List<MEAI.ChatMessage>
+                               {
+                                   new(MEAI.ChatRole.System, "## World State\nnear shop")
+                               }
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.IsNotNull(inner.LastMessages);
+            Assert.AreEqual(MEAI.ChatRole.System, inner.LastMessages[0].Role);
+            Assert.IsFalse(inner.LastMessages.Skip(1).Any(m => m.Role == MEAI.ChatRole.System),
+                "Streaming must keep the same provider-safe message contract as CompleteAsync.");
+            Assert.AreEqual(MEAI.ChatRole.User, inner.LastMessages[1].Role);
+            StringAssert.Contains("## World State", inner.LastMessages[1].Text);
+            Assert.AreEqual("current user", inner.LastMessages[^1].Text);
+        }
+
+        [Test]
         public void ExtractCacheTokenCounts_MatchesProviderKeyVariants()
         {
             (int nullRead, int nullWrite) = MeaiLlmClient.ExtractCacheTokenCounts(null);
@@ -583,7 +641,7 @@ namespace CoreAI.Tests.EditMode
 
             public MEAI.AIFunction CreateAIFunction()
             {
-                return MEAI.AIFunctionFactory.Create(new Action(() => { }), Name, Description);
+                return MEAI.AIFunctionFactory.Create((Func<string>)(() => "{\"Success\":true}"), Name, Description);
             }
         }
 
@@ -601,18 +659,20 @@ namespace CoreAI.Tests.EditMode
 
             public MEAI.AIFunction CreateAIFunction()
             {
-                return MEAI.AIFunctionFactory.Create(new Action(() => { }), Name, Description);
+                return MEAI.AIFunctionFactory.Create((Func<string>)(() => "{\"Success\":true}"), Name, Description);
             }
         }
 
         private sealed class CapturingChatClient : MEAI.IChatClient
         {
             public MEAI.ChatOptions LastOptions { get; private set; }
+            public List<MEAI.ChatMessage> LastMessages { get; private set; }
 
             public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
                 MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
             {
                 LastOptions = options;
+                LastMessages = chatMessages.ToList();
                 return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "ok")));
             }
 
@@ -623,6 +683,7 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken = default)
             {
                 LastOptions = options;
+                LastMessages = chatMessages.ToList();
                 yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "ok");
                 await Task.Yield();
             }

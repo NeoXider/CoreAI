@@ -61,6 +61,37 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task MemoryTool_ExecuteAsync_Append_UsesNewTextFallback()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Line 1" });
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("append", new_text: "Line 2");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Line 1\nLine 2", store.States["TestRole"].Memory);
+        }
+
+        [Test]
+        public async Task MemoryTool_ExecuteAsync_Read_ReturnsCurrentMemoryWithoutSaving()
+        {
+            TestMemoryStore store = new();
+            store.Save("TestRole", new AgentMemoryState { Memory = "Known learner fact" });
+            store.LastSaved = null;
+            MemoryTool tool = new(store, "TestRole");
+
+            string resultJson = await tool.ExecuteAsync("read");
+            MemoryTool.MemoryResult result = JsonConvert.DeserializeObject<MemoryTool.MemoryResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual("Known learner fact", result.Memory);
+            Assert.AreEqual("Known learner fact".Length, result.MemoryLength);
+            Assert.IsNull(store.LastSaved, "Read must not mutate or resave memory state.");
+        }
+
+        [Test]
         public async Task MemoryTool_ExecuteAsync_Clear_RemovesMemory()
         {
             TestMemoryStore store = new();
@@ -150,6 +181,36 @@ namespace CoreAI.Tests.EditMode
             IReadOnlyList<AgentMemoryVersionSnapshot> afterRevert = store.ListVersions("TestRole");
             Assert.AreEqual(3, afterRevert.Count);
             Assert.AreEqual("revert", afterRevert[2].Action);
+        }
+
+        #endregion
+
+        #region WaitTool Tests
+
+        [Test]
+        public void WaitLlmTool_CreateAIFunction_ReturnsNonNull()
+        {
+            WaitLlmTool tool = new(0.01d);
+
+            AIFunction function = tool.CreateAIFunction();
+
+            Assert.IsNotNull(function);
+            Assert.AreEqual("wait", function.Name);
+            Assert.IsTrue(tool.AllowDuplicates);
+        }
+
+        [Test]
+        public async Task WaitLlmTool_ExecuteAsync_ClampsAndReturnsResult()
+        {
+            WaitLlmTool tool = new(0.001d);
+
+            string resultJson = await tool.ExecuteAsync(10d, "polling test");
+            WaitLlmTool.WaitResult result = JsonConvert.DeserializeObject<WaitLlmTool.WaitResult>(resultJson);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual(10d, result.RequestedSeconds, 0.0001d);
+            Assert.AreEqual(0.001d, result.WaitedSeconds, 0.0001d);
+            Assert.AreEqual("polling test", result.Reason);
         }
 
         #endregion

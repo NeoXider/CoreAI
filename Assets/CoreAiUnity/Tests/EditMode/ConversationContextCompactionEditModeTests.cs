@@ -372,6 +372,19 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void CompactionTriggerRatio_InvalidValue_UsesDefaultThreshold()
+        {
+            ConversationContextBuildArgs buildArgs = new()
+            {
+                CompactionTriggerRatio = 0f
+            };
+
+            Assert.AreEqual(
+                CoreAISettings.DefaultConversationCompactionTriggerRatio,
+                ConversationContextBudgetTokens.ResolveCompactionTriggerRatio(buildArgs));
+        }
+
+        [Test]
         public void DeterministicManager_BelowTriggerAfterPriorCompaction_DoesNotRewriteSummary()
         {
             RecordingSummaryStore store = new();

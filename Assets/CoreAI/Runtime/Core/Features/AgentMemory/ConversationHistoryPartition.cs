@@ -49,7 +49,7 @@ namespace CoreAI.Ai
             float ratio = buildArgs?.CompactionTriggerRatio ?? 0f;
             if (ratio <= 0f || ratio > 1f || float.IsNaN(ratio) || float.IsInfinity(ratio))
             {
-                return 1f;
+                return CoreAISettings.DefaultConversationCompactionTriggerRatio;
             }
 
             return ratio;

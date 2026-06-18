@@ -182,23 +182,7 @@ namespace CoreAI.Infrastructure.Llm
                 request.Tools, _currentRoleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance);
 
-            List<MEAI.ChatMessage> chatMessages = new()
-            {
-                new MEAI.ChatMessage(MEAI.ChatRole.System, request.SystemPrompt ?? "")
-            };
-
-            if (request.ChatHistory != null && request.ChatHistory.Count > 0)
-            {
-                chatMessages.AddRange(request.ChatHistory);
-                if (!string.IsNullOrWhiteSpace(request.UserPayload))
-                {
-                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
-                }
-            }
-            else
-            {
-                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
-            }
+            List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
             _logger.LogInfo(GameLogFeature.Llm,
                 $"MeaiLlmClient: Initial prompt (system={chatMessages[0].Contents?.Count ?? 0} parts, user={chatMessages[1].Contents?.Count ?? 0} parts)");
@@ -336,6 +320,53 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
+        private static List<MEAI.ChatMessage> BuildMeaiChatMessages(LlmCompletionRequest request)
+        {
+            List<MEAI.ChatMessage> chatMessages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.System, request.SystemPrompt ?? "")
+            };
+
+            if (request.ChatHistory != null && request.ChatHistory.Count > 0)
+            {
+                foreach (MEAI.ChatMessage message in request.ChatHistory)
+                {
+                    chatMessages.Add(NormalizeChatHistoryMessageForProvider(message));
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.UserPayload))
+                {
+                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
+                }
+            }
+            else
+            {
+                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
+            }
+
+            return chatMessages;
+        }
+
+        private static MEAI.ChatMessage NormalizeChatHistoryMessageForProvider(MEAI.ChatMessage message)
+        {
+            if (message.Role != MEAI.ChatRole.System)
+            {
+                return message;
+            }
+
+            string text = message.Text;
+            if (string.IsNullOrEmpty(text) && message.Contents != null)
+            {
+                text = string.Join(
+                    "\n",
+                    message.Contents
+                        .Select(content => content?.ToString())
+                        .Where(content => !string.IsNullOrWhiteSpace(content)));
+            }
+
+            return new MEAI.ChatMessage(MEAI.ChatRole.User, "System context update:\n" + (text ?? string.Empty));
+        }
+
         private string ResolveModelName()
         {
             return _settings switch
@@ -375,23 +406,7 @@ namespace CoreAI.Infrastructure.Llm
                 request.TraceId,
                 EnsureIdempotencyKey(request));
 
-            List<MEAI.ChatMessage> chatMessages = new()
-            {
-                new MEAI.ChatMessage(MEAI.ChatRole.System, request.SystemPrompt ?? "")
-            };
-
-            if (request.ChatHistory != null && request.ChatHistory.Count > 0)
-            {
-                chatMessages.AddRange(request.ChatHistory);
-                if (!string.IsNullOrWhiteSpace(request.UserPayload))
-                {
-                    chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload));
-                }
-            }
-            else
-            {
-                chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload ?? ""));
-            }
+            List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
             List<MEAI.AIFunction> aiTools = BuildAIFunctions(request.Tools, _currentRoleId);
             MEAI.ChatOptions chatOptions = new()

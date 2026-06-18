@@ -23,7 +23,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Compaction (summarization of older turns) only triggers once estimated history tokens reach this
         /// fraction of the history budget; below it, all turns are kept verbatim and the stored summary is left untouched.
-        /// Roadmap §2. Values less than or equal to zero preserve legacy budget-boundary behavior.
+        /// Roadmap §2. Invalid values fall back to <see cref="CoreAISettings.DefaultConversationCompactionTriggerRatio"/>.
         /// </summary>
         public float CompactionTriggerRatio { get; set; }
 

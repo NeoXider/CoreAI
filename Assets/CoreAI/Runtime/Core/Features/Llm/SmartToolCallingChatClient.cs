@@ -63,6 +63,8 @@ namespace CoreAI.Infrastructure.Llm
         {
             List<MEAI.ChatMessage> messages = chatMessages.ToList();
             int iteration = 0;
+            int missingRequiredToolResponses = 0;
+            bool executedToolCallInRequest = false;
 
             // Assistant/Tool message pairs from iterations where *every* tool call failed.
             // They exist only as error feedback so the model can retry; once a later iteration
@@ -104,15 +106,23 @@ namespace CoreAI.Infrastructure.Llm
                             LogTag.Llm);
                     }
 
+                    MEAI.ChatOptions iterationOptions = options;
+                    if (executedToolCallInRequest &&
+                        options?.ToolMode != null &&
+                        options.ToolMode is not MEAI.AutoChatToolMode)
+                    {
+                        iterationOptions = CloneOptionsWithAutoToolMode(options);
+                    }
+
                     // WebGL player builds: keep the continuation on the captured Unity SynchronizationContext.
                     // resumption to TaskScheduler.Default, where it never got pumped, so the chat panel's
                     // typing dots stayed up forever even though the HTTP response had already arrived.
 #if UNITY_WEBGL && !UNITY_EDITOR
                     MEAI.ChatResponse response = await _innerClient
-                        .GetResponseAsync(messages, options, cancellationToken);
+                        .GetResponseAsync(messages, iterationOptions, cancellationToken);
 #else
                     MEAI.ChatResponse response = await _innerClient
-                        .GetResponseAsync(messages, options, cancellationToken)
+                        .GetResponseAsync(messages, iterationOptions, cancellationToken)
                         .ConfigureAwait(false);
 #endif
 
@@ -126,7 +136,7 @@ namespace CoreAI.Infrastructure.Llm
                     List<MEAI.FunctionCallContent> textCalls = new();
                     string cleanedAssistantText = null;
                     bool hasTextExtraction = false;
-                    if (nativeCalls.Count == 0 && (options?.Tools?.Count ?? 0) > 0)
+                    if (nativeCalls.Count == 0 && (iterationOptions?.Tools?.Count ?? 0) > 0)
                     {
                         string assistantText = ConcatenateAssistantTextContents(response);
                         if (!string.IsNullOrEmpty(assistantText) &&
@@ -146,6 +156,34 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (toolCalls.Count == 0)
                     {
+                        if (TryGetRequiredToolName(iterationOptions?.ToolMode, out string requiredToolName) &&
+                            (iterationOptions?.Tools?.Count ?? 0) > 0)
+                        {
+                            missingRequiredToolResponses++;
+                            string assistantText = ConcatenateAssistantTextContents(response);
+                            if (_settings.LogMeaiToolCallingSteps)
+                            {
+                                _logger.Warn(
+                                    $"[SmartToolCall] Iteration {iteration}: required tool call was not emitted; retrying ({missingRequiredToolResponses}/{_maxConsecutiveErrors}).",
+                                    LogTag.Llm);
+                            }
+
+                            if (missingRequiredToolResponses > _maxConsecutiveErrors)
+                            {
+                                return BuildMissingRequiredToolResponse(requiredToolName);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(assistantText))
+                            {
+                                messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, assistantText));
+                            }
+
+                            messages.Add(new MEAI.ChatMessage(
+                                MEAI.ChatRole.User,
+                                BuildMissingRequiredToolInstruction(requiredToolName)));
+                            continue;
+                        }
+
                         if (_settings.LogMeaiToolCallingSteps)
                         {
                             _logger.Info(
@@ -171,12 +209,13 @@ namespace CoreAI.Infrastructure.Llm
 
 #if UNITY_WEBGL && !UNITY_EDITOR
                     ToolExecutionPolicy.BatchToolCallResult batch =
-                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken);
+                        await policy.ExecuteBatchAsync(toolCalls, iterationOptions, cancellationToken);
 #else
                     ToolExecutionPolicy.BatchToolCallResult batch =
-                        await policy.ExecuteBatchAsync(toolCalls, options, cancellationToken)
+                        await policy.ExecuteBatchAsync(toolCalls, iterationOptions, cancellationToken)
                             .ConfigureAwait(false);
 #endif
+                    executedToolCallInRequest = true;
 
                     if (policy.IsMaxErrorsReached)
                     {
@@ -374,6 +413,56 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return sb.ToString();
+        }
+
+        private static bool TryGetRequiredToolName(MEAI.ChatToolMode toolMode, out string requiredToolName)
+        {
+            requiredToolName = "";
+            if (toolMode is not MEAI.RequiredChatToolMode required)
+            {
+                return false;
+            }
+
+            requiredToolName = required.RequiredFunctionName ?? "";
+            return true;
+        }
+
+        private static string BuildMissingRequiredToolInstruction(string requiredToolName)
+        {
+            string target = string.IsNullOrWhiteSpace(requiredToolName)
+                ? "one of the available tools"
+                : $"the '{requiredToolName}' tool";
+            return "Tool-call contract violation: call " + target +
+                   " now with valid arguments. Do not answer with plain text.";
+        }
+
+        private static MEAI.ChatResponse BuildMissingRequiredToolResponse(string requiredToolName)
+        {
+            string target = string.IsNullOrWhiteSpace(requiredToolName)
+                ? "a required tool"
+                : $"required tool '{requiredToolName}'";
+            return new MEAI.ChatResponse(new MEAI.ChatMessage(
+                MEAI.ChatRole.Assistant,
+                "Required tool call missing: " + target + "."))
+            {
+                FinishReason = MEAI.ChatFinishReason.Stop
+            };
+        }
+
+        private static MEAI.ChatOptions CloneOptionsWithAutoToolMode(MEAI.ChatOptions source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            return new MEAI.ChatOptions
+            {
+                Temperature = source.Temperature,
+                MaxOutputTokens = source.MaxOutputTokens,
+                Tools = source.Tools,
+                ToolMode = MEAI.ChatToolMode.Auto
+            };
         }
 
         /// <summary>

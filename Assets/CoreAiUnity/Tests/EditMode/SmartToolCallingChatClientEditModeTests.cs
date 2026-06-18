@@ -58,6 +58,84 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("line1\nline2", SmartToolCallingChatClient.ConcatenateAssistantTextContents(response));
         }
 
+        [Test]
+        public async Task RequiredToolMode_RetriesWhenModelReturnsText()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                if (iteration == 1)
+                {
+                    return MakeTextResponse("I handled it without a tool.");
+                }
+
+                if (iteration == 2)
+                {
+                    return MakeToolCallResponse("my_tool", "call_required");
+                }
+
+                return MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool> { tool },
+                ToolMode = MEAI.ChatToolMode.RequireSpecific("my_tool")
+            };
+
+            MEAI.ChatResponse response =
+                await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(3, callCount, "Text-only required-tool responses should get one correction turn.");
+            Assert.IsTrue(fakeInner.ObservedMessages[1].Any(m =>
+                    m.Role == MEAI.ChatRole.User &&
+                    (m.Text?.Contains("Tool-call contract violation") ?? false)),
+                "Second request should include a correction that forces the required tool call.");
+            Assert.IsTrue(client.LastExecutedToolCalls.Any(t => t.Name == "my_tool" && t.Success),
+                "Required tool must execute after correction.");
+            Assert.That(response.Messages?.LastOrDefault()?.Text, Does.Contain("done"));
+        }
+
+        [Test]
+        public async Task RequiredToolMode_ResetsToAutoAfterFirstToolCall()
+        {
+            int callCount = 0;
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                callCount++;
+                return iteration == 1
+                    ? MakeToolCallResponse("my_tool", "call_required")
+                    : MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            MEAI.ChatOptions options = new()
+            {
+                Tools = new List<MEAI.AITool> { tool },
+                ToolMode = MEAI.ChatToolMode.RequireSpecific("my_tool")
+            };
+
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(2, callCount);
+            Assert.IsInstanceOf<MEAI.RequiredChatToolMode>(fakeInner.ObservedOptions[0].ToolMode);
+            Assert.IsInstanceOf<MEAI.AutoChatToolMode>(fakeInner.ObservedOptions[1].ToolMode);
+        }
+
         /// <summary>
         /// Two errors followed by a success reset the counter; a later run of three errors
         /// then aborts the agent after six total iterations.
@@ -178,6 +256,43 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(4, callCount, "3 tool calls + 1 text response = 4 iterations");
             string lastText = response.Messages?.LastOrDefault()?.Text;
             Assert.IsTrue(lastText?.Contains("All done") == true, "Should complete normally");
+        }
+
+        [Test]
+        public async Task ToolResult_IsReturnedToModel_WithOriginalCallId()
+        {
+            ScriptedChatClient fakeInner = new(iteration =>
+            {
+                if (iteration == 1)
+                {
+                    return MakeToolCallResponse("my_tool", "call_123");
+                }
+
+                return MakeTextResponse("done");
+            });
+
+            MEAI.AIFunction tool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true,\"Message\":\"ok\"}"));
+
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool } };
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(), options);
+
+            Assert.AreEqual(2, fakeInner.ObservedMessages.Count);
+            List<MEAI.ChatMessage> secondIterationMessages = fakeInner.ObservedMessages[1];
+            Assert.AreEqual(2, secondIterationMessages.Count);
+
+            MEAI.FunctionCallContent call =
+                secondIterationMessages[0].Contents.OfType<MEAI.FunctionCallContent>().Single();
+            MEAI.FunctionResultContent result =
+                secondIterationMessages[1].Contents.OfType<MEAI.FunctionResultContent>().Single();
+
+            Assert.AreEqual("call_123", call.CallId);
+            Assert.AreEqual("call_123", result.CallId);
+            StringAssert.Contains("\"Success\":true", result.Result?.ToString());
         }
 
         // ===================== Duplicate Detection =====================
@@ -416,12 +531,17 @@ namespace CoreAI.Tests.EditMode
                 _scriptFn = scriptFn;
             }
 
+            public List<List<MEAI.ChatMessage>> ObservedMessages { get; } = new();
+            public List<MEAI.ChatOptions> ObservedOptions { get; } = new();
+
             public Task<MEAI.ChatResponse> GetResponseAsync(
                 IEnumerable<MEAI.ChatMessage> chatMessages,
                 MEAI.ChatOptions options = null,
                 CancellationToken cancellationToken = default)
             {
                 _iteration++;
+                ObservedMessages.Add(chatMessages.ToList());
+                ObservedOptions.Add(options);
                 return Task.FromResult(_scriptFn(_iteration));
             }
 

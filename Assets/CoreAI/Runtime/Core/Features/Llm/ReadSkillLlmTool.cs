@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
+using System.Linq;
+using Microsoft.Extensions.AI;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
@@ -10,82 +13,141 @@ namespace CoreAI.Ai
     internal static class ReadSkillLlmTool
     {
         /// <summary>
-        /// Creates the <c>read_skill</c> <see cref="DelegateLlmTool"/>.
-        /// Uses <see cref="DelegateLlmTool"/> so MEAI auto-generates the JSON schema.
+        /// Creates the <c>read_skill</c> tool.
         /// </summary>
-        public static DelegateLlmTool Create(IReadOnlyList<SkillSet> skills)
+        public static ILlmTool Create(IReadOnlyList<SkillSet> skills)
         {
-            if (skills == null)
-            {
-                throw new ArgumentNullException(nameof(skills));
-            }
+            return Create(skills, null);
+        }
 
-            Dictionary<string, SkillSet> skillsByName = new(StringComparer.OrdinalIgnoreCase);
-            foreach (SkillSet skill in skills)
+        internal static ILlmTool Create(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
+        {
+            return new ReadSkillProxy(skills, allowedToolNames);
+        }
+
+        private sealed class ReadSkillProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
+        {
+            private readonly IReadOnlyList<SkillSet> _skills;
+            private readonly Dictionary<string, SkillSet> _skillsByName;
+            private readonly IReadOnlyCollection<string> _allowedToolNames;
+            private readonly HashSet<string> _skillToolNames;
+
+            public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
-                if (skill != null && !string.IsNullOrWhiteSpace(skill.Name))
+                _skills = skills ?? throw new ArgumentNullException(nameof(skills));
+                _allowedToolNames = allowedToolNames;
+                _skillsByName = new Dictionary<string, SkillSet>(StringComparer.OrdinalIgnoreCase);
+                _skillToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (SkillSet skill in _skills)
                 {
-                    skillsByName[skill.Name] = skill;
+                    if (skill != null && !string.IsNullOrWhiteSpace(skill.Name))
+                    {
+                        _skillsByName[skill.Name] = skill;
+                    }
+
+                    foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
+                    {
+                        if (!string.IsNullOrWhiteSpace(descriptor.Name))
+                        {
+                            _skillToolNames.Add(descriptor.Name);
+                        }
+                    }
                 }
             }
 
-            // Use local function so MEAI sees the parameter name 'skill_name' in the schema
-            object ReadSkillFn(string skill_name)
-            {
-                return Execute(skill_name, skillsByName);
-            }
+            public override string Name => "read_skill";
 
-            DelegateLlmTool tool = new(
-                "read_skill",
+            public override string Description =>
                 "Read the full instructions and tool list for a skill. Call this BEFORE using " +
                 "call_skill_tool so you know which tools are available and what parameters they need. " +
-                "Pass the skill name exactly as listed in the catalog.",
-                new Func<string, object>(ReadSkillFn));
+                "Pass the skill name exactly as listed in the catalog.";
 
-            tool.AllowDuplicates = true; // Model may read multiple skills
-            return tool;
+            public override string ParametersSchema =>
+                "{\"type\":\"object\",\"properties\":{\"skill_name\":{\"type\":\"string\",\"description\":\"Skill name exactly as listed in the catalog.\"}},\"required\":[\"skill_name\"]}";
+
+            public override bool AllowDuplicates => true;
+
+            public bool ContainsSkillTool(string toolName)
+            {
+                return !string.IsNullOrWhiteSpace(toolName) && _skillToolNames.Contains(toolName.Trim());
+            }
+
+            public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
+            {
+                return new ReadSkillProxy(_skills, allowedToolNames);
+            }
+
+            public AIFunction CreateAIFunction()
+            {
+                return AIFunctionFactory.Create(
+                    (Func<string, string>)Execute,
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = Name,
+                        Description = Description
+                    });
+            }
+
+            private string Execute(string skill_name)
+            {
+                return ReadSkillLlmTool.Execute(skill_name, _skillsByName, _allowedToolNames);
+            }
         }
 
-        private static object Execute(string skillName, Dictionary<string, SkillSet> skillsByName)
+        private static string Execute(string skillName, Dictionary<string, SkillSet> skillsByName,
+            IReadOnlyCollection<string> allowedToolNames)
+        {
+            return JsonConvert.SerializeObject(ExecuteObject(skillName, skillsByName, allowedToolNames));
+        }
+
+        private static object ExecuteObject(string skillName, Dictionary<string, SkillSet> skillsByName,
+            IReadOnlyCollection<string> allowedToolNames)
         {
             if (string.IsNullOrWhiteSpace(skillName))
             {
-                return new { error = "skill_name is required.", available = new List<string>(skillsByName.Keys) };
+                return new
+                {
+                    success = false,
+                    error = "skill_name is required.",
+                    available = AvailableSkillNames(skillsByName, allowedToolNames)
+                };
             }
 
             string trimmed = skillName.Trim();
 
             if (skillsByName.TryGetValue(trimmed, out SkillSet skill))
             {
-                // Return full instructions + tool schemas with parameters
                 List<object> toolSchemas = new();
-                foreach (ILlmTool t in skill.Tools)
+                foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
                 {
-                    List<object> parameters = new();
-                    if (t is DelegateLlmTool dt)
+                    if (!IsAllowed(descriptor.Name, allowedToolNames))
                     {
-                        ParameterInfo[] pars = dt.ActionDelegate.Method.GetParameters();
-                        foreach (ParameterInfo p in pars)
-                        {
-                            parameters.Add(new
-                            {
-                                name = p.Name,
-                                type = GetFriendlyTypeName(p.ParameterType),
-                                required = !p.HasDefaultValue
-                            });
-                        }
+                        continue;
                     }
 
                     toolSchemas.Add(new
                     {
-                        tool_name = t.Name,
-                        description = t.Description,
-                        parameters
+                        tool_name = descriptor.Name,
+                        description = descriptor.Description,
+                        parameters_schema = ParseSchemaOrRaw(descriptor.ParametersSchema),
+                        invocable = descriptor.CanInvoke
                     });
+                }
+
+                if (toolSchemas.Count == 0)
+                {
+                    return new
+                    {
+                        success = false,
+                        error = $"Skill '{trimmed}' is not available for the current tool allowlist.",
+                        available = AvailableSkillNames(skillsByName, allowedToolNames)
+                    };
                 }
 
                 return new
                 {
+                    success = true,
                     skill = skill.Name,
                     instructions = skill.Instructions,
                     tools = toolSchemas,
@@ -102,52 +164,76 @@ namespace CoreAI.Ai
                 {
                     return new
                     {
+                        success = false,
                         error = $"Skill '{trimmed}' not found. Did you mean '{kvp.Key}'?",
-                        available = new List<string>(skillsByName.Keys)
+                        available = AvailableSkillNames(skillsByName, allowedToolNames)
                     };
                 }
             }
 
             return new
             {
+                success = false,
                 error = $"Skill '{trimmed}' not found.",
-                available = new List<string>(skillsByName.Keys)
+                available = AvailableSkillNames(skillsByName, allowedToolNames)
             };
         }
 
-        private static string GetFriendlyTypeName(Type type)
+        private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
         {
-            if (type == typeof(string))
+            if (allowedToolNames == null || allowedToolNames.Count == 0)
             {
-                return "string";
+                return true;
             }
 
-            if (type == typeof(int))
+            foreach (string allowed in allowedToolNames)
             {
-                return "int";
+                if (string.Equals(allowed?.Trim(), toolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
-            if (type == typeof(float))
+            return false;
+        }
+
+        private static List<string> AvailableSkillNames(Dictionary<string, SkillSet> skillsByName,
+            IReadOnlyCollection<string> allowedToolNames)
+        {
+            if (allowedToolNames == null || allowedToolNames.Count == 0)
             {
-                return "float";
+                return new List<string>(skillsByName.Keys);
             }
 
-            if (type == typeof(double))
+            List<string> names = new();
+            foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
-                return "double";
+                bool anyToolAllowed = SkillSetToolResolver.BuildDescriptors(kvp.Value)
+                    .Any(d => IsAllowed(d.Name, allowedToolNames));
+                if (anyToolAllowed)
+                {
+                    names.Add(kvp.Key);
+                }
             }
 
-            if (type == typeof(bool))
+            return names;
+        }
+
+        private static object ParseSchemaOrRaw(string schema)
+        {
+            if (string.IsNullOrWhiteSpace(schema))
             {
-                return "bool";
+                return new JObject();
             }
 
-            if (type == typeof(long))
+            try
             {
-                return "long";
+                return JToken.Parse(schema);
             }
-
-            return type.Name;
+            catch
+            {
+                return schema;
+            }
         }
     }
 }

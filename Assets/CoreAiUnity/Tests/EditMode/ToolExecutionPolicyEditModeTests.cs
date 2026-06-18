@@ -298,6 +298,27 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteSingle_NullToolResult_ReturnsExplicitPayloadWithCallId()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => null),
+                new MEAI.AIFunctionFactoryOptions { Name = "empty_tool", Description = "Empty tool" }));
+            MEAI.FunctionCallContent fc = MakeToolCall("empty_tool");
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded);
+            Assert.AreEqual(fc.CallId, result.Result.CallId);
+            string text = result.Result.Result.ToString();
+            StringAssert.Contains("\"Success\":true", text);
+            StringAssert.Contains("Tool completed without an explicit result payload", text);
+        }
+
+        [Test]
         public async Task ExecuteSingle_AsyncTool_WaitsForCompletion()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),

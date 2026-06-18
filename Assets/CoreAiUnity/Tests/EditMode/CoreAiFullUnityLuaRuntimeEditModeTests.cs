@@ -4,7 +4,10 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Sandbox;
 using NUnit.Framework;
+using System;
+using System.Reflection;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -257,6 +260,38 @@ return t.position.x == 4 and t.scale.z == 4
                 Object.DestroyImmediate(probe);
             }
         }
+
+        [Test]
+        public void FullBindings_BlacklistPolicy_BlocksDeniedMembersAndTypes()
+        {
+            GameObject probe = new("ForgeProbeGo");
+            probe.AddComponent<ForgeMemberProbe>();
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings(
+                        null,
+                        allowNonPublicMembers: false,
+                        new DenyForgeProbePolicy())
+                    .RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                int id = probe.GetInstanceID();
+
+                Assert.Catch(
+                    () => env.RunChunk(script,
+                        $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'publicValue')"),
+                    "Policy-denied members must not be readable through Full Lua reflection.");
+
+                MoonSharp.Interpreter.DynValue found = env.RunChunk(script,
+                    "return #unity_find_by_component('CoreAI.Tests.EditMode.ForgeMemberProbe')");
+                Assert.AreEqual(0d, found.Number, 0.001d);
+            }
+            finally
+            {
+                Object.DestroyImmediate(probe);
+            }
+        }
     }
 
     /// <summary>Probe component with one public and one private field for Full-tier visibility tests.</summary>
@@ -268,6 +303,19 @@ return t.position.x == 4 and t.scale.z == 4
         public int RevealSecret()
         {
             return secretValue;
+        }
+    }
+
+    internal sealed class DenyForgeProbePolicy : IFullLuaAccessBlacklistPolicy
+    {
+        public bool IsTypeAllowed(Type componentType)
+        {
+            return componentType != typeof(ForgeMemberProbe);
+        }
+
+        public bool IsMemberAllowed(MemberInfo member)
+        {
+            return member.Name != nameof(ForgeMemberProbe.publicValue);
         }
     }
 }

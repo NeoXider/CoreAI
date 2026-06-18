@@ -365,6 +365,8 @@ namespace CoreAI.Tests.PlayMode
                         Hint =
                             "Design a weapon from: Iron (hardness:60, rarity:1) + Fire Crystal (magic:85, rarity:4).\n" +
                             "Remember the design summary and return a structured response.",
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "memory",
                         MaxOutputTokens = LiveModelMaxOutputTokens
                     }, cts.Token);
 
@@ -400,6 +402,8 @@ namespace CoreAI.Tests.PlayMode
                         RoleId = BuiltInAgentRoleIds.CoreMechanic,
                         Hint = "Calculate weapon from: Iron (hardness:60) + Fire Crystal (magic:85).\n" +
                                "Remember the craft result and return a structured response with item_name, damage, fire_damage.",
+                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                        RequiredToolName = "memory",
                         MaxOutputTokens = LiveModelMaxOutputTokens
                     }, cts.Token);
 

@@ -52,6 +52,18 @@ namespace CoreAI.Diagnostics
                 AddUnique(roleIds, policyRoles[i]);
             }
 
+            if (_systemPrompts is IAgentRoleIdProvider roleIdProvider)
+            {
+                IReadOnlyList<string> promptRoles = roleIdProvider.GetKnownRoleIds();
+                if (promptRoles != null)
+                {
+                    for (int i = 0; i < promptRoles.Count; i++)
+                    {
+                        AddUnique(roleIds, promptRoles[i]);
+                    }
+                }
+            }
+
             for (int i = 0; i < BuiltInAgentRoleIds.AllBuiltInRoles.Count; i++)
             {
                 AddUnique(roleIds, BuiltInAgentRoleIds.AllBuiltInRoles[i]);
@@ -88,17 +100,19 @@ namespace CoreAI.Diagnostics
             string systemWithRuntime = string.IsNullOrWhiteSpace(runtimeContext)
                 ? resolvedSystem
                 : resolvedSystem.TrimEnd() + "\n\n" + runtimeContext.Trim();
-            string systemPrefix = _settings.PlaceLiveContextInTail ? resolvedSystem : systemWithRuntime;
+            string systemPrefix = resolvedSystem;
 
             string memoryText = "";
             string systemWithMemory = systemPrefix;
+            AgentMemoryPromptParts memoryParts = default;
             if (_memoryPolicy.IsMemoryEnabled(resolvedRoleId) &&
                 _memoryStore != null &&
                 _memoryStore.TryLoad(resolvedRoleId, out AgentMemoryState state) &&
                 !string.IsNullOrWhiteSpace(state?.Memory))
             {
                 memoryText = state.Memory.Trim();
-                systemWithMemory = systemWithRuntime.Trim() + "\n\n## Memory\n" + memoryText;
+                memoryParts = AgentMemoryPromptPlacement.Build(state);
+                systemWithMemory = AppendTailBudgetSection(systemPrefix, memoryParts.PrefixBlock);
             }
 
             IReadOnlyList<ILlmTool> tools = _memoryPolicy.GetToolsForRole(resolvedRoleId);
@@ -110,16 +124,21 @@ namespace CoreAI.Diagnostics
                 _settings);
 
             string conversationSummary = _summaryStore?.LoadSummary(resolvedRoleId) ?? "";
-            string systemForBudget = systemWithTools;
+            string summaryTailBlock = "";
+            string finalSystemEstimate = systemWithTools;
             if (roleConfig.WithChatHistory &&
-                !_settings.PlaceLiveContextInTail &&
                 !string.IsNullOrWhiteSpace(conversationSummary))
             {
-                systemWithTools = systemWithTools.Trim() + "\n\n## Conversation Summary\n" +
-                                  conversationSummary.Trim();
+                string summaryBlock = "## Conversation Summary\n" + conversationSummary.Trim();
+                summaryTailBlock = summaryBlock;
             }
 
             string userPayload = BuildUserPayloadEstimate(inspectRequest);
+            string tailBudgetSections = JoinTailSections(
+                summaryTailBlock,
+                memoryParts.TailBlock,
+                runtimeContext);
+            string systemForBudget = AppendTailBudgetSection(systemWithTools, tailBudgetSections);
             ContextBudget budget = ComputeBudget(roleConfig, systemForBudget, userPayload, tools, inspectRequest);
             int historyBudget = ResolveHistoryBudget(budget, roleConfig);
 
@@ -139,8 +158,8 @@ namespace CoreAI.Diagnostics
                 AdditionalSystemPrompt = ResolveAdditionalSystemPrompt(resolvedRoleId),
                 ResolvedSystemPrompt = resolvedSystem,
                 ResolvedSystemPromptWithRuntimeContext = systemWithRuntime,
-                ResolvedSystemPromptWithMemoryAndTools = systemForBudget,
-                ResolvedSystemPromptFinalEstimate = systemWithTools,
+                ResolvedSystemPromptWithMemoryAndTools = systemWithTools,
+                ResolvedSystemPromptFinalEstimate = finalSystemEstimate,
                 MemoryText = memoryText,
                 ConversationSummary = conversationSummary,
                 UserPayloadEstimate = userPayload,
@@ -156,7 +175,12 @@ namespace CoreAI.Diagnostics
 
             AddTools(snapshot.Tools, tools);
             AddMessages(snapshot.ChatHistory, storedHistory);
-            AddMessages(snapshot.EstimatedRequestChatHistory, requestHistoryEstimate);
+            AddEstimatedRequestMessages(
+                snapshot.EstimatedRequestChatHistory,
+                summaryTailBlock,
+                requestHistoryEstimate,
+                memoryParts.TailBlock,
+                runtimeContext);
             AddNotes(snapshot, roleConfig, inspectRequest);
             return snapshot;
         }
@@ -202,13 +226,15 @@ namespace CoreAI.Diagnostics
 
             string memoryText = "";
             string systemWithMemory = resolvedSystem;
+            AgentMemoryPromptParts memoryParts = default;
             if (memoryPolicy.IsMemoryEnabled(resolvedRoleId) &&
                 memoryStore != null &&
                 memoryStore.TryLoad(resolvedRoleId, out AgentMemoryState state) &&
                 !string.IsNullOrWhiteSpace(state?.Memory))
             {
                 memoryText = state.Memory.Trim();
-                systemWithMemory = resolvedSystem.Trim() + "\n\n## Memory\n" + memoryText;
+                memoryParts = AgentMemoryPromptPlacement.Build(state);
+                systemWithMemory = AppendTailBudgetSection(resolvedSystem, memoryParts.PrefixBlock);
             }
 
             IReadOnlyList<ILlmTool> tools = memoryPolicy.GetToolsForRole(resolvedRoleId);
@@ -220,15 +246,17 @@ namespace CoreAI.Diagnostics
                 settings);
 
             string conversationSummary = summaryStore?.LoadSummary(resolvedRoleId) ?? "";
-            string systemForBudget = systemWithTools;
+            string summaryTailBlock = "";
+            string finalSystemEstimate = systemWithTools;
             if (roleConfig.WithChatHistory &&
-                !settings.PlaceLiveContextInTail &&
                 !string.IsNullOrWhiteSpace(conversationSummary))
             {
-                systemWithTools = systemWithTools.Trim() + "\n\n## Conversation Summary\n" +
-                                  conversationSummary.Trim();
+                string summaryBlock = "## Conversation Summary\n" + conversationSummary.Trim();
+                summaryTailBlock = summaryBlock;
             }
 
+            string tailBudgetSections = JoinTailSections(summaryTailBlock, memoryParts.TailBlock);
+            string systemForBudget = AppendTailBudgetSection(systemWithTools, tailBudgetSections);
             ContextBudget budget = ComputeBudget(
                 roleConfig,
                 systemForBudget,
@@ -252,8 +280,8 @@ namespace CoreAI.Diagnostics
                 AdditionalSystemPrompt = additionalSystemPrompt,
                 ResolvedSystemPrompt = resolvedSystem,
                 ResolvedSystemPromptWithRuntimeContext = AgentSessionSnapshot.UnavailableInEditMode,
-                ResolvedSystemPromptWithMemoryAndTools = systemForBudget,
-                ResolvedSystemPromptFinalEstimate = systemWithTools,
+                ResolvedSystemPromptWithMemoryAndTools = systemWithTools,
+                ResolvedSystemPromptFinalEstimate = finalSystemEstimate,
                 MemoryText = memoryText,
                 ConversationSummary = conversationSummary,
                 UserPayloadEstimate = AgentSessionSnapshot.UnavailableInEditMode,
@@ -270,6 +298,8 @@ namespace CoreAI.Diagnostics
 
             AddTools(snapshot.Tools, tools);
             AddMessages(snapshot.ChatHistory, storedHistory);
+            AddTailMessage(snapshot.EstimatedRequestChatHistory, summaryTailBlock);
+            AddTailMessage(snapshot.EstimatedRequestChatHistory, memoryParts.TailBlock);
             snapshot.EstimatedRequestChatHistory.Add(new AgentSessionChatMessageSnapshot
             {
                 Role = "diagnostics",
@@ -590,6 +620,65 @@ namespace CoreAI.Diagnostics
                     Timestamp = messages[i].Timestamp
                 });
             }
+        }
+
+        private static void AddEstimatedRequestMessages(
+            List<AgentSessionChatMessageSnapshot> output,
+            string summaryTailBlock,
+            ChatMessage[] recentMessages,
+            string memoryTailBlock,
+            string runtimeContextTailBlock)
+        {
+            AddTailMessage(output, summaryTailBlock);
+            AddMessages(output, recentMessages);
+            AddTailMessage(output, memoryTailBlock);
+            AddTailMessage(output, runtimeContextTailBlock);
+        }
+
+        private static void AddTailMessage(List<AgentSessionChatMessageSnapshot> output, string content)
+        {
+            if (output == null || string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
+            output.Add(new AgentSessionChatMessageSnapshot
+            {
+                Role = "system",
+                Content = content.Trim(),
+                Timestamp = 0
+            });
+        }
+
+        private static string JoinTailSections(params string[] sections)
+        {
+            if (sections == null || sections.Length == 0)
+            {
+                return "";
+            }
+
+            List<string> nonEmpty = new(sections.Length);
+            for (int i = 0; i < sections.Length; i++)
+            {
+                if (!string.IsNullOrWhiteSpace(sections[i]))
+                {
+                    nonEmpty.Add(sections[i].Trim());
+                }
+            }
+
+            return nonEmpty.Count == 0 ? "" : string.Join("\n\n", nonEmpty);
+        }
+
+        private static string AppendTailBudgetSection(string system, string tailBlock)
+        {
+            if (string.IsNullOrWhiteSpace(tailBlock))
+            {
+                return system ?? "";
+            }
+
+            return string.IsNullOrWhiteSpace(system)
+                ? tailBlock.Trim()
+                : system.TrimEnd() + "\n\n" + tailBlock.Trim();
         }
 
         private static void AddNotes(

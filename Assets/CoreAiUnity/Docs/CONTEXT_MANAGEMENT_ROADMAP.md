@@ -25,21 +25,20 @@ Reference implementations we are aligning with:
 ## Target design
 
 ### 1. Transcript model + stable cacheable prefix
-- Status: **partially implemented behind `PlaceLiveContextInTail` (default off)** for `## Conversation Summary`
-  only. The summary is prepended as the first tail message because it represents the evicted oldest turns;
-  recent turns already remain verbatim after it. Dynamic world-state observation (§8) is implemented as the
-  final tail message. Memory deltas are still pending.
+- Status: **implemented as the only CoreAI runtime path** for conversation summary, world-state, and live
+  memory-update placement. The summary is prepended as the first tail message because it represents the evicted
+  oldest turns; recent turns already remain verbatim after it.
 - Keep recent turns as **real `user`/`assistant`/`tool` messages** in the tail; do **not** rewrite the
   `system`/`tools` prefix each turn. The frozen prefix is what the provider caches.
 - Volatile, per-turn content goes at the **end**, after the cache breakpoint.
 
 ### 1a. Prefix vs Tail — how live memory & summary coexist with caching (the core decision)
-- Status: **summary-to-tail implemented behind `PlaceLiveContextInTail` (default off)**. When enabled,
-  `AiOrchestrator.BuildChatHistoryAsync` emits `## Conversation Summary` as the first system-role
+- Status: **implemented as mandatory tail placement**. `AiOrchestrator.BuildChatHistoryAsync` emits
+  `## Conversation Summary` as the first system-role
   `ChatHistory` message, before recent verbatim turns, instead of appending it to the system prefix.
   Runtime/world-state context from the existing per-role/global context providers is emitted as the final
-  system-role `## World State` tail message. `## Memory` remains in the prefix for now; memory deltas are a
-  later step near the end of the tail.
+  system-role `## World State` tail message. `## Memory` remains a stable prefix snapshot; changes after that
+  snapshot are emitted as `## Memory (updates)` tail content and consolidated only at compaction/retry boundaries.
 
 The reason today's design breaks caching is **placement, not content**: the `## Memory` block and
 `## Conversation Summary` are injected into the **top-level `system`** (the prefix), so every memory update or
@@ -114,11 +113,11 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   is emitted, so callers never receive mixed chunks from two attempts.
 
 ### 6. Persistent memory — incremental, versioned, boundary-consolidated
-Today the `memory` tool is coarse — `write / append / clear` (confirmed via the Agent Session Inspector).
-Upgrade to a real editable memory:
+Status: **implemented** for granular edits, version snapshots, explicit `read`, cache-safe tail updates, and
+boundary consolidation.
 
-- **Granular ops:** `append / str_replace / insert / delete / rename` over a structured memory doc — the agent
-  edits, it does **not** rewrite the whole thing each time (model-decided when useful).
+- **Granular ops:** `read / append / str_replace / insert / delete / rename` over a structured memory doc — the
+  agent edits, it does **not** rewrite the whole thing each time (model-decided when useful).
 - **Versioned:** snapshot per mutation for audit + rollback (revert a bad self-edit).
 
 **Placement & consolidation (the cache-safe rule).** Tie memory placement to *cache boundaries*, not to each turn:
@@ -134,8 +133,8 @@ So two levels live in the prompt: a **canonical snapshot** (prefix, refreshed on
 the system prompt when the session summarizes/restarts" — yes, the boundary is exactly the consolidation point.
 
 - **Memory is always fully readable.** The full memory is present in context every turn (canonical prefix +
-  tail deltas), so the model never loses it; additionally expose an explicit `view`/read action so the agent can
-  re-read the whole memory on demand. Caching is *not* the goal — keeping the system prompt stable is only a
+  tail deltas), so the model never loses it; the explicit `read` action lets the agent re-read the whole memory
+  on demand. Caching is *not* the goal — keeping the system prompt stable is only a
   side effect of "the model already remembers"; at boundaries (new session / summarization / truncation) the
   cache breaks anyway, so that is exactly when we refresh memory into the system prompt.
 
@@ -164,11 +163,10 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
   blocks once they no longer matter. Prune first (cheap, lossless-ish), summarize only when still over budget.
 
 ### 8. Dynamic world-state observation (universal / game agent — beyond Claude Code/Cursor)
-- Status: **implemented behind `PlaceLiveContextInTail` (default off)**. Existing per-role
-  `IAgentRuntimeContextProvider` and global `IAiPromptContextProvider` output is still assembled by
-  `AiPromptComposer`, but when tail placement is enabled it is appended as the final system-role
-  `## World State` chat-history message after the summary and recent verbatim turns. Flag-off behavior keeps
-  the legacy system prompt placement.
+- Status: **implemented as mandatory tail placement**. Existing per-role `IAgentRuntimeContextProvider` and global
+  `IAiPromptContextProvider` output is still assembled by `AiPromptComposer`, then appended as the final
+  system-role `## World State` chat-history message after the summary and recent verbatim turns. The old
+  system-prefix placement toggle was removed.
 - This agent is not just a coder: it also drives **game mechanics, NPCs, lesson briefings**. Give it, each turn,
   a compact **world-state observation** in the tail — current scene, relevant NPC/quest/player state, the
   "current slide" in a briefing, etc. This is the game analog of Claude Code's file-context, but for live state.

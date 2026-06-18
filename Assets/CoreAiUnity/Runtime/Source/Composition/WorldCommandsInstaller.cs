@@ -4,7 +4,9 @@ using CoreAI.Config;
 using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Messaging;
 using CoreAI.Infrastructure.World;
+using MessagePipe;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -37,7 +39,8 @@ namespace CoreAI.Composition
             CoreAiPrefabRegistryAsset worldPrefabRegistry,
             System.Collections.Generic.IEnumerable<string> allowedLuaScenes = null,
             bool enableFullLuaAccess = false,
-            bool enableFullLuaPrivateAccess = false)
+            bool enableFullLuaPrivateAccess = false,
+            IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null)
         {
             CoreAiPrefabRegistryAsset registry =
                 worldPrefabRegistry != null
@@ -59,7 +62,8 @@ namespace CoreAI.Composition
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
                     c.Resolve<IGameLogger>(),
-                    enableFullLuaPrivateAccess),
+                    enableFullLuaPrivateAccess,
+                    fullLuaBlacklistPolicy),
                 Lifetime.Singleton);
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -92,7 +96,11 @@ namespace CoreAI.Composition
                     c.Resolve<IGameLuaRuntimeBindings>(),
                     c.Resolve<ILuaModStore>()),
                 Lifetime.Singleton);
-            builder.RegisterEntryPoint<LuaModRuntimeTicker>();
+            builder.RegisterEntryPoint<ITickable>(c => new LuaModRuntimeTicker(
+                    c.Resolve<LuaModRuntime>(),
+                    c.ResolveOrDefault<IGameLogger>(),
+                    c.ResolveOrDefault<IPublisher<LuaModEventEmitted>>()),
+                Lifetime.Singleton);
 
             // Native tool-calling path for the built-in Programmer role: the same sandbox and
             // game bindings as the Lua envelope pipeline, exposed as execute_lua + manage_mods

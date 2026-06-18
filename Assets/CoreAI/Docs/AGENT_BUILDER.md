@@ -9,7 +9,8 @@
 - ✅ **Unique tools** — any `ILlmTool` for a specific agent
 - ✅ **Skills** — named tool+instruction groups with per-request activation (**v2.0+**)
 - ✅ **Three response modes** — `ChatOnly`, `ToolsAndChat`, `ToolsOnly`
-- ✅ **Memory** — persistent agent memory (write/append/clear)
+- ✅ **Memory** — persistent agent memory (read/write/append/clear and granular edits)
+- ✅ **Wait tool** — optional `wait(seconds)` tool for polling/cooldowns inside a tool-calling turn
 - ✅ **Chat history** — automatic saving of conversation context
 - ✅ **Per-agent output budget** — `WithMaxOutputTokens(...)` for roles that should stay short or verbose
 - ✅ **Minimal code** — 3–5 lines per agent
@@ -108,7 +109,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 ### How it works
 
 1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list
-2. `ApplyToPolicy()` registers `SkillRuntimeContextProvider` (catalog in prompt) + `read_skill` + `call_skill_tool`
+2. `ApplyToPolicy()` appends the static skill catalog to the stable system prompt prefix and registers `read_skill` + `call_skill_tool`
 3. Model sees the catalog (skill names + descriptions), calls `read_skill(name)` to load instructions + tool schemas
 4. Model calls `call_skill_tool(tool_name, arguments_json)` to execute tools through the proxy
 5. Token overhead: **constant** (2 meta-tools) regardless of skill/tool count
@@ -200,6 +201,7 @@ var merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. When player asks to buy, call get_inventory first.")
     .WithTool(new InventoryLlmTool(myInventoryProvider))
     .WithMemory()  // Persistent memory
+    .WithWaitTool(10) // Optional: let the model wait before polling again
     .WithMode(AgentMode.ToolsAndChat)
     .Build();
 
@@ -920,7 +922,9 @@ async Task AskMerchant(string playerMessage)
 
 | Method | Description | Example |
 |-------|----------|--------|
-| `WithSystemPrompt(string)` | Set system prompt | `.WithSystemPrompt("You are...")` |
+| `WithSystemPrompt(string)` | Replace the builder-level Layer 3 prompt fragment | `.WithSystemPrompt("You are...")` |
+| `AppendSystemPrompt(string)` | Append to the builder-level Layer 3 prompt fragment | `.AppendSystemPrompt("Use short examples.")` |
+| `WithSystemPrompt(string, SystemPromptWriteMode)` | Replace or append explicitly | `.WithSystemPrompt("Extra rules", SystemPromptWriteMode.Append)` |
 | `WithTool(ILlmTool)` | Add a tool | `.WithTool(new InventoryLlmTool(...))` |
 | `WithTools(IEnumerable<ILlmTool>)` | Add multiple tools | `.WithTools(tools)` |
 | `WithAction(string, string, Delegate)` | ADD tool from C# delegate | `.WithAction("heal", "desc", () => Heal())` |
@@ -988,6 +992,12 @@ Built-in statics: `RoleId.Creator`, `RoleId.Analyzer`, `RoleId.Programmer`, `Rol
 | `Write` | Replace memory entirely |
 | `Append` | Append to existing memory |
 | `Clear` | Clear memory |
+| `StrReplace` | Replace exact text in memory |
+| `Insert` | Insert text by line/anchor/end |
+| `Delete` | Delete exact text from memory |
+| `Rename` | Rename a leading section/key label |
+
+The runtime `memory` tool also accepts `action = "read"` to return the current durable memory document without mutating it.
 
 ---
 

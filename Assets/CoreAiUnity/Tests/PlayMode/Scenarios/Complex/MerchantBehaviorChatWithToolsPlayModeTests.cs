@@ -28,6 +28,44 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
         private const int LlmStepTimeoutSeconds = 240;
         private const int ScenarioStepMaxOutputTokens = 2048;
 
+        [Test]
+        public async Task MerchantEconomy_BuyWithoutDiscount_DoesNotMutateOnInsufficientGold()
+        {
+            MerchantInventoryProvider inventory = new();
+            MerchantEconomyState economy = new(inventory);
+
+            string result = await economy.BuyItemAsync("Iron Sword", 1);
+
+            StringAssert.Contains("\"success\":false", result);
+            StringAssert.Contains("insufficient_gold", result);
+            Assert.AreEqual(40, economy.PlayerGold);
+            Assert.AreEqual(2, inventory.Items.Single(i => i.Name == "Iron Sword").Quantity);
+            Assert.IsEmpty(economy.PlayerInventory);
+            CollectionAssert.Contains(economy.CallLog, "buy_item:Iron Sword:1:insufficient_gold");
+        }
+
+        [Test]
+        public async Task MerchantEconomy_DiscountEnablesPurchaseWithinPlayerBudget()
+        {
+            MerchantInventoryProvider inventory = new();
+            MerchantEconomyState economy = new(inventory);
+
+            string discount = await economy.ApplyDiscountAsync("Iron Sword", 34);
+            string purchase = await economy.BuyItemAsync("Iron Sword", 1);
+
+            StringAssert.Contains("\"success\":true", discount);
+            StringAssert.Contains("\"discountPercent\":34", discount);
+            StringAssert.Contains("\"success\":true", purchase);
+            Assert.AreEqual(0, economy.PlayerGold);
+            Assert.AreEqual(1, inventory.Items.Single(i => i.Name == "Iron Sword").Quantity);
+            CollectionAssert.AreEqual(new[] { "Iron Sword" }, economy.PlayerInventory);
+            CollectionAssert.Contains(economy.CallLog, "apply_discount:Iron Sword:34");
+            Assert.IsTrue(
+                economy.CallLog.Any(c => c.StartsWith("buy_item:Iron Sword:1:success:40",
+                    StringComparison.Ordinal)),
+                "A 34% discount should round the 60g sword to exactly the player's 40g budget.");
+        }
+
         [UnityTest]
         [Explicit("Long live-model negotiation scenario; run targeted when validating merchant behavior, not in mandatory full PlayMode.")]
         [Timeout(600000)]
@@ -91,8 +129,10 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
 
                 const string step2Base =
                     "Player says: 'I want Leather Armor x1'. Player has low gold (40 gold). " +
+                    "This step validates the purchase-failure tool path: call buy_item for Leather Armor x1. " +
                     "If purchase fails, explain briefly and suggest cheaper options.";
-                yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base);
+                yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base,
+                    LlmToolChoiceMode.RequireSpecific, "buy_item");
 
                 yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
                     "Player says: 'I can spend at most 40 gold and I want one Iron Sword. " +
@@ -127,7 +167,9 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
             MerchantEconomyState economy,
             InMemoryStore store,
             string label,
-            string hint)
+            string hint,
+            LlmToolChoiceMode forcedToolMode = LlmToolChoiceMode.Auto,
+            string requiredToolName = "")
         {
             Debug.Log($"[MerchantScenario] === {label} ===");
             Debug.Log($"[MerchantScenario] PLAYER: {hint}");
@@ -138,6 +180,8 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                 RoleId = BuiltInAgentRoleIds.Merchant,
                 Hint = hint,
                 SourceTag = "BehaviorScenario",
+                ForcedToolMode = forcedToolMode,
+                RequiredToolName = requiredToolName ?? "",
                 MaxOutputTokens = ScenarioStepMaxOutputTokens
             }, cts.Token);
             yield return PlayModeTestAwait.WaitTask(task, LlmStepTimeoutSeconds, label, cts);

@@ -30,6 +30,9 @@ namespace CoreAI.Composition
             builder.RegisterMessageBroker<LlmToolCallStarted>(opts);
             builder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
             builder.RegisterMessageBroker<LlmToolCallFailed>(opts);
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+            builder.RegisterMessageBroker<LuaModEventEmitted>(opts);
+#endif
 
             IObjectResolver resolver = builder.Build();
             GlobalMessagePipe.SetProvider(resolver.AsServiceProvider());

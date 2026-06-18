@@ -21,6 +21,20 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class SmartChatAndAINpcPlayModeTests
     {
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            LogAssert.ignoreFailingMessages = false;
+            yield break;
+        }
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();

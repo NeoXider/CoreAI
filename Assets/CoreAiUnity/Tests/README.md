@@ -21,8 +21,8 @@ already owns.**
   reshaping the implementation around the test, the design problem comes first; raise it
   rather than bending the test or the code.
 - Do not relax an assertion to match buggy behavior. If the expected value changed because
-  the *contract* changed, update the test and record it in `Docs/EditModeTestAudit.md` with
-  before/after and rationale. If it changed because the *code regressed*, fix the code.
+  the *contract* changed, update the test and record the rationale in the nearest feature/test
+  documentation or changelog. If it changed because the *code regressed*, fix the code.
 
 ## A2. Tests are fair diagnostics, not coached completions
 
@@ -85,8 +85,8 @@ A test that cannot fail for a real defect is noise. Do not write or keep:
 ## A6. When a test breaks
 
 1. Decide whether the **contract** changed or the **code regressed**.
-2. Contract changed → update the test to the new contract and log it in
-   `Docs/EditModeTestAudit.md`.
+2. Contract changed → update the test to the new contract and document the rationale near the
+   affected test, feature documentation, or changelog.
 3. Code regressed → fix the code. Do not edit the test to accept the regression.
 4. Test was wrong/dumb (A4) → delete or rewrite it against the real contract. Do not keep a
    green test that cannot fail.
@@ -237,7 +237,6 @@ Run via Unity Test Runner → PlayMode, filtered by assembly.
 ## References
 
 - `Docs/ARCHITECTURE.md` — global Test Integrity Rule (mirrors Part A).
-- `Docs/EditModeTestAudit.md` — log of contract-driven test changes.
 - `Tests/TOOL_CALL_TESTS.md` — tool-call test matrix and tool-call JSON format.
 - `Tests/PlayMode/Scenarios/CraftingMemory_README.md`, `Tests/PlayMode/Scenarios/Complex/README.md`
   — scenario-specific docs.

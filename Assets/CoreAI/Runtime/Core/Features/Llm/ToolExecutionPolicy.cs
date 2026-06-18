@@ -23,6 +23,9 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class ToolExecutionPolicy
     {
+        private const string EmptyToolResultPayload =
+            "{\"Success\":true,\"Message\":\"Tool completed without an explicit result payload.\"}";
+
         private readonly ILog _logger;
         private readonly ICoreAISettings _settings;
         private readonly IReadOnlyList<ILlmTool> _originalTools;
@@ -339,7 +342,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 sw.Stop();
-                string resultText = result?.ToString() ?? "";
+                string resultText = NormalizeToolResultText(result);
 
                 // === Tool result truncation ===
                 int maxResultChars = _settings.MaxToolResultChars;
@@ -404,6 +407,12 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = false
                 };
             }
+        }
+
+        private static string NormalizeToolResultText(object result)
+        {
+            string resultText = result?.ToString() ?? "";
+            return string.IsNullOrWhiteSpace(resultText) ? EmptyToolResultPayload : resultText;
         }
 
         private string ValidateRequiredArguments(MEAI.FunctionCallContent fc)

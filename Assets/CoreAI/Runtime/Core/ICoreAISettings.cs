@@ -130,16 +130,14 @@ namespace CoreAI
         bool EnableTokenCalibration => true;
 
         /// <summary>
+        /// Stable key used to persist token-estimator calibration, usually the active model id.
+        /// </summary>
+        string TokenCalibrationModelKey => "default";
+
+        /// <summary>
         /// When false, the orchestrator does not cap chat history with a rolling summary partition (full loaded transcript stays in the MEAI tail; risk of context overflow).
         /// </summary>
         bool EnableConversationHistorySummarization => true;
-
-        /// <summary>
-        /// When true, the conversation summary is prepended as the first tail message before recent verbatim turns
-        /// instead of in the system prefix, so the cached prefix stays stable (roadmap §1a). Later memory
-        /// deltas/world-state still belong near the end of the tail. Default false = legacy behaviour.
-        /// </summary>
-        bool PlaceLiveContextInTail => false;
 
         /// <summary>
         /// When greater than zero, overrides the computed recent-history token budget from <see cref="IContextBudgetPolicy"/>.
@@ -154,7 +152,7 @@ namespace CoreAI
         /// <summary>
         /// Compaction (summarization of older turns) only triggers once estimated history tokens reach this
         /// fraction of the history budget; below it, all turns are kept verbatim and the stored summary is left untouched.
-        /// Roadmap §2. Values less than or equal to zero or greater than one preserve legacy budget-boundary behavior.
+        /// Roadmap §2. Invalid values fall back to <see cref="CoreAISettings.DefaultConversationCompactionTriggerRatio"/>.
         /// </summary>
         float ConversationCompactionTriggerRatio => 0.8f;
 

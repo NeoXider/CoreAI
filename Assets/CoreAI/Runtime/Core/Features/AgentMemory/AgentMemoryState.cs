@@ -19,6 +19,17 @@ namespace CoreAI.Ai
         public string Memory { get; set; }
 
         /// <summary>
+        /// Cached memory snapshot currently embedded in the stable system prompt prefix.
+        /// Runtime memory changes after this snapshot are sent as tail updates until a consolidation boundary.
+        /// </summary>
+        public string SystemPromptMemorySnapshot { get; set; }
+
+        /// <summary>
+        /// Latest retained memory version included in <see cref="SystemPromptMemorySnapshot"/>.
+        /// </summary>
+        public int SystemPromptMemoryVersion { get; set; }
+
+        /// <summary>
         /// Default number of memory mutation snapshots retained per role.
         /// </summary>
         public const int DefaultMaxMemoryVersions = 30;

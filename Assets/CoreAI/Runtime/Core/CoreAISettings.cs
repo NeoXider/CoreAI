@@ -56,7 +56,6 @@
         private static bool? _enableStreaming;
         private static bool? _enableLlmContextCompaction;
         private static bool? _enableTokenCalibration;
-        private static bool? _placeLiveContextInTail;
         private static float? _conversationCompactionTriggerRatio;
         private static bool? _enableContextPruning;
         private static int? _maxRetainedToolResultMessages;
@@ -92,7 +91,6 @@
         private const bool DefaultEnableStreaming = true;
         private const bool DefaultEnableLlmContextCompaction = false;
         public const bool DefaultEnableTokenCalibration = true;
-        public const bool DefaultPlaceLiveContextInTail = false;
         public const float DefaultConversationCompactionTriggerRatio = 0.8f;
         public const bool DefaultEnableContextPruning = true;
         public const int DefaultMaxRetainedToolResultMessages = 3;
@@ -316,19 +314,7 @@
         }
 
         /// <summary>
-        /// When true, volatile live context is sent in chat history instead of rewriting the system prefix.
-        /// </summary>
-        public static bool PlaceLiveContextInTail
-        {
-            get =>
-                _placeLiveContextInTail ??
-                Instance?.PlaceLiveContextInTail ??
-                DefaultPlaceLiveContextInTail;
-            set => _placeLiveContextInTail = value;
-        }
-
-        /// <summary>
-        /// Roadmap §2 compaction trigger fraction of the history budget. Invalid values resolve to legacy behavior.
+        /// Roadmap §2 compaction trigger fraction of the history budget.
         /// </summary>
         public static float ConversationCompactionTriggerRatio
         {
@@ -446,7 +432,6 @@
                 _enableStreaming = null;
                 _enableLlmContextCompaction = null;
                 _enableTokenCalibration = null;
-                _placeLiveContextInTail = null;
                 _conversationCompactionTriggerRatio = null;
                 _enableContextPruning = null;
                 _maxRetainedToolResultMessages = null;

@@ -154,11 +154,18 @@ namespace CoreAI.Ai
             /// </summary>
             public bool UseLlmContextCompaction;
 
+            /// <summary>
+            /// Per-role compaction trigger ratio; null = use global <see cref="ICoreAISettings.ConversationCompactionTriggerRatio"/>.
+            /// Valid values are greater than 0 and less than or equal to 1.
+            /// </summary>
+            public float? CompactionTriggerRatio;
+
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
                 bool withChatHistory = true, bool persistChatHistory = false, int contextTokens = 0,
                 bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
                 bool useLlmContextCompaction = true, float? temperature = null,
-                ToolResultMemoryPolicy toolResultMemory = ToolResultMemoryPolicy.CompactSummary)
+                ToolResultMemoryPolicy toolResultMemory = ToolResultMemoryPolicy.CompactSummary,
+                float? compactionTriggerRatio = null)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -171,6 +178,7 @@ namespace CoreAI.Ai
                 UseLlmContextCompaction = useLlmContextCompaction;
                 Temperature = temperature;
                 ToolResultMemory = toolResultMemory;
+                CompactionTriggerRatio = NormalizeCompactionTriggerRatio(compactionTriggerRatio);
             }
         }
 
@@ -367,7 +375,8 @@ namespace CoreAI.Ai
                     MaxOutputTokens = existing.MaxOutputTokens,
                     ToolResultMemory = existing.ToolResultMemory,
                     Temperature = existing.Temperature,
-                    UseLlmContextCompaction = existing.UseLlmContextCompaction
+                    UseLlmContextCompaction = existing.UseLlmContextCompaction,
+                    CompactionTriggerRatio = existing.CompactionTriggerRatio
                 };
             }
         }
@@ -429,6 +438,41 @@ namespace CoreAI.Ai
                 existing.ToolResultMemory = policy;
                 _roleConfigs[roleId] = existing;
             }
+        }
+
+        /// <summary>
+        /// Set a per-role compaction trigger ratio. Null or invalid values clear the override.
+        /// </summary>
+        public void SetCompactionTriggerRatio(string roleId, float? ratio)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.CompactionTriggerRatio = NormalizeCompactionTriggerRatio(ratio);
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        private static float? NormalizeCompactionTriggerRatio(float? ratio)
+        {
+            if (!ratio.HasValue)
+            {
+                return null;
+            }
+
+            float value = ratio.Value;
+            if (value <= 0f || value > 1f || float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return null;
+            }
+
+            return value;
         }
 
         /// <summary>

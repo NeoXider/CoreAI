@@ -10,15 +10,15 @@ namespace CoreAI.AgentMemory
         public override string Name => "memory";
 
         public override string Description =>
-            "Store, append, clear, or edit the persistent memory document for agent recall. " +
-            "Actions: write replaces the document; append adds a line; clear empties memory; " +
+            "Read, store, append, clear, or edit the persistent memory document for agent recall. " +
+            "Actions: read returns the current memory document; write replaces the document; append adds a line; clear empties memory; " +
             "str_replace replaces exact old_text with new_text/content (first match unless replace_all=true); " +
             "insert adds content before a 1-based line, after an anchor line, or at the end; " +
             "delete removes exact old_text/content (first match unless replace_all=true); " +
             "rename changes the first leading 'key:' or '# key:' label named old_text to new_text/content.";
 
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true, "Action: write, append, clear, str_replace, insert, delete, or rename"),
+            ("action", "string", true, "Action: read, write, append, clear, str_replace, insert, delete, or rename"),
             ("content", "string", false, "Memory content for write/append/insert, replacement fallback for str_replace/rename, or delete target fallback"),
             ("old_text", "string", false, "Exact text to replace/delete, or section/key label to rename"),
             ("new_text", "string", false, "Replacement text for str_replace, or new section/key label for rename"),

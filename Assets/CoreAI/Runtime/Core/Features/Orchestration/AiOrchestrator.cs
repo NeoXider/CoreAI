@@ -88,29 +88,31 @@ namespace CoreAI.Ai
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
             string systemBase = _promptComposer.GetSystemPrompt(roleId);
-            string worldState = "";
-            if (_settings.PlaceLiveContextInTail)
-            {
-                worldState = _promptComposer.BuildRuntimeContext(task, roleId, traceId);
-            }
-            else
-            {
-                systemBase = _promptComposer.AppendRuntimeContext(systemBase, task, roleId, traceId);
-            }
+            string worldState = _promptComposer.BuildRuntimeContext(task, roleId, traceId);
 
             string system = systemBase;
+            AgentMemoryState memoryState = null;
+            AgentMemoryPromptParts memoryParts = default;
             bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
             if (useMemoryTool &&
-                _memoryStore != null && _memoryStore.TryLoad(roleId, out AgentMemoryState mem) &&
-                !string.IsNullOrWhiteSpace(mem?.Memory))
+                _memoryStore != null && _memoryStore.TryLoad(roleId, out memoryState) &&
+                !string.IsNullOrWhiteSpace(memoryState?.Memory))
             {
-                system = systemBase.Trim() + "\n\n## Memory\n" + mem.Memory.Trim();
+                if (AgentMemoryPromptPlacement.NeedsInitialSnapshot(memoryState) &&
+                    AgentMemoryPromptPlacement.ConsolidateSnapshot(memoryState))
+                {
+                    _memoryStore.Save(roleId, memoryState);
+                }
+
+                memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
+                system = AppendTailBudgetSection(systemBase, memoryParts.PrefixBlock);
             }
 
             string user = _promptComposer.BuildUserPayload(snap, task);
             IReadOnlyList<ILlmTool> tools = _memoryPolicy?.GetToolsForRole(roleId);
             tools = FilterToolsForRequest(tools, task);
             system = AppendToolContract(system, tools, task, roleId);
+            string systemForBudget = AppendTailBudgetSection(system, memoryParts.TailBlock);
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
@@ -123,20 +125,18 @@ namespace CoreAI.Ai
             ConversationContextBuildArgs ctxBuildArgs = null;
             int? resolvedMaxOutput = ResolveMaxOutputTokens(task.MaxOutputTokens, roleConfig.MaxOutputTokens);
             ContextBudget budget = default;
-            bool hasBudget = false;
             if (roleConfig.WithChatHistory && _memoryStore != null)
             {
                 ContextBudgetRequest budgetRequest = new()
                 {
                     MaxContextTokens = contextWindowTokens,
-                    SystemPrompt = system,
+                    SystemPrompt = systemForBudget,
                     UserPayload = user,
                     Tools = tools,
                     MaxOutputTokens = resolvedMaxOutput,
                     ContextRetryLevel = contextRetryPass
                 };
                 budget = _contextBudgetPolicy.Compute(budgetRequest, _tokenEstimator);
-                hasBudget = true;
                 int historyBudget = budget.HistoryTokenBudget;
                 if (!_settings.EnableConversationHistorySummarization)
                 {
@@ -148,6 +148,8 @@ namespace CoreAI.Ai
                 }
 
                 int maxRolled = _settings.ConversationRolledSummaryMaxTokens;
+                float compactionTriggerRatio =
+                    roleConfig.CompactionTriggerRatio ?? _settings.ConversationCompactionTriggerRatio;
                 ctxBuildArgs = new ConversationContextBuildArgs
                 {
                     HistoryTokenBudget = historyBudget,
@@ -155,23 +157,35 @@ namespace CoreAI.Ai
                     UseLlmContextCompaction =
                         _settings.EnableLlmContextCompaction && roleConfig.UseLlmContextCompaction,
                     MaxRolledSummaryTokens = maxRolled > 0 ? maxRolled : 0,
-                    CompactionTriggerRatio = _settings.ConversationCompactionTriggerRatio,
+                    CompactionTriggerRatio = compactionTriggerRatio,
                     EnableContextPruning = _settings.EnableContextPruning,
                     MaxRetainedToolResultMessages = _settings.MaxRetainedToolResultMessages
                 };
             }
 
-            (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory) =
+            (string updatedSystem, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted) =
                 await BuildChatHistoryAsync(roleId, roleConfig, system, ctxBuildArgs, traceId, cancellationToken)
                     .ConfigureAwait(false);
             system = updatedSystem;
+            bool shouldConsolidateMemorySnapshot = wasCompacted || contextRetryPass > 0;
+            if (shouldConsolidateMemorySnapshot &&
+                memoryState != null &&
+                AgentMemoryPromptPlacement.HasPendingUpdates(memoryState) &&
+                AgentMemoryPromptPlacement.ConsolidateSnapshot(memoryState))
+            {
+                _memoryStore.Save(roleId, memoryState);
+                memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
+                system = AppendTailBudgetSection(systemBase, memoryParts.PrefixBlock);
+                system = AppendToolContract(system, tools, task, roleId);
+            }
+
+            AppendMemoryTailMessage(ref chatHistory, memoryParts.TailBlock);
             AppendWorldStateTailMessage(ref chatHistory, worldState);
-            int estimatedPromptTokens = hasBudget
-                ? budget.EstimatedFixedPromptTokens + EstimateChatHistoryTokens(chatHistory)
-                : _tokenEstimator.EstimateText(system ?? "") +
-                  _tokenEstimator.EstimateText(user ?? "") +
-                  EstimateToolsTokens(tools) +
-                  EstimateChatHistoryTokens(chatHistory);
+            int estimatedPromptTokens =
+                _tokenEstimator.EstimateText(system ?? "") +
+                _tokenEstimator.EstimateText(user ?? "") +
+                EstimateToolsTokens(tools) +
+                EstimateChatHistoryTokens(chatHistory);
 
             return new RequestBundle
             {
@@ -761,7 +775,7 @@ namespace CoreAI.Ai
             public int EstimatedPromptTokens;
         }
 
-        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory)>
+        private async Task<(string systemPrompt, List<Microsoft.Extensions.AI.ChatMessage> chatHistory, bool wasCompacted)>
             BuildChatHistoryAsync(
                 string roleId,
                 AgentMemoryPolicy.RoleMemoryConfig roleConfig,
@@ -772,14 +786,14 @@ namespace CoreAI.Ai
         {
             if (!roleConfig.WithChatHistory || _memoryStore == null)
             {
-                return (system, null);
+                return (system, null, false);
             }
 
             int maxMessages = roleConfig.MaxChatHistoryMessages > 0 ? roleConfig.MaxChatHistoryMessages : 30;
             ChatMessage[] history = _memoryStore.GetChatHistory(roleId, maxMessages);
             if (history == null || history.Length == 0)
             {
-                return (system, null);
+                return (system, null, false);
             }
 
             ConversationContextSnapshot snapshot =
@@ -790,37 +804,32 @@ namespace CoreAI.Ai
                     : _contextManager.BuildSnapshot(roleId, history, roleConfig, buildArgs);
             if (snapshot == null)
             {
-                return (system, null);
+                return (system, null, false);
             }
 
             string resultSystem = system;
             bool hasSummary = !string.IsNullOrWhiteSpace(snapshot.Summary);
-            bool placeLiveContextInTail = _settings.PlaceLiveContextInTail;
             string summaryBlock = hasSummary
                 ? "## Conversation Summary\n" + snapshot.Summary.Trim()
                 : "";
-            if (hasSummary && !placeLiveContextInTail)
-            {
-                resultSystem = resultSystem.Trim() + "\n\n" + summaryBlock;
-            }
 
             ChatMessage[] recent = snapshot.RecentMessages ?? Array.Empty<ChatMessage>();
             if (recent.Length == 0)
             {
-                if (hasSummary && placeLiveContextInTail)
+                if (hasSummary)
                 {
                     return (resultSystem, new List<Microsoft.Extensions.AI.ChatMessage>
                     {
                         new(Microsoft.Extensions.AI.ChatRole.System, summaryBlock)
-                    });
+                    }, snapshot.WasCompacted);
                 }
 
-                return (resultSystem, null);
+                return (resultSystem, null, snapshot.WasCompacted);
             }
 
             List<Microsoft.Extensions.AI.ChatMessage> chatHistory =
-                new(recent.Length + (hasSummary && placeLiveContextInTail ? 1 : 0));
-            if (hasSummary && placeLiveContextInTail)
+                new(recent.Length + (hasSummary ? 1 : 0));
+            if (hasSummary)
             {
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
                     Microsoft.Extensions.AI.ChatRole.System,
@@ -833,7 +842,7 @@ namespace CoreAI.Ai
                 chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(aiRole, msg.Content));
             }
 
-            return (resultSystem, chatHistory);
+            return (resultSystem, chatHistory, snapshot.WasCompacted);
         }
 
         private static void AppendWorldStateTailMessage(
@@ -849,6 +858,33 @@ namespace CoreAI.Ai
             chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
                 Microsoft.Extensions.AI.ChatRole.System,
                 "## World State\n" + worldState.Trim()));
+        }
+
+        private static void AppendMemoryTailMessage(
+            ref List<Microsoft.Extensions.AI.ChatMessage> chatHistory,
+            string memoryTailBlock)
+        {
+            if (string.IsNullOrWhiteSpace(memoryTailBlock))
+            {
+                return;
+            }
+
+            chatHistory ??= new List<Microsoft.Extensions.AI.ChatMessage>(1);
+            chatHistory.Add(new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.System,
+                memoryTailBlock.Trim()));
+        }
+
+        private static string AppendTailBudgetSection(string system, string tailBlock)
+        {
+            if (string.IsNullOrWhiteSpace(tailBlock))
+            {
+                return system;
+            }
+
+            return string.IsNullOrWhiteSpace(system)
+                ? tailBlock.Trim()
+                : system.TrimEnd() + "\n\n" + tailBlock.Trim();
         }
 
         private void RecordTrace(RequestBundle bundle, LlmCompletionResult result, string assistantResponse,
@@ -1051,10 +1087,34 @@ namespace CoreAI.Ai
                 if (tool != null && allowed.Contains(tool.Name))
                 {
                     filtered.Add(tool);
+                    continue;
+                }
+
+                if (tool is ISkillSetMetaLlmTool skillMetaTool && IntersectsSkillToolAllowlist(skillMetaTool, allowed))
+                {
+                    filtered.Add(skillMetaTool.RestrictTo(allowed));
                 }
             }
 
             return filtered;
+        }
+
+        private static bool IntersectsSkillToolAllowlist(ISkillSetMetaLlmTool skillMetaTool, HashSet<string> allowed)
+        {
+            if (skillMetaTool == null || allowed == null || allowed.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (string name in allowed)
+            {
+                if (skillMetaTool.ContainsSkillTool(name))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private string AppendToolContract(

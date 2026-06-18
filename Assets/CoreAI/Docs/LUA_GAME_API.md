@@ -10,7 +10,7 @@ builds without Lua (stub bindings in DI). See [LUA_SANDBOX_SECURITY.md § Option
 
 **Best practices and anti-patterns:** [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 **MoonSharp: native vs custom:** [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md).
-**Access modes (Read -> Full):** [LUA_ACCESS_MODES_AUDIT.md](LUA_ACCESS_MODES_AUDIT.md).
+**Access modes (Read -> Full):** [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 All bindings run on the Unity main thread.
 
@@ -158,7 +158,8 @@ Read-only introspection: `LuaModsLlmTool(..., allowModManagement: false)`.
 ## Full Mode (`unity_*`)
 
 Opt-in through **Enable Full Lua Access** on `CoreAILifetimeScope` or `LoadMod(..., caps | Full)`.
-Policy is **allow-all** (type blacklist is Planned; see the audit).
+Policy is **allow-all by default**; hosts can inject `IFullLuaAccessBlacklistPolicy` to deny component types
+or specific members.
 
 ```lua
 -- One-shot diagnostic: inspect first, then decide what mod/edit to make.
@@ -225,5 +226,5 @@ into the same pipeline as LLM/Lua world commands. Example in LUA_BEST_PRACTICES.
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) - how to do it / how **not** to do it
 - [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) - security and checklists
 - [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md) - native MoonSharp APIs
-- [LUA_ACCESS_MODES_AUDIT.md](LUA_ACCESS_MODES_AUDIT.md) - access modes
+- [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md) - access modes
 - Demo: `Assets/CoreAI.Demos/README.md`

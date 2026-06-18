@@ -116,6 +116,37 @@ namespace CoreAI.Diagnostics
             StringBuilder sb = new();
             AppendHeader(sb);
 
+            AppendSystemPromptSections(sb);
+            AppendSection(sb, "User Payload Estimate", UserPayloadEstimate);
+            AppendTools(sb);
+            AppendHistorySections(sb, includeSystemMessages: true);
+
+            return sb.ToString();
+        }
+
+        /// <summary>System prompt parts and tool contract data without chat history.</summary>
+        public string ToSystemPromptText()
+        {
+            StringBuilder sb = new();
+            AppendHeader(sb);
+            AppendSystemPromptSections(sb);
+            AppendTools(sb);
+            return sb.ToString();
+        }
+
+        /// <summary>Stored and estimated request history without any system prompt messages.</summary>
+        public string ToHistoryText()
+        {
+            StringBuilder sb = new();
+            AppendHeader(sb);
+            sb.AppendLine("System-role messages are omitted from this view. Use the System view for prompts, memory tails, and summaries.");
+            sb.AppendLine();
+            AppendHistorySections(sb, includeSystemMessages: false);
+            return sb.ToString();
+        }
+
+        private void AppendSystemPromptSections(StringBuilder sb)
+        {
             AppendSection(sb, "Universal System Prompt Prefix", UniversalSystemPromptPrefix);
             AppendSection(sb, "Base System Prompt", BaseSystemPrompt);
             AppendSection(sb, "Additional System Prompt", AdditionalSystemPrompt);
@@ -125,8 +156,10 @@ namespace CoreAI.Diagnostics
             AppendSection(sb, "Conversation Summary", ConversationSummary);
             AppendSection(sb, "Resolved System Prompt + Memory + Tools", ResolvedSystemPromptWithMemoryAndTools);
             AppendSection(sb, "Final System Prompt Estimate", ResolvedSystemPromptFinalEstimate);
-            AppendSection(sb, "User Payload Estimate", UserPayloadEstimate);
+        }
 
+        private void AppendTools(StringBuilder sb)
+        {
             sb.AppendLine("Tools");
             sb.AppendLine("-----");
             if (Tools.Count == 0)
@@ -146,10 +179,12 @@ namespace CoreAI.Diagnostics
             }
 
             sb.AppendLine();
-            AppendMessages(sb, "Stored Chat History", ChatHistory);
-            AppendMessages(sb, "Estimated Request Chat History", EstimatedRequestChatHistory);
+        }
 
-            return sb.ToString();
+        private void AppendHistorySections(StringBuilder sb, bool includeSystemMessages)
+        {
+            AppendMessages(sb, "Stored Chat History", ChatHistory, includeSystemMessages);
+            AppendMessages(sb, "Estimated Request Chat History", EstimatedRequestChatHistory, includeSystemMessages);
         }
 
         private void AppendHeader(StringBuilder sb)
@@ -177,7 +212,8 @@ namespace CoreAI.Diagnostics
         private static void AppendMessages(
             StringBuilder sb,
             string title,
-            IReadOnlyList<AgentSessionChatMessageSnapshot> messages)
+            IReadOnlyList<AgentSessionChatMessageSnapshot> messages,
+            bool includeSystemMessages)
         {
             sb.AppendLine(title);
             sb.AppendLine(new string('-', title.Length));
@@ -188,11 +224,25 @@ namespace CoreAI.Diagnostics
                 return;
             }
 
+            bool wroteAny = false;
             for (int i = 0; i < messages.Count; i++)
             {
                 AgentSessionChatMessageSnapshot message = messages[i];
+                if (!includeSystemMessages &&
+                    string.Equals(message.Role, "system", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                wroteAny = true;
                 sb.AppendLine($"{i + 1}. [{message.Role}] {message.Timestamp}");
                 sb.AppendLine(message.Content ?? "");
+                sb.AppendLine();
+            }
+
+            if (!wroteAny)
+            {
+                sb.AppendLine("(none)");
                 sb.AppendLine();
             }
         }

@@ -56,7 +56,8 @@ go.transform.position = Vector3(1, 2, 3)  -- if Transform is registered
 
 Pros: typed marshalling, `[MoonSharpUserData]`, `[MoonSharpHide]`, hardwire for IL2CPP, no `MethodInfo.Invoke` on the hot path.
 
-Cons: every type must be registered explicitly (or generated); type blacklist is a separate policy (see `LUA_ACCESS_MODES_AUDIT.md` Planned).
+Cons: every type must be registered explicitly (or generated); type/member denial stays a separate host policy
+(see `IFullLuaAccessBlacklistPolicy` in `LUA_ACCESS_MODES.md`).
 
 **Intermediate step (current):** reflection API with Type/Member caching. It works for opt-in Full, but it is not idiomatic MoonSharp.
 
@@ -87,5 +88,5 @@ Detailed **✅/❌** guidance: [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 - [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) - security boundaries
 - [LUA_GAME_API.md](LUA_GAME_API.md) - game API for scripts
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) - best practices and anti-patterns
-- `LUA_ACCESS_MODES_AUDIT.md` - access modes (Read -> Full), planned blacklist
+- `LUA_ACCESS_MODES.md` - access modes (Read -> Full), blacklist policy
 

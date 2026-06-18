@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
@@ -12,6 +13,7 @@ using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
 using Microsoft.Extensions.AI;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -92,6 +94,7 @@ namespace CoreAI.Tests.EditMode
             }
 
             public LlmCompletionRequest LastRequest { get; private set; }
+            public List<LlmCompletionRequest> Requests { get; } = new();
 
             public void SetTools(IReadOnlyList<ILlmTool> tools)
             {
@@ -101,6 +104,7 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken = default)
             {
                 LastRequest = request;
+                Requests.Add(request);
                 if (_results.Count > 0)
                 {
                     return Task.FromResult(_results.Dequeue());
@@ -114,15 +118,19 @@ namespace CoreAI.Tests.EditMode
         {
             public List<Ai.ChatMessage> FakeHistory { get; set; } = new();
             public List<(string Role, string Content, bool Persist)> Appended { get; } = new();
+            public AgentMemoryState MemoryState { get; set; }
+            public int SaveCount { get; private set; }
 
             public bool TryLoad(string roleId, out AgentMemoryState state)
             {
-                state = null;
-                return false;
+                state = MemoryState;
+                return state != null;
             }
 
             public void Save(string roleId, AgentMemoryState state)
             {
+                SaveCount++;
+                MemoryState = state;
             }
 
             public void Clear(string roleId)
@@ -499,7 +507,6 @@ namespace CoreAI.Tests.EditMode
             public bool LogToolCallResults => false;
             public bool EnableStreaming => true;
             public bool EnableConversationHistorySummarization { get; set; } = true;
-            public bool PlaceLiveContextInTail { get; set; }
             public int ConversationHistoryRecentTokenBudgetOverride { get; set; }
             public int ConversationRolledSummaryMaxTokens { get; set; }
         }
@@ -654,7 +661,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task RunTaskAsync_CompactsOldHistory_IntoSystemSummary()
+        public async Task RunTaskAsync_CompactsOldHistory_IntoTailSummary()
         {
             TestLlmClient llm = new();
             TestMemoryStore memory = new();
@@ -684,32 +691,23 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(llm.LastRequest);
             Assert.IsNotNull(llm.LastRequest.ChatHistory);
             Assert.Less(llm.LastRequest.ChatHistory.Count, memory.FakeHistory.Count);
-            StringAssert.Contains("## Conversation Summary", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("old-context-0", llm.LastRequest.SystemPrompt);
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
+            Assert.AreEqual(ChatRole.System, llm.LastRequest.ChatHistory[0].Role);
+            StringAssert.Contains("## Conversation Summary", llm.LastRequest.ChatHistory[0].Text);
+            StringAssert.Contains("old-context-0", llm.LastRequest.ChatHistory[0].Text);
             StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
         }
 
         [Test]
-        public async Task RunTaskAsync_PlaceLiveContextInTail_TogglesSummaryPlacement()
+        public async Task RunTaskAsync_Compaction_AddsSummaryAsFirstTailMessage()
         {
-            TestLlmClient legacyLlm = new();
-            await RunSummaryPlacementRequestAsync(legacyLlm, placeLiveContextInTail: false);
-
-            Assert.IsNotNull(legacyLlm.LastRequest);
-            StringAssert.Contains("## Conversation Summary", legacyLlm.LastRequest.SystemPrompt);
-            Assert.IsNotNull(legacyLlm.LastRequest.ChatHistory);
-            Assert.AreNotEqual(
-                ChatRole.System,
-                legacyLlm.LastRequest.ChatHistory[^1].Role,
-                "Legacy mode must not append a trailing system chat-history message.");
-
             TestLlmClient tailLlm = new();
-            await RunSummaryPlacementRequestAsync(tailLlm, placeLiveContextInTail: true);
+            await RunSummaryPlacementRequestAsync(tailLlm);
 
             Assert.IsNotNull(tailLlm.LastRequest);
             Assert.IsFalse(
                 tailLlm.LastRequest.SystemPrompt.Contains("## Conversation Summary"),
-                "Tail mode should keep volatile summary out of the stable system prefix.");
+                "Volatile summary should stay out of the stable system prefix.");
             Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
             Microsoft.Extensions.AI.ChatMessage summaryMessage = tailLlm.LastRequest.ChatHistory[0];
             Assert.AreEqual(ChatRole.System, summaryMessage.Role);
@@ -721,22 +719,15 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task RunTaskAsync_PlaceLiveContextInTail_MovesWorldStateToLastTailMessage()
+        public async Task RunTaskAsync_RuntimeContext_MovesWorldStateToLastTailMessage()
         {
-            TestLlmClient legacyLlm = new();
-            await RunWorldStatePlacementRequestAsync(legacyLlm, placeLiveContextInTail: false);
-
-            Assert.IsNotNull(legacyLlm.LastRequest);
-            StringAssert.Contains("CURRENT SLIDE: 3", legacyLlm.LastRequest.SystemPrompt);
-            Assert.IsNull(legacyLlm.LastRequest.ChatHistory);
-
             TestLlmClient tailLlm = new();
-            await RunWorldStatePlacementRequestAsync(tailLlm, placeLiveContextInTail: true);
+            await RunWorldStatePlacementRequestAsync(tailLlm);
 
             Assert.IsNotNull(tailLlm.LastRequest);
             Assert.IsFalse(
                 tailLlm.LastRequest.SystemPrompt.Contains("CURRENT SLIDE: 3"),
-                "Tail mode should keep live world-state out of the stable system prefix.");
+                "Live world-state should stay out of the stable system prefix.");
             Assert.IsNotNull(tailLlm.LastRequest.ChatHistory);
             Assert.AreEqual(1, tailLlm.LastRequest.ChatHistory.Count);
             Microsoft.Extensions.AI.ChatMessage worldState = tailLlm.LastRequest.ChatHistory[^1];
@@ -759,6 +750,129 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("## World State", last.Text);
             StringAssert.Contains("CURRENT SLIDE: 3", last.Text);
             Assert.AreNotEqual(ChatRole.System, summaryTailLlm.LastRequest.ChatHistory[1].Role);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_Memory_UsesSnapshotAndTailUpdates()
+        {
+            TestLlmClient tailLlm = new();
+            TestMemoryStore tailMemory = await RunMemoryPlacementRequestAsync(tailLlm);
+
+            Assert.IsNotNull(tailLlm.LastRequest);
+            StringAssert.Contains("## Memory", tailLlm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Learner likes geometry puzzles.", tailLlm.LastRequest.SystemPrompt);
+            Assert.IsNull(tailLlm.LastRequest.ChatHistory);
+            Assert.AreEqual("Learner likes geometry puzzles.", tailMemory.MemoryState.SystemPromptMemorySnapshot);
+
+            TestLlmClient updateLlm = new();
+            await RunMemoryPlacementRequestAsync(
+                updateLlm,
+                memoryText: "Learner likes geometry puzzles.\nLearner prefers hints.",
+                cachedSnapshot: "Learner likes geometry puzzles.");
+
+            Assert.IsNotNull(updateLlm.LastRequest);
+            StringAssert.Contains("Learner likes geometry puzzles.", updateLlm.LastRequest.SystemPrompt);
+            Assert.IsFalse(
+                updateLlm.LastRequest.SystemPrompt.Contains("Learner prefers hints."),
+                "Pending memory updates should not rewrite the cached system prefix before a boundary.");
+            Assert.IsNotNull(updateLlm.LastRequest.ChatHistory);
+            Assert.AreEqual(1, updateLlm.LastRequest.ChatHistory.Count);
+            Microsoft.Extensions.AI.ChatMessage memoryUpdates = updateLlm.LastRequest.ChatHistory[0];
+            Assert.AreEqual(ChatRole.System, memoryUpdates.Role);
+            StringAssert.Contains("## Memory (updates)", memoryUpdates.Text);
+            StringAssert.Contains("Learner prefers hints.", memoryUpdates.Text);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_Compaction_ConsolidatesMemoryUpdatesIntoSystemPrefix()
+        {
+            TestLlmClient llm = new();
+            TestMemoryStore memory = new()
+            {
+                MemoryState = new AgentMemoryState
+                {
+                    Memory = "Learner likes geometry puzzles.\nLearner prefers hints.",
+                    SystemPromptMemorySnapshot = "Learner likes geometry puzzles.",
+                    SystemPromptMemoryVersion = 1
+                }
+            };
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("Teacher", true, 60, false, 50);
+            for (int i = 0; i < 10; i++)
+            {
+                memory.FakeHistory.Add(new Ai.ChatMessage
+                {
+                    Role = i % 2 == 0 ? "user" : "assistant",
+                    Content = $"old-context-{i}-".PadRight(90, 'x')
+                });
+            }
+
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
+
+            Assert.IsNotNull(llm.LastRequest);
+            StringAssert.Contains("Learner likes geometry puzzles.", llm.LastRequest.SystemPrompt);
+            StringAssert.Contains("Learner prefers hints.", llm.LastRequest.SystemPrompt);
+            Assert.AreEqual(memory.MemoryState.Memory, memory.MemoryState.SystemPromptMemorySnapshot);
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Assert.IsFalse(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
+            Assert.IsTrue(llm.LastRequest.ChatHistory.Any(m => (m.Text ?? "").Contains("## Conversation Summary")));
+        }
+
+        [Test]
+        public async Task RunTaskAsync_ContextOverflowRetry_ConsolidatesMemoryUpdatesIntoSystemPrefix()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.ContextLengthExceeded,
+                    Error = "context too long"
+                },
+                new LlmCompletionResult { Ok = true, Content = "ok" });
+            TestMemoryStore memory = new()
+            {
+                MemoryState = new AgentMemoryState
+                {
+                    Memory = "Learner likes geometry puzzles.\nLearner prefers hints.",
+                    SystemPromptMemorySnapshot = "Learner likes geometry puzzles.",
+                    SystemPromptMemoryVersion = 1
+                }
+            };
+            AgentMemoryPolicy policy = new();
+            policy.ConfigureChatHistory("Teacher", true, 4096, false, 50);
+
+            TestSettings settings = new()
+            {
+                MaxContextOverflowRetries = 1
+            };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "retry test" });
+
+            Assert.GreaterOrEqual(llm.Requests.Count, 2);
+            LlmCompletionRequest first = llm.Requests[0];
+            LlmCompletionRequest second = llm.Requests[1];
+
+            StringAssert.Contains("Learner likes geometry puzzles.", first.SystemPrompt);
+            StringAssert.DoesNotContain("Learner prefers hints.", first.SystemPrompt);
+            Assert.IsTrue(first.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
+
+            StringAssert.Contains("Learner likes geometry puzzles.", second.SystemPrompt);
+            StringAssert.Contains("Learner prefers hints.", second.SystemPrompt);
+            Assert.IsFalse(second.ChatHistory != null &&
+                           second.ChatHistory.Any(m => (m.Text ?? "").Contains("## Memory (updates)")));
+            Assert.AreEqual(memory.MemoryState.Memory, memory.MemoryState.SystemPromptMemorySnapshot);
         }
 
         [Test]
@@ -795,7 +909,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
         }
 
-        private static async Task RunSummaryPlacementRequestAsync(TestLlmClient llm, bool placeLiveContextInTail)
+        private static async Task RunSummaryPlacementRequestAsync(TestLlmClient llm)
         {
             TestMemoryStore memory = new();
             AgentMemoryPolicy policy = new();
@@ -812,7 +926,7 @@ namespace CoreAI.Tests.EditMode
 
             policy.ConfigureChatHistory("test_role", true, 60, false, 50);
 
-            TestSettings settings = new() { PlaceLiveContextInTail = placeLiveContextInTail };
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
@@ -822,13 +936,11 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
         }
 
-        private static async Task RunWorldStatePlacementRequestAsync(
-            TestLlmClient llm,
-            bool placeLiveContextInTail)
+        private static async Task RunWorldStatePlacementRequestAsync(TestLlmClient llm)
         {
             AgentMemoryPolicy policy = new();
             policy.SetRuntimeContextProvider("Teacher", new SlideRuntimeContextProvider());
-            TestSettings settings = new() { PlaceLiveContextInTail = placeLiveContextInTail };
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
@@ -855,7 +967,7 @@ namespace CoreAI.Tests.EditMode
 
             policy.ConfigureChatHistory("Teacher", true, 60, false, 50);
 
-            TestSettings settings = new() { PlaceLiveContextInTail = true };
+            TestSettings settings = new();
             AiOrchestrator orchestrator = new(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
@@ -863,6 +975,30 @@ namespace CoreAI.Tests.EditMode
                 new DeterministicConversationContextManager(new NullConversationSummaryStore()));
 
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "budget test" });
+        }
+
+        private static async Task<TestMemoryStore> RunMemoryPlacementRequestAsync(
+            TestLlmClient llm,
+            string memoryText = "Learner likes geometry puzzles.",
+            string cachedSnapshot = "")
+        {
+            TestMemoryStore store = new()
+            {
+                MemoryState = new AgentMemoryState
+                {
+                    Memory = memoryText,
+                    SystemPromptMemorySnapshot = cachedSnapshot
+                }
+            };
+            AgentMemoryPolicy policy = new();
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                store, policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "memory?" });
+            return store;
         }
 
         [Test]
@@ -894,14 +1030,16 @@ namespace CoreAI.Tests.EditMode
             await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "test_role", Hint = "budget test" });
 
             Assert.IsNotNull(llm.LastRequest?.ChatHistory);
-            Assert.AreEqual(1, llm.LastRequest.ChatHistory.Count);
-            StringAssert.Contains("## Conversation Summary", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("old-context-0", llm.LastRequest.SystemPrompt);
+            Assert.AreEqual(2, llm.LastRequest.ChatHistory.Count);
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Conversation Summary"));
+            Assert.AreEqual(ChatRole.System, llm.LastRequest.ChatHistory[0].Role);
+            StringAssert.Contains("## Conversation Summary", llm.LastRequest.ChatHistory[0].Text);
+            StringAssert.Contains("old-context-0", llm.LastRequest.ChatHistory[0].Text);
             StringAssert.Contains("old-context-9", llm.LastRequest.ChatHistory[^1].Text);
         }
 
         [Test]
-        public async Task RunTaskAsync_AppendsRuntimePromptContext()
+        public async Task RunTaskAsync_AppendsRuntimePromptContextToTail()
         {
             TestLlmClient llm = new();
             AgentMemoryPolicy policy = new();
@@ -926,13 +1064,18 @@ namespace CoreAI.Tests.EditMode
                 SourceTag = "practice-slot"
             });
 
-            StringAssert.Contains("## Runtime Context", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("slot=practice-slot", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("trace=trace-context", llm.LastRequest.SystemPrompt);
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("## Runtime Context"));
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage worldState = llm.LastRequest.ChatHistory[^1];
+            Assert.AreEqual(ChatRole.System, worldState.Role);
+            StringAssert.Contains("## World State", worldState.Text);
+            StringAssert.Contains("## Runtime Context", worldState.Text);
+            StringAssert.Contains("slot=practice-slot", worldState.Text);
+            StringAssert.Contains("trace=trace-context", worldState.Text);
         }
 
         [Test]
-        public async Task RunTaskAsync_AppendsPerRoleRuntimeContext()
+        public async Task RunTaskAsync_AppendsPerRoleRuntimeContextToTail()
         {
             TestLlmClient llm = new();
             AgentMemoryPolicy policy = new();
@@ -949,8 +1092,13 @@ namespace CoreAI.Tests.EditMode
                 SourceTag = "theory"
             });
 
-            StringAssert.Contains("role-context=Teacher", llm.LastRequest.SystemPrompt);
-            StringAssert.Contains("slot=theory", llm.LastRequest.SystemPrompt);
+            Assert.IsFalse(llm.LastRequest.SystemPrompt.Contains("role-context=Teacher"));
+            Assert.IsNotNull(llm.LastRequest.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage worldState = llm.LastRequest.ChatHistory[^1];
+            Assert.AreEqual(ChatRole.System, worldState.Role);
+            StringAssert.Contains("## World State", worldState.Text);
+            StringAssert.Contains("role-context=Teacher", worldState.Text);
+            StringAssert.Contains("slot=theory", worldState.Text);
         }
 
         [Test]
@@ -1054,6 +1202,82 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, llm.LastRequest.Tools.Count);
             Assert.AreEqual("spawn_drag_and_drop", llm.LastRequest.Tools[0].Name);
             CollectionAssert.AreEqual(new[] { "spawn_drag_and_drop" }, llm.LastRequest.AllowedToolNames);
+        }
+
+        [Test]
+        public async Task RunTaskAsync_AllowedSkillToolNames_AttachesRestrictedMetaTools()
+        {
+            TestLlmClient llm = new();
+            AgentMemoryPolicy policy = new();
+            string called = "";
+            SkillSet skill = new(
+                "Crafting",
+                "Crafting tools",
+                "Use only the allowed crafting function.",
+                new DelegateLlmTool("allowed_skill_tool", "Allowed skill tool",
+                    new Func<string, string>(value =>
+                    {
+                        called = value;
+                        return "{\"success\":true,\"value\":\"" + value + "\"}";
+                    })),
+                new DelegateLlmTool("blocked_skill_tool", "Blocked skill tool",
+                    new Func<string>(() => "{\"success\":true}")));
+
+            AgentConfig config = new AgentBuilder("Teacher")
+                {
+                    SuppressBuildWarnings = true
+                }
+                .WithSkill(skill)
+                .Build();
+            config.ApplyToPolicy(policy);
+
+            TestSettings settings = new();
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new TestMemoryStore(), policy, null, null, settings);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                AllowedToolNames = new[] { "allowed_skill_tool" }
+            });
+
+            Assert.AreEqual(2, llm.LastRequest.Tools.Count);
+            CollectionAssert.AreEquivalent(
+                new[] { "read_skill", "call_skill_tool" },
+                llm.LastRequest.Tools.Select(t => t.Name).ToArray());
+            CollectionAssert.AreEqual(new[] { "allowed_skill_tool" }, llm.LastRequest.AllowedToolNames);
+
+            ILlmTool readSkill = llm.LastRequest.Tools.First(t => t.Name == "read_skill");
+            AIFunction readFn = ((IAIFunctionLlmTool)readSkill).CreateAIFunction();
+            string readJson = (await readFn.InvokeAsync(
+                new AIFunctionArguments(new Dictionary<string, object> { ["skill_name"] = "Crafting" }),
+                CancellationToken.None))?.ToString();
+            Assert.That(readJson, Does.Contain("allowed_skill_tool"));
+            Assert.That(readJson, Does.Not.Contain("blocked_skill_tool"));
+
+            ILlmTool callSkill = llm.LastRequest.Tools.First(t => t.Name == "call_skill_tool");
+            AIFunction callFn = ((IAIFunctionLlmTool)callSkill).CreateAIFunction();
+            string okJson = (await callFn.InvokeAsync(
+                new AIFunctionArguments(new Dictionary<string, object>
+                {
+                    ["tool_name"] = "allowed_skill_tool",
+                    ["arguments_json"] = "{\"value\":\"ok\"}"
+                }),
+                CancellationToken.None))?.ToString();
+            Assert.That(okJson, Does.Contain("ok"));
+            Assert.AreEqual("ok", called);
+
+            string blockedJson = (await callFn.InvokeAsync(
+                new AIFunctionArguments(new Dictionary<string, object>
+                {
+                    ["tool_name"] = "blocked_skill_tool",
+                    ["arguments_json"] = "{}"
+                }),
+                CancellationToken.None))?.ToString();
+            Assert.IsFalse(JObject.Parse(blockedJson).Value<bool>("success"));
+            Assert.That(blockedJson, Does.Contain("not found"));
         }
 
         private sealed class FailsThenOkLlm : ILlmClient

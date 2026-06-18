@@ -137,6 +137,88 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("Append", parsed["RoleConfig"]?.Value<string>("DefaultAction"));
         }
 
+        [Test]
+        public void SnapshotTextViews_SplitSystemAndHistory()
+        {
+            AgentSessionSnapshot snapshot = new()
+            {
+                SnapshotSource = "test",
+                RoleId = "Teacher",
+                RoleIsExplicitlyConfigured = true,
+                ResolvedSystemPrompt = "Resolved teacher prompt.",
+                ResolvedSystemPromptFinalEstimate = "Resolved teacher prompt with tool contract.",
+                RoleConfig = new AgentSessionRoleConfigSnapshot(),
+                Budget = new AgentSessionBudgetSnapshot()
+            };
+            snapshot.ChatHistory.Add(new AgentSessionChatMessageSnapshot
+            {
+                Role = "user",
+                Content = "Can you explain loops?",
+                Timestamp = 123
+            });
+            snapshot.EstimatedRequestChatHistory.Add(new AgentSessionChatMessageSnapshot
+            {
+                Role = "system",
+                Content = "## Memory\nStudent likes examples.",
+                Timestamp = 0
+            });
+            snapshot.EstimatedRequestChatHistory.Add(new AgentSessionChatMessageSnapshot
+            {
+                Role = "assistant",
+                Content = "Loops repeat a block.",
+                Timestamp = 124
+            });
+
+            string systemText = snapshot.ToSystemPromptText();
+            string historyText = snapshot.ToHistoryText();
+
+            StringAssert.Contains("Resolved teacher prompt.", systemText);
+            StringAssert.DoesNotContain("Can you explain loops?", systemText);
+
+            StringAssert.Contains("Can you explain loops?", historyText);
+            StringAssert.Contains("Loops repeat a block.", historyText);
+            StringAssert.DoesNotContain("Resolved teacher prompt.", historyText);
+            StringAssert.DoesNotContain("Student likes examples.", historyText);
+        }
+
+        [Test]
+        public void LiveKnownRoleIds_IncludeManifestPromptRoles()
+        {
+            CoreAISettingsOptions settings = new()
+            {
+                UniversalSystemPromptPrefix = "Universal prefix."
+            };
+            AgentPromptsDefinition prompts = new();
+            prompts.CustomAgents.Add(new AgentPromptEntryDefinition
+            {
+                RoleId = "Teacher",
+                SystemPrompt = "Teacher prompt."
+            });
+
+            IAgentSystemPromptProvider systemProvider = new ChainedAgentSystemPromptProvider(
+                new IAgentSystemPromptProvider[]
+                {
+                    new ManifestAgentSystemPromptProvider(prompts),
+                    new BuiltInDefaultAgentSystemPromptProvider()
+                });
+            AgentMemoryPolicy policy = new();
+            AgentSessionInspector inspector = new(
+                new AiPromptComposer(
+                    systemProvider,
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(),
+                    null,
+                    policy,
+                    settings),
+                systemProvider,
+                null,
+                null,
+                policy,
+                settings);
+
+            CollectionAssert.Contains(inspector.GetKnownRoleIds(), "Teacher");
+        }
+
         private sealed class ReadOnlyMemoryStore : IAgentMemoryStore
         {
             private readonly string _memory;

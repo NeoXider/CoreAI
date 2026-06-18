@@ -204,6 +204,15 @@ The system prompt sent to the model is **not** the literal string you pass to `A
 
 **Composition order:** `Layer 1 + "\n\n" + Layer 2 + "\n\n" + Layer 3`. Each layer is optional. If Layer 2 is missing for a custom role, only Layers 1 + 3 are used.
 
+**Layer 3 write mode.** `WithSystemPrompt(...)` replaces the current builder-level Layer 3 fragment by default. This keeps factories and reconfiguration code from accidentally carrying stale role instructions forward. If several code-owned fragments must be combined deliberately, use `AppendSystemPrompt(...)` or `WithSystemPrompt(..., SystemPromptWriteMode.Append)`:
+
+```csharp
+new AgentBuilder("Teacher")
+    .WithSystemPrompt("You are a teacher.")
+    .AppendSystemPrompt("Use short examples for this lesson.")
+    .Build();
+```
+
 **Skipping the universal prefix.** Roles that need a fully custom prompt (strict JSON parsers, validators) opt out per role:
 
 ```csharp

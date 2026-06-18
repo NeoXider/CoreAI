@@ -421,10 +421,6 @@ namespace CoreAI.Infrastructure.Llm.Editor
                     new GUIContent(
                         "Enable history summarization",
                         "When off, the full loaded transcript is kept in the chat tail without rolling older turns into ## Conversation Summary (risk of context overflow)."));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("placeLiveContextInTail"),
-                    new GUIContent(
-                        "Place live context in tail",
-                        "When on, the conversation summary is sent as the first tail system message before recent verbatim turns instead of being merged into the system prefix. Default off preserves legacy behaviour."));
                 EditorGUILayout.PropertyField(
                     serializedObject.FindProperty("conversationHistoryRecentTokenBudgetOverride"),
                     new GUIContent(
@@ -437,7 +433,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("conversationCompactionTriggerRatio"),
                     new GUIContent(
                         "Compaction trigger ratio",
-                        "Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. 0 or 1 = legacy budget-boundary behavior."));
+                        "Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. Invalid values fall back to the CoreAI default."));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("enableContextPruning"),
                     new GUIContent(
                         "Enable context pruning",

@@ -157,6 +157,12 @@ namespace CoreAI.Composition
         internal static void RegisterConversationSummaryForCoreAiLifetimeScope(IContainerBuilder builder)
         {
 #if !UNITY_WEBGL
+            builder.Register<ITokenCalibrationStore>(_ =>
+                    new FileTokenCalibrationStore(
+                        Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
+                            "TokenCalibration", "scales.json"),
+                        null),
+                Lifetime.Singleton);
             builder.Register<IConversationSummaryStore>(_ =>
                     new FileConversationSummaryStore(
                         Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
@@ -166,11 +172,13 @@ namespace CoreAI.Composition
 
             builder.RegisterCorePortable(
                 true,
+                true,
                 true);
 #else
             builder.RegisterCorePortable(
                 suppressDefaultConversationSummaryStore: false,
-                suppressDefaultAgentMemoryStore: true);
+                suppressDefaultAgentMemoryStore: true,
+                suppressDefaultTokenCalibrationStore: false);
 #endif
         }
 

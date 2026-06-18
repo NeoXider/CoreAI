@@ -74,7 +74,6 @@ namespace CoreAI.Ai
             tools ??= Array.Empty<ILlmTool>();
 
             List<ILlmTool> toolList = new(tools.Length);
-            List<string> names = new(tools.Length);
             foreach (ILlmTool tool in tools)
             {
                 if (tool == null)
@@ -83,14 +82,10 @@ namespace CoreAI.Ai
                 }
 
                 toolList.Add(tool);
-                if (!string.IsNullOrWhiteSpace(tool.Name))
-                {
-                    names.Add(tool.Name);
-                }
             }
 
             Tools = toolList;
-            ToolNames = names.ToArray();
+            ToolNames = SkillSetToolResolver.BuildToolNames(toolList);
         }
 
         /// <summary>

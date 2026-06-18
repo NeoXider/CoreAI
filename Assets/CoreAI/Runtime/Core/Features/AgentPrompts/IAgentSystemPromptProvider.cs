@@ -12,9 +12,18 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
+    /// Optional companion contract for prompt providers that can enumerate configured role ids.
+    /// </summary>
+    public interface IAgentRoleIdProvider
+    {
+        /// <summary>Returns role ids configured by this provider.</summary>
+        IReadOnlyList<string> GetKnownRoleIds();
+    }
+
+    /// <summary>
     /// Combines multiple system prompt providers in priority order.
     /// </summary>
-    public sealed class ChainedAgentSystemPromptProvider : IAgentSystemPromptProvider
+    public sealed class ChainedAgentSystemPromptProvider : IAgentSystemPromptProvider, IAgentRoleIdProvider
     {
         private readonly IReadOnlyList<IAgentSystemPromptProvider> _chain;
 
@@ -39,12 +48,57 @@ namespace CoreAI.Ai
             systemPrompt = null;
             return false;
         }
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> GetKnownRoleIds()
+        {
+            List<string> roleIds = new();
+            foreach (IAgentSystemPromptProvider provider in _chain)
+            {
+                if (provider is not IAgentRoleIdProvider roleIdProvider)
+                {
+                    continue;
+                }
+
+                IReadOnlyList<string> known = roleIdProvider.GetKnownRoleIds();
+                if (known == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < known.Count; i++)
+                {
+                    AddUnique(roleIds, known[i]);
+                }
+            }
+
+            return roleIds;
+        }
+
+        private static void AddUnique(List<string> values, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            string trimmed = value.Trim();
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (values[i] == trimmed)
+                {
+                    return;
+                }
+            }
+
+            values.Add(trimmed);
+        }
     }
 
     /// <summary>
     /// Built-in fallback system prompt provider for known CoreAI roles.
     /// </summary>
-    public sealed class BuiltInDefaultAgentSystemPromptProvider : IAgentSystemPromptProvider
+    public sealed class BuiltInDefaultAgentSystemPromptProvider : IAgentSystemPromptProvider, IAgentRoleIdProvider
     {
         /// <inheritdoc />
         public bool TryGetSystemPrompt(string roleId, out string systemPrompt)
@@ -65,6 +119,12 @@ namespace CoreAI.Ai
             // or every orchestrator request duplicates it (built-in strings are raw role prompts).
             systemPrompt = basePrompt;
             return true;
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> GetKnownRoleIds()
+        {
+            return BuiltInAgentRoleIds.AllBuiltInRoles;
         }
     }
 }

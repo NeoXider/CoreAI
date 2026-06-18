@@ -1,5 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -11,98 +15,149 @@ namespace CoreAI.Ai
     internal static class CallSkillToolLlmTool
     {
         /// <summary>
-        /// Creates the <c>call_skill_tool</c> <see cref="DelegateLlmTool"/>.
+        /// Creates the <c>call_skill_tool</c> tool.
         /// </summary>
-        public static DelegateLlmTool Create(IReadOnlyList<SkillSet> skills)
+        public static ILlmTool Create(IReadOnlyList<SkillSet> skills)
         {
-            if (skills == null)
+            return Create(skills, null);
+        }
+
+        internal static ILlmTool Create(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
+        {
+            return new CallSkillToolProxy(skills, allowedToolNames);
+        }
+
+        private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
+        {
+            private readonly IReadOnlyList<SkillSet> _skills;
+            private readonly Dictionary<string, SkillToolDescriptor> _toolsByName;
+
+            public CallSkillToolProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
-                throw new ArgumentNullException(nameof(skills));
+                _skills = skills ?? throw new ArgumentNullException(nameof(skills));
+                _toolsByName = BuildToolMap(_skills, allowedToolNames);
             }
 
-            Dictionary<string, ToolEntry> toolsByName = new(StringComparer.OrdinalIgnoreCase);
-            foreach (SkillSet skill in skills)
+            public override string Name => "call_skill_tool";
+
+            public override string Description =>
+                "Call a tool from a skill. First call read_skill to learn available tools and their parameters. " +
+                "Then call this with tool_name and arguments_json (a JSON object string with the tool's parameters).";
+
+            public override string ParametersSchema =>
+                "{\"type\":\"object\",\"properties\":{\"tool_name\":{\"type\":\"string\",\"description\":\"Skill tool name returned by read_skill.\"},\"arguments_json\":{\"type\":\"string\",\"description\":\"JSON object string with the skill tool parameters.\"}},\"required\":[\"tool_name\",\"arguments_json\"]}";
+
+            public override bool AllowDuplicates => true;
+
+            public bool ContainsSkillTool(string toolName)
             {
-                if (skill?.Tools == null)
+                return !string.IsNullOrWhiteSpace(toolName) && _toolsByName.ContainsKey(toolName.Trim());
+            }
+
+            public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
+            {
+                return new CallSkillToolProxy(_skills, allowedToolNames);
+            }
+
+            public AIFunction CreateAIFunction()
+            {
+                return AIFunctionFactory.Create(
+                    (Func<string, string, CancellationToken, Task<string>>)ExecuteAsync,
+                    new AIFunctionFactoryOptions
+                    {
+                        Name = Name,
+                        Description = Description
+                    });
+            }
+
+            private Task<string> ExecuteAsync(string tool_name, string arguments_json,
+                CancellationToken cancellationToken = default)
+            {
+                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, _toolsByName, cancellationToken);
+            }
+        }
+
+        private static Dictionary<string, SkillToolDescriptor> BuildToolMap(
+            IReadOnlyList<SkillSet> skills,
+            IReadOnlyCollection<string> allowedToolNames)
+        {
+            Dictionary<string, SkillToolDescriptor> toolsByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skills))
+            {
+                if (descriptor == null || string.IsNullOrWhiteSpace(descriptor.Name))
                 {
                     continue;
                 }
 
-                foreach (ILlmTool tool in skill.Tools)
+                if (!IsAllowed(descriptor.Name, allowedToolNames))
                 {
-                    if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
-                    {
-                        toolsByName[tool.Name] = new ToolEntry(skill, tool);
-                    }
+                    continue;
                 }
+
+                toolsByName[descriptor.Name] = descriptor;
             }
 
-            object CallSkillToolFn(string tool_name, string arguments_json)
-            {
-                return Execute(tool_name, arguments_json, toolsByName);
-            }
-
-            DelegateLlmTool proxy = new(
-                "call_skill_tool",
-                "Call a tool from a skill. First call read_skill to learn available tools and their parameters. " +
-                "Then call this with tool_name and arguments_json (a JSON object string with the tool's parameters).",
-                new Func<string, string, object>(CallSkillToolFn));
-
-            proxy.AllowDuplicates = true;
-            return proxy;
+            return toolsByName;
         }
 
-        private static object Execute(string toolName, string argumentsJson,
-            Dictionary<string, ToolEntry> toolsByName)
+        private static async Task<string> ExecuteAsync(string toolName, string argumentsJson,
+            Dictionary<string, SkillToolDescriptor> toolsByName, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(toolName))
             {
-                return new
-                {
-                    error = "tool_name is required.",
-                    available = new List<string>(toolsByName.Keys)
-                };
+                return SkillSetToolResolver.SerializeFailure(
+                    "tool_name is required.",
+                    toolsByName.Keys);
             }
 
             string trimmed = toolName.Trim();
 
-            if (!toolsByName.TryGetValue(trimmed, out ToolEntry entry))
+            if (!toolsByName.TryGetValue(trimmed, out SkillToolDescriptor descriptor))
             {
-                return new
-                {
-                    error = $"Tool '{trimmed}' not found.",
-                    available = new List<string>(toolsByName.Keys)
-                };
+                return SkillSetToolResolver.SerializeFailure(
+                    $"Tool '{trimmed}' not found.",
+                    toolsByName.Keys);
             }
 
-            // Execute the real tool via its delegate
-            ILlmTool tool = entry.Tool;
-            if (tool is DelegateLlmTool delegateTool)
+            if (!descriptor.CanInvoke)
             {
-                try
-                {
-                    return InvokeDelegateWithJson(delegateTool, argumentsJson ?? "{}");
-                }
-                catch (Exception ex)
-                {
-                    return new { error = $"Tool execution failed: {ex.Message}" };
-                }
+                return SkillSetToolResolver.SerializeFailure(
+                    $"Tool '{trimmed}' is registered in a skill but does not expose an invocable MEAI binding.",
+                    toolsByName.Keys);
             }
 
-            return new { error = $"Tool '{trimmed}' is not a DelegateLlmTool - direct invocation not supported." };
+            try
+            {
+                object result = descriptor.DelegateTool != null
+                    ? await InvokeDelegateWithJsonAsync(descriptor.DelegateTool, argumentsJson ?? "{}")
+                        .ConfigureAwait(false)
+                    : await descriptor.Function
+                        .InvokeAsync(SkillSetToolResolver.CreateArguments(argumentsJson ?? "{}"), cancellationToken)
+                        .ConfigureAwait(false);
+
+                return SkillSetToolResolver.SerializeResult(result);
+            }
+            catch (JsonException ex)
+            {
+                return SkillSetToolResolver.SerializeFailure($"Invalid JSON arguments: {ex.Message}", toolsByName.Keys);
+            }
+            catch (Exception ex)
+            {
+                return SkillSetToolResolver.SerializeFailure($"Tool execution failed: {Unwrap(ex).Message}");
+            }
         }
 
         /// <summary>
         /// Invoke a DelegateLlmTool by parsing JSON arguments and mapping them to the delegate's parameters.
         /// </summary>
-        private static object InvokeDelegateWithJson(DelegateLlmTool tool, string json)
+        private static async Task<object> InvokeDelegateWithJsonAsync(DelegateLlmTool tool, string json)
         {
             Delegate action = tool.ActionDelegate;
-            System.Reflection.ParameterInfo[] parameters = action.Method.GetParameters();
+            ParameterInfo[] parameters = action.Method.GetParameters();
 
             if (parameters.Length == 0)
             {
-                return action.DynamicInvoke();
+                return await AwaitIfTask(action.DynamicInvoke()).ConfigureAwait(false);
             }
 
             JObject args;
@@ -115,16 +170,16 @@ namespace CoreAI.Ai
                 // Try treating the whole string as a single argument
                 if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string))
                 {
-                    return action.DynamicInvoke(json);
+                    return await AwaitIfTask(action.DynamicInvoke(json)).ConfigureAwait(false);
                 }
 
-                return new { error = $"Invalid JSON: {json}" };
+                throw new JsonReaderException($"Invalid JSON: {json}");
             }
 
             object[] invokeArgs = new object[parameters.Length];
             for (int i = 0; i < parameters.Length; i++)
             {
-                System.Reflection.ParameterInfo param = parameters[i];
+                ParameterInfo param = parameters[i];
                 JToken token = null;
 
                 // Try exact name match, then case-insensitive
@@ -167,19 +222,50 @@ namespace CoreAI.Ai
                 }
             }
 
-            return action.DynamicInvoke(invokeArgs);
+            return await AwaitIfTask(action.DynamicInvoke(invokeArgs)).ConfigureAwait(false);
         }
 
-        private readonly struct ToolEntry
+        private static async Task<object> AwaitIfTask(object result)
         {
-            public readonly SkillSet Skill;
-            public readonly ILlmTool Tool;
-
-            public ToolEntry(SkillSet skill, ILlmTool tool)
+            if (result is Task task)
             {
-                Skill = skill;
-                Tool = tool;
+                await task.ConfigureAwait(false);
+                Type taskType = task.GetType();
+                if (taskType.IsGenericType)
+                {
+                    PropertyInfo resultProperty = taskType.GetProperty("Result");
+                    return resultProperty?.GetValue(task);
+                }
+
+                return null;
             }
+
+            return result;
+        }
+
+        private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
+        {
+            if (allowedToolNames == null || allowedToolNames.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (string allowed in allowedToolNames)
+            {
+                if (string.Equals(allowed?.Trim(), toolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static Exception Unwrap(Exception ex)
+        {
+            return ex is TargetInvocationException tie && tie.InnerException != null
+                ? tie.InnerException
+                : ex;
         }
     }
 }
