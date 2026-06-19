@@ -267,6 +267,7 @@ namespace CoreAI.Chat
             ResetUiReferences();
 
             Root = rootElement;
+            ApplyFixedWorldSpaceSize(Root);
             if (customStyleSheet != null)
             {
                 Root.styleSheets.Add(customStyleSheet);
@@ -278,6 +279,39 @@ namespace CoreAI.Chat
             HydrateStartupMessagesFromStore();
             TryRegisterToolCallChatDisplay();
         }
+
+#if UNITY_6000_5_OR_NEWER
+        private void ApplyFixedWorldSpaceSize(VisualElement rootElement)
+        {
+            if (_panelRenderer == null ||
+                rootElement == null ||
+                _panelRenderer.panelSettings == null ||
+                _panelRenderer.panelSettings.renderMode != PanelRenderMode.WorldSpace ||
+                _panelRenderer.worldSpaceSizeMode != WorldSpaceSizeMode.Fixed)
+            {
+                return;
+            }
+
+            Vector2 size = _panelRenderer.worldSpaceSize;
+            if (size.x <= 0f || size.y <= 0f)
+            {
+                return;
+            }
+
+            rootElement.style.width = size.x;
+            rootElement.style.height = size.y;
+            rootElement.style.minWidth = size.x;
+            rootElement.style.minHeight = size.y;
+            rootElement.style.maxWidth = size.x;
+            rootElement.style.maxHeight = size.y;
+            rootElement.style.flexGrow = 0;
+            rootElement.style.flexShrink = 0;
+        }
+#else
+        private void ApplyFixedWorldSpaceSize(VisualElement rootElement)
+        {
+        }
+#endif
 
         protected virtual void Start()
         {
