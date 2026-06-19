@@ -403,12 +403,12 @@ namespace CoreAI.Chat
 
         private void UnbindUiCallbacks(bool ignoreReleasedElements)
         {
-            TryUnregisterCallback(SendButton, OnSendClicked, ignoreReleasedElements);
-            TryUnregisterCallback(ClearButton, OnClearClicked, ignoreReleasedElements);
-            TryUnregisterCallback(CollapseButton, OnCollapseClicked, ignoreReleasedElements);
-            TryUnregisterCallback(FabButton, OnFabClicked, ignoreReleasedElements);
-            TryUnregisterCallback(InputField, OnInputKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
-            TryUnregisterCallback(Root, OnRootKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+            TryUnregisterCallback<ClickEvent>(SendButton, OnSendClicked, ignoreReleasedElements);
+            TryUnregisterCallback<ClickEvent>(ClearButton, OnClearClicked, ignoreReleasedElements);
+            TryUnregisterCallback<ClickEvent>(CollapseButton, OnCollapseClicked, ignoreReleasedElements);
+            TryUnregisterCallback<ClickEvent>(FabButton, OnFabClicked, ignoreReleasedElements);
+            TryUnregisterCallback<KeyDownEvent>(InputField, OnInputKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+            TryUnregisterCallback<KeyDownEvent>(Root, OnRootKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
         }
 
         private static void TryUnregisterCallback<TEventType>(
