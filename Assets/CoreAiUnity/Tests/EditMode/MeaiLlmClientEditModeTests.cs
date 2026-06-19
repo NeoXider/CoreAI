@@ -641,7 +641,13 @@ namespace CoreAI.Tests.EditMode
 
             public MEAI.AIFunction CreateAIFunction()
             {
-                return MEAI.AIFunctionFactory.Create((Func<string>)(() => "{\"Success\":true}"), Name, Description);
+                return MEAI.AIFunctionFactory.Create(
+                    (Func<string>)(() => "{\"Success\":true}"),
+                    new MEAI.AIFunctionFactoryOptions
+                    {
+                        Name = Name,
+                        Description = Description
+                    });
             }
         }
 
@@ -659,7 +665,13 @@ namespace CoreAI.Tests.EditMode
 
             public MEAI.AIFunction CreateAIFunction()
             {
-                return MEAI.AIFunctionFactory.Create((Func<string>)(() => "{\"Success\":true}"), Name, Description);
+                return MEAI.AIFunctionFactory.Create(
+                    (Func<string>)(() => "{\"Success\":true}"),
+                    new MEAI.AIFunctionFactoryOptions
+                    {
+                        Name = Name,
+                        Description = Description
+                    });
             }
         }
 

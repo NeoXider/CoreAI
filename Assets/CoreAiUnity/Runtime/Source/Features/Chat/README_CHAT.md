@@ -558,6 +558,69 @@ await foreach (var chunk in chatService.SendMessageStreamingAsync("Tell me about
 }
 ```
 
+## uGUI / Canvas integration
+
+`CoreAiChatPanel` is only the ready UI Toolkit view. The chat logic does not require UI Toolkit:
+host games can build their own uGUI / Canvas screen and call the same CoreAI runtime services.
+
+Recommended split for a Canvas implementation:
+
+- Keep `CoreAILifetimeScope`, settings assets, role registration, tools, memory and backend routing exactly the same.
+- Do not add `CoreAiChatPanel`, `PanelRenderer`, or `UIDocument` to the Canvas chat object.
+- Create a project-local `MonoBehaviour` presenter for your uGUI view (`TMP_InputField`, `Button`, `ScrollRect`,
+  message item prefab, stop/clear buttons).
+- On Send, call `CoreAiChatService.TryCreateFromScene()` and then `SendMessageAsync(...)` or
+  `SendMessageStreamingAsync(...)`, or use the static `CoreAi` facade directly.
+- For text output use TextMeshPro (`TMP_Text` / `TextMeshProUGUI`), not legacy `UnityEngine.UI.Text`.
+- For stop and reset flows call `CoreAi.StopAgent(roleId)`, `chatService.StopAgent(roleId)`, and
+  `CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory)` as appropriate.
+
+Minimal uGUI presenter shape:
+
+```csharp
+using CoreAI;
+using CoreAI.Chat;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+public sealed class MyCanvasChatPresenter : MonoBehaviour
+{
+    [SerializeField] private TMP_InputField input;
+    [SerializeField] private Button sendButton;
+    [SerializeField] private TMP_Text output;
+    [SerializeField] private string roleId = "SmartChat";
+
+    private CoreAiChatService chatService;
+
+    private void Awake()
+    {
+        chatService = CoreAiChatService.TryCreateFromScene();
+        sendButton.onClick.AddListener(Send);
+    }
+
+    private async void Send()
+    {
+        string text = input.text;
+        if (string.IsNullOrWhiteSpace(text) || chatService == null)
+        {
+            return;
+        }
+
+        input.text = string.Empty;
+        output.text += $"\nYou: {text}";
+
+        string answer = await chatService.SendMessageAsync(text, roleId);
+        output.text += $"\nAI: {answer}";
+    }
+}
+```
+
+For streaming, replace the final `SendMessageAsync` call with `await foreach` over
+`chatService.SendMessageStreamingAsync(text, roleId)` and append non-empty `chunk.Text` to the current assistant
+`TMP_Text`. If the game needs per-turn tool policy, build an `AiTaskRequest` and pass it to the service overload,
+the same way `CoreAiChatPanel.BuildAiTaskRequest(...)` does for the UI Toolkit panel.
+
 ## Agent setup
 
 ```csharp

@@ -220,7 +220,7 @@ return t.position.x == 4 and t.scale.z == 4
                 LuaApiRegistry registry = new();
                 new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
                 MoonSharp.Interpreter.Script script = env.CreateScript(registry);
-                int id = probe.GetInstanceID();
+                int id = GetObjectId(probe);
 
                 MoonSharp.Interpreter.DynValue publicValue = env.RunChunk(script,
                     $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'publicValue')");
@@ -249,7 +249,7 @@ return t.position.x == 4 and t.scale.z == 4
                 new CoreAiFullUnityLuaRuntimeBindings(null, allowNonPublicMembers: true)
                     .RegisterGameplayApis(registry);
                 MoonSharp.Interpreter.Script script = env.CreateScript(registry);
-                int id = probe.GetInstanceID();
+                int id = GetObjectId(probe);
 
                 MoonSharp.Interpreter.DynValue secret = env.RunChunk(script,
                     $"return unity_get_member({id}, 'CoreAI.Tests.EditMode.ForgeMemberProbe', 'secretValue')");
@@ -276,7 +276,7 @@ return t.position.x == 4 and t.scale.z == 4
                         new DenyForgeProbePolicy())
                     .RegisterGameplayApis(registry);
                 MoonSharp.Interpreter.Script script = env.CreateScript(registry);
-                int id = probe.GetInstanceID();
+                int id = GetObjectId(probe);
 
                 Assert.Catch(
                     () => env.RunChunk(script,
@@ -291,6 +291,20 @@ return t.position.x == 4 and t.scale.z == 4
             {
                 Object.DestroyImmediate(probe);
             }
+        }
+
+        private static int GetObjectId(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return 0;
+            }
+
+#if UNITY_6000_3_OR_NEWER
+            return obj.GetEntityId().GetHashCode();
+#else
+            return obj.GetInstanceID();
+#endif
         }
     }
 

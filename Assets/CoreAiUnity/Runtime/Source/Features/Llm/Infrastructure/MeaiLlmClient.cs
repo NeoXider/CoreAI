@@ -1685,7 +1685,7 @@ namespace CoreAI.Infrastructure.Llm
 
                             break;
                         case DelegateLlmTool dt:
-                            result.Add(MEAI.AIFunctionFactory.Create(dt.ActionDelegate, dt.Name, dt.Description));
+                            result.Add(dt.CreateAIFunction());
                             break;
                         case IAIFunctionLlmTool functionTool:
                             result.Add(functionTool.CreateAIFunction());

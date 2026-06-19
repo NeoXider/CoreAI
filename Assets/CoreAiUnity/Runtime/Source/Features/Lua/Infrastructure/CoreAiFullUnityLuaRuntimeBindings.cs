@@ -153,7 +153,7 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             GameObject go = GameObject.Find(name.Trim());
-            return go != null ? go.GetInstanceID() : 0;
+            return GetObjectId(go);
         }
 
         private List<object> ListObjects(int max)
@@ -507,7 +507,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             Dictionary<string, object> summary = new()
             {
-                { "id", go.GetInstanceID() },
+                { "id", GetObjectId(go) },
                 { "name", go.name },
                 { "path", GetPath(go) },
                 { "tag", go.tag },
@@ -515,7 +515,7 @@ namespace CoreAI.Infrastructure.Lua
                 { "layer_index", go.layer },
                 { "active", go.activeSelf },
                 { "active_in_hierarchy", go.activeInHierarchy },
-                { "parent_id", go.transform.parent != null ? go.transform.parent.gameObject.GetInstanceID() : 0 },
+                { "parent_id", go.transform.parent != null ? GetObjectId(go.transform.parent.gameObject) : 0 },
                 { "parent", go.transform.parent != null ? go.transform.parent.gameObject.name : "" },
                 { "child_count", go.transform.childCount }
             };
@@ -527,10 +527,24 @@ namespace CoreAI.Infrastructure.Lua
 
             if (includeComponents)
             {
-                summary["components"] = ListComponents(go.GetInstanceID());
+                summary["components"] = ListComponents(GetObjectId(go));
             }
 
             return summary;
+        }
+
+        private static int GetObjectId(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return 0;
+            }
+
+#if UNITY_6000_3_OR_NEWER
+            return obj.GetEntityId().GetHashCode();
+#else
+            return obj.GetInstanceID();
+#endif
         }
 
         private static Dictionary<string, object> BuildTransformSummary(Transform transform)

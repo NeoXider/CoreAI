@@ -95,7 +95,7 @@ namespace CoreAI.Ai
                     {
                         results.Add(new
                         {
-                            instanceId = go.GetInstanceID(),
+                            instanceId = GetObjectId(go),
                             name = go.name,
                             tag = go.tag,
                             parent = go.transform.parent != null ? go.transform.parent.name : null
@@ -137,7 +137,7 @@ namespace CoreAI.Ai
                         Transform child = root.transform.GetChild(i);
                         children.Add(new
                         {
-                            instanceId = child.gameObject.GetInstanceID(),
+                            instanceId = GetObjectId(child.gameObject),
                             name = child.name,
                             childCount = child.childCount
                         });
@@ -152,7 +152,7 @@ namespace CoreAI.Ai
                     {
                         children.Add(new
                         {
-                            instanceId = r.GetInstanceID(),
+                            instanceId = GetObjectId(r),
                             name = r.name,
                             childCount = r.transform.childCount
                         });
@@ -294,13 +294,27 @@ namespace CoreAI.Ai
                 UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (GameObject go in allObjects)
             {
-                if (go.GetInstanceID() == instanceId)
+                if (GetObjectId(go) == instanceId)
                 {
                     return go;
                 }
             }
 
             return null;
+        }
+
+        private static int GetObjectId(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return 0;
+            }
+
+#if UNITY_6000_3_OR_NEWER
+            return obj.GetEntityId().GetHashCode();
+#else
+            return obj.GetInstanceID();
+#endif
         }
 
         private string SerializeSuccess(object data)

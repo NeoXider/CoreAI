@@ -88,7 +88,7 @@ namespace CoreAI.Tests.EditMode
             SceneLlmTool tool = new();
             JObject response = await InvokeAsync(tool, "get_hierarchy", new Dictionary<string, object>
             {
-                { "rootInstanceId", root.GetInstanceID() }
+                { "rootInstanceId", GetObjectId(root) }
             });
 
             JArray children = AssertSuccessObjectArray(response);
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.EditMode
             JObject response = await InvokeAsync(tool, "set_transform",
                 new Dictionary<string, object>
                 {
-                    { "instanceId", go.GetInstanceID() },
+                    { "instanceId", GetObjectId(go) },
                     { "px", 9f },
                     { "ry", 45f }
                 });
@@ -142,6 +142,20 @@ namespace CoreAI.Tests.EditMode
 
             object raw = await function.InvokeAsync(new AIFunctionArguments(args), CancellationToken.None);
             return JObject.Parse(raw?.ToString() ?? "{}");
+        }
+
+        private static int GetObjectId(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return 0;
+            }
+
+#if UNITY_6000_3_OR_NEWER
+            return obj.GetEntityId().GetHashCode();
+#else
+            return obj.GetInstanceID();
+#endif
         }
 
         private GameObject SpawnGameObject(string name, bool active = true, Transform parent = null)

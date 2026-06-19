@@ -34,7 +34,12 @@ namespace CoreAI.Ai
         /// </summary>
         public AIFunction CreateAIFunction()
         {
-            return AIFunctionFactory.Create(ActionDelegate, Name, Description);
+            AIFunctionFactoryOptions options = new()
+            {
+                Name = Name,
+                Description = Description
+            };
+            return AIFunctionFactory.Create(ActionDelegate, options);
         }
 
         /// <summary>

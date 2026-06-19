@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **uGUI chat integration docs.** `README_CHAT.md` now documents the supported Canvas/uGUI path: reuse
+  `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
+  `TMP_InputField` / `ScrollRect` / `Button` view.
+
 ## 4.8.1 - 2026-06-19
 
 - **Unity 6.5 PanelRenderer chat host.** `CoreAiChatPanel` now uses `PanelRenderer.RegisterUIReloadCallback`
