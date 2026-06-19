@@ -8,6 +8,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
   `TMP_InputField` / `ScrollRect` / `Button` view.
 
+## 4.8.2 - 2026-06-19
+
+- **World-space chat auto-focus opt-out.** `CoreAiChatPanel` now exposes `protected virtual bool AutoFocusInputFieldEnabled => true;`, checked inside `FocusInputField()`. Subclasses used in world-space / gaze scenes can override it to `false` to suppress automatic keyboard-focus stealing after a message is sent, after each AI turn, and when the panel is expanded — default screen-space behaviour is unchanged.
+
 ## 4.8.1 - 2026-06-19
 
 - **Unity 6.5 PanelRenderer chat host.** `CoreAiChatPanel` now uses `PanelRenderer.RegisterUIReloadCallback`

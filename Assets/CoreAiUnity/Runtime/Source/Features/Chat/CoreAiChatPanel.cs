@@ -1521,10 +1521,24 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Controls whether automatic focus-steering to the chat input field is active.
+        /// Returns <c>true</c> by default so screen-space chat behaviour is unchanged. Override and
+        /// return <c>false</c> in world-space / gaze UIs where stealing keyboard focus after every
+        /// AI turn (or message send / panel expand) is harmful.
+        /// </summary>
+        protected virtual bool AutoFocusInputFieldEnabled => true;
+
+        /// <summary>
         /// Moves keyboard focus back to the chat input field when the panel is active.
+        /// No-op when <see cref="AutoFocusInputFieldEnabled"/> is <c>false</c>.
         /// </summary>
         private void FocusInputField()
         {
+            if (!AutoFocusInputFieldEnabled)
+            {
+                return;
+            }
+
             InputField?.Focus();
         }
 
