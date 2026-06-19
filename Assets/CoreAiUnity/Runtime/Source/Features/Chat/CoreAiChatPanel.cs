@@ -262,6 +262,10 @@ namespace CoreAI.Chat
                 return;
             }
 
+            UnbindUiCallbacks(true);
+            StopTypingAnimation();
+            ResetUiReferences();
+
             Root = rootElement;
             if (customStyleSheet != null)
             {
@@ -293,33 +297,9 @@ namespace CoreAI.Chat
 #endif
 
             TryUnregisterToolCallChatDisplay();
-            if (SendButton != null)
-            {
-                SendButton.UnregisterCallback<ClickEvent>(OnSendClicked);
-            }
-
-            if (ClearButton != null)
-            {
-                ClearButton.UnregisterCallback<ClickEvent>(OnClearClicked);
-            }
-
-            if (InputField != null)
-            {
-                InputField.UnregisterCallback<KeyDownEvent>(OnInputKeyDown, TrickleDown.TrickleDown);
-            }
-
-            Root?.UnregisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
-            if (CollapseButton != null)
-            {
-                CollapseButton.UnregisterCallback<ClickEvent>(OnCollapseClicked);
-            }
-
-            if (FabButton != null)
-            {
-                FabButton.UnregisterCallback<ClickEvent>(OnFabClicked);
-            }
-
+            UnbindUiCallbacks(true);
             StopTypingAnimation();
+            ResetUiReferences();
         }
 
         protected virtual void OnDestroy()
@@ -334,7 +314,7 @@ namespace CoreAI.Chat
 
         protected virtual void BindUI()
         {
-            ChatContainer = Root.Q<VisualElement>("coreai-chat-root");
+            ChatContainer = ResolveChatContainer(Root);
             MessageScroll = Root.Q<ScrollView>("coreai-chat-scroll");
             InputField = Root.Q<TextField>("coreai-chat-input");
             SendButton = Root.Q<Button>("coreai-chat-send");
@@ -407,6 +387,68 @@ namespace CoreAI.Chat
             ApplyClearButtonVisibility();
             UpdateSendButtonVisualState();
             ApplyShortcutTooltips();
+        }
+
+        private static VisualElement ResolveChatContainer(VisualElement root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            return root.name == "coreai-chat-root"
+                ? root
+                : root.Q<VisualElement>("coreai-chat-root");
+        }
+
+        private void UnbindUiCallbacks(bool ignoreReleasedElements)
+        {
+            TryUnregisterCallback(SendButton, OnSendClicked, ignoreReleasedElements);
+            TryUnregisterCallback(ClearButton, OnClearClicked, ignoreReleasedElements);
+            TryUnregisterCallback(CollapseButton, OnCollapseClicked, ignoreReleasedElements);
+            TryUnregisterCallback(FabButton, OnFabClicked, ignoreReleasedElements);
+            TryUnregisterCallback(InputField, OnInputKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+            TryUnregisterCallback(Root, OnRootKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+        }
+
+        private static void TryUnregisterCallback<TEventType>(
+            VisualElement element,
+            EventCallback<TEventType> callback,
+            bool ignoreReleasedElements,
+            TrickleDown useTrickleDown = TrickleDown.NoTrickleDown)
+            where TEventType : EventBase<TEventType>, new()
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            try
+            {
+                element.UnregisterCallback(callback, useTrickleDown);
+            }
+            catch (InvalidOperationException) when (ignoreReleasedElements)
+            {
+            }
+        }
+
+        private void ResetUiReferences()
+        {
+            Root = null;
+            ChatContainer = null;
+            MessageScroll = null;
+            InputField = null;
+            SendButton = null;
+            ClearButton = null;
+            CollapseButton = null;
+            FabButton = null;
+            TypingIndicator = null;
+            TypingAvatar = null;
+            TypingLabel = null;
+            HeaderTitle = null;
+            HeaderIcon = null;
+            _longRequestHint = null;
+            _streamingLabel = null;
         }
 
         protected virtual void ApplyConfig()
