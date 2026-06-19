@@ -21,7 +21,7 @@ The “UI vs code” table is in [COREAI_SINGLETON_API](../../../../Docs/COREAI_
 
 ## Quick start (1 click)
 
-The menu `CoreAI → Setup → Create Chat Demo Scene` creates a ready scene `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with all required objects (camera, light, EventSystem, `CoreAILifetimeScope`, `UIDocument` + `CoreAiChatPanel` with default `CoreAiChatConfig_Demo`). Press Play and chat with the model.
+The menu `CoreAI → Setup → Create Chat Demo Scene` creates a ready scene `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with all required objects (camera, light, EventSystem, `CoreAILifetimeScope`, UI Toolkit host + `CoreAiChatPanel` with default `CoreAiChatConfig_Demo`). Press Play and chat with the model.
 
 ## Manual setup (2 steps)
 
@@ -46,11 +46,16 @@ Configure in the Inspector:
 
 ### 2. Add to the scene
 
-1. Create a `GameObject` with `UIDocument`
+1. Create a UI Toolkit host GameObject:
+   - Unity 6.5+: add `PanelRenderer`.
+   - Unity 6.3/6.4: add `UIDocument`.
 2. Assign UXML: `Packages/com.nexoider.coreaiunity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`
 3. Add the `CoreAiChatPanel` component
 4. Assign your `CoreAiChatConfig`
 5. **Done!** The chat uses the current CoreAI backend
+
+`CoreAiChatPanel` supports both host components. On Unity 6.5+ it listens for `PanelRenderer` UI reloads through
+`RegisterUIReloadCallback`. On older Unity 6.x versions it uses the existing `UIDocument.rootVisualElement` path.
 
 ### WebGL (browser build)
 
@@ -192,7 +197,7 @@ void OnWorldMapClosed()
 
 **Default behavior (both flags on):**
 
-- While chat is **collapsed** — the configured key opens the panel (handled in `OnRootKeyDown` at `TrickleDown` from `UIDocument` root).
+- While chat is **collapsed** — the configured key opens the panel (handled in `OnRootKeyDown` at `TrickleDown` from the current UI Toolkit root).
 - While chat is **expanded** — **Esc** first stops active generation (if a request/stream is in progress), otherwise **collapses** the panel to the FAB.
 - Additionally **`Update()`** polls **Legacy `Input.GetKeyDown`** only when the UITK root has **no** focused element (`Root.focusController.focusedElement == null`) — so it coexists with character control when focus is not in UI. On **WebGL**, the same `Update()` still resets `WebGLInput.captureAllKeyboardInput`.
 

@@ -39,7 +39,9 @@ namespace CoreAI.Chat
 
         private static readonly CoreAiChatOptions DefaultOptions = CoreAiChatOptions.CreateDefault();
         private ICoreAiChatOptions _runtimeOptions;
+#if UNITY_6000_5_OR_NEWER
         private PanelRenderer _panelRenderer;
+#endif
 
         /// <summary>Project game logger (shared fallback when no scoped logger is available).</summary>
         protected static IGameLogger Logger => GameLoggerUnscopedFallback.Instance;
@@ -219,28 +221,37 @@ namespace CoreAI.Chat
 
         protected virtual void OnEnable()
         {
+#if UNITY_6000_5_OR_NEWER
             _panelRenderer = GetComponent<PanelRenderer>();
             if (_panelRenderer != null)
             {
                 _panelRenderer.RegisterUIReloadCallback(OnPanelRendererUiReloaded);
                 return;
             }
+#endif
 
             UIDocument uiDoc = GetComponent<UIDocument>();
             if (uiDoc == null)
             {
+#if UNITY_6000_5_OR_NEWER
                 Logger.LogError(GameLogFeature.Core,
                     "[CoreAiChatPanel] PanelRenderer or UIDocument component not found on this GameObject!");
+#else
+                Logger.LogError(GameLogFeature.Core,
+                    "[CoreAiChatPanel] UIDocument component not found on this GameObject!");
+#endif
                 return;
             }
 
             InitializeUiRoot(uiDoc.rootVisualElement);
         }
 
+#if UNITY_6000_5_OR_NEWER
         private void OnPanelRendererUiReloaded(PanelRenderer renderer, VisualElement rootElement)
         {
             InitializeUiRoot(rootElement);
         }
+#endif
 
         private void InitializeUiRoot(VisualElement rootElement)
         {
@@ -274,10 +285,12 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+#if UNITY_6000_5_OR_NEWER
             if (_panelRenderer != null)
             {
                 _panelRenderer.UnregisterUIReloadCallback(OnPanelRendererUiReloaded);
             }
+#endif
 
             TryUnregisterToolCallChatDisplay();
             if (SendButton != null)

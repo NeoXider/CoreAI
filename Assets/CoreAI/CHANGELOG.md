@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 4.8.1 - 2026-06-19
+
+- **Release sync.** `com.nexoider.coreai` is bumped to `4.8.1` to stay version-aligned with
+  `com.nexoider.coreaiunity`. No portable-core API changes; the Unity package adds Unity 6.5
+  `PanelRenderer` chat-host compatibility while preserving the Unity 6.3 `UIDocument` path.
+
 ## 4.8.0 - 2026-06-18
 
 - **Chat UI text options.** Added optional `ICoreAiChatTextOptions` and matching `CoreAiChatOptions` fields for

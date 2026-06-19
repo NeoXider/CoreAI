@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.8.1 - 2026-06-19
+
+- **Unity 6.5 PanelRenderer chat host.** `CoreAiChatPanel` now uses `PanelRenderer.RegisterUIReloadCallback`
+  on Unity 6.5+ so host projects can migrate runtime UI Toolkit chat panels away from `UIDocument`.
+- **Unity 6.3 compatibility preserved.** `PanelRenderer` references are compiled only for
+  `UNITY_6000_5_OR_NEWER`; older Unity 6.x projects continue to compile and run through the existing
+  `UIDocument.rootVisualElement` initialization path.
+
 ## 4.8.0 - 2026-06-18
 
 - **Chat config text overrides.** `CoreAiChatConfig` now exposes Inspector/runtime overrides for the chat panel's
