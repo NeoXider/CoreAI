@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace CoreAI.Ai
 {
@@ -8,8 +9,12 @@ namespace CoreAI.Ai
     /// </summary>
     public static class ConversationHistoryPruner
     {
+        private const string ThinkOpenTag = "<think>";
+        private const string ThinkCloseTag = "</think>";
+
         /// <summary>
-        /// Drops exact consecutive duplicate messages, removes fully superseded older tool-result messages,
+        /// Drops exact consecutive duplicate messages, strips stale <c>&lt;think&gt;</c> reasoning from
+        /// every assistant turn except the newest one, removes fully superseded older tool-result messages,
         /// then keeps only the newest tool-result messages.
         /// The input array and durable stores are never mutated.
         /// </summary>
@@ -41,15 +46,26 @@ namespace CoreAI.Ai
             }
 
             bool[] dropped = new bool[deduped.Count];
+            int staleThinkingChanged = StripStaleThinking(deduped, dropped);
             int supersededToolCount = MarkSupersededToolResults(deduped, dropped);
             int remainingToolCount = CountRemainingToolMessages(deduped, dropped);
             int staleToolCount = Math.Max(0, remainingToolCount - maxTools);
-            if (duplicateCount == 0 && supersededToolCount == 0 && staleToolCount == 0)
+
+            int droppedCount = 0;
+            for (int i = 0; i < dropped.Length; i++)
+            {
+                if (dropped[i])
+                {
+                    droppedCount++;
+                }
+            }
+
+            if (duplicateCount == 0 && staleThinkingChanged == 0 && droppedCount == 0 && staleToolCount == 0)
             {
                 return history;
             }
 
-            ChatMessage[] pruned = new ChatMessage[deduped.Count - supersededToolCount - staleToolCount];
+            ChatMessage[] pruned = new ChatMessage[deduped.Count - droppedCount - staleToolCount];
             int write = 0;
             int skippedTools = 0;
 
@@ -71,6 +87,121 @@ namespace CoreAI.Ai
             }
 
             return pruned;
+        }
+
+        /// <summary>
+        /// Removes <c>&lt;think&gt;...&lt;/think&gt;</c> reasoning blocks from every assistant message except
+        /// the newest one, because past chain-of-thought is scratch space the model does not need to re-read.
+        /// Assistant messages that contain nothing but reasoning are marked dropped. The newest assistant turn
+        /// keeps its reasoning intact. Returns the number of messages whose content changed (including emptied
+        /// ones marked dropped). Operates on the in-memory list copy only.
+        /// </summary>
+        private static int StripStaleThinking(List<ChatMessage> messages, bool[] dropped)
+        {
+            int newestAssistant = -1;
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (IsAssistantMessage(messages[i]))
+                {
+                    newestAssistant = i;
+                    break;
+                }
+            }
+
+            int changed = 0;
+            for (int i = 0; i < messages.Count; i++)
+            {
+                if (i == newestAssistant || dropped[i] || !IsAssistantMessage(messages[i]))
+                {
+                    continue;
+                }
+
+                string content = messages[i].Content;
+                if (!ContainsThinkMarker(content))
+                {
+                    continue;
+                }
+
+                string stripped = StripThinkBlocks(content);
+                if (string.Equals(stripped, content, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                changed++;
+                if (string.IsNullOrWhiteSpace(stripped))
+                {
+                    dropped[i] = true;
+                }
+                else
+                {
+                    ChatMessage updated = messages[i];
+                    updated.Content = stripped;
+                    messages[i] = updated;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool ContainsThinkMarker(string content)
+        {
+            return !string.IsNullOrEmpty(content) &&
+                   (content.IndexOf(ThinkOpenTag, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    content.IndexOf(ThinkCloseTag, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        /// <summary>
+        /// Removes well-formed <c>&lt;think&gt;...&lt;/think&gt;</c> spans and orphan reasoning that ends in a
+        /// stray <c>&lt;/think&gt;</c> (some reasoning models stream hidden text without an opening tag). An
+        /// unterminated opening tag drops the remainder. The result is trimmed of surrounding whitespace.
+        /// </summary>
+        private static string StripThinkBlocks(string content)
+        {
+            StringBuilder sb = new(content.Length);
+            int i = 0;
+            int n = content.Length;
+
+            while (i < n)
+            {
+                int open = content.IndexOf(ThinkOpenTag, i, StringComparison.OrdinalIgnoreCase);
+                int close = content.IndexOf(ThinkCloseTag, i, StringComparison.OrdinalIgnoreCase);
+
+                // Orphan close before any open: treat the leading text as hidden reasoning and drop it.
+                if (close >= 0 && (open < 0 || close < open))
+                {
+                    i = close + ThinkCloseTag.Length;
+                    continue;
+                }
+
+                if (open < 0)
+                {
+                    sb.Append(content, i, n - i);
+                    break;
+                }
+
+                if (open > i)
+                {
+                    sb.Append(content, i, open - i);
+                }
+
+                int afterOpen = open + ThinkOpenTag.Length;
+                int matchingClose = content.IndexOf(ThinkCloseTag, afterOpen, StringComparison.OrdinalIgnoreCase);
+                if (matchingClose < 0)
+                {
+                    // Unterminated reasoning block: drop everything to the end.
+                    break;
+                }
+
+                i = matchingClose + ThinkCloseTag.Length;
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private static bool IsAssistantMessage(ChatMessage message)
+        {
+            return string.Equals(message.Role, "assistant", StringComparison.Ordinal);
         }
 
         private static int MarkSupersededToolResults(List<ChatMessage> messages, bool[] dropped)

@@ -88,6 +88,9 @@ namespace CoreAI.Composition
                 builder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(settings);
 
                 CoreAISettings.Instance = settings;
+#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
+                CoreAI.Sandbox.SecureLuaEnvironment.WebGlLuaOptIn = settings.EnableLuaOnWebGl;
+#endif
             }
 
             if (gameLogSettings != null)
@@ -102,10 +105,16 @@ namespace CoreAI.Composition
             builder.RegisterAgentPrompts(agentPromptsManifest);
             builder.RegisterCore();
 
+            // Full tier uses unity_* reflection bindings; never expose it on the WebGL/IL2CPP player.
+#if UNITY_WEBGL && !UNITY_EDITOR
+            bool effectiveFullLuaAccess = false;
+#else
+            bool effectiveFullLuaAccess = enableFullLuaAccess;
+#endif
             builder.RegisterWorldCommands(
                 worldPrefabRegistry,
                 luaAllowedScenes,
-                enableFullLuaAccess,
+                effectiveFullLuaAccess,
                 enableFullLuaPrivateAccess);
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);

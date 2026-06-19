@@ -8,6 +8,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
   `TMP_InputField` / `ScrollRect` / `Button` view.
 
+## 4.9.0 - 2026-06-20
+
+- **Full Lua fix on Unity 6000.3+.** `CoreAiFullUnityLuaRuntimeBindings.Resolve` resolved object ids
+  via `Resources.InstanceIDToObject`, but `GetObjectId` hands out `GetEntityId().GetHashCode()` on
+  Unity 6000.3+ — a different id scheme — so every `unity_*` call that round-trips an id (`unity_get_position`,
+  `unity_set_position`, `unity_get_member`, `unity_call`, describe/hierarchy) failed with
+  "object id … not found" in Edit mode. `Resolve` now matches by the same `GetObjectId` scheme, fixing
+  it across Unity versions and in both Edit and Play mode (verified: EditMode `CoreAI.Tests` 1168/1168).
+- **WebGL Lua opt-in (Unity).** `CoreAISettingsAsset.EnableLuaOnWebGl` inspector flag wires
+  `SecureLuaEnvironment.WebGlLuaOptIn` at bootstrap; `CoreAILifetimeScope` force-disables the Full
+  `unity_*` reflection tier on the WebGL player. `Assets/link.xml` preserves `MoonSharp.Interpreter`
+  against IL2CPP stripping. New `WebGlLuaSelfTest` demo component runs the sandbox self-test in a build.
+
 ## 4.8.2 - 2026-06-19
 
 - **World-space chat auto-focus opt-out.** `CoreAiChatPanel` now exposes `protected virtual bool AutoFocusInputFieldEnabled => true;`, checked inside `FocusInputField()`. Subclasses used in world-space / gaze scenes can override it to `false` to suppress automatic keyboard-focus stealing after a message is sent, after each AI turn, and when the panel is expanded — default screen-space behaviour is unchanged.
@@ -320,7 +333,7 @@ Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned wi
 - **`CoreAiFullUnityLuaRuntimeBindings`** — Full-tier `unity_*` reflection APIs; wired through capability gating and `enableFullLuaAccess` on `CoreAILifetimeScope`.
 - **`GameLuaToolExecutor`** — production `execute_lua` backend; Programmer role gets `execute_lua` + `manage_mods` via `WorldCommandsInstaller`.
 - **`ICoreAiCustomWorldCommandHandler`** — extend `CoreAiWorldCommandExecutor` from game code.
-- Demo scenes under **`Assets/CoreAI.Demos/`** (LuaMods, WorldCommands, Skills, LiveMechanics). FullAccess: bindings + README; **`.unity` scene pending** (see repo `TODO.md`).
+- Demo scenes under **`Assets/CoreAI.Demos/`** (LuaMods, WorldCommands, Skills, LiveMechanics). FullAccess: bindings + README at this release; **`.unity` scene + PlayMode smoke completed later** (done).
 - **`luaAllowedScenes`** whitelist on `CoreAILifetimeScope`.
 
 ### Changed / fixed

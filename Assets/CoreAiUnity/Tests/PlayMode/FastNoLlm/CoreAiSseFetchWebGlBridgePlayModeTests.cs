@@ -91,12 +91,36 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [Test]
-        public void LuaSandbox_IsExplicitlyDisabledOnWebGl()
+        public void LuaSandbox_DisabledOnWebGl_WhenOptInIsOff()
         {
-            SecureLuaEnvironment env = new();
+            bool previous = SecureLuaEnvironment.WebGlLuaOptIn;
+            try
+            {
+                SecureLuaEnvironment.WebGlLuaOptIn = false;
+                SecureLuaEnvironment env = new();
 
-            Assert.IsFalse(SecureLuaEnvironment.IsSupported);
-            Assert.Throws<PlatformNotSupportedException>(() => env.CreateScript(null));
+                Assert.IsFalse(SecureLuaEnvironment.IsSupported);
+                Assert.Throws<PlatformNotSupportedException>(() => env.CreateScript(null));
+            }
+            finally
+            {
+                SecureLuaEnvironment.WebGlLuaOptIn = previous;
+            }
+        }
+
+        [Test]
+        public void LuaSandbox_EnabledOnWebGl_WhenOptInIsOn()
+        {
+            bool previous = SecureLuaEnvironment.WebGlLuaOptIn;
+            try
+            {
+                SecureLuaEnvironment.WebGlLuaOptIn = true;
+                Assert.IsTrue(SecureLuaEnvironment.IsSupported);
+            }
+            finally
+            {
+                SecureLuaEnvironment.WebGlLuaOptIn = previous;
+            }
         }
 
         private static CallbackState Register(int id)

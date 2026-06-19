@@ -54,6 +54,7 @@
         private static bool? _logMeaiToolCallingSteps;
         private static bool? _allowDuplicateToolCalls;
         private static bool? _enableStreaming;
+        private static bool? _enableLuaOnWebGl;
         private static bool? _enableLlmContextCompaction;
         private static bool? _enableTokenCalibration;
         private static float? _conversationCompactionTriggerRatio;
@@ -89,6 +90,7 @@
         private const bool DefaultLogMeaiToolCallingSteps = true;
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
+        private const bool DefaultEnableLuaOnWebGl = false;
         private const bool DefaultEnableLlmContextCompaction = false;
         public const bool DefaultEnableTokenCalibration = true;
         public const float DefaultConversationCompactionTriggerRatio = 0.8f;
@@ -290,6 +292,14 @@
         }
 
         /// <summary>
+        /// Whether the MoonSharp Lua sandbox may run on the WebGL player (opt-in). ///.</summary>
+        public static bool EnableLuaOnWebGl
+        {
+            get => _enableLuaOnWebGl ?? Instance?.EnableLuaOnWebGl ?? DefaultEnableLuaOnWebGl;
+            set => _enableLuaOnWebGl = value;
+        }
+
+        /// <summary>
         /// Whether long LLM histories may be compacted before requests. ///.</summary>
         public static bool EnableLlmContextCompaction
         {
@@ -430,6 +440,7 @@
                 _logMeaiToolCallingSteps = null;
                 _allowDuplicateToolCalls = null;
                 _enableStreaming = null;
+                _enableLuaOnWebGl = null;
                 _enableLlmContextCompaction = null;
                 _enableTokenCalibration = null;
                 _conversationCompactionTriggerRatio = null;

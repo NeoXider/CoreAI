@@ -145,6 +145,77 @@ namespace CoreAI.Tests.EditMode
                 "Pruning alone must not create or mutate a rolled summary.");
         }
 
+        [Test]
+        public void Prune_StripsThinkBlocks_FromOlderAssistantTurns_KeepsNewestIntact()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "u0"),
+                Msg("assistant", "<think>old reasoning</think>Answer one"),
+                Msg("user", "u1"),
+                Msg("assistant", "<think>fresh reasoning</think>Answer two")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreEqual(4, pruned.Length);
+            Assert.AreEqual("u0", pruned[0].Content);
+            Assert.AreEqual("Answer one", pruned[1].Content);
+            Assert.AreEqual("u1", pruned[2].Content);
+            Assert.AreEqual("<think>fresh reasoning</think>Answer two", pruned[3].Content,
+                "The newest assistant turn keeps its reasoning intact.");
+        }
+
+        [Test]
+        public void Prune_DropsOlderAssistantMessage_WhenItIsOnlyReasoning()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "u0"),
+                Msg("assistant", "<think>just thinking, no answer</think>"),
+                Msg("user", "u1"),
+                Msg("assistant", "final answer")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreEqual(3, pruned.Length);
+            Assert.AreEqual("u0", pruned[0].Content);
+            Assert.AreEqual("u1", pruned[1].Content);
+            Assert.AreEqual("final answer", pruned[2].Content);
+        }
+
+        [Test]
+        public void Prune_StripsOrphanCloseTag_InOlderAssistant()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "u0"),
+                Msg("assistant", "hidden chain of thought</think>Visible answer"),
+                Msg("user", "u1"),
+                Msg("assistant", "latest")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreEqual(4, pruned.Length);
+            Assert.AreEqual("Visible answer", pruned[1].Content);
+        }
+
+        [Test]
+        public void Prune_KeepsThinkBlock_WhenOnlyAssistantIsTheNewest()
+        {
+            ChatMessage[] history =
+            {
+                Msg("user", "u0"),
+                Msg("assistant", "<think>reasoning</think>answer")
+            };
+
+            ChatMessage[] pruned = ConversationHistoryPruner.Prune(history, 10);
+
+            Assert.AreSame(history, pruned);
+        }
+
         private static ChatMessage Msg(string role, string content)
         {
             return new ChatMessage { Role = role, Content = content };

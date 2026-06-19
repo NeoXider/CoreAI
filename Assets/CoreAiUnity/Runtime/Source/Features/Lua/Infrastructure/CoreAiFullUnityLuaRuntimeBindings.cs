@@ -415,15 +415,18 @@ namespace CoreAI.Infrastructure.Lua
                 return null;
             }
 
-            UnityEngine.Object obj = Resources.InstanceIDToObject(instanceId);
-            if (obj is GameObject go)
+            // Resolve by the SAME id scheme GetObjectId() handed out (instance id on older Unity,
+            // entity-id hash on 6000.3+). Scanning loaded objects keeps the round-trip consistent across
+            // Unity versions and works in both Edit and Play mode, unlike Resources.InstanceIDToObject,
+            // which uses the legacy scheme and returns null in Edit mode. Full tier is admin/debug, not a
+            // hot path, so the linear scan is acceptable.
+            GameObject[] loaded = Resources.FindObjectsOfTypeAll<GameObject>();
+            for (int i = 0; i < loaded.Length; i++)
             {
-                return go;
-            }
-
-            if (obj is Component comp)
-            {
-                return comp.gameObject;
+                if (GetObjectId(loaded[i]) == instanceId)
+                {
+                    return loaded[i];
+                }
             }
 
             return null;

@@ -22,13 +22,21 @@ namespace CoreAI.Sandbox
         /// </summary>
         public const int MaxStringRepLength = 1_000_000;
 
+        /// <summary>
+        /// Host opt-in to run the MoonSharp Lua sandbox on the WebGL player. Default <c>false</c>:
+        /// WebGL stays disabled unless the host explicitly enables it after verifying an IL2CPP build
+        /// keeps the required marshalling metadata. Set once at bootstrap from
+        /// <see cref="ICoreAISettings.EnableLuaOnWebGl"/>. Ignored on non-WebGL players (always supported).
+        /// </summary>
+        public static bool WebGlLuaOptIn { get; set; }
+
         /// <summary>Whether the embedded MoonSharp sandbox is safe to instantiate on this player.</summary>
         public static bool IsSupported
         {
             get
             {
 #if UNITY_WEBGL && !UNITY_EDITOR
-                return false;
+                return WebGlLuaOptIn;
 #else
                 return true;
 #endif
@@ -86,13 +94,84 @@ namespace CoreAI.Sandbox
             return new LuaCoroutineHandle(script, coroutine, debugger, budgetPerResume, totalLifetimeSteps);
         }
 
+        /// <summary>
+        /// Runs a small set of sandbox invariants (host callback marshalling, stripped globals, string.rep cap)
+        /// and returns a human-readable PASS/FAIL report. Intended for a WebGL-player self-test scene where
+        /// EditMode/PlayMode test runners are unavailable. The report string contains no MoonSharp types,
+        /// so non-Lua assemblies can display it. Returns <c>true</c> when every check passes.
+        /// </summary>
+        public static bool TryRunSelfTest(out string report)
+        {
+            System.Text.StringBuilder sb = new();
+            bool allPassed = true;
+
+            void Check(string name, System.Func<bool> body)
+            {
+                bool ok;
+                string detail = "";
+                try
+                {
+                    ok = body();
+                }
+                catch (Exception ex)
+                {
+                    ok = false;
+                    detail = " (" + ex.GetType().Name + ": " + ex.Message + ")";
+                }
+
+                allPassed &= ok;
+                sb.AppendLine((ok ? "PASS " : "FAIL ") + name + detail);
+            }
+
+            if (!IsSupported)
+            {
+                report = "Lua sandbox is not supported on this player (IsSupported == false).";
+                return false;
+            }
+
+            SecureLuaEnvironment env = new();
+
+            Check("host callback marshalling (host_add(2,3) == 5)", () =>
+            {
+                LuaApiRegistry registry = new();
+                registry.Register("host_add", (System.Func<double, double, double>)((a, b) => a + b));
+                Script script = env.CreateScript(registry);
+                DynValue result = env.RunChunk(script, "return host_add(2, 3)");
+                return result.Type == DataType.Number && System.Math.Abs(result.Number - 5d) < 0.0001d;
+            });
+
+            Check("risky globals stripped (os/io/require are nil)", () =>
+            {
+                Script script = env.CreateScript(null);
+                DynValue result = env.RunChunk(script, "return (os == nil) and (io == nil) and (require == nil)");
+                return result.Type == DataType.Boolean && result.Boolean;
+            });
+
+            Check("string.rep length cap is enforced", () =>
+            {
+                Script script = env.CreateScript(null);
+                try
+                {
+                    env.RunChunk(script, "return string.rep('a', 5000000)");
+                    return false; // should have thrown
+                }
+                catch (ScriptRuntimeException)
+                {
+                    return true;
+                }
+            });
+
+            report = sb.ToString().TrimEnd();
+            return allPassed;
+        }
+
         private static void ThrowIfUnsupported()
         {
             if (!IsSupported)
             {
                 throw new PlatformNotSupportedException(
-                    "CoreAI MoonSharp Lua sandbox is disabled on WebGL player builds. " +
-                    "MoonSharp initializes reflection-based loaders that can abort WebGL/IL2CPP before a managed exception is raised.");
+                    "CoreAI MoonSharp Lua sandbox is disabled on this WebGL player. " +
+                    "Set ICoreAISettings.EnableLuaOnWebGl = true (CoreAISettingsAsset) to opt in after verifying the IL2CPP build.");
             }
         }
 

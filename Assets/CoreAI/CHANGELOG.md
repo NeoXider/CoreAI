@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## 4.9.0 - 2026-06-20
+
+- **Context pruning — stale reasoning.** `ConversationHistoryPruner` now strips stale
+  `<think>…</think>` reasoning blocks from every assistant turn except the newest one (lossless,
+  prune-before-summarize, prompt-copy only — durable history is untouched). Assistant turns that are
+  pure reasoning are dropped. Completes the roadmap §7 "prune stale thinking" item alongside the
+  existing superseded-tool-result and duplicate collapsing.
+- **WebGL Lua opt-in (core).** `SecureLuaEnvironment.WebGlLuaOptIn` + `ICoreAISettings.EnableLuaOnWebGl`
+  (default `false`): `IsSupported` now honors the opt-in on the WebGL player instead of a hard block.
+  Added `SecureLuaEnvironment.TryRunSelfTest(out report)` for a player-side sandbox self-test.
+
 ## 4.8.1 - 2026-06-19
 
 - **Release sync.** `com.nexoider.coreai` is bumped to `4.8.1` to stay version-aligned with
@@ -208,7 +219,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Demos (`Assets/CoreAI.Demos/`)
 
-- LuaMods, WorldCommands, Skills, LiveMechanics (LLM + chat). FullAccess: controller + README only (scene — TODO).
+- LuaMods, WorldCommands, Skills, LiveMechanics (LLM + chat). FullAccess: controller + README at this release; `FullAccessDemo.unity` scene + PlayMode smoke completed in a later release (done).
 
 ### Performance
 

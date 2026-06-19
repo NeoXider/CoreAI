@@ -288,6 +288,11 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool webGlNativeStreaming = true;
 
+        [Tooltip("WebGL-only: opt in to running the MoonSharp Lua sandbox on the WebGL player. Off by default; " +
+                 "requires link.xml stripping protection in the build. Full unity_* tier stays disabled on WebGL regardless.")]
+        [SerializeField]
+        private bool enableLuaOnWebGl;
+
         [Tooltip(
             "WebGL only: fetch credentials mode. When true -> credentials: 'same-origin' (cookies on same host). " +
             "When false -> 'omit' (default): Bearer keys still work; required for many APIs that return CORS " +
@@ -648,6 +653,9 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>WebGL-only: opt in to the native fetch SSE bridge instead of UnityWebRequest.</summary>
         public bool WebGlNativeStreaming => webGlNativeStreaming;
+
+        /// <inheritdoc cref="ICoreAISettings.EnableLuaOnWebGl"/>
+        public bool EnableLuaOnWebGl => enableLuaOnWebGl;
 
         /// <summary>WebGL-only: send cookies on cross-origin requests (fetch credentials='include').</summary>
         public bool SameOriginCredentials => sameOriginCredentials;

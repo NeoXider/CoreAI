@@ -1,4 +1,6 @@
 <linker>
+  <!-- WebGL/IL2CPP: keep MoonSharp Lua marshalling/reflection metadata when Lua-on-WebGL is enabled -->
+  <assembly fullname="MoonSharp.Interpreter" preserve="all"/>
   <!-- Microsoft.Extensions.AI core -->
   <assembly fullname="Microsoft.Extensions.AI" preserve="all"/>
   <assembly fullname="Microsoft.Extensions.AI.Abstractions" preserve="all"/>
