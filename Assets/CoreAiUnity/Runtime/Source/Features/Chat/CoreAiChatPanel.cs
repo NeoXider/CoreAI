@@ -39,6 +39,7 @@ namespace CoreAI.Chat
 
         private static readonly CoreAiChatOptions DefaultOptions = CoreAiChatOptions.CreateDefault();
         private ICoreAiChatOptions _runtimeOptions;
+        private PanelRenderer _panelRenderer;
 
         /// <summary>Project game logger (shared fallback when no scoped logger is available).</summary>
         protected static IGameLogger Logger => GameLoggerUnscopedFallback.Instance;
@@ -218,15 +219,39 @@ namespace CoreAI.Chat
 
         protected virtual void OnEnable()
         {
+            _panelRenderer = GetComponent<PanelRenderer>();
+            if (_panelRenderer != null)
+            {
+                _panelRenderer.RegisterUIReloadCallback(OnPanelRendererUiReloaded);
+                return;
+            }
+
             UIDocument uiDoc = GetComponent<UIDocument>();
             if (uiDoc == null)
             {
                 Logger.LogError(GameLogFeature.Core,
-                    "[CoreAiChatPanel] UIDocument component not found on this GameObject!");
+                    "[CoreAiChatPanel] PanelRenderer or UIDocument component not found on this GameObject!");
                 return;
             }
 
-            Root = uiDoc.rootVisualElement;
+            InitializeUiRoot(uiDoc.rootVisualElement);
+        }
+
+        private void OnPanelRendererUiReloaded(PanelRenderer renderer, VisualElement rootElement)
+        {
+            InitializeUiRoot(rootElement);
+        }
+
+        private void InitializeUiRoot(VisualElement rootElement)
+        {
+            if (rootElement == null)
+            {
+                Logger.LogError(GameLogFeature.Core,
+                    "[CoreAiChatPanel] UI root is not ready.");
+                return;
+            }
+
+            Root = rootElement;
             if (customStyleSheet != null)
             {
                 Root.styleSheets.Add(customStyleSheet);
@@ -249,6 +274,11 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            if (_panelRenderer != null)
+            {
+                _panelRenderer.UnregisterUIReloadCallback(OnPanelRendererUiReloaded);
+            }
+
             TryUnregisterToolCallChatDisplay();
             if (SendButton != null)
             {
