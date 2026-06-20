@@ -348,10 +348,12 @@ namespace CoreAI.Tests.EditMode
         public void LongRequestHint_WhenSendingWithoutStreaming_ShowsAfterDelay()
         {
             GameObject go = new("CoreAiChatPanel_LongRequestHint_NonStreaming_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
             try
             {
                 CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
-                Label hint = new();
+                Label hint = CreateAttachedLongRequestHint(out panelHost, out panelSettings);
                 hint.style.display = DisplayStyle.None;
 
                 SetPrivateField(panel, "_longRequestHint", hint);
@@ -367,6 +369,8 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
             }
         }
 
@@ -374,10 +378,12 @@ namespace CoreAI.Tests.EditMode
         public void LongRequestHint_WhenStreamingActive_ClearsAndStaysHidden()
         {
             GameObject go = new("CoreAiChatPanel_LongRequestHint_Streaming_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
             try
             {
                 CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
-                Label hint = new("old hint");
+                Label hint = CreateAttachedLongRequestHint(out panelHost, out panelSettings, "old hint");
                 hint.style.display = DisplayStyle.Flex;
 
                 SetPrivateField(panel, "_longRequestHint", hint);
@@ -394,6 +400,8 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
             }
         }
 
@@ -401,10 +409,12 @@ namespace CoreAI.Tests.EditMode
         public void StartStreaming_ClearsLongRequestHintImmediately()
         {
             GameObject go = new("CoreAiChatPanel_StartStreaming_LongRequestHint_Test");
+            GameObject panelHost = null;
+            PanelSettings panelSettings = null;
             try
             {
                 CoreAiChatPanel panel = go.AddComponent<CoreAiChatPanel>();
-                Label hint = new("old hint");
+                Label hint = CreateAttachedLongRequestHint(out panelHost, out panelSettings, "old hint");
                 hint.style.display = DisplayStyle.Flex;
 
                 SetPrivateField(panel, "_longRequestHint", hint);
@@ -421,6 +431,8 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 Object.DestroyImmediate(go);
+                Object.DestroyImmediate(panelHost);
+                Object.DestroyImmediate(panelSettings);
             }
         }
 
@@ -509,6 +521,24 @@ namespace CoreAI.Tests.EditMode
             typeof(CoreAiChatPanel)
                 .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.SetValue(panel, value);
+        }
+
+        private static Label CreateAttachedLongRequestHint(
+            out GameObject panelHost,
+            out PanelSettings panelSettings,
+            string text = "")
+        {
+            panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
+            panelHost = new GameObject("CoreAiChatPanel_LongRequestHint_PanelHost_Test");
+            panelHost.SetActive(false);
+            UIDocument document = panelHost.AddComponent<UIDocument>();
+            document.panelSettings = panelSettings;
+            panelHost.SetActive(true);
+
+            Label hint = new(text);
+            document.rootVisualElement.Add(hint);
+            Assert.IsNotNull(hint.panel, "Long request hint test label must be attached to a UI Toolkit panel.");
+            return hint;
         }
 
         private static T GetPrivateField<T>(CoreAiChatPanel panel, string fieldName)

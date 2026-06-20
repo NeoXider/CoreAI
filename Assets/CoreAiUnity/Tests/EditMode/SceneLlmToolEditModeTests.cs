@@ -151,11 +151,7 @@ namespace CoreAI.Tests.EditMode
                 return 0;
             }
 
-#if UNITY_6000_3_OR_NEWER
-            return (int)obj.GetEntityId();
-#else
-            return obj.GetInstanceID();
-#endif
+            return obj.GetEntityId().GetHashCode();
         }
 
         private GameObject SpawnGameObject(string name, bool active = true, Transform parent = null)

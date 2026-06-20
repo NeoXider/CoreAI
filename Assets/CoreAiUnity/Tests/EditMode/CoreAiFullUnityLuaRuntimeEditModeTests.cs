@@ -300,11 +300,7 @@ return t.position.x == 4 and t.scale.z == 4
                 return 0;
             }
 
-#if UNITY_6000_3_OR_NEWER
-            return (int)obj.GetEntityId();
-#else
-            return obj.GetInstanceID();
-#endif
+            return obj.GetEntityId().GetHashCode();
         }
     }
 
