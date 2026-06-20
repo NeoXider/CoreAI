@@ -310,13 +310,11 @@ namespace CoreAI.Ai
                 return 0;
             }
 
-#if UNITY_6000_3_OR_NEWER
-            // EntityId exposes a stable, unique int value; use it directly instead of GetHashCode(),
-            // which collapses the id and can collide so FindObjectById() could return the wrong object.
-            return (int)obj.GetEntityId();
-#else
+            // GetInstanceID() returns a stable, session-unique int — exactly what FindObjectById() needs
+            // (no GetHashCode() collisions). Unity 6.5 made the EntityId->int implicit cast an obsolete
+            // ERROR (CS0619: "EntityId will not be representable by an int in the future"), so we no longer
+            // route through GetEntityId() here.
             return obj.GetInstanceID();
-#endif
         }
 
         private string SerializeSuccess(object data)
