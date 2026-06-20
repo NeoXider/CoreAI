@@ -922,6 +922,11 @@ namespace CoreAI.Chat
 
             foreach (ChatMessage msg in history)
             {
+                if (!ShouldRenderPersistedMessageForUi(msg, options.ShowToolCallsInChat))
+                {
+                    continue;
+                }
+
                 bool isUser = string.Equals(msg.Role, "user", StringComparison.OrdinalIgnoreCase);
                 string text = FormatPersistedMessageForUi(msg.Content ?? "", isUser);
                 if (string.IsNullOrWhiteSpace(text))
@@ -931,6 +936,22 @@ namespace CoreAI.Chat
 
                 AddMessage(text.TrimEnd(), isUser);
             }
+        }
+
+        internal static bool ShouldRenderPersistedMessageForUi(ChatMessage message, bool showToolCallsInChat)
+        {
+            string role = message.Role?.Trim();
+            if (string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                return showToolCallsInChat || !IsToolLifecycleNotification(message.Content);
+            }
+
+            return false;
         }
 
         internal static string FormatPersistedMessageForUi(string content, bool isUser)
@@ -1973,11 +1994,33 @@ namespace CoreAI.Chat
                 return;
             }
 
+            if (!isUser && !Options.ShowToolCallsInChat && IsToolLifecycleNotification(text))
+            {
+                return;
+            }
+
             HideTypingIndicator();
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
             MessageScroll.Add(bubble);
             ScrollToBottom();
+        }
+
+        private static bool IsToolLifecycleNotification(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            string value = text.TrimStart();
+            return value.StartsWith("Tool call completed:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("Tool calls completed:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("Tool call failed:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("Tool calls failed:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("Tool call started:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("Tool calls started:", StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith("[Tool]", StringComparison.OrdinalIgnoreCase);
         }
 
         private void TryRegisterToolCallChatDisplay()

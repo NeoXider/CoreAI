@@ -12,6 +12,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.10.2 - 2026-06-21
+
+- **Chat UI hides internal tool notifications.** `CoreAiChatPanel` now skips persisted `tool`/`system`
+  rows in the normal chat transcript and hides assistant fallback lifecycle strings such as
+  `Tool call completed: ...` unless tool-call diagnostics are explicitly enabled, while preserving
+  normal user and assistant prose.
+
 ## 4.10.1 - 2026-06-20
 
 - **Unity 6.5 compile fix (CS0619).** Unity 6.5 marked BOTH the `EntityId -> int` implicit cast and

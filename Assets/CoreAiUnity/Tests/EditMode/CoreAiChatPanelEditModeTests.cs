@@ -1,3 +1,4 @@
+using CoreAI.Ai;
 using CoreAI.Chat;
 using NUnit.Framework;
 using System.Collections.Generic;
@@ -229,6 +230,33 @@ namespace CoreAI.Tests.EditMode
             string formatted = CoreAiChatPanel.FormatPersistedMessageForUi(content, true);
 
             Assert.AreEqual(content, formatted);
+        }
+
+        [Test]
+        public void ShouldRenderPersistedMessageForUi_UserAndAssistantProse_ReturnsTrue()
+        {
+            Assert.IsTrue(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(
+                new ChatMessage("user", "Hello"), false));
+            Assert.IsTrue(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(
+                new ChatMessage("assistant", "Natural teacher reply."), false));
+        }
+
+        [Test]
+        public void ShouldRenderPersistedMessageForUi_InternalRoles_ReturnFalse()
+        {
+            Assert.IsFalse(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(
+                new ChatMessage("tool", "## Tool Results\n- call_skill_tool: ok"), false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(
+                new ChatMessage("system", "System context update"), false));
+        }
+
+        [Test]
+        public void ShouldRenderPersistedMessageForUi_ToolLifecycleNotification_RespectsDiagnosticsFlag()
+        {
+            ChatMessage message = new("assistant", "Tool call completed: call_skill_tool.");
+
+            Assert.IsFalse(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(message, false));
+            Assert.IsTrue(CoreAiChatPanel.ShouldRenderPersistedMessageForUi(message, true));
         }
 
         [Test]
