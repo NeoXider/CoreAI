@@ -193,7 +193,7 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
 
 ## Notes / constraints
 - WebGL/IL2CPP: no local tokenizer; API-usage calibration is the realistic accuracy path (no per-model BPE).
-- Changes are core (`com.nexoider.coreai`) + Unity adapter (`com.nexoider.coreaiunity`); ship behind config so
+- Changes are core (`com.neoxider.coreai`) + Unity adapter (`com.neoxider.coreaiunity`); ship behind config so
   existing roles keep working. Caching cooperation is provider-dependent (verify via `usage.cache_read_*` when present).
 - Repository hygiene: `.gitattributes` pins Unity YAML/source text to deterministic line endings and marks common
   media/build artifacts as binary so context-management commits do not pick up CRLF/LF churn or binary phantom diffs.

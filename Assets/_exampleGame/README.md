@@ -2,7 +2,7 @@
 
 **CoreAI template author:** **Neoxider** (nickname **neoxider**) - [github.com/NeoXider](https://github.com/NeoXider).
 
-The example game in **`Assets/_exampleGame`** uses the **UPM** package **`com.nexoider.coreai`** (code in **`Assets/CoreAI`**) and the host **`Assets/CoreAiUnity`** (docs, **`Resources/AgentPrompts`**): a procedural wave arena, DI (**`CoreAILifetimeScope`**), **Creator** calls for every wave (**`ArenaCreatorWavePlanner`**), and a **Programmer** demo on **F9** (**`CoreAiLuaHotkey`**). Core logs: **`[Llm]`** + **`traceId`** in **`ApplyAiGameCommand`** - see [LLMUNITY_SETUP_AND_MODELS.md](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md).
+The example game in **`Assets/_exampleGame`** uses the **UPM** package **`com.neoxider.coreai`** (code in **`Assets/CoreAI`**) and the host **`Assets/CoreAiUnity`** (docs, **`Resources/AgentPrompts`**): a procedural wave arena, DI (**`CoreAILifetimeScope`**), **Creator** calls for every wave (**`ArenaCreatorWavePlanner`**), and a **Programmer** demo on **F9** (**`CoreAiLuaHotkey`**). Core logs: **`[Llm]`** + **`traceId`** in **`ApplyAiGameCommand`** - see [LLMUNITY_SETUP_AND_MODELS.md](../CoreAiUnity/Docs/LLMUNITY_SETUP_AND_MODELS.md).
 
 **Step-by-step Unity setup (scene, LLM, HTTP):** [`Docs/UNITY_SETUP.md`](Docs/UNITY_SETUP.md). **Arena architecture, multiplayer, AI (waves / player analysis):** [`Docs/ARENA_ARCHITECTURE_AND_AI.md`](Docs/ARENA_ARCHITECTURE_AND_AI.md). Editor menu: **CoreAI -> Development -> Example Game -> Open RogueliteArena scene** (and an option to make the scene first in Build Settings). General repository quick start: [`../CoreAiUnity/Docs/QUICK_START.md`](../CoreAiUnity/Docs/QUICK_START.md). Template-code onboarding: [`../CoreAiUnity/Docs/DEVELOPER_GUIDE.md`](../CoreAiUnity/Docs/DEVELOPER_GUIDE.md).
 
@@ -53,7 +53,7 @@ Plugins in `Assets/Plugins` (for example debug utilities) are included as they e
 | **Orchestration** | **`IAiOrchestrationService`** / **`AiOrchestrator`**, roles from **`BuiltInAgentRoleIds`** |
 | **Lua** | **`LuaAiEnvelopeProcessor`**, MoonSharp sandbox, Programmer repair on error |
 
-The example game **depends** on the public **CoreAI** API (**`com.nexoider.coreai`**), not the other way around: `_exampleGame` contains only game-specific scenes, prefabs, presenters, and use cases for the "arena + hub" mode.
+The example game **depends** on the public **CoreAI** API (**`com.neoxider.coreai`**), not the other way around: `_exampleGame` contains only game-specific scenes, prefabs, presenters, and use cases for the "arena + hub" mode.
 
 ---
 

@@ -69,8 +69,8 @@
 
 ## 4.8.1 - 2026-06-19
 
-- **Release sync.** `com.nexoider.coreai` is bumped to `4.8.1` to stay version-aligned with
-  `com.nexoider.coreaiunity`. No portable-core API changes; the Unity package adds Unity 6.5
+- **Release sync.** `com.neoxider.coreai` is bumped to `4.8.1` to stay version-aligned with
+  `com.neoxider.coreaiunity`. No portable-core API changes; the Unity package adds Unity 6.5
   `PanelRenderer` chat-host compatibility while preserving the Unity 6.3 `UIDocument` path.
 
 ## 4.8.0 - 2026-06-18
@@ -92,12 +92,12 @@
 
 ## 4.6.2 - 2026-06-18
 
-- **Version alignment.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.2 for UPM consumers that pin
+- **Version alignment.** Patch release aligned with `com.neoxider.coreaiunity` 4.6.2 for UPM consumers that pin
   matching package versions.
 
 ## 4.6.1 - 2026-06-18
 
-- **NoLua package compile fix.** Patch release aligned with `com.nexoider.coreaiunity` 4.6.1 so UPM consumers can
+- **NoLua package compile fix.** Patch release aligned with `com.neoxider.coreaiunity` 4.6.1 so UPM consumers can
   pin matching versions when Lua is disabled.
 
 ## 4.6.0 - 2026-06-18
@@ -212,12 +212,12 @@
 
 - **Full-tier member visibility split.** `CoreAiFullUnityLuaRuntimeBindings` now exposes only **public** members by default; non-public access is an explicit opt-in (`allowNonPublicMembers` ctor flag). The reflection member cache is keyed by visibility so public-only and private-enabled bindings never collide.
 - **Full Lua Mode guidance.** The built-in Programmer prompt and `execute_lua` metadata now document the diagnostic-first Full workflow: inspect with one-shot Lua, read `Success` / `Output` / `Error`, then use `manage_mods` for persistent hook/timer behavior. The guidance explicitly forbids invented Lua APIs such as `game.enemies`, `game.create`, and `GameObject.Find`.
-- **Release sync.** `com.nexoider.coreai` is bumped to `4.2.0` to stay version-aligned with the Unity package's mod-driven Unit Forge / Full Access demos and the optional-module editor tool.
+- **Release sync.** `com.neoxider.coreai` is bumped to `4.2.0` to stay version-aligned with the Unity package's mod-driven Unit Forge / Full Access demos and the optional-module editor tool.
 
 ## [4.1.0] - 2026-06-12
 
 - **Lua mod lifecycle metadata for host managers.** `LuaModRuntime.ModSourceUnloaded` now reports the unloaded source and capability tier, allowing host UIs to move a mod from active to saved/inactive state without losing source code.
-- **Release sync.** `com.nexoider.coreai` is bumped to `4.1.0` so the portable core and Unity package stay version-aligned for the new wave auto-battler mod-management demo.
+- **Release sync.** `com.neoxider.coreai` is bumped to `4.1.0` so the portable core and Unity package stay version-aligned for the new wave auto-battler mod-management demo.
 
 ## [4.0.8] - 2026-06-12
 
@@ -225,7 +225,7 @@
 
 ## [4.0.7] - 2026-06-12
 
-- **Release sync.** `com.nexoider.coreai` is bumped to `4.0.7` so portable CoreAI and `com.nexoider.coreaiunity` remain version-aligned. Unity-side LiveMechanics persistence and docs changes are listed in the Unity package changelog.
+- **Release sync.** `com.neoxider.coreai` is bumped to `4.0.7` so portable CoreAI and `com.neoxider.coreaiunity` remain version-aligned. Unity-side LiveMechanics persistence and docs changes are listed in the Unity package changelog.
 
 ## [4.0.4] - 2026-06-12
 
@@ -352,7 +352,7 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Semver
 
-- **Major bump to `3.0.0`** (lockstep with `com.nexoider.coreaiunity` `3.0.0`): Lua becoming an optional, compile-out module is a structural change to how the packages are consumed.
+- **Major bump to `3.0.0`** (lockstep with `com.neoxider.coreaiunity` `3.0.0`): Lua becoming an optional, compile-out module is a structural change to how the packages are consumed.
 
 ## [v2.6.5] - 2026-06-10
 
@@ -366,28 +366,28 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Lockstep patch with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.6.4` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- No portable runtime behavior change; the backend-managed authorization, streaming tool-loop completion, and chat collapse idempotency fixes live in `com.nexoider.coreaiunity`.
+- Bumped `com.neoxider.coreai` to `2.6.4` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
+- No portable runtime behavior change; the backend-managed authorization, streaming tool-loop completion, and chat collapse idempotency fixes live in `com.neoxider.coreaiunity`.
 
 ## [v2.6.3] - 2026-06-01
 
 ### Chat options parity with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.6.3` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- Bumped `com.neoxider.coreai` to `2.6.3` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
 - Added portable chat options `EnableStopGeneration` and `ShowClearButton`. Unity consumes these through `CoreAiChatConfig` / `CoreAiChatPanel`; the portable package remains Unity-free.
 - Defaults preserve existing behavior: stop generation is enabled and the clear button is shown unless a host explicitly disables them.
 ## [v2.6.2] - 2026-06-01
 
 ### Lockstep patch with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.6.2` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- Portable package metadata documents the WebGL streaming continuation fix; the runtime and verification changes for WebGL chat Stop/recovery live in `com.nexoider.coreaiunity`.
+- Bumped `com.neoxider.coreai` to `2.6.2` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
+- Portable package metadata documents the WebGL streaming continuation fix; the runtime and verification changes for WebGL chat Stop/recovery live in `com.neoxider.coreaiunity`.
 
 ## [v2.6.0] - 2026-05-29
 
 ### WebGL streaming and Lua platform guard
 
-- Bumped `com.nexoider.coreai` to `2.6.0` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching minor versions.
+- Bumped `com.neoxider.coreai` to `2.6.0` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching minor versions.
 - `MeaiOpenAiChatClient` now treats OpenAI-style `data: [DONE]` SSE frames as terminal stream sentinels. WebGL native streaming can finish promptly without waiting for the browser connection to close.
 - `SecureLuaEnvironment` now exposes an explicit platform support guard. WebGL player builds report Lua as unsupported before MoonSharp can initialize reflection-heavy loader paths that crash IL2CPP/WebGL.
 - `LuaAiEnvelopeProcessor` now publishes a controlled Lua failure when the runtime is unavailable instead of constructing the sandbox on unsupported platforms.
@@ -397,29 +397,29 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 ### Lockstep patch with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.5.4` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- No portable runtime behavior change; the WebGL SSE cancellation and Editor Play Mode main-thread marshaling hardening live in `com.nexoider.coreaiunity`.
+- Bumped `com.neoxider.coreai` to `2.5.4` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
+- No portable runtime behavior change; the WebGL SSE cancellation and Editor Play Mode main-thread marshaling hardening live in `com.neoxider.coreaiunity`.
 
 ## [v2.5.3] - 2026-05-27
 
 ### Lockstep patch with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.5.3` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- No portable runtime behavior change; the Unity fixes live in `com.nexoider.coreaiunity`.
+- Bumped `com.neoxider.coreai` to `2.5.3` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
+- No portable runtime behavior change; the Unity fixes live in `com.neoxider.coreaiunity`.
 
 ## [v2.5.1] - 2026-05-25
 
 ### Lockstep patch with CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.5.1` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
+- Bumped `com.neoxider.coreai` to `2.5.1` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
 - Added portable `IAIFunctionLlmTool` / `IAIFunctionsLlmTool` contracts so Unity MEAI binding can discover tool functions without reflection duck typing.
 
 ## [v2.5.0] - 2026-05-24
 
 ### Version Parity With CoreAI Unity
 
-- Bumped `com.nexoider.coreai` to `2.5.0` so portable CoreAI and `com.nexoider.coreaiunity` publish with matching versions.
-- Updated the Unity package dependency contract to `com.nexoider.coreai` `2.5.0`.
+- Bumped `com.neoxider.coreai` to `2.5.0` so portable CoreAI and `com.neoxider.coreaiunity` publish with matching versions.
+- Updated the Unity package dependency contract to `com.neoxider.coreai` `2.5.0`.
 - No additional portable runtime behavior change beyond the release-train alignment for the Unity ScriptableObject wrapper and options/snapshot work.
 
 ## [v2.4.0] - 2026-05-24
@@ -428,12 +428,12 @@ Major release: Lua as a second game language (production-ready), capability tier
 
 - Added Unity-free runtime options/snapshots for Unity-authored configuration: `CoreAiChatOptions`, `CoreAISettingsOptions`, `OpenAiHttpOptions`, `GameLogSettingsOptions`, `AiPermissionsOptions`, `AgentPromptsDefinition`, and `SkillSetDefinition`.
 - Moved Unity-free logging contracts (`GameLogFeature`, `GameLogLevel`, `IGameLogSettings`) into the portable CoreAI package.
-- Preserved the rule that `Assets/CoreAI` has no `UnityEngine` dependency; Unity-specific authoring stays in `com.nexoider.coreaiunity`.
+- Preserved the rule that `Assets/CoreAI` has no `UnityEngine` dependency; Unity-specific authoring stays in `com.neoxider.coreaiunity`.
 
 ### Migration Notes
 
 - Runtime/tests should prefer plain options/classes over mutating Unity `ScriptableObject` assets.
-- Unity assets remain supported through wrapper methods in `com.nexoider.coreaiunity`.
+- Unity assets remain supported through wrapper methods in `com.neoxider.coreaiunity`.
 
 ## [v2.3.1] — 2026-05-08
 
@@ -591,44 +591,44 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Semver
 
-- **`2.0.0`** with **`com.nexoider.coreaiunity` `2.0.0`**. Major bump — new public API surface (`SkillSet`, `AgentConfig.Skills`, `AgentBuilder.WithSkill/WithSkills`).
+- **`2.0.0`** with **`com.neoxider.coreaiunity` `2.0.0`**. Major bump — new public API surface (`SkillSet`, `AgentConfig.Skills`, `AgentBuilder.WithSkill/WithSkills`).
 
 ## [v1.7.5] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.7.5 (Unity-only)
 
-- **Semver:** **`1.7.5`** with **`com.nexoider.coreaiunity` `1.7.5`**. No portable **`CoreAI.Core`** API changes — Unity release adds optional chat tool-call UI and renames **`CoreAISettingsAsset`** temperature override field to **`enableTemperatureOverriding`** (see Unity changelog).
+- **Semver:** **`1.7.5`** with **`com.neoxider.coreaiunity` `1.7.5`**. No portable **`CoreAI.Core`** API changes — Unity release adds optional chat tool-call UI and renames **`CoreAISettingsAsset`** temperature override field to **`enableTemperatureOverriding`** (see Unity changelog).
 
 ## [v1.7.4] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.7.4 (Unity-only)
 
-- **Semver:** **`1.7.4`** with **`com.nexoider.coreaiunity` `1.7.4`**. No portable **`CoreAI.Core`** API changes — Unity release documents LLMUnity runtime host defaults (see Unity changelog).
+- **Semver:** **`1.7.4`** with **`com.neoxider.coreaiunity` `1.7.4`**. No portable **`CoreAI.Core`** API changes — Unity release documents LLMUnity runtime host defaults (see Unity changelog).
 
 ## [v1.7.3] — 2026-05-05
 
 ### Streaming request option (lockstep with coreaiunity 1.7.3)
 
 - **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** — optional **`bool?`**. When **`Tools`** is non-empty: **`true`** buffers the full assistant iteration before emitting any **`LlmStreamChunk.Text`**; **`null`**/**`false`** (default) keeps the **hybrid JSON hold** (stream only the prefix that cannot be part of incomplete text-shaped tool JSON, then hold until balanced **`{...}`** closes). Intended as an escape hatch for exotic delta fragmentation; Unity **`MeaiLlmClient`** implements both modes.
-- **Semver:** **`1.7.3`** with **`com.nexoider.coreaiunity` `1.7.3`**.
+- **Semver:** **`1.7.3`** with **`com.neoxider.coreaiunity` `1.7.3`**.
 
 ## [v1.7.2] — 2026-05-05
 
 ### Lockstep with coreaiunity 1.7.2 (WebGL)
 
-- **Semver:** **`1.7.2`** with **`com.nexoider.coreaiunity` `1.7.2`**. No portable **`CoreAI.Core`** API changes — Unity **`CoreAiPersistFs.jslib`** now runs **`FS.syncfs`** single-flight (queues coalesced follow-up) so concurrent **`CoreAi_PersistFsSync`** calls from **`FileAgentMemoryStore`** no longer trigger Emscripten’s *“2 FS.syncfs operations in flight”* warning or related WebGL stalls.
+- **Semver:** **`1.7.2`** with **`com.neoxider.coreaiunity` `1.7.2`**. No portable **`CoreAI.Core`** API changes — Unity **`CoreAiPersistFs.jslib`** now runs **`FS.syncfs`** single-flight (queues coalesced follow-up) so concurrent **`CoreAi_PersistFsSync`** calls from **`FileAgentMemoryStore`** no longer trigger Emscripten’s *“2 FS.syncfs operations in flight”* warning or related WebGL stalls.
 
 ## [v1.7.1] — 2026-05-05
 
 ### Lockstep & tests
 
-- **Semver:** **`1.7.1`** with **`com.nexoider.coreaiunity` `1.7.1`**. No portable API changes — Unity EditMode adds **`FailedCompletion_BackendUnavailable_RetriesAndSucceeds`** for **`LoggingLlmClientDecorator`** (result-based **`BackendUnavailable`** retry, same as **`RateLimited`** in v1.7.0).
+- **Semver:** **`1.7.1`** with **`com.neoxider.coreaiunity` `1.7.1`**. No portable API changes — Unity EditMode adds **`FailedCompletion_BackendUnavailable_RetriesAndSucceeds`** for **`LoggingLlmClientDecorator`** (result-based **`BackendUnavailable`** retry, same as **`RateLimited`** in v1.7.0).
 
 ## [v1.7.0] — 2026-05-05
 
 ### Streaming — `LlmStreamChunk` marker for buffered Meai iterations
 
-- **`LlmStreamChunk`** — **`BufferedStreamingNoToolBinding`** plus optional **`BufferedStreamingUseToolProgressHint`**. **`MeaiLlmClient.CompleteStreamingAsync`** yields marker chunks for unbound iterations, hybrid JSON hold, native tool deltas, and text-shaped tool execute (host chat: short **`StreamingToolProgressHint`** vs animated dots — see **`com.nexoider.coreaiunity` ≥ 1.7.0**).
+- **`LlmStreamChunk`** — **`BufferedStreamingNoToolBinding`** plus optional **`BufferedStreamingUseToolProgressHint`**. **`MeaiLlmClient.CompleteStreamingAsync`** yields marker chunks for unbound iterations, hybrid JSON hold, native tool deltas, and text-shaped tool execute (host chat: short **`StreamingToolProgressHint`** vs animated dots — see **`com.neoxider.coreaiunity` ≥ 1.7.0**).
 - **Sampling temperature:** **`ICoreAISettings.OverrideTemperature`** (default **off**). When off, **`MeaiOpenAiChatClient`** omits the JSON **`temperature`** field and **`MeaiLlmClient`** does not set MEAI **`ChatOptions.Temperature`** (HTTP + LLMUnity use backend defaults). When on, **`AiOrchestrator`** sets **`LlmCompletionRequest.SendTemperature`** and sends **`ICoreAISettings.Temperature`**. **`LlmCompletionRequest.SendTemperature`** is also set for LLM-assisted compaction. **`ConfigureHttpApi`** enables the override flag so programmatic HTTP setup still sends temperature.
 - **HTTP retries:** **`LoggingLlmClientDecorator`** now retries **`LlmCompletionResult`** with **`RateLimited`** / **`BackendUnavailable`** (same backoff as for **`LlmClientException`**). Previously only thrown exceptions retried; **`MeaiLlmClient`** converts HTTP errors to failed results, so 429 produced no **`LLM ↺`** lines and no second attempt. Default **`ICoreAISettings.MaxLlmRequestRetries`** / asset field is **1** retry (minimum clamp **1**).
 
@@ -636,31 +636,31 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Lockstep with coreaiunity 1.6.19 (Unity-only)
 
-- **Semver:** **`1.6.19`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore`** on WebGL player so chat history and agent memory JSON persist (with existing **`CoreAi_PersistFsSync`** after writes).
+- **Semver:** **`1.6.19`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore`** on WebGL player so chat history and agent memory JSON persist (with existing **`CoreAi_PersistFsSync`** after writes).
 
 ## [v1.6.18] — 2026-05-04
 
 ### Lockstep with coreaiunity 1.6.18 (Unity-only)
 
-- **Semver:** **`1.6.18`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** uses synchronous **`TaskCompletionSource`** continuations + true async **`ReadAsync`** so WebGL single-threaded awaits no longer park forever on a non-existent thread pool, and **`Stream.Read`** no longer blocks the JS event loop while waiting for fetch chunks.
+- **Semver:** **`1.6.18`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** uses synchronous **`TaskCompletionSource`** continuations + true async **`ReadAsync`** so WebGL single-threaded awaits no longer park forever on a non-existent thread pool, and **`Stream.Read`** no longer blocks the JS event loop while waiting for fetch chunks.
 
 ## [v1.6.17] — 2026-05-04
 
 ### Lockstep with coreaiunity 1.6.17 (Unity-only)
 
-- **Semver:** **`1.6.17`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** now await the real **`fetch`** response status before returning, so **`MeaiOpenAiChatClient`** sees the actual HTTP code instead of the default **`HTTP 0`** that was masking CORS / network errors as transport failures.
+- **Semver:** **`1.6.17`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** now await the real **`fetch`** response status before returning, so **`MeaiOpenAiChatClient`** sees the actual HTTP code instead of the default **`HTTP 0`** that was masking CORS / network errors as transport failures.
 
 ## [v1.6.16] — 2026-05-04
 
 ### Lockstep with coreaiunity 1.6.16 (Unity-only)
 
-- **Semver:** **`1.6.16`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity WebGL **`fetch`** default **`credentials: 'omit'`** for SSE (OpenRouter + CORS `*`).
+- **Semver:** **`1.6.16`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity WebGL **`fetch`** default **`credentials: 'omit'`** for SSE (OpenRouter + CORS `*`).
 
 ## [v1.6.15] — 2026-05-04
 
 ### Lockstep with coreaiunity 1.6.15 (Unity-only)
 
-- **Semver:** **`1.6.15`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAISettingsAssetEditor`** moves WebGL streaming toggles under **Advanced**.
+- **Semver:** **`1.6.15`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`CoreAISettingsAssetEditor`** moves WebGL streaming toggles under **Advanced**.
 
 ## [v1.6.8] — 2026-05-03
 
@@ -670,25 +670,25 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Semver
 
-- Lockstep **`1.6.8`** with **`com.nexoider.coreaiunity`**.
+- Lockstep **`1.6.8`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.6.7] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.7 (Unity-only)
 
-- **Semver:** **`1.6.7`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`MeaiLlmClient`** incremental streaming + tests.
+- **Semver:** **`1.6.7`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity **`MeaiLlmClient`** incremental streaming + tests.
 
 ## [v1.6.6] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.6 (Unity-only)
 
-- **Semver:** **`1.6.6`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat streaming UI thread hop + clear button UXML.
+- **Semver:** **`1.6.6`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat streaming UI thread hop + clear button UXML.
 
 ## [v1.6.5] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.5 (Unity-only)
 
-- **Semver:** **`1.6.5`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat WebGL streaming gate alignment (**`CoreAiChatService`** / **`CoreAiChatPanel`**).
+- **Semver:** **`1.6.5`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity chat WebGL streaming gate alignment (**`CoreAiChatService`** / **`CoreAiChatPanel`**).
 
 ## [v1.6.4] — 2026-05-03
 
@@ -698,19 +698,19 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Semver
 
-- Lockstep **`1.6.4`** with **`com.nexoider.coreaiunity`**.
+- Lockstep **`1.6.4`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.6.3] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.3 (Unity-only)
 
-- **Semver:** **`1.6.3`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity host **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore` in Editor even when the active build target is WebGL** (`#if !UNITY_WEBGL || UNITY_EDITOR`).
+- **Semver:** **`1.6.3`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes — Unity host **`CoreAILifetimeScope`** registers **`FileAgentMemoryStore` in Editor even when the active build target is WebGL** (`#if !UNITY_WEBGL || UNITY_EDITOR`).
 
 ## [v1.6.2] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.6.2
 
-- **Semver:** lockstep **`1.6.2`** with **`com.nexoider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes in this drop (Unity: marshaler mirror + CraftingMemory / chat persistence tests + **`MaxRolledSummaryTokens`** deterministic compaction EditMode coverage — see Unity changelog).
+- **Semver:** lockstep **`1.6.2`** with **`com.neoxider.coreaiunity`**. No portable **`CoreAI.Core`** API or runtime behaviour changes in this drop (Unity: marshaler mirror + CraftingMemory / chat persistence tests + **`MaxRolledSummaryTokens`** deterministic compaction EditMode coverage — see Unity changelog).
 
 ## [v1.6.1] — 2026-05-03
 
@@ -723,7 +723,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Semver
 
-- Lockstep **`1.6.1`** with **`com.nexoider.coreaiunity`** (Unity: **`CoreAISettingsAsset`** fields + custom inspector foldout **Chat history summarization**; docs **`COREAI_SETTINGS.md`**).
+- Lockstep **`1.6.1`** with **`com.neoxider.coreaiunity`** (Unity: **`CoreAISettingsAsset`** fields + custom inspector foldout **Chat history summarization**; docs **`COREAI_SETTINGS.md`**).
 
 ## [v1.6.0] — 2026-05-03
 
@@ -738,13 +738,13 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Semver
 
-- Lockstep **`1.6.0`** with **`com.nexoider.coreaiunity`** (Unity: WebGL fetch SSE, **`RefreshOnUnauthorizedDecorator`** hardening, **`LlmClientRegistry`** wrapping, validators — see Unity changelog).
+- Lockstep **`1.6.0`** with **`com.neoxider.coreaiunity`** (Unity: WebGL fetch SSE, **`RefreshOnUnauthorizedDecorator`** hardening, **`LlmClientRegistry`** wrapping, validators — see Unity changelog).
 
 ## [v1.5.29] — 2026-05-03
 
 ### Lockstep with coreaiunity 1.5.29
 
-- **Semver:** lockstep **`1.5.29`** with **`com.nexoider.coreaiunity`** (no Core-only API change in this drop).
+- **Semver:** lockstep **`1.5.29`** with **`com.neoxider.coreaiunity`** (no Core-only API change in this drop).
 
 ## [v1.5.28] — 2026-05-02
 
@@ -755,7 +755,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`CompositeRoleStructuredResponsePolicy`** routes **`PlainChat`** and **`SmartChat`** through **`PlayerChatResponsePolicy`** (free-form text).
 - **`InGameLlmChatService`** uses **`SmartChat`** for system prompt + **`AgentRoleId`**.
 - Demo / defaults: **`CoreAiChatConfig`** default **`RoleId`** is **`SmartChat`** (Unity package).
-- **Semver:** lockstep **`1.5.28`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.28`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.27] — 2026-05-02
 
@@ -767,14 +767,14 @@ await orch.RunTaskAsync(new AiTaskRequest {
   - **`PlainChat`**: persisted chat history ON, `MemoryTool` OFF.
   - **`SmartChat`**: persisted chat history ON, `MemoryTool` ON (`append`).
 - **`LlmConversationalRolePolicy`** treats both **`PlainChat`** and **`SmartChat`** as conversational user-facing roles.
-- **Semver:** lockstep **`1.5.27`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.27`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.26] — 2026-05-01
 
 ### HTTP SSE (`HttpClient`) — keep client until body is read
 
 - **`HttpClientOpenAiTransport.OpenSseResponseStreamAsync`** no longer wraps **`HttpClient`** in **`using`** for the streaming path. Returning from the method disposed **`HttpClient`** immediately, which **canceled** the open SSE request (`The request was aborted: The request was canceled.`, `chunks=0`). **`OpenAiHttpSseOpenResult`** now owns **`HttpClient`** and disposes it **after** the content stream and **`HttpResponseMessage`**.
-- **Semver:** lockstep **`1.5.26`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.26`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.25] — 2026-05-01
 
@@ -783,7 +783,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`IOpenAiHttpTransport`**, **`OpenAiHttpPostRequest`**, **`OpenAiHttpPostResult`**, **`OpenAiHttpSseOpenResult`** — portable HTTP surface for **`/chat/completions`** without **`UnityEngine`** in the contract.
 - **`HttpClientOpenAiTransport`** — default **`System.Net.Http`** implementation (SSE + non-stream); honors **`MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory`** in the Editor.
 - **`MeaiOpenAiChatClient`** — requires **`IOpenAiHttpTransport`**; convenience ctor **`(settings, log)`** when **`!UNITY_WEBGL || UNITY_EDITOR`**. When **`SupportsSseStreaming`** is false, **`GetStreamingResponseAsync`** uses full JSON completion and **simulated** **`ChatResponseUpdate`** yields.
-- **Semver:** lockstep **`1.5.25`** with **`com.nexoider.coreaiunity`** (Unity: **`UnityWebRequestOpenAiTransport`**, WebGL scene guard, docs, tests).
+- **Semver:** lockstep **`1.5.25`** with **`com.neoxider.coreaiunity`** (Unity: **`UnityWebRequestOpenAiTransport`**, WebGL scene guard, docs, tests).
 
 ## [v1.5.24] — 2026-05-01
 
@@ -792,7 +792,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`MeaiOpenAiChatClient`** — SSE lines accept **`data:`** with or without a space after the colon (LM Studio / llama.cpp variants). **`ExtractDeltaUpdate`** falls back to **`choices[0].message`** and **`choices[0].text`** when **`delta.content`** is empty so streamed replies are not dropped.
 - **Diagnostics** — log **HTTP status** and **Content-Type** immediately after response headers; **Warn** when the stream ends with **zero** parsed deltas (empty or non–OpenAI-shaped chunks).
 - **Edit Mode** — extra **`MeaiOpenAiChatClientSseEditModeTests`** cases for `data:` variants and message-only chunks.
-- **Semver:** lockstep **`1.5.24`** with **`com.nexoider.coreaiunity`** (Unity package: fullscreen chat option in **`CoreAiChatConfig`**).
+- **Semver:** lockstep **`1.5.24`** with **`com.neoxider.coreaiunity`** (Unity package: fullscreen chat option in **`CoreAiChatConfig`**).
 
 ## [v1.5.23] — 2026-05-01
 
@@ -801,13 +801,13 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`MeaiOpenAiChatClient`** — moved to **`CoreAI.Infrastructure.Llm`** in portable **`CoreAI.Core`**: **`System.Net.Http.HttpClient`** for non-streaming and SSE (no **UnityEngine** / **UnityWebRequest**). **`await`** without **`ConfigureAwait(false)`** so synchronization context is preserved when the host sets one (e.g. Unity / WebGL main thread).
 - **`IOpenAiHttpSettings`**, **`OpenAiHttpConstants`** — live next to the client in portable Core (Unity layer re-exports or implements the same settings surface).
 - **`UNITY_EDITOR`:** **`MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory`** — optional **`HttpClient`** factory for EditMode tests with **`HttpMessageHandler`** mocks (**must be cleared after tests**).
-- **Semver:** lockstep **`1.5.23`** with **`com.nexoider.coreaiunity`** (Unity package adds **`MeaiOpenAiChatClientHttpEditModeTests`**).
+- **Semver:** lockstep **`1.5.23`** with **`com.neoxider.coreaiunity`** (Unity package adds **`MeaiOpenAiChatClientHttpEditModeTests`**).
 
 ## [v1.5.22] — 2026-05-01
 
-### Lockstep packaging (`com.nexoider.coreaiunity`)
+### Lockstep packaging (`com.neoxider.coreaiunity`)
 
-- **Semver:** lockstep **`1.5.22`** with **`com.nexoider.coreaiunity`**. No portable **CoreAI.Core** API or behavior change; **v1.5.22** composition fix (**`RegisterCorePortable` / `IAgentMemoryStore`**) ships in the Unity package only.
+- **Semver:** lockstep **`1.5.22`** with **`com.neoxider.coreaiunity`**. No portable **CoreAI.Core** API or behavior change; **v1.5.22** composition fix (**`RegisterCorePortable` / `IAgentMemoryStore`**) ships in the Unity package only.
 
 ## [v1.5.21] — 2026-05-01
 
@@ -817,13 +817,13 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`LlmStructuredPayloadSanitizer`** — JSON/markdown fence helpers moved out of **`ProgrammerLuaResponseParser`** (renamed from duplicate **`LlmResponseSanitizer`** type in **`CoreAI.Ai`**); **`CoreAI.Infrastructure.Llm.LlmResponseSanitizer`** remains for system-prompt echo stripping.
 - **`Log.Instance`** backing field is **`volatile`** for safer multi-threaded reads after composition.
 - **`AgentConfigExtensions.Ask`** — fire-and-forget uses **`Task`** (`RunAskFireAndForgetAsync`) instead of **`async void`**.
-- **Semver:** lockstep **`1.5.21`** with **`com.nexoider.coreaiunity`** (Unity changelog lists WebGL/chat/composition changes).
+- **Semver:** lockstep **`1.5.21`** with **`com.neoxider.coreaiunity`** (Unity changelog lists WebGL/chat/composition changes).
 
 ## [v1.5.20] — 2026-05-01
 
 ### Lockstep packaging (WebGL host composition)
 
-- **Semver:** lockstep **`1.5.20`** with **`com.nexoider.coreaiunity`**. No portable **CoreAI.Core** API or **`FileConversationSummaryStore`** implementation change; **`CoreAILifetimeScope`** WebGL registration lives in the Unity package (**`InMemoryConversationSummaryStore`** instead of file-backed summaries).
+- **Semver:** lockstep **`1.5.20`** with **`com.neoxider.coreaiunity`**. No portable **CoreAI.Core** API or **`FileConversationSummaryStore`** implementation change; **`CoreAILifetimeScope`** WebGL registration lives in the Unity package (**`InMemoryConversationSummaryStore`** instead of file-backed summaries).
 
 ## [v1.5.19] — 2026-05-01
 
@@ -831,7 +831,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 - **`LlmAssistedConversationContextManager`** — XML `<remarks>` state that the orchestrator’s **main** system prompt (role instructions, universal prefix, memory, tool contract) is **never** included in the auxiliary compaction `LlmCompletionRequest`; only transcript-related text goes into **`UserPayload`**, **`ChatHistory`** stays **null**, and **`LlmContextCompactionOptions.SystemPrompt`** supplies the summarizer instructions.
 - **`LlmContextCompactionOptions.SystemPrompt`** — property docs clarify it is **compaction-only**, not the primary role system string.
-- **Semver:** lockstep **`1.5.19`** with **`com.nexoider.coreaiunity`** (Unity package ships Edit/Play tests and settings docs for the same contract).
+- **Semver:** lockstep **`1.5.19`** with **`com.neoxider.coreaiunity`** (Unity package ships Edit/Play tests and settings docs for the same contract).
 
 ## [v1.5.18] — 2026-04-30
 
@@ -840,20 +840,20 @@ await orch.RunTaskAsync(new AiTaskRequest {
 - **`LlmConversationalRolePolicy`** — classifies roles that should get **short user-facing** replies in **stub/offline** flows (e.g. **`PlainChat`**, **`SmartChat`**, **`AINpc`**, ids containing **`teacher` / mentor / tutor`**, names ending with **`chat`**, excluding **`Merchant`**).
 - **`StubLlmClient`** — conversational roles return **`[stub] Offline — LLM unavailable (stub).`** instead of echoing **`UserPayload`** or emitting JSON **`ApplyWaveModifier`** for custom ids like **`Teacher`**.
 - **`AiOrchestrator.RunTaskAsync`** — when **`AiTaskRequest.SourceTag`** is **`Chat`**, LLM failure / empty result / authority denied returns a **short printable message** (error text or default) instead of **`null`**, so **`CoreAiChatService`** can show text in the bubble. Non-chat callers still get **`null`** on failure.
-- **Semver:** lockstep **`1.5.18`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.18`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.17] — 2026-04-30
 
 ### Lockstep packaging (Unity — `UnityMainThreadLlmAsyncMarshaler`)
 
-- **Semver:** lockstep **`1.5.17`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change.
+- **Semver:** lockstep **`1.5.17`** with **`com.neoxider.coreaiunity`** — no portable **CoreAI.Core** API change.
 - **`UnityMainThreadLlmAsyncMarshaler`:** **`Application.isPlaying`** is **never** read from non–script-main threads (`ManagedThreadId` vs **`onBeforeRender`** mirror). Avoids **`get_isPlaying` / AggregateException** on MEAI **`Task`/thread-pool paths** (`UnityMainThreadLlmAsyncMarshalerEditModeTests.InvokeAsync_WhenNotPlaying_CompletesUnderMainThreadWait_FromThreadPool`).
 
 ## [v1.5.16] — 2026-04-30
 
 ### Lockstep packaging (Unity — `UnityMainThreadLlmAsyncMarshaler`)
 
-- **Semver:** lockstep **`1.5.16`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change.
+- **Semver:** lockstep **`1.5.16`** with **`com.neoxider.coreaiunity`** — no portable **CoreAI.Core** API change.
 - **`UnityMainThreadLlmAsyncMarshaler`** (Unity package): **`Application.isPlaying`** is not reliably readable from MEAI continuation **threads** (**main thread / `UnityException`**). Use a **`Application.onBeforeRender`** **mirror**: **edit-time / unknown** ⇒ same **inline** path as **`!playing`** (**`ToolCallExtractionParityEditModeTests`**); **mirror says Editor Play Mode** ⇒ **`UniTask.SwitchToMainThread`** (keeps **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** valid in the Editor).
 
 ## [v1.5.15] — 2026-04-30
@@ -862,13 +862,13 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 - **`FlattenAssistantContents`** — walks assistant turns using non-generic **`IList`** contents (MEAI **`ChatMessage.Contents`**), instead of LINQ **`SelectMany(... ?? Enumerable.Empty<AIContent>())`**, which could yield **no** **`FunctionCallContent`** items → false “text-only” exits and **premature consecutive-error stops** (`EditMode` **`SmartToolCallingChatClientEditModeTests`** regressions).
 - **`ConcatenateAssistantTextContents`** — enumerates **`Contents`** via **`object`** for the same **IList** contract.
-- **Semver:** lockstep **`1.5.15`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.15`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.14] — 2026-04-30
 
 ### Lockstep + API clarity (behavior in Unity package)
 
-- **Semver:** lockstep **`1.5.14`** with **`com.nexoider.coreaiunity`** — no new portable **CoreAI.Core** symbols; **Edit Mode** `UnityMainThreadLlmAsyncMarshaler` bypass (**`UNITY_EDITOR`**, **`!Application.isPlaying`**) and regression tests live in the Unity package.
+- **Semver:** lockstep **`1.5.14`** with **`com.neoxider.coreaiunity`** — no new portable **CoreAI.Core** symbols; **Edit Mode** `UnityMainThreadLlmAsyncMarshaler` bypass (**`UNITY_EDITOR`**, **`!Application.isPlaying`**) and regression tests live in the Unity package.
 - **Docs / XML:** **`CoreAi`** static entrypoint comments — **non-streaming** chat is async via **`await`** only; discourage **`.Result` / `.Wait()`** on Unity’s managed **main thread**.
 
 ## [v1.5.13] — 2026-04-30
@@ -877,7 +877,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 - **Edit Mode:** **`LlmAsyncMarshalerEditModeTests`**, **`ToolExecutionPolicyEditModeTests.ExecuteSingle_UsesToolInvocationMarshaler_WhenProvided`**, **`CoreAISettingsToolMarshalerEditModeTests`**.
 - **Docs (Unity monorepo):** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`Assets/CoreAiUnity/Tests/PlayMode/README.md`** — document **`ToolInvocationMarshaler`** + HTTP main-thread semantics.
-- **Semver:** lockstep **`1.5.13`** with **`com.nexoider.coreaiunity`** (no portable API change).
+- **Semver:** lockstep **`1.5.13`** with **`com.neoxider.coreaiunity`** (no portable API change).
 
 ## [v1.5.12] — 2026-04-30
 
@@ -885,19 +885,19 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 - **`ILlmAsyncMarshaler`** + **`PassThroughLlmAsyncMarshaler`** — host can marshal MEAI **`AIFunction.InvokeAsync`** before Unity-only tool bodies run.
 - **`ICoreAISettings.ToolInvocationMarshaler`** (default: pass-through) — **`ToolExecutionPolicy`** wraps each native tool call.
-- **Semver:** lockstep **`1.5.12`** with **`com.nexoider.coreaiunity`**.
+- **Semver:** lockstep **`1.5.12`** with **`com.neoxider.coreaiunity`**.
 
 ## [v1.5.11] — 2026-05-01
 
 ### Meta
 
-- **Semver:** lockstep **`1.5.11`** with **`com.nexoider.coreaiunity`** — no portable **CoreAI.Core** API change in this tag; sibling Unity package reorganizes Play Mode tests into **`FastNoLlm`**, **`LlmVerification`**, and **`Scenarios`** assemblies (`Assets/CoreAiUnity/Tests/PlayMode/`).
+- **Semver:** lockstep **`1.5.11`** with **`com.neoxider.coreaiunity`** — no portable **CoreAI.Core** API change in this tag; sibling Unity package reorganizes Play Mode tests into **`FastNoLlm`**, **`LlmVerification`**, and **`Scenarios`** assemblies (`Assets/CoreAiUnity/Tests/PlayMode/`).
 
 ## [v1.5.10] — 2026-05-01
 
 ### Version alignment
 
-- **`com.nexoider.coreai` 1.5.10** is released in lockstep with **`com.nexoider.coreaiunity` 1.5.10** so UPM projects can pin the same version on both packages.
+- **`com.neoxider.coreai` 1.5.10** is released in lockstep with **`com.neoxider.coreaiunity` 1.5.10** so UPM projects can pin the same version on both packages.
 - **Portable Core** (`Assets/CoreAI`): no additional API or behavior changes in this tag beyond the version bump; Unity-side fixes and tooling live in the Unity package changelog.
 
 #### Package **`1.5.10`**.
@@ -906,7 +906,7 @@ await orch.RunTaskAsync(new AiTaskRequest {
 
 ### Release alignment
 
-- **`com.nexoider.coreai`** and **`com.nexoider.coreaiunity`** use the **same semver (1.5.9)** in this monorepo drop so UPM consumers can pin one version mentally.
+- **`com.neoxider.coreai`** and **`com.neoxider.coreaiunity`** use the **same semver (1.5.9)** in this monorepo drop so UPM consumers can pin one version mentally.
 
 ### WebGL / IL2CPP — LLM + orchestration continuation hygiene
 
@@ -924,7 +924,7 @@ Single-threaded Unity player loop: avoid unnecessary **SyncContext-captured** co
 
 ### LLM — MEAI assistant text helper
 
-- **`SmartToolCallingChatClient.ConcatenateAssistantTextContents(ChatResponse)`** — joins all **`TextContent`** parts in **`response.Messages`**. Used by **`com.nexoider.coreaiunity`** **`MeaiLlmClient.CompleteAsync`** when **`ChatResponse.Text`** is empty but messages still hold text (provider / MEAI shape differences).
+- **`SmartToolCallingChatClient.ConcatenateAssistantTextContents(ChatResponse)`** — joins all **`TextContent`** parts in **`response.Messages`**. Used by **`com.neoxider.coreaiunity`** **`MeaiLlmClient.CompleteAsync`** when **`ChatResponse.Text`** is empty but messages still hold text (provider / MEAI shape differences).
 
 #### Package **`1.5.6`**.
 
@@ -1065,7 +1065,7 @@ Two production resilience features for robust LLM orchestration.
 - ✨ **`ComputeBackoff(attempt)`** — exponential backoff helper: `2^(attempt+1)` capped at 30s.
 - 🧪 **EditMode:** `TryRepairToolName` (5 tests), `ExecuteSingle` repair (2 tests), `ComputeBackoff` curve, text-extraction edge cases (4 tests).
 - 🧪 **PlayMode:** `ToolNameRepairPlayModeTests` — 3 hybrid scripted+real-LLM tests for repair, self-correction, and mixed-case text prefix.
-- 🔧 Package version **`1.4.0`**; align `com.nexoider.coreaiunity` to **`1.4.0`**.
+- 🔧 Package version **`1.4.0`**; align `com.neoxider.coreaiunity` to **`1.4.0`**.
 
 ## [v1.3.0] — 2026-04-30
 
@@ -1075,7 +1075,7 @@ Two production resilience features for robust LLM orchestration.
 - ✨ **`LlmToolCallTrace`** struct in `CoreAI.Ai` — `(Name, Success, DurationMs, Source)` record for one tool call. Source is `native` / `text` / `duplicate` / `missing`.
 - ✨ **`LlmCompletionResult.ExecutedToolCalls`** + **`LlmStreamChunk.ExecutedToolCalls`** — non-empty when the turn invoked tools. Stream propagates the list on the `IsDone` chunk; non-streaming on the result. Used by Unity-side `LoggingLlmClientDecorator` to render `tools=[name(ok,12ms)]` on every `LLM ◀` line.
 - 🛡 **`AiOrchestrator`** runs `LlmToolCallTextExtractor.StripForDisplay` on the assistant text before persisting to chat history or publishing `ApplyAiGameCommand`, both for sync and streaming paths. Logs a warning if the strip changed anything (defense-in-depth — should be a no-op once Unity-side extraction succeeds).
-- Package version **`1.3.0`**; align `com.nexoider.coreaiunity` to **`1.3.0`**.
+- Package version **`1.3.0`**; align `com.neoxider.coreaiunity` to **`1.3.0`**.
 
 ## [v1.2.1] — 2026-04-29
 
@@ -1087,7 +1087,7 @@ Two production resilience features for robust LLM orchestration.
 - **Tests:** `RunTaskAsync_EmptyAllowedToolNames_SendsNoTools`, `RunStreamingAsync_UsesSameToolFiltering_AsRunTaskAsync`.
 - **EditMode:** `CoreServicesInstallerEditModeTests` — no invalid `GlobalMessagePipe.SetProvider(null)` in TearDown (MessagePipe does not support null).
 
-Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
+Package version **`1.2.1`**; align `com.neoxider.coreaiunity` to **`1.2.2`**.
 
 ## [v1.2.0] — 2026-04-29
 
@@ -1096,7 +1096,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - Added per-role runtime context providers on `AgentMemoryPolicy` so lesson slots can inject context without UI prompt-spaghetti.
 - Added `AllowedToolNames` filtering and chat-only tool suppression on `AiTaskRequest`/`LlmCompletionRequest`.
 - Added `ILlmToolCallHistory`, `ScriptedLlmClient`, `LlmToolResultEnvelope`, and `IAgentTurnTraceSink` for deterministic tests, structured tool results, and diagnostics.
-- Package version **`1.2.0`**; aligned with `com.nexoider.coreaiunity` **`1.2.0`**.
+- Package version **`1.2.0`**; aligned with `com.neoxider.coreaiunity` **`1.2.0`**.
 
 ## [v1.1.0] — 2026-04-29
 
@@ -1106,13 +1106,13 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - ✨ **Portable registry and policy contracts** — added `ILlmClientRegistry`, `ILlmAuthContextProvider`, `ILlmEntitlementPolicy`, `LlmEntitlementDecision`, `ILlmUsageSink`, and `LlmUsageRecord`.
 - ✨ **Provider error DTO** — added `LlmProviderError` for stable backend/provider codes such as `quota_exceeded`, `subscription_required`, `model_not_allowed`, and `rate_limited`.
 - 📝 **Docs:** added `Assets/CoreAI/Docs/LLM_ROUTING.md`.
-- 🔧 Package version **`1.1.0`**; aligned with `com.nexoider.coreaiunity` **`1.1.0`**.
+- 🔧 Package version **`1.1.0`**; aligned with `com.neoxider.coreaiunity` **`1.1.0`**.
 
 ## [v1.0.3] — 2026-04-29
 
 ### Unity chat UX alignment
 
-- 🔧 Package version **`1.0.3`**; aligned with `com.nexoider.coreaiunity` **`1.0.3`**.
+- 🔧 Package version **`1.0.3`**; aligned with `com.neoxider.coreaiunity` **`1.0.3`**.
 
 ## [v1.0.2] — 2026-04-28
 
@@ -1121,7 +1121,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - ✨ **Conversation context management** — added portable `IConversationContextManager`, `ConversationContextSnapshot`, and `IConversationSummaryStore` contracts for long-running chat history compaction.
 - ✨ **Deterministic summary fallback** — `DeterministicConversationContextManager` keeps recent messages in chat history and moves older turns into a `## Conversation Summary` system section without requiring an extra LLM call.
 - ✨ **Tool-call identity** — added `LlmToolCallInfo` with `CallId`, `TraceId`, role, tool name, and sanitized arguments. Tool lifecycle events now expose `Info` while preserving `ToolName` and `ArgumentsJson` accessors.
-- 🔧 Package version **`1.0.2`**; aligned with `com.nexoider.coreaiunity` **`1.0.2`**.
+- 🔧 Package version **`1.0.2`**; aligned with `com.neoxider.coreaiunity` **`1.0.2`**.
 
 ## [v1.0.1] — 2026-04-28
 
@@ -1132,7 +1132,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - ✨ **Runtime prompt context** — `IAiPromptContextProvider` lets projects append per-request context to prompts without mutating static role configuration.
 - ✨ **Scoped memory contracts** — `AgentMemoryScope`, `IAgentMemoryScopeProvider`, and `ScopedAgentMemoryStoreDecorator` allow user/session/topic isolation while preserving role-only keys by default.
 - ✨ **Tool lifecycle events** — added portable `LlmToolCallStarted`, `LlmToolCallCompleted`, and `LlmToolCallFailed` contracts for diagnostics and gameplay integrations.
-- 🔧 Package version **`1.0.1`**; aligned with `com.nexoider.coreaiunity` **`1.0.1`**.
+- 🔧 Package version **`1.0.1`**; aligned with `com.neoxider.coreaiunity` **`1.0.1`**.
 
 ## [v1.0.0] — 2026-04-28
 
@@ -1140,13 +1140,13 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 - ✨ **`LlmExecutionMode`** — portable public mode contract for `Auto`, `LocalModel`, `ClientOwnedApi`, `ClientLimited`, `ServerManagedApi`, and `Offline`.
 - ✨ **LLM routing events** — added portable `LlmBackendSelected`, `LlmRequestStarted`, and `LlmRequestCompleted` message contracts for Unity MessagePipe integration without adding MessagePipe dependencies to `CoreAI.Core`.
-- 🔧 Package version **`1.0.0`**; aligned with `com.nexoider.coreaiunity` **`1.0.0`**.
+- 🔧 Package version **`1.0.0`**; aligned with `com.neoxider.coreaiunity` **`1.0.0`**.
 
 ## [v0.25.14] — 2026-04-27
 
 ### Release
 
-- 🔧 Version **0.25.14**; release train aligned with `com.nexoider.coreaiunity` **0.25.14** (see Unity package changelog for `CoreAiChatPanel` UX fixes).
+- 🔧 Version **0.25.14**; release train aligned with `com.neoxider.coreaiunity` **0.25.14** (see Unity package changelog for `CoreAiChatPanel` UX fixes).
 
 ## [v0.25.13] — 2026-04-27
 
@@ -1155,7 +1155,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - 🐛 **`CompatibilityLlmTool` native argument binding** — the MEAI executor parameter is now named `ingredients`, matching the JSON schema. Valid model calls such as `{"ingredients":["Fire","Earth"]}` no longer fail before reaching the tool with a missing `ingredientsObj` argument.
 - 🧪 **EditMode coverage:** added an `AIFunction.InvokeAsync` regression for `check_compatibility` using the public `ingredients` argument name.
 - 📝 **`MEAI_TOOL_CALLING.md`** — documents that .NET `AIFunction` parameter names must match `ILlmTool.ParametersSchema` property names.
-- 🔧 Version **`0.25.13`**; `com.nexoider.coreaiunity` aligned to **`0.25.13`**.
+- 🔧 Version **`0.25.13`**; `com.neoxider.coreaiunity` aligned to **`0.25.13`**.
 
 ## [v0.25.12] — 2026-04-27
 
@@ -1164,7 +1164,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - 🐛 **`QueuedAiOrchestrator` latest-wins scopes** — `CancellationScope` now cancels older active and pending work as soon as a newer task with the same scope is enqueued, including streaming tasks.
 - 🐛 **Queue fairness and cancellation** — equal priorities are FIFO, streaming and non-streaming tasks share one effective priority order, and pending tasks observe external cancellation before they start.
 - 🧪 **EditMode coverage:** queue tests now cover priority ordering, FIFO tie-breaking, active and pending scope cancellation, pending external cancellation, `CancelTasks(scope)`, and shared sync/stream priority.
-- 🔧 Version **`0.25.12`**; `com.nexoider.coreaiunity` aligned to **`0.25.12`**.
+- 🔧 Version **`0.25.12`**; `com.neoxider.coreaiunity` aligned to **`0.25.12`**.
 
 ## [v0.25.11] — 2026-04-27
 
@@ -1173,14 +1173,14 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - ✨ **`AiOrchestrator` tool contract injection** — roles with registered tools now get a compact `## Tool Contract` block in the system prompt that lists available tools, schemas, and rules: call tools through the tool interface when requested, pass required arguments structurally, and do not claim registered tools are unavailable. This nudges local models toward real tool calls without weakening tests.
 - 🐛 **Structured retry keeps tool context** — the structured-response retry path now preserves `Tools`, `ChatHistory`, `ForcedToolMode`, `RequiredToolName`, and `MaxOutputTokens` from the original request instead of retrying with text-only context.
 - 🧪 **EditMode coverage:** orchestrator regression test verifies that tool-enabled roles receive the tool contract, required-tool hint, and parameter schema in `LlmCompletionRequest.SystemPrompt`.
-- 🔧 Version **`0.25.11`**; `com.nexoider.coreaiunity` aligned to **`0.25.11`**.
+- 🔧 Version **`0.25.11`**; `com.neoxider.coreaiunity` aligned to **`0.25.11`**.
 
 ## [v0.25.10] — 2026-04-27
 
 ### Agent memory policy defaults
 
 - 🔧 **`AgentMemoryPolicy.RoleMemoryConfig` constructor** — default `persistChatHistory` is now **`false`**. Built-in agent roles that use only the two-argument form (`MemoryTool` + default action) therefore do **not** imply cross-session chat persistence when `WithChatHistory` is off (matches the role table in docs and `AgentBuilderChatHistoryEditModeTests`). **`PlainChat`** / **`SmartChat`** still set `persistChatHistory: true` explicitly in the policy constructor.
-- 🔧 Version **`0.25.10`**; `com.nexoider.coreaiunity` aligned to **`0.25.10`**.
+- 🔧 Version **`0.25.10`**; `com.neoxider.coreaiunity` aligned to **`0.25.10`**.
 
 ## [v0.25.9] — 2026-04-27
 
@@ -1190,7 +1190,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 - ✨ **`AgentMemoryPolicy.RoleMemoryConfig.MaxOutputTokens`** + **`SetMaxOutputTokens(roleId, int?)`** — policy-level storage for the per-role override. `null` / non-positive values clear the override.
 - 🔧 **Priority via orchestrator:** `AiTaskRequest.MaxOutputTokens` (per-call) → `AgentBuilder.WithMaxOutputTokens` / policy (per-agent) → `ICoreAISettings.MaxTokens` (global fallback in the Unity LLM client) → provider default. Direct `LlmCompletionRequest.MaxOutputTokens` remains the highest priority when calling an `ILlmClient` directly.
 - 🧪 **EditMode coverage:** orchestrator tests for per-agent forwarding, per-call override priority, and unset role fallback.
-- 🔧 Version bumped to **`0.25.9`** so `com.nexoider.coreai` and `com.nexoider.coreaiunity` publish with matching package versions.
+- 🔧 Version bumped to **`0.25.9`** so `com.neoxider.coreai` and `com.neoxider.coreaiunity` publish with matching package versions.
 
 ## [v0.25.4] — 2026-04-27
 
@@ -1204,30 +1204,30 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ## [v0.25.7] — 2026-04-27
 
-### Release sync with `com.nexoider.coreaiunity 0.25.7`
+### Release sync with `com.neoxider.coreaiunity 0.25.7`
 
-- 🔧 **`com.nexoider.coreai`** stays at **`0.25.3`** — no public **`CoreAI.Core`** API changes. Unity-only release: Editor `CoreAISettings` bootstrap, PlayMode recall on 5xx, `TROUBLESHOOTING`. Details: `Assets/CoreAiUnity/CHANGELOG.md` (0.25.7).
+- 🔧 **`com.neoxider.coreai`** stays at **`0.25.3`** — no public **`CoreAI.Core`** API changes. Unity-only release: Editor `CoreAISettings` bootstrap, PlayMode recall on 5xx, `TROUBLESHOOTING`. Details: `Assets/CoreAiUnity/CHANGELOG.md` (0.25.7).
 
 ## [v0.25.3] — 2026-04-26
 
-### Release sync with `com.nexoider.coreaiunity 0.25.3`
+### Release sync with `com.neoxider.coreaiunity 0.25.3`
 
 - 🔧 Package version bumped to `0.25.3`. Manifest dependency `coreaiunity 0.25.3 → coreai 0.25.3`.
 - ✅ No **`CoreAI.Core`** public API changes — Unity-layer release only. Details: `Assets/CoreAiUnity/CHANGELOG.md` (0.25.3: chat hotkeys C/Esc, `Update` + poll when UITK has no focus, `FocusController` fix, `OnCollapsedStateChanged` hook, UXML/tooltips).
 
 ## [v0.25.2] — 2026-04-26
 
-### Release sync with `com.nexoider.coreaiunity 0.25.2`
+### Release sync with `com.neoxider.coreaiunity 0.25.2`
 
 - 🔧 Package version bumped to `0.25.2`. Manifest dependency `coreaiunity 0.25.2 → coreai 0.25.2`.
 - ✅ No `CoreAI.Core` public API changes — release sync only. See CoreAI Unity CHANGELOG 0.25.2 (UXML emoji cleanup + new `Docs/STREAMING_WEBGL_TODO.md` with a plan to fix WebGL SSE streaming in `OpenAiChatLlmClient.CompleteStreamingAsync`).
 
 ## [v0.25.1] — 2026-04-26
 
-### Release sync — version alignment with `com.nexoider.coreaiunity 0.25.1`
+### Release sync — version alignment with `com.neoxider.coreaiunity 0.25.1`
 
-- 🔧 Package version bumped to `0.25.1` to align with `com.nexoider.coreaiunity 0.25.1` (two WebGL/input fixes — see below).
-- 🔧 Manifest dependency `com.nexoider.coreaiunity` now requires `com.nexoider.coreai 0.25.1` (was `0.25.0`).
+- 🔧 Package version bumped to `0.25.1` to align with `com.neoxider.coreaiunity 0.25.1` (two WebGL/input fixes — see below).
+- 🔧 Manifest dependency `com.neoxider.coreaiunity` now requires `com.neoxider.coreai 0.25.1` (was `0.25.0`).
 - ✅ **No breaking changes to `CoreAI.Core` API** — pure release sync. Existing code using `LlmToolChoiceMode`, `AiTaskRequest.ForcedToolMode`, orchestrator, etc. continues to work.
 
 ### CoreAI Unity 0.25.1 release context (what actually changed in the Unity layer)
@@ -1248,27 +1248,27 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Release sync
 
-- 🔧 Version bumped to `0.25.0` (minor — new public API). Dependency contract `com.nexoider.coreaiunity` `0.25.0+`.
+- 🔧 Version bumped to `0.25.0` (minor — new public API). Dependency contract `com.neoxider.coreaiunity` `0.25.0+`.
 
 ## [v0.24.2] — 2026-04-26
 
 ### Release sync
 
-- 🔧 Version bumped to `0.24.2` to match `com.nexoider.coreaiunity` `0.24.2`.
+- 🔧 Version bumped to `0.24.2` to match `com.neoxider.coreaiunity` `0.24.2`.
 - 🔧 Synced Unity-layer hardening: HTTP error response body logging in `MeaiOpenAiChatClient` (both non-streaming and SSE paths), `ToolExecutionPolicy.maxConsecutiveErrors` clamped to `Math.Max(1, value)`.
 
 ## [v0.24.0] — 2026-04-26
 
 ### Streaming tool-calling hardening (release sync)
 
-- 🔧 Version bumped to `0.24.0` to match `com.nexoider.coreaiunity` `0.24.0`.
+- 🔧 Version bumped to `0.24.0` to match `com.neoxider.coreaiunity` `0.24.0`.
 - 🔧 Synced Unity-layer hardening: `ToolExecutionPolicy` (shared duplicate detection / error tracking), pattern-aware text JSON parser with multi-tool and code-block protection, native SSE `delta.tool_calls` parsing, stop/clear race condition fix.
 
 ## [v0.23.3] — 2026-04-26
 
 ### Release sync
 
-- 🔧 Version bumped to `0.23.3` to match `com.nexoider.coreaiunity` `0.23.3`.
+- 🔧 Version bumped to `0.23.3` to match `com.neoxider.coreaiunity` `0.23.3`.
 - 🔧 Synced Unity-layer reliability update: idempotent `CoreAIGameEntryPoint` startup guard prevents duplicate CoreAI initialization in scenes with accidental double composition.
 - 🧪 Synced test coverage additions in Unity host: `CoreAIGameEntryPointEditModeTests` and additional streaming/tool-cycle guards in `MeaiLlmClientEditModeTests`.
 
@@ -1276,20 +1276,20 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Release sync
 
-- 🔧 Version bumped to `0.23.2` to match `com.nexoider.coreaiunity` `0.23.2` (includes non-stream HTTP cancellation fix used by Chat stop / Esc).
+- 🔧 Version bumped to `0.23.2` to match `com.neoxider.coreaiunity` `0.23.2` (includes non-stream HTTP cancellation fix used by Chat stop / Esc).
 
 ## [v0.23.1] — 2026-04-26
 
 ### Release sync
 
-- 🔧 Version bumped to `0.23.1` to match `com.nexoider.coreaiunity` `0.23.1` and ensure downstream projects resolve the latest reliability fixes.
+- 🔧 Version bumped to `0.23.1` to match `com.neoxider.coreaiunity` `0.23.1` and ensure downstream projects resolve the latest reliability fixes.
 
 ## [v0.23.0] — 2026-04-25
 
 ### Agent Control API UI
 - ✨ **Chat UI updated.** `CoreAiChatPanel` adds a stop control that interrupts agent generation.
 - ✨ **Default clear behavior.** The clear control in `CoreAiChatPanel` clears the UI and short-term chat history (`CoreAi.ClearContext(roleId, true, false)`). Full reset (including long-term memory) uses `ClearChat(clearChatHistory: true, clearLongTermMemory: true)`.
-- 🔧 `com.nexoider.coreai` / `com.nexoider.coreaiunity` package versions aligned.
+- 🔧 `com.neoxider.coreai` / `com.neoxider.coreaiunity` package versions aligned.
 - 🔧 Release synced with the Unity layer for streaming + tool calling (`MeaiLlmClient` single-cycle: tool JSON suppressed in UI, tools run inside the same streaming pipeline).
 - 🔧 For tool roles (`AgentMode.ToolsAndChat`, `AgentMode.ToolsOnly`) streaming is enabled per-role by default; `ChatOnly` still follows global/explicit overrides.
 - 🔧 PlayMode reliability synced: stricter HTTP stream cancellation plus stabilized `Streaming_CancellationToken_StopsStream` and `MemoryTool_AppendsMemory`.
@@ -1305,7 +1305,7 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.22.0** (Unity-layer release: `CoreAiChatPanel` stop via `Esc` and send-button stop state + tooltip). No portable-core API changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.22.0** (Unity-layer release: `CoreAiChatPanel` stop via `Esc` and send-button stop state + tooltip). No portable-core API changes.
 
 ## [v0.21.9] — 2026-04-25
 
@@ -1316,43 +1316,43 @@ Package version **`1.2.1`**; align `com.nexoider.coreaiunity` to **`1.2.2`**.
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.8** (Unity layer: LLMUnity preprocessor guard refactor, automatic `COREAI_HAS_LLMUNITY` via `versionDefines`, fixes `CS0246` when LLMUnity is absent). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.8** (Unity layer: LLMUnity preprocessor guard refactor, automatic `COREAI_HAS_LLMUNITY` via `versionDefines`, fixes `CS0246` when LLMUnity is absent). No portable-core changes.
 
 ## [v0.21.7] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.7** (Unity layer: `CoreAiChatPanel` FAB collapse, auto-collapse on small screens, `PlayerPrefs` persistence). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.7** (Unity layer: `CoreAiChatPanel` FAB collapse, auto-collapse on small screens, `PlayerPrefs` persistence). No portable-core changes.
 
 ## [v0.21.6] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.6** (Unity layer: removed forced `InputField` focus hacks in `CoreAiChatPanel`, WebGL caret flicker / lost keys fix). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.6** (Unity layer: removed forced `InputField` focus hacks in `CoreAiChatPanel`, WebGL caret flicker / lost keys fix). No portable-core changes.
 
 ## [v0.21.4] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.4** (Unity layer: WebGL input focus hardening in `CoreAiChatPanel`). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.4** (Unity layer: WebGL input focus hardening in `CoreAiChatPanel`). No portable-core changes.
 
 ## [v0.21.3] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.3** (Unity layer: `CoreAiChatPanel` WebGL focus/typing stability). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.3** (Unity layer: `CoreAiChatPanel` WebGL focus/typing stability). No portable-core changes.
 
 ## [v0.21.2] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.2** (Unity layer: `TextField` focus fix in `CoreAiChatPanel` after sending a message). No portable-core changes.
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.2** (Unity layer: `TextField` focus fix in `CoreAiChatPanel` after sending a message). No portable-core changes.
 
 ## [v0.21.1] — 2026-04-23
 
 ### Release sync
 
-- 🔧 Version aligned with `com.nexoider.coreaiunity` **0.21.1** (Unity layer: chat UI/scrollbar, timeouts, tests).
+- 🔧 Version aligned with `com.neoxider.coreaiunity` **0.21.1** (Unity layer: chat UI/scrollbar, timeouts, tests).
 
 ## [v0.21.0] — 2026-04-23
 

@@ -4,7 +4,7 @@ This folder documents the host-agnostic CoreAI layer: agents, prompts, tools,
 LLM routing, MEAI integration, memory, Lua safety, and runtime contracts that do
 not depend on Unity scene objects.
 
-Canonical language is English because this package ships as `com.nexoider.coreai`.
+Canonical language is English because this package ships as `com.neoxider.coreai`.
 Unity-specific setup lives under [`Assets/CoreAiUnity/Docs/`](../../CoreAiUnity/Docs/).
 Russian files are kept only when the filename is explicitly marked `_RU`.
 

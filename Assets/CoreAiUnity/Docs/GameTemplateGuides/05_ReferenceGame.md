@@ -6,6 +6,6 @@
 
 **Goal:** a fast loop “play → verify orchestrator / commands / network” without a separate title.
 
-**Dependency on the core:** public **CoreAI** API only (UPM **`com.nexoider.coreai`**), separate asmdef as sample code grows.
+**Dependency on the core:** public **CoreAI** API only (UPM **`com.neoxider.coreai`**), separate asmdef as sample code grows.
 
 **Minimum criterion (phase D SPEC):** one run (arena, wave, UI) + one procedural lever via core commands after authority is wired.

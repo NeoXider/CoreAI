@@ -78,8 +78,8 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 
 Per-release notes, migration hints, and **version numbers** are maintained only in the changelogs (so this README does not need duplicate edits on every ship):
 
-- **[`com.nexoider.coreaiunity` CHANGELOG](Assets/CoreAiUnity/CHANGELOG.md)** — Unity layer: Editor, chat UI, PlayMode tests, docs.
-- **[`com.nexoider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
+- **[`com.neoxider.coreaiunity` CHANGELOG](Assets/CoreAiUnity/CHANGELOG.md)** — Unity layer: Editor, chat UI, PlayMode tests, docs.
+- **[`com.neoxider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
 
 The **`version`** field in each package’s `package.json` is the authoritative semver for that package.
 
@@ -386,8 +386,8 @@ The repository consists of **two packages**:
 
 | Package | What's inside | Dependencies |
 |---------|--------------|--------------|
-| **[com.nexoider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
-| **[com.nexoider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MEAI, MessagePipe, tests | Depends on `coreai` |
+| **[com.neoxider.coreai](Assets/CoreAI)** | Portable core — pure C# **without** Unity | VContainer, MoonSharp |
+| **[com.neoxider.coreaiunity](Assets/CoreAiUnity)** | Unity layer — DI, LLM, MEAI, MessagePipe, tests | Depends on `coreai` |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

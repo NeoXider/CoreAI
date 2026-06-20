@@ -70,7 +70,7 @@
         /// CoreAI.Core is portable (no <c>UnityEngine</c> reference), so the Unity-specific
         /// <c>[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]</c> reset hook that
         /// clears this state across Play Mode / domain transitions lives in the Unity layer
-        /// (<c>CoreAi.Invalidate()</c> in <c>com.nexoider.coreaiunity</c>), which calls this method.
+        /// (<c>CoreAi.Invalidate()</c> in <c>com.neoxider.coreaiunity</c>), which calls this method.
         /// </remarks>
         public static void Reset()
         {

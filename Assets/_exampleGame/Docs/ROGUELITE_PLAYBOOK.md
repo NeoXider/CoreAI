@@ -24,7 +24,7 @@ For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is
 
 ## Next Steps in the CoreAI Repository
 
-1. Connect **CoreAI**: UPM **`com.nexoider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; copy the **`CoreAiUnity`** host if needed (tests, prompts in **Resources**, **`_mainCoreAI`** scene).
+1. Connect **CoreAI**: UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration, Lua sandbox, and events; copy the **`CoreAiUnity`** host if needed (tests, prompts in **Resources**, **`_mainCoreAI`** scene).
 2. Add **VContainer + MessagePipe + R3** to the example (as in Last-War, but with the minimal set).
 3. Scene `RogueliteBootstrap` with `ExampleRogueliteEntry` + later `LifetimeScope`.
 4. Prototype loop: spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks (without networking).

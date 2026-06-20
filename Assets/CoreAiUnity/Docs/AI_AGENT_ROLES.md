@@ -201,7 +201,7 @@ They need not ship in v1 core, but the names help the roadmap.
 
 ## 4. Core telemetry (expectations for Analyzer)
 
-The **CoreAI** package (`com.nexoider.coreai`) should offer **ready building blocks** (subscriptions / aggregators); the game enables what it needs:
+The **CoreAI** package (`com.neoxider.coreai`) should offer **ready building blocks** (subscriptions / aggregators); the game enables what it needs:
 
 - **Combat tick:** damage in/out, deaths, fight time, wave #.
 - **Position / zone:** time in triggers, biome change.

@@ -26,7 +26,7 @@ public static class UnityAsyncAnalysisScope
         if (Ins(n, "/CoreAiUnity/Runtime/") || Ins(n, "/CoreAiUnity/Editor/"))
             return true;
 
-        if (Ins(n, "com.nexoider.coreaiunity") &&
+        if (Ins(n, "com.neoxider.coreaiunity") &&
             (Ins(n, "/Runtime/") || Ins(n, "/Editor/")))
             return true;
 

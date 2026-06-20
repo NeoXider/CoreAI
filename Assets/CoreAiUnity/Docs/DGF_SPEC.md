@@ -2,7 +2,7 @@
 
 **Document version:** 0.23
 **Repository:** CoreAI · **Author:** Neoxider (handle neoxider) — [github.com/NeoXider](https://github.com/NeoXider)
-**UPM:** **`com.nexoider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** only: pure **C# without an engine** (`noEngineReferences`). **`com.nexoider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
+**UPM:** **`com.neoxider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** only: pure **C# without an engine** (`noEngineReferences`). **`com.neoxider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
 **Sample game:** `Assets/_exampleGame` (see also `Docs/ROGUELITE_PLAYBOOK.md` in the sample)
 **Reference architecture (do not copy wholesale):** `D:\Git\GameDev-Last-War`
 **AI role catalog (orchestration, placement, models):** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md)
@@ -51,8 +51,8 @@
 
 | Layer | Package / assembly | Contents |
 |------|-------------------|----------|
-| **Engine-agnostic core** | **`com.nexoider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), **MoonSharp** sandbox, typed commands and extension points. **No** `UnityEngine`, **no** explicit implementation for Unity, Unreal, Godot, etc. — only portable logic and abstractions; binding to the “game world” is external via interface implementations and injection. |
-| **Unity implementation** | **`com.nexoider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Concrete **Unity** implementation: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), Unity console logging, file stores, main-thread marshaling, UI wiring. Depends on **`com.nexoider.coreai`**. |
+| **Engine-agnostic core** | **`com.neoxider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), **MoonSharp** sandbox, typed commands and extension points. **No** `UnityEngine`, **no** explicit implementation for Unity, Unreal, Godot, etc. — only portable logic and abstractions; binding to the “game world” is external via interface implementations and injection. |
+| **Unity implementation** | **`com.neoxider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Concrete **Unity** implementation: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), Unity console logging, file stores, main-thread marshaling, UI wiring. Depends on **`com.neoxider.coreai`**. |
 
 **Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; **`CoreAI.Core`** shall contain only portable .NET/C# (plus MoonSharp/VContainer per asmdef). **`RegisterCorePortable`** registers a default **`InMemoryConversationSummaryStore`** as **`IConversationSummaryStore`** unless the host suppresses it (**`CoreAILifetimeScope`** registers **`FileConversationSummaryStore`** first and calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**). **`RegisterCorePortable`** also registers **`NullAgentMemoryStore`** as **`IAgentMemoryStore`** unless **`suppressDefaultAgentMemoryStore: true`** — **`CoreAILifetimeScope`** always suppresses and then registers **`FileAgentMemoryStore`** on all Unity players (including WebGL, with IDBFS flush via **`CoreAi_PersistFsSync`**) so VContainer never sees two implementations for **`IAgentMemoryStore`** (**v1.5.22**, WebGL agent memory since **v1.6.19**).
 
@@ -401,11 +401,11 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 | E2 | Host/client model for AI and rules |
 | E3 | Extend MCPForUnity scenarios for regression |
 
-### Phase F — UPM package `com.nexoider.coreai`
+### Phase F — UPM package `com.neoxider.coreai`
 
 | Id | Criterion |
 |----|-----------|
-| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.nexoider.coreai`**, dependencies: **VContainer**, **MoonSharp**; **`Assets/CoreAiUnity/package.json`** — **`com.nexoider.coreaiunity`**, dependencies: **`com.nexoider.coreai`**, MessagePipe, UniTask, LLMUnity, etc. |
+| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, dependencies: **VContainer**, **MoonSharp**; **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`**, MessagePipe, UniTask, LLMUnity, etc. |
 | **F1** | **Done:** monorepo — sources in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; **do not** register them in **`manifest.json`** via **`file:`** to a path inside **`Assets/`** (Unity UPM rejects). External project: Git UPM **`?path=Assets/CoreAI`** / **`?path=Assets/CoreAiUnity`**. |
 | **F2** | **Done:** **`CoreAI.Core`** in **`Assets/CoreAI/Runtime/Core/`**; **`CoreAI.Source`** in **`Assets/CoreAiUnity/Runtime/Source/`**; tests, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — in package **`CoreAiUnity`**. |
 | F3 | Publish: git URL with **`?path=Assets/CoreAI`**, tags per `version`, optional OpenUPM; sync `package.json` version with releases. |
@@ -439,7 +439,7 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 | 0.15 | §Phase F: core UPM (`package.json`, dependencies including AI Navigation); plan F1–F3 |
 | 0.16 | Header: repository author Neoxider (GitHub link) |
 | 0.17 | §3.4: LLM routing, orchestrator queue, metrics; phase F1–F2 (UPM move Core/Source into package) |
-| 0.18 | Package **`com.nexoider.coreai`**, code in **`Assets/CoreAI`**; Git UPM **`?path=Assets/CoreAI`** (as NeoxiderTools); monorepo without **`file:`** in manifest |
+| 0.18 | Package **`com.neoxider.coreai`**, code in **`Assets/CoreAI`**; Git UPM **`?path=Assets/CoreAI`** (as NeoxiderTools); monorepo without **`file:`** in manifest |
 | 0.19 | Template host folder renamed to **`Assets/CoreAiUnity`** (instead of `_source`); paths in docs and **NeoxiderSettings** updated |
 | 0.20 | §9 **ADR-9.4:** explicit main-thread guidance after LLM (`QueuedAiOrchestrator` + `ConfigureAwait(false)`), role of **`AiGameCommandRouter`** and **`UniTask.SwitchToMainThread`**, checklist for custom MessagePipe subscribers |
 | 0.21 | Sources only in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; duplicates removed from **`Packages/`**; **`manifest`**: no **`file:`** to `Assets/` |

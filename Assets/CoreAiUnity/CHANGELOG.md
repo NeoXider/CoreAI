@@ -1,6 +1,6 @@
-﻿# Changelog - `com.nexoider.coreaiunity`
+﻿# Changelog - `com.neoxider.coreaiunity`
 
-Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.nexoider.coreai`**.
+Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
 ## [Unreleased]
 
@@ -14,7 +14,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## 4.10.0 - 2026-06-20
 
-Depends on **`com.nexoider.coreai` 4.10.0**.
+Depends on **`com.neoxider.coreai` 4.10.0**.
 
 - **Camera vision tool fixed end-to-end.** `CameraLlmTool` previously only returned a base64 string the
   model could not see. Capture is now a reusable `CameraLlmTool.CaptureCameraJpeg(...)` (offscreen render
@@ -152,7 +152,7 @@ Depends on **`com.nexoider.coreai` 4.10.0**.
 
 ## 4.4.0 - 2026-06-15
 
-> Context management overhaul (Claude Code / Cline / Kilo-grade) + tool-call/memory/Lua fixes. Depends on `com.nexoider.coreai` 4.4.0. See entries below.
+> Context management overhaul (Claude Code / Cline / Kilo-grade) + tool-call/memory/Lua fixes. Depends on `com.neoxider.coreai` 4.4.0. See entries below.
 
 - GameMaster Lua mechanics test now advertises the logic_* slot API, matching the crafting test.
 - **Agent memory clear regression fix.** The memory tool `clear` action now removes the role key instead of saving an empty versioned row.
@@ -198,7 +198,7 @@ Depends on **`com.nexoider.coreai` 4.10.0**.
   snapshots on `AgentMemoryState` and store extension APIs for version listing and rollback. Runtime
   chat history now defaults on for built-in and builder-created roles (30-message cap, persistence
   still opt-in).
-- **Version bump to 4.3.0** (`com.nexoider.coreai` + `com.nexoider.coreaiunity`).
+- **Version bump to 4.3.0** (`com.neoxider.coreai` + `com.neoxider.coreaiunity`).
 - **Context management roadmap documented.** New `Assets/CoreAiUnity/Docs/CONTEXT_MANAGEMENT_ROADMAP.md`
   fixes the target design for Claude Code / Cline / Kilo-grade history handling: stable cacheable prefix +
   verbatim recent turns, threshold-based compaction (not per-turn re-summarization), a per-role
@@ -295,7 +295,7 @@ Depends on **`com.nexoider.coreai` 4.10.0**.
 
 ## [4.2.0] - 2026-06-13
 
-Depends on **`com.nexoider.coreai` 4.2.0**.
+Depends on **`com.neoxider.coreai` 4.2.0**.
 
 - Added `Assets/CoreAI.Demos/ModdableUnits/ModdableUnitsDemo.unity`: a mod-driven game where chat-authored Lua mods create entirely new content. `UnitForgeLuaBindings` exposes `forge_define`/`forge_spawn`/`forge_count`/`forge_clear`/`forge_reset` (WorldEdit tier, via `GameLuaBindingsExtensibility`); the host runs a small auto-battle and emits `unit_spawned`/`unit_died`/`team_wiped` events back to mods. The bindings use only plain CLR types so the demo assembly never hard-references the optional MoonSharp package.
 - Added `Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity`: the previously controller-only Full demo now ships a runnable scene with Full Lua access enabled and prompt buttons that move/grow/inspect an auto-created `TargetCube`.
@@ -308,7 +308,7 @@ Depends on **`com.nexoider.coreai` 4.2.0**.
 
 ## [4.1.0] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.1.0**.
+Depends on **`com.neoxider.coreai` 4.1.0**.
 
 - Added `WaveAutoBattlerModsDemo.unity`: a hero-vs-waves auto-battler where waves scale upward, the hero levels up, and Lua mods can change real combat slots (`hero_damage`, `hero_regen`, `enemy_count`, `enemy_hp`, `enemy_damage`, `wave_reward`) and react to battle events.
 - Upgraded `LiveMechanicsModsChatPersistenceController` into an F10-style mod manager: active mods, saved/unloaded mods, metadata display from Lua comments (`-- name:` / `-- description:`), deactivate with `X`, activate saved mods, and forget saved sources.
@@ -317,7 +317,7 @@ Depends on **`com.nexoider.coreai` 4.1.0**.
 
 ## [4.0.8] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.8**.
+Depends on **`com.neoxider.coreai` 4.0.8**.
 
 - Added `Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`, a copy of LiveMechanics focused on chat-driven `manage_mods` workflows.
 - Added `LiveMechanicsModsChatPersistenceController`, a scene-level host policy that persists successful Lua mod `load`/`reload` sources and removes them from autoload on `unload`.
@@ -326,7 +326,7 @@ Depends on **`com.nexoider.coreai` 4.0.8**.
 
 ## [4.0.7] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.7**.
+Depends on **`com.neoxider.coreai` 4.0.7**.
 
 - LiveMechanics now persists successful `execute_lua` rule-slot edits that touch its known slots (`damage_formula`, `attack_interval`, `loot_formula`, `boss_reward`) through `ILuaScriptVersionStore` and reapplies the saved Lua on scene start.
 - `GameLuaToolExecutor` now raises a successful-code notification so scene demos can persist scene-specific Lua policy without making the generic executor own scene state.
@@ -334,7 +334,7 @@ Depends on **`com.nexoider.coreai` 4.0.7**.
 
 ## [4.0.6] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.4**.
+Depends on **`com.neoxider.coreai` 4.0.4**.
 
 - LiveMechanics chat guidance now steers local Programmer models toward `logic_define('loot_formula', function(...) return 1000 end)` for boss reward edits instead of hallucinated `create_item()` calls.
 - LiveMechanics now also declares a `boss_reward` Lua logic-slot alias and uses it as a fallback for boss loot, matching the natural slot name small models often infer from player wording like "boss reward".
@@ -343,40 +343,40 @@ Depends on **`com.nexoider.coreai` 4.0.4**.
 
 ## [4.0.5] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.3**.
+Depends on **`com.neoxider.coreai` 4.0.3**.
 
 - Demo/chat tool recovery now handles malformed `manage_mods` calls before MEAI invocation. Missing required arguments such as `action` are returned to the model as schema-aware tool failures, enabling the configured Programmer retry loop to repair the call instead of repeatedly surfacing `The arguments dictionary is missing a value for the required parameter 'action'`.
 - Added EditMode coverage for required tool-argument validation and schema repair feedback.
 
 ## [4.0.4] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.2**.
+Depends on **`com.neoxider.coreai` 4.0.2**.
 
 - Fixed a full PlayMode-suite-only `UnityMainThreadLlmAsyncMarshaler` regression where the Editor play-state mirror could keep a stale thread id and run Unity tool bodies inline on a ThreadPool thread. The mirror now records UniTask's player-loop main thread id, and the PlayMode regression primes the mirror before switching to the ThreadPool.
 - Hardened `MultiAgentCraftingWorkflowPlayModeTests`: if a local model completes the Programmer memory step but skips `execute_lua`, the scenario performs an exact `execute_lua` retry with `ForcedToolMode.RequireSpecific` before failing.
 
 ## [4.0.3] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.2**.
+Depends on **`com.neoxider.coreai` 4.0.2**.
 
 - Streaming tool-call recovery now feeds an explicit retry instruction back to the model when a tool call fails and the next model turn is empty/whitespace. This keeps `Programmer` in the correction loop for failed Lua/mod tool calls instead of ending the chat with only a fallback diagnostic.
 - Added PlayMode coverage for the failed-tool -> empty-model-turn -> corrected-tool retry flow.
 
 ## [4.0.2] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.2**.
+Depends on **`com.neoxider.coreai` 4.0.2**.
 
 - Chat/PlayMode regression coverage added for `Programmer` tool-only failure turns. When `manage_mods` or another tool fails and the model returns only whitespace after the tool call, the chat now shows the real tool failure instead of the misleading structured-validation message `Response is empty or whitespace`.
 
 ## [4.0.1] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.1**.
+Depends on **`com.neoxider.coreai` 4.0.1**.
 
 - Chat panels using tool-oriented roles such as `Programmer` now keep short-term session context through the orchestrator when sending `SourceTag = "Chat"`. This fixes follow-up instructions like "answer in Russian" being dropped on the next turn, without enabling persisted chat history or LLM compaction for normal Programmer/Lua tasks.
 
 ## [4.0.0] - 2026-06-12
 
-Depends on **`com.nexoider.coreai` 4.0.0**. Major Unity-layer release aligned with portable core Lua v4.
+Depends on **`com.neoxider.coreai` 4.0.0**. Major Unity-layer release aligned with portable core Lua v4.
 
 ### Added
 
@@ -411,13 +411,13 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - **CI matrix (GitHub Actions).** `.github/workflows/ci.yml` runs EditMode tests both with MoonSharp and in a `no-lua` job (package removed from `manifest.json`/`packages-lock.json`, `COREAI_NO_LUA` appended to all platform defines). The MoonSharp job fails if the `SecureLuaSandboxEditModeTests` escape suite did not execute, locking sandbox-isolation coverage. Lua-dependent test files that were missing `#if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA` guards are now wrapped, so the project compiles without MoonSharp.
 - New EditMode coverage: `RoleId` (conversions, equality, flow into string APIs), `AskWithCallback`/obsolete alias, `LuaGenerationRateLimiter` (window math) and envelope-processor rate-limit behavior.
 
-#### Package **`3.2.0`** - dependency **`com.nexoider.coreai` `3.2.0`**.
+#### Package **`3.2.0`** - dependency **`com.neoxider.coreai` `3.2.0`**.
 
 ## [3.1.0] - 2026-06-10
 
 ### Reliability hardening + diagnostics overlay
 
-- Bumped `com.nexoider.coreaiunity` to `3.1.0` and aligned the dependency on `com.nexoider.coreai` `3.1.0`.
+- Bumped `com.neoxider.coreaiunity` to `3.1.0` and aligned the dependency on `com.neoxider.coreai` `3.1.0`.
 - **`LuaCoroutineRunner` — active-coroutine cap.** New `MaxActiveCoroutines` (default 64); `Register()` prunes dead handles and hard-stops with `InvalidOperationException` + error log when the cap is reached, so LLM-generated scripts can no longer spam unbounded coroutines. Completed/killed coroutines free their slot immediately (previously cleanup only happened in `Update()`).
 - **`FileAgentMemoryStore` — off-main-thread async I/O.** New `TryLoadAsync` / `SaveAsync` / `ClearAsync` / `ClearChatHistoryAsync` / `AppendChatMessageAsync` / `AppendTranscriptEntryAsync` run file I/O on the thread pool, serialized with the sync paths via a per-store `SemaphoreSlim` (no frame freeze on large agent memory). Atomic tmp-file writes unchanged; WebGL runs inline (no threads). New optional `rootDirectory` ctor parameter for testability.
 - **Token-budget overlay.** New `CoreAiTokenBudgetOverlay` (IMGUI, F10 toggle by default) showing current token usage, tokens/request, optional $/session from configurable per-1K prices, and a rolling-window request-load indicator on top of `IInGameLlmChatService.GetRateLimiterMetrics()`. Works in Editor and Play Mode; degrades gracefully when no service is available.
@@ -425,19 +425,19 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - New EditMode coverage: backoff jitter bounds, repair-counter increments, error-feedback removal with valid pairing, coroutine-limit behavior, sandbox escape vectors, concurrent async store writes, token-budget calculator.
 - Repository: versioned `hooks/pre-commit` guard against junk files in the repo root (logs, `*.db`, orphan root `.meta`); enable with `git config core.hooksPath hooks` (see `CONTRIBUTING.md`).
 
-#### Package **`3.1.0`** - dependency **`com.nexoider.coreai` `3.1.0`**.
+#### Package **`3.1.0`** - dependency **`com.neoxider.coreai` `3.1.0`**.
 
 ## [3.0.0] - 2026-06-10
 
 ### Major — optional Lua module + core reliability hardening
 
-- Bumped `com.nexoider.coreaiunity` to `3.0.0` and aligned the dependency on `com.nexoider.coreai` `3.0.0`.
+- Bumped `com.neoxider.coreaiunity` to `3.0.0` and aligned the dependency on `com.neoxider.coreai` `3.0.0`.
 - **Lua/MoonSharp is now an optional module via the `COREAI_NO_LUA` scripting define** (mirrors the existing `COREAI_NO_LLM` opt-out). With the define set, `LuaCoroutineRunner` and all Lua registrations in `CorePortableInstaller` / `WorldCommandsInstaller` are compiled out, `AiGameCommandRouter` drops its `LuaAiEnvelopeProcessor` dependency, and the DI graph falls back to `CoreDefaultLuaRuntimeBindings` / `NullLuaExecutionObserver`. Both build configurations compile with zero errors.
-- Core audit follow-up shipping in `com.nexoider.coreai` `3.0.0`: shared `HttpClient` over an `HttpClientHandler` (socket-exhaustion fix, valid on .NET Standard 2.0), crash-safe atomic JSON writes for `FileAgentMemoryStore` / `FileConversationSummaryStore`, and real `LuaCoroutineHandle.Kill()` termination.
+- Core audit follow-up shipping in `com.neoxider.coreai` `3.0.0`: shared `HttpClient` over an `HttpClientHandler` (socket-exhaustion fix, valid on .NET Standard 2.0), crash-safe atomic JSON writes for `FileAgentMemoryStore` / `FileConversationSummaryStore`, and real `LuaCoroutineHandle.Kill()` termination.
 - Fixed a portable-Core regression where a `[RuntimeInitializeOnLoadMethod]` (`UnityEngine`) attribute had been added to the UnityEngine-free `CoreAI.Core`; the Play Mode static reset of `CoreAIAgent` now runs from the Unity layer via `CoreAi.Invalidate()`.
 - Fixed `AgentConfigExtensions.AskAsync` so role-registration validation runs before the orchestrator-null check (unregistered roles now report `role not registered` consistently).
 
-#### Package **`3.0.0`** - dependency **`com.nexoider.coreai` `3.0.0`**.
+#### Package **`3.0.0`** - dependency **`com.neoxider.coreai` `3.0.0`**.
 
 ## [2.6.5] - 2026-06-10
 
@@ -452,7 +452,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 
 ### Backend-managed streaming and chat reliability
 
-- Bumped `com.nexoider.coreaiunity` to `2.6.4` and kept the dependency aligned with `com.nexoider.coreai` `2.6.4`.
+- Bumped `com.neoxider.coreaiunity` to `2.6.4` and kept the dependency aligned with `com.neoxider.coreai` `2.6.4`.
 - Fixed `ServerManagedLlmClient` so `ServerManagedApi` HTTP and streaming calls forward the dynamic `ServerManagedAuthorization` bearer header to backend proxy requests, including routed `LlmRoutingManifest` profiles.
 - Fixed streaming tool-loop completion so successful repeated tool calls that already emitted assistant text finish cleanly instead of showing `tool loop exceeded max iterations` in chat.
 - Fixed `CoreAiChatPanel.SetCollapsed` idempotency so setting the current collapse state does not notify override hooks again.
@@ -460,13 +460,13 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - Added EditMode coverage for server-managed authorization forwarding and successful visible-text completion after repeated tool calls.
 - Added EditMode coverage for `CoreAiChatMessageBubbleElement` default, user, toggle, and null-text states.
 
-#### Package **`2.6.4`** - dependency **`com.nexoider.coreai` `2.6.4`**.
+#### Package **`2.6.4`** - dependency **`com.neoxider.coreai` `2.6.4`**.
 
 ## [2.6.3] - 2026-06-01
 
 ### Chat UI authoring and host control toggles
 
-- Bumped `com.nexoider.coreaiunity` to `2.6.3` and kept the dependency aligned with `com.nexoider.coreai` `2.6.3`.
+- Bumped `com.neoxider.coreaiunity` to `2.6.3` and kept the dependency aligned with `com.neoxider.coreai` `2.6.3`.
 - Added `CoreAiChatConfig.EnableStopGeneration` / `CoreAiChatOptions.EnableStopGeneration`. When disabled, active AI turns cannot be stopped from the chat UI: the send button stays as `>` and is disabled until the response completes, and Esc no longer cancels the request.
 - Added `CoreAiChatConfig.ShowClearButton` / `CoreAiChatOptions.ShowClearButton`. When disabled, the header clear button is physically hidden; `CoreAiChatPanel.ClearChat(...)` remains available for code-driven resets.
 - Added an authorable `CoreAiChatMessageBubble.uxml` and `CoreAiChatMessageBubbleElement` with `is-user`, `message-text`, and `avatar-sprite` attributes for UI Builder workflows. `CoreAiChatPanel.messageBubbleTemplate` is optional, so existing scenes keep working without assigning a template.
@@ -474,19 +474,19 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - Fixed startup hydration scroll positioning so restored persisted chat sessions land on the newest messages after UI Toolkit layout settles.
 - Added EditMode coverage for chat config defaults, options round-tripping, disabled stop presentation, and disabled send button state while a request is running.
 
-#### Package **`2.6.3`** - dependency **`com.nexoider.coreai` `2.6.3`**.
+#### Package **`2.6.3`** - dependency **`com.neoxider.coreai` `2.6.3`**.
 ## [2.6.2] - 2026-06-01
 
 ### WebGL chat streaming, Stop recovery, and settings diagnostics
 
-- Bumped `com.nexoider.coreaiunity` to `2.6.2` and kept the dependency aligned with `com.nexoider.coreai` `2.6.2`.
+- Bumped `com.neoxider.coreaiunity` to `2.6.2` and kept the dependency aligned with `com.neoxider.coreai` `2.6.2`.
 - Added a real-backend WebGL Player verification path for `CoreAiChatDemo`: first message must show live streaming text, the second long streaming message must be cancellable with `Stop`, and a third message must still submit and receive a non-empty model response after cancellation.
 - Added deterministic PlayMode coverage for `CoreAiChatPanel.StopAgent()` so cancellation unlocks the panel, stops active streaming, and allows the next streaming request to run.
 - Hardened HTTP streaming fallback behavior so a primary backend that completes a streaming response without visible chunks can fall through to the configured secondary backend instead of producing an empty assistant turn.
 - Updated `CoreAISettingsAsset` connection testing: the test prompt now asks for an exact `OK` response with a larger token budget, and the inspector displays the result directly below the **Test Connection** button.
 - Documented the WebGL Stop verification flow and clarified that very short real-model replies can complete before tests observe a transient streaming label; recovery is verified by the final non-empty assistant response.
 
-#### Package **`2.6.2`** - dependency **`com.nexoider.coreai` `2.6.2`**.
+#### Package **`2.6.2`** - dependency **`com.neoxider.coreai` `2.6.2`**.
 
 ## [2.6.0] - 2026-05-29
 
@@ -503,7 +503,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - Added regression coverage for `CoreAISettingsAsset` URL/model normalization paths introduced by the restored settings inspector: HTTP base URL trim/default behavior and `ModelName` fallback in Auto/Local execution modes.
 - Removed stale Unity project warning debt from this repo by deleting an empty test asmdef and a missing PathTracing resource reference in URP global settings.
 
-#### Package **`2.6.0`** - dependency **`com.nexoider.coreai` `2.6.0`**.
+#### Package **`2.6.0`** - dependency **`com.neoxider.coreai` `2.6.0`**.
 
 ## [2.5.4] - 2026-05-29
 
@@ -517,7 +517,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - Updated `CoreAISettingsAsset` resource/preset tests for committed blank API keys, keeping provider presets safe to publish without embedded secrets.
 - Updated WebGL streaming docs with the native bridge callback-safety note.
 
-#### Package **`2.5.4`** - dependency **`com.nexoider.coreai` `2.5.4`**.
+#### Package **`2.5.4`** - dependency **`com.neoxider.coreai` `2.5.4`**.
 
 ## [2.5.3] - 2026-05-27
 
@@ -530,7 +530,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - LLM memory verification tests now report external HTTP backend no-response cases as inconclusive instead of failing later memory assertions after the orchestrator returns an empty terminal string.
 - Aligned LM Studio local-server documentation, presets, resource assets, and `CoreAISettingsAsset` resource-loading tests with the active loopback endpoint `http://127.0.0.1:1234/v1` and `qwen3.5-4b`.
 
-#### Package **`2.5.3`** - dependency **`com.nexoider.coreai` `2.5.3`**.
+#### Package **`2.5.3`** - dependency **`com.neoxider.coreai` `2.5.3`**.
 
 ## [2.5.1] - 2026-05-25
 
@@ -557,7 +557,7 @@ See portable core **[CHANGELOG](../CoreAI/CHANGELOG.md)** and **`Docs/PERF_REVIE
 - Added focused EditMode regression tests for `CoreAISettingsAsset` resource loading and provider presets in `Assets/CoreAiUnity/Tests/EditMode/CoreAISettingsAssetEditModeTests.cs`.
 - Added preset smoke coverage for `Assets/Resources/{open,minmaxFree,grok}.preset` application (`Preset.ApplyTo`) and kept `COREAI_SETTINGS.md` updated with provider preset guidance.
 
-#### Package **`2.5.1`** - dependency **`com.nexoider.coreai` `2.5.1`**.
+#### Package **`2.5.1`** - dependency **`com.neoxider.coreai` `2.5.1`**.
 
 ## [2.5.0] - 2026-05-24
 
@@ -585,7 +585,7 @@ All framework ScriptableObjects now follow the accepted rule: assets are Unity a
 - Updated `SCRIPTABLE_OBJECTS.md` with the `Options + ScriptableObject wrapper` rule.
 - Updated chat README with runtime options vs config asset guidance.
 
-#### Package **`2.5.0`** - dependency **`com.nexoider.coreai` `2.5.0`**.
+#### Package **`2.5.0`** - dependency **`com.neoxider.coreai` `2.5.0`**.
 ## [2.4.0] - 2026-05-08
 
 ### ChatPanel — public busy API + tool-round event + scroll/diagnostic fixes
@@ -621,7 +621,7 @@ Previously external code (RedoSchool's `ChatExternalSubmitUnlock` gate, similar 
 
 - New `EditMode/CoreAiChatPanelBusyApiEditModeTests`: `IsBusy` reflects each flag, `BusyStateChanged` fires on transitions only (not on every mutation), `ResetBusyStateWithoutCancellation` clears all flags, `ToolRoundStarted` delivers iteration index and tool name.
 
-#### Package **`2.4.0`** — dependency **`com.nexoider.coreai` `2.3.1`** (no Core changes).
+#### Package **`2.4.0`** — dependency **`com.neoxider.coreai` `2.3.1`** (no Core changes).
 
 ## [2.3.1] - 2026-05-08
 
@@ -645,50 +645,50 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **8 new EditMode tests** in `ToolCallExtractionParityEditModeTests`: `arguments_json` key extraction, function-call syntax (quoted/unquoted/multi-arg), prose-with-parens safety, and end-to-end `SmartToolCallingChatClient` integration.
 - **3 PlayMode LLM verification tests** now validate the self-service Skill flow through real tool lifecycle events and domain side effects: `SelfService_ModelMustReadSkill`, `SelfService_ModelCallsReadSkill`, `Model_ReadsSkill_ThenCallsSkillToolViaProxy`.
 
-#### Package **`2.3.1`** — dependency **`com.nexoider.coreai` `2.3.1`**.
+#### Package **`2.3.1`** — dependency **`com.neoxider.coreai` `2.3.1`**.
 
 ## [2.3.0] - 2026-05-08
 
 ### Dual-Backend — Lockstep with CoreAI 2.3.0
 
-- **Dependency:** **`com.nexoider.coreai` `2.3.0`**.
+- **Dependency:** **`com.neoxider.coreai` `2.3.0`**.
 - **Inspector:** New **🔄 Fallback Backend** section in `CoreAISettingsAsset` — `enableFallbackBackend`, `secondaryApiBaseUrl`, `secondaryApiKey`, `secondaryModelName`.
 - **`FallbackLlmClientDecorator`** — auto-fallback primary → secondary on failure.
 - **`LlmPipelineInstaller`** — DI wiring wraps primary client in fallback decorator when secondary is configured.
 - **5 EditMode tests** for fallback decorator behavior.
 
-#### Package **`2.3.0`** — dependency **`com.nexoider.coreai` `2.3.0`**.
+#### Package **`2.3.0`** — dependency **`com.neoxider.coreai` `2.3.0`**.
 
 ## [2.2.0] - 2026-05-08
 
 ### Lockstep with CoreAI 2.2.0
 
-- **Dependency:** **`com.nexoider.coreai` `2.2.0`**.
+- **Dependency:** **`com.neoxider.coreai` `2.2.0`**.
 - **Inspector:** `MaxToolCallHistoryMessages` field added to **🛡️ Resilience & Safety** foldout (default 20, 0 = no limit).
 - **`RateLimiterMetrics`** exposed via `IInGameLlmChatService.GetRateLimiterMetrics()`.
 
-#### Package **`2.2.0`** — dependency **`com.nexoider.coreai` `2.2.0`**.
+#### Package **`2.2.0`** — dependency **`com.neoxider.coreai` `2.2.0`**.
 
 ## [2.1.0] - 2026-05-08
 
 ### Production Resilience — Lockstep with CoreAI 2.1.0
 
-- **Dependency:** **`com.nexoider.coreai` `2.1.0`** — four runtime guardrails: `MaxToolResultChars`, `DefaultToolTimeoutMs`, `MaxResponseChars`, `MaxToolCallRoundtrips`.
+- **Dependency:** **`com.neoxider.coreai` `2.1.0`** — four runtime guardrails: `MaxToolResultChars`, `DefaultToolTimeoutMs`, `MaxResponseChars`, `MaxToolCallRoundtrips`.
 - **Inspector:** **`CoreAISettingsAsset`** — new **🛡️ Resilience & Safety** foldout with four fields, tooltips, and min-value constraints.
 - **Tests:** **`ResilienceFeaturesEditModeTests`** — 8 tests covering truncation, timeout, and roundtrip limits without LLM backends.
 - **PlayMode prompts:** Anti-thinking instructions added to `CraftingMemoryViaOpenAiPlayModeTests`, `MultiToolChainPlayModeTests`, `AgentMemoryOpenAiApiPlayModeTests` for Qwen3.5 compatibility.
 - **Docs:** `README.md` resilience row; `AGENT_BUILDER.md` Resilience & Safety section.
 
-#### Package **`2.1.0`** — dependency **`com.nexoider.coreai` `2.1.0`**.
+#### Package **`2.1.0`** — dependency **`com.neoxider.coreai` `2.1.0`**.
 
 ## [2.0.0] - 2026-05-08
 
 ### Major — Lockstep with CoreAI 2.0.0 (SkillSet)
 
-- **Dependency:** **`com.nexoider.coreai` `2.0.0`** — **SkillSet** (named tool+instruction groups with per-request activation). No Unity-layer API changes; all public SkillSet types live in the portable **`CoreAI.Core`** assembly.
+- **Dependency:** **`com.neoxider.coreai` `2.0.0`** — **SkillSet** (named tool+instruction groups with per-request activation). No Unity-layer API changes; all public SkillSet types live in the portable **`CoreAI.Core`** assembly.
 - **Tests:** **`SkillSetEditModeTests`** — tests covering construction, instruction injection, per-request filtering, `MergeToolNames`, and `AgentBuilder.WithSkill` integration.
 
-#### Package **`2.0.0`** — dependency **`com.nexoider.coreai` `2.0.0`**.
+#### Package **`2.0.0`** — dependency **`com.neoxider.coreai` `2.0.0`**.
 
 ## [1.7.5] - 2026-05-05
 
@@ -707,7 +707,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **EditMode:** **`CoreAiToolCallChatFormatterEditModeTests`**; **`CoreAiChatConfigEditModeTests`** asserts **`ShowToolCallsInChat`** default **false**.
 - **`README_CHAT.md`**, **`DEVELOPER_GUIDE.md`**, **`COREAI_SETTINGS.md`**.
 
-#### Package **`1.7.5`** — dependency **`com.nexoider.coreai` `1.7.5`** (lockstep).
+#### Package **`1.7.5`** — dependency **`com.neoxider.coreai` `1.7.5`** (lockstep).
 
 ## [1.7.4] - 2026-05-05
 
@@ -719,7 +719,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`LlmUnityAutoDisableIfNoModel`** — tries **`CoreAISettingsAsset.GgufModelPath`** before disabling empty **`LLM.model`**.
 - **Tests:** **`LlmUnityGgufHintNormalizationEditModeTests`** (`NormalizeGgufHintToFileName`).
 - **Docs:** **`LLMUNITY_SETUP_AND_MODELS.md`**.
-- **Dependency:** **`com.nexoider.coreai` `1.7.4`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.7.4`** — lockstep semver.
 
 #### Package **`1.7.4`**.
 
@@ -728,10 +728,10 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 ### Streaming — hybrid JSON hold for bound tools + suffix after Path 2
 
 - **`MeaiLlmClient.CompleteStreamingAsync`** — when **`Tools`** is non-empty and **`BufferFullStreamingIterationWhenToolsDeclared`** is not **`true`**, uses the same **hybrid JSON hold** previously applied mainly to unbound iterations: avoids leaking incomplete tool JSON into live UI tokens while still streaming safe prefixes. After native **`delta.tool_calls`** (Path 2) or text extraction, any assistant text not yet forwarded is reconciled via **`GetCleanedTextSuffixAfterHybridPrefix`** and emitted as trailing **`Text`** chunks.
-- **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** — portable flag (**`com.nexoider.coreai` `1.7.3`**): full-iteration buffer vs hybrid (default).
+- **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** — portable flag (**`com.neoxider.coreai` `1.7.3`**): full-iteration buffer vs hybrid (default).
 - **Tests:** **`MeaiLlmClientEditModeTests.GetCleanedTextSuffixAfterHybridPrefix_*`**; **`MultiToolChainPlayModeTests`** — second **`AiTaskRequest`** if the memory marker is missing after the first hop (flaky LLMUnity timing).
 - **Docs:** **`STREAMING_ARCHITECTURE.md`**, **`DEVELOPER_GUIDE.md`**, **`TESTING_TOOL_CALLING.md`**.
-- **Dependency:** **`com.nexoider.coreai` `1.7.3`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.7.3`** — lockstep semver.
 
 #### Package **`1.7.3`**.
 
@@ -741,7 +741,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`CoreAiPersistFs.jslib`** — **`CoreAi_PersistFsSync`** no longer calls **`FS.syncfs`** while a previous sync is still in flight. Overlapping calls (e.g. **`FileAgentMemoryStore`** persisting chat JSON and memory in quick succession) set a **queued** flag and run **at most one** follow-up sync after the current callback — avoids Emscripten’s *“2 FS.syncfs operations in flight”* warning and reduces risk of the main thread / IDBFS getting into a bad state after several turns.
 - **Docs:** [`TROUBLESHOOTING.md`](Docs/TROUBLESHOOTING.md) (WebGL row in agent-memory table).
-- **Dependency:** **`com.nexoider.coreai` `1.7.2`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.7.2`** — lockstep semver.
 
 #### Package **`1.7.2`**.
 
@@ -752,7 +752,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`CoreAiChatPanel`** — when a buffered marker uses **`BufferedStreamingUseToolProgressHint`** (static **`StreamingToolProgressHint`**) and later a marker **without** that flag arrives **before** any visible assistant text, **`ShowTypingIndicator()`** runs unconditionally so the default animated dots return (hint path had stopped the animation).
 - **Tests:** **`LoggingLlmClientDecoratorEditModeTests.FailedCompletion_BackendUnavailable_RetriesAndSucceeds`** — mirrors the v1.7.0 **`RateLimited`** result-retry test for **`LlmErrorCode.BackendUnavailable`**.
 - **Docs:** settings guide (**override temperature**, **max LLM request retries**), index / quick start / developer guide / agent roles — UPM **`1.7.1`**.
-- **Dependency:** **`com.nexoider.coreai` `1.7.1`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.7.1`** — lockstep semver.
 
 #### Package **`1.7.1`**.
 
@@ -760,7 +760,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Portable streaming marker + chat typing hint (buffered tool iteration)
 
-- **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (**`com.nexoider.coreai`**) — marker chunk (no `Text`) so host UI can refresh the typing row during special streaming phases (unbound iteration, tool JSON hold, etc.).
+- **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (**`com.neoxider.coreai`**) — marker chunk (no `Text`) so host UI can refresh the typing row during special streaming phases (unbound iteration, tool JSON hold, etc.).
 - **`LlmStreamChunk.BufferedStreamingUseToolProgressHint`** — when set with the marker, chat shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (native / text-shaped tool execution, hybrid hold). When the marker arrives **without** this flag (e.g. unbound iteration waiting for the model step), **`CoreAiChatPanel`** keeps the default animated typing dots.
 - **`MeaiLlmClient`** — yields marker(s) for unbound streaming, hybrid JSON hold, native tool deltas, and text-shaped tool execute; logs optional hold start.
 - **`CoreAiChatConfig`** — **`StreamingToolProgressHint`** (Inspector): short default **`Action...`**; empty falls back to **`CoreAiChatPanel`** default.
@@ -768,7 +768,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **Tests:** **`CoreAiChatConfigEditModeTests`**, **`StreamingAndPromptsEditModeTests`** (`BufferedStreamingNoToolBinding` / `BufferedStreamingUseToolProgressHint` default **false**).
 - **Sampling temperature:** **`CoreAISettingsAsset`** — **`overrideTemperature`** (Inspector **Override temperature**, default **off**); when on, **`temperature`** is sent via orchestrator (**`LlmCompletionRequest.SendTemperature`**) to HTTP and LLMUnity. **`ConfigureHttpApi`** turns the override on. **`MeaiLlmClient`** only assigns MEAI **`ChatOptions.Temperature`** when **`SendTemperature`** is true.
 - **HTTP retries:** **`LoggingLlmClientDecorator`** retries failed completions with **`RateLimited`** / **`BackendUnavailable`** (not only thrown **`LlmClientException`**), matching **`MeaiLlmClient`**’s result-based HTTP errors. Default **`maxLlmRequestRetries`** on **`CoreAISettingsAsset`** is **1** (inspector minimum **1**).
-- **Dependency:** **`com.nexoider.coreai` `1.7.0`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.7.0`** — lockstep semver.
 
 #### Package **`1.7.0`**.
 
@@ -784,7 +784,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`CoreAILifetimeScope.RegisterAgentMemoryStore`** — **`internal`** helper used by **`Configure`** and **`CoreAILifetimeScopeConversationStoreEditModeTests`** (`RegisterAgentMemoryStore_Resolves_FileAgentMemoryStore_SharedSingleton`).
 - **Chat UI (default `CoreAiChat.uxml` / `.uss`):** floating panel defaults **650×910** (~**+30%** vs legacy **500×700**); **`CoreAiChatConfig`** default width/height match. **Vertical scrollbar** — strip horizontal inset on **`unity-scroll-view__content-and-vertical-scroll-container`** and scroller/slider parts; **move message inset to `unity-scroll-view__content-container`** (not padding on the `ScrollView` root) and set **`content-viewport` `min-width: 0`** so the track stays **flush to the inner right** (fixes a wide empty strip beside the bar when the old `>` selector missed the real DOM). **`coreai-long-request-hint`** — optional `Label` under **`#coreai-typing-indicator`**; **`TickLongRequestHint`** uses **`LongRequestHintFormat`** with **`{elapsed}`**; arms after **~3 s while the LLM turn is in flight** (`_isSending`, same spirit as RedoSchool activity text); **Stop** clears the hint; empty format disables the line. **`LlmStreamChunk.BufferedStreamingNoToolBinding`** / **`BufferedStreamingUseToolProgressHint`** — **`MeaiLlmClient`** typing markers; **`CoreAiChatPanel`** shows short **`StreamingToolProgressHint`** only when **`BufferedStreamingUseToolProgressHint`** is set, else keeps animated typing dots for unbound step wait.
 - **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`README_CHAT.md`**, root **`README.md`** / **`README_RU.md`**, **`DOCS_INDEX.md`**, **`QUICK_START.md`**, **`TODO.md`**, **`STREAMING_WEBGL_TODO.md`**, **`STREAMING_ARCHITECTURE.md`**, **`TROUBLESHOOTING.md`**, **`MemorySystem.md`**, **`HTTP_TRANSPORT_SPEC.md`**, **`DEVELOPER_GUIDE.md`** (session restore + WebGL + jslib logging; chat template sizing + scrollbar + long-hint).
-- **Dependency:** **`com.nexoider.coreai` `1.6.19`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.6.19`** — lockstep semver.
 
 #### Package **`1.6.19`**.
 
@@ -795,7 +795,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`FetchSseOpenAiTransport.StreamState`** — **`TaskCompletionSource<OpenInfo>`** no longer uses **`RunContinuationsAsynchronously`**. WebGL builds have no real thread pool, so `RunContinuationsAsynchronously` queued the awaiting continuation onto a scheduler that never ran — the await of **`WaitForOpenAsync`** parked forever after `POST (stream)` and the chat UI animated indefinitely with no response. With **synchronous continuations**, the C# **`await`** resumes inside the JS **`onOpen`** callback's call stack, on the same Unity main thread, immediately after **`fetch().then`** delivers the response headers.
 - **`FetchSseStream.ReadAsync`** — true async via **`TaskCompletionSource<int>`**. Previously **`Stream.Read`** blocked the calling thread on **`AutoResetEvent.WaitOne`**, which on WebGL froze the JS event loop and prevented further fetch chunks from ever being delivered (deadlock: read waits for chunks; chunks wait for the event loop; event loop waits for read to return). Now **`ReadAsync`** returns synchronously when bytes are queued and a parked **`Task<int>`** otherwise; **`EnqueueChunk` / `SignalDone` / `SignalError`** call **`PumpPendingRead`** to fulfil the parked task from the JS callback, so the consumer (**`StreamReader.ReadLineAsync`** in **`MeaiOpenAiChatClient`**) gets data without blocking the main thread. **`Read` (sync)** is now non-blocking too — returns 0 instead of waiting — so any caller that bypasses **`ReadAsync`** simply observes EOF instead of hanging.
 - **`CoreAiSseFetch.jslib`** — added optional **`console.log`** lifecycle traces (**`[CoreAiSseFetch] open / response / done`**) for DevTools (**v1.6.18**); **`console.warn`** for read errors / **`fetch.catch`** kept. **v1.6.19:** those **`console.log`** lines are commented out by default (uncomment in the jslib to trace **`fetch`** / SSE); **`console.warn`** unchanged.
-- **Dependency:** **`com.nexoider.coreai` `1.6.18`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.6.18`** — lockstep semver.
 
 #### Package **`1.6.18`**.
 
@@ -807,7 +807,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`CoreAiSseFetch.jslib`** — adds an **`onOpen(callId, status, errorBody, headersFlat)`** callback fired right after **`fetch().then(response =>)`**. On **`response.ok`** the JS side starts pumping chunks via **`onChunk`** as before; on a non-2xx the body is read once and forwarded to **`onOpen`** so C# can populate **`OpenAiHttpSseOpenResult.ErrorBodyText`** and surface a proper **`LlmClientException`** with the gateway's actual status. **`fetch.catch`** (CORS / DNS / network) signals **`onOpen(callId, 0, message, "")`** + **`onError`** so the consumer sees a real diagnostic instead of a 120 ms timeout.
 - **`CoreAi_FetchSseAbort`** — now keyed by **`callId`** (was a controller pointer); the JS side keeps a **`controllers[callId]`** map and aborts on demand. Aligned with the **`CancellationToken`** registration in C#.
 - **`FetchSseStream`** — wraps each JS-extracted delta back into a single **`data: {"choices":[{"delta":{"content":"…"}}]}\n\n`** SSE event so the existing **`MeaiOpenAiChatClient`** parser can read it via **`StreamReader.ReadLineAsync`** without a special code path. Includes minimal JSON escaping so chunks containing quotes / control chars don't corrupt the framed event.
-- **Dependency:** **`com.nexoider.coreai` `1.6.17`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.6.17`** — lockstep semver.
 
 #### Package **`1.6.17`**.
 
@@ -817,7 +817,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** — when **`SameOriginCredentials`** is **off** (default), **`fetch`** now uses **`credentials: 'omit'`** instead of **`'include'`**, so providers that respond with **`Access-Control-Allow-Origin: *`** (e.g. OpenRouter) no longer fail the browser preflight. **`Authorization: Bearer …`** is still sent. **`SameOriginCredentials` on** still maps to **`same-origin`**.
 - **`CoreAISettingsAsset`** tooltips, **`CoreAISettingsAssetEditor`**, **`COREAI_SETTINGS.md`**, **`TROUBLESHOOTING.md`** — document the behaviour.
-- **Dependency:** **`com.nexoider.coreai` `1.6.16`** — lockstep semver.
+- **Dependency:** **`com.neoxider.coreai` `1.6.16`** — lockstep semver.
 
 #### Package **`1.6.16`**.
 
@@ -827,7 +827,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`CoreAISettingsAssetEditor`** — **Essentials → Streaming** keeps only **Global streaming**. **WebGL: native SSE (fetch)** and **WebGL: fetch credentials** moved to **Advanced Settings → WebGL player (browser build)** (foldout state persisted via `EditorPrefs`). When the active build target is **WebGL** and global streaming is on but native SSE is off, **Essentials** still shows a short warning pointing to that foldout.
 - **`COREAI_SETTINGS.md`**, **`README_CHAT.md`** — document the new layout.
-- **Dependency:** **`com.nexoider.coreai` `1.6.15`** — lockstep semver with this package.
+- **Dependency:** **`com.neoxider.coreai` `1.6.15`** — lockstep semver with this package.
 
 #### Package **`1.6.15`**.
 
@@ -896,7 +896,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Portable dependency + EditMode parity
 
-- **`com.nexoider.coreai` `1.6.8`** — **`QueuedAiOrchestrator`** treats **`TaskCanceledException`** from the inner orchestrator as cancellation on the public **`RunTaskAsync` / streaming** tasks (fixes **`CancelTasks_SpecificScope_CancelsActiveTask`** when the stub completes the gate with **`TrySetCanceled()`**).
+- **`com.neoxider.coreai` `1.6.8`** — **`QueuedAiOrchestrator`** treats **`TaskCanceledException`** from the inner orchestrator as cancellation on the public **`RunTaskAsync` / streaming** tasks (fixes **`CancelTasks_SpecificScope_CancelsActiveTask`** when the stub completes the gate with **`TrySetCanceled()`**).
 - **`ToolCallExtractionParityEditModeTests.Streaming_FailureThenSuccess_ResetsConsecutiveErrorsAndContinues`** — no longer requires that concatenated streamed **`Text`** omit raw tool-call JSON; with live deltas and bound tools, that JSON can appear before tools run; assertions still cover tool invocation count, terminal chunk, **`ExecutedToolCalls`**, and **`All good.`** in the aggregate.
 
 #### Package **`1.6.8`**.
@@ -934,7 +934,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### WebGL player — LLM requests and public API CORS
 
-- **Portable dependency:** **`com.nexoider.coreai` 1.6.4** — **`MeaiOpenAiChatClient`** no longer attaches correlation / idempotency / tenant headers in the **WebGL player** build, avoiding browser preflight failures against APIs that do not list those headers in **`Access-Control-Allow-Headers`** (typical when calling **OpenRouter** directly from **`http(s):…`** game origins).
+- **Portable dependency:** **`com.neoxider.coreai` 1.6.4** — **`MeaiOpenAiChatClient`** no longer attaches correlation / idempotency / tenant headers in the **WebGL player** build, avoiding browser preflight failures against APIs that do not list those headers in **`Access-Control-Allow-Headers`** (typical when calling **OpenRouter** directly from **`http(s):…`** game origins).
 
 #### Package **`1.6.4`**.
 
@@ -947,7 +947,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **Compile:** **`CoreAiChatService`** / **`CoreAiChatPanel`** — add **`using CoreAI.Infrastructure.Llm`** for **`CoreAISettingsAsset`** / **`WebGlNativeStreaming`** checks under **`UNITY_WEBGL && !UNITY_EDITOR`** (fixes **CS0246** when building WebGL player).
 - **WebGL link:** **`CoreAiSseFetch.jslib`** — use Unity’s documented macro **`makeDynCall`** (lowercase), not **`MakeDynCall`**, so Emscripten **6000.3** no longer throws **`ReferenceError: MakeDynCall is not defined`** during **`build.js`** / **jsify**.
 - **WebGL link:** avoid **`?.` optional chaining** in **`CoreAiSseFetch.jslib`** (Emscripten’s **Node** parser rejects it — **`SyntaxError: Unexpected token '.'`**); use plain **`&&`** property access for OpenAI **`delta.content`** extraction.
-- **Dependency:** **`com.nexoider.coreai` 1.6.3** (lockstep semver; portable assembly unchanged).
+- **Dependency:** **`com.neoxider.coreai` 1.6.3** (lockstep semver; portable assembly unchanged).
 
 #### Package **`1.6.3`**.
 
@@ -962,7 +962,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **Edit Mode:** **`CoreAiChatServiceEditModeTests`** — **`TryGetPersistedChatHistory`** (empty / tail / no store) and **`PersistedChat_UiFormattingRoundTrip_MatchesCoreAiChatPanelRules`** (same path as **`CoreAiChatPanel.TryAppendPersistedChatHistoryFromStore`** via service + **`FormatPersistedMessageForUi`**).
 - **Edit Mode:** **`ConversationContextCompactionEditModeTests`** — **`DeterministicManager_MaxRolledSummaryTokens_TruncatesBeforeSave`** and **`DeterministicManager_MaxRolledSummaryTokens_TruncatesStoredOnlySnapshot`** assert **`MaxRolledSummaryTokens`** truncation and **`InMemoryConversationSummaryStore`** parity for rolled summaries.
 - **Docs:** **`README_CHAT.md`** (session-restore test pointers); **`ARCHITECTURE.md`** (v1.6.2 marshaler note).
-- **Dependency:** **`com.nexoider.coreai 1.6.2`** (lockstep; no portable code changes in this drop).
+- **Dependency:** **`com.neoxider.coreai 1.6.2`** (lockstep; no portable code changes in this drop).
 
 #### Package **`1.6.2`**.
 
@@ -972,7 +972,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`CoreAISettingsAsset`** — **`enableConversationHistorySummarization`**, **`conversationHistoryRecentTokenBudgetOverride`**, **`conversationRolledSummaryMaxTokens`**; **`enableLlmContextCompaction`** moved into the same Inspector group (**Advanced → Chat history summarization**).
 - **`CoreAISettingsAssetEditor`** — dedicated foldout + tooltips; LLM compaction toggle removed from the General foldout to avoid burying summarization options.
-- **Dependency:** **`com.nexoider.coreai 1.6.1`** (portable summarization wiring + **`ConversationRolledSummaryLimiter`**).
+- **Dependency:** **`com.neoxider.coreai 1.6.1`** (portable summarization wiring + **`ConversationRolledSummaryLimiter`**).
 - **Edit Mode:** **`AiOrchestratorHistoryEditModeTests`**, **`CoreAISettingsAssetEditModeTests`**, **`ConversationRolledSummaryLimiterEditModeTests`**.
 - **Docs:** **`COREAI_SETTINGS.md`** (table + portable property names).
 
@@ -989,9 +989,9 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`ServerManagedCoreSettingsAdapter`** — relative **`ApiBaseUrl`** (`/api/...`) resolves against **`Application.absoluteURL`**.
 - **`CoreAISettingsAsset`** — **`WebGlNativeStreaming`**, **`SameOriginCredentials`**; **`CoreAiChatService`** / **`CoreAiChatPanel`** respect native streaming on WebGL when the bridge is enabled.
 - **`CoreAIProductionSettingsValidator`** — extended WebGL warnings (keys, streaming without native bridge, **`ClientLimited`** key leak).
-- Portable **`com.nexoider.coreai`** — **`LlmRequestContext`**, **`LlmAuthContextRegistry`**, **`MeaiOpenAiChatClient`** header layering, **`LlmCompletionRequest.IdempotencyKey`**, **`IOpenAiHttpSettings.HeaderProvider`** (see core changelog).
+- Portable **`com.neoxider.coreai`** — **`LlmRequestContext`**, **`LlmAuthContextRegistry`**, **`MeaiOpenAiChatClient`** header layering, **`LlmCompletionRequest.IdempotencyKey`**, **`IOpenAiHttpSettings.HeaderProvider`** (see core changelog).
 - **Edit Mode:** **`MeaiLlmClientEditModeTests`** (idempotency); **`RefreshOnUnauthorizedDecoratorEditModeTests`**.
-- **Dependency:** **`com.nexoider.coreai 1.6.0`**.
+- **Dependency:** **`com.neoxider.coreai 1.6.0`**.
 
 #### Package **`1.6.0`**.
 
@@ -1001,7 +1001,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`ResolveTimeoutMessage(bool stopRequestedByUser)`** — hosts may return **`null`** / empty to skip **`AddMessage`** when they already posted contextual diagnostics (e.g. watchdog + external stop).
 - **`SendNonStreamingAsync`** — passes **`CancellationToken`** to **`SendMessageAsync`** so HTTP / orchestration timeouts can cancel the turn (WebGL non-streaming audit; no behavioral change beyond **`ResolveTimeoutMessage`** hook).
-- **Dependency:** **`com.nexoider.coreai 1.5.29`** (lockstep).
+- **Dependency:** **`com.neoxider.coreai 1.5.29`** (lockstep).
 
 #### Package **`1.5.29`**.
 
@@ -1009,7 +1009,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Drop legacy `PlayerChat` role string
 
-- **Dependency:** **`com.nexoider.coreai 1.5.28`** — removes **`BuiltInAgentRoleIds.PlayerChat`**; use **`PlainChat`** or **`SmartChat`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.28`** — removes **`BuiltInAgentRoleIds.PlayerChat`**; use **`PlainChat`** or **`SmartChat`**.
 - **Defaults:** **`CoreAiChatConfig`** / **`CoreAiChatPanel`** fall back to **`SmartChat`** when **`RoleId`** is unset.
 - **Docs:** examples and routing tables updated (**`README_CHAT.md`**, **`COREAI_SINGLETON_API.md`**, **`QUICK_START.md`**, etc.).
 - **Edit / Play tests:** assertions and routing manifests use **`SmartChat`** instead of **`PlayerChat`**.
@@ -1021,7 +1021,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Two built-in chat agents: PlainChat and SmartChat
 
-- **Dependency:** **`com.nexoider.coreai 1.5.27`** (new built-in chat roles and memory defaults).
+- **Dependency:** **`com.neoxider.coreai 1.5.27`** (new built-in chat roles and memory defaults).
 - **Demo chat config:** **`CoreAiChatConfig_Demo.asset`** now uses `RoleId = SmartChat` (memory-enabled chat out of the box).
 - **Docs:** updated chat-role guidance in **`Docs/AI_AGENT_ROLES.md`** and **`Runtime/Source/Features/Chat/README_CHAT.md`**.
 - **Edit Mode tests:** updated built-in role and memory-policy expectations for `PlainChat` / `SmartChat`.
@@ -1033,7 +1033,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 ### Dependency: Core 1.5.26 — SSE HttpClient lifetime
 
 - **`HttpClientOpenAiTransport`** streaming path no longer disposes **`HttpClient`** before the SSE body is consumed (fixes aborted stream / zero chunks right after HTTP 200).
-- **Dependency:** **`com.nexoider.coreai 1.5.26`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.26`**.
 
 #### Package **`1.5.26`**.
 
@@ -1045,7 +1045,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`CoreAiWebGlLlmUnitySceneGuard`** — optional early-execution component to **`SetActive(false)`** **LLMUnity** roots on WebGL player so **LlamaLib** never initializes from scene objects.
 - **Docs:** **`HTTP_TRANSPORT_SPEC.md`**, **`ARCHITECTURE.md`** (WebGL HTTP + guard), **`STREAMING_ARCHITECTURE.md`** (transports + simulated stream), **`TROUBLESHOOTING.md`** (CORS), **`DOCS_INDEX.md`**.
 - **Edit Mode:** **`MeaiOpenAiWebGlTransportEditModeTests`** — non-SSE transport yields assistant text from full completion.
-- **Dependency:** **`com.nexoider.coreai 1.5.25`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.25`**.
 
 #### Package **`1.5.25`**.
 
@@ -1057,7 +1057,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`CoreAiChat.uss`:** optional **`coreai-chat-fullscreen`** border-radius tweak.
 - **Edit Mode:** **`CoreAiChatConfigEditModeTests`** asserts default fullscreen **off**.
 - **Docs:** **`README_CHAT.md`**, **`STREAMING_ARCHITECTURE.md`** (HTTP SSE = **`HttpClient`**, paths, WebGL note).
-- **Dependency:** **`com.nexoider.coreai 1.5.24`** (SSE parsing + logging in **`MeaiOpenAiChatClient`**).
+- **Dependency:** **`com.neoxider.coreai 1.5.24`** (SSE parsing + logging in **`MeaiOpenAiChatClient`**).
 
 #### Package **`1.5.24`**.
 
@@ -1065,7 +1065,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Portable HTTP client + EditMode coverage
 
-- **Dependency:** **`com.nexoider.coreai 1.5.23`** — **`MeaiOpenAiChatClient`** in **`CoreAI.Core`** uses **`System.Net.Http.HttpClient`** (not **UnityWebRequest**).
+- **Dependency:** **`com.neoxider.coreai 1.5.23`** — **`MeaiOpenAiChatClient`** in **`CoreAI.Core`** uses **`System.Net.Http.HttpClient`** (not **UnityWebRequest**).
 - **Edit Mode:** **`MeaiOpenAiChatClientHttpEditModeTests`** — non-streaming success, HTTP 429 + **`Retry-After`**, SSE aggregation; asserts client assembly is **`CoreAI.Core`**.
 - **Docs:** root **`README`**, **`COREAI_SETTINGS`**, **`ARCHITECTURE`**, **`DEVELOPER_GUIDE`**, **`PROJECT_ANALYSIS`**, **`CoreAiUnity/README`** — HTTP transport wording updated for **`HttpClient`**.
 
@@ -1079,7 +1079,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`RegisterConversationSummaryForCoreAiLifetimeScope`:** passes **`suppressDefaultAgentMemoryStore: true`** for both non-WebGL and WebGL branches so **`CoreAILifetimeScope`** remains the only place that registers **`IAgentMemoryStore`** for the Unity host (**`FileAgentMemoryStore`** on all players since **v1.6.19**, including WebGL; previously WebGL player used **`NullAgentMemoryStore`**). Fixes **`VContainerException: Conflict implementation type`** when building **`CoreAILifetimeScope`** (regression after **v1.5.21** WebGL memory registration).
 - **Edit Mode:** **`CorePortableAgentMemoryRegistrationEditModeTests`** — suppress path yields a single **`IReadOnlyList<IAgentMemoryStore>`** entry; without suppress, portable Null + host File yields **two** list entries (VContainer does not throw on **Build** for distinct implementation types; duplicate **same** type e.g. WebGL double Null still throws). **`CoreAILifetimeScopeConversationStoreEditModeTests`** also asserts **`IAgentMemoryStore`** type.
 - **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`**, **`COREAI_SETTINGS.md`**.
-- **Dependency:** **`com.nexoider.coreai 1.5.22`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.22`**.
 
 #### Package **`1.5.22`**.
 
@@ -1094,7 +1094,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **JSON:** **`FileAgentMemoryStore`** transcript JSON uses Newtonsoft; **`System.Text.Json.dll`** removed from **`CoreAI.Source`** and test asmdefs.
 - **Constants:** **`OpenAiHttpConstants`**, **`CoreAiPersistentPaths`**; **`OpenAiHttpLlmSettings`** / **`MeaiOpenAiChatClient`** / **`CoreAISettingsAssetEditor`** use shared defaults.
 - **Docs:** **`ARCHITECTURE.md`**, **`DGF_SPEC.md`** (Core asmdef vs VContainer), **`MEAI_TOOL_CALLING.md`** (IL2CPP **`CreateAIFunction`**), **`STREAMING_WEBGL_TODO.md`** (Solution C status).
-- **Dependency:** **`com.nexoider.coreai 1.5.21`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.21`**.
 
 #### Package **`1.5.21`**.
 
@@ -1106,7 +1106,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`RegisterConversationSummaryForCoreAiLifetimeScope`:** internal helper used by **`Configure`** (documented on the type).
 - **Docs:** **`ARCHITECTURE.md`** — Runtime Context (WebGL vs file-backed registration).
 - **Edit Mode:** **`CoreAILifetimeScopeConversationStoreEditModeTests`** — compile-time WebGL contract + non-WebGL resolve of **`FileConversationSummaryStore`**.
-- **Dependency:** **`com.nexoider.coreai 1.5.20`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.20`**.
 
 #### Package **`1.5.20`**.
 
@@ -1117,7 +1117,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **Docs:** **[`MemorySystem.md`](Docs/MemorySystem.md)** — *Separation from the main system prompt* for **`EnableLlmContextCompaction`**: compaction calls use **`LlmContextCompactionOptions.SystemPrompt`** and transcript payload only; **`## Conversation Summary`** is merged into the **primary** turn afterward. **[`COREAI_SETTINGS.md`](Docs/COREAI_SETTINGS.md)** — chat history compaction section notes the same for Inspector users.
 - **Edit Mode:** **[`ConversationContextCompactionEditModeTests`](Tests/EditMode/ConversationContextCompactionEditModeTests.cs)** — asserts **`ChatHistory`** null, default vs custom compaction **`SystemPrompt`**, payload headings, and that orchestrator-only marker / **`## Tool Contract`** never leak into compaction input.
 - **Play Mode (`FastNoLlm`):** **[`LlmCompactionPerRolePlayModeTests`](Tests/PlayMode/FastNoLlm/LlmCompactionPerRolePlayModeTests.cs)** — records last auxiliary **`__CoreAI_ContextCompaction`** request and asserts **`ChatHistory`** null, **`DefaultSystemPrompt`**, and **`UserPayload`** shape.
-- **Dependency:** **`com.nexoider.coreai 1.5.19`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.19`**.
 
 #### Package **`1.5.19`**.
 
@@ -1128,7 +1128,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`OfflineLlmClient`:** conversational roles use **`OfflineCustomResponse`** only (no **`[Offline] <payload>`** echo); generic offline JSON drops the **`echo`** field. Log level **Info** for offline path.
 - **Docs:** **`COREAI_SETTINGS.md`** (Offline table), **`DEVELOPER_GUIDE.md`**, **`TROUBLESHOOTING.md`** (offline/stub chat symptoms).
 - **Edit Mode tests:** **`LlmConversationalRolePolicyEditModeTests`**, **`OfflineLlmClientEditModeTests`** (PlainChat / SmartChat / Teacher), **`AiOrchestratorRefactorEditModeTests`** (Chat vs non-chat failure paths, authority denied).
-- **Dependency:** **`com.nexoider.coreai 1.5.18`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.18`**.
 
 #### Package **`1.5.18`**.
 
@@ -1137,7 +1137,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 ### Editor / MEAI — never probe `Application.isPlaying` off script main
 
 - **`UnityMainThreadLlmAsyncMarshaler`:** gate **`Application.isPlaying`** reads with mirrored **`ManagedThreadId`** (**`Application.onBeforeRender`**); **`SubsystemRegistration`** no longer primes mirrors (**wrong thread risk**).
-- **Dependency:** **`com.nexoider.coreai 1.5.17`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.17`**.
 
 #### Package **`1.5.17`**.
 
@@ -1147,7 +1147,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`UnityMainThreadLlmAsyncMarshaler`:** under **`UNITY_EDITOR`**, probes **`Application.isPlaying`** safely; **thread-pool** threads use a **`Application.onBeforeRender`** snapshot so Edit Mode tooling stays **inline** when **not playing** / unknown, while **Editor Play Mode** still **marshals** to the player loop (fixes **`get_isPlaying` off-main** + **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** coherence).
 - **Edit Mode tests:** **`UnityMainThreadLlmAsyncMarshalerEditModeTests.InvokeAsync_FromThreadPool_CompletesWithAsyncAwait_AvoidsIsPlayingOnWorker`**.
-- **Dependency:** **`com.nexoider.coreai 1.5.16`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.16`**.
 
 #### Package **`1.5.16`**.
 
@@ -1155,7 +1155,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 ### Portable Core fix (MEAI `ChatMessage.Contents`)
 
-- Dependency **`com.nexoider.coreai 1.5.15`**: **`SmartToolCallingChatClient`** correctly observes native **`FunctionCallContent`** when **`Contents`** is the MEAI **`IList`** model (fixes **three inner iterations → max consecutive errors** behaviour in **`SmartToolCallingChatClientEditModeTests`**).
+- Dependency **`com.neoxider.coreai 1.5.15`**: **`SmartToolCallingChatClient`** correctly observes native **`FunctionCallContent`** when **`Contents`** is the MEAI **`IList`** model (fixes **three inner iterations → max consecutive errors** behaviour in **`SmartToolCallingChatClientEditModeTests`**).
 
 #### Package **`1.5.15`**.
 
@@ -1166,7 +1166,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **`UnityMainThreadLlmAsyncMarshaler`:** under **`UNITY_EDITOR`** when **`Application.isPlaying`** is **false**, skips **`UniTask.SwitchToMainThread`** and invokes the MEAI **`AIFunction`** factory **inline** (same thread as the calling continuation). Avoids **deadlock** when Edit Mode code blocks the managed **main thread** on **`Task.Wait` / `.Result`** while **`SmartToolCallingChatClient`** continuations use **`ConfigureAwait(false)`** on the **thread pool**.
 - **Edit Mode tests:** **`UnityMainThreadLlmAsyncMarshalerEditModeTests`** (`Task.Run` + main-thread **`Wait`** + thread-pool **`InvokeAsync`**; sync-factory thread affinity).
 - **Docs:** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`COREAI_SINGLETON_API.md`**; **`CoreAi` API** XML on **`AskAsync`** / class summary.
-- **Dependency:** **`com.nexoider.coreai 1.5.14`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.14`**.
 
 #### Package **`1.5.14`**.
 
@@ -1177,7 +1177,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 - **Edit Mode:** **`LlmAsyncMarshalerEditModeTests`**, **`CoreAISettingsToolMarshalerEditModeTests`**, extended **`ToolExecutionPolicyEditModeTests`** for **`ToolInvocationMarshaler`**.
 - **Play Mode (`FastNoLlm`):** **`UnityMainThreadLlmAsyncMarshalerPlayModeTests`** verifies **`UniTask.SwitchToThreadPool`** then marshaler restores the Unity test thread’s **`ManagedThreadId`** inside the tool factory (inequality pre-check only when not **`UNITY_WEBGL`**).
 - **Docs:** **`ARCHITECTURE.md`**, **`COREAI_SETTINGS.md`**, **`DEVELOPER_GUIDE.md`**, **`Tests/PlayMode/README.md`**.
-- **Dependency:** **`com.nexoider.coreai 1.5.13`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.13`**.
 
 #### Package **`1.5.13`**.
 
@@ -1189,7 +1189,7 @@ Local GGUF models (Qwen3.5-4B via LLMUnity/llama.cpp) cannot emit native functio
 
 - **`MeaiOpenAiChatClient.GetResponseAsync`** / **`GetStreamingResponseAsync`** — **`await UniTask.SwitchToMainThread(PlayerLoopTiming.Update)`** at entry so every HTTP round-trip creates UWR on the player loop.
 - **`UnityMainThreadLlmAsyncMarshaler`** — implements **`ICoreAISettings.ToolInvocationMarshaler`**; **`CoreAISettingsAsset`** returns this instance so tool bodies run on the main thread.
-- **Dependency:** **`com.nexoider.coreai 1.5.12`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.12`**.
 
 #### Package **`1.5.12`**.
 
@@ -1210,7 +1210,7 @@ Support: **`CoreAI.Tests.PlayMode.Shared`** (`PlayModeTestAwait`, **`AiOrchestra
 - **Docs:** **`DEVELOPER_GUIDE.md`**, **`QUICK_START.md`**, **`DGF_SPEC.md`**, **`DOCS_INDEX.md`** (Crafting readme path).
 - **Editor:** **`FixLlmUnityAsmdefWiring`** targets the three Play Mode asmdefs that include **`COREAI_HAS_LLMUNITY`** (not **FastNoLlm** / **Shared**).
 
-#### Package **`1.5.11`**. Dependency **`com.nexoider.coreai 1.5.11`**.
+#### Package **`1.5.11`**. Dependency **`com.neoxider.coreai 1.5.11`**.
 
 ## [1.5.10] - 2026-05-01
 
@@ -1228,19 +1228,19 @@ Polling **`UnityWebRequest`** on the main thread with **`await Task.Delay(0)`** 
 - **Roslyn analyzer** **`CAIU001`** — warns on **`ConfigureAwait(false)`** in **`CoreAiUnity` Runtime/Editor** (deployed under **`Assets/CoreAiUnity/RoslynAnalyzers`**); **`Tools/build-analyzers.ps1`**, **`Tools/CoreAI.UnityAsyncAnalyzer.Tests`**.
 - **EditMode** — **`RoslynAnalyzerDeploymentTests`**; test sources use classic namespace blocks for **C# 9** compatibility.
 
-#### Package **`1.5.10`**. Dependency **`com.nexoider.coreai 1.5.10`**.
+#### Package **`1.5.10`**. Dependency **`com.neoxider.coreai 1.5.10`**.
 
 ## [1.5.9] - 2026-04-30
 
 ### WebGL / single-threaded async — HTTP poll + MEAI completion chain
 
-> **Update:** The **`UnityWebRequest`** poll implementation described in the first bullet below was **replaced in 1.5.10** by **`UniTask.Yield(PlayerLoopTiming.Update)`** and **no `ConfigureAwait(false)`** on the poll `await`s (see **1.5.10**). Portable Core items (**`SmartToolCallingChatClient`**, orchestrator, queue) from **com.nexoider.coreai 1.5.9** are unchanged.
+> **Update:** The **`UnityWebRequest`** poll implementation described in the first bullet below was **replaced in 1.5.10** by **`UniTask.Yield(PlayerLoopTiming.Update)`** and **no `ConfigureAwait(false)`** on the poll `await`s (see **1.5.10**). Portable Core items (**`SmartToolCallingChatClient`**, orchestrator, queue) from **com.neoxider.coreai 1.5.9** are unchanged.
 
 Continuations that always capture `UnitySynchronizationContext` can stall after **`SmartToolCallingChatClient`** returns a text response (logs show **Text response, stopping** but no **GetResponseAsync completed** in **`MeaiLlmClient`**).
 
 - **`MeaiOpenAiChatClient`** — replace **`Task.Yield()`** in **`UnityWebRequest`** poll loops with **`await Task.Delay(0, ct).ConfigureAwait(false)`**; retry backoff **`Task.Delay(...).ConfigureAwait(false)`** (non-stream + stream paths).
 - **`MeaiLlmClient.CompleteAsync`** — **`ConfigureAwait(false)`** on **`SmartToolCallingChatClient.GetResponseAsync`**.
-- **Dependency:** **`com.nexoider.coreai 1.5.9`** (same semver as this package; portable changelog: **`SmartToolCallingChatClient`**, **`AiOrchestrator`**, **`QueuedAiOrchestrator`**, tools).
+- **Dependency:** **`com.neoxider.coreai 1.5.9`** (same semver as this package; portable changelog: **`SmartToolCallingChatClient`**, **`AiOrchestrator`**, **`QueuedAiOrchestrator`**, tools).
 
 #### Package **`1.5.9`**.
 
@@ -1253,7 +1253,7 @@ Some OpenAI-compatible providers return **no usable `ChatResponse.Text`** even t
 - **`MeaiOpenAiChatClient.ParseResponse`** — parses **`message.content`** as string **or** array of parts (`text` fields); if still empty after stripping `<think>` / legacy blocks, uses **`reasoning_content`**. **Parsing uses `JObject.Parse`**: `DeserializeObject<Dictionary<string,object>>` left **`choices`** in a shape where **`as JArray`** was null, so **assistant text was always empty** in tests and at runtime.
 - **`MeaiLlmClient.CompleteAsync`** — if **`response.Text`** is empty, concatenates **`TextContent`** from **`response.Messages`** via **`SmartToolCallingChatClient.ConcatenateAssistantTextContents`** (portable Core **1.5.6**).
 - **EditMode tests:** `ParseCompletion_EmptyContent_UsesReasoningContent`, `ParseCompletion_ContentAsTextPartsArray_JoinsText`.
-- **Dependency:** **`com.nexoider.coreai 1.5.6`**.
+- **Dependency:** **`com.neoxider.coreai 1.5.6`**.
 
 ### Meta
 
@@ -1273,7 +1273,7 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 
 ### Meta
 
-- Package **`1.5.7`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+- Package **`1.5.7`**. Dependency **`com.neoxider.coreai 1.5.5`**.
 
 ## [1.5.6] - 2026-04-30
 
@@ -1284,18 +1284,18 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 
 ### Meta
 
-- Package **`1.5.6`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+- Package **`1.5.6`**. Dependency **`com.neoxider.coreai 1.5.5`**.
 
 ## [1.5.5] - 2026-04-29
 
 ### Tests: non-streaming chat panel (WebGL-relevant path)
 
 - **PlayMode:** `CoreAiChatPanelNonStreamingPlayModeTests` — `SubmitMessageFromExternalAsync` with **streaming off**, stub `CoreAiChatService` / `IAiOrchestrationService`, **no** `UIDocument`: asserts **`OnAiResponseCompleted`**, return text, and **`_isSending == false`** after the turn; second case overrides **`FormatResponseText`** to empty and asserts **null** result and **no** completion fire (matches “No response” UI path).
-- **Dependency:** unchanged **`com.nexoider.coreai 1.5.5`**.
+- **Dependency:** unchanged **`com.neoxider.coreai 1.5.5`**.
 
 ### Meta
 
-- Package **`1.5.5`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+- Package **`1.5.5`**. Dependency **`com.neoxider.coreai 1.5.5`**.
 
 ## [1.5.4] - 2026-04-29
 
@@ -1304,11 +1304,11 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 - **`CoreAiChatPanel.RunAgentTurnAsync`** — `finally` now **`await UniTask.SwitchToMainThread`** before `HideTypingIndicator`, reset of `_isSending`, and send-button refresh so UI Toolkit updates always run on the Unity player loop (WebGL runs inside the browser; continuations after HTTP must not mutate `VisualElement` off-thread).
 - **`CoreAiChatPanel.SendNonStreamingAsync`** — after **`SendMessageAsync`**, **`await UniTask.SwitchToMainThread`** before hiding typing and appending the assistant bubble; nested `try`/`finally` also switches before a defensive **`HideTypingIndicator`**.
 - **Empty formatted replies** — if **`FormatResponseText`** yields empty text, show **`No response.`** (same as empty raw response) instead of an empty bubble.
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.5`**.
+- **Dependency:** bumped to **`com.neoxider.coreai 1.5.5`**.
 
 ### Meta
 
-- Package **`1.5.4`**. Dependency **`com.nexoider.coreai 1.5.5`**.
+- Package **`1.5.4`**. Dependency **`com.neoxider.coreai 1.5.5`**.
 
 ## [1.5.3] - 2026-04-30
 
@@ -1325,11 +1325,11 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 - **README / README_RU** — Quick Start documents the manifest menu shortcut, Chat Demo vs bare scene, and clarifies that detailed Markdown guides ship in English.
 - **Documentation** — **`EXAMPLES.md`**, **`AGENT_BUILDER.md`**, **`QUICK_START.md`**, **`COREAI_SINGLETON_API.md`** steer beginners toward **`WithAction`** before custom **`ILlmTool`**.
 - **EditMode tests:** `AgentBuilderEditModeTests` coverage for **`ValidateOnBuild`** / compaction gate / built-in-role prompt fallback.
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.3`**.
+- **Dependency:** bumped to **`com.neoxider.coreai 1.5.3`**.
 
 ### Meta
 
-- Package **`1.5.3`**. Dependency **`com.nexoider.coreai 1.5.3`**.
+- Package **`1.5.3`**. Dependency **`com.neoxider.coreai 1.5.3`**.
 
 ## [1.5.2] - 2026-04-30
 
@@ -1340,11 +1340,11 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 - **`MeaiOpenAiChatClient`** maps HTTP **413** and common context-overload payloads to **`LlmErrorCode.ContextLengthExceeded`**.
 - **EditMode tests:** `AiOrchestratorHistoryEditModeTests` context-overflow retry (`RunTaskAsync_RetriesOnce_OnContextLengthExceeded`), `FileConversationSummaryStoreEditModeTests`.
 - **`ARCHITECTURE.md`**, **`MemorySystem.md`** — budget/summary/transcript narrative.
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.2`**.
+- **Dependency:** bumped to **`com.neoxider.coreai 1.5.2`**.
 
 ### Meta
 
-- Package **`1.5.2`**. Dependency **`com.nexoider.coreai 1.5.2`**.
+- Package **`1.5.2`**. Dependency **`com.neoxider.coreai 1.5.2`**.
 
 ## [1.5.1] - 2026-04-30
 
@@ -1352,11 +1352,11 @@ Orchestrator / LLM pipeline resumes on thread-pool continuations in several plac
 
 - **`CoreAiChatService.SendMessageAsync`** / **`SendMessageStreamingAsync`** — timeout is now enforced at the Unity layer via **`CancelAfterSlim`** (`Cysharp.Threading.Tasks`), which uses Unity's `PlayerLoop` and is fully compatible with WebGL's single-threaded execution model. Previously, timeout relied on `CancellationTokenSource.CancelAfter` (backed by `System.Threading.Timer`), which hangs indefinitely in WebGL/Emscripten.
 - **Error propagation** — `SendMessageAsync` no longer swallows exceptions with a `catch` block that returned `null`. Errors now propagate to `CoreAiChatPanel`, which displays the error message to the user instead of a generic "No response."
-- **Dependency:** bumped to **`com.nexoider.coreai 1.5.1`** (retry multiplier fix, `CancelAfter` removal from orchestrator and decorator).
+- **Dependency:** bumped to **`com.neoxider.coreai 1.5.1`** (retry multiplier fix, `CancelAfter` removal from orchestrator and decorator).
 
 ### Meta
 
-- Package **`1.5.1`**. Dependency **`com.nexoider.coreai 1.5.1`**.
+- Package **`1.5.1`**. Dependency **`com.neoxider.coreai 1.5.1`**.
 
 ## [1.5.0] - 2026-04-30
 
@@ -1413,7 +1413,7 @@ Migrated core LLM pipeline components from `CoreAI.Source` (Unity-dependent) to 
 
 ### Meta
 
-- Package **`1.5.0`**. Dependency **`com.nexoider.coreai 1.5.0`**.
+- Package **`1.5.0`**. Dependency **`com.neoxider.coreai 1.5.0`**.
 
 
 ## [1.4.1] - 2026-04-30
@@ -1476,7 +1476,7 @@ All changes work across **every LLM mode**: `Auto`, `Local Model`, `Client Owned
 
 ### Meta
 
-- Package **`1.4.0`**. Dependency **`com.nexoider.coreai 1.4.0`** (bumped — adds `TryRepairToolName`, retry backoff).
+- Package **`1.4.0`**. Dependency **`com.neoxider.coreai 1.4.0`** (bumped — adds `TryRepairToolName`, retry backoff).
 
 
 ### Tool-calling test coverage: chain, parallel, native+text, fail/success reset
@@ -1490,7 +1490,7 @@ Adds the scenarios that the 1.3.0 fix did not pin down explicitly. Code paths fr
 
 ### Meta
 
-- Package **`1.3.1`**. Dependency **`com.nexoider.coreai 1.3.0`** (unchanged — this is a tests-only release).
+- Package **`1.3.1`**. Dependency **`com.neoxider.coreai 1.3.0`** (unchanged — this is a tests-only release).
 
 ## [1.3.0] - 2026-04-30
 
@@ -1512,7 +1512,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 ### Portable extractor
 
-- **`CoreAI.Ai.LlmToolCallTextExtractor`** (new in `com.nexoider.coreai 1.3.0`) — engine-agnostic `TryExtract` / `StripForDisplay`, available to anything that depends on the portable core. Existing **`MeaiLlmClient.TryExtractToolCallsFromText`** / `StripEmbeddedToolCallJsonForDisplay` keep their public surface for backward compatibility.
+- **`CoreAI.Ai.LlmToolCallTextExtractor`** (new in `com.neoxider.coreai 1.3.0`) — engine-agnostic `TryExtract` / `StripForDisplay`, available to anything that depends on the portable core. Existing **`MeaiLlmClient.TryExtractToolCallsFromText`** / `StripEmbeddedToolCallJsonForDisplay` keep their public surface for backward compatibility.
 
 ### Tests
 
@@ -1520,7 +1520,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 ### Meta
 
-- Package **`1.3.0`**. Dependency **`com.nexoider.coreai 1.3.0`** (bumped — adds `LlmToolCallTextExtractor` and `LlmToolCallTrace` / `ExecutedToolCalls`).
+- Package **`1.3.0`**. Dependency **`com.neoxider.coreai 1.3.0`** (bumped — adds `LlmToolCallTextExtractor` and `LlmToolCallTrace` / `ExecutedToolCalls`).
 
 ## [1.2.6] - 2026-04-30
 
@@ -1532,7 +1532,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - **PlayMode:** `AgentMemoryOpenAiApiPlayModeTests` — verbose LLM logging toggle, explicit `AgentMemoryState.Memory` assertions (non-empty write, append preserves baseline + marker, clear removes row), orchestrator reply logging.
 - **EditMode:** `GlobalMessagePipeMinimalBootstrapEditModeTests` — idempotent bootstrap + publish/subscribe smoke for `LlmToolCallCompleted`.
 - **Docs:** `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md` — note bootstrap + PlayMode `TestAgentSetup` behaviour.
-- Package **`1.2.6`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+- Package **`1.2.6`**. Dependency **`com.neoxider.coreai 1.2.1`** (unchanged).
 
 ## [1.2.5] - 2026-04-30
 
@@ -1543,7 +1543,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 ### Meta
 
-- Package **`1.2.5`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+- Package **`1.2.5`**. Dependency **`com.neoxider.coreai 1.2.1`** (unchanged).
 
 ## [1.2.4] - 2026-04-29
 
@@ -1552,7 +1552,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - **`README_CHAT.md`** — section *Custom roles — not locked to “one persona”* (`CoreAiChatConfig.RoleId`, registering multiple roles, **`AgentMode.ToolsOnly`** expectations, host-only `BuildAiTaskRequest` policy, EN + RU `<details>` summary). Cross-links to tool policy and streaming/tool sections.
 - **EditMode:** `CoreAiChatPanelBuildRequestEditModeTests` — default `BuildAiTaskRequest` shape (`RoleId`, `Hint`, `SourceTag`, `AllowedToolNames` null) and subclass allowlist injection.
 - **PlayMode:** `CoreAiChatPanelBuildRequestPlayModeTests` — same checks in a player frame (no LLM; complements EditMode for lifecycle/domain differences).
-- Package **`1.2.4`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+- Package **`1.2.4`**. Dependency **`com.neoxider.coreai 1.2.1`** (unchanged).
 
 ## [1.2.3] - 2026-04-29
 
@@ -1561,14 +1561,14 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - **`CoreAiChatPanel.BuildAiTaskRequest(string, string)`** — clarified in xmldocs: default minimal `AiTaskRequest` (`RoleId` + `Hint` + `SourceTag=Chat`); hosts override to inject **tool policy** (`AllowedToolNames`, `ForcedToolMode`, `RequiredToolName`, etc.). The same override is used for **typed UI sends** and **`SubmitMessageFromExternalAsync`** (both build the request through this method).
 - **`README_CHAT.md`** — new subsection *Custom `AiTaskRequest` (tool policy)* describing the override pattern and parity with streaming / orchestrator.
 - **`IChatRequestConfigurator`** — xmldocs corrected: no longer reference non-existent `CoreAiChatExternalSubmitOptions.ConfigureRequest` or claim registration on `CoreAiChatPanel`; the interface remains a **preview** contract for future DI-style wiring; until then **`BuildAiTaskRequest`** is the supported extension point.
-- Package **`1.2.3`**. Dependency **`com.nexoider.coreai 1.2.1`** (unchanged).
+- Package **`1.2.3`**. Dependency **`com.neoxider.coreai 1.2.1`** (unchanged).
 
 ## [1.2.2] - 2026-04-29
 
 ### Streaming parity + `AllowedToolNames` empty = no tools
 
 - **`CoreAi.StreamChunksAsync(AiTaskRequest, CancellationToken)`** — forwards to `CoreAiChatService.SendMessageStreamingAsync` so hosts pass `AllowedToolNames` / `ForcedToolMode` on streaming turns.
-- Depends on **`com.nexoider.coreai 1.2.1`** (orchestrator: empty allowlist strips tools; see Core CHANGELOG).
+- Depends on **`com.neoxider.coreai 1.2.1`** (orchestrator: empty allowlist strips tools; see Core CHANGELOG).
 - **EditMode:** `AiOrchestratorHistoryEditModeTests` — empty allowlist + sync vs streaming tool parity; `CoreServicesInstallerEditModeTests` — TearDown no longer calls `SetProvider(null)`.
 
 ## [1.2.1] - 2026-04-29
@@ -1578,7 +1578,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - **UPM `link.xml`** at package root `Assets/CoreAiUnity/link.xml` (the monorepo file `Assets/link.xml` is **not** inside `path=Assets/CoreAiUnity`, so consumers need the copy in the package folder).
 - **EditMode:** `CoreServicesInstallerEditModeTests.RegisterCore_Builds_AndResolves_IAiGameCommandSink_As_MessagePipeSink` — guards `RegisterCore` + factory-registered `IAiGameCommandSink` against VContainer constructor-analysis failures on IL2CPP.
 - **Docs:** WebGL / IL2CPP note in `DEVELOPER_GUIDE.md` §2.1.
-- Package **`1.2.1`**. Dependency **`com.nexoider.coreai 1.2.0`** (unchanged).
+- Package **`1.2.1`**. Dependency **`com.neoxider.coreai 1.2.0`** (unchanged).
 
 ## [1.2.0] - 2026-04-29
 
@@ -1590,7 +1590,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 - Added Unity DI registration for the default tool-call history and no-op agent trace sink.
 - Added EditMode coverage for per-role runtime context, allowed tool filtering, chat-only tool suppression, scripted LLM responses, structured tool result envelopes, and tool-call history.
-- Package **`1.2.0`**. Dependency **`com.nexoider.coreai 1.2.0`**.
+- Package **`1.2.0`**. Dependency **`com.neoxider.coreai 1.2.0`**.
 
 ## [1.1.0] - 2026-04-29
 
@@ -1600,7 +1600,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🔧 **Registry uses core resolver** — `LlmClientRegistry` keeps Unity-specific client construction, but route matching now goes through `CoreAI.Core` `LlmRouteResolver`.
 - ✨ **Production policy surface** — Unity can now build on core entitlement, usage, auth context, and provider error contracts while keeping ScriptableObjects, VContainer, HTTP/SSE, and LLMUnity in the Unity package.
 - 🧪 **EditMode coverage:** added route resolver priority, route table validation, manifest conversion, provider error mapping, and usage aggregation tests.
-- 🔧 Package **`1.1.0`**. Dependency **`com.nexoider.coreai 1.1.0`**.
+- 🔧 Package **`1.1.0`**. Dependency **`com.neoxider.coreai 1.1.0`**.
 
 ## [1.0.3] - 2026-04-29
 
@@ -1611,7 +1611,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - ✨ **HTTP model presets** — `CoreAISettingsAssetEditor` keeps the free-form model field and adds a preset dropdown for common OpenAI-compatible model ids.
 - 🧪 **EditMode coverage:** updated chat config defaults and added hotkey contract regressions.
 - 📝 **Docs:** chat README updated for the new send/newline behavior.
-- 🔧 Package **`1.0.3`**. Dependency **`com.nexoider.coreai 1.0.3`**.
+- 🔧 Package **`1.0.3`**. Dependency **`com.neoxider.coreai 1.0.3`**.
 
 ## [1.0.2] - 2026-04-28
 
@@ -1621,7 +1621,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - ✨ **Tool lifecycle identity** — `ToolExecutionPolicy` publishes `LlmToolCallInfo` with `CallId` for start/completed/failed events, making async and parallel diagnostics correlate to the exact provider tool call.
 - 🧪 **EditMode coverage:** added regressions for deterministic context summary behavior and awaited async tool execution.
 - 📝 **Docs:** architecture and developer guide updated for context management and tool-call event identity.
-- 🔧 Package **`1.0.2`**. Dependency **`com.nexoider.coreai 1.0.2`**.
+- 🔧 Package **`1.0.2`**. Dependency **`com.neoxider.coreai 1.0.2`**.
 
 ## [1.0.1] - 2026-04-28
 
@@ -1634,7 +1634,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - ✨ **Production diagnostics** — `CoreAI/Validate Production Settings` and the settings inspector warn when WebGL is configured with `ClientOwnedApi` and a non-empty API key.
 - 🧪 **EditMode coverage:** targeted production-extension run passed `12/12` for routing usage events, ServerManaged auth hook, scoped memory, and runtime prompt context.
 - 📝 **Docs:** architecture, settings, developer guide, and changelogs updated for production extension points.
-- 🔧 Package **`1.0.1`**. Dependency **`com.nexoider.coreai 1.0.1`**.
+- 🔧 Package **`1.0.1`**. Dependency **`com.neoxider.coreai 1.0.1`**.
 
 ## [1.0.0] - 2026-04-28
 
@@ -1647,7 +1647,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🔧 **Editor UX** — `CoreAISettingsAssetEditor` exposes the public LLM mode field, single-mode vs routing-profile guidance, ClientLimited limit fields, and ServerManagedApi key-safety guidance.
 - 🧪 **EditMode coverage:** focused tests for settings helpers, routing metadata/events, ClientLimited limits, and mixed-mode manifest resolution. Targeted run: 16/16 passed.
 - 📝 **Docs:** architecture, settings, quick start, developer guide, docs index, chat README, package READMEs, and changelogs updated for the 1.0.0 mode surface.
-- 🔧 Package **`1.0.0`**. Dependency **`com.nexoider.coreai 1.0.0`**.
+- 🔧 Package **`1.0.0`**. Dependency **`com.neoxider.coreai 1.0.0`**.
 
 ## [0.25.14] - 2026-04-27
 
@@ -1659,7 +1659,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🐛 **Assistant bubble layout** — leading whitespace/newlines from the model are trimmed for display so empty gaps do not appear above the first line.
 - 🧪 **EditMode:** `FormatPersistedMessageForUi`, `NormalizeAssistantDisplayText` regressions.
 - 📝 **`README_CHAT.md`** — documents send vs stop semantics, streaming completion, persisted `hint`, display trimming, and an in-editor screenshot (`chat-readme-example.png`) with the chat panel next to Unity Console (`[CoreAI] [Llm]`, MessagePipe).
-- 🔧 Package **`0.25.14`**. Dependency **`com.nexoider.coreai 0.25.14`**.
+- 🔧 Package **`0.25.14`**. Dependency **`com.neoxider.coreai 0.25.14`**.
 
 ## [0.25.13] - 2026-04-27
 
@@ -1669,7 +1669,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🧪 **EditMode coverage:** added an `AIFunction.InvokeAsync` regression for `check_compatibility` using the public `ingredients` argument name.
 - 🧪 **PlayMode stability:** `CoreAiChatServiceIntegrationPlayModeTests` now falls back to the returned task result when a streaming callback receives no text chunks, avoiding false failures on providers that emit only terminal chunks for short answers.
 - 📝 **`MEAI_TOOL_CALLING.md`** — documents that .NET `AIFunction` parameter names must match `ILlmTool.ParametersSchema` property names.
-- 🔧 Package **`0.25.13`**. Dependency **`com.nexoider.coreai 0.25.13`**.
+- 🔧 Package **`0.25.13`**. Dependency **`com.neoxider.coreai 0.25.13`**.
 
 ## [0.25.12] - 2026-04-27
 
@@ -1679,7 +1679,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🐛 **Queue fairness and cancellation** — equal priorities are FIFO, streaming and non-streaming tasks share one effective priority order, and pending tasks observe external cancellation before they start.
 - 🧪 **EditMode coverage:** added queue regressions for FIFO priority ties, pending scope supersession, pending external cancellation, pending stream supersession, `CancelTasks(scope)` for pending streams, and shared sync/stream priority.
 - 📝 **`DEVELOPER_GUIDE.md`** — documents the queue contract: `MaxConcurrent`, `Priority`, `CancellationScope`, `CancelTasks(scope)`, and sync/stream scheduling.
-- 🔧 Package **`0.25.12`**. Dependency **`com.nexoider.coreai 0.25.12`**.
+- 🔧 Package **`0.25.12`**. Dependency **`com.neoxider.coreai 0.25.12`**.
 
 ## [0.25.11] - 2026-04-27
 
@@ -1691,16 +1691,16 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🔧 **`WorldLlmTool` tool contract hardening** — descriptions now explicitly require `targetName` for animation commands such as `list_animations`, and invalid/missing argument responses use one centralized valid-action list plus action-specific missing-parameter messages.
 - 🧪 **EditMode coverage:** added regressions for orchestrator tool-contract injection, `WorldLlmTool` missing `targetName` feedback, and world executor thread handling.
 - 📝 **`MEAI_TOOL_CALLING.md` / `WORLD_COMMANDS.md` / `DEVELOPER_GUIDE.md`** — documented the orchestrator-level tool contract, direct world-command main-thread execution, and beginner/pro MessagePipe extension points.
-- 🔧 Package **`0.25.11`**. Dependency **`com.nexoider.coreai 0.25.11`**.
+- 🔧 Package **`0.25.11`**. Dependency **`com.neoxider.coreai 0.25.11`**.
 
 ## [0.25.10] - 2026-04-27
 
 ### File-backed memory store + docs
 
 - 🐛 **`FileAgentMemoryStore.ClearChatHistory`** — after dropping in-memory chat for a role, the internal “history loaded” flag is reset so the **same store instance** can call `GetChatHistory` / `AppendChatMessage` again without `KeyNotFoundException` (regression covered by **`FileAgentMemoryStoreEditModeTests.ClearChatHistory_SameStoreInstance_GetChatHistory_IsSafe`**).
-- 📝 **`MemorySystem.md`** — notes that `RoleMemoryConfig` defaults treat persisted chat as off unless chat history is enabled or set explicitly (see **`com.nexoider.coreai` 0.25.10**).
+- 📝 **`MemorySystem.md`** — notes that `RoleMemoryConfig` defaults treat persisted chat as off unless chat history is enabled or set explicitly (see **`com.neoxider.coreai` 0.25.10**).
 - 📝 **`MEMORY_STORE_CUSTOM_BACKENDS.md`** — custom `IAgentMemoryStore` implementations should invalidate any per-role RAM cache when implementing `ClearChatHistory`, same contract as the reference file store.
-- 🔧 Package **`0.25.10`**. Dependency **`com.nexoider.coreai 0.25.10`**.
+- 🔧 Package **`0.25.10`**. Dependency **`com.neoxider.coreai 0.25.10`**.
 
 ## [0.25.9] - 2026-04-27
 
@@ -1710,7 +1710,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🐛 **LLMUnity package detection:** all CoreAI asmdefs use the real UPM package name **`ai.undream.llm`** in `versionDefines` (`COREAI_HAS_LLMUNITY`). The assembly references remain `undream.llmunity.Runtime` / `.Editor`, which are the assembly names exposed by the package.
 - ✨ **`CoreAISettingsAssetEditor` — LLMUnity status helper.** The LLMUnity foldout now reports whether package `ai.undream.llm` is installed and whether `COREAI_HAS_LLMUNITY` is active. If the package is installed but the define is missing, **Auto-fix asmdef wiring** updates the four CoreAI asmdefs and refreshes the AssetDatabase.
 - 🧪 **EditMode:** added per-agent MaxOutputTokens priority tests in the orchestrator plumbing suite.
-- 🔧 Package version **`0.25.9`**. Dependency `com.nexoider.coreai 0.25.9+`; package versions are aligned.
+- 🔧 Package version **`0.25.9`**. Dependency `com.neoxider.coreai 0.25.9+`; package versions are aligned.
 
 ## [0.25.8] - 2026-04-27
 
@@ -1729,7 +1729,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🔧 **Effective priority:** `LlmCompletionRequest.MaxOutputTokens` (per-request direct call) → `AiTaskRequest.MaxOutputTokens` (per-call via orchestrator) → `ICoreAISettings.MaxTokens` (global default in `CoreAISettings.asset`) → provider default. Set `MaxTokens = 0` in the asset to opt out of the global fallback.
 - 🧪 **`MaxTokensFallbackEditModeTests`** — 4 new tests through `MeaiLlmClient` covering: settings-default fallback (non-streaming + streaming), per-request override wins, `MaxTokens=0` leaves provider default. Existing 552 EditMode tests continue to pass.
 - 🔧 **TODO (next):** dual-backend at runtime (primary + secondary, per-role routing via existing `RoutingLlmClient` + `LlmRoutingManifest`). Captured in [`TODO.md`](../../TODO.md).
-- 🔧 Package version **`0.25.8`**. Dependency `com.nexoider.coreai 0.25.4+` (new `MaxTokens` interface member with default-impl, new `AiTaskRequest.MaxOutputTokens`).
+- 🔧 Package version **`0.25.8`**. Dependency `com.neoxider.coreai 0.25.4+` (new `MaxTokens` interface member with default-impl, new `AiTaskRequest.MaxOutputTokens`).
 
 ## [0.25.7] - 2026-04-27
 
@@ -1821,7 +1821,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 ### Forced Tool Mode (provider tool_choice) — deterministic tool calls
 
-- **`MeaiLlmClient.ApplyForcedToolMode`** maps the new `LlmToolChoiceMode` (introduced in `com.nexoider.coreai 0.25.0`) onto Microsoft.Extensions.AI `ChatOptions.ToolMode`:
+- **`MeaiLlmClient.ApplyForcedToolMode`** maps the new `LlmToolChoiceMode` (introduced in `com.neoxider.coreai 0.25.0`) onto Microsoft.Extensions.AI `ChatOptions.ToolMode`:
   - `Auto` → provider default (model decides),
   - `RequireAny` → `ChatToolMode.RequireAny`,
   - `RequireSpecific` → `ChatToolMode.RequireSpecific(name)` (validated against the available `AIFunction` set; falls back to `RequireAny` with a warning if the named tool isn't present),
@@ -1831,7 +1831,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - **Tool-call JSON stays out of streaming text by default.** The existing native (SSE `delta.tool_calls`) and text-based extraction paths already strip tool-call JSON before yielding text chunks; `ForcedToolMode` does not change that.
 - 🧪 **Tests:** new `ForcedToolModeEditModeTests` verify forced-mode mapping, RequireSpecific validation, and the per-iteration reset in streaming.
 - **HTTP SSE `reasoning_content` (Qwen / LM Studio)** — `MeaiOpenAiChatClient.ExtractDeltaUpdate` applies deltas so reasoning chains in a separate field do not leak into visible `content`; `ParseResponse` is documented as “`message.content` only for assistant text”. EditMode: `MeaiOpenAiChatClientSseEditModeTests`; PlayMode: `Streaming_ThinkBlocks_StrippedFromResponse` timing aligned with `RequestTimeoutSeconds` plus margin.
-- 🔧 Bumped package versions to `0.25.0`. Dependency: `com.nexoider.coreai 0.25.0+`.
+- 🔧 Bumped package versions to `0.25.0`. Dependency: `com.neoxider.coreai 0.25.0+`.
 
 ## [0.24.2] - 2026-04-26
 
@@ -1871,7 +1871,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
   - `ToolExecutionPolicyEditModeTests` — 14 tests: duplicate detection (global, per-tool, reset), error counter, batch execution, max errors, safety normalization.
   - `TryExtractToolCallsFromTextTests` — 11 tests: single/multi tool, code block protection, malformed JSON, nested braces, edge cases.
 - Updated `STREAMING_ARCHITECTURE.md` — new §7 "Streaming tool-calling" documenting dual-path architecture and execution policy guarantees.
-- Bumped package versions to `0.24.0` (`com.nexoider.coreaiunity` and dependency on `com.nexoider.coreai`).
+- Bumped package versions to `0.24.0` (`com.neoxider.coreaiunity` and dependency on `com.neoxider.coreai`).
 
 ## [0.23.3] - 2026-04-26
 
@@ -1883,7 +1883,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - Expanded streaming + tool-calling tests in `MeaiLlmClientEditModeTests`:
   - keeps visible prefix text while suppressing tool JSON from UI;
   - terminates with explicit terminal error when tool-loop iteration limit is exceeded.
-- Bumped package version to `0.23.3` and synced dependency to `com.nexoider.coreai` `0.23.3`.
+- Bumped package version to `0.23.3` and synced dependency to `com.neoxider.coreai` `0.23.3`.
 
 ## [0.23.2] - 2026-04-26
 
@@ -1895,8 +1895,8 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 
 ### Packaging and release pin
 
-- Bumped `com.nexoider.coreaiunity` to `0.23.1`.
-- Pinned dependency `com.nexoider.coreai` to `0.23.1` to force package consumers to pick the build with streaming/tool-calling reliability fixes.
+- Bumped `com.neoxider.coreaiunity` to `0.23.1`.
+- Pinned dependency `com.neoxider.coreai` to `0.23.1` to force package consumers to pick the build with streaming/tool-calling reliability fixes.
 
 ## [0.23.0] - 2026-04-26
 
@@ -1909,7 +1909,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - Strengthened HTTP streaming cancellation in `MeaiOpenAiChatClient`: active request is aborted both on token cancellation and on early enumerator disposal.
 - Stabilized PlayMode tests: `Streaming_CancellationToken_StopsStream` uses fallback timed cancellation; `MemoryTool_AppendsMemory` now retries with strict tool-only prompt before failing.
 - Added complex behavior scenario test in dedicated folder: `Tests/PlayModeTest/Scenarios/Complex/MerchantBehaviorChatWithToolsPlayModeTests.cs`.
-- Updated package versions to `0.23.0` (`com.nexoider.coreaiunity` and dependency on `com.nexoider.coreai`).
+- Updated package versions to `0.23.0` (`com.neoxider.coreaiunity` and dependency on `com.neoxider.coreai`).
 
 ## [0.22.0] - 2026-04-25
 
@@ -1990,7 +1990,7 @@ A new level of control over agents: stop, clear memory, subscribe to tool invoca
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.21.8**
+- Bumped dependency on `com.neoxider.coreai` to **0.21.8**
 
 ## [0.21.7] - 2026-04-23
 
@@ -2159,7 +2159,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.20.2**
+- Bumped dependency on `com.neoxider.coreai` to **0.20.2**
 
 ## [0.20.1] - 2026-04-23
 
@@ -2177,7 +2177,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.20.1**
+- Bumped dependency on `com.neoxider.coreai` to **0.20.1**
 
 ## [0.20.0] - 2026-04-23
 
@@ -2203,7 +2203,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 - 🧪 **PlayMode**: `StreamingPlayModeTests` (4 tests: streaming chunks, cancellation, think-block stripping, 3-layer prompt with a real LLM).
 
 ### Dependencies
-- Bumped dependency on `com.nexoider.coreai` to **0.20.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.20.0**
 
 ## [0.19.1] - 2026-04-14
 
@@ -2217,7 +2217,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.19.1**
+- Bumped dependency on `com.neoxider.coreai` to **0.19.1**
 
 ## [0.19.0] - 2026-04-10
 
@@ -2231,7 +2231,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.19.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.19.0**
 
 ## [0.18.0] - 2026-04-10
 
@@ -2250,7 +2250,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.18.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.18.0**
 
 ## [0.16.0] - 2026-04-09
 
@@ -2272,7 +2272,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 ## [0.13.0] - 2026-04-09
 
 ### Action / Event System
-- ✨ `DelegateLlmTool`, `CoreAiEvents`, and `AgentBuilder` extensions (via `com.nexoider.coreai 0.13.0`).
+- ✨ `DelegateLlmTool`, `CoreAiEvents`, and `AgentBuilder` extensions (via `com.neoxider.coreai 0.13.0`).
 - 📝 Updated `TOOL_CALL_SPEC.md` and `AGENT_BUILDER.md` with examples and trigger prompting.
 - 🧪 **EditMode tests** for `CoreAiEvents` and `AgentBuilder.WithAction`.
 - 🧪 **PlayMode test** `CustomAgentsPlayModeTests.CustomAgent_Helper_WithAction` for `DelegateLlmTool`.
@@ -2292,7 +2292,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.12.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.12.0**
 
 ---
 
@@ -2371,7 +2371,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.7.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.7.0**
 
 ---
 
@@ -2417,7 +2417,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.6.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.6.0**
 
 ---
 
@@ -2451,7 +2451,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Dependencies
 
-- Bumped dependency on `com.nexoider.coreai` to **0.5.0**
+- Bumped dependency on `com.neoxider.coreai` to **0.5.0**
 
 ---
 
@@ -2501,7 +2501,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Layout
 
-- **CoreAI.Source** sources live under **`Assets/CoreAiUnity/Runtime/Source/`** (previously under `Packages/com.nexoider.coreai/Runtime/Source/`). UPM dependencies for this package: **MessagePipe**, **MessagePipe.VContainer**, **UniTask**, **LLMUnity** (plus **`com.nexoider.coreai`** transitively).
+- **CoreAI.Source** sources live under **`Assets/CoreAiUnity/Runtime/Source/`** (previously under `Packages/com.neoxider.coreai/Runtime/Source/`). UPM dependencies for this package: **MessagePipe**, **MessagePipe.VContainer**, **UniTask**, **LLMUnity** (plus **`com.neoxider.coreai`** transitively).
 
 ### Logging (release requirement)
 
@@ -2510,7 +2510,7 @@ Previously, calling the LLM from game code meant knowing VContainer (`container.
 
 ### Other
 
-- Version aligned with **`com.nexoider.coreai` 0.1.3** (`package.json` dependency).
+- Version aligned with **`com.neoxider.coreai` 0.1.3** (`package.json` dependency).
 
 ## [0.1.2] - earlier
 

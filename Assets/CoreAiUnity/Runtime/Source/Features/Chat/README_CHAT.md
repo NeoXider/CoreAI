@@ -49,7 +49,7 @@ Configure in the Inspector:
 1. Create a UI Toolkit host GameObject:
    - Unity 6.5+: add `PanelRenderer`.
    - Unity 6.3/6.4: add `UIDocument`.
-2. Assign UXML: `Packages/com.nexoider.coreaiunity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`
+2. Assign UXML: `Packages/com.neoxider.coreaiunity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`
 3. Add the `CoreAiChatPanel` component
 4. Assign your `CoreAiChatConfig`
 5. **Done!** The chat uses the current CoreAI backend
@@ -59,7 +59,7 @@ Configure in the Inspector:
 
 ### WebGL (browser build)
 
-`UnityWebRequest` runs under the browser's same-origin / CORS / HTTPS rules. For **`CoreAiChatPanel`**, use **`com.nexoider.coreaiunity` ≥ **1.5.6** (minimum **1.5.4** for non-streaming bubbles; **1.5.6** also marshals **streaming** cleanup in `RunAgentTurnAsync` `finally`). After LLM completion, the panel **`await`s `UniTask.SwitchToMainThread`** before toggling the typing indicator, finishing streaming state, or adding assistant bubbles, so UI Toolkit is not updated from the wrong synchronization context. **1.5.5** adds PlayMode tests `CoreAiChatPanelNonStreamingPlayModeTests` for the non-streaming external-submit path.
+`UnityWebRequest` runs under the browser's same-origin / CORS / HTTPS rules. For **`CoreAiChatPanel`**, use **`com.neoxider.coreaiunity` ≥ **1.5.6** (minimum **1.5.4** for non-streaming bubbles; **1.5.6** also marshals **streaming** cleanup in `RunAgentTurnAsync` `finally`). After LLM completion, the panel **`await`s `UniTask.SwitchToMainThread`** before toggling the typing indicator, finishing streaming state, or adding assistant bubbles, so UI Toolkit is not updated from the wrong synchronization context. **1.5.5** adds PlayMode tests `CoreAiChatPanelNonStreamingPlayModeTests` for the non-streaming external-submit path.
 
 ## Custom roles — not locked to “one persona” (`CoreAiChatConfig.RoleId`)
 
@@ -461,7 +461,7 @@ Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI auto
 - Some OpenAI-compatible reasoning models may stream hidden reasoning without the opening `<think>` tag and only emit `</think>` before the final answer. The shared filter treats the buffered prefix before that orphan closing tag as hidden reasoning and drops it.
 - **Non-streaming**: regex strips `<think>` blocks from the final reply.
 - **Tool calls**: not shown in chat (handled inside the MEAI pipeline, including streaming single-cycle).
-- **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots — including after a hint-only chunk when no assistant prose has appeared yet (since **`com.nexoider.coreaiunity` 1.7.1**).
+- **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots — including after a hint-only chunk when no assistant prose has appeared yet (since **`com.neoxider.coreaiunity` 1.7.1**).
 
 > Streaming must be invoked from the **Unity main thread** (from a coroutine, `async void`, `UniTask`, or a normal async method in UI). Wrapping `CompleteStreamingAsync` in `Task.Run` will throw `"Create can only be called from the main thread"` because `UnityWebRequest` is created off the main thread.
 

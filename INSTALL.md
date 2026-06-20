@@ -4,8 +4,8 @@ CoreAI ships as two UPM packages that share the same version (lockstep semver):
 
 | Package | What it is |
 |---|---|
-| `com.nexoider.coreai` | Portable C# core (orchestration, tools, memory, sandbox). No `UnityEngine`. |
-| `com.nexoider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). Depends on the core. |
+| `com.neoxider.coreai` | Portable C# core (orchestration, tools, memory, sandbox). No `UnityEngine`. |
+| `com.neoxider.coreaiunity` | Unity layer (MonoBehaviours, LLM clients, chat UI, editor menus). Depends on the core. |
 
 **LLM** (Microsoft.Extensions.AI) and **Lua** (MoonSharp) are **optional modules**. The core compiles
 without them; features light up automatically when the package is present. Install only what your game uses.

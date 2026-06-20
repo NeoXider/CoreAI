@@ -316,7 +316,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | NullAgentMemoryStore | Expected when using **`RegisterCorePortable()`** without **`suppressDefaultAgentMemoryStore: true`** and no host **`IAgentMemoryStore`**. With **`CoreAILifetimeScope`**, resolve **`FileAgentMemoryStore`** on **all** players (WebGL included, **v1.6.19+**). If you still see **`NullAgentMemoryStore`**, check custom DI / duplicate registrations. |
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Ensure `useChatHistory: true` and backend = LLMUnity |
-| WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.nexoider.coreaiunity`**. |
+| WebGL: **`2 FS.syncfs operations in flight`** (console) / UI stops updating after several messages | **`CoreAiPersistFs.jslib`** (**v1.7.2+**) serializes **`FS.syncfs`** so only one sync runs at a time; bursts from **`FileAgentMemoryStore`** (chat JSON + memory writes in the same turn) no longer overlap. Rebuild the WebGL player after upgrading **`com.neoxider.coreaiunity`**. |
 
 ### Clearing all CoreAI file persistence (Editor)
 
@@ -330,8 +330,8 @@ To reset **everything** CoreAI stores under `persistentDataPath` (memory, persis
 - Model returns text instead of a tool call
 - `Tool call not recognized` in logs
 - Tool call retries exhausted
-- **`SmartToolCallingChatClientEditModeTests`** (or runtime) stops after **3 LLM rounds** despite successful tools — fixed in **`com.nexoider.coreai` 1.5.15**: MEAI **`ChatMessage.Contents`** is a non-generic **`IList`**; enumerating native **`FunctionCallContent`** must not rely on **`SelectMany` + `Enumerable.Empty<AIContent>()`** over that property.
-- Edit Mode logs show tools **`status=FAIL`** with **`get_isPlaying can only be called from the main thread`** (execution count stays **0**) — fixed from **`com.nexoider.coreaiunity` 1.5.16** onward; current hardening uses the **`UnityMainThreadLlmAsyncMarshaler`** Editor play-state mirror (`RuntimeInitializeOnLoadMethod`, **`Application.onBeforeRender`**, and **`EditorApplication.update`**) plus **`ManagedThreadId`** gate so worker threads never call **`Application.isPlaying`** directly.
+- **`SmartToolCallingChatClientEditModeTests`** (or runtime) stops after **3 LLM rounds** despite successful tools — fixed in **`com.neoxider.coreai` 1.5.15**: MEAI **`ChatMessage.Contents`** is a non-generic **`IList`**; enumerating native **`FunctionCallContent`** must not rely on **`SelectMany` + `Enumerable.Empty<AIContent>()`** over that property.
+- Edit Mode logs show tools **`status=FAIL`** with **`get_isPlaying can only be called from the main thread`** (execution count stays **0**) — fixed from **`com.neoxider.coreaiunity` 1.5.16** onward; current hardening uses the **`UnityMainThreadLlmAsyncMarshaler`** Editor play-state mirror (`RuntimeInitializeOnLoadMethod`, **`Application.onBeforeRender`**, and **`EditorApplication.update`**) plus **`ManagedThreadId`** gate so worker threads never call **`Application.isPlaying`** directly.
 
 ### Diagnostics
 
@@ -474,7 +474,7 @@ Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](
 1. Host the LLM API with CORS enabled for your game’s origin, **or** put a **same-origin** reverse proxy in front of the model (e.g. `https://yourgame.com/api/v1` → LM Studio).
 2. For local dev, browser extensions or a tiny proxy that adds CORS headers are common; shipping builds need a real server config.
 3. See **`HTTP_TRANSPORT_SPEC.md`** for transport selection.
-4. **Preflight + wildcard ACAO:** if the console reports *`credentials mode is 'include'` … `Access-Control-Allow-Origin` must not be the wildcard `*`* — keep **`SameOriginCredentials`** **off** on **`CoreAISettingsAsset`** (default **`fetch` `credentials: 'omit'`** since **`com.nexoider.coreaiunity` 1.6.16**; **`Authorization: Bearer …`** is still sent). Turn **`SameOriginCredentials`** **on** only when you intentionally need **`same-origin`** cookie behaviour.
+4. **Preflight + wildcard ACAO:** if the console reports *`credentials mode is 'include'` … `Access-Control-Allow-Origin` must not be the wildcard `*`* — keep **`SameOriginCredentials`** **off** on **`CoreAISettingsAsset`** (default **`fetch` `credentials: 'omit'`** since **`com.neoxider.coreaiunity` 1.6.16**; **`Authorization: Bearer …`** is still sent). Turn **`SameOriginCredentials`** **on** only when you intentionally need **`same-origin`** cookie behaviour.
 
 ---
 

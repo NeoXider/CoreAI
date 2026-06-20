@@ -6,7 +6,7 @@ This is the **Unity half** of CoreAI: MEAI clients, VContainer wiring, UI Toolki
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.nexoider.coreaiunity` — [`package.json`](package.json) (`version`) | `com.nexoider.coreai` — [core `package.json`](../CoreAI/package.json) | ✅ Production |
+| `com.neoxider.coreaiunity` — [`package.json`](package.json) (`version`) | `com.neoxider.coreai` — [core `package.json`](../CoreAI/package.json) | ✅ Production |
 
 **Changelog:** [CHANGELOG.md](CHANGELOG.md) (release notes; keep `version` in `package.json` in sync when you ship).
 

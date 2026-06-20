@@ -6,7 +6,7 @@ Use this checklist before every commit or release that changes Assets/CoreAI or 
 
 - Update Assets/CoreAI/package.json when portable API or runtime behavior changes.
 - Update Assets/CoreAiUnity/package.json when Unity runtime, editor tooling, or docs change.
-- Keep the com.nexoider.coreai dependency in Assets/CoreAiUnity/package.json aligned with the CoreAI package version.
+- Keep the com.neoxider.coreai dependency in Assets/CoreAiUnity/package.json aligned with the CoreAI package version.
 - Keep changelog headings consistent with package.json versions.
 
 ## Changelog

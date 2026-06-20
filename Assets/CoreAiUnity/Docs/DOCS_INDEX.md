@@ -6,8 +6,8 @@ is wired.
 
 Package manifests:
 
-- Unity layer: [`com.nexoider.coreaiunity`](../package.json)
-- Portable core: [`com.nexoider.coreai`](../../CoreAI/package.json)
+- Unity layer: [`com.neoxider.coreaiunity`](../package.json)
+- Portable core: [`com.neoxider.coreai`](../../CoreAI/package.json)
 - Repository entry point: [Docs/README.md](../../../Docs/README.md)
 
 ## Read By Goal
