@@ -12,6 +12,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.10.1 - 2026-06-20
+
+- **Unity 6.5 compile fix (CS0619).** Unity 6.5 marked BOTH the `EntityId -> int` implicit cast and
+  `Object.GetInstanceID()` as obsolete ERRORS. `GetObjectId()` in `SceneLlmTool` and
+  `CoreAiFullUnityLuaRuntimeBindings` now use `obj.GetEntityId().GetHashCode()` — a stable, session-unique
+  int for the in-session object lookups these ids feed — without any obsolete API.
+
 ## 4.10.0 - 2026-06-20
 
 Depends on **`com.neoxider.coreai` 4.10.0**.

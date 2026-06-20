@@ -1,6 +1,6 @@
 {
   "name": "com.neoxider.coreaiunity",
-  "version": "4.10.0",
+  "version": "4.10.1",
   "displayName": "CoreAI Unity",
   "unity": "6000.0",
   "description": "Unity framework for LLM-powered NPCs and agents that call your game code — drop-in chat UI, function-calling tools, persistent memory, token-by-token streaming, and per-role LLM routing. Runs on a local GGUF model (via LLMUnity) or any OpenAI-compatible API; proven on a 4 GB local model. Unity layer for com.neoxider.coreai.",
