@@ -7,6 +7,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - **uGUI chat integration docs.** `README_CHAT.md` now documents the supported Canvas/uGUI path: reuse
   `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
   `TMP_InputField` / `ScrollRect` / `Button` view.
+- **Tool audit + `LLM_TOOLS.md`.** Audited every `ILlmTool`: no broken/orphaned tools remain. New
+  `Assets/CoreAI/Docs/LLM_TOOLS.md` documents built-in tools vs **host-wired** tools (`world_command`,
+  scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
+  but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
 ## 4.10.0 - 2026-06-20
 
