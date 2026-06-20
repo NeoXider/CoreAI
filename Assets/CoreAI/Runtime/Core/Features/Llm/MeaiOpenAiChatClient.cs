@@ -345,7 +345,7 @@ namespace CoreAI.Infrastructure.Llm
                             LlmErrorCode.BackendUnavailable);
                     }
 
-                    SseToolCallAccumulator toolAccumulator = new();
+                    SseToolCallAccumulator toolAccumulator = new(_log);
                     DateTime lastProgressUtc = DateTime.UtcNow;
                     int parsedSseDeltas = 0;
 
@@ -1415,36 +1415,74 @@ namespace CoreAI.Infrastructure.Llm
             return ExtractDeltaUpdate(dataJson, new SseToolCallAccumulator());
         }
 
+        /// <summary>
+        /// EditMode tests: feed several streaming <c>delta</c> data-line JSON payloads into a single
+        /// accumulator (mirroring multi-chunk <c>tool_calls</c> reassembly) then return the flushed update.
+        /// </summary>
+        internal static MEAI.ChatResponseUpdate AccumulateToolCallDeltasForTests(IEnumerable<string> dataJsonChunks)
+        {
+            SseToolCallAccumulator accumulator = new();
+            foreach (string dataJson in dataJsonChunks)
+            {
+                ExtractDeltaUpdate(dataJson, accumulator);
+            }
+
+            return accumulator.Flush();
+        }
+
+        /// <summary>EditMode tests: marker key carrying the raw argument string when JSON parsing failed.</summary>
+        internal static string ToolCallRawArgumentsKeyForTests => SseToolCallAccumulator.RawArgumentsKey;
+
+        /// <summary>EditMode tests: marker key set when accumulated tool-call arguments could not be parsed.</summary>
+        internal static string ToolCallParseErrorKeyForTests => SseToolCallAccumulator.ParseErrorKey;
+
+        /// <summary>
+        /// Accumulates OpenAI streaming <c>delta.tool_calls</c> fragments keyed by tool-call index.
+        /// Each index is a distinct in-progress tool call, so parallel calls accumulate independently.
+        /// </summary>
         private sealed class SseToolCallAccumulator
         {
-            private readonly Dictionary<int, (string id, string name, StringBuilder args)> _pending = new();
+            /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+            internal const string RawArgumentsKey = "__raw_arguments";
 
+            /// <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
+            internal const string ParseErrorKey = "__parse_error";
+
+            private readonly Dictionary<int, PendingToolCall> _pending = new();
+            private readonly ILog _log;
+
+            public SseToolCallAccumulator(ILog log = null)
+            {
+                _log = log ?? NullLog.Instance;
+            }
+
+            /// <summary>
+            /// Feeds one streaming tool-call delta fragment. The first delta for an index creates the entry;
+            /// later deltas update <paramref name="callId"/>/<paramref name="name"/> only when non-empty and
+            /// always append <paramref name="argumentsFragment"/> to the same buffer, so name/id/args may
+            /// arrive in any order across chunks.
+            /// </summary>
             public void Feed(int index, string callId, string name, string argumentsFragment)
             {
-                if (!_pending.TryGetValue(index, out (string id, string name, StringBuilder args) entry))
+                if (!_pending.TryGetValue(index, out PendingToolCall entry))
                 {
-                    entry = (callId, name, new StringBuilder());
+                    entry = new PendingToolCall();
                     _pending[index] = entry;
                 }
-                else
+
+                if (!string.IsNullOrEmpty(callId))
                 {
-                    if (!string.IsNullOrEmpty(callId))
-                    {
-                        entry.id = callId;
-                    }
+                    entry.Id = callId;
+                }
 
-                    if (!string.IsNullOrEmpty(name))
-                    {
-                        entry.name = name;
-                    }
-
-                    _pending[index] = entry;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    entry.Name = name;
                 }
 
                 if (!string.IsNullOrEmpty(argumentsFragment))
                 {
-                    _pending[index] = (_pending[index].id, _pending[index].name, _pending[index].args);
-                    _pending[index].args.Append(argumentsFragment);
+                    entry.Arguments.Append(argumentsFragment);
                 }
             }
 
@@ -1458,35 +1496,78 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
                 update.Contents = new List<MEAI.AIContent>();
 
-                foreach (KeyValuePair<int, (string id, string name, StringBuilder args)> kvp in _pending)
+                foreach (KeyValuePair<int, PendingToolCall> kvp in _pending)
                 {
-                    (string id, string name, StringBuilder argsBuilder) = kvp.Value;
-                    if (string.IsNullOrEmpty(name))
+                    PendingToolCall pending = kvp.Value;
+                    string argsStr = pending.Arguments.ToString();
+
+                    if (string.IsNullOrEmpty(pending.Name))
                     {
+                        // An entry with accumulated id/args but no name cannot be invoked. Do not let it
+                        // silently vanish - surface it so the loss is observable.
+                        if (!string.IsNullOrEmpty(pending.Id) || !string.IsNullOrEmpty(argsStr))
+                        {
+                            _log.Warn(
+                                $"MeaiOpenAiChatClient: dropped streamed tool call at index {kvp.Key} - missing function name " +
+                                $"(id='{pending.Id ?? ""}', args length={argsStr.Length}).",
+                                LogTag.Llm);
+                        }
+
                         continue;
                     }
 
-                    Dictionary<string, object> args = null;
-                    string argsStr = argsBuilder.ToString();
-                    if (!string.IsNullOrEmpty(argsStr))
-                    {
-                        try
-                        {
-                            args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argsStr);
-                        }
-                        catch
-                        {
-                        }
-                    }
-
-                    args ??= new Dictionary<string, object>();
+                    Dictionary<string, object> args = ParseArguments(argsStr, pending.Name, kvp.Key);
                     update.Contents.Add(new MEAI.FunctionCallContent(
-                        id ?? $"sse_{name}_{Guid.NewGuid():N}",
-                        name, args));
+                        pending.Id ?? $"sse_{pending.Name}_{Guid.NewGuid():N}",
+                        pending.Name, args));
                 }
 
                 _pending.Clear();
                 return update.Contents.Count > 0 ? update : null;
+            }
+
+            /// <summary>
+            /// Parses accumulated argument JSON. A non-empty but malformed/truncated string is NOT silently
+            /// dropped: it is surfaced under <see cref="RawArgumentsKey"/>/<see cref="ParseErrorKey"/> markers
+            /// and a warning is logged, so callers can detect and recover from a broken stream.
+            /// </summary>
+            private Dictionary<string, object> ParseArguments(string argsStr, string name, int index)
+            {
+                if (string.IsNullOrEmpty(argsStr))
+                {
+                    return new Dictionary<string, object>();
+                }
+
+                try
+                {
+                    Dictionary<string, object> parsed =
+                        JsonConvert.DeserializeObject<Dictionary<string, object>>(argsStr);
+                    if (parsed != null)
+                    {
+                        return parsed;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _log.Warn(
+                        $"MeaiOpenAiChatClient: streamed tool call '{name}' (index {index}) had malformed/truncated " +
+                        $"arguments JSON - surfacing raw string instead of empty args: {ex.Message}",
+                        LogTag.Llm);
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { RawArgumentsKey, argsStr },
+                    { ParseErrorKey, true }
+                };
+            }
+
+            /// <summary>Mutable per-index accumulation state for one in-progress streamed tool call.</summary>
+            private sealed class PendingToolCall
+            {
+                public string Id;
+                public string Name;
+                public readonly StringBuilder Arguments = new();
             }
         }
 

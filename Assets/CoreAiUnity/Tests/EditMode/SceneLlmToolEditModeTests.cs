@@ -152,7 +152,7 @@ namespace CoreAI.Tests.EditMode
             }
 
 #if UNITY_6000_3_OR_NEWER
-            return obj.GetEntityId().GetHashCode();
+            return (int)obj.GetEntityId();
 #else
             return obj.GetInstanceID();
 #endif

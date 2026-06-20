@@ -11,7 +11,8 @@ namespace CoreAI.Infrastructure.Lua
     /// so a restricted script physically lacks the disallowed functions (default: all tiers,
     /// preserving historical behavior).
     /// </summary>
-    public sealed class AggregatingGameLuaRuntimeBindings : IGameLuaRuntimeBindings, ICapabilityScopedLuaBindings
+    public sealed class AggregatingGameLuaRuntimeBindings
+        : IGameLuaRuntimeBindings, ICapabilityScopedLuaBindings, ILuaTransactionScope
     {
         private readonly IGameLogger _logger;
         private readonly CoreAiVersioningLuaRuntimeBindings _versioning;
@@ -86,6 +87,16 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             GameLuaBindingsExtensibility.RegisterAll(registry, effective);
+        }
+
+        /// <summary>
+        /// Forwards a transaction reset to every wrapped binding set that owns mutable per-run
+        /// transaction state (currently the world bindings). Lets top-level executors clear a
+        /// transaction leaked by a previously aborted chunk through the single aggregator they hold.
+        /// </summary>
+        public void ResetTransactions()
+        {
+            (_world as ILuaTransactionScope)?.ResetTransactions();
         }
     }
 }

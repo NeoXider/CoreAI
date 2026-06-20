@@ -45,6 +45,42 @@ unity_set_position(id, 4, 1, -2)
         }
 
         [UnityTest]
+        public IEnumerator FullBindings_unity_find_AndSetPosition_WorksOnSceneObject_PlayMode()
+        {
+            yield return null;
+
+            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.name = "FullLuaPlayModeMoveCube";
+            try
+            {
+                SecureLuaEnvironment env = new();
+                LuaApiRegistry registry = new();
+                new CoreAiFullUnityLuaRuntimeBindings().RegisterGameplayApis(registry);
+                MoonSharp.Interpreter.Script script = env.CreateScript(registry);
+                cube.transform.position = new Vector3(1f, 2f, 3f);
+
+                env.RunChunk(script, @"
+local id = unity_find('FullLuaPlayModeMoveCube')
+assert(id ~= 0, 'find failed')
+local p = unity_get_position(id)
+assert(math.abs(p.x - 1) < 0.01 and math.abs(p.y - 2) < 0.01, 'get position')
+unity_set_position(id, 5, 6, 7)
+");
+
+                Vector3 pos = cube.transform.position;
+                Assert.AreEqual(5f, pos.x, 0.01f);
+                Assert.AreEqual(6f, pos.y, 0.01f);
+                Assert.AreEqual(7f, pos.z, 0.01f);
+            }
+            finally
+            {
+                Object.Destroy(cube);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Full_GameObjectDiscoveryTransformAndHierarchy_WorkInLiveScene()
         {
             yield return null;

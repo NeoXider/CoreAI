@@ -16,10 +16,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `unity_set_position`, `unity_get_member`, `unity_call`, describe/hierarchy) failed with
   "object id … not found" in Edit mode. `Resolve` now matches by the same `GetObjectId` scheme, fixing
   it across Unity versions and in both Edit and Play mode (verified: EditMode `CoreAI.Tests` 1168/1168).
-- **WebGL Lua opt-in (Unity).** `CoreAISettingsAsset.EnableLuaOnWebGl` inspector flag wires
-  `SecureLuaEnvironment.WebGlLuaOptIn` at bootstrap; `CoreAILifetimeScope` force-disables the Full
-  `unity_*` reflection tier on the WebGL player. `Assets/link.xml` preserves `MoonSharp.Interpreter`
-  against IL2CPP stripping. New `WebGlLuaSelfTest` demo component runs the sandbox self-test in a build.
+- **WebGL Lua opt-in (Unity).** `CoreAISettingsAsset.EnableLuaOnWebGl` inspector flag (**on by default**
+  for new assets) wires `SecureLuaEnvironment.WebGlLuaOptIn` at bootstrap; `CoreAILifetimeScope`
+  force-disables the Full `unity_*` reflection tier on the WebGL player. `Assets/link.xml` preserves
+  `MoonSharp.Interpreter` against IL2CPP stripping. New `WebGlLuaSelfTest` demo component runs the
+  sandbox self-test in a build.
+- **Audit hardening (Unity).** Full-tier `unity_*` object ids now use the stable entity-id value instead
+  of `GetEntityId().GetHashCode()` (eliminates hash-collision → wrong-object mutations); overloaded-member
+  reflection (`unity_call` / member access) raises a clear `ScriptRuntimeException` instead of a raw
+  `AmbiguousMatchException`. Added EditMode/PlayMode coverage: mod global event budget, `WaitLlmTool`
+  clamping, SSE split-arg / parallel-index / malformed `tool_calls`, trim-pair history, and a PlayMode
+  `unity_find`/`unity_set_position` mutation test. Verified: EditMode `CoreAI.Tests` 1180/1180,
+  PlayMode `FastNoLlm` 43/43.
 
 ## 4.8.2 - 2026-06-19
 

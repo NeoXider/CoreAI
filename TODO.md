@@ -33,8 +33,6 @@
       `SecureLuaEnvironment.IsSupported == false`, `link.xml` / `[Preserve]` against IL2CPP stripping,
       prefer non-generic `RegisterCallback` bindings for AOT, keep Full tier disabled (or hardwired
       allowlist) on web, and add a WebGL-player self-test scene. See `BACKLOG.md` (Lua & World Runtime).
-- [ ] **Engine-agnostic controllers.** `IAudioController` / `IUIController` / `IPhysicsController`
-      Unity implementations are still ⏳ in `Assets/CoreAI/Docs/ENGINE_AGNOSTIC_TOOLS.md`.
 
 ## [P3] Minor / test-coverage nits (non-blocking)
 

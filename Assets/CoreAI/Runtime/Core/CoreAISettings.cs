@@ -90,7 +90,7 @@
         private const bool DefaultLogMeaiToolCallingSteps = true;
         private const bool DefaultAllowDuplicateToolCalls = false;
         private const bool DefaultEnableStreaming = true;
-        private const bool DefaultEnableLuaOnWebGl = false;
+        private const bool DefaultEnableLuaOnWebGl = true;
         private const bool DefaultEnableLlmContextCompaction = false;
         public const bool DefaultEnableTokenCalibration = true;
         public const float DefaultConversationCompactionTriggerRatio = 0.8f;

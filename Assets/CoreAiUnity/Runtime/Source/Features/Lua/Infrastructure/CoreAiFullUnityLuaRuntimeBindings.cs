@@ -384,7 +384,17 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             Type type = target.GetType();
-            MethodInfo method = type.GetMethod(methodName, MemberFlags());
+            MethodInfo method;
+            try
+            {
+                method = type.GetMethod(methodName, MemberFlags());
+            }
+            catch (System.Reflection.AmbiguousMatchException)
+            {
+                throw new ScriptRuntimeException(
+                    $"unity_call: method '{methodName}' is ambiguous on {type.Name} (overloaded); call is not supported.");
+            }
+
             if (method == null)
             {
                 throw new ScriptRuntimeException($"unity_call: method '{methodName}' not found on {type.Name}.");
@@ -416,7 +426,7 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             // Resolve by the SAME id scheme GetObjectId() handed out (instance id on older Unity,
-            // entity-id hash on 6000.3+). Scanning loaded objects keeps the round-trip consistent across
+            // entity-id value on 6000.3+). Scanning loaded objects keeps the round-trip consistent across
             // Unity versions and works in both Edit and Play mode, unlike Resources.InstanceIDToObject,
             // which uses the legacy scheme and returns null in Edit mode. Full tier is admin/debug, not a
             // hot path, so the linear scan is acceptable.
@@ -544,7 +554,9 @@ namespace CoreAI.Infrastructure.Lua
             }
 
 #if UNITY_6000_3_OR_NEWER
-            return obj.GetEntityId().GetHashCode();
+            // EntityId exposes a stable, unique int value; use it directly instead of GetHashCode(),
+            // which collapses the id and can collide so Resolve() could return the wrong object.
+            return (int)obj.GetEntityId();
 #else
             return obj.GetInstanceID();
 #endif
@@ -656,8 +668,18 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             BindingFlags flags = MemberFlags();
-            MemberInfo member = type.GetField(memberName, flags) as MemberInfo ??
-                                type.GetProperty(memberName, flags);
+            MemberInfo member;
+            try
+            {
+                member = type.GetField(memberName, flags) as MemberInfo ??
+                         type.GetProperty(memberName, flags);
+            }
+            catch (System.Reflection.AmbiguousMatchException)
+            {
+                throw new ScriptRuntimeException(
+                    $"unity_call: member '{memberName}' is ambiguous on {type.Name} (overloaded); call is not supported.");
+            }
+
             if (member == null)
             {
                 throw new ScriptRuntimeException($"Member '{memberName}' not found on {type.Name}.");

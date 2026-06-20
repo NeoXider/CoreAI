@@ -167,6 +167,95 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("AB", string.Concat(parts));
         }
 
+        [Test]
+        public void AccumulateToolCallDeltas_ArgumentsSplitAcrossChunks_Reassemble()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"qu\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"ery\\\":\\\"cat\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"s\\\"}\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            MEAI.FunctionCallContent call = update.Contents.OfType<MEAI.FunctionCallContent>().Single();
+            Assert.AreEqual("search", call.Name);
+            Assert.AreEqual("call_1", call.CallId);
+            Assert.AreEqual("cats", call.Arguments["query"]);
+            Assert.IsFalse(call.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_NameInFirstChunk_ArgsInLaterChunks_Reassemble()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_2\",\"function\":{\"name\":\"add\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"a\\\":1,\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"b\\\":2}\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            MEAI.FunctionCallContent call = update.Contents.OfType<MEAI.FunctionCallContent>().Single();
+            Assert.AreEqual("add", call.Name);
+            Assert.AreEqual("call_2", call.CallId);
+            Assert.AreEqual(1L, Convert.ToInt64(call.Arguments["a"]));
+            Assert.AreEqual(2L, Convert.ToInt64(call.Arguments["b"]));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_TwoParallelCalls_BothMaterialize()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"y\\\":\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"2}\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            List<MEAI.FunctionCallContent> calls =
+                update.Contents.OfType<MEAI.FunctionCallContent>().ToList();
+            Assert.AreEqual(2, calls.Count);
+
+            MEAI.FunctionCallContent alpha = calls.Single(c => c.Name == "alpha");
+            Assert.AreEqual("call_a", alpha.CallId);
+            Assert.AreEqual(1L, Convert.ToInt64(alpha.Arguments["x"]));
+
+            MEAI.FunctionCallContent beta = calls.Single(c => c.Name == "beta");
+            Assert.AreEqual("call_b", beta.CallId);
+            Assert.AreEqual(2L, Convert.ToInt64(beta.Arguments["y"]));
+        }
+
+        [Test]
+        public void AccumulateToolCallDeltas_MalformedJson_SurfacesRawArgsNotSilentlyEmpty()
+        {
+            string[] chunks =
+            {
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_3\",\"function\":{\"name\":\"broken\",\"arguments\":\"{\\\"q\\\":\\\"unclo\"}}]}}]}",
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"sed\"}}]}}]}"
+            };
+
+            MEAI.ChatResponseUpdate update = MeaiOpenAiChatClient.AccumulateToolCallDeltasForTests(chunks);
+
+            Assert.IsNotNull(update);
+            MEAI.FunctionCallContent call = update.Contents.OfType<MEAI.FunctionCallContent>().Single();
+            Assert.AreEqual("broken", call.Name);
+            Assert.IsTrue(
+                call.Arguments.ContainsKey(MeaiOpenAiChatClient.ToolCallParseErrorKeyForTests),
+                "Malformed arguments must surface a parse-error marker rather than silently empty args.");
+            Assert.AreEqual(
+                "{\"q\":\"unclosed",
+                call.Arguments[MeaiOpenAiChatClient.ToolCallRawArgumentsKeyForTests]);
+        }
+
         private sealed class DoneSentinelTransport : IOpenAiHttpTransport
         {
             private readonly string _sse;

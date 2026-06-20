@@ -15,7 +15,7 @@ namespace CoreAI.Infrastructure.World
     /// <remarks>
     /// Transactions are single-at-a-time per bindings instance and intended for main-thread use.
     /// </remarks>
-    public sealed class CoreAiWorldLuaRuntimeBindings : IGameLuaRuntimeBindings
+    public sealed class CoreAiWorldLuaRuntimeBindings : IGameLuaRuntimeBindings, ILuaTransactionScope
     {
         /// <summary>Coordinates beyond this magnitude are rejected (NaN/Infinity always are).</summary>
         public const double MaxCoordinate = 100_000d;
@@ -117,6 +117,15 @@ namespace CoreAI.Infrastructure.World
         {
             _txBuffer.Clear();
             _txActive = false;
+        }
+
+        /// <summary>
+        /// <see cref="ILuaTransactionScope"/> entry point: forwards to <see cref="AbortTransaction"/>
+        /// so top-level executors can reset this shared singleton's transaction state between runs.
+        /// </summary>
+        public void ResetTransactions()
+        {
+            AbortTransaction();
         }
 
         public void RegisterGameplayApis(LuaApiRegistry registry)

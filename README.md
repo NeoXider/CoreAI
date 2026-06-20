@@ -438,6 +438,8 @@ The repository consists of **two packages**:
 
 ## 🚀 Quick Start
 
+> 📦 **Full step-by-step guide: [INSTALL.md](INSTALL.md)** — base install, the LLM module (NuGet), and the Lua module, with the optional-module switches. The summary below is the short version.
+
 ### 1. Install NuGet DLLs (required)
 
 CoreAI uses [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) for the LLM pipeline. Copy these DLLs into your project's `Assets/Packages/` folder (download from NuGet or copy from this repo's `Assets/Packages/`):

@@ -311,7 +311,9 @@ namespace CoreAI.Ai
             }
 
 #if UNITY_6000_3_OR_NEWER
-            return obj.GetEntityId().GetHashCode();
+            // EntityId exposes a stable, unique int value; use it directly instead of GetHashCode(),
+            // which collapses the id and can collide so FindObjectById() could return the wrong object.
+            return (int)obj.GetEntityId();
 #else
             return obj.GetInstanceID();
 #endif

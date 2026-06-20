@@ -9,9 +9,17 @@
   prune-before-summarize, prompt-copy only — durable history is untouched). Assistant turns that are
   pure reasoning are dropped. Completes the roadmap §7 "prune stale thinking" item alongside the
   existing superseded-tool-result and duplicate collapsing.
-- **WebGL Lua opt-in (core).** `SecureLuaEnvironment.WebGlLuaOptIn` + `ICoreAISettings.EnableLuaOnWebGl`
-  (default `false`): `IsSupported` now honors the opt-in on the WebGL player instead of a hard block.
+- **WebGL Lua (core).** `SecureLuaEnvironment.WebGlLuaOptIn` + `ICoreAISettings.EnableLuaOnWebGl`
+  (default **`true`**): `IsSupported` now honors the setting on the WebGL player instead of a hard block.
   Added `SecureLuaEnvironment.TryRunSelfTest(out report)` for a player-side sandbox self-test.
+- **Audit hardening (core).** Sandbox now caps `string.format` output (allocation-bomb parity with
+  `string.rep`). `LuaModRuntime` adds a global per-tick event-dispatch budget on top of the per-mod cap
+  (bounds worst-case main-thread stall with many mods; surplus carries over, never dropped). Lua
+  world-transaction state is reset/aborted on every top-level run (`ILuaTransactionScope`) so an aborted
+  `coreai_world_begin` cannot leak buffered commands into the next script. The streaming SSE tool-call
+  accumulator keys parallel calls by index and **surfaces** malformed/truncated argument JSON instead of
+  silently sending empty args. `SmartToolCallingChatClient.TrimToolCallHistory` trims assistant+tool turns
+  as coupled pairs so a `tool` message is never orphaned (provider 400).
 
 ## 4.8.1 - 2026-06-19
 

@@ -556,9 +556,13 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Removes the oldest tool call message pairs (Assistant + Tool) from the middle of the list
-        /// to keep total tool-related messages within <paramref name="maxToolMessages"/>.
-        /// System and original user messages at the start are preserved.
+        /// Removes the oldest tool-call units (an Assistant tool-call turn together with the
+        /// Tool result turn(s) that answer it) to keep total tool-related messages within
+        /// <paramref name="maxToolMessages"/>. System and original user messages at the start are
+        /// preserved. Trimming is performed in whole units so an Assistant <c>tool_calls</c> message
+        /// is never separated from its paired Tool result(s): the provider rejects any orphaned
+        /// 'tool' role message ("messages with role 'tool' must be a response to a preceding message
+        /// with 'tool_calls'"), so a partial removal would break the very next request.
         /// </summary>
         private void TrimToolCallHistory(List<MEAI.ChatMessage> messages, int maxToolMessages)
         {
@@ -584,21 +588,38 @@ namespace CoreAI.Infrastructure.Llm
             int toRemove = toolMessageCount - maxToolMessages;
             int removed = 0;
 
-            // Remove oldest tool call pairs from the list (skip system/user at the beginning).
-            for (int i = 0; i < messages.Count && removed < toRemove;)
+            // Remove oldest tool-call units as coupled blocks. Each unit starts at an Assistant
+            // tool-call message and extends through every Tool result message that immediately
+            // follows it. Removing the unit as a whole keeps every surviving Tool message paired
+            // with its preceding Assistant tool_calls message (OpenAI-valid). We may overshoot the
+            // exact target by at most one unit, but never split a unit, since splitting produces the
+            // orphaned-tool-message HTTP 400 this method exists to prevent.
+            int index = 0;
+            while (index < messages.Count && removed < toRemove)
             {
-                bool isToolMsg = messages[i].Role == MEAI.ChatRole.Tool;
                 bool isToolAssistant =
-                    messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]);
+                    messages[index].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[index]);
 
-                if (isToolMsg || isToolAssistant)
+                if (isToolAssistant)
                 {
-                    messages.RemoveAt(i);
-                    removed++;
+                    int unitToolMessages = 1; // the Assistant tool-call message itself
+
+                    // Drop the Assistant tool-call message, then every contiguous Tool result it owns.
+                    messages.RemoveAt(index);
+                    while (index < messages.Count && messages[index].Role == MEAI.ChatRole.Tool)
+                    {
+                        messages.RemoveAt(index);
+                        unitToolMessages++;
+                    }
+
+                    removed += unitToolMessages;
                 }
                 else
                 {
-                    i++;
+                    // Preserve non-tool messages (system/user/plain assistant) and skip past them.
+                    // A leading Tool message without a preceding Assistant tool-call would already be
+                    // malformed; leave it untouched rather than orphan it further.
+                    index++;
                 }
             }
 

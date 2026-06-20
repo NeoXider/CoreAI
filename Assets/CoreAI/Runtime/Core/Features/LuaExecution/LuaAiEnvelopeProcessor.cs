@@ -87,6 +87,11 @@ namespace CoreAI.Ai
                 return;
             }
 
+            // The world bindings are a shared singleton: a prior envelope that died between
+            // coreai_world_begin() and commit/rollback leaves its transaction open, which would
+            // silently buffer this envelope's world commands. Reset before running and abort in the
+            // finally so a leaked transaction can never bleed across envelopes in either direction.
+            (_bindings as ILuaTransactionScope)?.ResetTransactions();
             try
             {
                 LuaApiRegistry registry = new();
@@ -126,6 +131,10 @@ namespace CoreAI.Ai
                     _observer.OnLuaRepairScheduled(next, msg);
                     ScheduleProgrammerRepair(cmd, lua, msg, next);
                 }
+            }
+            finally
+            {
+                (_bindings as ILuaTransactionScope)?.ResetTransactions();
             }
         }
 

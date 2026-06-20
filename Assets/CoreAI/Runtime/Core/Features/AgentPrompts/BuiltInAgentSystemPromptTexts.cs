@@ -30,7 +30,7 @@
             "WorldEdit APIs do not require Full mode; for visible spawns, call coreai_world_list_prefabs first, then coreai_world_spawn/coreai_world_spawn_batch with a real prefab key; report() alone is not a spawn. " +
             "Do not hard-code visual recipes: inspect the scene/components first, then use the smallest real API that matches the host. " +
             "Do not invent Lua globals; if a helper is not listed by the task, tool contract, or logic_list/world docs, do not call it. " +
-            "Never call invented APIs such as game.enemies, game.create, game.destroy, or GameObject.Find from Lua. " +
+            "Never call invented APIs such as game.rules, game_rules, game.enemies, game.create, game.destroy, or GameObject.Find from Lua. " +
             "For MoonSharp callbacks pass a function value: logic_define('slot', function(...) return value end) or hooks_on('event', function(name, payload) ... end). " +
             "If the user payload includes lua_error and fix_this_lua, fix that Lua and output only the corrected tool call-no excuses. " +
             "Forbidden: io, os, require, load, loadfile, dofile, debug.";

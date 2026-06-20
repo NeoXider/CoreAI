@@ -43,6 +43,20 @@ namespace CoreAI.Ai
         public const int DefaultMaxTimersPerMod = 16;
         public const int DefaultMaxQueuedEventsPerMod = 256;
         public const int DefaultMaxEventsDispatchedPerTick = 64;
+
+        /// <summary>
+        /// Upper bound on handler invocations dispatched across <em>all</em> mods in a single
+        /// <see cref="Tick"/>. The per-mod cap (<see cref="DefaultMaxEventsDispatchedPerTick"/>)
+        /// alone lets a tick fan out to up to <see cref="DefaultMaxMods"/> mods, i.e.
+        /// <c>DefaultMaxMods * DefaultMaxEventsDispatchedPerTick</c> calls, which is a large
+        /// main-thread stall. This global budget caps the whole tick; mods not reached once it is
+        /// exhausted keep their queued events and are serviced on later ticks (no events are
+        /// dropped). Chosen as 4x the per-mod cap: comfortably above the per-mod cap so a single
+        /// busy mod is never throttled below its own budget, while still bounding a worst-case
+        /// burst across many mods to a few hundred calls per frame.
+        /// </summary>
+        public const int DefaultMaxEventsDispatchedPerTickGlobal = 256;
+
         public const int MaxErrorsBeforeUnload = 8;
 
         /// <summary>Shortest accepted <c>hooks_every</c> interval, so timers cannot degenerate into per-instruction spam.</summary>
@@ -284,7 +298,22 @@ namespace CoreAI.Ai
 
             Script script = _env.CreateScript(registry);
             mod.Script = script;
-            _env.RunChunk(script, luaCode);
+
+            // The game bindings (and their world transaction state) are shared with the envelope
+            // and tool executors. A load/reload chunk that opens a world transaction and then errors
+            // would otherwise leave that shared transaction open, silently buffering later scripts'
+            // world commands. Reset before running and abort in the finally so a leaked transaction
+            // cannot bleed out of mod loading.
+            (_gameBindings as ILuaTransactionScope)?.ResetTransactions();
+            try
+            {
+                _env.RunChunk(script, luaCode);
+            }
+            finally
+            {
+                (_gameBindings as ILuaTransactionScope)?.ResetTransactions();
+            }
+
             return mod;
         }
 
@@ -414,11 +443,21 @@ namespace CoreAI.Ai
                 }
             }
 
+            // Running count of handler invocations dispatched across all mods this tick. Timers
+            // always run (they are bounded to one fire per timer per tick); only event dispatch is
+            // charged against the global budget so a heavy event-fan-out tick cannot stall the
+            // main thread. Once the budget is exhausted, the remaining mods keep their queued
+            // events untouched and are serviced on later ticks.
+            int dispatchedThisTick = 0;
             for (int i = 0; i < _tickScratch.Count; i++)
             {
                 Mod mod = _tickScratch[i];
                 TickTimers(mod, deltaSeconds);
-                DispatchPendingEvents(mod);
+
+                if (dispatchedThisTick < DefaultMaxEventsDispatchedPerTickGlobal)
+                {
+                    dispatchedThisTick += DispatchPendingEvents(mod, dispatchedThisTick);
+                }
 
                 if (mod.ErrorCount >= MaxErrorsBeforeUnload)
                 {
@@ -446,17 +485,28 @@ namespace CoreAI.Ai
             }
         }
 
-        private void DispatchPendingEvents(Mod mod)
+        /// <summary>
+        /// Dispatches this mod's queued events, honouring both the per-mod cap
+        /// (<see cref="DefaultMaxEventsDispatchedPerTick"/>) and the shared global budget
+        /// (<see cref="DefaultMaxEventsDispatchedPerTickGlobal"/>). <paramref name="alreadyDispatchedThisTick"/>
+        /// is the number of handler invocations other mods already spent this tick, so the
+        /// effective limit is the smaller of the per-mod cap and the remaining global budget.
+        /// Returns the number of invocations this mod dispatched; surplus events stay queued and
+        /// are carried over to the next tick.
+        /// </summary>
+        private int DispatchPendingEvents(Mod mod, int alreadyDispatchedThisTick)
         {
+            int globalRemaining = DefaultMaxEventsDispatchedPerTickGlobal - alreadyDispatchedThisTick;
+            int limit = Math.Min(DefaultMaxEventsDispatchedPerTick, globalRemaining);
             int dispatched = 0;
-            while (dispatched < DefaultMaxEventsDispatchedPerTick)
+            while (dispatched < limit)
             {
                 KeyValuePair<string, string> evt;
                 lock (_gate)
                 {
                     if (mod.Pending.Count == 0)
                     {
-                        return;
+                        return dispatched;
                     }
 
                     evt = mod.Pending.Dequeue();
@@ -469,15 +519,17 @@ namespace CoreAI.Ai
 
                 foreach (Closure fn in handlers)
                 {
-                    if (dispatched >= DefaultMaxEventsDispatchedPerTick)
+                    if (dispatched >= limit)
                     {
-                        return;
+                        return dispatched;
                     }
 
                     InvokeGuarded(mod, fn, evt.Key, evt.Value);
                     dispatched++;
                 }
             }
+
+            return dispatched;
         }
 
         private void InvokeGuarded(Mod mod, Closure fn, params object[] args)

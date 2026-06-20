@@ -306,9 +306,6 @@ public:
 | **Inventory** | Engine-specific | `InventoryLlmTool` | `InventoryTool` (CoreAiUnity) |
 | **GameConfig** | Engine-specific | `GameConfigLlmTool` | `GameConfigTool` (CoreAiUnity) |
 | **WorldCommand** | Engine-specific | `IWorldCommandExecutor` (CoreAI) | `WorldTool`, `WorldLlmTool`, `CoreAiWorldCommandExecutor` (CoreAiUnity) ✅ |
-| **Audio** | Engine-specific | ⏳ `IAudioController` (CoreAI) | ⏳ TODO (Unity: AudioSource) |
-| **UI** | Engine-specific | ⏳ `IUIController` (CoreAI) | ⏳ TODO (Unity: Canvas/UI) |
-| **Physics** | Engine-specific | ⏳ `IPhysicsController` (CoreAI) | ⏳ TODO (Unity: Rigidbody) |
 
 ### Why Memory and Lua live in CoreAI?
 

@@ -185,6 +185,125 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_EventBudget_CapsDispatchPerTick()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+
+            // The counter mod records how many 'ping' handler invocations actually run, both in
+            // total and within the most recent tick (reset by the host between ticks below).
+            runtime.LoadMod("counter", @"
+                hooks_on('ping', function()
+                    local total = tonumber(store_get('count')) or 0
+                    store_set('count', tostring(total + 1))
+                    local this_tick = tonumber(store_get('tick_count')) or 0
+                    store_set('tick_count', tostring(this_tick + 1))
+                end)");
+
+            // The emitter mod floods the counter with far more than the per-tick budget in a
+            // single 'go' handler call. events_emit only delivers to *other* mods, so every ping
+            // lands in the counter's pending queue (queue capacity is well above the flood size).
+            int cap = LuaModRuntime.DefaultMaxEventsDispatchedPerTick;
+            int flood = cap * 2;
+            runtime.LoadMod("emitter", $@"
+                hooks_on('go', function()
+                    for i = 1, {flood} do
+                        events_emit('ping', tostring(i))
+                    end
+                end)");
+
+            runtime.EmitEvent("go", "");
+
+            // Drive several ticks; mod iteration order within a tick is unspecified, so the flood
+            // may land before or after the counter is serviced this tick. Either way, no single
+            // tick may dispatch more handler invocations than the budget allows.
+            for (int tick = 0; tick < 4; tick++)
+            {
+                store.Set("counter", "tick_count", "0");
+                runtime.Tick(0);
+                int dispatchedThisTick = int.Parse(store.Get("counter", "tick_count"));
+                Assert.LessOrEqual(dispatchedThisTick, cap,
+                    "A single tick must not dispatch more handler invocations than the per-tick budget.");
+            }
+
+            // The runtime must not drop the surplus: every flooded ping is eventually delivered
+            // across subsequent ticks (flood < queue capacity, so nothing is dropped at enqueue).
+            int total = int.Parse(store.Get("counter", "count"));
+            Assert.AreEqual(flood, total,
+                "Events over the per-tick budget must carry over to later ticks, not be lost.");
+        }
+
+        [Test]
+        public void LuaModRuntime_EventBudget_CapsTotalDispatchAcrossModsPerTick()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+
+            // Enough receiver mods that, at the per-mod cap each, their combined per-tick demand
+            // far exceeds the global budget — so without a global cap a single tick would dispatch
+            // perModCap * receiverCount handler calls. Each receiver records, per tick, how many
+            // 'ping' invocations actually ran (the host resets these counters between ticks).
+            int perModCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTick;
+            int globalCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTickGlobal;
+            int receiverCount = (globalCap / perModCap) + 4;
+            string[] receivers = new string[receiverCount];
+            for (int r = 0; r < receiverCount; r++)
+            {
+                string id = $"receiver{r}";
+                receivers[r] = id;
+                runtime.LoadMod(id, @"
+                    hooks_on('ping', function()
+                        local total = tonumber(store_get('count')) or 0
+                        store_set('count', tostring(total + 1))
+                        local this_tick = tonumber(store_get('tick_count')) or 0
+                        store_set('tick_count', tostring(this_tick + 1))
+                    end)");
+            }
+
+            // One flood of pings reaches every *other* mod, so each receiver gets its own queue
+            // filled well past the per-mod cap.
+            int floodPerReceiver = perModCap * 2;
+            runtime.LoadMod("emitter", $@"
+                hooks_on('go', function()
+                    for i = 1, {floodPerReceiver} do
+                        events_emit('ping', tostring(i))
+                    end
+                end)");
+
+            runtime.EmitEvent("go", "");
+
+            // Drive enough ticks to drain every receiver. No single tick may dispatch more handler
+            // invocations across all mods than the global budget allows.
+            int ticks = ((floodPerReceiver * receiverCount) / globalCap) + 4;
+            for (int tick = 0; tick < ticks; tick++)
+            {
+                foreach (string id in receivers)
+                {
+                    store.Set(id, "tick_count", "0");
+                }
+
+                runtime.Tick(0);
+
+                int dispatchedThisTick = 0;
+                foreach (string id in receivers)
+                {
+                    dispatchedThisTick += int.Parse(store.Get(id, "tick_count"));
+                }
+
+                Assert.LessOrEqual(dispatchedThisTick, globalCap,
+                    "A single tick must not dispatch more handler invocations across all mods than the global budget.");
+            }
+
+            // Every flooded ping is eventually delivered to every receiver: the global cap only
+            // defers dispatch to later ticks, it never drops queued events.
+            foreach (string id in receivers)
+            {
+                Assert.AreEqual(floodPerReceiver, int.Parse(store.Get(id, "count")),
+                    $"Receiver '{id}' must eventually receive every queued ping across ticks.");
+            }
+        }
+
+        [Test]
         public void LuaModRuntime_HandlerRepeatedErrors_AutoUnloadsMod()
         {
             LuaModRuntime runtime = new();

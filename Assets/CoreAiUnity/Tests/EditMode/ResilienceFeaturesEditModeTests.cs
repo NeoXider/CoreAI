@@ -931,6 +931,80 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task TrimToolCallHistory_OddOverflow_KeepsPairsCoupled()
+        {
+            // Cap allows 3 tool-related messages. Each successful tool iteration appends 2
+            // (Assistant tool-call + Tool result), so after the 2nd iteration there are 4, forcing
+            // a single-message overflow. Removing that one message individually (the old behaviour)
+            // would orphan a Tool result whose Assistant tool_calls turn was dropped, which the
+            // provider rejects on the next request. The trim must instead drop the whole oldest unit.
+            ResilienceSettings settings = new() { MaxToolCallHistoryMessagesOverride = 3 };
+            Func<string> okA = () => "a-ok";
+            Func<string> okB = () => "b-ok";
+            Func<string> okC = () => "c-ok";
+            MEAI.ChatOptions opts = MakeChatOptions(("tool_a", okA), ("tool_b", okB), ("tool_c", okC));
+
+            ScriptedChatClient inner = new(
+                () => AssistantToolCallResponse("call_a", "tool_a"),
+                () => AssistantToolCallResponse("call_b", "tool_b"),
+                () => AssistantToolCallResponse("call_c", "tool_c"),
+                () => new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "done")));
+
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, settings,
+                true, new List<ILlmTool>(), "test", 3);
+
+            MEAI.ChatResponse response = await client.GetResponseAsync(
+                new List<MEAI.ChatMessage> { new(MEAI.ChatRole.User, "hi") }, opts);
+
+            Assert.AreEqual("done", response.Text);
+            Assert.AreEqual(4, inner.ObservedMessages.Count);
+
+            // Every request the provider sees must keep tool results paired with their tool_calls turn.
+            foreach (List<MEAI.ChatMessage> observed in inner.ObservedMessages)
+            {
+                AssertToolCallPairingValid(observed);
+            }
+
+            // The final request (after the 3rd tool unit was appended and the oldest trimmed) must
+            // hold whole units only, never a stray Tool message. tool_a (the oldest unit) is gone.
+            List<MEAI.ChatMessage> finalRequest = inner.ObservedMessages[3];
+            int finalToolMsgCount = finalRequest.FindAll(m => m.Role == MEAI.ChatRole.Tool).Count;
+            int finalAssistantCallCount = finalRequest.FindAll(m =>
+                m.Role == MEAI.ChatRole.Assistant && HasFunctionCall(m)).Count;
+            Assert.AreEqual(finalAssistantCallCount, finalToolMsgCount,
+                "Each surviving tool result must have a matching assistant tool-call message");
+            Assert.IsFalse(finalRequest.Exists(m => HasFunctionCall(m) && CallName(m) == "tool_a"),
+                "Oldest tool unit (tool_a) should have been trimmed as a whole");
+            Assert.AreEqual(MEAI.ChatRole.User, finalRequest[0].Role, "Original user message is preserved");
+        }
+
+        private static bool HasFunctionCall(MEAI.ChatMessage message)
+        {
+            foreach (object c in message.Contents)
+            {
+                if (c is MEAI.FunctionCallContent)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string CallName(MEAI.ChatMessage message)
+        {
+            foreach (object c in message.Contents)
+            {
+                if (c is MEAI.FunctionCallContent fcc)
+                {
+                    return fcc.Name;
+                }
+            }
+
+            return null;
+        }
+
+        [Test]
         public void RemoveResolvedErrorFeedback_AlreadyTrimmedEntries_AreSkipped()
         {
             MEAI.ChatMessage user = new(MEAI.ChatRole.User, "hi");
