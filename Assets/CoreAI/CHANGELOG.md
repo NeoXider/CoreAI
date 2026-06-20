@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 4.10.2 - 2026-06-21
+
+- Версия приведена в соответствие с `com.neoxider.coreaiunity` (пакеты держим в lockstep — одинаковые версии). Функциональных изменений в core нет; правки этого релиза — в Unity-слое (см. `CoreAiUnity/CHANGELOG.md`: фикс отображения tool-call уведомлений в чате + тест-фиксы EditMode).
+
 ## 4.10.0 - 2026-06-20
 
 - **Vision / image input (core).** `MeaiOpenAiChatClient` now serializes image content (MEAI
