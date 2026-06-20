@@ -170,6 +170,27 @@ namespace CoreAI.Chat
         private ICoreAiChatOptions Options => _runtimeOptions ?? (config != null ? config : DefaultOptions);
         private ICoreAiChatTextOptions TextOptions => Options as ICoreAiChatTextOptions ?? DefaultOptions;
 
+        private bool IsWorldSpacePanelRenderer()
+        {
+#if UNITY_6000_5_OR_NEWER
+            return _panelRenderer != null &&
+                   _panelRenderer.panelSettings != null &&
+                   _panelRenderer.panelSettings.renderMode == PanelRenderMode.WorldSpace;
+#else
+            return false;
+#endif
+        }
+
+        private bool IsElementReadyForStyle(VisualElement element)
+        {
+            if (element == null || element.panel == null)
+            {
+                return false;
+            }
+
+            return Root == null || Root.panel == null || element.panel == Root.panel;
+        }
+
         public void SetRuntimeOptions(ICoreAiChatOptions options)
         {
             _runtimeOptions = options;
@@ -285,6 +306,7 @@ namespace CoreAI.Chat
         {
             if (_panelRenderer == null ||
                 rootElement == null ||
+                rootElement.panel == null ||
                 _panelRenderer.panelSettings == null ||
                 _panelRenderer.panelSettings.renderMode != PanelRenderMode.WorldSpace ||
                 _panelRenderer.worldSpaceSizeMode != WorldSpaceSizeMode.Fixed)
@@ -415,7 +437,10 @@ namespace CoreAI.Chat
 
             if (TypingIndicator != null)
             {
-                TypingIndicator.style.display = DisplayStyle.None;
+                if (IsElementReadyForStyle(TypingIndicator))
+                {
+                    TypingIndicator.style.display = DisplayStyle.None;
+                }
             }
 
             ApplyClearButtonVisibility();
@@ -494,12 +519,12 @@ namespace CoreAI.Chat
                 HeaderTitle.text = options.HeaderTitle;
             }
 
-            if (HeaderIcon != null && config?.AiAvatarIcon != null)
+            if (HeaderIcon != null && config?.AiAvatarIcon != null && IsElementReadyForStyle(HeaderIcon))
             {
                 HeaderIcon.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
             }
 
-            if (TypingAvatar != null && config?.AiAvatarIcon != null)
+            if (TypingAvatar != null && config?.AiAvatarIcon != null && IsElementReadyForStyle(TypingAvatar))
             {
                 TypingAvatar.style.backgroundImage = Background.FromSprite(config.AiAvatarIcon);
             }
@@ -537,6 +562,11 @@ namespace CoreAI.Chat
         private void ApplyClearButtonVisibility()
         {
             if (ClearButton == null)
+            {
+                return;
+            }
+
+            if (!IsElementReadyForStyle(ClearButton))
             {
                 return;
             }
@@ -642,6 +672,11 @@ namespace CoreAI.Chat
         /// </summary>
         private void ApplyResponsiveSize(VisualElement container)
         {
+            if (!IsElementReadyForStyle(container) || IsWorldSpacePanelRenderer())
+            {
+                return;
+            }
+
             ICoreAiChatOptions options = Options;
             float configuredWidth = options.ChatWidth;
             float configuredHeight = options.ChatHeight;
@@ -740,7 +775,7 @@ namespace CoreAI.Chat
                 }
             }
 
-            if (FabButton != null)
+            if (FabButton != null && IsElementReadyForStyle(FabButton))
             {
                 FabButton.style.display = collapsed ? DisplayStyle.Flex : DisplayStyle.None;
             }
@@ -1061,7 +1096,7 @@ namespace CoreAI.Chat
         /// </summary>
         private void TickLongRequestHint()
         {
-            if (_longRequestHint == null)
+            if (_longRequestHint == null || !IsElementReadyForStyle(_longRequestHint))
             {
                 return;
             }
@@ -1110,7 +1145,7 @@ namespace CoreAI.Chat
         private void ResetLongRequestHint()
         {
             _longRequestHintArmedSince = float.NaN;
-            if (_longRequestHint == null)
+            if (_longRequestHint == null || !IsElementReadyForStyle(_longRequestHint))
             {
                 return;
             }
@@ -2319,7 +2354,7 @@ namespace CoreAI.Chat
 
         public void ShowTypingIndicator()
         {
-            if (TypingIndicator == null)
+            if (TypingIndicator == null || !IsElementReadyForStyle(TypingIndicator))
             {
                 return;
             }
@@ -2333,7 +2368,7 @@ namespace CoreAI.Chat
             {
                 _typingDotCount =
                     _typingDotCount % 3 + 1; // Animation advances 1 -> 2 -> 3 -> 1 for visual typing feedback.
-                if (TypingLabel == null)
+                if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
                 {
                     return;
                 }
@@ -2347,7 +2382,7 @@ namespace CoreAI.Chat
 
         private void ApplyStreamingToolProgressTypingHint()
         {
-            if (TypingLabel == null)
+            if (TypingLabel == null || !IsElementReadyForStyle(TypingLabel))
             {
                 return;
             }
@@ -2361,7 +2396,7 @@ namespace CoreAI.Chat
 
         public void HideTypingIndicator()
         {
-            if (TypingIndicator != null)
+            if (TypingIndicator != null && IsElementReadyForStyle(TypingIndicator))
             {
                 TypingIndicator.style.display = DisplayStyle.None;
             }

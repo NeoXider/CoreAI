@@ -4,6 +4,11 @@
 
 ## 4.10.0 - 2026-06-20
 
+- **Vision / image input (core).** `MeaiOpenAiChatClient` now serializes image content (MEAI
+  `DataContent` / `UriContent` with an `image/*` media type) on a message as OpenAI multimodal
+  `content` parts (`{type:"text"}` + `{type:"image_url"}` with a data URI), so a vision-capable model
+  actually receives attached images. Text-only messages are unchanged. Exposed
+  `BuildOpenAiMessageContent(...)` for verification (covered by `MeaiOpenAiVisionEditModeTests`).
 - **Persistent file-backed Lua mod packages.** New `ILuaModSourceStore` (with `NullLuaModSourceStore`
   default and a host-side `FileLuaModSourceStore`) persists a mod's **source plus its
   `LuaModManifest`** (`id`, `name`, `description`, `version`, `author`, `capabilities`, `active`,

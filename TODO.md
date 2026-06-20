@@ -50,6 +50,21 @@
       path (next-turn context block or a `manage_mods` diagnostics action) so the agent learns of runtime
       handler failures and can repair the mod.
 
+## [P2] Vision / multimodal — follow-ups
+
+> 4.10.0 added the core enabler: `MeaiOpenAiChatClient` serializes image content to OpenAI `image_url`,
+> and `CameraLlmTool.CaptureCameraJpeg/CaptureCameraImageContent` produce real image content (tested).
+> Remaining to make it fully usable:
+
+- [ ] **Host vision send path.** Add a chat/facade method (e.g. `AskWithCameraAsync(prompt, cameraName)`)
+      that captures the camera as a `DataContent` and sends it as a user message — the working,
+      provider-safe "camera → model" path.
+- [ ] **Register `CameraLlmTool`** on a vision-enabled role (behind a flag) so the model can request a
+      screenshot; for the autonomous pattern, lift the tool-result image into a follow-up user `image_url`
+      message before the next model call (OpenAI tool results cannot carry images).
+- [ ] **Model capability gate.** Skip/omit vision when the configured model is text-only.
+- [ ] PlayMode round-trip test against a vision-capable model (`[Explicit]`).
+
 ## [P3] Minor / test-coverage nits (non-blocking)
 
 - [ ] Dedicated test for `LuaModRuntime.DefaultMaxEventsDispatchedPerTick = 64` cap (queue >64 events, assert truncation).

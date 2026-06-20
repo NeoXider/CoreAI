@@ -12,6 +12,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 Depends on **`com.nexoider.coreai` 4.10.0**.
 
+- **Camera vision tool fixed end-to-end.** `CameraLlmTool` previously only returned a base64 string the
+  model could not see. Capture is now a reusable `CameraLlmTool.CaptureCameraJpeg(...)` (offscreen render
+  → JPEG, resolution clamped, render state restored) plus `CaptureCameraImageContent(...)` that returns a
+  MEAI `DataContent` (`image/jpeg`). Attached to a user message, it flows through the core's new
+  `image_url` serialization so a vision-capable model receives the frame. Tests:
+  `CameraLlmToolPlayModeTests` (valid JPEG render) + `MeaiOpenAiVisionEditModeTests` (image serialization).
 - **Persistent file-backed Lua mod packages.** Mods are now durable and shareable through the portable
   `ILuaModSourceStore`. A `FileLuaModSourceStore` persists each mod's source plus its `LuaModManifest`
   (`id`, `name`, `description`, `version`, `author`, `capabilities`, `active`, `entry`) under

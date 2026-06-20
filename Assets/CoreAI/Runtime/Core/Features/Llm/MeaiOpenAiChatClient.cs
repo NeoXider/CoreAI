@@ -1671,13 +1671,83 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
-                    msgDict["content"] = content;
+                    msgDict["content"] = BuildOpenAiMessageContent(content, msg.Contents);
                 }
 
                 messages.Add(msgDict);
             }
 
             return messages;
+        }
+
+        /// <summary>
+        /// Builds the OpenAI <c>content</c> value for a message. When the message carries image content
+        /// (<see cref="MEAI.DataContent"/> or <see cref="MEAI.UriContent"/> with an <c>image/*</c> media
+        /// type), the value is a multimodal parts array (<c>{type:"text"}</c> + one or more
+        /// <c>{type:"image_url"}</c>) so vision-capable models receive the image; otherwise it is the plain
+        /// text string (unchanged behavior for text-only messages). Public for test verification.
+        /// </summary>
+        public static object BuildOpenAiMessageContent(string text, IList<MEAI.AIContent> contents)
+        {
+            List<string> imageUrls = null;
+            if (contents != null)
+            {
+                foreach (MEAI.AIContent c in contents)
+                {
+                    string url = TryGetImageUrl(c);
+                    if (!string.IsNullOrEmpty(url))
+                    {
+                        (imageUrls ??= new List<string>()).Add(url);
+                    }
+                }
+            }
+
+            if (imageUrls == null)
+            {
+                return text ?? "";
+            }
+
+            List<object> parts = new();
+            if (!string.IsNullOrEmpty(text))
+            {
+                parts.Add(new Dictionary<string, object> { { "type", "text" }, { "text", text } });
+            }
+
+            foreach (string url in imageUrls)
+            {
+                parts.Add(new Dictionary<string, object>
+                {
+                    { "type", "image_url" },
+                    { "image_url", new Dictionary<string, object> { { "url", url } } }
+                });
+            }
+
+            return parts;
+        }
+
+        private static string TryGetImageUrl(MEAI.AIContent content)
+        {
+            switch (content)
+            {
+                case MEAI.DataContent data when IsImageMediaType(data.MediaType):
+                    return $"data:{NormalizeImageMediaType(data.MediaType)};base64," +
+                           Convert.ToBase64String(data.Data.ToArray());
+                case MEAI.UriContent uri when IsImageMediaType(uri.MediaType):
+                    return uri.Uri?.ToString();
+                default:
+                    return null;
+            }
+        }
+
+        private static bool IsImageMediaType(string mediaType)
+        {
+            return !string.IsNullOrEmpty(mediaType) &&
+                   mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeImageMediaType(string mediaType)
+        {
+            return string.IsNullOrEmpty(mediaType) ? "image/jpeg" : mediaType;
         }
 
         private static List<Dictionary<string, object>> BuildToolsPayload(MEAI.ChatOptions? options)
