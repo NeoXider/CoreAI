@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## 4.10.0 - 2026-06-20
+
+- **Persistent file-backed Lua mod packages.** New `ILuaModSourceStore` (with `NullLuaModSourceStore`
+  default and a host-side `FileLuaModSourceStore`) persists a mod's **source plus its
+  `LuaModManifest`** (`id`, `name`, `description`, `version`, `author`, `capabilities`, `active`,
+  `entry`). The file-backed store lays each package out under
+  `persistentDataPath/CoreAI/Mods/<id>/` as `manifest.json` + `main.lua`. This is separate from the
+  per-mod `store_set`/`store_get` key/value store (`FileLuaModStore`); the source store persists the
+  mod itself. With no store wired the runtime uses `NullLuaModSourceStore` and behaves exactly as
+  before (in-memory only).
+- **Auto-persist + rehydrate.** `LuaModRuntime` gains a `sourceStore` constructor parameter (appended
+  with a default, `autoPersistMods` defaults to `true`, so all existing callers compile unchanged).
+  Every successful `LoadMod` / `ReloadMod` auto-saves the source and manifest; `UnloadMod` marks the
+  stored package dormant (`Active = false`) instead of deleting it. All store calls are best-effort —
+  a store failure is logged and never aborts a load. On startup `RehydrateFromStore(hostGrant,
+  allowFull = false)` re-loads every active stored mod, returning the count restored, so a mod loaded
+  once via chat survives a restart. The `manage_mods` tool auto-persists through this path.
+- **Export / import / forget — move mods between players.** `ExportMod(id)` returns a self-contained
+  bundle `{"manifest":{...},"source":"..."}` (or `null` for an unknown id); `ImportMod(bundleJson,
+  hostGrant, allowFull = false)` loads it on another host; `ForgetMod(id)` permanently removes the
+  stored package. The `manage_mods` tool exposes the matching `export`, `import`, and `forget` actions
+  alongside `load`, `reload`, `unload`, `list`, and `get_source`. A mod folder can also be copied
+  directly between players' `persistentDataPath/CoreAI/Mods/<id>/`.
+- **Full OFF by default for persisted/shared mods (security).** `RehydrateFromStore` and `ImportMod`
+  both intersect the mod's requested capabilities with the host grant and then strip
+  `LuaCapabilities.Full` unless the host explicitly passes `allowFull: true`. Capability parsing is
+  fail-closed (an empty/unparsable manifest capability string resolves to `None`, not `All`). A
+  persisted, rehydrated, imported, or copied mod can never silently escalate to reflection access.
+- **First-class `.lua` TextAssets.** A `.lua` ScriptedImporter imports any `*.lua` file as a
+  `TextAsset`, so mods can be authored with a real `.lua` extension (editor recognition, drag-and-drop
+  references) instead of the `.lua.txt` workaround; `asset.text` returns the source. The importer is
+  text-only with no MoonSharp dependency, so it works in no-Lua builds too.
+- **Docs.** Added `FIRST_MOD.md` ("Your first Lua mod in 5 minutes"): what a mod is, a copy-paste
+  minimal mod, the capability tiers, the three ways to load (agent / C# / `.lua` TextAsset),
+  persistence, sharing, and a Full-mode example with the security note. `LUA_GAME_API.md` gains a
+  Persistence & Sharing section; `LUA_ACCESS_MODES.md` notes that persisted/shared mods are non-Full
+  by default. Ships with a no-LLM Full-mode mod demo and example `.lua` mods.
+
 ## 4.9.0 - 2026-06-20
 
 - **Context pruning — stale reasoning.** `ConversationHistoryPruner` now strips stale

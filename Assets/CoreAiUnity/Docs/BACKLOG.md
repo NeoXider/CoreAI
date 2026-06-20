@@ -32,11 +32,6 @@ Items here are intentionally not active TODO checkboxes.
   explicitly non-undoable unless a host game supplies a checkpoint system.
 - Add role-configured Lua capability tiers and optional player confirmation for dangerous capabilities such as
   `WorldEdit` and `Full`.
-- Add reusable file-backed Lua mod packages, for example `Mods/<mod_id>/manifest.json` plus `main.lua`, with
-  metadata (`id`, `name`, `description`, `version`, `capabilities`, `entry`, `author`, `active`) and host-side
-  activate/deactivate/reload/forget flow. Existing runtime support covers loaded mod lifecycle, `manage_mods`,
-  source inspection, persistent per-mod key/value storage, and MessagePipe events; package discovery/activation
-  is the future host-management layer.
 - Investigate MoonSharp in WebGL player builds: IL2CPP support, binary size, threading limits, and whether the
   current `SecureLuaEnvironment.IsSupported == false` rule should stay.
 

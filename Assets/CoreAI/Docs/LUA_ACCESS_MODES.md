@@ -23,6 +23,13 @@ If a capability is absent, the corresponding functions are physically absent fro
 - the **Enable Full Lua Access** checkbox on `CoreAILifetimeScope`;
 - `LoadMod(..., caps | Full)` or `manage_mods` with host-granted capabilities.
 
+**Persisted and shared mods are non-Full by default.** A mod that is rehydrated from the source store
+on startup, imported from a bundle, or copied between players never auto-acquires `Full`:
+`LuaModRuntime.RehydrateFromStore` and `ImportMod` intersect the mod's requested capabilities with the
+host grant and then strip `Full` unless the host explicitly passes `allowFull: true`. A shared
+capability set is only ever a request; the receiving host decides. See
+[LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md) and [FIRST_MOD.md](FIRST_MOD.md).
+
 ## Full Mode
 
 Full mode exposes public component fields and methods by default. Non-public members require the
@@ -72,8 +79,10 @@ file APIs that a host game exposes through components.
 
 ## Mod LLM Tools
 
-`manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`) and `execute_lua` are registered in
-`WorldCommandsInstaller`. Mod source is retrieved through `LuaModRuntime.TryGetModSource`.
+`manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`) and
+`execute_lua` are registered in `WorldCommandsInstaller`. Mod source is retrieved through
+`LuaModRuntime.TryGetModSource`; `export`/`import`/`forget` move mods between players through the
+source store.
 
 Programmer guidance keeps these tools direct: run a one-shot `execute_lua` diagnostic first, inspect
 `Success` / `Output` / `Error`, then use `manage_mods` for persistent hook/timer behavior.

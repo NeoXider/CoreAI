@@ -8,6 +8,7 @@ grows, and every group is gated by a capability level.
 **Lua is an optional module:** define `COREAI_NO_LUA` or remove the MoonSharp package, and CoreAI
 builds without Lua (stub bindings in DI). See [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md).
 
+**New to mods?** Start with [FIRST_MOD.md](FIRST_MOD.md) — "Your first Lua mod in 5 minutes".
 **Best practices and anti-patterns:** [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 **MoonSharp: native vs custom:** [MOONSHARP_NATIVE_APIS.md](MOONSHARP_NATIVE_APIS.md).
 **Access modes (Read -> Full):** [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
@@ -143,12 +144,48 @@ The bus lives inside `LuaModRuntime`: `events_emit` is delivered to all other mo
 and to the C# event `ModEventEmitted`; the game sends events to mods through `EmitEvent`. Game-side
 subscription is directly on the DI singleton `LuaModRuntime` (a MessagePipe adapter can be written in one line if needed).
 
+## Persistence & Sharing
+
+By default a loaded mod lives only in memory. A host can make mods durable and shareable by wiring an
+`ILuaModSourceStore` into `LuaModRuntime` (constructor parameter `sourceStore`; `autoPersistMods`
+defaults to `true`). The source store keeps a mod's **source plus its `LuaModManifest`** (`id`, `name`,
+`description`, `version`, `author`, `capabilities`, `active`, `entry`). This is separate from
+`ILuaModStore` / `FileLuaModStore`, which persists per-mod `store_set`/`store_get` values, not the mod
+itself.
+
+A file-backed implementation (`FileLuaModSourceStore`) lays each package out under
+`persistentDataPath/CoreAI/Mods/<id>/` as `manifest.json` + `main.lua`. When no store is wired the
+runtime uses `NullLuaModSourceStore` (in-memory only, exactly the historical behavior).
+
+```csharp
+// Auto-save on load/reload, mark dormant on unload, and auto-load active mods on startup.
+var modRuntime = new LuaModRuntime(gameBindings, store, log, sourceStore: fileSourceStore);
+int restored = modRuntime.RehydrateFromStore(LuaCapabilities.All);   // active mods reload
+modRuntime.ForgetMod("greeter");                                      // delete the stored package
+```
+
+- **Auto-persist.** Every successful `LoadMod` / `ReloadMod` saves the source + manifest; `UnloadMod`
+  flips the stored manifest to `Active = false` (dormant, not deleted). All store calls are
+  best-effort — a store failure is logged and never aborts the load.
+- **Rehydrate.** `RehydrateFromStore(hostGrant, allowFull = false)` re-loads every stored package whose
+  manifest is `Active`, masking each mod's requested capabilities to `hostGrant` and stripping `Full`
+  unless `allowFull` is set. Returns the count of mods reloaded.
+- **Export / import.** `ExportMod(id)` returns a self-contained bundle `{"manifest":{...},"source":"..."}`
+  (or `null` for an unknown id). `ImportMod(bundleJson, hostGrant, allowFull = false)` loads it on
+  another host with the same capability masking. `ForgetMod(id)` permanently removes the stored package.
+- **Security.** Persisted, rehydrated, imported, and copied mods are **never** granted `Full` unless the
+  host explicitly opts in. A shared mod can only ever request capabilities; the host grant decides.
+
+The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, and `forget` in addition
+to `load`, `reload`, `unload`, `list`, `get_source`. See [FIRST_MOD.md](FIRST_MOD.md) for a worked
+walkthrough.
+
 ## LLM Tools (Programmer Role)
 
 | Tool | Purpose |
 |---|---|
 | `execute_lua` | One-shot Lua in the sandbox (same bindings and limits as the envelope pipeline) |
-| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload` for `LuaModRuntime` |
+| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget` for `LuaModRuntime` |
 
 `manage_mods` does not let the model expand the capability tier; the host sets the tier when registering the tool.
 When `enableFullLuaAccess` is on, mods loaded through the built-in Programmer `manage_mods` tool receive

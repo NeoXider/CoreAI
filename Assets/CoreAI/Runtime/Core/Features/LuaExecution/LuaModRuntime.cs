@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using CoreAI.Logging;
 using CoreAI.Sandbox;
 using MoonSharp.Interpreter;
+using Newtonsoft.Json;
 
 namespace CoreAI.Ai
 {
@@ -90,6 +91,8 @@ namespace CoreAI.Ai
         private readonly LuaExecutionGuard _handlerGuard;
         private readonly IGameLuaRuntimeBindings _gameBindings;
         private readonly ILuaModStore _store;
+        private readonly ILuaModSourceStore _sourceStore;
+        private readonly bool _autoPersistMods;
         private readonly ILog _log;
         private readonly List<Mod> _tickScratch = new();
 
@@ -148,16 +151,31 @@ namespace CoreAI.Ai
         /// <param name="log">Optional logger.</param>
         /// <param name="handlerTimeoutMs">Wall-clock budget per handler/timer call.</param>
         /// <param name="handlerMaxSteps">Instruction budget per handler/timer call.</param>
+        /// <param name="sourceStore">
+        /// Optional package store persisting mod source + manifest so mods survive a restart and can be
+        /// shared. Distinct from <paramref name="store"/> (which is per-mod runtime k/v). Null falls back
+        /// to <see cref="NullLuaModSourceStore.Instance"/> (in-memory only — the prior behaviour).
+        /// </param>
+        /// <param name="autoPersistMods">
+        /// When true (default), a successful <see cref="LoadMod"/>/<see cref="ReloadMod"/> persists the
+        /// source + manifest to <paramref name="sourceStore"/> and <see cref="UnloadMod"/> marks the
+        /// stored package dormant. Persistence is always best-effort: a store failure is logged, never
+        /// thrown out of the load.
+        /// </param>
         public LuaModRuntime(
             IGameLuaRuntimeBindings gameBindings = null,
             ILuaModStore store = null,
             ILog log = null,
             int handlerTimeoutMs = DefaultHandlerTimeoutMs,
-            long handlerMaxSteps = DefaultHandlerMaxSteps)
+            long handlerMaxSteps = DefaultHandlerMaxSteps,
+            ILuaModSourceStore sourceStore = null,
+            bool autoPersistMods = true)
         {
             _gameBindings = gameBindings;
             _store = store;
             _log = log;
+            _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
+            _autoPersistMods = autoPersistMods;
             _handlerGuard = new LuaExecutionGuard(handlerTimeoutMs, handlerMaxSteps);
         }
 
@@ -282,6 +300,7 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
+            PersistMod(modId, luaCode, capabilities);
             ModSourceLoaded?.Invoke(modId, luaCode, capabilities);
         }
 
@@ -370,6 +389,22 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' unloaded.");
+
+            // Keep the persisted package but mark it dormant so it does not auto-reload next start; the
+            // source is not lost (use ForgetMod to delete it). Best-effort: a store failure must not
+            // break unloading.
+            if (_autoPersistMods)
+            {
+                try
+                {
+                    _sourceStore.SetActive(modId, false);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] Source store SetActive('{modId}', false) failed: {ex}");
+                }
+            }
+
             ModSourceUnloaded?.Invoke(modId, source, caps);
             return true;
         }
@@ -405,6 +440,7 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' reloaded (caps={caps}).");
+            PersistMod(modId, luaCode, caps);
             ModSourceLoaded?.Invoke(modId, luaCode, caps);
         }
 
@@ -719,6 +755,275 @@ namespace CoreAI.Ai
             }
 
             mod.Pending.Enqueue(new KeyValuePair<string, string>(evt, payload));
+        }
+
+        /// <summary>
+        /// Unloads the mod (if loaded) <em>and</em> deletes its persisted package, so it does not
+        /// rehydrate on a future start. Returns true when either an unload or a delete occurred.
+        /// </summary>
+        public bool ForgetMod(string id)
+        {
+            string modId = Normalize(id);
+            bool wasLoaded = UnloadMod(modId);
+
+            try
+            {
+                _sourceStore.Delete(modId);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Source store Delete('{modId}') failed: {ex}");
+                return wasLoaded;
+            }
+
+            return wasLoaded || modId.Length > 0;
+        }
+
+        /// <summary>
+        /// Loads every stored mod whose manifest is <see cref="LuaModManifest.Active"/> and not already
+        /// loaded. Each mod's persisted capability request is intersected with
+        /// <paramref name="hostGrant"/> and (unless <paramref name="allowFull"/>) stripped of
+        /// <see cref="LuaCapabilities.Full"/>, so a persisted or shared mod can never auto-acquire full
+        /// reflection. Loads run in independent try/catch blocks so one bad package does not abort the
+        /// rest. Returns the count successfully loaded.
+        /// </summary>
+        public int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            IReadOnlyList<LuaModManifest> manifests;
+            try
+            {
+                manifests = _sourceStore.List() ?? Array.Empty<LuaModManifest>();
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Source store List() failed during rehydrate: {ex}");
+                return 0;
+            }
+
+            int loaded = 0;
+            foreach (LuaModManifest manifest in manifests)
+            {
+                if (manifest == null || !manifest.Active)
+                {
+                    continue;
+                }
+
+                string modId = Normalize(manifest.Id);
+                if (modId.Length == 0 || IsLoaded(modId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!_sourceStore.TryLoad(modId, out string source, out LuaModManifest stored) ||
+                        string.IsNullOrWhiteSpace(source))
+                    {
+                        _log?.Warn($"[LuaModRuntime] Rehydrate skipped '{modId}': no source in store.");
+                        continue;
+                    }
+
+                    string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
+                    LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+                    LoadMod(modId, source, effectiveCaps);
+                    loaded++;
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] Rehydrate of mod '{modId}' failed: {ex}");
+                }
+            }
+
+            return loaded;
+        }
+
+        /// <summary>
+        /// Returns a shareable JSON bundle <c>{ "manifest": {...}, "source": "..." }</c> for a loaded or
+        /// stored mod, or null when neither holds the id.
+        /// </summary>
+        public string ExportMod(string id)
+        {
+            string modId = Normalize(id);
+            string source = null;
+            LuaModManifest manifest = null;
+
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    source = mod.Source;
+                    manifest = BuildManifest(modId, mod.Caps, active: true);
+                }
+            }
+
+            if (source == null)
+            {
+                try
+                {
+                    if (_sourceStore.TryLoad(modId, out string storedSource, out LuaModManifest storedManifest))
+                    {
+                        source = storedSource;
+                        manifest = storedManifest ?? BuildManifest(modId, LuaCapabilities.None, active: false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] Source store TryLoad('{modId}') failed during export: {ex}");
+                }
+            }
+
+            if (source == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonConvert.SerializeObject(new LuaModBundle { Manifest = manifest, Source = source });
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Export of mod '{modId}' failed: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Parses an <see cref="ExportMod"/> bundle and loads (plus persists) it. The bundle's capability
+        /// request is intersected with <paramref name="hostGrant"/> and (unless
+        /// <paramref name="allowFull"/>) stripped of <see cref="LuaCapabilities.Full"/>, so an imported
+        /// mod can never auto-acquire full reflection. Returns false on malformed input, a missing/blank
+        /// id or source, or a load failure.
+        /// </summary>
+        public bool ImportMod(string bundleJson, LuaCapabilities hostGrant, bool allowFull = false)
+        {
+            if (string.IsNullOrWhiteSpace(bundleJson))
+            {
+                return false;
+            }
+
+            LuaModBundle bundle;
+            try
+            {
+                bundle = JsonConvert.DeserializeObject<LuaModBundle>(bundleJson);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] ImportMod failed to parse bundle: {ex}");
+                return false;
+            }
+
+            if (bundle == null || string.IsNullOrWhiteSpace(bundle.Source))
+            {
+                _log?.Warn("[LuaModRuntime] ImportMod rejected: missing source.");
+                return false;
+            }
+
+            string modId = Normalize(bundle.Manifest != null ? bundle.Manifest.Id : "");
+            if (modId.Length == 0)
+            {
+                _log?.Warn("[LuaModRuntime] ImportMod rejected: missing/blank mod id.");
+                return false;
+            }
+
+            string capsText = bundle.Manifest != null ? bundle.Manifest.Capabilities : "";
+            LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
+
+            try
+            {
+                if (IsLoaded(modId))
+                {
+                    ReloadMod(modId, bundle.Source);
+                }
+                else
+                {
+                    LoadMod(modId, bundle.Source, effectiveCaps);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] ImportMod of '{modId}' failed: {ex}");
+                return false;
+            }
+        }
+
+        /// <summary>JSON shape of an export/import bundle: the manifest plus the raw Lua source.</summary>
+        private sealed class LuaModBundle
+        {
+            [JsonProperty("manifest")]
+            public LuaModManifest Manifest;
+
+            [JsonProperty("source")]
+            public string Source = "";
+        }
+
+        /// <summary>Best-effort persist of a mod's source + manifest; a store failure is logged, never thrown.</summary>
+        private void PersistMod(string modId, string source, LuaCapabilities caps)
+        {
+            if (!_autoPersistMods)
+            {
+                return;
+            }
+
+            try
+            {
+                _sourceStore.Save(modId, source, BuildManifest(modId, caps, active: true));
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Source store Save('{modId}') failed: {ex}");
+            }
+        }
+
+        /// <summary>Builds a manifest for the given mod with its capability set rendered as a string.</summary>
+        private static LuaModManifest BuildManifest(string id, LuaCapabilities caps, bool active)
+        {
+            return new LuaModManifest
+            {
+                Id = id,
+                Name = id,
+                Capabilities = caps.ToString(),
+                Active = active
+            };
+        }
+
+        /// <summary>
+        /// Intersects a mod's requested capabilities with the host grant and, unless
+        /// <paramref name="allowFull"/>, clears <see cref="LuaCapabilities.Full"/>. Persisted and shared
+        /// mods route through here so they can never escalate beyond what the host currently allows.
+        /// </summary>
+        private static LuaCapabilities ApplyHostGrant(LuaCapabilities requested, LuaCapabilities hostGrant, bool allowFull)
+        {
+            LuaCapabilities effective = requested & hostGrant;
+            if (!allowFull)
+            {
+                effective &= ~LuaCapabilities.Full;
+            }
+
+            return effective;
+        }
+
+        /// <summary>
+        /// Tolerantly parses a persisted capability string into <see cref="LuaCapabilities"/>. An empty
+        /// or unparsable value yields <see cref="LuaCapabilities.None"/> (fail closed) and is logged, so
+        /// a corrupt manifest grants no capabilities rather than defaulting open.
+        /// </summary>
+        private LuaCapabilities ParseCaps(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return LuaCapabilities.None;
+            }
+
+            if (Enum.TryParse(text.Trim(), ignoreCase: true, out LuaCapabilities parsed))
+            {
+                return parsed;
+            }
+
+            _log?.Warn($"[LuaModRuntime] Unrecognized capability string '{text}'; defaulting to None.");
+            return LuaCapabilities.None;
         }
 
         private static string Normalize(string value)

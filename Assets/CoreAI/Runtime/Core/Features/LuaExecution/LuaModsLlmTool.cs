@@ -11,10 +11,12 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// LLM tool (<c>manage_mods</c>) that lets an agent inspect and rewrite its own persistent
-    /// Lua mods in <see cref="LuaModRuntime"/>: list mods, read their source, load, reload, and
-    /// unload them.
+    /// Lua mods in <see cref="LuaModRuntime"/>: list mods, read their source, load, reload, unload,
+    /// export, import, and forget them. Loaded/reloaded mods auto-persist and survive a restart;
+    /// export/import move a mod between players via a shareable bundle.
     /// <para>
-    /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>) effectively grant the model the
+    /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>)
+    /// effectively grant the model the
     /// whole capability tier configured at registration, so hosts that only want introspection
     /// must construct the tool with <c>allowModManagement: false</c>. Loaded mods always receive
     /// the host-configured <see cref="LuaCapabilities"/> tier — the model cannot request a wider
@@ -66,22 +68,28 @@ namespace CoreAI.Ai
             "Manage persistent Lua mods (long-lived scripts with hooks_on/hooks_every handlers). " +
             "Actions: list (all loaded mods), get_source (read a mod's Lua code), " +
             "load (install new mod), reload (replace a mod's code keeping its permissions), " +
-            "unload (remove a mod). Use get_source before reload to edit existing behavior. " +
+            "unload (remove a mod), export (get a shareable bundle of a mod to move it to another player), " +
+            "import (install a mod from a shareable bundle, passed in the 'bundle' or 'code' param), " +
+            "forget (unload a mod and delete it from persistent storage). " +
+            "load/reload auto-persist mods so they survive an app restart; export/import move mods between players. " +
+            "Use get_source before reload to edit existing behavior. " +
             "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
             "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end.";
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true, "One of: list, get_source, load, reload, unload"),
-            ("mod_id", "string", false, "Mod id (required for get_source, load, reload, unload)"),
+            ("action", "string", true, "One of: list, get_source, load, reload, unload, export, import, forget"),
+            ("mod_id", "string", false, "Mod id (required for get_source, load, reload, unload, export, forget)"),
             ("code", "string", false,
-                "Lua source for load/reload. Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end).")
+                "Lua source for load/reload. Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted."),
+            ("bundle", "string", false,
+                "Shareable mod bundle JSON (as returned by export) for the import action.")
         );
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string, string, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string, string, string, string, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -95,6 +103,7 @@ namespace CoreAI.Ai
             string action,
             string mod_id = null,
             string code = null,
+            string bundle = null,
             CancellationToken cancellationToken = default)
         {
             string normalized = (action ?? "").Trim().ToLowerInvariant();
@@ -113,7 +122,11 @@ namespace CoreAI.Ai
                     "load" => Mutate(() => Load(mod_id, code)),
                     "reload" => Mutate(() => Reload(mod_id, code)),
                     "unload" => Mutate(() => Unload(mod_id)),
-                    _ => Fail($"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload.")
+                    "export" => Export(mod_id),
+                    "import" => Mutate(() => Import(bundle ?? code)),
+                    "forget" => Mutate(() => Forget(mod_id)),
+                    _ => Fail(
+                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget.")
                 };
             }
             catch (Exception ex)
@@ -214,6 +227,46 @@ namespace CoreAI.Ai
             return _runtime.UnloadMod(modId)
                 ? Ok($"Mod '{modId.Trim()}' unloaded.")
                 : Fail($"unload: mod '{modId.Trim()}' is not loaded.");
+        }
+
+        private string Export(string modId)
+        {
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                return Fail("export: mod_id is required.");
+            }
+
+            string bundle = _runtime.ExportMod(modId);
+            if (bundle == null)
+            {
+                return Fail($"export: mod '{modId.Trim()}' is not loaded or stored.");
+            }
+
+            return Ok($"Bundle for mod '{modId.Trim()}'. Pass it to import on another player.", bundle);
+        }
+
+        private string Import(string bundle)
+        {
+            if (string.IsNullOrWhiteSpace(bundle))
+            {
+                return Fail("import: bundle (or code) with the shareable mod JSON is required.");
+            }
+
+            return _runtime.ImportMod(bundle, _grantedCapabilities, allowFull: false)
+                ? Ok($"Mod imported and loaded (capabilities masked to {_grantedCapabilities}).")
+                : Fail("import: failed to import bundle (invalid JSON, missing source, or load error).");
+        }
+
+        private string Forget(string modId)
+        {
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                return Fail("forget: mod_id is required.");
+            }
+
+            return _runtime.ForgetMod(modId)
+                ? Ok($"Mod '{modId.Trim()}' forgotten (unloaded and deleted from storage).")
+                : Fail($"forget: mod '{modId.Trim()}' is not loaded or stored.");
         }
 
         private static string Ok(string message, object data = null)

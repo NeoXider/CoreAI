@@ -20,7 +20,7 @@ Package manifests:
 | Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) |
 | Understand architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md), [DGF_SPEC.md](DGF_SPEC.md) |
 | Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
-| Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
+| Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md), [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
 | Run or extend tests | [../Tests/PlayMode/README.md](../Tests/PlayMode/README.md) | Test-specific docs listed below |
 
 ## First Run
@@ -71,7 +71,8 @@ Package manifests:
 | [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) | MEAI pipeline from `ILlmTool` to `AIFunction` and forced tool modes. |
 | [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) | Provider usage facts, client estimates, SSE usage, timeout boundaries. |
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
-| [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`. |
+| [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md) | Your first Lua mod in 5 minutes: load via agent/C#/TextAsset, persistence, sharing. |
+| [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`, persistence & sharing. |
 | [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md) | Do's and don'ts: slots, extensions, MoonSharp, LLM context. |
 | [MOONSHARP_NATIVE_APIS](../../CoreAI/Docs/MOONSHARP_NATIVE_APIS.md) | Native MoonSharp vs custom CoreAI code. |
 

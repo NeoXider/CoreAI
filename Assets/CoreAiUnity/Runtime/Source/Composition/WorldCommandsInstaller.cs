@@ -92,15 +92,41 @@ namespace CoreAI.Composition
             // Persistent mod runtime: long-lived Lua mods with hooks/timers/events + per-mod store.
             builder.Register(c => new FileLuaModStore(), Lifetime.Singleton)
                 .As<ILuaModStore>();
+            // Package store: persists each mod's source + manifest so active mods survive a restart
+            // (rehydrated at startup) and can be exported/imported between hosts.
+            builder.Register(c => new FileLuaModSourceStore(), Lifetime.Singleton)
+                .As<ILuaModSourceStore>();
             builder.Register(c => new LuaModRuntime(
                     c.Resolve<IGameLuaRuntimeBindings>(),
-                    c.Resolve<ILuaModStore>()),
+                    c.Resolve<ILuaModStore>(),
+                    sourceStore: c.Resolve<ILuaModSourceStore>(),
+                    autoPersistMods: true),
                 Lifetime.Singleton);
             builder.RegisterEntryPoint<ITickable>(c => new LuaModRuntimeTicker(
                     c.Resolve<LuaModRuntime>(),
                     c.ResolveOrDefault<IGameLogger>(),
                     c.ResolveOrDefault<IPublisher<LuaModEventEmitted>>()),
                 Lifetime.Singleton);
+
+            // Startup rehydration: reload every persisted active mod once the container is built.
+            // The host's configured capability tier (scriptCapabilities) is the grant ceiling;
+            // allowFull is always false here so a persisted mod can never silently regain Full
+            // reflection across a restart (it must be re-granted explicitly by a live load). With a
+            // Null/empty source store (e.g. WebGL) this is a harmless no-op. Best-effort: a rehydrate
+            // failure is swallowed so it never aborts container construction.
+            builder.RegisterBuildCallback(container =>
+            {
+                try
+                {
+                    LuaModRuntime runtime = container.Resolve<LuaModRuntime>();
+                    runtime.RehydrateFromStore(scriptCapabilities, allowFull: false);
+                }
+                catch (VContainerException)
+                {
+                    // Minimal containers (tests, headless tools) may omit the mod runtime; rehydration
+                    // is an additive convenience, not a requirement.
+                }
+            });
 
             // Native tool-calling path for the built-in Programmer role: the same sandbox and
             // game bindings as the Lua envelope pipeline, exposed as execute_lua + manage_mods

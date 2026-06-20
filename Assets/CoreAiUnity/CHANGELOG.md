@@ -8,6 +8,38 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
   `TMP_InputField` / `ScrollRect` / `Button` view.
 
+## 4.10.0 - 2026-06-20
+
+Depends on **`com.nexoider.coreai` 4.10.0**.
+
+- **Persistent file-backed Lua mod packages.** Mods are now durable and shareable through the portable
+  `ILuaModSourceStore`. A `FileLuaModSourceStore` persists each mod's source plus its `LuaModManifest`
+  (`id`, `name`, `description`, `version`, `author`, `capabilities`, `active`, `entry`) under
+  `persistentDataPath/CoreAI/Mods/<id>/` as `manifest.json` + `main.lua`. This is separate from the
+  per-mod `store_set`/`store_get` key/value store; the source store persists the mod itself. Without a
+  wired store the runtime falls back to the in-memory `NullLuaModSourceStore` (previous behavior).
+- **`manage_mods` auto-persists and survives restart.** Loading or reloading a mod through chat now
+  auto-saves it; `unload` marks the stored package dormant instead of deleting it. On startup
+  `LuaModRuntime.RehydrateFromStore(hostGrant)` re-loads every active stored mod, so a mod created in
+  chat is back the next time you press Play. The `manage_mods` tool adds `export`, `import`, and
+  `forget` actions alongside `load`, `reload`, `unload`, `list`, and `get_source`.
+- **Export / import / forget to move mods between players.** `export` returns a self-contained
+  `{"manifest":{...},"source":"..."}` bundle that another player can `import`; a mod folder can also be
+  copied directly between `persistentDataPath/CoreAI/Mods/<id>/` paths. `forget` permanently removes a
+  stored package.
+- **Full OFF by default for persisted/shared mods.** Rehydrate and import intersect the mod's requested
+  capabilities with the host grant and strip `Full` unless the host explicitly opts in, so a persisted,
+  imported, or copied mod can never silently gain reflection (`unity_*`) access. Capability parsing is
+  fail-closed.
+- **First-class `.lua` TextAssets.** New `LuaScriptedImporter` imports any `*.lua` file as a
+  `TextAsset`, so mods can be authored with a real `.lua` extension (editor recognition, drag-and-drop)
+  instead of the `.lua.txt` workaround; `asset.text` returns the source. Text-only, no MoonSharp
+  dependency, works in no-Lua builds.
+- **Docs and demos.** Added `Assets/CoreAI/Docs/FIRST_MOD.md` ("Your first Lua mod in 5 minutes"),
+  linked from `DOCS_INDEX.md`; `LUA_GAME_API.md` gains a Persistence & Sharing section and
+  `LUA_ACCESS_MODES.md` notes the non-Full default. Ships a no-LLM Full-mode mod demo plus example
+  `.lua` mods. Marked the reusable file-backed Lua mod packages item done in `BACKLOG.md`.
+
 ## 4.9.0 - 2026-06-20
 
 - **Full Lua fix on Unity 6000.3+.** `CoreAiFullUnityLuaRuntimeBindings.Resolve` resolved object ids

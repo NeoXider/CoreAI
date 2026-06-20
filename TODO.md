@@ -34,6 +34,22 @@
       prefer non-generic `RegisterCallback` bindings for AOT, keep Full tier disabled (or hardwired
       allowlist) on web, and add a WebGL-player self-test scene. See `BACKLOG.md` (Lua & World Runtime).
 
+## [P2] Lua mod packages — follow-ups
+
+> File-backed mod persistence + export/import shipped in 4.10.0 (`ILuaModSourceStore` /
+> `FileLuaModSourceStore`, `RehydrateFromStore`, `manage_mods export/import/forget`). Remaining:
+
+- [ ] **Mod versioning (agent edits).** Mod source persists, but each `manage_mods reload` **overwrites**
+      the source — no revision history or rollback. `LuaModManifest.Version` is a static field, not tracked.
+      Wire mod load/reload into the existing `ILuaScriptVersionStore` (keyed by mod id): record a revision
+      per edit, auto-increment `LuaModManifest.Version`, and add `manage_mods versions` / `revert` actions
+      so the agent (or host) can list and roll back mod changes.
+- [ ] **Surface runtime mod-handler errors to the agent.** Load/reload errors are returned to the agent
+      via `manage_mods` (it can fix + retry), but a hook that throws later during `Tick` only raises
+      `ModHandlerErrored` + counts toward auto-unload host-side — it is not fed back to the agent. Add a
+      path (next-turn context block or a `manage_mods` diagnostics action) so the agent learns of runtime
+      handler failures and can repair the mod.
+
 ## [P3] Minor / test-coverage nits (non-blocking)
 
 - [ ] Dedicated test for `LuaModRuntime.DefaultMaxEventsDispatchedPerTick = 64` cap (queue >64 events, assert truncation).
