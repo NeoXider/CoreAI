@@ -261,7 +261,16 @@ namespace CoreAI.Ai
         /// the chunk (which registers its hooks). Throws on invalid input, duplicate id, mod-count
         /// limit, or script error — nothing is left registered when the load fails.
         /// </summary>
-        public void LoadMod(string id, string luaCode, LuaCapabilities capabilities = LuaCapabilities.All)
+        /// <param name="persistToStore">
+        /// When true (default), the mod's source and manifest are written to the source store. Rehydration
+        /// and import pass false so loading a mod with masked runtime capabilities never overwrites the
+        /// declared capabilities already recorded in the store.
+        /// </param>
+        public void LoadMod(
+            string id,
+            string luaCode,
+            LuaCapabilities capabilities = LuaCapabilities.All,
+            bool persistToStore = true)
         {
             string modId = Normalize(id);
             if (modId.Length == 0)
@@ -300,7 +309,11 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
-            PersistMod(modId, luaCode, capabilities);
+            if (persistToStore)
+            {
+                PersistMod(modId, luaCode, capabilities);
+            }
+
             ModSourceLoaded?.Invoke(modId, luaCode, capabilities);
         }
 
@@ -825,7 +838,12 @@ namespace CoreAI.Ai
 
                     string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
                     LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
-                    LoadMod(modId, source, effectiveCaps);
+
+                    // Load with the masked runtime tier but do NOT re-persist: the stored manifest already
+                    // holds the mod's declared capabilities. Overwriting it with the masked tier would
+                    // permanently strip Full from the store, so a later allowFull rehydrate could not
+                    // restore it.
+                    LoadMod(modId, source, effectiveCaps, persistToStore: false);
                     loaded++;
                 }
                 catch (Exception ex)
@@ -937,7 +955,11 @@ namespace CoreAI.Ai
                 }
                 else
                 {
-                    LoadMod(modId, bundle.Source, effectiveCaps);
+                    // Run with the masked runtime tier, but persist the DECLARED capabilities from the
+                    // bundle (not the masked tier) so a later allowFull rehydrate can restore the full
+                    // request rather than the stripped-down version.
+                    LoadMod(modId, bundle.Source, effectiveCaps, persistToStore: false);
+                    PersistMod(modId, bundle.Source, ParseCaps(capsText));
                 }
 
                 return true;
