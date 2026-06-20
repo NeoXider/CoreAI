@@ -27,6 +27,21 @@ namespace CoreAI.Infrastructure.Llm
 #endif
 
     /// <summary>
+    /// Stable marker keys placed inside a tool call's arguments dictionary when the streamed
+    /// argument JSON could not be parsed (malformed/truncated). Both the streaming accumulator that
+    /// emits the markers and <see cref="ToolExecutionPolicy"/> that detects them reference these
+    /// shared constants so the contract stays in sync across the assembly.
+    /// </summary>
+    public static class ToolCallArgumentMarkers
+    {
+        /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
+        public const string RawArgumentsKey = "__raw_arguments";
+
+        /// <summary>Marker key (boolean <c>true</c>) set when the accumulated arguments could not be parsed as JSON.</summary>
+        public const string ParseErrorKey = "__parse_error";
+    }
+
+    /// <summary>
     /// MEAI <see cref="MEAI.IChatClient"/> for OpenAI-compatible HTTP APIs.
     /// Uses <see cref="IOpenAiHttpTransport"/> (default <see cref="HttpClientOpenAiTransport"/> outside WebGL player;
     /// WebGL uses <c>UnityWebRequest</c> from CoreAI.Source). Continuations preserve sync context when present.
@@ -1443,10 +1458,10 @@ namespace CoreAI.Infrastructure.Llm
         private sealed class SseToolCallAccumulator
         {
             /// <summary>Marker key carrying the raw argument string when it failed to parse as JSON.</summary>
-            internal const string RawArgumentsKey = "__raw_arguments";
+            internal const string RawArgumentsKey = ToolCallArgumentMarkers.RawArgumentsKey;
 
             /// <summary>Marker key (boolean) set when the accumulated arguments could not be parsed as JSON.</summary>
-            internal const string ParseErrorKey = "__parse_error";
+            internal const string ParseErrorKey = ToolCallArgumentMarkers.ParseErrorKey;
 
             private readonly Dictionary<int, PendingToolCall> _pending = new();
             private readonly ILog _log;
@@ -1496,7 +1511,9 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
                 update.Contents = new List<MEAI.AIContent>();
 
-                foreach (KeyValuePair<int, PendingToolCall> kvp in _pending)
+                // Emit in ascending tool-call index order so the FunctionCallContent order is
+                // deterministic and matches the provider's tool_calls index order.
+                foreach (KeyValuePair<int, PendingToolCall> kvp in _pending.OrderBy(p => p.Key))
                 {
                     PendingToolCall pending = kvp.Value;
                     string argsStr = pending.Arguments.ToString();

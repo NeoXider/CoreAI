@@ -19,7 +19,10 @@
   `coreai_world_begin` cannot leak buffered commands into the next script. The streaming SSE tool-call
   accumulator keys parallel calls by index and **surfaces** malformed/truncated argument JSON instead of
   silently sending empty args. `SmartToolCallingChatClient.TrimToolCallHistory` trims assistant+tool turns
-  as coupled pairs so a `tool` message is never orphaned (provider 400).
+  as coupled pairs so a `tool` message is never orphaned (provider 400). Re-audit follow-ups: the
+  world-transaction reset also covers the mod tick loop (per guarded handler/timer); malformed streamed
+  tool-call arguments are **rejected before execution** (not just logged); mod event dispatch rotates
+  round-robin so no mod starves under sustained load; SSE tool calls emit in ascending index order.
 
 ## 4.8.1 - 2026-06-19
 

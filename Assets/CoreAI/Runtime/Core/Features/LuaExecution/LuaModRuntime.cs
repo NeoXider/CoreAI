@@ -94,6 +94,14 @@ namespace CoreAI.Ai
         private readonly List<Mod> _tickScratch = new();
 
         /// <summary>
+        /// Round-robin start index into <see cref="_tickScratch"/> for charging the global event
+        /// dispatch budget. Advancing it every tick keeps the per-tick budget from always being
+        /// spent on the first few mods in iteration order, so under sustained saturation every mod
+        /// is reached over a bounded number of ticks instead of the tail starving forever.
+        /// </summary>
+        private int _dispatchRotation;
+
+        /// <summary>
         /// Raised when a mod calls <c>events_emit(name, payload)</c>: (modId, eventName, payload).
         /// The Unity layer bridges this to MessagePipe/game systems.
         /// </summary>
@@ -443,16 +451,30 @@ namespace CoreAI.Ai
                 }
             }
 
-            // Running count of handler invocations dispatched across all mods this tick. Timers
-            // always run (they are bounded to one fire per timer per tick); only event dispatch is
-            // charged against the global budget so a heavy event-fan-out tick cannot stall the
-            // main thread. Once the budget is exhausted, the remaining mods keep their queued
-            // events untouched and are serviced on later ticks.
-            int dispatchedThisTick = 0;
+            // Timers always run (they are bounded to one fire per timer per tick); they are not
+            // charged against the global event budget, so they run for every mod in iteration
+            // order regardless of how the event budget is shared.
             for (int i = 0; i < _tickScratch.Count; i++)
             {
-                Mod mod = _tickScratch[i];
-                TickTimers(mod, deltaSeconds);
+                TickTimers(_tickScratch[i], deltaSeconds);
+            }
+
+            // Running count of handler invocations dispatched across all mods this tick. Only event
+            // dispatch is charged against the global budget so a heavy event-fan-out tick cannot
+            // stall the main thread. The start index rotates round-robin every tick: charging the
+            // budget always from index 0 would mean only the first DefaultMaxEventsDispatchedPerTickGlobal
+            // / DefaultMaxEventsDispatchedPerTick mods are serviced under sustained saturation while
+            // the tail starves (and EnqueueLocked drops their oldest events). Rotating the start
+            // shares the global budget fairly across all mods over successive ticks. Once the budget
+            // is exhausted, the remaining mods keep their queued events untouched for later ticks.
+            int count = _tickScratch.Count;
+            int start = count > 0 ? ((_dispatchRotation % count) + count) % count : 0;
+            _dispatchRotation++;
+
+            int dispatchedThisTick = 0;
+            for (int n = 0; n < count; n++)
+            {
+                Mod mod = _tickScratch[(start + n) % count];
 
                 if (dispatchedThisTick < DefaultMaxEventsDispatchedPerTickGlobal)
                 {
@@ -569,6 +591,17 @@ namespace CoreAI.Ai
                         _log?.Error($"[LuaModRuntime] ModHandlerErrored subscriber threw: {subscriberEx}");
                     }
                 }
+            }
+            finally
+            {
+                // The game bindings (and their world-transaction state) are a shared singleton
+                // also used by the envelope/tool executors. A guarded handler/timer that calls
+                // coreai_world_begin() and then errors (the catch above swallows the exception)
+                // would otherwise leave the transaction open, silently buffering every later
+                // handler's, timer's, and tick's world commands instead of publishing them.
+                // Resetting per guarded call guarantees no transaction opened inside one
+                // invocation can leak into the next handler, the next timer, or a later tick.
+                (_gameBindings as ILuaTransactionScope)?.ResetTransactions();
             }
         }
 

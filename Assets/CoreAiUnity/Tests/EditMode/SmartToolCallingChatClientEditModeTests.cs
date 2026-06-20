@@ -458,6 +458,133 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(response);
         }
 
+        // ===================== Tool Call History Trim =====================
+
+        /// <summary>
+        /// An over-cap unit list removes the OLDEST whole unit (Assistant tool_calls + its Tool
+        /// result) and the surviving list never begins with an orphaned Tool message.
+        /// </summary>
+        [Test]
+        public void TrimToolCallHistory_OverCap_RemovesOldestWholeUnit_NoOrphanLead()
+        {
+            // [System, User, A(tool_calls #1), Tool #1, A(tool_calls #2), Tool #2]
+            // 4 tool-related messages, cap 2 → the oldest unit (#1) is dropped as a whole.
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.System, "you are helpful"),
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "do work"),
+                MakeAssistantToolCall("call_1", "tool_1"),
+                MakeToolResult("call_1", "ok_1"),
+                MakeAssistantToolCall("call_2", "tool_2"),
+                MakeToolResult("call_2", "ok_2")
+            };
+
+            InvokeTrim(messages, 2);
+
+            // System + User preserved; only the newest unit (#2) survives.
+            Assert.AreEqual(MEAI.ChatRole.System, messages[0].Role, "System message must be preserved");
+            Assert.AreEqual(MEAI.ChatRole.User, messages[1].Role, "Original user message must be preserved");
+            Assert.IsFalse(messages.Any(m => CallNameOf(m) == "tool_1"),
+                "Oldest unit (tool_1) must be removed as a whole");
+            Assert.IsTrue(messages.Any(m => CallNameOf(m) == "tool_2"),
+                "Newest unit (tool_2) must survive");
+
+            // The first Tool message must never appear before its assistant tool_calls turn.
+            int firstTool = messages.FindIndex(m => m.Role == MEAI.ChatRole.Tool);
+            int firstAssistantCall = messages.FindIndex(m =>
+                m.Role == MEAI.ChatRole.Assistant && HasFunctionCall(m));
+            Assert.IsTrue(firstTool > firstAssistantCall,
+                "Surviving list must not start with an orphan Tool message");
+            AssertNoOrphanToolMessage(messages);
+        }
+
+        /// <summary>
+        /// A unit whose Assistant <c>tool_calls</c> turn is answered by MULTIPLE contiguous Tool
+        /// result messages is trimmed as one block, never split mid-unit.
+        /// </summary>
+        [Test]
+        public void TrimToolCallHistory_MultiResultUnit_TrimsAsOneBlock()
+        {
+            // Unit #1 has two contiguous Tool results (e.g. a parallel tool_calls turn the provider
+            // answered with separate 'tool' messages). 5 tool-related messages, cap 2 → unit #1
+            // (its assistant turn + BOTH tool results) is removed together.
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "do work"),
+                MakeAssistantToolCall("call_1a", "tool_1"),
+                MakeToolResult("call_1a", "ok_1a"),
+                MakeToolResult("call_1b", "ok_1b"),
+                MakeAssistantToolCall("call_2", "tool_2"),
+                MakeToolResult("call_2", "ok_2")
+            };
+
+            InvokeTrim(messages, 2);
+
+            Assert.IsFalse(messages.Any(m => CallNameOf(m) == "tool_1"),
+                "Multi-result unit must be removed as one block (assistant turn gone)");
+            Assert.IsFalse(messages.Any(m => m.Role == MEAI.ChatRole.Tool &&
+                    ResultCallIdOf(m).StartsWith("call_1")),
+                "Both contiguous Tool results of the trimmed unit must be removed together");
+            Assert.IsTrue(messages.Any(m => CallNameOf(m) == "tool_2"),
+                "Newest unit must survive intact");
+            AssertNoOrphanToolMessage(messages);
+        }
+
+        /// <summary>
+        /// An input already within the cap is returned unchanged (same instances, same order).
+        /// </summary>
+        [Test]
+        public void TrimToolCallHistory_UnderCap_ReturnsUnchanged()
+        {
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.System, "sys"),
+                new MEAI.ChatMessage(MEAI.ChatRole.User, "do work"),
+                MakeAssistantToolCall("call_1", "tool_1"),
+                MakeToolResult("call_1", "ok_1")
+            };
+            List<MEAI.ChatMessage> snapshot = messages.ToList();
+
+            // 2 tool-related messages, cap 5 → nothing to trim.
+            InvokeTrim(messages, 5);
+
+            Assert.AreEqual(snapshot.Count, messages.Count, "Under-cap input must keep its length");
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                Assert.AreSame(snapshot[i], messages[i],
+                    "Under-cap input must be returned unchanged (same instances, same order)");
+            }
+        }
+
+        /// <summary>
+        /// Across several over-cap shapes, no surviving Tool message is left without a preceding
+        /// Assistant tool_calls turn (the orphaned-'tool' provider-400 invariant).
+        /// </summary>
+        [Test]
+        public void TrimToolCallHistory_Invariant_NoOrphanToolMessageSurvives()
+        {
+            // Three units, every cap from 1..5 forces a different amount of trimming.
+            for (int cap = 1; cap <= 5; cap++)
+            {
+                List<MEAI.ChatMessage> messages = new()
+                {
+                    new MEAI.ChatMessage(MEAI.ChatRole.System, "sys"),
+                    new MEAI.ChatMessage(MEAI.ChatRole.User, "do work"),
+                    MakeAssistantToolCall("call_1", "tool_1"),
+                    MakeToolResult("call_1", "ok_1"),
+                    MakeAssistantToolCall("call_2", "tool_2"),
+                    MakeToolResult("call_2", "ok_2a"),
+                    MakeToolResult("call_2", "ok_2b"),
+                    MakeAssistantToolCall("call_3", "tool_3"),
+                    MakeToolResult("call_3", "ok_3")
+                };
+
+                InvokeTrim(messages, cap);
+
+                AssertNoOrphanToolMessage(messages);
+            }
+        }
+
         /// <summary>
         /// Simple <see cref="ILlmTool"/> implementation with duplicate calls explicitly allowed.
         /// </summary>
@@ -516,6 +643,99 @@ namespace CoreAI.Tests.EditMode
             };
             return MEAI.AIFunctionFactory.Create(func,
                 new MEAI.AIFunctionFactoryOptions { Name = name, Description = "test tool" });
+        }
+
+        /// <summary>
+        /// Builds an Assistant turn carrying a single <c>tool_calls</c> entry.
+        /// </summary>
+        private static MEAI.ChatMessage MakeAssistantToolCall(string callId, string toolName)
+        {
+            return new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
+                new List<MEAI.AIContent> { new MEAI.FunctionCallContent(callId, toolName) });
+        }
+
+        /// <summary>
+        /// Builds a Tool result turn answering the call with <paramref name="callId"/>.
+        /// </summary>
+        private static MEAI.ChatMessage MakeToolResult(string callId, string result)
+        {
+            return new MEAI.ChatMessage(MEAI.ChatRole.Tool,
+                new List<MEAI.AIContent> { new MEAI.FunctionResultContent(callId, result) });
+        }
+
+        /// <summary>
+        /// Returns the tool name of an Assistant tool_calls turn, or <c>null</c> for other messages.
+        /// </summary>
+        private static string CallNameOf(MEAI.ChatMessage message)
+        {
+            return message.Contents
+                .OfType<MEAI.FunctionCallContent>()
+                .Select(c => c.Name)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Returns the call id of a Tool result turn, or empty for other messages.
+        /// </summary>
+        private static string ResultCallIdOf(MEAI.ChatMessage message)
+        {
+            return message.Contents
+                .OfType<MEAI.FunctionResultContent>()
+                .Select(c => c.CallId)
+                .FirstOrDefault() ?? "";
+        }
+
+        /// <summary>
+        /// True when the message carries at least one <c>tool_calls</c> entry.
+        /// </summary>
+        private static bool HasFunctionCall(MEAI.ChatMessage message)
+        {
+            return message.Contents.OfType<MEAI.FunctionCallContent>().Any();
+        }
+
+        /// <summary>
+        /// Asserts every surviving Tool message is preceded (somewhere earlier) by an Assistant
+        /// tool_calls turn, and that no Tool message immediately follows a non-tool message without
+        /// such a preceding tool_calls turn. Mirrors the provider rule the trim protects.
+        /// </summary>
+        private static void AssertNoOrphanToolMessage(List<MEAI.ChatMessage> messages)
+        {
+            bool sawAssistantToolCall = false;
+            for (int i = 0; i < messages.Count; i++)
+            {
+                MEAI.ChatMessage m = messages[i];
+                if (m.Role == MEAI.ChatRole.Assistant && HasFunctionCall(m))
+                {
+                    sawAssistantToolCall = true;
+                }
+                else if (m.Role == MEAI.ChatRole.Tool)
+                {
+                    Assert.IsTrue(sawAssistantToolCall,
+                        $"Tool message at index {i} has no preceding assistant tool_calls turn (orphan)");
+                }
+                else
+                {
+                    // A plain (non-tool) message ends the current tool-call block.
+                    sawAssistantToolCall = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Invokes the private <c>TrimToolCallHistory(List, int)</c> on a client wired to a low cap,
+        /// mutating <paramref name="messages"/> in place exactly as the production loop would.
+        /// </summary>
+        private static void InvokeTrim(List<MEAI.ChatMessage> messages, int maxToolMessages)
+        {
+            SmartToolCallingChatClient client = new(new ScriptedChatClient(_ => MakeTextResponse("noop")),
+                NullLog.Instance, UnityEngine.ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            System.Reflection.MethodInfo trim = typeof(SmartToolCallingChatClient).GetMethod(
+                "TrimToolCallHistory",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.IsNotNull(trim, "TrimToolCallHistory(List, int) must exist for trim coverage");
+            trim.Invoke(client, new object[] { messages, maxToolMessages });
         }
 
         /// <summary>

@@ -494,6 +494,124 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Minimal stand-in for the shared world bindings singleton: <c>world_begin()</c> opens a
+        /// transaction that buffers subsequent <c>world_cmd()</c> calls instead of publishing them,
+        /// exactly like <c>CoreAiWorldLuaRuntimeBindings</c>. The runtime is expected to reset this
+        /// shared transaction state around every guarded handler/timer so a transaction opened (and
+        /// abandoned via an error) inside one handler cannot swallow another handler's commands.
+        /// </summary>
+        private sealed class TxLeakBindingsStub : IGameLuaRuntimeBindings, ILuaTransactionScope
+        {
+            public readonly List<string> Published = new();
+            private readonly List<string> _buffer = new();
+            private bool _txActive;
+
+            public void RegisterGameplayApis(Sandbox.LuaApiRegistry registry)
+            {
+                registry.Register("world_begin", new Action(() =>
+                {
+                    _txActive = true;
+                    _buffer.Clear();
+                }));
+
+                registry.Register("world_cmd", new Action<string>(payload =>
+                {
+                    if (_txActive)
+                    {
+                        _buffer.Add(payload ?? "");
+                        return;
+                    }
+
+                    Published.Add(payload ?? "");
+                }));
+            }
+
+            public void ResetTransactions()
+            {
+                _buffer.Clear();
+                _txActive = false;
+            }
+        }
+
+        [Test]
+        public void LuaModRuntime_WorldTransactionLeftOpenByErroringHandler_DoesNotLeakIntoNextHandler()
+        {
+            TxLeakBindingsStub bindings = new();
+            LuaModRuntime runtime = new(bindings);
+
+            // First mod opens a world transaction inside its handler and then errors before any
+            // commit/rollback. InvokeGuarded swallows the error, so without a per-call reset the
+            // shared transaction stays open.
+            runtime.LoadMod("leaker", @"
+                hooks_on('go', function()
+                    world_begin()
+                    error('boom')
+                end)");
+
+            // Second mod emits a world command in the SAME tick. It must be published immediately,
+            // not silently buffered into the leaked transaction.
+            runtime.LoadMod("worker", @"
+                hooks_on('go', function()
+                    world_cmd('published')
+                end)");
+
+            runtime.EmitEvent("go", "");
+            runtime.Tick(0);
+
+            CollectionAssert.AreEqual(new[] { "published" }, bindings.Published,
+                "A world transaction opened by an erroring handler must not leak into and swallow a " +
+                "later handler's world command in the same tick.");
+        }
+
+        [Test]
+        public void LuaModRuntime_DispatchBudget_RotatesStartSoEveryModMakesProgress()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+
+            // More mods than a single tick's global budget can fully service. Each mod re-emits a
+            // ping to itself-equivalent (via the looping source below) every tick, so every mod is
+            // permanently saturated. If dispatch always started at index 0, the tail mods would
+            // never be reached; the rotating start index must let each one make progress within a
+            // bounded number of ticks.
+            int perModCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTick;
+            int globalCap = LuaModRuntime.DefaultMaxEventsDispatchedPerTickGlobal;
+            int modCount = (globalCap / perModCap) + 4;
+            string[] ids = new string[modCount];
+            for (int m = 0; m < modCount; m++)
+            {
+                string id = $"mod{m}";
+                ids[m] = id;
+                runtime.LoadMod(id, @"
+                    hooks_on('ping', function()
+                        local n = tonumber(store_get('seen')) or 0
+                        store_set('seen', tostring(n + 1))
+                    end)");
+            }
+
+            // Keep every mod's queue saturated each tick: emit enough pings to every mod to exceed
+            // the per-mod cap, then drive enough ticks that a fair rotation must have reached the
+            // tail at least once.
+            int ticks = modCount * 2;
+            for (int t = 0; t < ticks; t++)
+            {
+                for (int e = 0; e < perModCap + 1; e++)
+                {
+                    runtime.EmitEvent("ping", "x");
+                }
+
+                runtime.Tick(0);
+            }
+
+            foreach (string id in ids)
+            {
+                Assert.Greater(int.Parse(store.Get(id, "seen")), 0,
+                    $"Under sustained saturation every mod must be serviced within a bounded number " +
+                    $"of ticks; '{id}' never ran, so the dispatch start index is not rotating fairly.");
+            }
+        }
+
         private sealed class CapturingPublisher : IPublisher<LuaModEventEmitted>
         {
             public readonly List<LuaModEventEmitted> Events = new();

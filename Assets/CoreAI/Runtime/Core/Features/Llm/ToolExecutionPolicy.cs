@@ -235,6 +235,25 @@ namespace CoreAI.Infrastructure.Llm
 
             fc = repairedFc;
 
+            // === Parse-error guard: never invoke a tool with malformed/truncated argument JSON ===
+            // The streaming accumulator surfaces unparseable tool-call arguments by injecting a
+            // ParseErrorKey marker instead of dropping them. Such args are bogus, so short-circuit
+            // here (before invoking the real tool) and ask the model to resend complete JSON.
+            if (HasParseErrorMarker(fc.Arguments))
+            {
+                string parseError =
+                    $"Error: Tool '{fc.Name}' arguments JSON was truncated or malformed and could not be parsed. " +
+                    "Retry the same tool call and emit the complete, valid JSON arguments object.";
+                _eventPublisher.PublishFailed(BuildInfo(fc), parseError, 0d);
+                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "parse-error", parseError));
+                LogCallLine(fc, false, 0d, parseError);
+                return new ToolCallResult
+                {
+                    Result = new MEAI.FunctionResultContent(fc.CallId, parseError),
+                    Succeeded = false
+                };
+            }
+
             MEAI.AIFunction aiFunc = chatOptions?.Tools?.OfType<MEAI.AIFunction>()
                 .FirstOrDefault(f => string.Equals(f.Name, fc.Name, StringComparison.Ordinal));
 
@@ -413,6 +432,27 @@ namespace CoreAI.Infrastructure.Llm
         {
             string resultText = result?.ToString() ?? "";
             return string.IsNullOrWhiteSpace(resultText) ? EmptyToolResultPayload : resultText;
+        }
+
+        /// <summary>
+        /// Detects whether an arguments dictionary carries the streaming
+        /// <see cref="ToolCallArgumentMarkers.ParseErrorKey"/> marker (boolean <c>true</c>), meaning the
+        /// originating tool-call argument JSON was malformed/truncated and must not be executed.
+        /// </summary>
+        private static bool HasParseErrorMarker(IDictionary<string, object> arguments)
+        {
+            if (arguments == null ||
+                !arguments.TryGetValue(ToolCallArgumentMarkers.ParseErrorKey, out object value))
+            {
+                return false;
+            }
+
+            return value switch
+            {
+                bool flag => flag,
+                JValue jv => jv.Type == JTokenType.Boolean && jv.Value<bool>(),
+                _ => false
+            };
         }
 
         private string ValidateRequiredArguments(MEAI.FunctionCallContent fc)

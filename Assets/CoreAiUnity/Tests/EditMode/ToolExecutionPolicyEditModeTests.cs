@@ -455,6 +455,60 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, countingMarshaler.InvokeCount);
         }
 
+        // ==================== Parse-error guard ====================
+
+        [Test]
+        public async Task ExecuteSingle_ParseErrorMarker_ShortCircuitsWithoutInvoking()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+
+            ToolExecutionPolicy policy =
+                new(new StubLogger(), settings, new List<ILlmTool>(), false, "test", 3);
+
+            // Tool has no required params, so required-arg validation would otherwise pass.
+            MEAI.ChatOptions opts = MakeChatOptions(("noargs", "should-not-run"));
+            MEAI.FunctionCallContent fc = MakeToolCall("noargs", new Dictionary<string, object?>
+            {
+                { ToolCallArgumentMarkers.RawArgumentsKey, "{\"x\": 1" },
+                { ToolCallArgumentMarkers.ParseErrorKey, true }
+            });
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+
+            Assert.IsFalse(result.Succeeded, "Parse-error marker must not execute the tool");
+            Assert.AreEqual(0, countingMarshaler.InvokeCount, "Real tool must never be invoked");
+            string text = result.Result.Result.ToString();
+            StringAssert.Contains("truncated or malformed", text);
+            StringAssert.Contains("Retry the same tool call", text);
+            Assert.AreEqual(1, policy.ExecutedTraces.Count);
+            Assert.AreEqual("parse-error", policy.ExecutedTraces[0].Source);
+        }
+
+        [Test]
+        public async Task ExecuteSingle_ValidArgsWithoutMarker_StillExecutes()
+        {
+            CountingMarshaler countingMarshaler = new();
+            StubSettings settings = new StubSettings().WithToolMarshaler(countingMarshaler);
+
+            ToolExecutionPolicy policy =
+                new(new StubLogger(), settings, new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeChatOptions(("noargs", "ran-ok"));
+            MEAI.FunctionCallContent fc = MakeToolCall("noargs", new Dictionary<string, object?>
+            {
+                { "x", 1 }
+            });
+
+            ToolExecutionPolicy.ToolCallResult result =
+                await policy.ExecuteSingleAsync(fc, opts, CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded, "Normal args should execute the tool");
+            Assert.AreEqual(1, countingMarshaler.InvokeCount);
+            Assert.AreEqual("ran-ok", result.Result.Result.ToString());
+        }
+
         // ==================== ExecuteBatchAsync ====================
 
         [Test]
