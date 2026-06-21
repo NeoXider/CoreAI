@@ -1383,9 +1383,7 @@ namespace CoreAI.Ai
 
             if (failed.Count > 0)
             {
-                return failed.Count == 1
-                    ? "Tool call failed: " + failed[0]
-                    : "Tool calls failed: " + string.Join("; ", failed);
+                return null;
             }
 
             return succeeded.Count == 1

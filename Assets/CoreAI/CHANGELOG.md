@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 4.10.4 - 2026-06-21
+
+- **Failed tool-only completions stay model/internal-only.** `AiOrchestrator` no longer synthesizes visible
+  `Tool call failed: ...` / `Tool calls failed: ...` assistant text when a streaming or non-streaming tool
+  round has no real model answer. The Unity streaming retry instruction for failed tools is unchanged.
+
 ## 4.10.3 - 2026-06-21
 
 Adversarial module audit fixes (core). Two independent passes (find + verify) over the LLM transport,

@@ -12,6 +12,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.10.4 - 2026-06-21
+
+Depends on **`com.neoxider.coreai` 4.10.4**.
+
+- **Streaming chat hides tool-turn preambles.** `MeaiLlmClient` now buffers bound-tool streaming iterations
+  until it knows whether the model actually called a tool. Native and text-extracted tool turns still add
+  pre-tool prose to the assistant message history for model context, but no longer yield that prose into the
+  visible chat bubble before tool execution.
+
 ## 4.10.3 - 2026-06-21
 
 Adversarial module audit fixes (Unity layer). Confirmed by two independent passes (find + verify).
