@@ -48,6 +48,16 @@ namespace CoreAI.Infrastructure.AiMemory
             public string memory;
             public string chatHistoryJson; // Serialized chat history JSON payload for persistence.
             public string transcriptEntriesJson;
+
+            // Memory versioning + stable-prefix snapshot. Persisted so the documented rollback feature
+            // (ListVersions/Revert) and the system-prompt tail-update prompt-cache optimization survive a
+            // reload; the orchestrator re-reads state from disk every request, so dropping these silently
+            // disables both. Versions are stored as a JSON string (JsonConvert) since JsonUtility cannot
+            // round-trip an array of reference-typed objects through a string field reliably.
+            public string versionsJson;
+            public string systemPromptMemorySnapshot;
+            public int systemPromptMemoryVersion;
+            public int maxMemoryVersions;
         }
 
         private readonly string _dir;
@@ -154,7 +164,13 @@ namespace CoreAI.Infrastructure.AiMemory
                 return new AgentMemoryState
                 {
                     LastSystemPrompt = p.lastSystemPrompt ?? "",
-                    Memory = p.memory ?? ""
+                    Memory = p.memory ?? "",
+                    SystemPromptMemorySnapshot = p.systemPromptMemorySnapshot ?? "",
+                    SystemPromptMemoryVersion = p.systemPromptMemoryVersion,
+                    MaxMemoryVersions = p.maxMemoryVersions > 0
+                        ? p.maxMemoryVersions
+                        : AgentMemoryState.DefaultMaxMemoryVersions,
+                    Versions = DeserializeVersions(p.versionsJson)
                 };
             }
             catch (Exception ex)
@@ -210,6 +226,10 @@ namespace CoreAI.Infrastructure.AiMemory
 
                 p.lastSystemPrompt = state.LastSystemPrompt;
                 p.memory = state.Memory;
+                p.systemPromptMemorySnapshot = state.SystemPromptMemorySnapshot;
+                p.systemPromptMemoryVersion = state.SystemPromptMemoryVersion;
+                p.maxMemoryVersions = state.MaxMemoryVersions;
+                p.versionsJson = SerializeVersions(state.Versions);
 
                 string newJson = JsonUtility.ToJson(p, true);
                 AtomicWriteAllText(path, newJson);
@@ -379,6 +399,43 @@ namespace CoreAI.Infrastructure.AiMemory
             if (!Directory.Exists(_dir))
             {
                 Directory.CreateDirectory(_dir);
+            }
+        }
+
+        /// <summary>
+        /// Serializes the memory version audit trail to a JSON string for storage in the
+        /// JsonUtility-backed <see cref="Persisted"/> DTO. Returns "" when there are no versions so the
+        /// persisted file stays compact.
+        /// </summary>
+        private static string SerializeVersions(AgentMemoryVersionSnapshot[] versions)
+        {
+            if (versions == null || versions.Length == 0)
+            {
+                return "";
+            }
+
+            return JsonConvert.SerializeObject(versions, TranscriptJson);
+        }
+
+        /// <summary>
+        /// Restores the memory version audit trail from its persisted JSON string. A null/blank or
+        /// unparsable value yields null (no versions) rather than throwing, so a corrupt field cannot
+        /// break loading the rest of the memory state.
+        /// </summary>
+        private static AgentMemoryVersionSnapshot[] DeserializeVersions(string versionsJson)
+        {
+            if (string.IsNullOrWhiteSpace(versionsJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonConvert.DeserializeObject<AgentMemoryVersionSnapshot[]>(versionsJson, TranscriptJson);
+            }
+            catch
+            {
+                return null;
             }
         }
 

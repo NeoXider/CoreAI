@@ -12,6 +12,35 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.10.3 - 2026-06-21
+
+Adversarial module audit fixes (Unity layer). Confirmed by two independent passes (find + verify).
+
+- **Memory rollback + prompt-cache restored (HIGH).** `FileAgentMemoryStore` dropped
+  `AgentMemoryState.Versions`, `SystemPromptMemorySnapshot/Version`, and `MaxMemoryVersions` on every
+  save (the persisted DTO had no fields for them), so the documented `ListVersions`/`Revert` rollback
+  always failed and the stable-prefix `## Memory (updates)` tail optimization never engaged across
+  requests. These fields are now round-tripped (versions serialized via `JsonConvert`).
+- **`coreai_world_grid` DoS fixed (HIGH).** The cell-count guard computed `xCount * zCount` in `int`,
+  which overflowed to a small value (e.g. `2^16 * 2^16` wraps to 0) and slipped past the `MaxBatchSize`
+  cap, then ran a multi-billion-iteration CLR loop the Lua instruction limiter cannot interrupt. The
+  product is now computed in `long` and rejected before any allocation.
+- **`load_scene` honours the scene whitelist on every path.** The native `world_command load_scene` tool
+  bypassed the `allowedLuaScenes` whitelist that the Lua binding enforced. Validation now lives in
+  `CoreAiWorldCommandExecutor`, so both the native tool and the Lua binding honour it.
+- **Lua mod persistence on WebGL.** `FileLuaModSourceStore` and `FileLuaModStore` now flush IDBFS
+  (`CoreAi_PersistFsSync`) after writes, so saved mod packages/source/key-values survive a WebGL tab
+  reload instead of being lost.
+- **`LlmAuthExpired` event delivered.** The MessagePipe broker for `LlmAuthExpired` (published by
+  `RefreshOnUnauthorizedDecorator` on a failed auth refresh) is now registered in `CoreServicesInstaller`
+  and `GlobalMessagePipeMinimalBootstrap`; previously `GetPublisher` threw and the re-login event was
+  silently swallowed.
+- **Full-tier Lua fail-open is no longer silent.** `CoreAiFullUnityLuaRuntimeBindings` logs a warning
+  when Full reflection runs with no blacklist policy (allow-all).
+- **Leak/cleanup fixes.** The auto-created `CoreAiPrefabRegistryAsset` ScriptableObject is now destroyed
+  on scope teardown (was leaked per container build), and `FileTokenCalibrationStore` deletes its temp
+  file when the atomic swap throws (matching the other file stores).
+
 ## 4.10.2 - 2026-06-21
 
 - **Chat UI hides internal tool notifications.** `CoreAiChatPanel` now skips persisted `tool`/`system`

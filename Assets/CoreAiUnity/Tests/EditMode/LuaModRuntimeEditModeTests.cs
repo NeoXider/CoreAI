@@ -87,6 +87,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaModRuntime_HandlerRegistersHandlerForSameEvent_TickDoesNotThrow()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            // A handler for 'hit' registers another 'hit' handler while it runs. The dispatch enumerates a
+            // snapshot, so this must not throw "Collection was modified" out of Tick().
+            runtime.LoadMod("m", @"
+                hooks_on('hit', function(name, payload)
+                    store_set('ran', '1')
+                    hooks_on('hit', function() store_set('second', '1') end)
+                end)");
+
+            runtime.EmitEvent("hit", "x");
+            Assert.DoesNotThrow(() => runtime.Tick(0),
+                "Registering a handler during dispatch must not crash the tick");
+            Assert.AreEqual("1", store.Get("m", "ran"));
+
+            // The newly registered handler fires on a later event, proving the runtime stayed healthy.
+            runtime.EmitEvent("hit", "y");
+            runtime.Tick(0);
+            Assert.AreEqual("1", store.Get("m", "second"));
+        }
+
+        [Test]
         public void LuaModRuntime_HooksEvery_IntervalElapsed_FiresOnce()
         {
             MemoryStore store = new();

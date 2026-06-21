@@ -111,13 +111,34 @@ namespace CoreAI.Infrastructure.Llm
 
                 string tmp = _path + ".tmp";
                 File.WriteAllText(tmp, JsonConvert.SerializeObject(data, JsonSettings));
-                if (File.Exists(_path))
+                try
                 {
-                    File.Replace(tmp, _path, null);
+                    if (File.Exists(_path))
+                    {
+                        File.Replace(tmp, _path, null);
+                    }
+                    else
+                    {
+                        File.Move(tmp, _path);
+                    }
                 }
-                else
+                catch
                 {
-                    File.Move(tmp, _path);
+                    // Match the other file stores: clean up the temp file if the atomic swap fails so a
+                    // stray scales.json.tmp is not left behind, then surface the failure to the outer catch.
+                    if (File.Exists(tmp))
+                    {
+                        try
+                        {
+                            File.Delete(tmp);
+                        }
+                        catch
+                        {
+                            /* best-effort cleanup */
+                        }
+                    }
+
+                    throw;
                 }
             }
             catch (Exception ex)

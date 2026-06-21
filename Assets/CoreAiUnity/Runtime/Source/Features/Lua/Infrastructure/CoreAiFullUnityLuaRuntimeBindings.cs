@@ -35,6 +35,16 @@ namespace CoreAI.Infrastructure.Lua
             _logger = logger;
             _allowNonPublic = allowNonPublicMembers;
             _blacklistPolicy = blacklistPolicy ?? AllowAllFullLuaAccessBlacklistPolicy.Instance;
+
+            // Full tier with no deny-list is fail-open: reflection can read/write/call any public member of
+            // any component. That is the documented admin/debug behaviour, but it must not be silent — a
+            // host that enabled Full and forgot to supply a policy should see why everything is reachable.
+            if (blacklistPolicy == null)
+            {
+                _logger?.LogWarning(GameLogFeature.MessagePipe,
+                    "[FullLua] No IFullLuaAccessBlacklistPolicy supplied; Full-tier reflection is unrestricted " +
+                    "(allow-all). Provide a deny-list policy to restrict which components/members scripts may reach.");
+            }
         }
 
         private BindingFlags MemberFlags()

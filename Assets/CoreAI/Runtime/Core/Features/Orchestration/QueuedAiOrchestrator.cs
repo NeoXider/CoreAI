@@ -71,12 +71,14 @@ namespace CoreAI.Ai
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             AsyncChunkQueue queue = new();
+            CancellationTokenSource consumerCancellation = new();
 
             StreamWorkItem work = new()
             {
                 Task = task ?? new AiTaskRequest(),
                 OuterCt = cancellationToken,
                 Queue = queue,
+                ConsumerCancellation = consumerCancellation,
                 Priority = task?.Priority ?? 0,
                 Sequence = NextSequence()
             };
@@ -104,9 +106,26 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            await foreach (LlmStreamChunk chunk in ReadStreamingQueue(queue))
+            try
             {
-                yield return chunk;
+                // Drain with CancellationToken.None on purpose: when the caller cancels, the producer
+                // observes it, writes the terminal "cancelled" chunk and completes the queue, and the
+                // consumer must deliver that terminal chunk rather than bail out early. Consumer
+                // abandonment (break without cancelling) is handled by the finally below.
+                await foreach (LlmStreamChunk chunk in ReadStreamingQueue(queue))
+                {
+                    yield return chunk;
+                }
+            }
+            finally
+            {
+                // Consumer finished or abandoned enumeration (e.g. broke out of the await foreach without
+                // cancelling its own token). Signal the producer so it stops draining the inner LLM stream
+                // into the unbounded queue instead of running silently to completion. Intentionally not
+                // disposed: a producer that starts after this point still links to its token, and a CTS
+                // with no timer and no allocated WaitHandle is reclaimed by GC once unreferenced. Nothing
+                // disposes consumerCancellation, so Cancel() cannot throw ObjectDisposedException here.
+                consumerCancellation.Cancel();
             }
         }
 
@@ -177,9 +196,20 @@ namespace CoreAI.Ai
         private async Task RunOneStreamingAsync(StreamWorkItem w)
         {
             w.PendingCancellation.Dispose();
+            CancellationTokenSource linkedCts = null;
             try
             {
-                CancellationToken token = w.ScopeCancellation?.Token ?? w.OuterCt;
+                CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
+                CancellationToken token = baseToken;
+                if (w.ConsumerCancellation != null)
+                {
+                    // Link in the consumer-abandonment signal so breaking the public enumeration without
+                    // cancelling the caller token still stops the inner stream.
+                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                        baseToken, w.ConsumerCancellation.Token);
+                    token = linkedCts.Token;
+                }
+
                 token.ThrowIfCancellationRequested();
                 await foreach (LlmStreamChunk chunk in _inner.RunStreamingAsync(w.Task, token))
                 {
@@ -200,6 +230,7 @@ namespace CoreAI.Ai
             }
             finally
             {
+                linkedCts?.Dispose();
                 ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
 
                 lock (_lock)
@@ -232,6 +263,11 @@ namespace CoreAI.Ai
             public CancellationTokenRegistration PendingCancellation;
             public string ScopeKey;
             public CancellationTokenSource ScopeCancellation;
+
+            // Cancelled by the public RunStreamingAsync iterator's finally when the consumer stops
+            // enumerating (including an early break that does not cancel its own token). The producer
+            // links its inner-stream token to this so it stops draining instead of running off-screen.
+            public CancellationTokenSource ConsumerCancellation;
         }
 
         /// <inheritdoc />
@@ -571,6 +607,9 @@ namespace CoreAI.Ai
             {
                 // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
                 // continuation must come back through UnitySynchronizationContext.
+                // CancellationToken.None on purpose: termination is driven by the producer completing the
+                // queue (it writes a terminal "cancelled" chunk on cancellation), so the consumer drains
+                // to completion instead of dropping that terminal chunk on the caller's cancel.
                 (bool hasValue, LlmStreamChunk chunk) = await queue.TryTakeAsync(CancellationToken.None);
                 if (!hasValue)
                 {

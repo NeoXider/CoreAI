@@ -14,13 +14,36 @@ namespace CoreAI.Infrastructure.World
     {
         private readonly IGameLogger _logger;
         private readonly ICoreAiPrefabRegistry _prefabRegistry;
+        private readonly HashSet<string> _allowedScenes;
         private readonly List<ICoreAiCustomWorldCommandHandler> _customHandlers = new();
         private MaterialPropertyBlock _sharedColorMpb;
 
-        public CoreAiWorldCommandExecutor(IGameLogger logger, ICoreAiPrefabRegistry prefabRegistry = null)
+        /// <param name="allowedScenes">
+        /// Optional scene whitelist for <c>load_scene</c>. When null/empty any Build-Settings scene stays
+        /// loadable (legacy). Enforced here (not only on the Lua binding) so every path — the native
+        /// <c>world_command</c> tool and the Lua <c>coreai_world_load_scene</c> binding alike — honours the
+        /// same restriction, closing the gap where the native tool bypassed the Lua-only whitelist.
+        /// </param>
+        public CoreAiWorldCommandExecutor(
+            IGameLogger logger,
+            ICoreAiPrefabRegistry prefabRegistry = null,
+            IEnumerable<string> allowedScenes = null)
         {
             _logger = logger;
             _prefabRegistry = prefabRegistry;
+            if (allowedScenes != null)
+            {
+                HashSet<string> set = new(StringComparer.Ordinal);
+                foreach (string scene in allowedScenes)
+                {
+                    if (!string.IsNullOrWhiteSpace(scene))
+                    {
+                        set.Add(scene.Trim());
+                    }
+                }
+
+                _allowedScenes = set.Count > 0 ? set : null;
+            }
         }
 
         /// <summary>Registers a game-specific world-command handler (see <see cref="ICoreAiCustomWorldCommandHandler"/>).</summary>
@@ -444,6 +467,13 @@ namespace CoreAI.Infrastructure.World
             string name = (env.sceneName ?? "").Trim();
             if (string.IsNullOrEmpty(name))
             {
+                return false;
+            }
+
+            if (_allowedScenes != null && !_allowedScenes.Contains(name))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe,
+                    $"[World] load_scene '{name}' rejected: not in the configured scene whitelist.");
                 return false;
             }
 

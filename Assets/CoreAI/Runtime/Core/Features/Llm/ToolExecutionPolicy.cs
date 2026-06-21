@@ -143,7 +143,7 @@ namespace CoreAI.Infrastructure.Llm
                     string argsSig = "";
                     try
                     {
-                        argsSig = fc.Arguments != null ? JsonConvert.SerializeObject(fc.Arguments) : "";
+                        argsSig = CanonicalizeArguments(fc.Arguments);
                     }
                     catch
                     {
@@ -167,6 +167,29 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Builds an order-independent signature of a tool call's arguments by serializing from a
+        /// key-sorted projection. The model can re-emit an identical call with a different key order
+        /// (streamed vs text-extracted reconstructions enumerate the dictionary differently); without
+        /// sorting, that produced a different signature and slipped past the duplicate guard. Sorting the
+        /// top-level keys matches the existing OrderBy on tool name so semantically identical calls collide.
+        /// </summary>
+        private static string CanonicalizeArguments(IDictionary<string, object> arguments)
+        {
+            if (arguments == null || arguments.Count == 0)
+            {
+                return "";
+            }
+
+            SortedDictionary<string, object> sorted = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, object> kv in arguments)
+            {
+                sorted[kv.Key] = kv.Value;
+            }
+
+            return JsonConvert.SerializeObject(sorted);
         }
 
         /// <summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 
@@ -89,6 +90,20 @@ namespace CoreAI.Ai
 
                 if (!IsAllowed(descriptor.Name, allowedToolNames))
                 {
+                    continue;
+                }
+
+                // First-registered wins (deterministic, matches the order read_skill enumerates skills).
+                // Previously this was last-write-wins, so two skills exposing a same-named tool silently
+                // shadowed each other: read_skill advertised skill A's tool while call_skill_tool ran
+                // skill B's. Keeping the first and warning makes the collision visible and predictable.
+                if (toolsByName.TryGetValue(descriptor.Name, out SkillToolDescriptor existing))
+                {
+                    Log.Instance.Warn(
+                        $"[call_skill_tool] Duplicate skill tool name '{descriptor.Name}' from skill " +
+                        $"'{descriptor.Skill?.Name}' shadowed by '{existing.Skill?.Name}' (first wins). " +
+                        "Rename one of the tools to avoid silent misrouting.",
+                        LogTag.Llm);
                     continue;
                 }
 

@@ -85,7 +85,13 @@ namespace CoreAI.Ai
                 sb.Append("__");
             }
 
-            sb.Append(Sanitize(value));
+            // Length-prefix the sanitized value so the part boundary is unambiguous. The "__" delimiter
+            // alone collides with literal '_' that Sanitize preserves, which let distinct scope tuples
+            // (e.g. user "a_"/session "b" vs user "a"/session "_b") map to the same key and share one
+            // memory bucket - a cross-user/session isolation breach. The length prefix makes the encoding
+            // injective so distinct tuples always produce distinct keys.
+            string sanitized = Sanitize(value);
+            sb.Append(sanitized.Length).Append(':').Append(sanitized);
         }
 
         private static string Sanitize(string value)

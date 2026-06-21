@@ -149,6 +149,25 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void CheckDuplicate_SameArgsDifferentKeyOrder_BlocksSecond()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "greet" } },
+                false, "test", 3);
+
+            // Same argument values, different key insertion order (e.g. streamed vs text-extracted
+            // reconstructions). The duplicate guard canonicalizes keys, so the second call is a duplicate.
+            Dictionary<string, object?> argsA = new() { { "a", "1" }, { "b", "2" } };
+            Dictionary<string, object?> argsB = new() { { "b", "2" }, { "a", "1" } };
+            List<MEAI.FunctionCallContent> calls1 = new() { MakeToolCall("greet", argsA) };
+            List<MEAI.FunctionCallContent> calls2 = new() { MakeToolCall("greet", argsB) };
+
+            Assert.IsNull(policy.CheckDuplicate(calls1));
+            Assert.IsNotNull(policy.CheckDuplicate(calls2),
+                "Reordered-key arguments are semantically identical and must be detected as a duplicate");
+        }
+
+        [Test]
         public void CheckDuplicate_SameSignatureTwice_RecordsDuplicateTrace()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),

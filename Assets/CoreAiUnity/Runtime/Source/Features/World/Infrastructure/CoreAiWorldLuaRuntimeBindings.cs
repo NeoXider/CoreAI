@@ -347,10 +347,13 @@ namespace CoreAI.Infrastructure.World
                     ValidatePosition(x0, y, z0);
                     ValidatePosition(x1, y, z1);
 
-                    int xCount = (int)Math.Floor((x1 - x0) / step) + 1;
-                    int zCount = (int)Math.Floor((z1 - z0) / step) + 1;
-                    int total = xCount * zCount;
-                    if (total > MaxBatchSize)
+                    long xCount = (long)Math.Floor((x1 - x0) / step) + 1;
+                    long zCount = (long)Math.Floor((z1 - z0) / step) + 1;
+                    // 64-bit product so a large grid cannot overflow int32 and wrap to a small value that
+                    // slips past the cap (e.g. 65536*65536 == 2^32 wraps to 0 in int32). With the product
+                    // computed as long, an out-of-range grid is rejected before any allocation/loop runs.
+                    long total = xCount * zCount;
+                    if (xCount <= 0 || zCount <= 0 || total > MaxBatchSize)
                     {
                         throw new ArgumentException($"grid exceeds maximum of {MaxBatchSize} cells.");
                     }

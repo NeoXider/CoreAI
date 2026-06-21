@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Logging;
@@ -24,6 +25,23 @@ namespace CoreAI.Infrastructure.Lua
     /// </summary>
     public sealed class FileLuaModSourceStore : ILuaModSourceStore, IDisposable
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void CoreAi_PersistFsSync();
+#endif
+
+        /// <summary>
+        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a tab reload (Unity
+        /// only auto-syncs on Application.Quit, which a reload does not invoke). No-op on other platforms.
+        /// Without this, persisted mod packages are lost on WebGL despite the durability the class promises.
+        /// </summary>
+        private static void PersistFsForWebGl()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+#endif
+        }
+
         private const string ManifestFileName = "manifest.json";
         private const string SourceFileName = "main.lua";
 
@@ -96,6 +114,7 @@ namespace CoreAI.Infrastructure.Lua
                 string manifestJson = JsonConvert.SerializeObject(toWrite, JsonSettings);
                 AtomicWriteAllText(Path.Combine(modDir, ManifestFileName), manifestJson, _log);
                 AtomicWriteAllText(Path.Combine(modDir, SourceFileName), source, _log);
+                PersistFsForWebGl();
             }
             catch (Exception ex)
             {
@@ -216,6 +235,7 @@ namespace CoreAI.Infrastructure.Lua
                 manifest.Active = active;
                 string manifestJson = JsonConvert.SerializeObject(manifest, JsonSettings);
                 AtomicWriteAllText(manifestPath, manifestJson, _log);
+                PersistFsForWebGl();
             }
             catch (Exception ex)
             {
@@ -243,6 +263,7 @@ namespace CoreAI.Infrastructure.Lua
                 if (Directory.Exists(modDir))
                 {
                     Directory.Delete(modDir, recursive: true);
+                    PersistFsForWebGl();
                 }
             }
             catch (Exception ex)

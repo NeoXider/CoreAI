@@ -527,7 +527,18 @@ namespace CoreAI.Ai
 
                 if (dispatchedThisTick < DefaultMaxEventsDispatchedPerTickGlobal)
                 {
-                    dispatchedThisTick += DispatchPendingEvents(mod, dispatchedThisTick);
+                    try
+                    {
+                        dispatchedThisTick += DispatchPendingEvents(mod, dispatchedThisTick);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Defence in depth: a single mod's dispatch failure must never abort the whole
+                        // per-frame tick for the other mods. (Handler bodies are already guarded in
+                        // InvokeGuarded; this catches anything escaping the dispatch bookkeeping itself.)
+                        mod.ErrorCount++;
+                        _log?.Error($"[LuaModRuntime] Mod '{mod.Id}' event dispatch failed: {ex}");
+                    }
                 }
 
                 if (mod.ErrorCount >= MaxErrorsBeforeUnload)
@@ -573,6 +584,7 @@ namespace CoreAI.Ai
             while (dispatched < limit)
             {
                 KeyValuePair<string, string> evt;
+                Closure[] handlerSnapshot;
                 lock (_gate)
                 {
                     if (mod.Pending.Count == 0)
@@ -580,21 +592,32 @@ namespace CoreAI.Ai
                         return dispatched;
                     }
 
-                    evt = mod.Pending.Dequeue();
-                }
+                    evt = mod.Pending.Peek();
 
-                if (!mod.Handlers.TryGetValue(evt.Key, out List<Closure> handlers))
-                {
-                    continue;
-                }
+                    // Snapshot the handler list under the gate. A dispatched handler may call hooks_on()
+                    // for the same event, which mutates mod.Handlers; enumerating the live list would then
+                    // throw "Collection was modified" out of the (unguarded) tick. The copy isolates this
+                    // dispatch from registrations made while it runs.
+                    handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<Closure> handlers)
+                        ? handlers.ToArray()
+                        : Array.Empty<Closure>();
 
-                foreach (Closure fn in handlers)
-                {
-                    if (dispatched >= limit)
+                    // Honour the no-drop contract: only dequeue when the remaining budget can run every
+                    // handler of this event. Otherwise leave it queued for the next tick instead of
+                    // dispatching it partially and silently losing the tail handlers. Exception: an event
+                    // whose own handler count exceeds the whole budget would starve forever, so when
+                    // nothing has run yet this mod we dispatch it in full (bounded by the per-mod handler
+                    // cap) to guarantee progress.
+                    if (handlerSnapshot.Length > limit - dispatched && dispatched > 0)
                     {
                         return dispatched;
                     }
 
+                    mod.Pending.Dequeue();
+                }
+
+                foreach (Closure fn in handlerSnapshot)
+                {
                     InvokeGuarded(mod, fn, evt.Key, evt.Value);
                     dispatched++;
                 }

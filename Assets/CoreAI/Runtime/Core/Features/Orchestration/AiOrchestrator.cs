@@ -147,6 +147,16 @@ namespace CoreAI.Ai
                     historyBudget = Math.Max(32, _settings.ConversationHistoryRecentTokenBudgetOverride);
                 }
 
+                // On a context-overflow retry pass the policy budget is progressively shrunk
+                // (0.75^retryLevel). The unlimited and fixed-override branches above ignore that shrink,
+                // so without this clamp a retry would rebuild a byte-identical oversized request that
+                // overflows again (up to MaxContextOverflowRetries wasted calls). Bounding by the shrunk
+                // policy budget makes each retry actually reduce the prompt.
+                if (contextRetryPass > 0)
+                {
+                    historyBudget = Math.Min(historyBudget, budget.HistoryTokenBudget);
+                }
+
                 int maxRolled = _settings.ConversationRolledSummaryMaxTokens;
                 float compactionTriggerRatio =
                     roleConfig.CompactionTriggerRatio ?? _settings.ConversationCompactionTriggerRatio;
@@ -735,8 +745,10 @@ namespace CoreAI.Ai
                         CacheWriteTokens = cacheWriteTokens,
                         ExecutedToolCalls = executedToolCalls
                     };
+                    // SanitizeAndPublish already records the token-calibration observation from
+                    // streamResult.PromptTokens; recording it again here double-applied the EMA and did a
+                    // second disk write per streaming turn (the non-streaming path records exactly once).
                     content = SanitizeAndPublish(bundle, task, content, bundle.UserPayload, streamResult);
-                    RecordTokenObservation(bundle, promptTokens);
                 }
                 else if (!string.IsNullOrEmpty(terminalError))
                 {

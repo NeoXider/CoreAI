@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## 4.10.3 - 2026-06-21
+
+Adversarial module audit fixes (core). Two independent passes (find + verify) over the LLM transport,
+orchestration/context, memory/skills, and Lua-execution clusters; the items below were confirmed by both.
+
+- **SSE idle-timeout no longer leaks timers.** `MeaiOpenAiChatClient.ReadWithIdleTimeoutAsync` drove a
+  fresh `Task.Delay(timeout)` per 8 KB read and never cancelled it when the read won, leaving one live
+  timer + `CancellationTokenRegistration` per read for the full timeout. It now uses a per-read linked
+  CTS, cancels it on the hot path, and observes the abandoned read so a post-dispose fault is not raised
+  as an unobserved task exception.
+- **Unified error path for the exception-based retry loop.** `LoggingLlmClientDecorator` now catches
+  `OperationCanceledException` (rethrow) and non-retryable exceptions (structured `Ok=false` result)
+  inside the exception-retry loop, matching the result-based loop instead of letting a raw exception
+  escape `CompleteAsync`.
+- **Order-independent duplicate tool-call detection.** `ToolExecutionPolicy` canonicalizes argument keys
+  (sorted) before hashing the call signature, so the same call re-emitted with a different key order is
+  recognized as a duplicate.
+- **Token-calibration fixes.** The streaming path no longer double-feeds the calibration EMA (the
+  redundant `RecordTokenObservation` after `SanitizeAndPublish` was removed), and
+  `CalibratingTokenEstimator` persists the scale **after** releasing its lock so estimation no longer
+  serializes behind a disk write.
+- **Context-overflow retry actually shrinks.** When history summarization is disabled (or a fixed recent
+  budget override is set), `AiOrchestrator` now clamps the history budget by the per-retry-shrunk policy
+  budget, so a context-overflow retry no longer re-sends a byte-identical oversized request.
+- **Streaming consumer cancels its producer.** `QueuedAiOrchestrator` links a consumer-abandonment token
+  into the producer, so breaking out of the public stream (without cancelling the caller token) stops the
+  inner LLM stream instead of draining it into an unbounded queue off-screen.
+- **Injective memory scope keys.** `ScopedAgentMemoryStoreDecorator` length-prefixes each scope part, so
+  distinct user/session tuples can no longer collide on the same key (a cross-user isolation breach). The
+  unscoped default path (bare role id) is unchanged.
+- **Skill tool-name collisions are visible.** `call_skill_tool` keeps the first-registered tool for a
+  duplicate name (deterministic) and logs a warning, instead of silent last-write-wins misrouting.
+- **Memory tool correctness.** `append` now dedupes on whole trimmed lines (not a case-insensitive
+  substring, which silently dropped short facts), and mutations load the state once and thread it through
+  `SaveMutation` instead of re-reading the store mid read-modify-write.
+- **Lua mod runtime hardening.** Event dispatch snapshots the handler list (so a handler calling
+  `hooks_on` for the in-flight event can no longer throw `InvalidOperationException` out of `Tick`),
+  honours the no-drop contract by only dequeuing an event when the budget covers all its handlers, and
+  guards per-mod dispatch so one mod cannot abort the whole tick. `SecureLuaEnvironment.RunChunk` now
+  applies the documented `OneShotHardLimitSteps` (500k) instead of the guard's 200k default.
+
 ## 4.10.2 - 2026-06-21
 
 - Версия приведена в соответствие с `com.neoxider.coreaiunity` (пакеты держим в lockstep — одинаковые версии). Функциональных изменений в core нет; правки этого релиза — в Unity-слое (см. `CoreAiUnity/CHANGELOG.md`: фикс отображения tool-call уведомлений в чате + тест-фиксы EditMode).

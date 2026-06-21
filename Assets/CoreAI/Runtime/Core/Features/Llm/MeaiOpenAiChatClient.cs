@@ -432,11 +432,12 @@ namespace CoreAI.Infrastructure.Llm
                         bool canRetryEmptyStream = attempt < transientLocalLlmReloadMaxAttempts;
                         if (canRetryEmptyStream)
                         {
+                            int emptyStreamBackoffMs = Math.Min(6000, 900 * attempt);
                             _log.Warn(
                                 $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments - provider/model produced no tokens). " +
-                                $"Retrying (attempt {attempt + 1}/{transientLocalLlmReloadMaxAttempts}) after backoff...",
+                                $"Retrying (attempt {attempt + 1}/{transientLocalLlmReloadMaxAttempts}) after {emptyStreamBackoffMs}ms backoff...",
                                 LogTag.Llm);
-                            await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                            await BackoffDelayAsync(emptyStreamBackoffMs, cancellationToken);
                             continue;
                         }
 
@@ -589,17 +590,46 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             int timeoutMs = Math.Max(1, streamIdleTimeoutSeconds) * 1000;
-            Task timeoutTask = Task.Delay(timeoutMs, cancellationToken);
+
+            // Drive the idle timeout off a linked CTS so that when the read wins (the hot path, hit once
+            // per 8 KB read for the whole stream) we cancel the Task.Delay immediately. That releases its
+            // underlying System.Threading.Timer and the CancellationTokenRegistration it holds on the
+            // request token; leaving it uncancelled accumulates one live ~timeout-length timer per read
+            // across the stream (a steady leak proportional to streamed tokens).
+            using CancellationTokenSource delayCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task timeoutTask = Task.Delay(timeoutMs, delayCts.Token);
             Task completed = await Task.WhenAny(readTask, timeoutTask);
             if (ReferenceEquals(completed, readTask))
             {
+                delayCts.Cancel();
                 return await readTask;
             }
+
+            // Idle timeout fired: the read is abandoned. Observe it so its eventual fault (e.g.
+            // ObjectDisposedException once the caller disposes the stream) does not surface as an
+            // unobserved task exception. The buffer it may still write into is iterator-local and is
+            // never read again after this throw unwinds the loop.
+            ObserveAbandonedRead(readTask);
 
             cancellationToken.ThrowIfCancellationRequested();
             throw new LlmClientException(
                 $"LLM SSE stalled - no data for {Math.Max(1, streamIdleTimeoutSeconds)}s.",
                 LlmErrorCode.Timeout);
+        }
+
+        /// <summary>
+        /// Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
+        /// <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
+        /// as an unobserved task exception on the finalizer thread.
+        /// </summary>
+        private static void ObserveAbandonedRead(Task readTask)
+        {
+            _ = readTask.ContinueWith(
+                t => { _ = t.Exception; },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private List<KeyValuePair<string, string>> BuildTransportHeaders(string url, bool acceptEventStream)

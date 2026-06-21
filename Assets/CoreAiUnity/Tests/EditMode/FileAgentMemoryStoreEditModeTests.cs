@@ -153,6 +153,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Save_Then_Load_RoundTrips_MemoryVersions_And_Snapshot()
+        {
+            string root = CreateTempRoot();
+            try
+            {
+                FileAgentMemoryStore store = new(null, root);
+
+                AgentMemoryState state = new() { LastSystemPrompt = "npc", Memory = "v2-content" };
+                state.RecordVersion("write", "v1-content");
+                state.RecordVersion("write", "v2-content");
+                state.SystemPromptMemorySnapshot = "v1-content";
+                state.SystemPromptMemoryVersion = 1;
+                store.Save(_roleId, state);
+
+                // Fresh instance forces a reload from disk (the orchestrator reloads every request).
+                FileAgentMemoryStore reloaded = new(null, root);
+                Assert.IsTrue(reloaded.TryLoad(_roleId, out AgentMemoryState loaded));
+
+                Assert.IsNotNull(loaded.Versions, "Memory versions must survive a disk round-trip (rollback feature).");
+                Assert.AreEqual(2, loaded.Versions.Length, "Both recorded versions must persist.");
+                Assert.AreEqual("v1-content", loaded.Versions[0].ContentAfter);
+                Assert.AreEqual("v2-content", loaded.Versions[1].ContentAfter);
+                Assert.AreEqual("v1-content", loaded.SystemPromptMemorySnapshot,
+                    "System-prompt memory snapshot must persist (tail-update prompt-cache optimization).");
+                Assert.AreEqual(1, loaded.SystemPromptMemoryVersion);
+            }
+            finally
+            {
+                DeleteTempRoot(root);
+            }
+        }
+
+        [Test]
         public void SaveAsync_ConcurrentWrites_FinalFileIsValidJsonOfOneWrite()
         {
             string root = CreateTempRoot();

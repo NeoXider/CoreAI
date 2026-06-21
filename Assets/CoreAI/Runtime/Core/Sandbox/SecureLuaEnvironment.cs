@@ -74,7 +74,10 @@ namespace CoreAI.Sandbox
             ThrowIfUnsupported();
 
             DynValue fn = script.LoadString(luaCode, codeFriendlyName: "sandbox_chunk");
-            guard ??= new LuaExecutionGuard();
+            // LuaExecutionGuard.Execute attaches its own debugger, replacing the one CreateScript set, so
+            // the default guard would silently cap at 200k steps instead of the documented one-shot limit.
+            // Build the default guard with OneShotHardLimitSteps so RunChunk actually honours the constant.
+            guard ??= new LuaExecutionGuard(maxSteps: OneShotHardLimitSteps);
             return guard.Execute(script, fn);
         }
 

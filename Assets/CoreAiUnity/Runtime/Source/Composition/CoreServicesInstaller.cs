@@ -32,6 +32,10 @@ namespace CoreAI.Composition
             builder.RegisterMessageBroker<LlmToolCallStarted>(opts);
             builder.RegisterMessageBroker<LlmToolCallCompleted>(opts);
             builder.RegisterMessageBroker<LlmToolCallFailed>(opts);
+            // Published by RefreshOnUnauthorizedDecorator when a server-managed auth refresh fails so host
+            // UI can prompt for re-login. Without this broker GetPublisher<LlmAuthExpired> threw and the
+            // event was silently swallowed.
+            builder.RegisterMessageBroker<LlmAuthExpired>(opts);
 #if COREAI_HAS_MOONSHARP && !COREAI_NO_LUA
             builder.RegisterMessageBroker<LuaModEventEmitted>(opts);
 #endif

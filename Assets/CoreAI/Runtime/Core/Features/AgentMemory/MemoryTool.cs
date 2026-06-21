@@ -92,9 +92,9 @@ namespace CoreAI.Ai
                                 { Success = false, Error = "content or new_text is required for append action" }));
                         }
 
-                        string currentState = LoadMemory(out _);
+                        string currentState = LoadMemory(out AgentMemoryState appendState);
 
-                        if (currentState.Contains(mutationContent, StringComparison.OrdinalIgnoreCase))
+                        if (MemoryContainsLine(currentState, mutationContent))
                         {
                             return Task.FromResult(SerializeResult(new MemoryResult
                             {
@@ -108,7 +108,8 @@ namespace CoreAI.Ai
                             ? mutationContent
                             : currentState + "\n" + mutationContent;
 
-                        return Task.FromResult(SaveMutation(action, newMemory, "Content appended"));
+                        return Task.FromResult(
+                            SaveMutation(appendState, currentState, action, newMemory, "Content appended"));
 
                     case "clear":
                         return Task.FromResult(ClearMemory());
@@ -197,7 +198,7 @@ namespace CoreAI.Ai
                     { Success = false, Error = "new_text or content is required for str_replace action" });
             }
 
-            string current = LoadMemory(out _);
+            string current = LoadMemory(out AgentMemoryState state);
             if (!current.Contains(oldText, StringComparison.Ordinal))
             {
                 return SerializeResult(new MemoryResult
@@ -207,7 +208,8 @@ namespace CoreAI.Ai
             string next = replaceAll
                 ? current.Replace(oldText, newText)
                 : ReplaceFirst(current, oldText, newText);
-            return SaveMutation("str_replace", next, replaceAll ? "Replaced all exact matches" : "Replaced first exact match");
+            return SaveMutation(state, current, "str_replace", next,
+                replaceAll ? "Replaced all exact matches" : "Replaced first exact match");
         }
 
         private string ExecuteInsert(string content, string anchor, int? line)
@@ -218,13 +220,14 @@ namespace CoreAI.Ai
                     { Success = false, Error = "Content is required for insert action" });
             }
 
-            string current = LoadMemory(out _);
+            string current = LoadMemory(out AgentMemoryState state);
             if (!TryInsert(current, content, anchor, line, out string next, out string error))
             {
                 return SerializeResult(new MemoryResult { Success = false, Error = error });
             }
 
-            return SaveMutation("insert", next, line.HasValue ? $"Inserted before line {line.Value}" : "Inserted content");
+            return SaveMutation(state, current, "insert", next,
+                line.HasValue ? $"Inserted before line {line.Value}" : "Inserted content");
         }
 
         private string ExecuteDelete(string target, bool deleteAll)
@@ -235,7 +238,7 @@ namespace CoreAI.Ai
                     { Success = false, Error = "old_text or content is required for delete action" });
             }
 
-            string current = LoadMemory(out _);
+            string current = LoadMemory(out AgentMemoryState state);
             if (!current.Contains(target, StringComparison.Ordinal))
             {
                 return SerializeResult(new MemoryResult
@@ -245,7 +248,8 @@ namespace CoreAI.Ai
             string next = deleteAll
                 ? current.Replace(target, "")
                 : ReplaceFirst(current, target, "");
-            return SaveMutation("delete", next, deleteAll ? "Deleted all exact matches" : "Deleted first exact match");
+            return SaveMutation(state, current, "delete", next,
+                deleteAll ? "Deleted all exact matches" : "Deleted first exact match");
         }
 
         private string ExecuteRename(string oldLabel, string newLabel)
@@ -262,19 +266,56 @@ namespace CoreAI.Ai
                     { Success = false, Error = "new_text or content is required for rename action" });
             }
 
-            string current = LoadMemory(out _);
+            string current = LoadMemory(out AgentMemoryState state);
             if (!TryRenameLabel(current, oldLabel.Trim(), newLabel.Trim(), out string next))
             {
                 return SerializeResult(new MemoryResult
                     { Success = false, Error = "Rename label was not found in memory" });
             }
 
-            return SaveMutation("rename", next, $"Renamed label '{oldLabel.Trim()}' to '{newLabel.Trim()}'");
+            return SaveMutation(state, current, "rename", next,
+                $"Renamed label '{oldLabel.Trim()}' to '{newLabel.Trim()}'");
+        }
+
+        /// <summary>
+        /// True when <paramref name="content"/> already exists as a whole trimmed line in the memory
+        /// document. Replaces a former case-insensitive substring check that silently dropped a short fact
+        /// which happened to be a substring of unrelated existing text (e.g. "apple" inside "pineapples").
+        /// </summary>
+        private static bool MemoryContainsLine(string memory, string content)
+        {
+            if (string.IsNullOrEmpty(memory) || string.IsNullOrEmpty(content))
+            {
+                return false;
+            }
+
+            string target = content.Trim();
+            foreach (string line in memory.Split('\n'))
+            {
+                if (string.Equals(line.Trim(), target, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private string SaveMutation(string action, string nextMemory, string messagePrefix)
         {
             string previous = LoadMemory(out AgentMemoryState state);
+            return SaveMutation(state, previous, action, nextMemory, messagePrefix);
+        }
+
+        /// <summary>
+        /// Applies a memory mutation to an already-loaded <paramref name="state"/> and persists it,
+        /// avoiding a second store read (the previous code re-loaded inside SaveMutation, widening the
+        /// read-modify-write window). <paramref name="previous"/> is the memory text before the mutation,
+        /// used for the version diff note.
+        /// </summary>
+        private string SaveMutation(AgentMemoryState state, string previous, string action, string nextMemory,
+            string messagePrefix)
+        {
             state.Memory = nextMemory ?? "";
             AgentMemoryVersionSnapshot snapshot = state.RecordVersion(action, state.Memory,
                 CreateMutationNote(previous, state.Memory));

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Infrastructure;
@@ -15,6 +16,22 @@ namespace CoreAI.Infrastructure.Lua
     /// </summary>
     public sealed class FileLuaModStore : ILuaModStore, IDisposable
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void CoreAi_PersistFsSync();
+#endif
+
+        /// <summary>
+        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB so writes survive a tab reload. No-op on
+        /// other platforms. Without this, store_set values are lost on WebGL reload.
+        /// </summary>
+        private static void PersistFsForWebGl()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try { CoreAi_PersistFsSync(); } catch { /* best-effort flush */ }
+#endif
+        }
+
         private const int MaxKeysPerMod = 256;
         private const int MaxValueBytes = 64 * 1024;
 
@@ -162,6 +179,7 @@ namespace CoreAI.Infrastructure.Lua
                 EnsureDir();
                 string json = JsonConvert.SerializeObject(values, JsonSettings);
                 AtomicWriteAllText(GetPath(modId), json, _log);
+                PersistFsForWebGl();
             }
             catch (Exception ex)
             {
@@ -177,6 +195,7 @@ namespace CoreAI.Infrastructure.Lua
                 if (File.Exists(path))
                 {
                     File.Delete(path);
+                    PersistFsForWebGl();
                 }
             }
             catch (Exception ex)

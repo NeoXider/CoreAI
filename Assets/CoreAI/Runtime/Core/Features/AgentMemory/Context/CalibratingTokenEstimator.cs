@@ -74,6 +74,7 @@ namespace CoreAI.Ai
                 return;
             }
 
+            double updatedScale;
             lock (_lock)
             {
                 // The observed estimate was produced as baseEstimate * _scale. Convert the
@@ -81,8 +82,13 @@ namespace CoreAI.Ai
                 // toward real/baseEstimate, not sqrt(real/baseEstimate).
                 double targetScale = _scale * realPromptTokens / estimatedPromptTokens;
                 _scale = Clamp((_scale * (1d - Alpha)) + (targetScale * Alpha), MinScale, MaxScale);
-                _store.SaveScale(_modelKey, _scale);
+                updatedScale = _scale;
             }
+
+            // Persist outside the lock so a blocking disk write in the store does not stall concurrent
+            // EstimateText/CurrentScale calls (which also take _lock). The in-memory scale is already
+            // updated; the store write does not need the estimator lock.
+            _store.SaveScale(_modelKey, updatedScale);
         }
 
         private bool IsCalibrationEnabled => _settings?.EnableTokenCalibration ?? true;

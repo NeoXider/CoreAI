@@ -42,10 +42,28 @@ namespace CoreAI.Composition
             bool enableFullLuaPrivateAccess = false,
             IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy = null)
         {
-            CoreAiPrefabRegistryAsset registry =
-                worldPrefabRegistry != null
-                    ? worldPrefabRegistry
-                    : ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            CoreAiPrefabRegistryAsset registry;
+            if (worldPrefabRegistry != null)
+            {
+                registry = worldPrefabRegistry;
+            }
+            else
+            {
+                // No inspector-assigned registry: create a throwaway one. ScriptableObjects are not
+                // garbage-collected, so register a container-owned disposable that destroys it on scope
+                // teardown instead of leaking one instance per container build (scene reload / play-mode).
+                registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+                registry.hideFlags = HideFlags.DontSave;
+                CoreAiPrefabRegistryAsset autoCreated = registry;
+                builder.Register(_ => new AutoCreatedPrefabRegistryOwner(autoCreated), Lifetime.Singleton)
+                    .AsSelf();
+                builder.RegisterBuildCallback(container =>
+                {
+                    // Force instantiation so the container tracks it and disposes it on teardown.
+                    container.Resolve<AutoCreatedPrefabRegistryOwner>();
+                });
+            }
+
             builder.RegisterInstance<ICoreAiPrefabRegistry, CoreAiPrefabRegistryAsset>(registry);
 
             builder.Register<DefaultDataOverlayPayloadValidator>(Lifetime.Singleton)
@@ -159,12 +177,43 @@ namespace CoreAI.Composition
             builder.Register<CoreAI.Ai.NullLuaExecutionObserver>(Lifetime.Singleton)
                 .As<CoreAI.Ai.ILuaExecutionObserver>();
 #endif
-            builder.Register<CoreAiWorldCommandExecutor>(Lifetime.Singleton)
+            // Factory registration so the load_scene whitelist (allowedLuaScenes) reaches the executor.
+            // Enforcing it here makes the native world_command tool honour the same restriction as the
+            // Lua coreai_world_load_scene binding, instead of the native path bypassing it.
+            builder.Register(c => new CoreAiWorldCommandExecutor(
+                    c.Resolve<IGameLogger>(),
+                    c.Resolve<ICoreAiPrefabRegistry>(),
+                    allowedLuaScenes),
+                Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
 
             // Game Config: Unity SO-based config store
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IGameConfigStore>();
+        }
+
+        /// <summary>
+        /// Container-owned holder that destroys an auto-created <see cref="CoreAiPrefabRegistryAsset"/>
+        /// (one with no inspector-assigned asset) when the DI scope is disposed, so the ScriptableObject
+        /// is not leaked across scope rebuilds.
+        /// </summary>
+        private sealed class AutoCreatedPrefabRegistryOwner : System.IDisposable
+        {
+            private CoreAiPrefabRegistryAsset _asset;
+
+            public AutoCreatedPrefabRegistryOwner(CoreAiPrefabRegistryAsset asset)
+            {
+                _asset = asset;
+            }
+
+            public void Dispose()
+            {
+                if (_asset != null)
+                {
+                    UnityEngine.Object.Destroy(_asset);
+                    _asset = null;
+                }
+            }
         }
     }
 }

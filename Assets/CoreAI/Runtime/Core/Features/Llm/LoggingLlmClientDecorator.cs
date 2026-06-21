@@ -143,9 +143,27 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 #endif
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw; // honour caller cancellation during a retry attempt
+                    }
                     catch (LlmClientException retryEx) when (IsRetryableHttpError(retryEx, out httpWait))
                     {
                         // will retry again if attempts remain
+                    }
+                    catch (Exception nonRetryEx)
+                    {
+                        // A non-retryable fault thrown during a retry attempt (e.g. the 429 cleared but the
+                        // next call returned a non-retryable 400, or an unexpected error). Stop retrying and
+                        // return it as a structured failure instead of letting a raw exception escape past
+                        // the unified error path, matching the result-based retry loop's catch-all below.
+                        sw.Stop();
+                        string failMsg = nonRetryEx is LlmClientException lce
+                            ? $"{lce.ErrorCode}: {lce.Message}"
+                            : nonRetryEx.Message;
+                        _logger.Warn(
+                            $"LLM x traceId={trace} role={role} backend={backendLine} | {failMsg}", LogTag.Llm);
+                        return new LlmCompletionResult { Ok = false, Error = failMsg };
                     }
                 }
 
