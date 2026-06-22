@@ -28,6 +28,19 @@
 - [ ] **Partial SSE `tool_calls` accumulation.** Streaming tool-call args may arrive split across SSE
       chunks; current parser only handles a complete `delta.tool_calls` in one chunk. Add progressive
       accumulation (`STREAMING_ARCHITECTURE.md` §9).
+- [ ] **Keep streaming live through tool calls (Kilo/Cline-style on-the-fly tool parsing).** A
+      tool-calling turn should NOT stop token streaming. Today such a turn either fully buffers
+      (`BufferFullStreamingIterationWhenToolsDeclared`) or uses `hybridToolJsonHold` (hides text from the
+      opening `{` of a text-shaped tool call); 4.10.4 briefly buffered *all* bound-tool turns to hide the
+      pre-tool preamble and that killed token-by-token streaming for the teacher chat (reverted in 4.10.5,
+      back to hybrid hold + preamble emitted). Proper fix: never buffer the whole turn. Stream visible
+      prose token-by-token; the moment a tool call begins — native `delta.tool_calls` OR a text-shaped `{`
+      — switch only the *tool-call payload* to a "calling tool…" indicator/hint and accumulate + parse its
+      args progressively (incremental JSON, like Kilo Code / Cline), then resume streaming the post-tool
+      answer. Hide only the tool-call JSON, never the surrounding prose/preamble. Pairs with the "Partial
+      SSE `tool_calls` accumulation" item above. Files: `MeaiLlmClient.CompleteStreamingAsync`
+      (`hybridToolJsonHold` / `fullIterationBuffer` paths), `STREAMING_ARCHITECTURE.md`. Goal: live
+      streaming UX even on tool turns (mission briefing slide-control / spawn_quiz).
 - [ ] **WebGL: Lua in the web build.** Feasibility confirmed (MoonSharp coroutines are stackless;
       bundled MoonSharp already AOT-detects WebGL). Work: capability-flag instead of hard
       `SecureLuaEnvironment.IsSupported == false`, `link.xml` / `[Preserve]` against IL2CPP stripping,
