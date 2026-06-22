@@ -494,12 +494,11 @@ namespace CoreAI.Infrastructure.Llm
                 int chunkCount = 0;
                 MEAI.UsageDetails iterationUsage = null;
                 bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
-                bool boundToolsDeclared = toolsDeclared && aiTools.Count > 0;
                 bool fullIterationBuffer =
-                    toolsDeclared && (boundToolsDeclared ||
-                                      request.BufferFullStreamingIterationWhenToolsDeclared == true);
+                    toolsDeclared && request.BufferFullStreamingIterationWhenToolsDeclared == true;
                 bool hybridToolJsonHold = toolsDeclared && !fullIterationBuffer;
                 bool streamLiveNoTools = !toolsDeclared;
+                bool unboundToolsRequested = toolsDeclared && aiTools.Count == 0;
                 int hybridRawExclusiveEndEmitted = 0;
                 bool emittedHybridHoldTypingHint = false;
                 bool emittedToolProgressTypingHint = false;
@@ -507,9 +506,18 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (hybridToolJsonHold)
                 {
-                    _logger.LogInfo(GameLogFeature.Llm,
-                        "MeaiLlmClient: Unbound-tool streaming - tools are declared but no MEAI AIFunctions are bound for this role. " +
-                        "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
+                    if (unboundToolsRequested)
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Unbound-tool streaming - tools are declared but no MEAI AIFunctions are bound for this role. " +
+                            "Prose may stream incrementally; output from the opening `{` of a text-shaped tool call is held until the JSON object completes or the turn ends, then stripped if applicable.");
+                    }
+                    else
+                    {
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Hybrid tool-json hold (bound tools) - assistant text streams only through the safe prefix; " +
+                            "from the opening `{` of a text-shaped tool call, output is held until the JSON object completes or the turn ends, then stripped before user-visible emission.");
+                    }
 
                     yield return new LlmStreamChunk { BufferedStreamingNoToolBinding = true };
                 }
@@ -691,6 +699,13 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: Streaming detected {nativeToolCalls.Count} NATIVE tool call(s), executing...");
                     }
 
+                    // Emit any visible text that preceded the tool calls (skip if already streamed token-by-token).
+                    if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(visibleText))
+                    {
+                        emittedAnyVisibleText = true;
+                        yield return new LlmStreamChunk { Text = visibleText };
+                    }
+
                     List<MEAI.AIContent> assistantContents = nativeToolCalls.Cast<MEAI.AIContent>().ToList();
                     if (!string.IsNullOrWhiteSpace(visibleText))
                     {
@@ -790,6 +805,27 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         _logger.LogInfo(GameLogFeature.Llm,
                             $"MeaiLlmClient: Streaming detected {toolCalls.Count} text-extracted tool call(s), executing...");
+                    }
+
+                    if (!streamedVisibleToConsumer && !string.IsNullOrWhiteSpace(cleanedText))
+                    {
+                        emittedAnyVisibleText = true;
+                        yield return new LlmStreamChunk { Text = cleanedText };
+                    }
+                    else if (streamedVisibleToConsumer && hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0 &&
+                             !string.IsNullOrWhiteSpace(cleanedText))
+                    {
+                        string suffix = GetCleanedTextSuffixAfterHybridPrefix(
+                            cleanedText, visibleText, hybridRawExclusiveEndEmitted);
+                        if (!string.IsNullOrEmpty(suffix))
+                        {
+                            foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                emittedAnyVisibleText = true;
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+                        }
                     }
 
                     List<MEAI.AIContent> assistantContents = toolCalls.Cast<MEAI.AIContent>().ToList();

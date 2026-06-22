@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 4.10.5 - 2026-06-22
+
+- Restore live token streaming for tool-declared turns (4.10.4 buffered them and lost streaming).
+  Keep the failed-tool status suppression.
+
 ## 4.10.4 - 2026-06-21
 
 - **Failed tool-only completions stay model/internal-only.** `AiOrchestrator` no longer synthesizes visible

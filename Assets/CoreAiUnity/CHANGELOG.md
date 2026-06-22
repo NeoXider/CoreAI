@@ -12,6 +12,13 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.10.5 - 2026-06-22
+
+Depends on **`com.neoxider.coreai` 4.10.5**.
+
+- Restore live token streaming for tool-declared turns (4.10.4 buffered them and lost streaming).
+  Keep the failed-tool status suppression.
+
 ## 4.10.4 - 2026-06-21
 
 Depends on **`com.neoxider.coreai` 4.10.4**.
