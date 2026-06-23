@@ -24,7 +24,9 @@ namespace CoreAI.Editor.Diagnostics
     public sealed class AgentSessionInspectorWindow : EditorWindow
     {
         private Vector2 _statsScroll;
-        private Vector2 _detailScroll;
+        private Vector2 _sessionDetailScroll;
+        private Vector2 _systemDetailScroll;
+        private Vector2 _historyDetailScroll;
         private string[] _roleIds = Array.Empty<string>();
         private int _selectedRoleIndex;
         private int _detailViewIndex;
@@ -206,7 +208,9 @@ namespace CoreAI.Editor.Diagnostics
                 Mathf.Clamp(_detailViewIndex, 0, DetailViewLabels.Length - 1),
                 DetailViewLabels);
             EditorGUILayout.LabelField(GetDetailTitle(), EditorStyles.boldLabel);
-            _detailScroll = DrawTextPanel(GetDetailText(), _detailScroll, available * 0.62f);
+            Vector2 detailScroll = GetDetailScroll();
+            detailScroll = DrawTextPanel(GetDetailText(), detailScroll, available * 0.62f);
+            SetDetailScroll(detailScroll);
         }
 
         private string GetDetailTitle()
@@ -229,13 +233,42 @@ namespace CoreAI.Editor.Diagnostics
             };
         }
 
+        private Vector2 GetDetailScroll()
+        {
+            return _detailViewIndex switch
+            {
+                1 => _systemDetailScroll,
+                2 => _historyDetailScroll,
+                _ => _sessionDetailScroll
+            };
+        }
+
+        private void SetDetailScroll(Vector2 scroll)
+        {
+            switch (_detailViewIndex)
+            {
+                case 1:
+                    _systemDetailScroll = scroll;
+                    break;
+                case 2:
+                    _historyDetailScroll = scroll;
+                    break;
+                default:
+                    _sessionDetailScroll = scroll;
+                    break;
+            }
+        }
+
         private Vector2 DrawTextPanel(string text, Vector2 scroll, float height)
         {
             GUIStyle textStyle = new(EditorStyles.textArea) { wordWrap = false, richText = false };
-            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(height));
             string content = text ?? "";
             float width = Mathf.Max(200f, position.width - 28f);
-            float contentHeight = Mathf.Max(height, textStyle.CalcHeight(new GUIContent(content), width));
+            float panelHeight = Mathf.Max(1f, height);
+            float contentHeight = Mathf.Max(panelHeight, textStyle.CalcHeight(new GUIContent(content), width));
+            scroll.y = Mathf.Clamp(scroll.y, 0f, Mathf.Max(0f, contentHeight - panelHeight));
+
+            scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(panelHeight));
             EditorGUILayout.SelectableLabel(content, textStyle, GUILayout.ExpandWidth(true), GUILayout.Height(contentHeight));
             EditorGUILayout.EndScrollView();
             return scroll;

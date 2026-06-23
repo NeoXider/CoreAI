@@ -12,6 +12,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.11.3 - 2026-06-23
+
+Depends on **`com.neoxider.coreai` 4.11.3**.
+
+- **Agent Session Inspector history tab rendering.** The Saved detail tabs now keep independent scroll
+  positions and clamp stale scroll offsets to the current panel height, so switching from a long
+  Session/System view no longer leaves the History tab visually blank. `Copy history` continues to copy
+  the same non-system history text.
+
 ## 4.11.2 - 2026-06-23
 
 Depends on **`com.neoxider.coreai` 4.11.2**.

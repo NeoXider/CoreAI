@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 4.11.3 - 2026-06-23
+
+- **Lockstep package version for Unity inspector fix.** No portable CoreAI API or runtime behavior
+  changed in this drop; `com.neoxider.coreai` is versioned with `com.neoxider.coreaiunity` so UPM
+  consumers can keep both package versions aligned.
+
 ## 4.11.2 - 2026-06-23
 
 - **Force-inject a skill into agent history (no model turn).** New
