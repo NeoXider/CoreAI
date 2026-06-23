@@ -907,7 +907,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            _traceSink.Record(new AgentTurnTrace
+            AgentTurnTrace trace = new()
             {
                 TraceId = bundle.TraceId,
                 RoleId = bundle.RoleId,
@@ -917,6 +917,7 @@ namespace CoreAI.Ai
                 UserPayload = bundle.UserPayload,
                 AssistantResponse = assistantResponse ?? result?.Content ?? "",
                 Error = error ?? "",
+                Status = string.IsNullOrWhiteSpace(error) ? AgentTurnStatus.Completed : AgentTurnStatus.Failed,
                 PromptTokens = result?.PromptTokens ?? 0,
                 CompletionTokens = result?.CompletionTokens ?? 0,
                 TotalTokens = result?.TotalTokens ?? 0,
@@ -924,7 +925,26 @@ namespace CoreAI.Ai
                 CacheWriteTokens = result?.CacheWriteTokens ?? 0,
                 HistoryTokenBudget = bundle.HistoryTokenBudget,
                 ChatHistoryMessageCount = bundle.ChatHistoryMessageCount
-            });
+            };
+
+            IReadOnlyList<LlmToolCallTrace> toolCalls = result?.ExecutedToolCalls;
+            if (toolCalls != null)
+            {
+                for (int i = 0; i < toolCalls.Count; i++)
+                {
+                    LlmToolCallTrace call = toolCalls[i];
+                    trace.ToolCalls.Add(new AgentTurnToolCallTrace
+                    {
+                        Name = call.Name ?? "",
+                        Success = call.Success,
+                        DurationMs = call.DurationMs,
+                        Source = call.Source ?? "",
+                        Detail = call.Detail ?? ""
+                    });
+                }
+            }
+
+            _traceSink.Record(trace);
         }
 
         private void RecordTokenObservation(RequestBundle bundle, LlmCompletionResult result)

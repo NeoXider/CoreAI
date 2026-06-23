@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## 4.11.0 - 2026-06-23
+
+- **Live-turn diagnostics.** `AgentTurnTrace` now carries the turn `Status` (`Completed`/`Failed`),
+  a `RecordedAtUtcTicks` timestamp, and the observed `ToolCalls` (name, success, duration, source,
+  detail). `AiOrchestrator.RecordTrace` populates these from the completion result without changing
+  orchestration or persistence behavior.
+- **Readable turn-trace sink.** New `IAgentTurnTraceReader.TryGetLatestTrace(roleId, out trace)`.
+  `InMemoryAgentTurnTraceSink` implements it, retaining the latest trace per role (bounded) in
+  addition to the existing ring buffer. The default `NullAgentTurnTraceSink` is unchanged, so the
+  feature degrades gracefully when no readable sink is registered.
+
 ## 4.10.5 - 2026-06-22
 
 - Restore live token streaming for tool-declared turns (4.10.4 buffered them and lost streaming).

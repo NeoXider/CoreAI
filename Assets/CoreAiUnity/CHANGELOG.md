@@ -12,6 +12,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.11.0 - 2026-06-23
+
+Depends on **`com.neoxider.coreai` 4.11.0**.
+
+- **Agent Session Inspector "Live turn" view.** New `Saved | Live turn` toggle in the
+  **CoreAI > Agent Session Inspector** window. *Saved* keeps the existing persisted-snapshot behavior.
+  *Live turn* reads the latest turn trace from the running container (`IAgentTurnTraceReader`) and renders
+  the composed user prompt, each tool call (name, status, duration, source, result), the assistant text,
+  and the turn status/timing — including mid-turn and failed turns that never reach persisted chat history.
+  When no readable trace sink is registered (the default `NullAgentTurnTraceSink`), the view explains how
+  to opt in; when none is recorded yet, it shows a clear "No turn recorded yet" message.
+- EditMode coverage for `InMemoryAgentTurnTraceSink` latest-per-role retention and live-turn fields.
+
 ## 4.10.5 - 2026-06-22
 
 Depends on **`com.neoxider.coreai` 4.10.5**.

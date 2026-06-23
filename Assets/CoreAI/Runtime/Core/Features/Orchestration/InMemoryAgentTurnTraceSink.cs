@@ -3,12 +3,15 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
-    /// Bounded in-memory trace sink for tests.
+    /// Bounded in-memory trace sink. Retains the recent ring of traces and the latest
+    /// trace per role so live diagnostics can read the most recent turn without persisting.
     /// </summary>
-    public sealed class InMemoryAgentTurnTraceSink : IAgentTurnTraceSink
+    public sealed class InMemoryAgentTurnTraceSink : IAgentTurnTraceSink, IAgentTurnTraceReader
     {
         private readonly object _gate = new();
         private readonly Queue<AgentTurnTrace> _traces = new();
+        private readonly Dictionary<string, AgentTurnTrace> _latestByRole =
+            new(System.StringComparer.Ordinal);
         private readonly int _capacity;
 
         /// <summary>Creates a bounded trace sink.</summary>
@@ -33,6 +36,9 @@ namespace CoreAI.Ai
                 }
 
                 _traces.Enqueue(trace);
+
+                string roleId = trace.RoleId ?? "";
+                _latestByRole[roleId] = trace;
             }
         }
 
@@ -42,6 +48,16 @@ namespace CoreAI.Ai
             lock (_gate)
             {
                 return _traces.ToArray();
+            }
+        }
+
+        /// <inheritdoc />
+        public bool TryGetLatestTrace(string roleId, out AgentTurnTrace trace)
+        {
+            string key = roleId ?? "";
+            lock (_gate)
+            {
+                return _latestByRole.TryGetValue(key, out trace);
             }
         }
     }

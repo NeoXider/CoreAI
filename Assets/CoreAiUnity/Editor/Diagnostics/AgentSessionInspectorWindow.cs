@@ -36,8 +36,12 @@ namespace CoreAI.Editor.Diagnostics
         private string _historyText = "No snapshot loaded.";
         private string _status = "Pick a role and inspect the live CoreAI container, or the active scene's serialized CoreAILifetimeScope in Edit Mode.";
         private double _nextKnownRolesRefreshTime;
+        private int _modeIndex;
+        private Vector2 _liveScroll;
+        private string _liveTurnText = "";
 
         private static readonly string[] DetailViewLabels = { "Session", "System", "History" };
+        private static readonly string[] ModeLabels = { "Saved", "Live turn" };
 
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
@@ -105,12 +109,20 @@ namespace CoreAI.Editor.Diagnostics
                         }
 
                         RefreshSnapshotOnly();
+                        if (_modeIndex == 1)
+                        {
+                            RefreshLiveTurnOnly();
+                        }
                     }
                 }
 
                 if (GUILayout.Button("Refresh", GUILayout.Width(90)))
                 {
                     RefreshRolesAndSnapshot();
+                    if (_modeIndex == 1)
+                    {
+                        RefreshLiveTurnOnly();
+                    }
                 }
             }
 
@@ -123,10 +135,31 @@ namespace CoreAI.Editor.Diagnostics
                 if (GUILayout.Button("Inspect", GUILayout.Width(90)) || changed && Event.current.keyCode == KeyCode.Return)
                 {
                     RefreshSnapshotOnly();
+                    if (_modeIndex == 1)
+                    {
+                        RefreshLiveTurnOnly();
+                    }
                 }
             }
 
             GUILayout.Space(6);
+            int nextMode = GUILayout.Toolbar(Mathf.Clamp(_modeIndex, 0, ModeLabels.Length - 1), ModeLabels);
+            if (nextMode != _modeIndex)
+            {
+                _modeIndex = nextMode;
+                if (_modeIndex == 1)
+                {
+                    RefreshLiveTurnOnly();
+                }
+            }
+
+            GUILayout.Space(4);
+            if (_modeIndex == 1)
+            {
+                DrawLiveTurnGui();
+                return;
+            }
+
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Copy stats", GUILayout.Width(90)))
@@ -360,6 +393,192 @@ namespace CoreAI.Editor.Diagnostics
             _sessionText = _snapshot?.ToSessionText() ?? "";
             _systemText = _snapshot?.ToSystemPromptText() ?? "";
             _historyText = _snapshot?.ToHistoryText() ?? "";
+        }
+
+        private void DrawLiveTurnGui()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Refresh live turn", GUILayout.Width(140)))
+                {
+                    RefreshLiveTurnOnly();
+                }
+
+                if (GUILayout.Button("Copy live turn", GUILayout.Width(120)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = _liveTurnText ?? "";
+                }
+            }
+
+            EditorGUILayout.HelpBox(
+                "Live turn shows the latest in-flight or completed turn from the agent turn-trace sink " +
+                "(composed prompt, tool calls, assistant text, status, and timing). Unlike Saved, it does " +
+                "not depend on persisted chat history, so mid-turn and failed turns are visible.",
+                MessageType.None);
+
+            float available = Mathf.Max(160f, position.height - 240f);
+            EditorGUILayout.LabelField("Latest turn trace", EditorStyles.boldLabel);
+            _liveScroll = DrawTextPanel(_liveTurnText, _liveScroll, available);
+        }
+
+        private void RefreshLiveTurnOnly()
+        {
+            string roleId = string.IsNullOrWhiteSpace(_manualRoleId)
+                ? (_roleIds.Length > 0 ? _roleIds[_selectedRoleIndex] : "")
+                : _manualRoleId.Trim();
+
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                _liveTurnText = "No role id selected.";
+                Repaint();
+                return;
+            }
+
+            if (!TryResolveTraceReader(out IAgentTurnTraceReader reader, out string error))
+            {
+                _liveTurnText = $"Live trace unavailable.\n{error}";
+                Repaint();
+                return;
+            }
+
+            if (!reader.TryGetLatestTrace(roleId, out AgentTurnTrace trace) || trace == null)
+            {
+                _liveTurnText = $"No turn recorded yet for role '{roleId}'.\n" +
+                                "Trigger an agent turn for this role, then click Refresh live turn.";
+                Repaint();
+                return;
+            }
+
+            _liveTurnText = FormatLiveTurn(trace);
+            Repaint();
+        }
+
+        private static bool TryResolveTraceReader(out IAgentTurnTraceReader reader, out string error)
+        {
+            reader = null;
+            error = "";
+
+            if (!Application.isPlaying)
+            {
+                error = "Not in Play Mode. Live turn traces are only available from the running container.";
+                return false;
+            }
+
+            LifetimeScope[] scopes = UnityEngine.Object.FindObjectsByType<LifetimeScope>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            if (scopes == null || scopes.Length == 0)
+            {
+                error = "No VContainer LifetimeScope found in the loaded scenes.";
+                return false;
+            }
+
+            foreach (LifetimeScope scope in scopes)
+            {
+                if (scope == null || scope.Container == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (scope.Container.TryResolve(typeof(IAgentTurnTraceReader), out object resolved) &&
+                        resolved is IAgentTurnTraceReader found)
+                    {
+                        reader = found;
+                        return true;
+                    }
+
+                    if (scope.Container.TryResolve(typeof(IAgentTurnTraceSink), out object sink) &&
+                        sink is IAgentTurnTraceReader readerSink)
+                    {
+                        reader = readerSink;
+                        return true;
+                    }
+                }
+                catch (Exception)
+                {
+                    // Scope without the reader registered — keep scanning.
+                }
+            }
+
+            error = "The active container registers no readable turn-trace sink (a NullAgentTurnTraceSink " +
+                    "is the default). Register an InMemoryAgentTurnTraceSink (or any IAgentTurnTraceReader) " +
+                    "to capture live turns.";
+            return false;
+        }
+
+        private static string FormatLiveTurn(AgentTurnTrace trace)
+        {
+            System.Text.StringBuilder sb = new();
+            sb.AppendLine("CoreAI Live Turn");
+            sb.AppendLine("================");
+            sb.AppendLine($"RoleId: {trace.RoleId}");
+            sb.AppendLine($"TraceId: {trace.TraceId}");
+            sb.AppendLine($"Status: {trace.Status}");
+            sb.AppendLine($"Model: {EmptyLabel(trace.Model)}");
+
+            string recordedAt = trace.RecordedAtUtcTicks > 0
+                ? new DateTime(trace.RecordedAtUtcTicks, DateTimeKind.Utc).ToLocalTime()
+                    .ToString("yyyy-MM-dd HH:mm:ss")
+                : "(unknown)";
+            sb.AppendLine($"Recorded at: {recordedAt}");
+            sb.AppendLine(
+                $"Tokens: prompt {trace.PromptTokens}, completion {trace.CompletionTokens}, total {trace.TotalTokens}");
+            if (trace.CacheReadTokens > 0 || trace.CacheWriteTokens > 0)
+            {
+                sb.AppendLine($"Cache tokens: read {trace.CacheReadTokens}, write {trace.CacheWriteTokens}");
+            }
+
+            sb.AppendLine($"Chat history messages: {trace.ChatHistoryMessageCount}");
+            sb.AppendLine();
+
+            sb.AppendLine("User Prompt");
+            sb.AppendLine("-----------");
+            sb.AppendLine(EmptyLabel(trace.UserPayload));
+            sb.AppendLine();
+
+            sb.AppendLine("Tool Calls");
+            sb.AppendLine("----------");
+            if (trace.ToolCalls == null || trace.ToolCalls.Count == 0)
+            {
+                sb.AppendLine("(none)");
+            }
+            else
+            {
+                for (int i = 0; i < trace.ToolCalls.Count; i++)
+                {
+                    AgentTurnToolCallTrace call = trace.ToolCalls[i];
+                    string outcome = call.Success ? "ok" : "FAILED";
+                    sb.AppendLine(
+                        $"{i + 1}. {call.Name} [{outcome}] ({call.DurationMs:0.#} ms, source={EmptyLabel(call.Source)})");
+                    sb.AppendLine($"   {EmptyLabel(call.Detail)}");
+                }
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("Assistant Response");
+            sb.AppendLine("------------------");
+            sb.AppendLine(EmptyLabel(trace.AssistantResponse));
+
+            if (!string.IsNullOrWhiteSpace(trace.Error))
+            {
+                sb.AppendLine();
+                sb.AppendLine("Error");
+                sb.AppendLine("-----");
+                sb.AppendLine(trace.Error);
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("System Prompt Preview");
+            sb.AppendLine("---------------------");
+            sb.AppendLine(EmptyLabel(trace.SystemPromptPreview));
+
+            return sb.ToString();
+        }
+
+        private static string EmptyLabel(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "(empty)" : value;
         }
 
         private static bool TryResolveInspector(out AgentSessionInspector inspector, out string error)
