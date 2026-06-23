@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## 4.11.2 - 2026-06-23
+
+- **Force-inject a skill into agent history (no model turn).** New
+  `AgentSkillInjection.InjectSkillIntoHistory(store, roleId, skill)` pushes a `SkillSet`'s `read_skill`
+  payload (instructions + tool schemas) straight into a role's history — exactly as if the agent had
+  already called `read_skill` — without running the agent. The agent does not start a response; the skill
+  is just available on its next turn. Stored with the internal `"tool"` history role, so the model sees it
+  while the visible chat stays clean. `ReadSkillLlmTool.BuildSkillPayloadJson` builds the payload (always
+  includes instructions, not gated on the skill having callable tools).
+
 ## 4.11.1 - 2026-06-23
 
 - **Tool failures are surfaced again, accurately.** A failed tool-only turn now resolves to

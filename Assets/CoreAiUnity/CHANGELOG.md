@@ -12,6 +12,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.11.2 - 2026-06-23
+
+Depends on **`com.neoxider.coreai` 4.11.2**.
+
+- **`CoreAi.InjectSkillIntoHistory(roleId, skill)`.** Force-inject a skill into an agent's history at any
+  moment (preloads the `read_skill` payload) without running a model turn — the agent does not start
+  answering, the skill is just there on its next turn. Resolves the memory store from the active scope and
+  stores the row with the hidden `"tool"` role (model sees it, chat does not). New EditMode tests cover the
+  injection, the hidden-row role, and invalid-input handling.
+
 ## 4.11.1 - 2026-06-23
 
 Depends on **`com.neoxider.coreai` 4.11.1**.

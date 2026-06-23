@@ -123,6 +123,25 @@ await orch.RunTaskAsync(new AiTaskRequest {
 // Model: sees catalog → read_skill("Crafting") → call_skill_tool("get_recipes", "{}") → response
 ```
 
+### Preloading a skill (force-inject, no model turn)
+
+Sometimes the host wants a skill **loaded right now** — without waiting for the agent to call
+`read_skill`. `CoreAi.InjectSkillIntoHistory` pushes the skill's `read_skill` payload (instructions +
+tool schemas) straight into the role's history. It does **not** run a model turn: the agent does not
+start answering, the content is just added to its history and read on its next turn.
+
+```csharp
+// Host already holds the SkillSet it built — push it into the agent's history at any moment.
+CoreAi.InjectSkillIntoHistory("GameMaster", crafting);
+
+// Portable core (no Unity): inject into any IAgentMemoryStore directly.
+AgentSkillInjection.InjectSkillIntoHistory(memoryStore, "GameMaster", crafting);
+```
+
+The message is stored with the internal `"tool"` history role: it is **replayed to the model** (the
+orchestrator maps `"tool"` history to a user-role context message) but **hidden from the visible chat**,
+so the conversation stays clean. Returns `false` for a null store/skill or a blank role id.
+
 ### How it works
 
 1. `WithSkill()` stores the `SkillSet` — tools are **not** added to the model's tool list

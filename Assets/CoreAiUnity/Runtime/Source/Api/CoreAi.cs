@@ -482,6 +482,45 @@ namespace CoreAI
             }
         }
 
+        /// <summary>
+        /// Force-injects a <paramref name="skill"/> into <paramref name="roleId"/>'s conversation history
+        /// — as if the agent had already called <c>read_skill</c> — without running a model turn. The agent
+        /// does not start writing a response; the skill's instructions and tools are just pushed into its
+        /// history and read on its next turn. Stored with the internal "tool" role, so the model sees it but
+        /// the visible chat stays clean. Returns false when CoreAI is not resolved or the skill is null.
+        /// </summary>
+        /// <param name="roleId">Target agent role.</param>
+        /// <param name="skill">Skill to preload (the host already holds the instance).</param>
+        /// <param name="persistToDisk">Persist the appended history immediately (default true).</param>
+        public static bool InjectSkillIntoHistory(string roleId, SkillSet skill, bool persistToDisk = true)
+        {
+            if (skill == null)
+            {
+                return false;
+            }
+
+            lock (SyncRoot)
+            {
+                if (!TryResolve(out _, out _, out _) || _scope?.Container == null)
+                {
+                    LogFacadeWarning("[CoreAi] InjectSkillIntoHistory: CoreAI services not resolved.");
+                    return false;
+                }
+
+                try
+                {
+                    IAgentMemoryStore memStore =
+                        (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
+                    return AgentSkillInjection.InjectSkillIntoHistory(memStore, roleId, skill, persistToDisk);
+                }
+                catch (Exception ex)
+                {
+                    LogFacadeWarning($"[CoreAi] InjectSkillIntoHistory failed: {ex.Message}");
+                    return false;
+                }
+            }
+        }
+
         private static CoreAiChatService RequireChatService()
         {
             lock (SyncRoot)

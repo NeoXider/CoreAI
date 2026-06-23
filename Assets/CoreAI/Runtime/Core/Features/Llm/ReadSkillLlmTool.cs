@@ -179,6 +179,48 @@ namespace CoreAI.Ai
             };
         }
 
+        /// <summary>
+        /// Builds the same JSON payload <c>read_skill</c> returns for a single skill (name, instructions,
+        /// tool schemas, usage), for host-side preloading of a skill into agent history without the agent
+        /// having to call the tool. Unlike the interactive path this is not gated on the skill having
+        /// callable tools — an instructions-only skill still yields a payload. Returns null for a null or
+        /// unnamed skill.
+        /// </summary>
+        internal static string BuildSkillPayloadJson(SkillSet skill)
+        {
+            if (skill == null || string.IsNullOrWhiteSpace(skill.Name))
+            {
+                return null;
+            }
+
+            List<object> toolSchemas = new();
+            foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
+            {
+                if (string.IsNullOrWhiteSpace(descriptor.Name))
+                {
+                    continue;
+                }
+
+                toolSchemas.Add(new
+                {
+                    tool_name = descriptor.Name,
+                    description = descriptor.Description,
+                    parameters_schema = ParseSchemaOrRaw(descriptor.ParametersSchema),
+                    invocable = descriptor.CanInvoke
+                });
+            }
+
+            return JsonConvert.SerializeObject(new
+            {
+                success = true,
+                skill = skill.Name,
+                instructions = skill.Instructions,
+                tools = toolSchemas,
+                usage = "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
+                        "arguments_json is a JSON object string with the parameter names and values."
+            });
+        }
+
         private static bool IsAllowed(string toolName, IReadOnlyCollection<string> allowedToolNames)
         {
             if (allowedToolNames == null || allowedToolNames.Count == 0)
