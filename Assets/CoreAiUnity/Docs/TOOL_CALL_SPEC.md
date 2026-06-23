@@ -353,6 +353,37 @@ MeaiLlmUnityClient: Calling GetResponseAsync (attempt 2/4)
 MeaiLlmUnityClient: Tool call parsed from JSON text
 ```
 
+### Tool-call result logging
+
+Every executed tool call is logged with its **outcome and details** when the relevant debug flags are on
+(`ToolExecutionPolicy`):
+
+| Setting | Effect |
+| --- | --- |
+| `LogToolCalls` | Emits one structured line per call: `[ToolCall] traceId=… role=… tool=<name> status=OK\|FAIL dur=<ms>ms`. |
+| `LogToolCallArguments` | Appends `args=<json>` (the call arguments). |
+| `LogToolCallResults` | Appends `result=<preview>` — the actual tool result or failure reason (truncated to 240 chars). |
+| `LogMeaiToolCallingSteps` | Adds `[ToolPolicy] <name>: SUCCESS\|FAILED` plus per-iteration loop steps. |
+
+A tool that throws is always logged as an error: `[ToolPolicy] <name> threw: <message>`. Example failure line:
+
+```
+[ToolCall] traceId=abc role=Programmer tool=manage_mods status=FAIL dur=4ms result={"success":false,"message":"attempt to index a function value"}
+```
+
+### How tool success/failure is surfaced
+
+- **To the model (always):** the exact tool result — including the failure reason — is returned in the
+  `tool` message, so the model can self-correct and retry. Unknown tool, malformed/missing arguments,
+  timeout, and thrown exceptions each return a descriptive error the model sees verbatim.
+- **To the user (tool-only turns):** when the model emits tool calls and no text,
+  `AiOrchestrator.ResolveToolOnlyCompletionContent` produces a status message —
+  `Tool call completed: <name>.` on success, or `Tool call failed: <name>: <reason>.` on failure — instead
+  of a misleading generic `LLM request failed.`
+- **In the chat UI:** these `Tool call …` lines are tool-lifecycle notifications. They are shown when
+  `ShowToolCallsInChat` is enabled and hidden (both success and failure) when it is off — so a clean-chat
+  configuration stays clean while the model still receives the full error.
+
 ## Custom agents via `AgentBuilder`
 
 Creating a new agent with custom tools — a few lines:

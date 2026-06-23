@@ -12,6 +12,18 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   scene query, `capture_camera`, game config, inventory, compatibility) that are functional and tested
   but require game-specific context, so the host opts in via `AgentBuilder.WithTool(...)`.
 
+## 4.11.1 - 2026-06-23
+
+Depends on **`com.neoxider.coreai` 4.11.1**.
+
+- **Tool failures surfaced accurately (chat-gated).** A failed tool-only turn now resolves to
+  `Tool call failed: <tool>: <reason>.` instead of `LLM request failed.` The chat panel still hides these
+  `Tool call …` lifecycle lines (success and failure alike) when `ShowToolCallsInChat` is off, so a
+  clean-chat setup is unchanged while the model always receives the full error.
+- **Docs + tests.** `TOOL_CALL_SPEC.md` documents the `[ToolCall] … status=OK|FAIL … result=…` debug log
+  and the logging flags. New `ToolExecutionPolicy` EditMode tests verify the debug line records FAIL status
+  and the result detail (and OK on success).
+
 ## 4.11.0 - 2026-06-23
 
 Depends on **`com.neoxider.coreai` 4.11.0**.

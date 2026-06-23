@@ -61,9 +61,9 @@ namespace CoreAI.Tests.EditMode
             public string UniversalSystemPromptPrefix => "";
             public float Temperature => 0.7f;
             public int MaxToolCallRetries => 3;
-            public bool LogToolCalls => false;
-            public bool LogToolCallArguments => false;
-            public bool LogToolCallResults => false;
+            public bool LogToolCalls { get; set; }
+            public bool LogToolCallArguments { get; set; }
+            public bool LogToolCallResults { get; set; }
             public bool LogMeaiToolCallingSteps => true;
             public bool AllowDuplicateToolCalls => false;
             public bool EnableStreaming => true;
@@ -570,6 +570,51 @@ namespace CoreAI.Tests.EditMode
                 new List<MEAI.FunctionCallContent> { MakeToolCall("dup", args) },
                 opts, CancellationToken.None);
             Assert.IsTrue(batch2.AnyFailed, "Duplicate should be blocked");
+        }
+
+        [Test]
+        public async Task ExecuteBatch_ToolFailure_DebugLog_RecordsFailStatusAndResultDetail()
+        {
+            StubLogger logger = new();
+            StubSettings settings = new() { LogToolCalls = true, LogToolCallResults = true };
+            ToolExecutionPolicy policy = new(logger, settings,
+                new List<ILlmTool> { new StubTool { Name = "manage_mods" } },
+                false, "Programmer", 3);
+
+            // Tool returns a structured failure with a real reason.
+            MEAI.ChatOptions opts = MakeChatOptions(("manage_mods",
+                "{\"success\":false,\"message\":\"attempt to index a function value\"}"));
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("manage_mods") };
+
+            await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+
+            Assert.IsTrue(
+                logger.Logs.Any(l =>
+                    l.Contains("[ToolCall]") && l.Contains("tool=manage_mods") &&
+                    l.Contains("status=FAIL") && l.Contains("attempt to index a function value")),
+                "Tool-call debug log must record the tool name, FAIL status, and the result detail.\n" +
+                string.Join("\n", logger.Logs));
+        }
+
+        [Test]
+        public async Task ExecuteBatch_ToolSuccess_DebugLog_RecordsOkStatus()
+        {
+            StubLogger logger = new();
+            StubSettings settings = new() { LogToolCalls = true };
+            ToolExecutionPolicy policy = new(logger, settings,
+                new List<ILlmTool> { new StubTool { Name = "manage_mods" } },
+                false, "Programmer", 3);
+
+            MEAI.ChatOptions opts = MakeChatOptions(("manage_mods", "{\"success\":true}"));
+            List<MEAI.FunctionCallContent> calls = new() { MakeToolCall("manage_mods") };
+
+            await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+
+            Assert.IsTrue(
+                logger.Logs.Any(l =>
+                    l.Contains("[ToolCall]") && l.Contains("tool=manage_mods") && l.Contains("status=OK")),
+                "Tool-call debug log must record an OK status for a successful tool call.\n" +
+                string.Join("\n", logger.Logs));
         }
 
         // ==================== BuildMaxErrorsResponse ====================

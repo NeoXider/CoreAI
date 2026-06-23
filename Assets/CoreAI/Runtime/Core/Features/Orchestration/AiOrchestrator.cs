@@ -1403,7 +1403,13 @@ namespace CoreAI.Ai
 
             if (failed.Count > 0)
             {
-                return null;
+                // Surface the failure to the user with the tool name(s) and the real reason, symmetric with
+                // the success path below. Previously this returned null, so a failed tool-only turn fell
+                // through to a misleading generic "LLM request failed." even though the LLM succeeded and a
+                // tool failed. The per-tool "name: detail" strings were already built above.
+                return failed.Count == 1
+                    ? "Tool call failed: " + failed[0] + "."
+                    : "Tool calls failed: " + string.Join("; ", failed) + ".";
             }
 
             return succeeded.Count == 1

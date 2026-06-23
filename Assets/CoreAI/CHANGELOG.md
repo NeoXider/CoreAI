@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## 4.11.1 - 2026-06-23
+
+- **Tool failures are surfaced again, accurately.** A failed tool-only turn now resolves to
+  `Tool call failed: <tool>: <reason>.` (e.g. `manage_mods: attempt to index a function value`) instead of
+  the misleading generic `LLM request failed.` / `structured validation failed`. This reverses the 4.10.4
+  hide at the orchestrator level; the chat UI still gates these `Tool call …` lifecycle lines symmetrically
+  by `ShowToolCallsInChat` (hidden = hidden for both success and failure), so a clean-chat configuration
+  stays clean while the model always receives the full error. Restores the `AiOrchestratorHistory` /
+  `AiOrchestratorToolFailureFallback` tests that pin this behavior.
+- **Documented tool-call result logging.** `TOOL_CALL_SPEC.md` now describes the per-call
+  `[ToolCall] … status=OK|FAIL dur=…ms args=… result=…` debug line and the `LogToolCalls` /
+  `LogToolCallArguments` / `LogToolCallResults` / `LogMeaiToolCallingSteps` flags, plus how success/failure
+  is surfaced to the model vs the user. New EditMode tests assert the FAIL line carries the tool name,
+  status, and the real result detail.
+
 ## 4.11.0 - 2026-06-23
 
 - **Live-turn diagnostics.** `AgentTurnTrace` now carries the turn `Status` (`Completed`/`Failed`),
