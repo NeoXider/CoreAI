@@ -1899,6 +1899,47 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Max characters of assistant text rendered into a single bubble. A backstop against the model
+        /// occasionally emitting a very long dump (a real incident leaked ~16 000 chars of reasoning).
+        /// </summary>
+        internal const int MaxAssistantRenderChars = 4000;
+
+        private const string CodeFence = "```";
+
+        /// <summary>
+        /// WebGL safety cap. Rendering one oversized message into a single bubble overflows UI Toolkit's
+        /// GPU vertex/index buffer in WebGL (<c>GfxDevice::CopyBufferRanges: range reads out of bounds</c>
+        /// → <c>memory access out of bounds</c> → app crash). Assistant text is hard-capped here as a
+        /// package-level backstop (a host may also cap earlier). RENDER-ONLY: the full message still lives
+        /// in chat memory/history; only what is drawn is bounded. Pure string logic — safe on Unity 6.0+.
+        /// </summary>
+        internal static string ClampAssistantForRender(string text)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= MaxAssistantRenderChars)
+            {
+                return text;
+            }
+
+            string clipped = text.Substring(0, MaxAssistantRenderChars);
+
+            // A truncation inside a ``` block leaves the fence open and breaks markdown layout; close it.
+            int fences = 0;
+            for (int i = clipped.IndexOf(CodeFence, StringComparison.Ordinal);
+                 i >= 0;
+                 i = clipped.IndexOf(CodeFence, i + CodeFence.Length, StringComparison.Ordinal))
+            {
+                fences++;
+            }
+
+            if ((fences & 1) == 1)
+            {
+                clipped += "\n" + CodeFence;
+            }
+
+            return clipped + "\n\n…";
+        }
+
+        /// <summary>
         /// Creates message bubble.
         /// </summary>
         protected virtual VisualElement CreateMessageBubble(string text, bool isUser)
@@ -1997,6 +2038,14 @@ namespace CoreAI.Chat
             if (!isUser && !Options.ShowToolCallsInChat && IsToolLifecycleNotification(text))
             {
                 return;
+            }
+
+            // WebGL GPU-buffer backstop: cap an oversized assistant dump before it becomes a giant bubble
+            // (user input is bounded by the input field). Hosts may cap earlier; this protects every
+            // consumer of the package. See ClampAssistantForRender.
+            if (!isUser)
+            {
+                text = ClampAssistantForRender(text);
             }
 
             HideTypingIndicator();

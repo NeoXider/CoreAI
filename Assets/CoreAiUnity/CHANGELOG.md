@@ -4,6 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+- **fix(chat): WebGL GPU-buffer backstop for oversized assistant messages.** A single very long message
+  (a real incident leaked ~16 000 chars of model reasoning) rendered into one bubble overflows UI Toolkit's
+  vertex/index buffer in WebGL (`GfxDevice::CopyBufferRanges: range reads out of bounds` →
+  `memory access out of bounds` → app crash). New `CoreAiChatPanel.ClampAssistantForRender` hard-caps
+  assistant text (`MaxAssistantRenderChars = 4000`, closes a dangling ``` fence), applied in `AddMessage`
+  for the assistant branch. Render-only — the full message still lives in chat memory/history; only the
+  drawn text is bounded. Pure string logic (no UITK API), so it holds on every supported Unity (6.0+).
+  Tests: `CoreAiChatPanelRenderLimitTests` (EditMode). Hosts may still cap earlier (RedoSchool caps at its
+  markdown render chokepoint); this is the package-level backstop for every consumer.
 - **uGUI chat integration docs.** `README_CHAT.md` now documents the supported Canvas/uGUI path: reuse
   `CoreAiChatService` or the static `CoreAi` facade for chat logic while the host game owns its own
   `TMP_InputField` / `ScrollRect` / `Button` view.
