@@ -4,6 +4,10 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.11.4 - 2026-06-26
+
+Depends on **`com.neoxider.coreai` 4.11.4**.
+
 - **fix(chat): WebGL GPU-buffer backstop for oversized assistant messages.** A single very long message
   (a real incident leaked ~16 000 chars of model reasoning) rendered into one bubble overflows UI Toolkit's
   vertex/index buffer in WebGL (`GfxDevice::CopyBufferRanges: range reads out of bounds` →

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## 4.11.4 - 2026-06-26
+
+- **Lockstep package version.** No portable CoreAI API or runtime behavior changed in this drop; the bump
+  keeps `com.neoxider.coreai` aligned with `com.neoxider.coreaiunity` 4.11.4 (WebGL chat render cap fix)
+  so UPM consumers keep both package versions in sync.
+
 ## 4.11.3 - 2026-06-23
 
 - **Lockstep package version for Unity inspector fix.** No portable CoreAI API or runtime behavior
