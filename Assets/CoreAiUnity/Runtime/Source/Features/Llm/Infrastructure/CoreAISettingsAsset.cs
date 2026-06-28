@@ -21,6 +21,22 @@ namespace CoreAI.Infrastructure.Llm
         Offline = 3
     }
 
+    /// <summary>
+    /// Vision / multimodal capability gate for the configured model. Controls whether CoreAI attaches
+    /// images to user messages and registers the <c>capture_camera</c> tool.
+    /// </summary>
+    public enum VisionSupportMode
+    {
+        /// <summary>Infer vision support from the model name heuristic (see <see cref="VisionCapability"/>).</summary>
+        Auto = 0,
+
+        /// <summary>Force vision on (model is known to be multimodal).</summary>
+        On = 1,
+
+        /// <summary>Force vision off (text-only model): never attach images, never register vision tools.</summary>
+        Off = 2
+    }
+
     /// <summary>Preference order inside <see cref="LlmBackendType.Auto"/>.</summary>
     public enum LlmAutoPriority
     {
@@ -94,6 +110,14 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Model identifier passed to OpenAI-compatible servers (gpt-4o-mini, qwen3.5-4b, etc.).")]
         [SerializeField]
         private string modelName = "gpt-4o-mini";
+
+        [Tooltip(
+            "Vision / multimodal capability of the configured model.\n" +
+            "Auto: infer from the model name (gpt-4o, gpt-4.1, o4, *vision*, *vl*, gemini, claude-3+, llava, etc.).\n" +
+            "On: force-enable image attachments + the capture_camera tool.\n" +
+            "Off: never attach images and never register vision tools (text-only model).")]
+        [SerializeField]
+        private VisionSupportMode visionSupport = VisionSupportMode.Auto;
 
         [Tooltip(
             "When enabled, the Temperature value below is sent to OpenAI-compatible HTTP APIs and LLMUnity (MEAI). " +
@@ -538,6 +562,17 @@ namespace CoreAI.Infrastructure.Llm
                 return "gpt-4o-mini";
             }
         }
+
+        /// <summary>Serialized vision capability mode (Auto / On / Off).</summary>
+        public VisionSupportMode VisionSupport => visionSupport;
+
+        /// <summary>
+        /// Whether the configured model can receive images. <see cref="VisionSupportMode.On"/> /
+        /// <see cref="VisionSupportMode.Off"/> are explicit; <see cref="VisionSupportMode.Auto"/> infers
+        /// from <see cref="ModelName"/> via <see cref="VisionCapability.ModelLooksVisionCapable"/>. Both the
+        /// host send path (<c>CoreAiChatService.AskWithCameraAsync</c>) and gated tool registration check this.
+        /// </summary>
+        public bool IsVisionEnabled => VisionCapability.IsEnabled(visionSupport, ModelName);
 
         /// <summary>Serialized temperature (used when <see cref="OverrideTemperature"/> is true).</summary>
         public float Temperature => temperature;

@@ -17,5 +17,18 @@
   <!-- Unity/WebGL: VContainer + DI цепочка к MessagePipe (см. CoreServicesInstaller / MessagePipeAiCommandSink) -->
   <assembly fullname="CoreAI.Source">
     <type fullname="CoreAI.Infrastructure.Messaging.MessagePipeAiCommandSink" preserve="all"/>
+
+    <!-- WebGL/IL2CPP: Lua game bindings register host callbacks as plain delegates; MoonSharp invokes
+         them via reflection (InteropAccessMode.Reflection on AOT), so the managed-stripper never sees a
+         direct call and may drop the lambda bodies. Preserve the binding types that run on the WebGL
+         player (every tier except Full) so their reflection-invoked methods survive. The Full-tier
+         CoreAiFullUnityLuaRuntimeBindings is intentionally NOT listed: it is disabled on WebGL, so
+         keeping it would only bloat the build. -->
+    <type fullname="CoreAI.Infrastructure.World.CoreAiWorldLuaRuntimeBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.World.CoreAiWorldQueryLuaBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.Lua.CoreAiVersioningLuaRuntimeBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.Lua.LoggingLuaRuntimeBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.Lua.LuaTimeBindings" preserve="all"/>
+    <type fullname="CoreAI.Infrastructure.Lua.AggregatingGameLuaRuntimeBindings" preserve="all"/>
   </assembly>
 </linker>

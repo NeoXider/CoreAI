@@ -12,8 +12,11 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool (<c>manage_mods</c>) that lets an agent inspect and rewrite its own persistent
     /// Lua mods in <see cref="LuaModRuntime"/>: list mods, read their source, load, reload, unload,
-    /// export, import, and forget them. Loaded/reloaded mods auto-persist and survive a restart;
-    /// export/import move a mod between players via a shareable bundle.
+    /// export, import, and forget them; list a mod's revision history and roll back to an earlier
+    /// revision (<c>versions</c>/<c>revert</c>); and read recent runtime hook/timer failures
+    /// (<c>diagnostics</c>) so a mod that throws long after it loaded can be repaired. Loaded/reloaded
+    /// mods auto-persist and survive a restart; export/import move a mod between players via a
+    /// shareable bundle.
     /// <para>
     /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>)
     /// effectively grant the model the
@@ -70,26 +73,36 @@ namespace CoreAI.Ai
             "load (install new mod), reload (replace a mod's code keeping its permissions), " +
             "unload (remove a mod), export (get a shareable bundle of a mod to move it to another player), " +
             "import (install a mod from a shareable bundle, passed in the 'bundle' or 'code' param), " +
-            "forget (unload a mod and delete it from persistent storage). " +
+            "forget (unload a mod and delete it from persistent storage), " +
+            "versions (list a mod's saved revisions; revision 0 is the original, newest last), " +
+            "revert (roll a mod back to an earlier revision, passed in the 'revision' param), " +
+            "diagnostics (read recent runtime errors thrown by mod hooks/timers so you can repair the mod). " +
             "load/reload auto-persist mods so they survive an app restart; export/import move mods between players. " +
+            "Each load/reload records a new revision; use versions then revert to undo a bad edit. " +
+            "A hook or timer that starts throwing at runtime is reported via diagnostics (not as an error on the " +
+            "call that loaded it) - poll diagnostics, fix the mod, and reload it. " +
             "Use get_source before reload to edit existing behavior. " +
             "MoonSharp/Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
             "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end.";
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true, "One of: list, get_source, load, reload, unload, export, import, forget"),
-            ("mod_id", "string", false, "Mod id (required for get_source, load, reload, unload, export, forget)"),
+            ("action", "string", true,
+                "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics"),
+            ("mod_id", "string", false,
+                "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)"),
             ("code", "string", false,
                 "Lua source for load/reload. Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted."),
             ("bundle", "string", false,
-                "Shareable mod bundle JSON (as returned by export) for the import action.")
+                "Shareable mod bundle JSON (as returned by export) for the import action."),
+            ("revision", "integer", false,
+                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")
         );
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string, string, string, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string, string, string, string, int, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -104,6 +117,7 @@ namespace CoreAI.Ai
             string mod_id = null,
             string code = null,
             string bundle = null,
+            int revision = -1,
             CancellationToken cancellationToken = default)
         {
             string normalized = (action ?? "").Trim().ToLowerInvariant();
@@ -125,8 +139,11 @@ namespace CoreAI.Ai
                     "export" => Export(mod_id),
                     "import" => Mutate(() => Import(bundle ?? code)),
                     "forget" => Mutate(() => Forget(mod_id)),
+                    "versions" => Versions(mod_id),
+                    "revert" => Mutate(() => Revert(mod_id, revision)),
+                    "diagnostics" => Diagnostics(mod_id),
                     _ => Fail(
-                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget.")
+                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
                 };
             }
             catch (Exception ex)
@@ -267,6 +284,103 @@ namespace CoreAI.Ai
             return _runtime.ForgetMod(modId)
                 ? Ok($"Mod '{modId.Trim()}' forgotten (unloaded and deleted from storage).")
                 : Fail($"forget: mod '{modId.Trim()}' is not loaded or stored.");
+        }
+
+        /// <summary>Max length of the per-revision source preview returned by <c>versions</c>.</summary>
+        private const int RevisionPreviewLength = 240;
+
+        /// <summary>Cap on the number of recent runtime errors returned by <c>diagnostics</c>.</summary>
+        private const int MaxDiagnosticsReturned = 20;
+
+        private string Versions(string modId)
+        {
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                return Fail("versions: mod_id is required.");
+            }
+
+            IReadOnlyList<LuaScriptRevision> history = _runtime.ListModVersions(modId);
+            if (history.Count == 0)
+            {
+                return Fail(
+                    $"versions: mod '{modId.Trim()}' has no recorded revisions (no version history is tracked).");
+            }
+
+            List<object> items = new(history.Count);
+            foreach (LuaScriptRevision rev in history)
+            {
+                string source = rev.Source ?? "";
+                string preview = source.Length > RevisionPreviewLength
+                    ? source.Substring(0, RevisionPreviewLength) + "..."
+                    : source;
+                items.Add(new
+                {
+                    revision = rev.Index,
+                    length = source.Length,
+                    saved_at_utc = new DateTime(rev.UtcTicks, DateTimeKind.Utc).ToString("O"),
+                    preview
+                });
+            }
+
+            return Ok(
+                $"{items.Count} revision(s) of mod '{modId.Trim()}' (0 = original, newest last). Use revert with a revision index to roll back.",
+                items);
+        }
+
+        private string Revert(string modId, int revision)
+        {
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                return Fail("revert: mod_id is required.");
+            }
+
+            if (revision < 0)
+            {
+                return Fail("revert: a non-negative 'revision' index is required (see versions).");
+            }
+
+            bool reverted;
+            string restored;
+            try
+            {
+                reverted = _runtime.TryRevertMod(modId, revision, out restored);
+            }
+            catch (Exception ex)
+            {
+                // The restored revision failed to reload; the live mod is left untouched.
+                return Fail($"revert: mod '{modId.Trim()}' revision {revision} failed to reload: {ex.Message}");
+            }
+
+            return reverted
+                ? Ok($"Mod '{modId.Trim()}' reverted to revision {revision}.")
+                : Fail($"revert: mod '{modId.Trim()}' has no revision {revision} (see versions).");
+        }
+
+        private string Diagnostics(string modId)
+        {
+            IReadOnlyList<LuaModHandlerError> errors = _runtime.GetRecentHandlerErrors(modId);
+            int total = errors.Count;
+            List<object> items = new(Math.Min(total, MaxDiagnosticsReturned));
+
+            // Return the newest entries (GetRecentHandlerErrors is oldest-first).
+            int start = total > MaxDiagnosticsReturned ? total - MaxDiagnosticsReturned : 0;
+            for (int i = start; i < total; i++)
+            {
+                LuaModHandlerError err = errors[i];
+                items.Add(new
+                {
+                    mod_id = err.ModId,
+                    error = err.Error,
+                    consecutive_errors = err.ConsecutiveCount,
+                    at_utc = err.AtUtc.ToString("O")
+                });
+            }
+
+            string scope = string.IsNullOrWhiteSpace(modId) ? "all mods" : $"mod '{modId.Trim()}'";
+            string message = total == 0
+                ? $"No recent runtime handler errors for {scope}."
+                : $"{total} recent runtime handler error(s) for {scope} (newest last). Fix the mod and reload it.";
+            return Ok(message, items);
         }
 
         private static string Ok(string message, object data = null)

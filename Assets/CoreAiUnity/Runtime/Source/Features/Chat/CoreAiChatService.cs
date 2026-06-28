@@ -6,8 +6,10 @@ using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.World;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
+using Microsoft.Extensions.AI;
 using UnityEngine;
 
 namespace CoreAI.Chat
@@ -22,19 +24,22 @@ namespace CoreAI.Chat
         private readonly ICoreAISettings _settings;
         private readonly IAgentMemoryStore _memoryStore;
         private readonly IGameLogger _logger;
+        private readonly ILlmClient _llmClient;
 
         public CoreAiChatService(
             IAiOrchestrationService orchestrator,
             AgentMemoryPolicy memoryPolicy = null,
             ICoreAISettings settings = null,
             IAgentMemoryStore memoryStore = null,
-            IGameLogger logger = null)
+            IGameLogger logger = null,
+            ILlmClient llmClient = null)
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _memoryPolicy = memoryPolicy;
             _settings = settings;
             _memoryStore = memoryStore;
             _logger = logger;
+            _llmClient = llmClient;
         }
 
         /// <summary>
@@ -57,6 +62,7 @@ namespace CoreAI.Chat
                 ICoreAISettings settings = null;
                 IAgentMemoryStore memStore = null;
                 IGameLogger logger = null;
+                ILlmClient llmClient = null;
 
                 try
                 {
@@ -98,7 +104,17 @@ namespace CoreAI.Chat
                         $"[CoreAiChatService] Resolve IGameLogger: {ex.Message}");
                 }
 
-                return new CoreAiChatService(orchestrator, policy, settings, memStore, logger);
+                try
+                {
+                    llmClient = (ILlmClient)scope.Container.Resolve(typeof(ILlmClient));
+                }
+                catch (Exception ex)
+                {
+                    GameLoggerUnscopedFallback.Instance.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve ILlmClient: {ex.Message}");
+                }
+
+                return new CoreAiChatService(orchestrator, policy, settings, memStore, logger, llmClient);
             }
             catch (Exception ex)
             {
@@ -274,15 +290,15 @@ namespace CoreAI.Chat
         /// <summary>
         /// Attempts to get persisted chat history and returns whether the operation succeeded.
         /// </summary>
-        public bool TryGetPersistedChatHistory(string roleId, out ChatMessage[] messages, int maxMessages = 0)
+        public bool TryGetPersistedChatHistory(string roleId, out CoreAI.Ai.ChatMessage[] messages, int maxMessages = 0)
         {
-            messages = Array.Empty<ChatMessage>();
+            messages = Array.Empty<CoreAI.Ai.ChatMessage>();
             if (_memoryStore == null || string.IsNullOrWhiteSpace(roleId))
             {
                 return false;
             }
 
-            ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
+            CoreAI.Ai.ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
             if (raw == null || raw.Length == 0)
             {
                 return false;
@@ -481,6 +497,209 @@ namespace CoreAI.Chat
             }
 
             return full;
+        }
+
+        // ===== Vision / multimodal (P2) =====
+
+        /// <summary>
+        /// Whether the configured model can receive images. Reads
+        /// <see cref="CoreAISettingsAsset.IsVisionEnabled"/> when settings are a
+        /// <see cref="CoreAISettingsAsset"/>, otherwise infers from <see cref="VisionCapability"/> using the
+        /// model name where exposed. Both the camera send path and any gated vision-tool registration check
+        /// this; when it is <c>false</c> no image is attached and vision tools are omitted.
+        /// </summary>
+        public bool IsVisionEnabled()
+        {
+            if (_settings is CoreAISettingsAsset asset)
+            {
+                return asset.IsVisionEnabled;
+            }
+
+            CoreAISettingsAsset inst = CoreAISettingsAsset.Instance;
+            return inst != null && inst.IsVisionEnabled;
+        }
+
+        /// <summary>
+        /// Captures <paramref name="cameraName"/> and sends it to a vision-capable model as a single USER
+        /// message (prompt text + the JPEG screenshot as an <c>image_url</c> part). This is the working,
+        /// provider-safe camera → model path. Resolves the camera on the main thread, then issues one
+        /// <see cref="ILlmClient.CompleteAsync"/> call carrying the image via
+        /// <see cref="LlmCompletionRequest.ChatHistory"/> (a user <see cref="Microsoft.Extensions.AI.ChatMessage"/>
+        /// whose <see cref="DataContent"/> is serialized to OpenAI <c>image_url</c> by the provider client).
+        /// <para>
+        /// Gated by <see cref="IsVisionEnabled"/>: when the configured model is text-only this throws
+        /// <see cref="InvalidOperationException"/> (the caller should not reach this path for text-only
+        /// models). Returns the model's text reply.
+        /// </para>
+        /// </summary>
+        public System.Threading.Tasks.Task<string> AskWithCameraAsync(
+            string prompt,
+            string cameraName = "main",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            int width = 512,
+            int height = 512,
+            CancellationToken ct = default)
+        {
+            return AskWithCameraInternalAsync(prompt, cameraName, null, roleId, width, height, ct);
+        }
+
+        /// <summary>
+        /// Camera overload that accepts an already-resolved <see cref="Camera"/> (no name lookup). See
+        /// <see cref="AskWithCameraAsync(string,string,string,int,int,CancellationToken)"/>.
+        /// </summary>
+        public System.Threading.Tasks.Task<string> AskWithCameraAsync(
+            string prompt,
+            Camera camera,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            int width = 512,
+            int height = 512,
+            CancellationToken ct = default)
+        {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            return AskWithCameraInternalAsync(prompt, null, camera, roleId, width, height, ct);
+        }
+
+        private async System.Threading.Tasks.Task<string> AskWithCameraInternalAsync(
+            string prompt,
+            string cameraName,
+            Camera camera,
+            string roleId,
+            int width,
+            int height,
+            CancellationToken ct)
+        {
+            if (!IsVisionEnabled())
+            {
+                throw new InvalidOperationException(
+                    "CoreAiChatService.AskWithCameraAsync: the configured model is text-only " +
+                    "(VisionSupport=Off or the model name is not vision-capable). " +
+                    "Gate camera sends on IsVisionEnabled() and fall back to AskAsync for text-only models.");
+            }
+
+            await UniTask.SwitchToMainThread(ct);
+            DataContent image;
+            try
+            {
+                Camera targetCam = camera != null ? camera : CameraLlmTool.ResolveCamera(cameraName);
+                if (targetCam == null)
+                {
+                    throw new InvalidOperationException(
+                        $"CoreAiChatService.AskWithCameraAsync: no camera matching '{cameraName}' was found.");
+                }
+
+                image = CameraLlmTool.CaptureCameraImageContent(targetCam, width, height);
+            }
+            finally
+            {
+                await UniTask.SwitchToThreadPool();
+            }
+
+            return await SendUserImageMessageAsync(prompt, image, roleId, ct);
+        }
+
+        /// <summary>
+        /// Autonomous-tool follow-up lift. OpenAI tool-result messages cannot carry images, so after the
+        /// model calls <c>capture_camera</c> the host lifts the returned image into a follow-up USER
+        /// <c>image_url</c> message before the next model call. Pass the raw <c>capture_camera</c> tool
+        /// result JSON (e.g. <c>LlmToolCallCompleted.ResultJson</c> from <c>CoreAi.OnToolCallCompleted</c>);
+        /// the image is extracted via <see cref="CameraLlmTool.TryExtractImageContentFromResult"/> and sent
+        /// with <paramref name="followUpPrompt"/>. Returns <c>null</c> when the result carries no usable
+        /// image (so the caller can keep the plain text turn). Gated by <see cref="IsVisionEnabled"/>.
+        /// </summary>
+        public async System.Threading.Tasks.Task<string> AskWithImageFollowUpAsync(
+            string followUpPrompt,
+            string captureCameraResultJson,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken ct = default)
+        {
+            if (!IsVisionEnabled())
+            {
+                return null;
+            }
+
+            if (!CameraLlmTool.TryExtractImageContentFromResult(captureCameraResultJson, out DataContent image))
+            {
+                return null;
+            }
+
+            return await SendUserImageMessageAsync(followUpPrompt, image, roleId, ct);
+        }
+
+        /// <summary>
+        /// Sends a single USER message carrying <paramref name="prompt"/> plus <paramref name="image"/> to
+        /// the LLM client. The image rides through <see cref="LlmCompletionRequest.ChatHistory"/> as a user
+        /// <see cref="Microsoft.Extensions.AI.ChatMessage"/> with a <see cref="DataContent"/>, which the provider
+        /// client serializes to an OpenAI <c>image_url</c> content part. Honors the configured request timeout.
+        /// </summary>
+        private async System.Threading.Tasks.Task<string> SendUserImageMessageAsync(
+            string prompt,
+            DataContent image,
+            string roleId,
+            CancellationToken ct)
+        {
+            if (_llmClient == null)
+            {
+                throw new InvalidOperationException(
+                    "CoreAiChatService: ILlmClient was not resolved; the vision send path is unavailable. " +
+                    "Ensure CoreAILifetimeScope.RegisterLlmPipeline() ran before resolving the chat service.");
+            }
+
+            Microsoft.Extensions.AI.ChatMessage userMessage = new(ChatRole.User, new List<AIContent>
+            {
+                new TextContent(prompt ?? ""),
+                image
+            });
+
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.SmartChat : roleId,
+                SystemPrompt = "",
+                UserPayload = "",
+                ChatHistory = new List<Microsoft.Extensions.AI.ChatMessage> { userMessage },
+                ContextWindowTokens = _settings?.ContextWindowTokens ?? CoreAISettings.DefaultContextWindowTokens
+            };
+
+            float timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
+            CancellationTokenSource timeoutCts = null;
+            IDisposable timerHandle = null;
+            CancellationToken effectiveCt = ct;
+            try
+            {
+                if (timeoutSec > 0)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timerHandle = timeoutCts.CancelAfterSlim(TimeSpan.FromSeconds(timeoutSec));
+                    effectiveCt = timeoutCts.Token;
+                }
+
+                LlmCompletionResult result = await _llmClient.CompleteAsync(request, effectiveCt);
+                await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
+                if (result == null)
+                {
+                    return "";
+                }
+
+                if (!result.Ok)
+                {
+                    throw new InvalidOperationException(
+                        $"CoreAiChatService vision request failed: {result.Error}");
+                }
+
+                return result.Content ?? "";
+            }
+            catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
+            {
+                throw new LlmOperationTimeoutException();
+            }
+            finally
+            {
+                timerHandle?.Dispose();
+                timeoutCts?.Dispose();
+            }
         }
     }
 }

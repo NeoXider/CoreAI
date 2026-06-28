@@ -155,9 +155,12 @@ tokens and keeps the prefix lean while remaining deterministic for caching.
 
 ### 7. Context editing (prune) alongside compaction (summarize)
 - Status: **implemented** for prompt-history copies. `ConversationHistoryPruner` runs before
-  `ConversationHistoryPartition.PartitionByBudget`, collapses exact consecutive duplicates, and keeps only the
-  newest configured `tool` / `## Tool Results` observations. This completes the cross-turn
-  superseded-tool-result pruning deferred by `ToolResultMemoryPolicy`; durable chat history on disk is not edited.
+  `ConversationHistoryPartition.PartitionByBudget`, collapses exact consecutive duplicates, strips stale
+  `<think>…</think>` reasoning from every assistant turn except the newest one (losslessly — only reasoning
+  scaffolding is dropped; visible answers and the latest turn's reasoning are preserved, and assistant turns that
+  contain nothing but reasoning are removed), and keeps only the newest configured `tool` / `## Tool Results`
+  observations. This completes the cross-turn superseded-tool-result and stale-reasoning pruning deferred by
+  `ToolResultMemoryPolicy`; durable chat history on disk is not edited.
 - Two complementary levers, like Claude Code: **compaction** summarizes old turns when near the limit (§2);
   **context editing** *prunes* stale content without summarizing — drop superseded tool results / old thinking
   blocks once they no longer matter. Prune first (cheap, lossless-ish), summarize only when still over budget.

@@ -32,8 +32,16 @@ Items here are intentionally not active TODO checkboxes.
   explicitly non-undoable unless a host game supplies a checkpoint system.
 - Add role-configured Lua capability tiers and optional player confirmation for dangerous capabilities such as
   `WorldEdit` and `Full`.
-- Investigate MoonSharp in WebGL player builds: IL2CPP support, binary size, threading limits, and whether the
-  current `SecureLuaEnvironment.IsSupported == false` rule should stay.
+
+> **Shipped:** MoonSharp Lua now runs on the WebGL/IL2CPP player. `SecureLuaEnvironment.IsSupported` is gated by
+> the `SecureLuaEnvironment.WebGlLuaOptIn` capability flag (wired from `ICoreAISettings.EnableLuaOnWebGl` /
+> `CoreAISettingsAsset.EnableLuaOnWebGl`, on by default for new assets) instead of a hard `false`. IL2CPP
+> stripping is held off by `Assets/link.xml` (preserving `MoonSharp.Interpreter` plus the WebGL-active Lua
+> binding types). MoonSharp falls back to `InteropAccessMode.Reflection` on AOT, so host-callback marshalling
+> works without emitted IL. The `Full` reflection tier (`unity_*` bindings) stays disabled on WebGL —
+> `CoreAILifetimeScope` forces `effectiveFullLuaAccess = false` under `UNITY_WEBGL && !UNITY_EDITOR`. See the
+> `WebGlLuaSelfTest` demo and `SecureLuaEnvironment.TryRunSelfTest` for an in-player smoke test. Remaining open
+> question: binary-size impact and how a host can prune unused bindings for the smallest web build.
 
 ## Product Ideas
 

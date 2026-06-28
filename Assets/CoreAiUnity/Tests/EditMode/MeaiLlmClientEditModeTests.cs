@@ -1125,5 +1125,107 @@ namespace CoreAI.Tests.EditMode
             Assert.That(cleaned, Does.Contain("Here is my answer."));
         }
     }
+
+    /// <summary>
+    /// Unit coverage for the Kilo/Cline-style on-the-fly hybrid hold helpers
+    /// (<see cref="MeaiLlmClient.GetHybridSafeSegments"/> / <see cref="MeaiLlmClient.GetHybridUnemittedSuffix"/>),
+    /// which keep prose streaming live before AND after a tool call instead of buffering the whole turn.
+    /// </summary>
+    public sealed class HybridSafeSegmentsTests
+    {
+        private const string ToolJson = "{\"name\":\"memory\",\"arguments\":{\"action\":\"read\"}}";
+
+        [Test]
+        public void GetHybridSafeSegments_ProseToolProse_SplitsIntoThreeSegmentsAndStreamsTrailingProse()
+        {
+            string text = "P " + ToolJson + " Q";
+            List<MeaiLlmClient.HybridProseSegment> segments =
+                MeaiLlmClient.GetHybridSafeSegments(text, out int safeEnd);
+
+            Assert.AreEqual(3, segments.Count, "Expected prose / tool-json / prose.");
+            Assert.IsFalse(segments[0].IsToolJson);
+            Assert.AreEqual("P ", text.Substring(segments[0].Start, segments[0].Length));
+            Assert.IsTrue(segments[1].IsToolJson, "Middle span is the hidden tool-call JSON.");
+            Assert.IsFalse(segments[2].IsToolJson, "Trailing prose must resume live after the tool call.");
+            Assert.AreEqual(" Q", text.Substring(segments[2].Start, segments[2].Length));
+            Assert.AreEqual(text.Length, safeEnd, "A fully-closed turn has no pending hold.");
+        }
+
+        [Test]
+        public void GetHybridSafeSegments_IncompleteBraceAtEnd_HoldsFromOpenBrace()
+        {
+            string text = "Hi {\"name\":\"x\",\"argu";
+            List<MeaiLlmClient.HybridProseSegment> segments =
+                MeaiLlmClient.GetHybridSafeSegments(text, out int safeEnd);
+
+            Assert.AreEqual(1, segments.Count);
+            Assert.IsFalse(segments[0].IsToolJson);
+            Assert.AreEqual("Hi ", text.Substring(segments[0].Start, segments[0].Length));
+            Assert.AreEqual(text.IndexOf('{'), safeEnd, "Output is held from the first still-open brace.");
+        }
+
+        [Test]
+        public void GetHybridSafeSegments_NonToolClosedObject_StreamsWholeTextAsProse()
+        {
+            string text = "Use { \"a\": 1 } now";
+            List<MeaiLlmClient.HybridProseSegment> segments =
+                MeaiLlmClient.GetHybridSafeSegments(text, out int safeEnd);
+
+            Assert.AreEqual(1, segments.Count, "A non-tool {...} must not be hidden.");
+            Assert.IsFalse(segments[0].IsToolJson);
+            Assert.AreEqual(text, text.Substring(segments[0].Start, segments[0].Length));
+            Assert.AreEqual(text.Length, safeEnd);
+        }
+
+        [Test]
+        public void GetHybridSafeSegments_TwoToolCalls_PreservesProseBetweenThem()
+        {
+            string text = "A " + ToolJson + " B " + ToolJson + " C";
+            List<MeaiLlmClient.HybridProseSegment> segments =
+                MeaiLlmClient.GetHybridSafeSegments(text, out int safeEnd);
+
+            int toolSpans = segments.Count(s => s.IsToolJson);
+            Assert.AreEqual(2, toolSpans, "Both text-shaped tool calls are hidden.");
+
+            string prose = string.Concat(segments
+                .Where(s => !s.IsToolJson)
+                .Select(s => text.Substring(s.Start, s.Length)));
+            Assert.AreEqual("A  B  C", prose, "Prose between two tool calls must not be lost.");
+            Assert.AreEqual(text.Length, safeEnd);
+        }
+
+        [Test]
+        public void GetHybridSafeSegments_Empty_ReturnsNoSegments()
+        {
+            List<MeaiLlmClient.HybridProseSegment> segments =
+                MeaiLlmClient.GetHybridSafeSegments("", out int safeEnd);
+            Assert.IsEmpty(segments);
+            Assert.AreEqual(0, safeEnd);
+        }
+
+        [Test]
+        public void GetHybridUnemittedSuffix_StripsHeldToolJson_ReturnsTrailingProse()
+        {
+            string visible = "ok " + ToolJson + " bye";
+            string? suffix = MeaiLlmClient.GetHybridUnemittedSuffix(visible, 3);
+
+            Assert.IsNotNull(suffix);
+            Assert.That(suffix, Does.Contain("bye"));
+            Assert.That(suffix, Does.Not.Contain("\"name\""), "Held tool-call JSON must be stripped.");
+        }
+
+        [Test]
+        public void GetHybridUnemittedSuffix_CursorAtOrPastEnd_ReturnsNull()
+        {
+            Assert.IsNull(MeaiLlmClient.GetHybridUnemittedSuffix("abc", 3));
+            Assert.IsNull(MeaiLlmClient.GetHybridUnemittedSuffix("abc", 9));
+        }
+
+        [Test]
+        public void GetHybridUnemittedSuffix_WhitespaceOnlyTail_ReturnsNull()
+        {
+            Assert.IsNull(MeaiLlmClient.GetHybridUnemittedSuffix("ok    ", 2));
+        }
+    }
 #endif
 }

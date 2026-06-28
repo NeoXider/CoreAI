@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## 4.12.0 - 2026-06-28
+
+- **Lua mod versioning (`manage_mods versions` / `revert`).** Mod load/reload now records a revision per
+  edit into the existing `ILuaScriptVersionStore` (keyed `mod:<id>`); `LuaModManifest.Version` auto-derives
+  from the revision count. New `manage_mods versions` lists the revision history (revision 0 = original) and
+  `manage_mods revert` rolls a mod back to a recorded revision — a non-destructive revert (the reload
+  re-records the restored source as the new current revision, so history stays an audit trail). A no-op
+  reload (identical source) does not grow history. With no version store wired, load/reload still work and
+  `versions` reports no history.
+- **Runtime mod-handler error feedback (`manage_mods diagnostics`).** A hook that throws during `Tick`
+  previously only raised `ModHandlerErrored` + counted toward host-side auto-unload; it is now also recorded
+  in a bounded ring buffer (`MaxRetainedHandlerErrors = 32`, newest kept) so the agent can poll
+  `manage_mods diagnostics` next turn to learn of runtime handler failures and repair the mod.
+  `GetRecentHandlerErrors` / `ClearRecentHandlerErrors` expose and acknowledge the buffer.
+
 ## 4.11.5 - 2026-06-27
 
 - **Lockstep package version.** No portable CoreAI API or runtime behavior changed in this drop; the bump

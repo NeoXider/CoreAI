@@ -109,6 +109,116 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// Whether the configured model can receive images (vision / multimodal). Gates the camera send
+        /// path and any vision-tool registration: when <c>false</c>, callers should fall back to
+        /// <see cref="AskAsync"/> and omit images/tools. Resolved from <c>CoreAISettingsAsset.VisionSupport</c>
+        /// (On / Off / Auto-by-model-name).
+        /// </summary>
+        public static bool IsVisionEnabled()
+        {
+            return RequireChatService().IsVisionEnabled();
+        }
+
+        /// <summary>
+        /// Captures the named camera and sends it to a vision-capable model as a single USER message
+        /// (prompt + JPEG screenshot serialized to OpenAI <c>image_url</c>). The provider-safe camera →
+        /// model path. Throws when the configured model is text-only — check <see cref="IsVisionEnabled"/>
+        /// first. Returns the model's text reply.
+        /// <code>
+        /// if (CoreAi.IsVisionEnabled())
+        ///     string answer = await CoreAi.AskWithCameraAsync("What is on screen?", "main", "SmartChat");
+        /// </code>
+        /// </summary>
+        public static Task<string> AskWithCameraAsync(
+            string prompt,
+            string cameraName = "main",
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            int width = 512,
+            int height = 512,
+            CancellationToken cancellationToken = default)
+        {
+            return RequireChatService().AskWithCameraAsync(prompt, cameraName, roleId, width, height, cancellationToken);
+        }
+
+        /// <summary>
+        /// Camera overload taking an already-resolved <see cref="UnityEngine.Camera"/> (no name lookup).
+        /// See <see cref="AskWithCameraAsync(string,string,string,int,int,CancellationToken)"/>.
+        /// </summary>
+        public static Task<string> AskWithCameraAsync(
+            string prompt,
+            UnityEngine.Camera camera,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            int width = 512,
+            int height = 512,
+            CancellationToken cancellationToken = default)
+        {
+            return RequireChatService().AskWithCameraAsync(prompt, camera, roleId, width, height, cancellationToken);
+        }
+
+        /// <summary>
+        /// Registers <c>CameraLlmTool</c> (the <c>capture_camera</c> tool) on <paramref name="roleId"/> so a
+        /// vision-capable model can autonomously request a screenshot — but only when
+        /// <see cref="IsVisionEnabled"/> is <c>true</c>. For text-only models this is a no-op (the tool is
+        /// omitted), satisfying the capability gate on the tool-registration side. Returns whether the tool
+        /// was registered.
+        /// <para>
+        /// Because OpenAI tool results cannot carry images, after the tool runs lift the screenshot into a
+        /// follow-up user message with <see cref="AskWithImageFollowUpAsync"/> (subscribe to
+        /// <see cref="OnToolCallCompleted"/>, match <c>capture_camera</c>, pass its <c>ResultJson</c>).
+        /// </para>
+        /// </summary>
+        public static bool RegisterCameraVisionTool(string roleId = BuiltInAgentRoleIds.SmartChat)
+        {
+            if (string.IsNullOrWhiteSpace(roleId) || !IsVisionEnabled())
+            {
+                return false;
+            }
+
+            lock (SyncRoot)
+            {
+                if (!TryResolve(out _, out _, out _) || _scope?.Container == null)
+                {
+                    LogFacadeWarning("[CoreAi] RegisterCameraVisionTool: CoreAI services not resolved.");
+                    return false;
+                }
+
+                try
+                {
+                    AgentMemoryPolicy policy = (AgentMemoryPolicy)_scope.Container.Resolve(typeof(AgentMemoryPolicy));
+                    if (policy == null)
+                    {
+                        return false;
+                    }
+
+                    policy.AddToolForRole(roleId.Trim(), new Infrastructure.World.CameraLlmTool());
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    LogFacadeWarning($"[CoreAi] RegisterCameraVisionTool failed: {ex.Message}");
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Autonomous-tool follow-up lift: after the model calls <c>capture_camera</c>, OpenAI tool results
+        /// cannot carry images, so the host lifts the returned image into a follow-up USER <c>image_url</c>
+        /// message before the next model call. Pass the raw <c>capture_camera</c> result JSON (e.g.
+        /// <see cref="LlmToolCallCompleted.ResultJson"/> from <see cref="OnToolCallCompleted"/>). Returns
+        /// <c>null</c> when the result carries no usable image or vision is disabled.
+        /// </summary>
+        public static Task<string> AskWithImageFollowUpAsync(
+            string followUpPrompt,
+            string captureCameraResultJson,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return RequireChatService()
+                .AskWithImageFollowUpAsync(followUpPrompt, captureCameraResultJson, roleId, cancellationToken);
+        }
+
+        /// <summary>
         /// Streams model text as stripped string chunks (<c>&lt;think&gt;</c> filtered). Terminal empty chunks are not yielded.
         /// </summary>
         public static async IAsyncEnumerable<string> StreamAsync(

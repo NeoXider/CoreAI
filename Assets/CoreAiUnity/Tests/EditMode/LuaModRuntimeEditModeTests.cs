@@ -672,6 +672,138 @@ namespace CoreAI.Tests.EditMode
             runtime.LoadMod("full", "stub_edit()", LuaCapabilities.All);
             Assert.IsTrue(runtime.IsLoaded("full"));
         }
+
+        // ==================== Mod versioning (manage_mods versions/revert) ====================
+
+        [Test]
+        public void LuaModRuntime_Reload_WithChangedSource_AppendsRevision()
+        {
+            MemoryLuaScriptVersionStore versions = new();
+            LuaModRuntime runtime = new(versionStore: versions);
+
+            runtime.LoadMod("m", "local x = 1");
+            Assert.AreEqual(1, runtime.ListModVersions("m").Count, "Initial load seeds one revision.");
+
+            runtime.ReloadMod("m", "local x = 2");
+
+            IReadOnlyList<LuaScriptRevision> history = runtime.ListModVersions("m");
+            Assert.AreEqual(2, history.Count, "A changed reload appends a revision.");
+            Assert.AreEqual("local x = 1", history[0].Source);
+            Assert.AreEqual("local x = 2", history[history.Count - 1].Source);
+        }
+
+        [Test]
+        public void LuaModRuntime_Reload_WithIdenticalSource_DoesNotGrowHistory()
+        {
+            MemoryLuaScriptVersionStore versions = new();
+            LuaModRuntime runtime = new(versionStore: versions);
+
+            runtime.LoadMod("m", "local x = 1");
+            int before = runtime.ListModVersions("m").Count;
+
+            runtime.ReloadMod("m", "local x = 1");
+
+            Assert.AreEqual(before, runtime.ListModVersions("m").Count, "A no-op reload must not add a revision.");
+        }
+
+        [Test]
+        public void LuaModRuntime_Revert_RestoresPriorSource()
+        {
+            MemoryLuaScriptVersionStore versions = new();
+            LuaModRuntime runtime = new(versionStore: versions);
+
+            runtime.LoadMod("m", "local x = 1");
+            runtime.ReloadMod("m", "local x = 2");
+
+            Assert.IsTrue(runtime.TryRevertMod("m", 0, out string restored));
+            Assert.AreEqual("local x = 1", restored);
+            Assert.IsTrue(runtime.TryGetModSource("m", out string live));
+            Assert.AreEqual("local x = 1", live, "The live mod runs the reverted source.");
+        }
+
+        [Test]
+        public void LuaModRuntime_Revert_UnknownRevision_ReturnsFalse()
+        {
+            MemoryLuaScriptVersionStore versions = new();
+            LuaModRuntime runtime = new(versionStore: versions);
+            runtime.LoadMod("m", "local x = 1");
+
+            Assert.IsFalse(runtime.TryRevertMod("m", 99, out _));
+            Assert.IsFalse(runtime.TryRevertMod("m", -1, out _));
+        }
+
+        [Test]
+        public void LuaModRuntime_NoVersionStore_ListVersionsEmpty_LoadStillWorks()
+        {
+            LuaModRuntime runtime = new(); // NullLuaScriptVersionStore fallback
+
+            runtime.LoadMod("m", "local x = 1");
+
+            Assert.IsTrue(runtime.IsLoaded("m"));
+            Assert.IsEmpty(runtime.ListModVersions("m"));
+        }
+
+        // ============== Runtime handler-error feedback (manage_mods diagnostics) ==============
+
+        [Test]
+        public void LuaModRuntime_TickHandlerThrows_RecordedInRecentHandlerErrors()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            runtime.LoadMod("m", "hooks_on('boom', function(n, p) error('kaboom') end)");
+
+            runtime.EmitEvent("boom", "x");
+            runtime.Tick(0); // must not throw
+
+            IReadOnlyList<LuaModHandlerError> errors = runtime.GetRecentHandlerErrors("m");
+            Assert.IsNotEmpty(errors, "A Tick-time handler throw must be visible to the agent.");
+            Assert.AreEqual("m", errors[0].ModId);
+            Assert.IsFalse(string.IsNullOrEmpty(errors[0].Error));
+            Assert.GreaterOrEqual(errors[0].ConsecutiveCount, 1);
+        }
+
+        [Test]
+        public void LuaModRuntime_ClearRecentHandlerErrors_RemovesModEntries()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            runtime.LoadMod("m", "hooks_on('boom', function(n, p) error('kaboom') end)");
+            runtime.EmitEvent("boom", "x");
+            runtime.Tick(0);
+            Assert.IsNotEmpty(runtime.GetRecentHandlerErrors("m"));
+
+            int cleared = runtime.ClearRecentHandlerErrors("m");
+
+            Assert.GreaterOrEqual(cleared, 1);
+            Assert.IsEmpty(runtime.GetRecentHandlerErrors("m"));
+        }
+
+        // ==================== Per-tick event dispatch cap (P3) ====================
+
+        [Test]
+        public void LuaModRuntime_EmitMoreThanPerTickCap_TruncatesDispatchThenDrainsNextTick()
+        {
+            MemoryStore store = new();
+            LuaModRuntime runtime = new(store: store);
+            runtime.LoadMod("m",
+                "hooks_on('e', function(n, p) store_set('c', tostring((tonumber(store_get('c')) or 0) + 1)) end)");
+
+            int over = LuaModRuntime.DefaultMaxEventsDispatchedPerTick + 6;
+            for (int i = 0; i < over; i++)
+            {
+                runtime.EmitEvent("e", i.ToString());
+            }
+
+            runtime.Tick(0);
+            Assert.AreEqual(
+                LuaModRuntime.DefaultMaxEventsDispatchedPerTick.ToString(),
+                store.Get("m", "c"),
+                "Per-tick dispatch must be capped at DefaultMaxEventsDispatchedPerTick.");
+
+            runtime.Tick(0);
+            Assert.AreEqual(over.ToString(), store.Get("m", "c"),
+                "The remaining queued events drain on the following tick.");
+        }
     }
 }
 #endif

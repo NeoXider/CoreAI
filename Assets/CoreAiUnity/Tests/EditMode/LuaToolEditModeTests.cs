@@ -299,4 +299,30 @@ namespace CoreAI.Tests.EditMode
             public bool EnableStreaming => true;
         }
     }
+
+    /// <summary>
+    /// Drift guard (P3): the forbidden invented-API list must stay identical between the
+    /// <c>execute_lua</c> tool contract (<see cref="LuaTool.ExecuteLuaDescription"/>) and the Programmer
+    /// system prompt (<see cref="BuiltInAgentSystemPromptTexts.Programmer"/>), so the model gets one
+    /// consistent rule from both surfaces.
+    /// </summary>
+    public sealed class ForbiddenLuaApiConsistencyEditModeTests
+    {
+        private static readonly string[] ForbiddenApis =
+        {
+            "game.rules", "game_rules", "game.enemies", "game.create", "game.destroy", "GameObject.Find"
+        };
+
+        [Test]
+        public void ForbiddenApiList_PresentInBothLuaToolDescriptionAndProgrammerPrompt()
+        {
+            foreach (string api in ForbiddenApis)
+            {
+                StringAssert.Contains(api, LuaTool.ExecuteLuaDescription,
+                    $"execute_lua description must forbid {api}");
+                StringAssert.Contains(api, BuiltInAgentSystemPromptTexts.Programmer,
+                    $"Programmer prompt must forbid {api}");
+            }
+        }
+    }
 }

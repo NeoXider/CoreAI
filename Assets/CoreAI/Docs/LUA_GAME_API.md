@@ -176,16 +176,48 @@ modRuntime.ForgetMod("greeter");                                      // delete 
 - **Security.** Persisted, rehydrated, imported, and copied mods are **never** granted `Full` unless the
   host explicitly opts in. A shared mod can only ever request capabilities; the host grant decides.
 
-The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, and `forget` in addition
-to `load`, `reload`, `unload`, `list`, `get_source`. See [FIRST_MOD.md](FIRST_MOD.md) for a worked
-walkthrough.
+### Mod versioning (revision history + rollback)
+
+Pass an `ILuaScriptVersionStore` into `LuaModRuntime` (constructor parameter `versionStore`; the Unity
+installer wires the host's existing store automatically) to record a **revision per edit**, keyed by
+`mod:<id>` so a mod's history shares the version store with one-shot `execute_lua` scripts without
+colliding with a game-defined script slot. Each successful `LoadMod` / `ReloadMod` calls
+`SeedOriginal` (establishing revision `0`) then `RecordSuccessfulExecution`, which appends a new revision
+**only when the source actually changed** — a no-op reload does not grow the history. The persisted and
+exported `LuaModManifest.Version` is then **auto-derived** as the revision count (`"1"` for a freshly
+seeded mod, `"3"` after three distinct edits), so the host never manages it by hand. When no version
+store is wired the runtime uses `NullLuaScriptVersionStore` (no history — the prior behavior).
+
+```csharp
+var modRuntime = new LuaModRuntime(gameBindings, store, log,
+    sourceStore: fileSourceStore, versionStore: scriptVersions);
+IReadOnlyList<LuaScriptRevision> history = modRuntime.ListModVersions("greeter"); // 0 = original
+modRuntime.TryRevertMod("greeter", revisionIndex: 0, out string restored);        // roll back
+```
+
+`TryRevertMod(id, revisionIndex, out restored)` rolls a loaded mod back by **reloading** it from the
+chosen revision's source (a non-destructive revert: the reload appends the restored source as the new
+current revision and re-persists). If the restored source fails to reload, the live mod is left
+untouched, exactly like `ReloadMod`.
+
+### Runtime handler-error feedback
+
+Load/reload errors propagate synchronously to whoever triggered them, but a hook or timer that throws
+**later**, during `Tick`, only raises `ModHandlerErrored` (and counts toward host-side auto-unload). The
+runtime now also buffers these Tick-time failures in a bounded ring (`MaxRetainedHandlerErrors`), readable
+via `GetRecentHandlerErrors(modId = null)` and clearable via `ClearRecentHandlerErrors(modId = null)`, so
+the agent can learn of them on a later turn through `manage_mods diagnostics` and repair the mod.
+
+The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `forget`, `versions`,
+`revert`, and `diagnostics` in addition to `load`, `reload`, `unload`, `list`, `get_source`. See
+[FIRST_MOD.md](FIRST_MOD.md) for a worked walkthrough.
 
 ## LLM Tools (Programmer Role)
 
 | Tool | Purpose |
 |---|---|
 | `execute_lua` | One-shot Lua in the sandbox (same bindings and limits as the envelope pipeline) |
-| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget` for `LuaModRuntime` |
+| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` for `LuaModRuntime` |
 
 `manage_mods` does not let the model expand the capability tier; the host sets the tier when registering the tool.
 When `enableFullLuaAccess` is on, mods loaded through the built-in Programmer `manage_mods` tool receive

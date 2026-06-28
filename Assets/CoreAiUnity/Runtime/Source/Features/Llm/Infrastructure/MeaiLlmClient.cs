@@ -527,6 +527,60 @@ namespace CoreAI.Infrastructure.Llm
                     yield return new LlmStreamChunk { BufferedStreamingNoToolBinding = true };
                 }
 
+                // Hybrid tool-json hold, on-the-fly (Kilo/Cline-style): given the accumulated visible text so
+                // far, emit every prose range that is already resolvable as live tokens, hide every completed
+                // text-shaped tool-call JSON span, and stop before the first still-incomplete `{...}` object.
+                // Prose AFTER a closed tool JSON resumes streaming live - only the tool-call JSON is hidden,
+                // never the surrounding prose/preamble. `hybridRawExclusiveEndEmitted` advances over both
+                // emitted prose and skipped JSON, so downstream suffix reconciliation stays in sync.
+                IEnumerable<LlmStreamChunk> DrainHybridSafeSegments(string full)
+                {
+                    List<HybridProseSegment> segments = GetHybridSafeSegments(full, out int safeEnd);
+                    foreach (HybridProseSegment segment in segments)
+                    {
+                        if (segment.Start + segment.Length <= hybridRawExclusiveEndEmitted)
+                        {
+                            continue; // already consumed in a previous update
+                        }
+
+                        int from = Math.Max(segment.Start, hybridRawExclusiveEndEmitted);
+                        int len = segment.Start + segment.Length - from;
+                        if (len <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (!segment.IsToolJson)
+                        {
+                            string prose = full.Substring(from, len);
+                            foreach (string part in SplitForLiveUiStreaming(prose, LiveUiStreamMaxCharsPerChunk))
+                            {
+                                emittedAnyVisibleText = true;
+                                streamedVisibleToConsumer = true;
+                                yield return new LlmStreamChunk { Text = part };
+                            }
+                        }
+                        // else: completed tool-call JSON span - hidden (never emitted), only the cursor advances.
+                    }
+
+                    if (safeEnd > hybridRawExclusiveEndEmitted)
+                    {
+                        hybridRawExclusiveEndEmitted = safeEnd;
+                    }
+
+                    if (safeEnd < full.Length && !emittedHybridHoldTypingHint)
+                    {
+                        emittedHybridHoldTypingHint = true;
+                        _logger.LogInfo(GameLogFeature.Llm,
+                            "MeaiLlmClient: Tool-json hold started - emitting only the safe prose; the trailing `{...}` is hidden behind the tool progress indicator until the object closes or the stream ends.");
+                        yield return new LlmStreamChunk
+                        {
+                            BufferedStreamingNoToolBinding = true,
+                            BufferedStreamingUseToolProgressHint = true
+                        };
+                    }
+                }
+
                 await foreach (MEAI.ChatResponseUpdate update in _innerClient
                                    .GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken))
                 {
@@ -587,33 +641,10 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     else if (hybridToolJsonHold)
                     {
-                        string full = iterationVisible.ToString();
-                        int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
-                        if (safeEnd > hybridRawExclusiveEndEmitted)
+                        foreach (LlmStreamChunk part in DrainHybridSafeSegments(iterationVisible.ToString()))
                         {
-                            string delta = full.Substring(hybridRawExclusiveEndEmitted,
-                                safeEnd - hybridRawExclusiveEndEmitted);
-                            hybridRawExclusiveEndEmitted = safeEnd;
-                            foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                emittedAnyVisibleText = true;
-                                yield return new LlmStreamChunk { Text = part };
-                            }
-
-                            streamedVisibleToConsumer = true;
-                        }
-
-                        if (safeEnd < full.Length && !emittedHybridHoldTypingHint)
-                        {
-                            emittedHybridHoldTypingHint = true;
-                            _logger.LogInfo(GameLogFeature.Llm,
-                                "MeaiLlmClient: Tool-json hold started - emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
-                            yield return new LlmStreamChunk
-                            {
-                                BufferedStreamingNoToolBinding = true,
-                                BufferedStreamingUseToolProgressHint = true
-                            };
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return part;
                         }
                     }
                 }
@@ -638,33 +669,10 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     else if (hybridToolJsonHold)
                     {
-                        string full = iterationVisible.ToString();
-                        int safeEnd = GetExclusiveEndForSafeUnboundRawStreaming(full);
-                        if (safeEnd > hybridRawExclusiveEndEmitted)
+                        foreach (LlmStreamChunk part in DrainHybridSafeSegments(iterationVisible.ToString()))
                         {
-                            string delta = full.Substring(hybridRawExclusiveEndEmitted,
-                                safeEnd - hybridRawExclusiveEndEmitted);
-                            hybridRawExclusiveEndEmitted = safeEnd;
-                            foreach (string part in SplitForLiveUiStreaming(delta, LiveUiStreamMaxCharsPerChunk))
-                            {
-                                cancellationToken.ThrowIfCancellationRequested();
-                                emittedAnyVisibleText = true;
-                                yield return new LlmStreamChunk { Text = part };
-                            }
-
-                            streamedVisibleToConsumer = true;
-                        }
-
-                        if (safeEnd < full.Length && !emittedHybridHoldTypingHint)
-                        {
-                            emittedHybridHoldTypingHint = true;
-                            _logger.LogInfo(GameLogFeature.Llm,
-                                "MeaiLlmClient: Tool-json hold started - emitting only the safe prefix; trailing `{...}` is buffered until the object closes or the stream ends.");
-                            yield return new LlmStreamChunk
-                            {
-                                BufferedStreamingNoToolBinding = true,
-                                BufferedStreamingUseToolProgressHint = true
-                            };
+                            cancellationToken.ThrowIfCancellationRequested();
+                            yield return part;
                         }
                     }
                 }
@@ -778,8 +786,8 @@ namespace CoreAI.Infrastructure.Llm
                             }
                             else if (hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0)
                             {
-                                string suffix = GetCleanedTextSuffixAfterHybridPrefix(
-                                    cleanedText, visibleText, hybridRawExclusiveEndEmitted);
+                                string suffix = GetHybridUnemittedSuffix(
+                                    visibleText, hybridRawExclusiveEndEmitted);
                                 if (!string.IsNullOrEmpty(suffix))
                                 {
                                     foreach (string part in SplitForLiveUiStreaming(suffix,
@@ -820,8 +828,8 @@ namespace CoreAI.Infrastructure.Llm
                     else if (streamedVisibleToConsumer && hybridToolJsonHold && hybridRawExclusiveEndEmitted > 0 &&
                              !string.IsNullOrWhiteSpace(cleanedText))
                     {
-                        string suffix = GetCleanedTextSuffixAfterHybridPrefix(
-                            cleanedText, visibleText, hybridRawExclusiveEndEmitted);
+                        string suffix = GetHybridUnemittedSuffix(
+                            visibleText, hybridRawExclusiveEndEmitted);
                         if (!string.IsNullOrEmpty(suffix))
                         {
                             foreach (string part in SplitForLiveUiStreaming(suffix, LiveUiStreamMaxCharsPerChunk))
@@ -1458,6 +1466,198 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// On-the-fly hybrid hold: prose in <paramref name="visibleText"/> up to
+        /// <paramref name="hybridRawExclusiveEndEmitted"/> has already been streamed live (with any tool-call
+        /// JSON in that region hidden). After the turn ends and tool calls are extracted, the only prose that
+        /// still needs to be emitted is the JSON-stripped remainder of the held tail
+        /// (<c>visibleText[hybridRawExclusiveEndEmitted..]</c>). This returns that suffix, or <c>null</c> when
+        /// the held tail was only tool-call JSON / whitespace.
+        /// </summary>
+        internal static string? GetHybridUnemittedSuffix(string visibleText, int hybridRawExclusiveEndEmitted)
+        {
+            if (string.IsNullOrEmpty(visibleText) || hybridRawExclusiveEndEmitted >= visibleText.Length)
+            {
+                return null;
+            }
+
+            int from = Math.Max(0, hybridRawExclusiveEndEmitted);
+            string heldTail = visibleText.Substring(from);
+            if (string.IsNullOrWhiteSpace(heldTail))
+            {
+                return null;
+            }
+
+            // Strip any tool-call JSON that lived in the held tail so only prose remains.
+            string strippedTail = TryExtractToolCallsFromText(heldTail, out _, out string cleanedTail)
+                ? cleanedTail
+                : heldTail;
+
+            return string.IsNullOrEmpty(strippedTail) ? null : strippedTail;
+        }
+
+        /// <summary>
+        /// One contiguous range of <c>text</c> that is safe to stream live in hybrid tool-json hold:
+        /// either prose (outside any tool-call JSON) or skipped tool-call JSON that must be hidden.
+        /// </summary>
+        internal readonly struct HybridProseSegment
+        {
+            public HybridProseSegment(int start, int length, bool isToolJson)
+            {
+                Start = start;
+                Length = length;
+                IsToolJson = isToolJson;
+            }
+
+            /// <summary>Inclusive start index into the source text.</summary>
+            public int Start { get; }
+
+            /// <summary>Length of the segment in characters.</summary>
+            public int Length { get; }
+
+            /// <summary>When <c>true</c> this span is a complete text-shaped tool-call JSON object to hide (never emit).</summary>
+            public bool IsToolJson { get; }
+        }
+
+        /// <summary>
+        /// Hybrid tool-json hold, Kilo/Cline-style: instead of holding everything from the first <c>{</c>
+        /// to the end of the turn, this walks <paramref name="text"/> and returns the ranges that can be
+        /// resolved <em>now</em> — prose ranges (safe to stream as visible tokens) and completed text-shaped
+        /// tool-call JSON spans (hidden) — up to <paramref name="exclusiveSafeEnd"/>. Everything at or after
+        /// <paramref name="exclusiveSafeEnd"/> is an <em>incomplete</em> object that may still become a tool
+        /// call and must stay held until it closes or the turn ends.
+        /// <para>
+        /// This is what keeps prose streaming live <em>after</em> a tool call: once a text-shaped tool JSON
+        /// closes, the prose that follows it is immediately a safe prose segment again.
+        /// </para>
+        /// Indices align with <paramref name="text"/> because <see cref="StripCodeBlocks"/> preserves length.
+        /// </summary>
+        internal static List<HybridProseSegment> GetHybridSafeSegments(string text, out int exclusiveSafeEnd)
+        {
+            List<HybridProseSegment> segments = new();
+            exclusiveSafeEnd = 0;
+            if (string.IsNullOrEmpty(text))
+            {
+                return segments;
+            }
+
+            string search = StripCodeBlocks(text);
+
+            // Hold boundary = start of the first STILL-INCOMPLETE (unclosed) brace that could grow into a
+            // tool call. Unlike GetExclusiveEndForSafeUnboundRawStreaming, completed tool-call JSON spans do
+            // NOT lower this boundary - they are hidden in place so prose after their closing `}` keeps
+            // streaming live.
+            int holdBoundary = GetFirstIncompleteBraceStart(search);
+
+            // Completed text-shaped tool-call JSON spans (to hide) that fall before the hold boundary.
+            List<JsonSpan> toolSpans = FindToolCallJsonSpans(search);
+
+            int cursor = 0;
+            foreach (JsonSpan span in toolSpans.OrderBy(s => s.Start))
+            {
+                if (span.Start >= holdBoundary)
+                {
+                    break;
+                }
+
+                if (span.Start > cursor)
+                {
+                    segments.Add(new HybridProseSegment(cursor, span.Start - cursor, isToolJson: false));
+                }
+
+                segments.Add(new HybridProseSegment(span.Start, span.Length, isToolJson: true));
+                cursor = span.Start + span.Length;
+            }
+
+            if (holdBoundary > cursor)
+            {
+                segments.Add(new HybridProseSegment(cursor, holdBoundary - cursor, isToolJson: false));
+            }
+
+            exclusiveSafeEnd = holdBoundary;
+            return segments;
+        }
+
+        /// <summary>
+        /// Returns the index of the first still-open (unbalanced) <c>{</c> in <paramref name="search"/> — the
+        /// point from which output must be held because the object may still grow into a tool call. Returns
+        /// <c>search.Length</c> when every brace is balanced (nothing pending). <paramref name="search"/> must
+        /// already be code-block-stripped so indices align with the source text.
+        /// </summary>
+        private static int GetFirstIncompleteBraceStart(string search)
+        {
+            if (string.IsNullOrEmpty(search))
+            {
+                return 0;
+            }
+
+            int i = 0;
+            while (i < search.Length)
+            {
+                int braceStart = search.IndexOf('{', i);
+                if (braceStart < 0)
+                {
+                    break;
+                }
+
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                int j = braceStart;
+
+                for (; j < search.Length; j++)
+                {
+                    char c = search[j];
+
+                    if (escaped)
+                    {
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (c == '\\' && inString)
+                    {
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (c == '"')
+                    {
+                        inString = !inString;
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        continue;
+                    }
+
+                    if (c == '{')
+                    {
+                        depth++;
+                    }
+                    else if (c == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (depth != 0)
+                {
+                    // Unbalanced from braceStart to end of text: hold from here.
+                    return braceStart;
+                }
+
+                i = j + 1;
+            }
+
+            return search.Length;
         }
 
         /// <summary>

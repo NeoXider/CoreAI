@@ -21,6 +21,24 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
+    /// A single Tick-time mod-handler failure captured for later inspection by the agent (via
+    /// <see cref="LuaModRuntime.GetRecentHandlerErrors"/> and the <c>manage_mods diagnostics</c>
+    /// action). Unlike a load/reload error — which propagates synchronously to whoever triggered it —
+    /// these happen asynchronously on the host thread, so they are buffered here so the agent learns of
+    /// them on a later turn and can repair the mod.
+    /// </summary>
+    public sealed class LuaModHandlerError
+    {
+        public string ModId = "";
+        public string Error = "";
+
+        /// <summary>The mod's consecutive-failure streak when this error fired (resets after any success).</summary>
+        public int ConsecutiveCount;
+
+        public DateTime AtUtc;
+    }
+
+    /// <summary>
     /// Persistent runtime for long-lived Lua mods (vs one-shot envelope scripts). A mod is a
     /// sandboxed script that registers hooks during load and then lives across frames:
     /// <list type="bullet">
@@ -63,6 +81,21 @@ namespace CoreAI.Ai
         /// <summary>Shortest accepted <c>hooks_every</c> interval, so timers cannot degenerate into per-instruction spam.</summary>
         public const double MinTimerIntervalSeconds = 0.05;
 
+        /// <summary>
+        /// Prefix applied to a mod id when forming its <see cref="ILuaScriptVersionStore"/> key, so a mod's
+        /// revision history shares the version store with one-shot <c>execute_lua</c> scripts without ever
+        /// colliding with a game-defined script slot of the same name.
+        /// </summary>
+        public const string VersionKeyPrefix = "mod:";
+
+        /// <summary>
+        /// Upper bound on the number of recent Tick-time handler errors retained for the agent to inspect
+        /// via <see cref="GetRecentHandlerErrors"/> / the <c>manage_mods diagnostics</c> action. Oldest
+        /// entries are dropped once the buffer is full so a perpetually broken mod cannot grow it without
+        /// bound.
+        /// </summary>
+        public const int MaxRetainedHandlerErrors = 32;
+
         private sealed class TimerEntry
         {
             public double IntervalSeconds;
@@ -92,9 +125,18 @@ namespace CoreAI.Ai
         private readonly IGameLuaRuntimeBindings _gameBindings;
         private readonly ILuaModStore _store;
         private readonly ILuaModSourceStore _sourceStore;
+        private readonly ILuaScriptVersionStore _versionStore;
         private readonly bool _autoPersistMods;
         private readonly ILog _log;
         private readonly List<Mod> _tickScratch = new();
+
+        /// <summary>
+        /// Ring buffer of the most recent Tick-time handler failures, capped at
+        /// <see cref="MaxRetainedHandlerErrors"/>. Populated under <see cref="_gate"/> from the (unguarded)
+        /// tick so the agent can poll them next turn via <c>manage_mods diagnostics</c>; the synchronous
+        /// load/reload error path already returns its failure to the caller, so it is not buffered here.
+        /// </summary>
+        private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
 
         /// <summary>
         /// Round-robin start index into <see cref="_tickScratch"/> for charging the global event
@@ -162,6 +204,13 @@ namespace CoreAI.Ai
         /// stored package dormant. Persistence is always best-effort: a store failure is logged, never
         /// thrown out of the load.
         /// </param>
+        /// <param name="versionStore">
+        /// Optional revision tracker. When supplied, every successful <see cref="LoadMod"/>/<see cref="ReloadMod"/>
+        /// records the mod's source as a new revision (keyed by <see cref="VersionKeyPrefix"/> + mod id), so
+        /// the agent (or host) can list past revisions and roll back via <see cref="ListModVersions"/> /
+        /// <see cref="RevertMod"/>. Null falls back to <see cref="NullLuaScriptVersionStore"/> (no history —
+        /// the prior behaviour).
+        /// </param>
         public LuaModRuntime(
             IGameLuaRuntimeBindings gameBindings = null,
             ILuaModStore store = null,
@@ -169,14 +218,22 @@ namespace CoreAI.Ai
             int handlerTimeoutMs = DefaultHandlerTimeoutMs,
             long handlerMaxSteps = DefaultHandlerMaxSteps,
             ILuaModSourceStore sourceStore = null,
-            bool autoPersistMods = true)
+            bool autoPersistMods = true,
+            ILuaScriptVersionStore versionStore = null)
         {
             _gameBindings = gameBindings;
             _store = store;
             _log = log;
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
+            _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
             _handlerGuard = new LuaExecutionGuard(handlerTimeoutMs, handlerMaxSteps);
+        }
+
+        /// <summary>The <see cref="ILuaScriptVersionStore"/> key for a mod's revision history.</summary>
+        private static string VersionKey(string modId)
+        {
+            return VersionKeyPrefix + modId;
         }
 
         /// <summary>Snapshot of all loaded mods.</summary>
@@ -309,6 +366,13 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
+
+            // Record the revision before persisting so PersistMod can stamp the manifest Version from the
+            // revision count. The version store seeds the original on the first record and dedups identical
+            // source, so a rehydrate (which replays the stored current source) does not create a spurious
+            // entry. Recording is independent of persistToStore: a masked rehydrate/import still wants its
+            // history seeded.
+            RecordRevision(modId, luaCode);
             if (persistToStore)
             {
                 PersistMod(modId, luaCode, capabilities);
@@ -453,8 +517,120 @@ namespace CoreAI.Ai
             }
 
             _log?.Info($"[LuaModRuntime] Mod '{modId}' reloaded (caps={caps}).");
+            RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps);
             ModSourceLoaded?.Invoke(modId, luaCode, caps);
+        }
+
+        /// <summary>
+        /// Records <paramref name="luaCode"/> as a new revision of the mod in the version store. Best-effort:
+        /// a store failure is logged, never thrown out of a load/reload. <c>SeedOriginal</c> establishes the
+        /// baseline (revision 0) on the first record; <c>RecordSuccessfulExecution</c> appends a new revision
+        /// only when the source actually changed, so a no-op reload does not grow the history.
+        /// </summary>
+        private void RecordRevision(string modId, string luaCode)
+        {
+            try
+            {
+                string key = VersionKey(modId);
+                _versionStore.SeedOriginal(key, luaCode);
+                _versionStore.RecordSuccessfulExecution(key, luaCode);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Version store record for '{modId}' failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Returns the recorded revision history for a mod (revision 0 = original), newest last, or an empty
+        /// list when the mod has no tracked history (no version store, or never loaded through one).
+        /// </summary>
+        public IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
+        {
+            string modId = Normalize(id);
+            try
+            {
+                if (_versionStore.TryGetSnapshot(VersionKey(modId), out LuaScriptVersionRecord snapshot) &&
+                    snapshot != null)
+                {
+                    return snapshot.History;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Version store snapshot for '{modId}' failed: {ex}");
+            }
+
+            return Array.Empty<LuaScriptRevision>();
+        }
+
+        /// <summary>
+        /// Rolls a mod back to a recorded revision. When the mod is currently loaded it is reloaded from that
+        /// revision's source; the reload appends the restored source as the new current revision (a
+        /// non-destructive revert — the history is an audit trail, not rewound) and re-persists the source
+        /// store and manifest Version. When the mod is not loaded the version store is rewound to that revision
+        /// instead (truncating later revisions), so a future load starts from the chosen point. Sets
+        /// <paramref name="restoredSource"/> and returns true on success; returns false when the mod has no such
+        /// revision. Throws if the restored source fails to reload (the live mod stays untouched, exactly like
+        /// <see cref="ReloadMod"/>).
+        /// </summary>
+        public bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
+        {
+            restoredSource = null;
+            string modId = Normalize(id);
+            if (revisionIndex < 0)
+            {
+                return false;
+            }
+
+            LuaScriptVersionRecord snapshot;
+            try
+            {
+                if (!_versionStore.TryGetSnapshot(VersionKey(modId), out snapshot) || snapshot == null)
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Version store snapshot for '{modId}' failed: {ex}");
+                return false;
+            }
+
+            if (revisionIndex >= snapshot.History.Count)
+            {
+                return false;
+            }
+
+            string source = snapshot.History[revisionIndex].Source ?? "";
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return false;
+            }
+
+            // Reload first (it can throw on a bad revision, leaving the live mod untouched), then truncate the
+            // version history to the chosen revision so a future revert references a clean lineage. Reload
+            // re-records the restored source as the new current revision and re-persists the source store.
+            if (IsLoaded(modId))
+            {
+                ReloadMod(modId, source);
+            }
+            else
+            {
+                try
+                {
+                    _versionStore.ResetToRevision(VersionKey(modId), revisionIndex);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaModRuntime] Version store revert for '{modId}' failed: {ex}");
+                    return false;
+                }
+            }
+
+            restoredSource = source;
+            return true;
         }
 
         /// <summary>Queues a game event for delivery to every mod's <c>hooks_on</c> handlers on the next <see cref="Tick"/>.</summary>
@@ -648,12 +824,19 @@ namespace CoreAI.Ai
                 mod.ErrorCount++;
                 _log?.Error($"[LuaModRuntime] Mod '{mod.Id}' handler failed ({mod.ErrorCount}): {ex}");
 
+                string message = (ex is InterpreterException ie ? ie.Message : ex.Message ?? "")
+                    .Replace("\r", " ").Replace("\n", " ").Trim();
+
+                // Buffer the failure so the agent can poll it next turn via `manage_mods diagnostics`,
+                // independent of any host-side ModHandlerErrored subscriber. (A load/reload error already
+                // returns synchronously to whoever triggered it; only these async Tick-time failures need
+                // a feedback path back to the model.)
+                RecordHandlerError(mod.Id, message, mod.ErrorCount);
+
                 // Surface the runtime failure so hosts can drive auto-repair. Fired outside the gate
                 // (InvokeGuarded never holds it); a throwing subscriber must not derail the tick.
                 if (ModHandlerErrored != null)
                 {
-                    string message = (ex is InterpreterException ie ? ie.Message : ex.Message ?? "")
-                        .Replace("\r", " ").Replace("\n", " ").Trim();
                     try
                     {
                         ModHandlerErrored.Invoke(mod.Id, message, mod.ErrorCount);
@@ -1022,16 +1205,45 @@ namespace CoreAI.Ai
             }
         }
 
-        /// <summary>Builds a manifest for the given mod with its capability set rendered as a string.</summary>
-        private static LuaModManifest BuildManifest(string id, LuaCapabilities caps, bool active)
+        /// <summary>
+        /// Builds a manifest for the given mod with its capability set rendered as a string. The
+        /// <see cref="LuaModManifest.Version"/> is auto-derived from the revision count tracked in the version
+        /// store (number of recorded revisions; "1" for a freshly seeded mod, blank when no history exists), so
+        /// each edit through load/reload advances the persisted and exported version without the caller managing it.
+        /// </summary>
+        private LuaModManifest BuildManifest(string id, LuaCapabilities caps, bool active)
         {
             return new LuaModManifest
             {
                 Id = id,
                 Name = id,
                 Capabilities = caps.ToString(),
-                Active = active
+                Active = active,
+                Version = CurrentVersionString(id)
             };
+        }
+
+        /// <summary>
+        /// Renders the mod's current version as the count of recorded revisions (e.g. "3" after three distinct
+        /// edits). Blank when the version store holds no history for the mod. Best-effort: a store failure
+        /// yields a blank version rather than throwing.
+        /// </summary>
+        private string CurrentVersionString(string id)
+        {
+            try
+            {
+                if (_versionStore.TryGetSnapshot(VersionKey(Normalize(id)), out LuaScriptVersionRecord snapshot) &&
+                    snapshot != null && snapshot.History.Count > 0)
+                {
+                    return snapshot.History.Count.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaModRuntime] Version store version lookup for '{id}' failed: {ex}");
+            }
+
+            return "";
         }
 
         /// <summary>
@@ -1069,6 +1281,95 @@ namespace CoreAI.Ai
 
             _log?.Warn($"[LuaModRuntime] Unrecognized capability string '{text}'; defaulting to None.");
             return LuaCapabilities.None;
+        }
+
+        /// <summary>
+        /// Appends a Tick-time handler failure to the bounded recent-errors buffer, dropping the oldest entry
+        /// when full. Called from the (gate-free) <see cref="InvokeGuarded"/> catch, so it takes the gate only
+        /// to mutate the queue.
+        /// </summary>
+        private void RecordHandlerError(string modId, string message, int consecutiveCount)
+        {
+            LuaModHandlerError entry = new()
+            {
+                ModId = modId,
+                Error = message ?? "",
+                ConsecutiveCount = consecutiveCount,
+                AtUtc = DateTime.UtcNow
+            };
+
+            lock (_gate)
+            {
+                if (_recentHandlerErrors.Count >= MaxRetainedHandlerErrors)
+                {
+                    _recentHandlerErrors.Dequeue();
+                }
+
+                _recentHandlerErrors.Enqueue(entry);
+            }
+        }
+
+        /// <summary>
+        /// Returns a snapshot of recent Tick-time handler failures (oldest first), capped at
+        /// <see cref="MaxRetainedHandlerErrors"/>. The agent polls these via <c>manage_mods diagnostics</c> so
+        /// it learns of mods whose hooks/timers throw at runtime — failures that, unlike load/reload errors, are
+        /// never returned synchronously. Pass <paramref name="modId"/> to filter to a single mod.
+        /// </summary>
+        public IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(string modId = null)
+        {
+            string filter = modId == null ? null : Normalize(modId);
+            List<LuaModHandlerError> result = new();
+            lock (_gate)
+            {
+                foreach (LuaModHandlerError entry in _recentHandlerErrors)
+                {
+                    if (filter == null || filter.Length == 0 ||
+                        string.Equals(entry.ModId, filter, StringComparison.Ordinal))
+                    {
+                        result.Add(entry);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Clears the recent Tick-time handler-error buffer (optionally only entries for one mod), so an agent
+        /// that has repaired a mod can acknowledge its failures and stop seeing them on later diagnostics polls.
+        /// Returns the number of entries removed.
+        /// </summary>
+        public int ClearRecentHandlerErrors(string modId = null)
+        {
+            string filter = modId == null ? null : Normalize(modId);
+            lock (_gate)
+            {
+                if (filter == null || filter.Length == 0)
+                {
+                    int cleared = _recentHandlerErrors.Count;
+                    _recentHandlerErrors.Clear();
+                    return cleared;
+                }
+
+                int before = _recentHandlerErrors.Count;
+                LuaModHandlerError[] kept = new LuaModHandlerError[before];
+                int keptCount = 0;
+                foreach (LuaModHandlerError entry in _recentHandlerErrors)
+                {
+                    if (!string.Equals(entry.ModId, filter, StringComparison.Ordinal))
+                    {
+                        kept[keptCount++] = entry;
+                    }
+                }
+
+                _recentHandlerErrors.Clear();
+                for (int i = 0; i < keptCount; i++)
+                {
+                    _recentHandlerErrors.Enqueue(kept[i]);
+                }
+
+                return before - keptCount;
+            }
         }
 
         private static string Normalize(string value)

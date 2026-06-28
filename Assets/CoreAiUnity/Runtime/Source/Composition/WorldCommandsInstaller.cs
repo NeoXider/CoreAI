@@ -118,7 +118,11 @@ namespace CoreAI.Composition
                     c.Resolve<IGameLuaRuntimeBindings>(),
                     c.Resolve<ILuaModStore>(),
                     sourceStore: c.Resolve<ILuaModSourceStore>(),
-                    autoPersistMods: true),
+                    autoPersistMods: true,
+                    // Reuse the host's ILuaScriptVersionStore so mod load/reload records a revision per edit
+                    // (keyed by mod id) and `manage_mods versions`/`revert` can list and roll back changes.
+                    // ResolveOrDefault: minimal containers may omit it, in which case mods simply have no history.
+                    versionStore: c.ResolveOrDefault<ILuaScriptVersionStore>()),
                 Lifetime.Singleton);
             builder.RegisterEntryPoint<ITickable>(c => new LuaModRuntimeTicker(
                     c.Resolve<LuaModRuntime>(),

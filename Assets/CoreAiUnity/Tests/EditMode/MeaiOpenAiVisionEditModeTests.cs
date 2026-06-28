@@ -66,5 +66,94 @@ namespace CoreAI.Tests.EditMode
             StringAssert.StartsWith("data:image/png;base64,", (string)imageUrl["url"]);
         }
     }
+
+    /// <summary>
+    /// Covers the vision capability gate (<see cref="VisionCapability"/>) and the autonomous tool-result
+    /// image lift (<see cref="CoreAI.Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult"/> /
+    /// <see cref="CoreAI.Infrastructure.World.CameraLlmTool.TryParseImageDataUri"/>).
+    /// </summary>
+    public sealed class VisionCapabilityGateEditModeTests
+    {
+        [TestCase("gpt-4o", true)]
+        [TestCase("gpt-4o-mini", true)]
+        [TestCase("qwen2-vl-7b", true)]
+        [TestCase("gemini-1.5-pro", true)]
+        [TestCase("claude-sonnet-4", true)]
+        [TestCase("llava-1.6", true)]
+        [TestCase("gpt-3.5-turbo", false)]
+        [TestCase("qwen3-4b", false)]
+        [TestCase("", false)]
+        [TestCase(null, false)]
+        public void ModelLooksVisionCapable_MatchesKnownVisionModels(string model, bool expected)
+        {
+            Assert.AreEqual(expected, VisionCapability.ModelLooksVisionCapable(model));
+        }
+
+        [Test]
+        public void IsEnabled_OnForcesVision_EvenForTextOnlyModel()
+        {
+            Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.On, "gpt-3.5-turbo"));
+        }
+
+        [Test]
+        public void IsEnabled_OffDisablesVision_EvenForVisionModel()
+        {
+            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Off, "gpt-4o"));
+        }
+
+        [Test]
+        public void IsEnabled_AutoDefersToModelHeuristic()
+        {
+            Assert.IsTrue(VisionCapability.IsEnabled(VisionSupportMode.Auto, "gpt-4o"));
+            Assert.IsFalse(VisionCapability.IsEnabled(VisionSupportMode.Auto, "gpt-3.5-turbo"));
+        }
+
+        [Test]
+        public void TryParseImageDataUri_ValidPngDataUri_ParsesBytesAndMediaType()
+        {
+            string b64 = System.Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+            bool ok = CoreAI.Infrastructure.World.CameraLlmTool.TryParseImageDataUri(
+                "data:image/png;base64," + b64, out DataContent image);
+
+            Assert.IsTrue(ok);
+            Assert.IsNotNull(image);
+            Assert.AreEqual("image/png", image.MediaType);
+        }
+
+        [TestCase("data:text/plain;base64,aGk=")]   // not an image
+        [TestCase("data:image/png;base64,!!notbase64!!")]
+        [TestCase("data:image/png,nodelimiters")]    // no ';'
+        [TestCase("plainstring")]
+        [TestCase("")]
+        public void TryParseImageDataUri_InvalidInputs_ReturnFalse(string dataUri)
+        {
+            Assert.IsFalse(CoreAI.Infrastructure.World.CameraLlmTool.TryParseImageDataUri(dataUri, out DataContent image));
+            Assert.IsNull(image);
+        }
+
+        [Test]
+        public void TryExtractImageContentFromResult_SuccessWithDataUri_ReturnsImage()
+        {
+            string b64 = System.Convert.ToBase64String(new byte[] { 1, 2, 3 });
+            string json = "{\"success\":true,\"dataUri\":\"data:image/jpeg;base64," + b64 + "\"}";
+
+            bool ok = CoreAI.Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
+                json, out DataContent image);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual("image/jpeg", image.MediaType);
+        }
+
+        [TestCase("{\"success\":false,\"dataUri\":\"data:image/jpeg;base64,AQID\"}")] // failed capture
+        [TestCase("{\"success\":true}")]                                              // missing dataUri
+        [TestCase("not json at all")]
+        [TestCase("")]
+        public void TryExtractImageContentFromResult_NonImageOrFailed_ReturnsFalse(string json)
+        {
+            Assert.IsFalse(CoreAI.Infrastructure.World.CameraLlmTool.TryExtractImageContentFromResult(
+                json, out DataContent image));
+            Assert.IsNull(image);
+        }
+    }
 }
 #endif

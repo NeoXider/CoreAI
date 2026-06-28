@@ -231,7 +231,26 @@ If the SSE stream contains `FunctionCallContent`, `MeaiLlmClient` uses native de
 
 ### Hybrid hold when tools are declared (v1.7.3+)
 
-When **`Tools`** is non-empty, **`MeaiLlmClient.CompleteStreamingAsync`** applies the **hybrid JSON hold** to **bound** and **unbound** tool registrations alike — unless **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** is **`true`**, which buffers the entire assistant iteration before any **`LlmStreamChunk.Text`** (escape hatch for exotic delta fragmentation). Live tokens stop before a suspected text-shaped tool JSON object; after Path 1 extraction or Path 2 **`delta.tool_calls`**, any assistant prefix that was not yet forwarded is reconciled against the cleaned, JSON-stripped text and emitted as trailing **`Text`** chunks so short prefixes (for example “Working…”) are not lost.
+When **`Tools`** is non-empty, **`MeaiLlmClient.CompleteStreamingAsync`** applies the **hybrid JSON hold** to **bound** and **unbound** tool registrations alike — unless **`LlmCompletionRequest.BufferFullStreamingIterationWhenToolsDeclared`** is **`true`**, which buffers the entire assistant iteration before any **`LlmStreamChunk.Text`** (escape hatch for exotic delta fragmentation). After Path 1 extraction or Path 2 **`delta.tool_calls`**, any assistant prose that was not yet forwarded is reconciled against the JSON-stripped held tail and emitted as trailing **`Text`** chunks so short prefixes (for example “Working…”) are not lost.
+
+> **Never** reintroduce full-turn buffering of bound-tool turns. In 4.10.4 all bound-tool turns were buffered to hide the pre-tool preamble; that killed token-by-token streaming for the teacher chat and was reverted in 4.10.5. The hybrid hold below must keep visible prose streaming live on every tool turn.
+
+### On-the-fly tool parsing — keep streaming live through tool calls (Kilo/Cline-style)
+
+The hybrid hold hides **only** the tool-call JSON, never the surrounding prose/preamble. It is a streaming state machine driven by the accumulated visible text each delta:
+
+1. **Prose (outside any tool JSON)** streams as normal token-by-token **`Text`** chunks — both before and **after** a tool call.
+2. The moment a tool call begins — a native **`delta.tool_calls`** (Path 2) **or** a text-shaped opening **`{`** of a tool-call JSON object (Path 1) — only the **tool-call payload** is swapped for a “calling tool…” indicator (**`BufferedStreamingNoToolBinding`** + **`BufferedStreamingUseToolProgressHint`** marker; the host shows **`CoreAiChatConfig.StreamingToolProgressHint`**). The JSON characters themselves are never emitted as visible text.
+3. A **completed** text-shaped tool-call JSON span is hidden (skipped); prose that follows the closing **`}`** **resumes streaming live** in the same turn.
+4. An **incomplete** `{…` that may still grow into a tool call is held from its `{` until it closes or the turn ends.
+
+Mechanism (`MeaiLlmClient`):
+
+- **`GetHybridSafeSegments(text, out exclusiveSafeEnd)`** walks the accumulated visible text and returns ordered **`HybridProseSegment`** ranges: prose segments (`IsToolJson=false`, emitted live) and completed tool-JSON spans (`IsToolJson=true`, hidden). `exclusiveSafeEnd` is the start of the first still-incomplete object (the hold boundary). Reuses **`GetExclusiveEndForSafeUnboundRawStreaming`** (hold boundary) + **`FindToolCallJsonSpans`** (completed spans).
+- The streaming loop drains these segments each delta via the local iterator **`DrainHybridSafeSegments`**, advancing **`hybridRawExclusiveEndEmitted`** over both emitted prose and hidden JSON, and emitting the tool-progress marker the first time a hold begins.
+- After the turn ends and tool calls are extracted, **`GetHybridUnemittedSuffix(visibleText, hybridRawExclusiveEndEmitted)`** returns the JSON-stripped remainder of the held tail (the only prose not yet streamed), so post-tool prose is emitted exactly once with no duplication.
+
+Non-text-shaped (native) tool calls never appear in the visible text at all, so prose around them already streams live; the same progress marker is emitted when the first **`FunctionCallContent`** arrives.
 
 ### Shared execution policy
 

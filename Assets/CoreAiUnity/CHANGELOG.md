@@ -4,9 +4,32 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-## 4.11.5 - 2026-06-27
+## 4.12.0 - 2026-06-28
 
-Depends on **`com.neoxider.coreai` 4.11.5** (Core unchanged; lockstep version bump for this Unity-only fix).
+Depends on **`com.neoxider.coreai` 4.12.0** (Lua mod versioning + runtime handler-error diagnostics).
+
+- **feat(streaming): keep streaming live through tool calls (Kilo/Cline-style on-the-fly hold).** A
+  tool-calling turn no longer stops token streaming. `MeaiLlmClient.CompleteStreamingAsync` now walks the
+  accumulated text into prose segments (streamed live, token-by-token) and completed text-shaped tool-call
+  JSON spans (hidden in place), holding only from the first still-incomplete `{`. Prose **after** a tool
+  call's closing `}` resumes live in the same turn; only the tool-call JSON is ever hidden, never the
+  surrounding prose/preamble. **No full-turn buffering is introduced** — the 4.10.4 regression (buffering all
+  bound-tool turns, which killed token-by-token streaming, reverted in 4.10.5) is explicitly avoided. New
+  internal helpers `GetHybridSafeSegments` / `GetHybridUnemittedSuffix` / `HybridProseSegment`.
+- **feat(vision): host camera→model send path + capability gate.** New
+  `CoreAiChatService.AskWithCameraAsync` / `CoreAi.AskWithCameraAsync` capture a camera as a `DataContent`
+  and send it as a user `image_url` message (the provider-safe camera→model path). `CoreAi.RegisterCameraVisionTool`
+  registers `capture_camera` on a vision role behind a gate; `AskWithImageFollowUpAsync` lifts a
+  tool-result image into a follow-up user `image_url` message (OpenAI tool results cannot carry images).
+  New `VisionCapability` + `CoreAISettingsAsset.VisionSupport` (`Auto`/`On`/`Off`) gate both the send path and
+  tool registration so text-only models never receive an image part.
+- **feat(lua): WebGL Lua IL2CPP/AOT hardening.** Lua already ran on WebGL behind
+  `CoreAISettingsAsset.EnableLuaOnWebGl` (default on) with the Full `unity_*` tier disabled on web; this drop
+  adds `link.xml` `preserve` entries for the six WebGL-active Lua binding types so the IL2CPP managed
+  stripper cannot drop the reflection-invoked delegates.
+- **test:** hybrid-segment streaming units, vision capability gate + tool-result image lift, Lua mod
+  versioning / revert / runtime-error diagnostics, per-tick event dispatch cap, and a forbidden-Lua-API
+  drift guard between the `execute_lua` contract and the Programmer prompt.
 
 - **fix(webgl): non-streaming completions work alongside native SSE streaming.** When
   `WebGlNativeStreaming=true`, `MeaiLlmClient.CreateHttp` built a streaming-only
