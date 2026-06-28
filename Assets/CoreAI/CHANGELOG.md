@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## 4.12.1 - 2026-06-28
+
+- **fix(prompts): memory-usage instruction now reaches native tool-calling roles.** In
+  `AiToolContractPromptFormatter`, the positive memory guidance ("when asked to remember/save/record,
+  call the memory tool") lived *after* the `supportsNativeToolCalling` early-return, so native
+  tool-calling roles whose base prompt never mentions memory (e.g. Creator) received **no** memory
+  instruction at all and silently ignored "remember the …" tasks — leaving it to the model to infer.
+  The detection + a strengthened imperative now run ahead of the early-return, so both the native and
+  text-shaped paths get it (gated on the role actually having the `memory` tool). Tests:
+  `DeterministicToolContractEditModeTests` (native+memory includes the imperative; native without memory
+  omits it).
+
 ## 4.12.0 - 2026-06-28
 
 - **Lua mod versioning (`manage_mods versions` / `revert`).** Mod load/reload now records a revision per

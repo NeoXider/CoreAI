@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.12.1 - 2026-06-28
+
+Depends on **`com.neoxider.coreai` 4.12.1** (native-role memory-instruction fix).
+
+- **fix(prompts): native tool-calling roles with the memory tool now get the memory instruction.**
+  See the Core 4.12.1 entry — the guidance was gated behind the native early-return in
+  `AiToolContractPromptFormatter`, so a role like Creator ignored "remember the …" tasks. Validated by the
+  live multi-agent crafting workflow (`MultiAgentCraftingWorkflowPlayModeTests`): Creator now reliably
+  persists the design summary. Lockstep version bump.
+
 ## 4.12.0 - 2026-06-28
 
 Depends on **`com.neoxider.coreai` 4.12.0** (Lua mod versioning + runtime handler-error diagnostics).

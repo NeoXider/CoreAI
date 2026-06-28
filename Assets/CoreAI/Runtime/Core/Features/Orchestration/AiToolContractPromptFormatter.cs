@@ -44,14 +44,8 @@ namespace CoreAI.Ai
                 sb.AppendLine(extra);
             }
 
-            if (supportsNativeToolCalling)
-            {
-                AppendForcedToolInstruction(sb, task);
-                return sb.ToString();
-            }
-
-            bool hasMemoryTool = false;
             IReadOnlyList<ILlmTool> canonicalTools = AiToolOrder.Canonical(tools);
+            bool hasMemoryTool = false;
             foreach (ILlmTool tool in canonicalTools)
             {
                 if (tool != null &&
@@ -60,6 +54,24 @@ namespace CoreAI.Ai
                     hasMemoryTool = true;
                     break;
                 }
+            }
+
+            // Positive memory trigger — applies to BOTH native and text-shaped tool-calling. Without it a role
+            // whose base prompt never mentions memory (e.g. Creator) silently ignores "remember the ..." because
+            // nothing maps that soft verb to the memory tool. This guidance previously lived only AFTER the
+            // native early-return below, so native tool-calling roles received no memory instruction at all.
+            if (hasMemoryTool)
+            {
+                sb.AppendLine(
+                    "Memory: when the task asks you to remember, save, note, record, or persist something, you MUST " +
+                    "call the memory tool (action \"append\" or \"store\") to persist it before answering — prose or " +
+                    "reasoning alone never saves anything.");
+            }
+
+            if (supportsNativeToolCalling)
+            {
+                AppendForcedToolInstruction(sb, task);
+                return sb.ToString();
             }
 
             if (hasMemoryTool)

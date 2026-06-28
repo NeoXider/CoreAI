@@ -86,6 +86,37 @@ namespace CoreAI.Tests.EditMode
             AssertNoGuidOrTimestamp(first);
         }
 
+        [Test]
+        public void AppendToolContract_NativeToolCallingWithMemoryTool_IncludesMemoryImperative()
+        {
+            // Regression: the memory instruction used to live only on the text-shaped path, after the
+            // native early-return, so native tool-calling roles (e.g. Creator) got no memory guidance and
+            // ignored "remember the ..." tasks.
+            string native = AiToolContractPromptFormatter.AppendToolContract(
+                "sys",
+                new[] { new StubTool("memory") },
+                new AiTaskRequest { RoleId = "Creator" },
+                new TestSettings(),
+                supportsNativeToolCalling: true);
+
+            StringAssert.Contains("call the memory tool", native,
+                "Native tool-calling roles with the memory tool must receive the positive memory instruction.");
+        }
+
+        [Test]
+        public void AppendToolContract_NativeToolCallingWithoutMemoryTool_OmitsMemoryImperative()
+        {
+            string native = AiToolContractPromptFormatter.AppendToolContract(
+                "sys",
+                new[] { new StubTool("world_command") },
+                new AiTaskRequest { RoleId = "Creator" },
+                new TestSettings(),
+                supportsNativeToolCalling: true);
+
+            StringAssert.DoesNotContain("call the memory tool", native,
+                "Roles without the memory tool must not receive memory guidance.");
+        }
+
         private static AgentMemoryPolicy BuildPolicy(params ILlmTool[] tools)
         {
             AgentMemoryPolicy policy = new();
