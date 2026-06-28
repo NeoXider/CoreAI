@@ -4,9 +4,22 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
-## 4.11.4 - 2026-06-26
+## 4.11.5 - 2026-06-27
 
-Depends on **`com.neoxider.coreai` 4.11.4**.
+Depends on **`com.neoxider.coreai` 4.11.5** (Core unchanged; lockstep version bump for this Unity-only fix).
+
+- **fix(webgl): non-streaming completions work alongside native SSE streaming.** When
+  `WebGlNativeStreaming=true`, `MeaiLlmClient.CreateHttp` built a streaming-only
+  `FetchSseOpenAiTransport` for *all* calls. Its `PostNonStreamingAsync` throws
+  `"Use UnityWebRequestOpenAiTransport for non-streaming in WebGL."`, so every non-streaming agent
+  (e.g. `TeacherLessonFeedback` hidden lesson feedback, structured-output analyzers) failed on WebGL
+  with `BackendUnavailable` after retries — the per-mission teacher feedback never reached the host/DB.
+  New `WebGlCompositeOpenAiTransport` routes SSE chat through the fetch bridge and non-streaming POSTs
+  through `UnityWebRequestOpenAiTransport`, so both paths work in one player. The gateway already serves
+  `stream:false` (non-streaming `POST /chat/completions`), so this is wiring-only.
+  Test: `MeaiOpenAiWebGlTransportEditModeTests.GetResponseAsync_SseCapableTransport_StillServesNonStreamingCompletion`.
+
+Depends on **`com.neoxider.coreai` 4.11.5**.
 
 - **fix(chat): WebGL GPU-buffer backstop for oversized assistant messages.** A single very long message
   (a real incident leaked ~16 000 chars of model reasoning) rendered into one bubble overflows UI Toolkit's

@@ -87,8 +87,13 @@ namespace CoreAI.Infrastructure.Llm
                 nativeStreaming = asset.WebGlNativeStreaming;
                 sameOrigin = asset.SameOriginCredentials;
             }
+            // Native streaming uses the fetch SSE bridge for chat, but that transport cannot serve
+            // non-streaming completions (internal agents like TeacherLessonFeedback). Wrap it in a
+            // composite that routes non-streaming POSTs to UnityWebRequest so both paths work.
             transport = nativeStreaming
-                ? (IOpenAiHttpTransport)new FetchSseOpenAiTransport(sameOrigin)
+                ? (IOpenAiHttpTransport)new WebGlCompositeOpenAiTransport(
+                    new FetchSseOpenAiTransport(sameOrigin),
+                    new UnityWebRequestOpenAiTransport())
                 : new UnityWebRequestOpenAiTransport();
 #else
             transport = new HttpClientOpenAiTransport();
