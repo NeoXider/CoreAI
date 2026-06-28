@@ -59,6 +59,12 @@ namespace CoreAI.Ai
         /// <summary>Null = default true (LLM-assisted compaction when global setting allows).</summary>
         private bool? _useLlmContextCompaction;
 
+        // Skill authoring (manage_skills): when set, the agent can create/update/persist/reuse its own skills.
+        private ISkillStore _skillStore;
+        private ILuaScriptVersionStore _skillVersionStore;
+        private bool _skillAuthoring;
+        private bool _requireKnownSkillTools = true;
+
         private readonly ICoreAISettings _settings;
 
         public AgentBuilder(string roleId, ICoreAISettings settings = null)
@@ -192,6 +198,39 @@ namespace CoreAI.Ai
                 }
             }
 
+            return this;
+        }
+
+        /// <summary>
+        /// Lets this agent <b>author</b> its own skills (not just read pre-registered ones). Registers the
+        /// <c>manage_skills</c> tool with actions <c>create</c>/<c>update</c>/<c>list</c>/<c>get</c>/<c>delete</c>.
+        /// Created/updated skills are persisted via <paramref name="store"/>, versioned via
+        /// <paramref name="versionStore"/> (keyed by skill id), and added to the same agent's
+        /// <c>read_skill</c> catalog so the model can reuse what it just authored within the session.
+        /// <para>
+        /// A skill references EXISTING registered tools by name; the model cannot invent C# tools. With
+        /// <paramref name="requireKnownTools"/> = true (default), a create/update that lists an unknown tool
+        /// name is rejected. <c>manage_skills</c> is one extra visible tool on top of the two skill meta-tools,
+        /// preserving progressive-disclosure (skills load on demand via <c>read_skill</c>).
+        /// </para>
+        /// </summary>
+        /// <param name="store">
+        /// Persistent skill store. Null uses an in-memory <see cref="NullSkillStore"/> (skills do not survive
+        /// a restart). Host file-backed implementations live in the Unity layer.
+        /// </param>
+        /// <param name="versionStore">
+        /// Optional version store for skill revisions. Null means no auditable history (create/update still work).
+        /// </param>
+        /// <param name="requireKnownTools">Reject skills referencing tool names the role does not have (default true).</param>
+        public AgentBuilder WithSkillAuthoring(
+            ISkillStore store = null,
+            ILuaScriptVersionStore versionStore = null,
+            bool requireKnownTools = true)
+        {
+            _skillAuthoring = true;
+            _skillStore = store;
+            _skillVersionStore = versionStore;
+            _requireKnownSkillTools = requireKnownTools;
             return this;
         }
 
@@ -437,6 +476,10 @@ namespace CoreAI.Ai
                 SystemPrompt = _systemPrompt,
                 Tools = new List<ILlmTool>(_tools),
                 Skills = _skills.Count > 0 ? new List<SkillSet>(_skills) : null,
+                SkillAuthoringEnabled = _skillAuthoring,
+                SkillStore = _skillStore,
+                SkillVersionStore = _skillVersionStore,
+                RequireKnownSkillTools = _requireKnownSkillTools,
                 Mode = _mode,
                 WithChatHistory = _withChatHistory,
                 ContextWindowTokens = ctxTokens,
@@ -521,7 +564,8 @@ namespace CoreAI.Ai
 
             if ((_mode == AgentMode.ToolsAndChat || _mode == AgentMode.ToolsOnly) &&
                 _tools.Count == 0 &&
-                _skills.Count == 0)
+                _skills.Count == 0 &&
+                !_skillAuthoring)
             {
                 issues.Add(new AgentBuilderIssue(
                     AgentBuilderIssueCode.NoToolsForToolMode,
@@ -601,6 +645,18 @@ namespace CoreAI.Ai
         /// </summary>
         public IReadOnlyList<SkillSet> Skills { get; internal set; }
 
+        /// <summary>When true, the agent gets the <c>manage_skills</c> tool to author its own skills.</summary>
+        public bool SkillAuthoringEnabled { get; internal set; }
+
+        /// <summary>Persistent store for agent-authored skills (null = in-memory only).</summary>
+        public ISkillStore SkillStore { get; internal set; }
+
+        /// <summary>Version store recording skill revisions (null = no history).</summary>
+        public ILuaScriptVersionStore SkillVersionStore { get; internal set; }
+
+        /// <summary>When true, authored skills may only reference tool names registered for the role.</summary>
+        public bool RequireKnownSkillTools { get; internal set; } = true;
+
         /// <summary>
         /// Applies this built agent configuration to a mutable <see cref="AgentMemoryPolicy"/>.
         /// </summary>
@@ -644,11 +700,25 @@ namespace CoreAI.Ai
             // The catalog (name + description per skill) goes into the system prompt.
             // The model calls read_skill(name) to load instructions + tool schemas,
             // then call_skill_tool(tool_name, args_json) to execute them.
-            // This keeps the model's visible tool count at exactly 2 regardless of skill count.
-            if (Skills != null && Skills.Count > 0)
+            // This keeps the model's visible tool count at exactly 2 (+1 for manage_skills when
+            // authoring is enabled) regardless of skill count.
+            bool hasSkills = Skills != null && Skills.Count > 0;
+            if (hasSkills || SkillAuthoringEnabled)
             {
+                // When the agent can author skills, the read_skill / call_skill_tool proxies read from a
+                // LIVE catalog so a skill created via manage_skills is immediately visible to the same
+                // agent. Without authoring, the static snapshot is used (cacheable, unchanged behavior).
+                IReadOnlyList<SkillSet> catalogSkills = Skills ?? (IReadOnlyList<SkillSet>)Array.Empty<SkillSet>();
+                MutableSkillCatalog liveCatalog = null;
+                if (SkillAuthoringEnabled)
+                {
+                    liveCatalog = new MutableSkillCatalog(catalogSkills);
+                    RehydrateAndRegisterAuthoring(policy, liveCatalog);
+                    catalogSkills = liveCatalog;
+                }
+
                 // Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
-                // per agent build, unlike live world-state context, so it should remain cacheable.
+                // per agent build (host skills), unlike live world-state context, so it stays cacheable.
                 string catalog = SkillSet.BuildCatalog(Skills);
                 if (!string.IsNullOrWhiteSpace(catalog))
                 {
@@ -658,16 +728,71 @@ namespace CoreAI.Ai
                 }
 
                 // Register read_skill meta-tool (loads instructions + tool schemas)
-                policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(Skills));
+                policy.AddToolForRole(RoleId, ReadSkillLlmTool.Create(catalogSkills));
 
                 // Register call_skill_tool proxy (routes to real skill tools)
-                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(Skills));
+                policy.AddToolForRole(RoleId, CallSkillToolLlmTool.Create(catalogSkills));
             }
 
             if (!string.IsNullOrWhiteSpace(additionalPrompt))
             {
                 policy.SetAdditionalSystemPrompt(RoleId, additionalPrompt);
             }
+        }
+
+        /// <summary>
+        /// Builds the <see cref="SkillAuthoringCoordinator"/> for this role, rehydrates persisted skills
+        /// into <paramref name="liveCatalog"/>, and registers the <c>manage_skills</c> tool. The tool
+        /// resolver maps an authored skill's allowlisted name to a real registered tool: the role's direct
+        /// <see cref="Tools"/> plus the tools inside host-registered <see cref="Skills"/>. This is what
+        /// enforces "a skill may only reference existing tools".
+        /// </summary>
+        private void RehydrateAndRegisterAuthoring(AgentMemoryPolicy policy, MutableSkillCatalog liveCatalog)
+        {
+            // Index every tool the role already has, by name, so an authored skill can reference it.
+            Dictionary<string, ILlmTool> toolsByName = new(StringComparer.OrdinalIgnoreCase);
+            foreach (ILlmTool tool in Tools)
+            {
+                if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
+                {
+                    toolsByName[tool.Name] = tool;
+                }
+            }
+
+            if (Skills != null)
+            {
+                foreach (SkillSet skill in Skills)
+                {
+                    if (skill?.Tools == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (ILlmTool tool in skill.Tools)
+                    {
+                        if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
+                        {
+                            toolsByName[tool.Name] = tool;
+                        }
+                    }
+                }
+            }
+
+            SkillToolResolver resolver = name =>
+                !string.IsNullOrWhiteSpace(name) && toolsByName.TryGetValue(name.Trim(), out ILlmTool t) ? t : null;
+
+            SkillAuthoringCoordinator coordinator = new(
+                liveCatalog,
+                SkillStore,
+                SkillVersionStore,
+                resolver,
+                RequireKnownSkillTools);
+
+            // Rehydrate persisted skills so prior-session skills reappear in this agent's read_skill catalog.
+            coordinator.RehydrateFromStore();
+
+            // One extra visible tool (progressive disclosure: skill bodies still load on demand).
+            policy.AddToolForRole(RoleId, new ManageSkillsLlmTool(coordinator));
         }
 
         private bool HasMemoryTool()

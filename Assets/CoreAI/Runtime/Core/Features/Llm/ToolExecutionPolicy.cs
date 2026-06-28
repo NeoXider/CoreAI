@@ -42,6 +42,15 @@ namespace CoreAI.Infrastructure.Llm
         private readonly HashSet<string> _executedSignatures = new();
         private readonly List<LlmToolCallTrace> _executedTraces = new();
 
+        /// <summary>
+        /// Guards <see cref="_executedTraces"/> appends. Under concurrent batch execution
+        /// (<see cref="ICoreAISettings.MaxParallelToolCalls"/> &gt; 1) several <see cref="ExecuteSingleAsync"/>
+        /// invocations may complete on different threads and add traces simultaneously; a plain
+        /// <see cref="List{T}"/> is not safe for concurrent <c>Add</c>. Trace ordering is by completion time,
+        /// which is intentionally diagnostic-only and independent of the order-preserving result collation.
+        /// </summary>
+        private readonly object _traceLock = new();
+
         public ToolExecutionPolicy(
             ILog logger,
             ICoreAISettings settings,
@@ -109,7 +118,19 @@ namespace CoreAI.Infrastructure.Llm
         public void RecordSyntheticTrace(string toolName, bool success, double durationMs, string source,
             string detail = "")
         {
-            _executedTraces.Add(new LlmToolCallTrace(toolName, success, durationMs, source, detail));
+            AddTrace(new LlmToolCallTrace(toolName, success, durationMs, source, detail));
+        }
+
+        /// <summary>
+        /// Thread-safe append to <see cref="_executedTraces"/>. Used by every trace site so concurrent
+        /// <see cref="ExecuteSingleAsync"/> completions cannot corrupt the underlying list.
+        /// </summary>
+        private void AddTrace(LlmToolCallTrace trace)
+        {
+            lock (_traceLock)
+            {
+                _executedTraces.Add(trace);
+            }
         }
 
         /// <summary>
@@ -268,7 +289,7 @@ namespace CoreAI.Infrastructure.Llm
                     $"Error: Tool '{fc.Name}' arguments JSON was truncated or malformed and could not be parsed. " +
                     "Retry the same tool call and emit the complete, valid JSON arguments object.";
                 _eventPublisher.PublishFailed(BuildInfo(fc), parseError, 0d);
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "parse-error", parseError));
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "parse-error", parseError));
                 LogCallLine(fc, false, 0d, parseError);
                 return new ToolCallResult
                 {
@@ -284,7 +305,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 string missing = $"Tool '{fc.Name}' not found";
                 _eventPublisher.PublishFailed(BuildInfo(fc), missing, 0d);
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "missing", missing));
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "missing", missing));
                 LogCallLine(fc, false, 0d, missing);
                 return new ToolCallResult
                 {
@@ -305,7 +326,7 @@ namespace CoreAI.Infrastructure.Llm
                     sw.Stop();
                     _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {validationError}", LogTag.Llm);
                     _eventPublisher.PublishFailed(info, validationError, sw.Elapsed.TotalMilliseconds);
-                    _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
+                    AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
                         "schema-validation", validationError));
                     LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, validationError);
                     return new ToolCallResult
@@ -363,7 +384,7 @@ namespace CoreAI.Infrastructure.Llm
                         string timeoutMsg = $"Error: Tool '{fc.Name}' timed out after {toolTimeoutMs}ms";
                         _logger.Warn($"[ToolPolicy] Timeout: {timeoutMsg}", LogTag.Llm);
                         _eventPublisher.PublishFailed(info, timeoutMsg, sw.Elapsed.TotalMilliseconds);
-                        _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
+                        AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
                             "timeout", timeoutMsg));
                         LogCallLine(fc, false, sw.Elapsed.TotalMilliseconds, timeoutMsg);
                         return new ToolCallResult
@@ -416,7 +437,7 @@ namespace CoreAI.Infrastructure.Llm
                     _eventPublisher.PublishFailed(info, SafeResultJson(resultText), elapsedMs);
                 }
 
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
                     resultText));
                 LogCallLine(fc, succeeded, elapsedMs, resultText);
 
@@ -437,11 +458,17 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = succeeded
                 };
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Outer cancellation must propagate; it is never converted into a "failed result".
+                // (Tool-level timeouts are handled above and surfaced as a normal error result instead.)
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.Error($"[ToolPolicy] {fc.Name} threw: {ex.Message}", LogTag.Llm);
                 _eventPublisher.PublishFailed(BuildInfo(fc), ex.Message, 0d);
-                _executedTraces.Add(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", ex.Message));
+                AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, 0d, "native", ex.Message));
                 LogCallLine(fc, false, 0d, $"threw: {ex.Message}");
                 return new ToolCallResult
                 {
@@ -663,15 +690,47 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Names of state-mutating built-in tools that must never run concurrently. These tools write to a
+        /// shared store (long-term memory, the installed Lua mods registry, the skills registry); racing two
+        /// of them risks lost updates or torn reads. Matched case-insensitively against the (possibly repaired)
+        /// tool name. See <see cref="IsSerializedTool"/> and <see cref="ExecuteBatchAsync"/>.
+        /// </summary>
+        private static readonly HashSet<string> SerializedMutatingToolNames =
+            new(StringComparer.OrdinalIgnoreCase) { "memory", "manage_mods", "manage_skills" };
+
+        /// <summary>
+        /// Whether a tool call must be serialized relative to other mutating calls in the same batch.
+        /// The rule is intentionally conservative: any call whose name is in
+        /// <see cref="SerializedMutatingToolNames"/> joins a single ordered serialization chain so that no two
+        /// state-mutating built-ins ever overlap, even with different names. All other (independent / read-only)
+        /// tools run fully in parallel under the concurrency limit.
+        /// </summary>
+        private static bool IsSerializedTool(MEAI.FunctionCallContent fc)
+        {
+            return fc?.Name != null && SerializedMutatingToolNames.Contains(fc.Name);
+        }
+
+        /// <summary>
         /// Execute a batch of tool calls, tracking cumulative success/failure.
         /// Returns the list of result contents and an aggregate success flag.
+        /// <para>
+        /// Concurrency model (<see cref="ICoreAISettings.MaxParallelToolCalls"/>): when the limit is &gt; 1 and
+        /// the batch has more than one call, independent tool calls execute concurrently with bounded
+        /// parallelism (a <see cref="SemaphoreSlim"/> of that size). State-mutating built-ins
+        /// (<see cref="SerializedMutatingToolNames"/>) are run on a single ordered serialization chain so they
+        /// never race each other. Regardless of completion order, results are collated back into the
+        /// <b>original call order</b> (indexed array). The consecutive-error counter is updated exactly once,
+        /// after ordered collation, with the same semantics as the sequential path. A value &lt;= 1 (or a
+        /// single-call batch) takes a strictly-sequential fast path that is byte-identical to the legacy loop.
+        /// Outer cancellation cancels all in-flight calls and propagates as <see cref="OperationCanceledException"/>.
+        /// </para>
         /// </summary>
         public async Task<BatchToolCallResult> ExecuteBatchAsync(
             List<MEAI.FunctionCallContent> toolCalls,
             MEAI.ChatOptions chatOptions,
             CancellationToken cancellationToken)
         {
-            // 1. Check for duplicates first
+            // 1. Check for duplicates first (whole-batch signature) - unchanged.
             List<MEAI.FunctionResultContent> duplicateResults = CheckDuplicate(toolCalls);
             if (duplicateResults != null)
             {
@@ -683,14 +742,111 @@ namespace CoreAI.Infrastructure.Llm
                 };
             }
 
-            // 2. Execute each tool call
-            List<MEAI.AIContent> results = new();
+            int maxParallel = Math.Max(1, _settings.MaxParallelToolCalls);
+
+            // 2a. Sequential fast-path: byte-identical to the legacy loop.
+            if (maxParallel <= 1 || toolCalls.Count <= 1)
+            {
+                List<MEAI.AIContent> seqResults = new();
+                bool seqAnyFailed = false;
+                bool seqAllFailed = true;
+
+                foreach (MEAI.FunctionCallContent fc in toolCalls)
+                {
+                    ToolCallResult r =
+                        await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                    seqResults.Add(r.Result);
+                    if (!r.Succeeded)
+                    {
+                        seqAnyFailed = true;
+                    }
+                    else
+                    {
+                        seqAllFailed = false;
+                    }
+                }
+
+                if (!seqAnyFailed)
+                {
+                    RecordSuccess();
+                }
+                else
+                {
+                    RecordFailure();
+                }
+
+                return new BatchToolCallResult
+                {
+                    Results = seqResults,
+                    AnyFailed = seqAnyFailed,
+                    AllFailed = seqAnyFailed && seqAllFailed
+                };
+            }
+
+            // 2b. Concurrent path with bounded parallelism + serialization of mutating built-ins.
+            ToolCallResult[] indexed = new ToolCallResult[toolCalls.Count];
+            using SemaphoreSlim gate = new(maxParallel, maxParallel);
+
+            // Single ordered chain for all serialized (mutating) tool calls so none of them overlap.
+            // Each serialized call awaits the previous serialized call before running.
+            Task serialChain = Task.CompletedTask;
+            List<Task> tasks = new(toolCalls.Count);
+
+            for (int i = 0; i < toolCalls.Count; i++)
+            {
+                int index = i;
+                MEAI.FunctionCallContent fc = toolCalls[index];
+
+                if (IsSerializedTool(fc))
+                {
+                    Task previous = serialChain;
+                    serialChain = RunGuardedAsync(previous);
+                    tasks.Add(serialChain);
+                }
+                else
+                {
+                    tasks.Add(RunGuardedAsync(Task.CompletedTask));
+                }
+
+                // Local function captures index/fc; gate bounds total in-flight concurrency.
+                async Task RunGuardedAsync(Task waitFor)
+                {
+                    if (waitFor != null && !waitFor.IsCompleted)
+                    {
+                        // Serialization ordering: wait for the prior serialized call. Swallow its
+                        // fault/cancellation here (it is observed via its own slot) so chaining never throws.
+                        try
+                        {
+                            await waitFor.ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            /* prior serialized call's outcome handled in its own slot */
+                        }
+                    }
+
+                    await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        indexed[index] =
+                            await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }
+            }
+
+            // Awaiting WhenAll surfaces OperationCanceledException on outer cancellation (never swallowed).
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            // 3. Collate strictly in original call order.
+            List<MEAI.AIContent> results = new(indexed.Length);
             bool anyFailed = false;
             bool allFailed = true;
-
-            foreach (MEAI.FunctionCallContent fc in toolCalls)
+            foreach (ToolCallResult r in indexed)
             {
-                ToolCallResult r = await ExecuteSingleAsync(fc, chatOptions, cancellationToken).ConfigureAwait(false);
                 results.Add(r.Result);
                 if (!r.Succeeded)
                 {
@@ -702,7 +858,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            // 3. Update error counter
+            // 4. Update error counter once, after ordered collation (deterministic regardless of
+            // completion order): the whole batch counts as one failure if any call failed.
             if (!anyFailed)
             {
                 RecordSuccess();

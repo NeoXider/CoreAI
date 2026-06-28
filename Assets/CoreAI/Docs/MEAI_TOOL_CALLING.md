@@ -115,6 +115,31 @@ This prompt contract does not replace provider-native tool choice. It gives smal
 models the same explicit behavioral guidance that production integrations expect, while
 `ForcedToolMode` / `RequiredToolName` still control provider-level tool selection when needed.
 
+### 6. Parallel tool execution (R1, 4.13.0)
+
+`ToolExecutionPolicy.ExecuteBatchAsync` runs the tool calls of one assistant turn **concurrently**,
+bounded by the `MaxParallelToolCalls` setting (default `4`; `1` = sequential, byte-identical to the
+legacy path). Guarantees preserved regardless of completion order:
+
+- **Result order** matches the original call order (results collated by index, not by completion).
+- **State-mutating built-ins are serialized**: `memory`, `manage_mods`, and `manage_skills` run on one
+  ordered chain so two writes never race; independent/read tools run fully in parallel.
+- Per-call timeout, whole-batch duplicate rejection, forced-tool reset, and the consecutive-error
+  counter are unchanged; outer cancellation cancels all in-flight calls and propagates (never a fallback).
+
+### 7. Text-shaped tool calls (local GGUF models)
+
+When a backend returns tool intent as assistant *text* instead of native `tool_calls`,
+`LlmToolCallTextExtractor` recovers it. Supported formats:
+
+- JSON object: `{"name":"tool","arguments":{…}}` (and `"arguments_json":"{…}"`, Qwen via LLMUnity).
+- Function-call syntax: `read_skill("Crafting")`.
+- Memory pseudo-syntax: `Action=write content="…"` → mapped to the `memory` tool.
+- **Hermes / Qwen-Agent XML** (4.13.0): `<tool_call><function=NAME><parameter=KEY>VALUE</parameter>…</function></tool_call>`
+  — parameter values are kept as strings (so an inner `arguments_json` stays a JSON string), and the
+  `<tool_call>` wrapper is stripped from the visible reply. Many local GGUF models fall back to this
+  template when their native `tool_calls` array is empty.
+
 ---
 
 ## 📦 Files

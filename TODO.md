@@ -1,59 +1,118 @@
 # TODO
 
-> Updated 2026-06-28. This file tracks **only open work**, by priority. All previously
-> tracked items are implemented and verified — see `CHANGELOG.md` (both packages). Non-blocking
-> future work lives in `Assets/CoreAiUnity/Docs/BACKLOG.md`.
->
-> 4.12.0 (2026-06-28) cleared the whole P2 engineering + Lua-mod + vision backlog and most of P3:
-> live streaming through tool calls, partial-SSE accumulation, WebGL Lua AOT hardening, stale-`<think>`
-> prune, mod versioning + runtime-error diagnostics, vision host send path + capability gate + tool-result
-> lift, plus P3 event-cap / WaitLlmTool / forbidden-API-drift tests. Remaining open work below.
-> Test baseline (2026-06-18 run): EditMode `CoreAI.Tests` 1142/1142, PlayMode `FastNoLlm` 42/42.
+> Updated 2026-06-28. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`. Priorities below reflect the
+> 2026-06-28 competitive audit (vs Cursor / Claude Code / Kilo / Cline) and the maintainer's ordering.
+> Test baseline: EditMode ~1238, PlayMode `FastNoLlm` ~50 (deterministic).
 
-## [P1] Multi-agent orchestration v2.0
+## Roadmap (prioritized)
 
-> Full design exists in `TODO/MultiAgent_Orchestration_v2.0.md`, but **not implemented**: no
-> `SubAgentDefinition` / `AgentRegistry` / `AgentOrchestrator` / `AgentLlmTool` / `AgentCallResult`
-> types exist in `Assets/CoreAI/Runtime/Core/Features/Orchestration/`.
+### [R1] Parallel tool-call execution  *(in progress)*
 
-- [ ] Declarative `SubAgentDefinition` (roleId, description, custom prompt, tools w/o Task tool, model, maxTokens, maxTurns).
-- [ ] `IAgentRegistry` sub-agent registration + lookup; `AgentOrchestrator.ExecuteSubAgentAsync` with **clean context isolation** and bounded `ExecuteSubAgentsParallelAsync` (default `MaxParallelAgents = 3`).
-- [ ] `AgentLlmTool` (parent-only; subagents cannot spawn subagents) returning results as tool_result.
-- [ ] DI wiring (`CorePortableInstaller`), per-role exposure (`AgentMemoryPolicy.GetToolsForRole`), settings (`MaxParallelAgents`, `AgentCallTimeoutSeconds`, `SubAgentMaxTurns/MaxTokens`).
-- [ ] EditMode tests for registry + tool; docs + CHANGELOG entry.
+> Today `ToolExecutionPolicy.ExecuteBatchAsync` runs a batch of tool calls strictly sequentially
+> (`foreach`). Cursor/Claude Code/Cline dispatch independent calls concurrently, so CoreAI multi-tool
+> turns are latency-bound. Make execution concurrent while preserving today's semantics.
 
-## [P2] Engineering follow-ups
+Plan:
+- [ ] Execute the calls of one batch concurrently (`Task.WhenAll`) with a bounded degree of parallelism
+      (new setting `MaxParallelToolCalls`, default e.g. 4; 1 = current sequential behavior).
+- [ ] **Preserve result order**: results/history entries appended in original call order regardless of
+      completion order (await an ordered array, not completion order).
+- [ ] **Serialize state-mutating built-ins** that share a store (e.g. `memory` append/edit, `manage_mods`)
+      — either run same-tool or same-store calls sequentially within the batch, or document that the model
+      must not issue racing writes. Pure/read tools and independent host tools run fully parallel.
+- [ ] Keep per-call timeout (linked CTS), duplicate-batch rejection, forced-tool reset, and the
+      consecutive-error counter semantics intact; a single failing call must not corrupt siblings' results.
+- [ ] Cancellation: cancel all in-flight calls on outer cancel; never fall back on `OperationCanceledException`.
+- [ ] Tests (orchestrator-written): order-preserved-under-parallelism, latency-improves (two slow tools run
+      concurrently), one-fails-others-succeed, duplicate detection still whole-batch, mutating-tool
+      serialization, cancellation cancels all.
 
-- [x] **Context-editing prune — stale thinking.** Shipped: `ConversationHistoryPruner.StripStaleThinking`
-      losslessly strips `<think>` from older assistant turns (newest turn preserved) ahead of summarization.
-- [x] **Partial SSE `tool_calls` accumulation.** Shipped: `MeaiOpenAiChatClient.SseToolCallAccumulator`
-      assembles id/name/arguments across split `delta.tool_calls` chunks.
-- [x] **Keep streaming live through tool calls (Kilo/Cline-style).** Shipped in 4.12.0:
-      `MeaiLlmClient` on-the-fly hybrid hold (`GetHybridSafeSegments`) — prose streams live before and
-      after a tool call; only the tool-call JSON is hidden; no full-turn buffering.
-- [x] **WebGL: Lua in the web build.** Shipped: `EnableLuaOnWebGl` capability flag + Full tier disabled on
-      web + 4.12.0 `link.xml` AOT preserve for the binding types. A WebGL-player self-test scene wiring
-      (`WebGlLuaSelfTest`) still needs to be attached to a scene before a real WebGL build (manual step).
+### [R2] PlayMode: configurable provider / API / model
 
-## [P2] Lua mod packages — follow-ups
+> The live PlayMode suite resolves the backend via `PlayModeProductionLikeLlmFactory` / settings / env, but
+> there is no single, easy place to point the whole live suite at a chosen OpenAI-compatible endpoint + key
+> + model. Make it first-class so anyone can run the live tests against their provider/model.
+- [ ] A single config surface (env vars + a gitignored config asset/JSON) for base URL, API key, model name,
+      and streaming/native-tools flags consumed by `PlayModeOpenAiTestConfig` / `PlayModeProductionLikeLlmFactory`.
+- [ ] Clear `Assert.Ignore` reason when unconfigured; doc in `Docs` on how to run the live suite.
+- [ ] Optional: per-test model override (vision-capable model for vision tests, etc.).
 
-- [x] **Mod versioning (agent edits).** Shipped in 4.12.0: revision history via `ILuaScriptVersionStore`,
-      auto-derived `LuaModManifest.Version`, `manage_mods versions` / `revert`.
-- [x] **Surface runtime mod-handler errors to the agent.** Shipped in 4.12.0: `manage_mods diagnostics`
-      poll + bounded handler-error ring buffer.
+### [R3] Real token counting (BPE) with heuristic fallback
 
-## [P2] Vision / multimodal — follow-ups
+> No real tokenizer exists — only `CalibratingTokenEstimator` (char-weight + EMA vs provider `prompt_tokens`).
+> Use a real BPE tokenizer when available; fall back to the estimator when the encoding is unknown or the
+> runtime can't host the lib (IL2CPP / WebGL / AOT).
+- [ ] Integrate a BPE tokenizer for OpenAI-family models (cl100k/o200k) behind an `ITokenCounter` abstraction.
+- [ ] Resolve encoding by model name; on unknown model / unavailable lib, fall back to `CalibratingTokenEstimator`.
+- [ ] AOT/WebGL safety (encoding data load, stripping); keep the calibrating estimator as the universal fallback.
+- [ ] Tests: known model → exact-ish BPE counts vs recorded fixtures; unknown model → estimator path.
 
-- [x] **Host vision send path.** Shipped in 4.12.0: `CoreAiChatService.AskWithCameraAsync` / `CoreAi` facade.
-- [x] **Register `CameraLlmTool`** + autonomous tool-result image lift. Shipped: `CoreAi.RegisterCameraVisionTool`
-      + `AskWithImageFollowUpAsync`.
-- [x] **Model capability gate.** Shipped: `VisionCapability` + `CoreAISettingsAsset.VisionSupport`.
-- [ ] PlayMode round-trip test against a vision-capable model (`[Explicit]`).
+### [R4] Skill authoring — model creates & saves new skills
 
-## [P3] Minor / test-coverage nits (non-blocking)
+> The model can only `read_skill` / `call_skill_tool` (use EXISTING skills). It cannot author and persist a
+> NEW skill, nor refine one. Add agent-authorable, persistent, self-improving skills.
+- [ ] `ISkillStore` + file-backed impl (persist `SkillSet` name/description/instructions/tool-allowlist).
+- [ ] A `manage_skills` tool: `create` / `update` / `list` / `get` / `delete` (mirrors `manage_mods`), so the
+      model can write a new skill and reload it into its own catalog.
+- [ ] Self-improvement: let a skill's instructions be revised by the agent (versioned via `ILuaScriptVersionStore`-style history) — "the agent learns a procedure once, saves it as a skill, reuses it."
+- [ ] Tests: create→persist→appears in catalog→read_skill returns it; update revises; isolation per role/scope.
 
-- [x] Dedicated test for `LuaModRuntime.DefaultMaxEventsDispatchedPerTick = 64` cap.
-- [x] `WaitLlmTool` timing/clamping unit test (clamp / below-cap / zero / NaN covered in `WaitLlmToolEditModeTests`).
-- [x] Align the forbidden-API list (`game.rules` / `game_rules`) between `LuaTool.ExecuteLuaDescription` and
-      `BuiltInAgentSystemPromptTexts.Programmer` (already identical; now guarded by a drift test).
-- [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite (currently EditMode-only; PlayMode validates scene-load only).
+### [R5] Summarization & context-overflow — live verification
+
+> Compaction is unit-tested with stubs only; `LlmCompactionPerRolePlayModeTests` is FastNoLlm (stub). No live
+> test proves the summary actually compresses well AND preserves key facts, nor that overflow-retry converges.
+- [ ] Live PlayMode test: build a long conversation, force compaction, assert (a) token reduction and
+      (b) key facts survive (probe the model that the summary retained specific details).
+- [ ] Integration test: context-overflow retry loop actually shrinks the prompt and eventually succeeds
+      (the `0.75^n` clamp converges) — currently only the shrink factor is unit-tested.
+- [ ] Default-config guard: cap the rolled summary by tokens (today `ConversationRolledSummaryMaxTokens=0` = uncapped).
+
+### [R6] Advanced resilience (basic fallback already shipped & tested)
+
+> `FallbackLlmClientDecorator` (primary→1 secondary) is shipped and covered by 10 EditMode tests. Missing:
+- [ ] **Circuit breaker** — trip a backend "open" after N consecutive failures so a dead primary doesn't cost
+      `timeout × (retries+1)` every turn; half-open probe to recover.
+- [ ] **Multi-provider fallback chain** (ordered list, not just 1 secondary) + secondary wrapped in the same
+      retry/logging decorators (today the secondary gets no HTTP-retry wrapper).
+- [ ] **Per-provider rate limiting** (token/request bucket) distinct from the Lua-generation limiter.
+- [ ] Streaming-path retry (today only `CompleteAsync` retries; `CompleteStreamingAsync` is single-shot).
+- [ ] Enforce request timeout in the portable core, not only in the Unity `CoreAiChatService` (default 300s).
+- [ ] Tests for each (circuit open/half-open, chain exhaustion, streaming retry, core-side timeout).
+
+### [R7] Structured output (schema-constrained generation) — optional, pending decision
+
+> Today "structured output" is post-hoc string validation (`IRoleStructuredResponsePolicy`), not provider-
+> enforced. Optional reliability win, not critical.
+- [ ] Pass `response_format` / `json_schema` to OpenAI-compatible providers; GBNF grammar for local models
+      where supported; keep post-validation as the fallback. (Decide whether to build.)
+
+### [R8] Vision — finish (feature already shipped)
+
+- [ ] PlayMode round-trip `[Explicit]` test against a real vision-capable model (capture → model → assert).
+      (Host send path, gate, and tool-result lift already shipped in 4.12.0; FastNoLlm camera test exists.)
+
+### [R9 — lowest priority] Multi-agent / sub-agent orchestration
+
+> Design in `TODO/MultiAgent_Orchestration_v2.0.md`. The decisive parity gap vs Claude Code Task tool /
+> Cursor background agents / Cline subtasks — but explicitly LAST per maintainer.
+- [ ] `SubAgentDefinition` (roleId, description, prompt, tools w/o Task tool, model, maxTokens, maxTurns).
+- [ ] `IAgentRegistry` + `AgentOrchestrator.ExecuteSubAgentAsync` (clean context isolation) + bounded `ExecuteSubAgentsParallelAsync`.
+- [ ] `AgentLlmTool` (parent-only) returning results as tool_result; DI wiring; per-role exposure; settings.
+- [ ] EditMode tests + docs + CHANGELOG.
+
+## Audit cleanup & cheap test gaps (from 2026-06-28 audit, non-blocking)
+
+- [ ] Remove now-dead `MeaiLlmClient.GetExclusiveEndForSafeUnboundRawStreaming` (superseded by `GetHybridSafeSegments`; only its own test references it) and bound the O(n²) per-delta hybrid rescan.
+- [ ] Separate inter-token idle timeout (distinct from total request timeout) in SSE streaming.
+- [ ] Surface provider-native `reasoning_content` SSE deltas as a collapsible "thinking" channel (currently parsed and dropped).
+- [ ] Pin "raw tool-call JSON never leaks into visible Text" as a hard test (today the parity test tolerates a brief flash).
+- [ ] Harden `ConversationHistoryPruner.ExtractToolNames` against `Full`-policy tool blocks (name-only markdown parse is brittle).
+- [ ] Fix `ToolExecutionPolicy.IsToolResultSuccess` lossy "contains 'success'" heuristic; structured success contract for tool results.
+- [ ] Tests: per-tool timeout firing; max-roundtrips cap termination; `SseToolCallAccumulator` state machine across many small deltas; Lua memory/table-growth bomb + blocking-native-binding; EditMode coverage gate in CI.
+- [ ] Move the `unity_find` / `unity_set_position` mutation assertion into the PlayMode suite.
+
+## Shipped (recent)
+
+- 4.12.1 — memory instruction now reaches native tool-calling roles (`AiToolContractPromptFormatter` early-return bug).
+- 4.12.0 — live streaming through tool calls, partial-SSE accumulation, WebGL Lua AOT hardening, stale-`<think>` prune, Lua mod versioning + diagnostics, vision host send path + gate + lift, P3 nits.

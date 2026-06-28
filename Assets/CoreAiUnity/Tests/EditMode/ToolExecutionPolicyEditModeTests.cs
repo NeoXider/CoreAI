@@ -67,6 +67,7 @@ namespace CoreAI.Tests.EditMode
             public bool LogMeaiToolCallingSteps => true;
             public bool AllowDuplicateToolCalls => false;
             public bool EnableStreaming => true;
+            public int MaxParallelToolCalls { get; set; } = 4;
 
             public ILlmAsyncMarshaler ToolInvocationMarshaler =>
                 _toolMarshalerOverride ?? PassThroughLlmAsyncMarshaler.Instance;
@@ -809,6 +810,173 @@ namespace CoreAI.Tests.EditMode
         public void IsToolResultSuccess_NoSuccessProperty_ReturnsTrue()
         {
             Assert.IsTrue(ToolExecutionPolicy.IsToolResultSuccess("{\"result\":\"ok\",\"count\":42}"));
+        }
+
+        // ==================== Parallel batch execution (R1) ====================
+
+        private static MEAI.ChatOptions MakeAsyncTools(params (string name, int delayMs, string result)[] tools)
+        {
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            foreach ((string name, int delayMs, string result) in tools)
+            {
+                int d = delayMs;
+                string r = result;
+                Func<CancellationToken, Task<string>> fn = async ct =>
+                {
+                    await Task.Delay(d, ct);
+                    return r;
+                };
+                opts.Tools.Add(MEAI.AIFunctionFactory.Create(fn,
+                    new MEAI.AIFunctionFactoryOptions { Name = name, Description = $"Tool {name}" }));
+            }
+
+            return opts;
+        }
+
+        [Test]
+        public async Task ExecuteBatch_PreservesCallOrder_DespiteOutOfOrderCompletion()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), false, "test", 3);
+
+            // "slow" finishes after "fast" but must still come first in Results (original call order).
+            MEAI.ChatOptions opts = MakeAsyncTools(("slow", 120, "SLOW"), ("fast", 5, "FAST"));
+            MEAI.FunctionCallContent callSlow = MakeToolCall("slow", new() { { "n", 1 } });
+            MEAI.FunctionCallContent callFast = MakeToolCall("fast", new() { { "n", 2 } });
+
+            ToolExecutionPolicy.BatchToolCallResult batch = await policy.ExecuteBatchAsync(
+                new List<MEAI.FunctionCallContent> { callSlow, callFast }, opts, CancellationToken.None);
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.AreEqual(callSlow.CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual("SLOW", ((MEAI.FunctionResultContent)batch.Results[0]).Result.ToString());
+            Assert.AreEqual(callFast.CallId, ((MEAI.FunctionResultContent)batch.Results[1]).CallId);
+        }
+
+        [Test]
+        public async Task ExecuteBatch_IndependentTools_RunConcurrently()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeAsyncTools(("a", 150, "A"), ("b", 150, "B"));
+            List<MEAI.FunctionCallContent> calls = new()
+            {
+                MakeToolCall("a", new() { { "n", 1 } }),
+                MakeToolCall("b", new() { { "n", 2 } }),
+            };
+
+            Stopwatch sw = Stopwatch.StartNew();
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+            sw.Stop();
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.Less(sw.ElapsedMilliseconds, 280,
+                "Two 150ms independent tools run in parallel should finish well under the 300ms sequential sum.");
+        }
+
+        [Test]
+        public async Task ExecuteBatch_MaxParallelOne_RunsSequentially()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = MakeAsyncTools(("a", 120, "A"), ("b", 120, "B"));
+            List<MEAI.FunctionCallContent> calls = new()
+            {
+                MakeToolCall("a", new() { { "n", 1 } }),
+                MakeToolCall("b", new() { { "n", 2 } }),
+            };
+
+            Stopwatch sw = Stopwatch.StartNew();
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+            sw.Stop();
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.AreEqual(2, batch.Results.Count);
+            Assert.GreaterOrEqual(sw.ElapsedMilliseconds, 200,
+                "MaxParallelToolCalls=1 must run tools sequentially (~240ms for two 120ms tools).");
+        }
+
+        [Test]
+        public async Task ExecuteBatch_OneFails_OthersSucceed_OrderPreserved()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool>(), false, "test", 3);
+
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => "OK1"),
+                new MEAI.AIFunctionFactoryOptions { Name = "ok1", Description = "ok" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(
+                (Func<CancellationToken, Task<string>>)(ct => throw new InvalidOperationException("boom")),
+                new MEAI.AIFunctionFactoryOptions { Name = "bad", Description = "bad" }));
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create((Func<string>)(() => "OK3"),
+                new MEAI.AIFunctionFactoryOptions { Name = "ok3", Description = "ok" }));
+
+            List<MEAI.FunctionCallContent> calls = new()
+            {
+                MakeToolCall("ok1", new() { { "n", 1 } }),
+                MakeToolCall("bad", new() { { "n", 2 } }),
+                MakeToolCall("ok3", new() { { "n", 3 } }),
+            };
+
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+
+            Assert.IsTrue(batch.AnyFailed);
+            Assert.IsFalse(batch.AllFailed);
+            Assert.AreEqual(3, batch.Results.Count);
+            Assert.AreEqual(calls[0].CallId, ((MEAI.FunctionResultContent)batch.Results[0]).CallId);
+            Assert.AreEqual(calls[2].CallId, ((MEAI.FunctionResultContent)batch.Results[2]).CallId);
+        }
+
+        [Test]
+        public async Task ExecuteBatch_MutatingTools_AreSerialized_NeverOverlap()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
+                new List<ILlmTool> { new StubTool { Name = "memory" } }, false, "test", 3);
+
+            int active = 0;
+            bool overlapped = false;
+            object gate = new();
+            Func<CancellationToken, Task<string>> mem = async ct =>
+            {
+                lock (gate)
+                {
+                    active++;
+                    if (active > 1)
+                    {
+                        overlapped = true;
+                    }
+                }
+
+                await Task.Delay(40, ct);
+                lock (gate)
+                {
+                    active--;
+                }
+
+                return "ok";
+            };
+            MEAI.ChatOptions opts = new() { Tools = new List<MEAI.AITool>() };
+            opts.Tools.Add(MEAI.AIFunctionFactory.Create(mem,
+                new MEAI.AIFunctionFactoryOptions { Name = "memory", Description = "mem" }));
+
+            List<MEAI.FunctionCallContent> calls = new()
+            {
+                MakeToolCall("memory", new() { { "n", 1 } }),
+                MakeToolCall("memory", new() { { "n", 2 } }),
+            };
+
+            ToolExecutionPolicy.BatchToolCallResult batch =
+                await policy.ExecuteBatchAsync(calls, opts, CancellationToken.None);
+
+            Assert.IsFalse(batch.AnyFailed);
+            Assert.IsFalse(overlapped,
+                "Two state-mutating 'memory' calls must be serialized, never run concurrently.");
         }
     }
 }

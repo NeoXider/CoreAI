@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
@@ -163,22 +164,36 @@ namespace CoreAI.Tests.PlayMode
         public ILlmClient Client { get; }
         public PlayModeProductionLikeLlmBackend ResolvedBackend { get; }
 
+        /// <summary>
+        /// The resolved live-test configuration for the HTTP path (base URL / model / streaming / native-tools),
+        /// or <c>null</c> when the backend was not driven by the unified config surface.
+        /// </summary>
+        public PlayModeOpenAiTestConfig.ResolvedConfig ResolvedConfig { get; }
+
         internal readonly OpenAiHttpLlmSettings _openAiSettings;
         internal readonly CoreAISettingsAsset _coreAiSettings;
         private readonly GameObject _llmUnityHarnessRoot;
+
+        // True when _coreAiSettings was created by the factory (env/file path) rather than being
+        // the shared CoreAISettingsAsset.Instance; only owned assets are destroyed on Dispose.
+        private readonly bool _ownsCoreAiSettings;
 
         internal PlayModeProductionLikeLlmHandle(
             ILlmClient client,
             PlayModeProductionLikeLlmBackend resolvedBackend,
             OpenAiHttpLlmSettings openAiSettings = null,
             CoreAISettingsAsset coreAiSettings = null,
-            GameObject llmUnityHarnessRoot = null)
+            GameObject llmUnityHarnessRoot = null,
+            bool ownsCoreAiSettings = false,
+            PlayModeOpenAiTestConfig.ResolvedConfig resolvedConfig = null)
         {
             Client = client;
             ResolvedBackend = resolvedBackend;
             _openAiSettings = openAiSettings;
             _coreAiSettings = coreAiSettings;
             _llmUnityHarnessRoot = llmUnityHarnessRoot;
+            _ownsCoreAiSettings = ownsCoreAiSettings;
+            ResolvedConfig = resolvedConfig;
         }
 
         public void Dispose()
@@ -226,6 +241,12 @@ namespace CoreAI.Tests.PlayMode
                 {
                     UnityEngine.Object.DestroyImmediate(_openAiSettings);
                 }
+            }
+
+            // Destroy only factory-created settings; never the shared CoreAISettingsAsset.Instance.
+            if (_ownsCoreAiSettings && _coreAiSettings != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_coreAiSettings);
             }
         }
     }
@@ -313,6 +334,22 @@ namespace CoreAI.Tests.PlayMode
             out PlayModeProductionLikeLlmHandle handle,
             out string ignoreReason)
         {
+            return TryCreate(explicitPreference, openAiTemperature, openAiTimeoutSeconds, null, out handle,
+                out ignoreReason);
+        }
+
+        /// <summary>
+        ///   ,    per-test model override ( vision-).
+        ///  <paramref name="modelOverride"/>      OpenAI-compatible HTTP.
+        /// </summary>
+        public static bool TryCreate(
+            PlayModeProductionLikeLlmBackend? explicitPreference,
+            float openAiTemperature,
+            int openAiTimeoutSeconds,
+            string modelOverride,
+            out PlayModeProductionLikeLlmHandle handle,
+            out string ignoreReason)
+        {
             handle = null;
             ignoreReason = null;
             PlayModeProductionLikeLlmBackend pref = ResolvePreference(explicitPreference);
@@ -330,7 +367,8 @@ namespace CoreAI.Tests.PlayMode
                     if (httpFirst)
                     {
                         // HTTP API  LLMUnity  Offline
-                        if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
+                        if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, modelOverride,
+                                out handle, out _))
                         {
                             return true;
                         }
@@ -348,7 +386,8 @@ namespace CoreAI.Tests.PlayMode
                             return true;
                         }
 
-                        if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
+                        if (TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, modelOverride,
+                                out handle, out _))
                         {
                             return true;
                         }
@@ -363,8 +402,8 @@ namespace CoreAI.Tests.PlayMode
                     return true;
 
                 case PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp:
-                    return TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, out handle,
-                        out ignoreReason);
+                    return TryCreateOpenAi(settings, openAiTemperature, openAiTimeoutSeconds, modelOverride,
+                        out handle, out ignoreReason);
 
                 case PlayModeProductionLikeLlmBackend.LlmUnity:
                     return TryCreateLlmUnity(settings, out handle, out ignoreReason);
@@ -387,6 +426,7 @@ namespace CoreAI.Tests.PlayMode
             CoreAISettingsAsset settings,
             float temperature,
             int timeoutSeconds,
+            string modelOverride,
             out PlayModeProductionLikeLlmHandle handle,
             out string ignoreReason)
         {
@@ -395,12 +435,60 @@ namespace CoreAI.Tests.PlayMode
             ignoreReason = "COREAI_NO_LLM: HTTP LLM clients are excluded from build.";
             return false;
 #else
+            // Unified resolution surface: env vars > gitignored local file > project defaults (opt-in).
+            // Env/file overrides the settings asset; the asset is the auto-detect fallback below.
+            PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve(modelOverride);
 
-            //  CoreAISettingsAsset
+            // 1) Explicit env/file configuration wins (and is the only place streaming/native-tools toggles live).
+            if (config.IsComplete)
+            {
+                // Wire config (base URL / key / model / temperature / timeout).
+                OpenAiHttpLlmSettings httpSettings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+                httpSettings.SetRuntimeConfiguration(
+                    true,
+                    config.BaseUrl,
+                    config.ApiKey,
+                    config.Model,
+                    temperature,
+                    timeoutSeconds);
+
+                // Behavioral config (streaming etc.) carried by an ICoreAISettings snapshot.
+                CoreAISettingsAsset behavior = BuildBehaviorSettings(config.Streaming, timeoutSeconds);
+
+                ILlmClient httpClient = MeaiLlmClient.CreateHttp(
+                    httpSettings, behavior, GameLoggerUnscopedFallback.Instance);
+
+                // CreateHttp wires native tool calling ON; honor an explicit native-tools=false toggle.
+                if (!config.NativeTools)
+                {
+                    httpClient = new NonNativeToolsLlmClientDecorator(httpClient);
+                }
+
+                handle = new PlayModeProductionLikeLlmHandle(
+                    httpClient,
+                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    openAiSettings: httpSettings,
+                    coreAiSettings: behavior,
+                    ownsCoreAiSettings: true,
+                    resolvedConfig: config);
+                ignoreReason = null;
+                return true;
+            }
+
+            // 2) Auto-detect: a fully configured CoreAISettingsAsset (HTTP backend) from the project.
             if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
                 !string.IsNullOrWhiteSpace(settings.ModelName))
             {
-                OpenAiChatLlmClient client = new(settings);
+                ILlmClient client = new OpenAiChatLlmClient(settings);
+                if (modelOverride != null && !string.IsNullOrWhiteSpace(modelOverride))
+                {
+                    // The asset path cannot retarget the model without mutating the shared asset; surface a clear hint.
+                    Debug.LogWarning(
+                        "[PlayModeProductionLikeLlmFactory] modelOverride is ignored when the project " +
+                        "CoreAISettingsAsset drives the HTTP backend. Set COREAI_TEST_BASE_URL/MODEL " +
+                        "(or the local config file) to use per-test model overrides.");
+                }
+
                 handle = new PlayModeProductionLikeLlmHandle(
                     client,
                     PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
@@ -409,35 +497,34 @@ namespace CoreAI.Tests.PlayMode
                 return true;
             }
 
-            // Fallback: PlayModeOpenAiTestConfig (env vars)
-            string baseUrl = PlayModeOpenAiTestConfig.ResolveBaseUrl();
-            string model = PlayModeOpenAiTestConfig.ResolveModelId();
-            if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(model))
-            {
-                ignoreReason =
-                    "OpenAI-compatible HTTP:    CoreAISettingsAsset    COREAI_OPENAI_TEST_BASE/MODEL.";
-                return false;
-            }
-
-            string apiKey = Environment.GetEnvironmentVariable("COREAI_OPENAI_TEST_API_KEY") ?? "";
-            OpenAiHttpLlmSettings legacySettings = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
-            legacySettings.SetRuntimeConfiguration(
-                true,
-                baseUrl.Trim().TrimEnd('/'),
-                apiKey,
-                model.Trim(),
-                temperature,
-                timeoutSeconds);
-
-            OpenAiChatLlmClient client2 = new(legacySettings);
-            handle = new PlayModeProductionLikeLlmHandle(
-                client2,
-                PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                legacySettings);
-            ignoreReason = null;
-            return true;
+            // 3) Unconfigured: tell the developer exactly what to set.
+            ignoreReason = PlayModeOpenAiTestConfig.BuildIgnoreReason(config);
+            return false;
 #endif
         }
+
+#if !COREAI_NO_LLM
+        /// <summary>
+        /// Builds a throwaway <see cref="CoreAISettingsAsset"/> carrying the resolved behavioral flags
+        /// (streaming, orchestration timeout). The asset has no public streaming setter, so the serialized
+        /// field is set via reflection — a deliberate test-only escape hatch that avoids touching runtime code.
+        /// </summary>
+        private static CoreAISettingsAsset BuildBehaviorSettings(bool enableStreaming, int timeoutSeconds)
+        {
+            CoreAISettingsAsset behavior = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            behavior.SetOrchestratorTimeoutSeconds(timeoutSeconds);
+
+            if (!enableStreaming)
+            {
+                System.Reflection.FieldInfo field = typeof(CoreAISettingsAsset).GetField(
+                    "enableStreaming",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                field?.SetValue(behavior, false);
+            }
+
+            return behavior;
+        }
+#endif
 
         private static bool TryCreateLlmUnity(
             CoreAISettingsAsset settings,
@@ -481,4 +568,46 @@ namespace CoreAI.Tests.PlayMode
 #endif
         }
     }
+
+#if !COREAI_NO_LLM
+    /// <summary>
+    /// Forwarding <see cref="ILlmClient"/> decorator that forces native tool calling OFF, so the
+    /// orchestrator falls back to the text/prompt tool contract. Used by the live-suite config when
+    /// <c>COREAI_TEST_NATIVE_TOOLS=false</c> against providers/models whose native function-calling is
+    /// unreliable. All completion/streaming behavior is delegated unchanged to the inner client.
+    /// </summary>
+    internal sealed class NonNativeToolsLlmClientDecorator : ILlmClient
+    {
+        private readonly ILlmClient _inner;
+
+        public NonNativeToolsLlmClientDecorator(ILlmClient inner)
+        {
+            _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        }
+
+        public bool SupportsNativeToolCalling => false;
+
+        public bool SupportsNativeToolCallingForRole(string agentRoleId) => false;
+
+        public void SetTools(IReadOnlyList<ILlmTool> tools) => _inner.SetTools(tools);
+
+        public Task<LlmCompletionResult> CompleteAsync(
+            LlmCompletionRequest request,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            return _inner.CompleteAsync(request, cancellationToken);
+        }
+
+        public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+            LlmCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken))
+            {
+                yield return chunk;
+            }
+        }
+    }
+#endif
 }

@@ -627,4 +627,122 @@ namespace CoreAI.Tests.EditMode
             }
         }
     }
+
+    /// <summary>
+    /// Covers agent-authored skills (R4): a model can create / update / delete its own skills via the
+    /// <see cref="SkillAuthoringCoordinator"/>, they persist, version, and become reusable through the same
+    /// role's live <c>read_skill</c> catalog.
+    /// </summary>
+    public sealed class SkillAuthoringEditModeTests
+    {
+        private sealed class StubTool : ILlmTool
+        {
+            public StubTool(string name) { Name = name; }
+            public string Name { get; }
+            public string Description => "stub";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => false;
+        }
+
+        private sealed class MemorySkillStore : ISkillStore
+        {
+            private readonly Dictionary<string, SkillRecord> _m = new(StringComparer.Ordinal);
+            public void Save(SkillRecord record) => _m[record.Id] = record;
+            public bool TryLoad(string id, out SkillRecord record) => _m.TryGetValue(id, out record);
+            public IReadOnlyList<SkillRecord> List() => new List<SkillRecord>(_m.Values);
+            public void Delete(string id) => _m.Remove(id);
+        }
+
+        private static SkillAuthoringCoordinator MakeCoordinator(
+            out MutableSkillCatalog catalog, out MemorySkillStore store)
+        {
+            catalog = new MutableSkillCatalog();
+            store = new MemorySkillStore();
+            SkillToolResolver resolver = name =>
+                string.Equals(name, "memory", StringComparison.OrdinalIgnoreCase)
+                    ? (ILlmTool)new StubTool("memory")
+                    : null;
+            return new SkillAuthoringCoordinator(
+                catalog, store, new MemoryLuaScriptVersionStore(), resolver, requireKnownTools: true);
+        }
+
+        [Test]
+        public void Create_PersistsAndAppearsInCatalog()
+        {
+            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+
+            SkillAuthoringResult r = coord.Create("greet", "greets the player", "Say hi warmly.", new[] { "memory" });
+
+            Assert.IsTrue(r.Success, r.Message);
+            Assert.IsNotNull(catalog.Get("greet"), "Authored skill must be in the live read_skill catalog.");
+            Assert.AreEqual("Say hi warmly.", catalog.Get("greet").Instructions);
+            Assert.IsTrue(store.TryLoad("greet", out SkillRecord rec));
+            Assert.AreEqual(0, rec.Version);
+        }
+
+        [Test]
+        public void Create_UnknownTool_Fails()
+        {
+            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out _);
+
+            SkillAuthoringResult r = coord.Create("bad", "d", "i", new[] { "ghost_tool" });
+
+            Assert.IsFalse(r.Success);
+            Assert.IsNull(catalog.Get("bad"), "A skill referencing an unregistered tool must not be created.");
+        }
+
+        [Test]
+        public void Create_InstructionsOnly_Succeeds()
+        {
+            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out _);
+
+            SkillAuthoringResult r = coord.Create("note", "a note", "Remember this procedure.", new string[0]);
+
+            Assert.IsTrue(r.Success, r.Message);
+            Assert.IsNotNull(catalog.Get("note"));
+        }
+
+        [Test]
+        public void Update_RevisesInstructionsAndRecordsRevision()
+        {
+            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+            coord.Create("greet", "d", "v0 instructions", new[] { "memory" });
+
+            SkillAuthoringResult u = coord.Update("greet", null, "v1 instructions", null);
+
+            Assert.IsTrue(u.Success, u.Message);
+            Assert.AreEqual("v1 instructions", catalog.Get("greet").Instructions);
+            Assert.IsTrue(store.TryLoad("greet", out SkillRecord rec));
+            Assert.GreaterOrEqual(rec.Version, 1, "Update must auto-increment the version.");
+            Assert.GreaterOrEqual(coord.ListRevisions("greet").Count, 2, "Create + update = two recorded revisions.");
+        }
+
+        [Test]
+        public void Delete_RemovesFromCatalogAndStore()
+        {
+            SkillAuthoringCoordinator coord = MakeCoordinator(out MutableSkillCatalog catalog, out MemorySkillStore store);
+            coord.Create("greet", "d", "i", new[] { "memory" });
+
+            SkillAuthoringResult d = coord.Delete("greet");
+
+            Assert.IsTrue(d.Success, d.Message);
+            Assert.IsNull(catalog.Get("greet"));
+            Assert.IsFalse(store.TryLoad("greet", out _));
+        }
+
+        [Test]
+        public void Rehydrate_LoadsPersistedSkillsIntoCatalog()
+        {
+            MemorySkillStore store = new();
+            store.Save(new SkillRecord("greet", "greets", "Say hi.", new List<string> { "memory" }, 2));
+            MutableSkillCatalog catalog = new();
+            SkillToolResolver resolver = name => new StubTool(name);
+            SkillAuthoringCoordinator coord = new(catalog, store, new MemoryLuaScriptVersionStore(), resolver);
+
+            int loaded = coord.RehydrateFromStore();
+
+            Assert.AreEqual(1, loaded);
+            Assert.IsNotNull(catalog.Get("greet"), "Persisted skill must reappear in read_skill after rehydrate.");
+        }
+    }
 }

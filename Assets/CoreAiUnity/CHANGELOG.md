@@ -4,6 +4,25 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.13.0 - 2026-06-28
+
+Depends on **`com.neoxider.coreai` 4.13.0** (parallel tool calls, XML tool-call parsing, real BPE tokens,
+agent-authored skills).
+
+- **feat(tools): parallel tool-call execution** + `CoreAISettingsAsset.MaxParallelToolCalls` ([Range 1–16],
+  default 4). See the Core 4.13.0 entry for the ordering/serialization guarantees.
+- **feat(tools): Hermes/Qwen-Agent XML tool-call parsing** — local GGUF models that emit
+  `<tool_call><function=…>` text now have their calls executed (Core `LlmToolCallTextExtractor`).
+- **feat(skills): agent-authored skills** — `manage_skills` + file-backed `FileSkillStore`
+  (`Application.persistentDataPath/CoreAI/Skills`), versioned and surfaced into `read_skill`.
+- **feat(context): real BPE token counting** (Core) with calibrating-estimator fallback; activate by adding
+  tiktoken rank files (see `Docs/CONTEXT_MANAGEMENT_ROADMAP.md`).
+- **test/infra: configurable live PlayMode provider** — point the suite at any OpenAI-compatible
+  provider/model via env vars or a gitignored `coreai-live-tests.local.json` (see `Docs/RUNNING_LIVE_TESTS.md`).
+- **test:** EditMode coverage for parallel batch execution (order, concurrency, mutating-tool serialization),
+  XML extraction, BPE counter (encoding resolve + synthetic-ranks merge + estimator fallback), and skill
+  authoring (create/update/delete/rehydrate/allowlist).
+
 ## 4.12.1 - 2026-06-28
 
 Depends on **`com.neoxider.coreai` 4.12.1** (native-role memory-instruction fix).

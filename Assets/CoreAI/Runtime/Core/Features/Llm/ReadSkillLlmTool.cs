@@ -28,6 +28,9 @@ namespace CoreAI.Ai
         private sealed class ReadSkillProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
+            // When the backing list is a live MutableSkillCatalog (skill authoring), the lookup is
+            // rebuilt per call so a skill the model just created/updated is immediately visible here.
+            private readonly bool _isLive;
             private readonly Dictionary<string, SkillSet> _skillsByName;
             private readonly IReadOnlyCollection<string> _allowedToolNames;
             private readonly HashSet<string> _skillToolNames;
@@ -35,25 +38,48 @@ namespace CoreAI.Ai
             public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
                 _skills = skills ?? throw new ArgumentNullException(nameof(skills));
+                _isLive = skills is MutableSkillCatalog;
                 _allowedToolNames = allowedToolNames;
                 _skillsByName = new Dictionary<string, SkillSet>(StringComparer.OrdinalIgnoreCase);
                 _skillToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (SkillSet skill in _skills)
+                if (!_isLive)
+                {
+                    IndexSkills(_skills, _skillsByName, _skillToolNames);
+                }
+            }
+
+            private static void IndexSkills(IReadOnlyList<SkillSet> skills,
+                Dictionary<string, SkillSet> skillsByName, HashSet<string> skillToolNames)
+            {
+                foreach (SkillSet skill in skills)
                 {
                     if (skill != null && !string.IsNullOrWhiteSpace(skill.Name))
                     {
-                        _skillsByName[skill.Name] = skill;
+                        skillsByName[skill.Name] = skill;
                     }
 
                     foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
                     {
                         if (!string.IsNullOrWhiteSpace(descriptor.Name))
                         {
-                            _skillToolNames.Add(descriptor.Name);
+                            skillToolNames.Add(descriptor.Name);
                         }
                     }
                 }
+            }
+
+            private Dictionary<string, SkillSet> ResolveSkillsByName()
+            {
+                if (!_isLive)
+                {
+                    return _skillsByName;
+                }
+
+                Dictionary<string, SkillSet> map = new(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+                IndexSkills(_skills, map, names);
+                return map;
             }
 
             public override string Name => "read_skill";
@@ -70,7 +96,26 @@ namespace CoreAI.Ai
 
             public bool ContainsSkillTool(string toolName)
             {
-                return !string.IsNullOrWhiteSpace(toolName) && _skillToolNames.Contains(toolName.Trim());
+                if (string.IsNullOrWhiteSpace(toolName))
+                {
+                    return false;
+                }
+
+                if (!_isLive)
+                {
+                    return _skillToolNames.Contains(toolName.Trim());
+                }
+
+                string trimmed = toolName.Trim();
+                foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(_skills))
+                {
+                    if (string.Equals(descriptor.Name, trimmed, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
@@ -91,7 +136,7 @@ namespace CoreAI.Ai
 
             private string Execute(string skill_name)
             {
-                return ReadSkillLlmTool.Execute(skill_name, _skillsByName, _allowedToolNames);
+                return ReadSkillLlmTool.Execute(skill_name, ResolveSkillsByName(), _allowedToolNames);
             }
         }
 
@@ -135,7 +180,11 @@ namespace CoreAI.Ai
                     });
                 }
 
-                if (toolSchemas.Count == 0)
+                // A skill that declares tools but has them all filtered out by the allowlist is genuinely
+                // unavailable. An instructions-only skill (no tools at all — common for agent-authored
+                // skills) is still readable: return its instructions with an empty tool list.
+                bool declaresTools = skill.Tools != null && skill.Tools.Count > 0;
+                if (toolSchemas.Count == 0 && declaresTools)
                 {
                     return new
                     {
@@ -250,7 +299,10 @@ namespace CoreAI.Ai
             List<string> names = new();
             foreach (KeyValuePair<string, SkillSet> kvp in skillsByName)
             {
-                bool anyToolAllowed = SkillSetToolResolver.BuildDescriptors(kvp.Value)
+                // Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
+                // only when at least one of their tools survives the allowlist.
+                bool declaresTools = kvp.Value?.Tools != null && kvp.Value.Tools.Count > 0;
+                bool anyToolAllowed = !declaresTools || SkillSetToolResolver.BuildDescriptors(kvp.Value)
                     .Any(d => IsAllowed(d.Name, allowedToolNames));
                 if (anyToolAllowed)
                 {

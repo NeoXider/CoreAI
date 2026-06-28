@@ -14,6 +14,20 @@ namespace CoreAI.Ai
     {
         private static readonly Regex CodeBlockRegex = new(@"```[\s\S]*?```", RegexOptions.Compiled);
 
+        // Hermes / Qwen-Agent XML tool-call template emitted by many local GGUF models when native
+        // tool_calls is empty, e.g.:
+        //   <tool_call><function=call_skill_tool>
+        //     <parameter=tool_name>craft_item</parameter>
+        //     <parameter=arguments_json>{"item":"Flame Sword"}</parameter>
+        //   </function></tool_call>
+        private static readonly Regex XmlFunctionRegex = new(
+            @"<function\s*=\s*([^>\s]+)\s*>(.*?)</function>",
+            RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+        private static readonly Regex XmlParameterRegex = new(
+            @"<parameter\s*=\s*([^>\s]+)\s*>(.*?)</parameter>",
+            RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
         /// <summary>
         /// One extracted tool call: function name + raw arguments JSON + the original span
         /// in <paramref name="text"/> so callers can rebuild the cleaned reply.
@@ -53,6 +67,13 @@ namespace CoreAI.Ai
             List<(int Start, int Length)> spans = FindBalancedToolCallSpans(searchText);
             if (spans.Count == 0)
             {
+                // Hermes/Qwen-Agent XML tool-call template (common local-model fallback when native
+                // tool_calls is empty) before function-call syntax and memory pseudo-write.
+                if (TryExtractXmlToolCallSyntax(text, out matches, out cleanedText))
+                {
+                    return true;
+                }
+
                 // Try function-call syntax before memory pseudo-write.
                 if (TryExtractFunctionCallSyntax(text, out matches, out cleanedText))
                 {
@@ -127,6 +148,67 @@ namespace CoreAI.Ai
             }
 
             cleanedText = cleanBuilder.ToString().Trim();
+            return true;
+        }
+
+        /// <summary>
+        /// Extracts Hermes / Qwen-Agent XML tool-call syntax that many local GGUF models emit as assistant
+        /// text when their native <c>tool_calls</c> array is empty:
+        /// <c>&lt;function=NAME&gt;&lt;parameter=KEY&gt;VALUE&lt;/parameter&gt;...&lt;/function&gt;</c>.
+        /// Each <c>&lt;parameter&gt;</c> value is kept as a string (so an inner <c>arguments_json</c> JSON
+        /// string stays intact for tools like <c>call_skill_tool</c>). The wrapping
+        /// <c>&lt;tool_call&gt;</c> tags are stripped from the cleaned reply.
+        /// </summary>
+        private static bool TryExtractXmlToolCallSyntax(string text, out List<Match> matches,
+            out string cleanedText)
+        {
+            matches = new List<Match>();
+            cleanedText = text;
+            if (string.IsNullOrEmpty(text) ||
+                text.IndexOf("<function", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            StringBuilder clean = new(text.Length);
+            int lastEnd = 0;
+            foreach (System.Text.RegularExpressions.Match fn in XmlFunctionRegex.Matches(text))
+            {
+                string name = fn.Groups[1].Value.Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                JObject args = new();
+                foreach (System.Text.RegularExpressions.Match p in XmlParameterRegex.Matches(fn.Groups[2].Value))
+                {
+                    string key = p.Groups[1].Value.Trim();
+                    if (key.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    // Keep values as strings: the model wrote text, and an inner arguments_json must stay a
+                    // JSON string. Tool arg binding coerces string -> number/bool where needed.
+                    args[key] = p.Groups[2].Value.Trim();
+                }
+
+                matches.Add(new Match(name, args.ToString(Formatting.None), fn.Index, fn.Length));
+                clean.Append(text, lastEnd, fn.Index - lastEnd);
+                lastEnd = fn.Index + fn.Length;
+            }
+
+            if (matches.Count == 0)
+            {
+                return false;
+            }
+
+            clean.Append(text, lastEnd, text.Length - lastEnd);
+            cleanedText = clean.ToString()
+                .Replace("<tool_call>", "")
+                .Replace("</tool_call>", "")
+                .Trim();
             return true;
         }
 

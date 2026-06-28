@@ -570,6 +570,33 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(LlmToolCallTextExtractor.LooksLikeToolCallJson(json));
         }
 
+        // ------------ Hermes / Qwen-Agent XML tool-call template --------
+
+        [Test]
+        public void PortableExtractor_XmlFunctionSyntax_ExtractsNameAndParameters()
+        {
+            // Many local GGUF models fall back to this when native tool_calls is empty (seen with
+            // qwythos-9b: <tool_call><function=NAME><parameter=KEY>VALUE</parameter></function></tool_call>).
+            string input =
+                "I'll craft it.\n<tool_call>\n<function=call_skill_tool>\n" +
+                "<parameter=tool_name>\ncraft_item\n</parameter>\n" +
+                "<parameter=arguments_json>\n{\"item\": \"Flame Sword\"}\n</parameter>\n" +
+                "</function>\n</tool_call>";
+
+            bool ok = LlmToolCallTextExtractor.TryExtract(input,
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned);
+
+            Assert.IsTrue(ok, "Hermes/Qwen XML tool-call format must be extracted.");
+            Assert.AreEqual(1, matches.Count);
+            Assert.AreEqual("call_skill_tool", matches[0].Name);
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("tool_name"));
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("craft_item"));
+            Assert.That(matches[0].ArgumentsJson, Does.Contain("Flame Sword"));
+            Assert.That(cleaned, Does.Not.Contain("<tool_call>"));
+            Assert.That(cleaned, Does.Not.Contain("<function="));
+            StringAssert.Contains("I'll craft it.", cleaned);
+        }
+
         // ------------ LLMUnity Qwen3.5: function-call syntax --------
 
         [Test]

@@ -298,6 +298,15 @@ namespace CoreAI.Infrastructure.Llm
         [Min(0)]
         private int maxToolCallHistoryMessages = 20;
 
+        [Tooltip(
+            "Max tool calls within a single LLM turn (batch) that may execute concurrently. " +
+            "1 = strictly sequential (original behavior). State-mutating built-ins (memory, manage_mods, manage_skills) " +
+            "are always serialized relative to each other; independent/read tools run in parallel. Result order is " +
+            "always preserved. Default 4.")]
+        [SerializeField]
+        [Range(1, 16)]
+        private int maxParallelToolCalls = 4;
+
         [Header("Streaming")]
         [Tooltip(
             "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI. " +
@@ -740,6 +749,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Max tool call history messages in the MEAI message list. 0 = no limit.</summary>
         public int MaxToolCallHistoryMessages => maxToolCallHistoryMessages < 0 ? 20 : maxToolCallHistoryMessages;
 
+        /// <summary>Max concurrent tool calls within one batch. 1 = sequential. Default 4.</summary>
+        public int MaxParallelToolCalls => maxParallelToolCalls < 1 ? 1 : maxParallelToolCalls;
+
         /// <inheritdoc cref="ICoreAISettings.ToolInvocationMarshaler"/>
         public ILlmAsyncMarshaler ToolInvocationMarshaler => UnityMainThreadLlmAsyncMarshaler.Instance;
 
@@ -859,6 +871,7 @@ namespace CoreAI.Infrastructure.Llm
             maxToolCallRoundtrips = options.MaxToolCallRoundtrips < 1 ? 10 : options.MaxToolCallRoundtrips;
             maxToolCallHistoryMessages =
                 options.MaxToolCallHistoryMessages < 0 ? 20 : options.MaxToolCallHistoryMessages;
+            maxParallelToolCalls = options.MaxParallelToolCalls < 1 ? 1 : options.MaxParallelToolCalls;
         }
 
         #endregion
@@ -1176,6 +1189,11 @@ namespace CoreAI.Infrastructure.Llm
             if (maxToolCallHistoryMessages < 0)
             {
                 maxToolCallHistoryMessages = 20;
+            }
+
+            if (maxParallelToolCalls < 1)
+            {
+                maxParallelToolCalls = 1;
             }
         }
 #endif

@@ -65,6 +65,7 @@
         private static int? _maxResponseChars;
         private static int? _maxToolCallRoundtrips;
         private static int? _maxToolCallHistoryMessages;
+        private static int? _maxParallelToolCalls;
 
         #endregion
 
@@ -101,6 +102,7 @@
         private const int DefaultMaxResponseChars = 0;
         private const int DefaultMaxToolCallRoundtrips = 10;
         private const int DefaultMaxToolCallHistoryMessages = 20;
+        private const int DefaultMaxParallelToolCalls = 4;
 
         internal const string DefaultUniversalSystemPromptPrefix =
             "CRITICAL RULES FOR ALL AGENTS:\n" +
@@ -409,6 +411,16 @@
             set => _maxToolCallHistoryMessages = value;
         }
 
+        /// <summary>
+        /// Max tool calls within one batch that may run concurrently. 1 (or less) = sequential.
+        /// Default: 4.
+        /// </summary>
+        public static int MaxParallelToolCalls
+        {
+            get => _maxParallelToolCalls ?? Instance?.MaxParallelToolCalls ?? DefaultMaxParallelToolCalls;
+            set => _maxParallelToolCalls = value;
+        }
+
         #endregion
 
         /// <summary>
@@ -451,6 +463,7 @@
                 _maxResponseChars = null;
                 _maxToolCallRoundtrips = null;
                 _maxToolCallHistoryMessages = null;
+                _maxParallelToolCalls = null;
             }
         }
 

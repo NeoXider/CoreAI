@@ -29,12 +29,23 @@ namespace CoreAI.Ai
         private sealed class CallSkillToolProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
+            private readonly IReadOnlyCollection<string> _allowedToolNames;
+            // When the backing list is a live MutableSkillCatalog (skill authoring), the tool map is
+            // rebuilt per call so a tool exposed by a just-authored skill is immediately invocable.
+            private readonly bool _isLive;
             private readonly Dictionary<string, SkillToolDescriptor> _toolsByName;
 
             public CallSkillToolProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
             {
                 _skills = skills ?? throw new ArgumentNullException(nameof(skills));
-                _toolsByName = BuildToolMap(_skills, allowedToolNames);
+                _allowedToolNames = allowedToolNames;
+                _isLive = skills is MutableSkillCatalog;
+                _toolsByName = _isLive ? null : BuildToolMap(_skills, allowedToolNames);
+            }
+
+            private Dictionary<string, SkillToolDescriptor> ResolveToolMap()
+            {
+                return _isLive ? BuildToolMap(_skills, _allowedToolNames) : _toolsByName;
             }
 
             public override string Name => "call_skill_tool";
@@ -50,7 +61,7 @@ namespace CoreAI.Ai
 
             public bool ContainsSkillTool(string toolName)
             {
-                return !string.IsNullOrWhiteSpace(toolName) && _toolsByName.ContainsKey(toolName.Trim());
+                return !string.IsNullOrWhiteSpace(toolName) && ResolveToolMap().ContainsKey(toolName.Trim());
             }
 
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
@@ -72,7 +83,7 @@ namespace CoreAI.Ai
             private Task<string> ExecuteAsync(string tool_name, string arguments_json,
                 CancellationToken cancellationToken = default)
             {
-                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, _toolsByName, cancellationToken);
+                return CallSkillToolLlmTool.ExecuteAsync(tool_name, arguments_json, ResolveToolMap(), cancellationToken);
             }
         }
 

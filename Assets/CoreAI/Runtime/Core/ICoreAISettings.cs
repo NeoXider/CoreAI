@@ -227,5 +227,14 @@ namespace CoreAI
         /// <para>See the implementation details for usage guidance.</para>
         /// </summary>
         int MaxToolCallHistoryMessages => 20;
+
+        /// <summary>
+        /// Maximum number of tool calls within a single batch (one LLM turn) that may execute concurrently.
+        /// Default 4. A value of <c>1</c> (or lower) forces the original strictly-sequential execution path.
+        /// State-mutating built-in tools (e.g. <c>memory</c>, <c>manage_mods</c>, <c>manage_skills</c>) are always
+        /// serialized relative to each other regardless of this value; only independent/read tools run in parallel.
+        /// Result order is always preserved (original call order), independent of completion order.
+        /// </summary>
+        int MaxParallelToolCalls => 4;
     }
 }

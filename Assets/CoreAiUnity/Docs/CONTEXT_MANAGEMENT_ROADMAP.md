@@ -101,6 +101,14 @@ invalidates system+messages but **not** tools; a tail-only `messages` change inv
   preserve legacy `chars/4`; Cyrillic/CJK use a denser ~0.4 token/char bucket) plus bounded EMA calibration
   from observed real prompt tokens. `HeuristicTokenEstimator` remains in the codebase as the simple
   pre-send fallback.
+- **Real BPE counter (R3, 4.13.0):** `BpeTokenCounter` (`ITokenCounter`) implements byte-level BPE
+  (cl100k_base / o200k_base, resolved from the model name by `BpeEncodingResolver`) for exact pre-flight
+  counts. It loads merge ranks via an `IBpeRanksProvider` and **falls back automatically** to the
+  calibrating estimator when the model is unknown, the data file is missing, or loading fails (AOT/WebGL).
+  **Activation (one manual step):** drop the standard tiktoken rank files at
+  `Assets/CoreAI/Runtime/Resources/Tokenizers/cl100k_base.tiktoken.bytes` and `…/o200k_base.tiktoken.bytes`
+  (format: one `base64(token-bytes) <rank>` per line, ~100k lines) and wire a Unity `IBpeRanksProvider`
+  that opens them as a `Stream`. Until then the estimator path is used — no behavior change without the data.
 - CoreAiPro's `ServerUsageSink` consumes the same `LlmUsageRecord`; sourcing it from `UsageDetails` keeps
   `Estimated = TotalTokens == 0` honest. Preserve the `ILlmUsageSink` contract — do not replace the sink.
 

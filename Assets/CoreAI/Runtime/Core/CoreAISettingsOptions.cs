@@ -48,6 +48,7 @@ namespace CoreAI
         public int MaxResponseChars { get; set; }
         public int MaxToolCallRoundtrips { get; set; } = 10;
         public int MaxToolCallHistoryMessages { get; set; } = 20;
+        public int MaxParallelToolCalls { get; set; } = 4;
 
         public static CoreAISettingsOptions From(ICoreAISettings source)
         {
@@ -94,7 +95,8 @@ namespace CoreAI
                 DefaultToolTimeoutMs = source.DefaultToolTimeoutMs,
                 MaxResponseChars = source.MaxResponseChars,
                 MaxToolCallRoundtrips = source.MaxToolCallRoundtrips,
-                MaxToolCallHistoryMessages = source.MaxToolCallHistoryMessages
+                MaxToolCallHistoryMessages = source.MaxToolCallHistoryMessages,
+                MaxParallelToolCalls = source.MaxParallelToolCalls
             };
         }
     }

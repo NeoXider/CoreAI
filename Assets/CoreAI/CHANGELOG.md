@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## 4.13.0 - 2026-06-28
+
+- **feat(tools): parallel tool-call execution.** `ToolExecutionPolicy.ExecuteBatchAsync` now runs a turn's
+  tool calls concurrently, bounded by the new `MaxParallelToolCalls` setting (default 4; 1 = sequential
+  fast-path). Result order is preserved (collated by index), state-mutating built-ins (`memory`,
+  `manage_mods`, `manage_skills`) are serialized so writes never race, and per-call timeout / duplicate
+  rejection / forced-tool reset / consecutive-error counting / cancellation semantics are unchanged.
+- **feat(tools): Hermes / Qwen-Agent XML tool-call parsing.** `LlmToolCallTextExtractor` now recovers the
+  `<tool_call><function=NAME><parameter=KEY>VALUE</parameter>…</function></tool_call>` template many local
+  GGUF models emit as text when native `tool_calls` is empty (parameter values kept as strings; wrapper
+  tags stripped). Joins the existing JSON / `arguments_json` / `read_skill(...)` / `Action=write` formats.
+- **feat(context): real BPE token counting.** `ITokenCounter` + `BpeTokenCounter` implement byte-level BPE
+  (cl100k_base / o200k_base, resolved by `BpeEncodingResolver`) for exact pre-flight counts, loaded via
+  `IBpeRanksProvider`. Falls back automatically to the calibrating estimator on unknown model / missing
+  data / AOT load failure. Activate by adding the tiktoken rank files (see CONTEXT_MANAGEMENT_ROADMAP).
+- **feat(skills): agent-authored skills.** New `manage_skills` tool (create/update/list/get/delete) +
+  `ISkillStore` lets the model write, version (via `ILuaScriptVersionStore`), persist, and immediately
+  reuse its own skills through the same role's `read_skill` catalog. `AgentBuilder.WithSkillAuthoring(...)`.
+
 ## 4.12.1 - 2026-06-28
 
 - **fix(prompts): memory-usage instruction now reaches native tool-calling roles.** In

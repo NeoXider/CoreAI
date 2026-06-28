@@ -12,5 +12,8 @@ namespace CoreAI.Infrastructure
         public const string ModPackages = "Mods";
         public const string LuaScriptVersions = "LuaScriptVersions";
         public const string DataOverlayVersions = "DataOverlayVersions";
+
+        /// <summary>Folder for agent-authored skills persisted by <c>FileSkillStore</c>.</summary>
+        public const string Skills = "Skills";
     }
 }

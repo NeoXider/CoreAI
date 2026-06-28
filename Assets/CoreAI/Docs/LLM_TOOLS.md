@@ -11,7 +11,8 @@ context, so the host adds them explicitly (the same pattern as a game's own tool
 | `memory` | `MemoryLlmTool` | Agent memory (read/append/edit), added by `AgentBuilder` / per-role policy. |
 | `execute_lua` | `LuaLlmTool` / `LuaTool` | Sandboxed Lua, registered in `WorldCommandsInstaller` for the Programmer role. |
 | `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). |
-| skills | `DelegateLlmTool` + `SkillSet` / `call_skill_tool` | Self-service skills (meta-tools). |
+| skills | `DelegateLlmTool` + `SkillSet` / `read_skill` / `call_skill_tool` | Self-service skills (meta-tools), progressive disclosure. |
+| `manage_skills` | `ManageSkillsLlmTool` | Agent-authored skills (create/update/list/get/delete). Opt-in via `AgentBuilder.WithSkillAuthoring(...)`. |
 | `wait` | `WaitLlmTool` | Opt-in via `AgentBuilder.WithWaitTool()`. |
 
 ## Optional / host-wired (add via `AgentBuilder.WithTool(...)` when your game provides the context)
@@ -38,6 +39,51 @@ Built-in tools are engine-agnostic or depend only on CoreAI services, so they ar
 everywhere. Host-wired tools need a concrete game service (inventory, world executor, camera) that
 CoreAI cannot fabricate, so the host opts in. This keeps the default tool surface small (fewer tokens,
 clearer model behavior) while leaving every tool available and tested.
+
+## Agent-authored skills (`manage_skills`)
+
+By default the model can only *read* and *call* skills the host pre-registered via
+`AgentBuilder.WithSkill(...)`. `AgentBuilder.WithSkillAuthoring(store, versionStore, requireKnownTools)`
+lets the model **create, update, persist, version, and immediately reuse its own skills**:
+
+```csharp
+new AgentBuilder("GameMaster")
+    .WithTool(new InventoryLlmTool(provider))   // tools the skill may reference by name
+    .WithSkill(craftingSkill)                   // (optional) host-registered skills
+    .WithSkillAuthoring(
+        store: new FileSkillStore(),            // Unity file-backed persistence
+        versionStore: container.Resolve<ILuaScriptVersionStore>()) // reused revision store
+    .Build();
+```
+
+A skill bundles step-by-step `instructions` with an **allowlist of existing tool names** — the model
+references tools already registered for the role and *cannot invent C# tools*. The single extra visible
+tool is `manage_skills`; skill bodies still load on demand through `read_skill`, preserving progressive
+disclosure.
+
+`manage_skills` actions (mirrors `manage_mods` success/failure JSON shape — `{success, message, data}`):
+
+| Action | Args | Effect |
+|---|---|---|
+| `create` | `name`, `description`, `instructions`, `tool_names[]` | Validates the allowlist, adds the skill to the live catalog, persists it (revision 0). Fails if the name exists or a tool is unknown. |
+| `update` | `name`, optional `description`/`instructions`/`tool_names[]` | Revises the skill, **auto-increments the version**, records a new revision. Null args leave fields unchanged. |
+| `list` | — | All skills with `version` and `tool_names`. |
+| `get` | `name` | Full definition (`instructions`, `tool_names`, `version`, `revision_count`). |
+| `delete` | `name` | Removes from catalog and store. |
+
+`tool_names` is a JSON array (or comma-separated) of names; an instructions-only skill (empty allowlist)
+is allowed and still readable via `read_skill`.
+
+**Persistence & versioning.** `ISkillStore` (portable; `SkillRecord` = id, description, instructions,
+tool-name allowlist, version) is implemented by `FileSkillStore` in the Unity layer — one atomic
+`<id>.json` per skill under `persistentDataPath/CoreAI/Skills/`. Revisions reuse `ILuaScriptVersionStore`
+keyed by `skill:<id>` (exactly like Lua mods), so edits are auditable. `NullSkillStore` is the in-memory
+default for tests/headless/WebGL.
+
+**Surfacing & rehydrate.** With authoring on, `read_skill`/`call_skill_tool` read from a live
+`MutableSkillCatalog`, so a just-created skill is instantly visible to the same agent. On build,
+`WithSkillAuthoring` rehydrates every persisted skill from the store back into that catalog, so skills
+authored in a previous session reappear.
 
 ## Vision / multimodal
 

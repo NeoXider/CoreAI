@@ -1,9 +1,89 @@
 using System;
+using System.IO;
 using CoreAI.Ai;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
 {
+    /// <summary>
+    /// Covers the real BPE token counter (R3): encoding resolution, byte-level BPE merge logic with a
+    /// synthetic ranks table, and the automatic heuristic-estimator fallback when the model is unknown or
+    /// tokenizer data is unavailable.
+    /// </summary>
+    public sealed class BpeTokenCounterEditModeTests
+    {
+        private sealed class StubRanks : IBpeRanksProvider
+        {
+            private readonly string _data;
+            public StubRanks(string data) { _data = data; }
+            public Stream OpenRanks(BpeEncoding encoding) =>
+                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_data));
+        }
+
+        [TestCase("gpt-4o", BpeEncoding.O200kBase)]
+        [TestCase("gpt-4o-mini", BpeEncoding.O200kBase)]
+        [TestCase("o3-mini", BpeEncoding.O200kBase)]
+        [TestCase("gpt-4", BpeEncoding.Cl100kBase)]
+        [TestCase("gpt-3.5-turbo", BpeEncoding.Cl100kBase)]
+        [TestCase("text-embedding-3-small", BpeEncoding.Cl100kBase)]
+        [TestCase("mistral-7b", BpeEncoding.Unknown)]
+        [TestCase("", BpeEncoding.Unknown)]
+        [TestCase(null, BpeEncoding.Unknown)]
+        public void EncodingResolver_MapsModelFamilies(string model, BpeEncoding expected)
+        {
+            Assert.AreEqual(expected, BpeEncodingResolver.Resolve(model));
+        }
+
+        [Test]
+        public void CountTokens_UnknownModel_UsesEstimatorFallback()
+        {
+            BpeTokenCounter counter = new(); // Null ranks provider, default estimator fallback.
+            Assert.AreEqual(counter.Fallback.EstimateText("hello world"),
+                counter.CountTokens("hello world", "llama-3"));
+        }
+
+        [Test]
+        public void CountTokens_KnownModelButNoData_FallsBackToEstimator()
+        {
+            BpeTokenCounter counter = new(NullBpeRanksProvider.Instance);
+            Assert.AreEqual(counter.Fallback.EstimateText("hello world"),
+                counter.CountTokens("hello world", "gpt-4o"));
+        }
+
+        [Test]
+        public void CountTokens_NullOrEmpty_ReturnsZero()
+        {
+            BpeTokenCounter counter = new();
+            Assert.AreEqual(0, counter.CountTokens("", "gpt-4o"));
+            Assert.AreEqual(0, counter.CountTokens(null, "gpt-4o"));
+        }
+
+        [Test]
+        public void CountTokens_RealBpe_NoMerge_CountsSingleByteTokens()
+        {
+            string b64h = Convert.ToBase64String(new[] { (byte)'h' });
+            string b64i = Convert.ToBase64String(new[] { (byte)'i' });
+            string ranks = b64h + " 0\n" + b64i + " 1\n";
+            BpeTokenCounter counter = new(new StubRanks(ranks));
+
+            // "hi" -> bytes h,i with no merge rank -> 2 single-byte tokens (real BPE, not the estimator).
+            Assert.AreEqual(2, counter.CountTokens("hi", "gpt-4"));
+        }
+
+        [Test]
+        public void CountTokens_RealBpe_WithMerge_MergesPair()
+        {
+            string b64h = Convert.ToBase64String(new[] { (byte)'h' });
+            string b64i = Convert.ToBase64String(new[] { (byte)'i' });
+            string b64hi = Convert.ToBase64String(new[] { (byte)'h', (byte)'i' });
+            string ranks = b64h + " 0\n" + b64i + " 1\n" + b64hi + " 2\n";
+            BpeTokenCounter counter = new(new StubRanks(ranks));
+
+            // "hi" merges h+i into the rank-2 piece -> 1 token.
+            Assert.AreEqual(1, counter.CountTokens("hi", "gpt-4"));
+        }
+    }
+
     public sealed class CalibratingTokenEstimatorEditModeTests
     {
         private sealed class MemoryCalibrationStore : ITokenCalibrationStore
