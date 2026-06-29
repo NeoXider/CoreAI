@@ -4,6 +4,17 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.15.1 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.15.1**.
+
+- **Report uses averages.** Multi-repetition runs are aggregated per scenario by the **mean (average)**
+  over repetitions (see the core 4.15.1 entry).
+- **Castle runs once.** The G6 castle hero (`Repeatable = false`) always runs a single time, even when the
+  suite is set to repeat every other scenario (e.g. reps = 3 for G1–G5, G6 once).
+- **Window shortcuts.** The UITK benchmark window toolbar gains **Open folder** (reveals
+  `TestResults/CoreAI/Benchmarks`) and **Open report** (opens the most recent `.md` report) buttons.
+
 ## 4.15.0 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.15.0** (Game-Creation Benchmark reporting polish and audit fixes).

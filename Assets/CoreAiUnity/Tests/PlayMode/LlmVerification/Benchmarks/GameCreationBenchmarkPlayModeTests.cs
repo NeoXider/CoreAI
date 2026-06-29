@@ -180,11 +180,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 foreach (GameBenchmarkScenario scenario in scenarios)
                 {
                     float timeout = ResolveTimeoutSeconds(scenario);
-                    for (int rep = 1; rep <= repetitions; rep++)
+                    // Non-repeatable scenarios (e.g. the G6 castle hero — a one-off visual) always run once,
+                    // even when the suite repeats every other scenario for an averaged score.
+                    int scenarioReps = scenario.Repeatable ? repetitions : 1;
+                    for (int rep = 1; rep <= scenarioReps; rep++)
                     {
                         BenchmarkProgress.StartScenario(
                             $"{scenario.Group} · {scenario.Name}  {Stars(scenario.Difficulty)}" +
-                            (repetitions > 1 ? $" (run {rep}/{repetitions})" : ""));
+                            (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""));
                         ScenarioResult captured = null;
                         // Retry on ANY hard failure that produced no measurement — provider/model crash,
                         // failed-to-load, timeout, dropped connection — so a crash never counts as a model

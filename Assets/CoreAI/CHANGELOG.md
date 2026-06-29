@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## 4.15.1 - 2026-06-30
+
+- **Averaged repetitions.** When a scenario is run multiple times, the report now aggregates each
+  scenario by the **mean (average)** of its repetitions instead of the median (suite score = mean of
+  per-scenario means). The report section is retitled "Scenario means (average over repetitions)".
+- **Opt-out of repetition.** Scenarios expose `Repeatable` (default true); a visual one-off such as the
+  G6 castle hero sets it false so it runs exactly once even when the suite repeats every other scenario.
+
 ## 4.15.0 - 2026-06-30
 
 - **feat(benchmarking): Game-Creation Benchmark reporting polish.** The portable reporting core now supports

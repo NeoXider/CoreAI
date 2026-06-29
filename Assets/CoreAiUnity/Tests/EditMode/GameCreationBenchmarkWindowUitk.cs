@@ -110,7 +110,31 @@ namespace CoreAI.Tests.EditMode
             {
                 text = "Refresh"
             };
+            ToolbarButton openFolder = new(() =>
+                EditorUtility.RevealInFinder(GameCreationBenchmarkLauncher.ResultsRoot()))
+            {
+                text = "Open folder",
+                tooltip = "Open the TestResults/CoreAI/Benchmarks folder"
+            };
+            ToolbarButton openReport = new(() =>
+            {
+                string latest = GameCreationBenchmarkLauncher.FindLatestResult();
+                if (string.IsNullOrEmpty(latest))
+                {
+                    EditorUtility.DisplayDialog("CoreAI Benchmark", "No report yet. Run the benchmark first.", "OK");
+                    return;
+                }
+
+                GameCreationBenchmarkLauncher.OpenReport(latest);
+            })
+            {
+                text = "Open report",
+                tooltip = "Open the most recent benchmark report (.md)"
+            };
+
             tabs.Add(new ToolbarSpacer { flex = true });
+            tabs.Add(openFolder);
+            tabs.Add(openReport);
             tabs.Add(refresh);
             rootVisualElement.Add(tabs);
 

@@ -23,6 +23,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int Difficulty => 5;
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
+            public override bool Repeatable => false; // visual hero, never repeated/averaged
             public override int TokenBudget => 2600;
             public override int MaxOutputTokens => 1600;
             public override double TimeBudgetMs => 45000;

@@ -915,6 +915,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>When true, the screenshot preserves model-authored positions instead of using the grid layout.</summary>
             public virtual bool FreeBuildLayout => false;
 
+            /// <summary>When false, the scenario runs once even when the suite repeats (e.g. the G6 visual hero).</summary>
+            public virtual bool Repeatable => true;
+
             /// <summary>Relative difficulty 1 (easiest) .. 5 (hardest). Drives ordering and the UI indicator.</summary>
             public virtual int Difficulty => 3;
 

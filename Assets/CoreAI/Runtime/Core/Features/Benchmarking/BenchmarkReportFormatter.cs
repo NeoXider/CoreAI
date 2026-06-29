@@ -149,13 +149,13 @@ namespace CoreAI.Benchmarking
             if (repeated)
             {
                 sb.AppendLine();
-                sb.AppendLine("## 📊 Scenario medians");
+                sb.AppendLine("## 📊 Scenario means (average over repetitions)");
                 sb.AppendLine();
-                sb.AppendLine("| Scenario | Group | Median base | Median bonus | Verdict | Reps | Spread |");
+                sb.AppendLine("| Scenario | Group | Mean base | Mean bonus | Verdict | Reps | Spread |");
                 sb.AppendLine("|---|---|---:|---:|---|---:|---:|");
                 foreach (ScenarioSummary s in summaries)
                 {
-                    sb.AppendLine($"| {s.Name} | {s.Group} | {F(s.MedianBase)} | {F(s.MedianBonus)} | " +
+                    sb.AppendLine($"| {s.Name} | {s.Group} | {F(s.MeanBase)} | {F(s.MeanBonus)} | " +
                                   $"{VerdictText(s.Classification)} | {s.Repetitions} | {F(s.Spread)} |");
                 }
             }

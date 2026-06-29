@@ -26,7 +26,7 @@ namespace CoreAI.Benchmarking
     /// Aggregated benchmark run: the metadata plus every <see cref="ScenarioResult"/>. Aggregates are
     /// computed over <see cref="Base"/> scores (the comparable number); bonus is reported separately.
     /// When a scenario is run multiple times, callers should add each repetition and read the
-    /// per-scenario median via <see cref="MedianBaseByScenario"/>.
+    /// per-scenario mean (average) via <see cref="MeanBaseByScenario"/>.
     /// </summary>
     public sealed class BenchmarkReport
     {
@@ -53,16 +53,16 @@ namespace CoreAI.Benchmarking
 
         /// <summary>
         /// One row per distinct scenario that produced a real model measurement, aggregated across
-        /// repetitions via the median base score (robust to a single noisy run on a small local model).
-        /// Suite-level numbers are computed from these.
+        /// repetitions via the MEAN (average) base score over its repetitions. Suite-level numbers are
+        /// computed from these.
         /// </summary>
         public IReadOnlyList<ScenarioSummary> Scenarios()
         {
             List<ScenarioSummary> summaries = new();
             foreach (IGrouping<string, ScenarioResult> group in GradedResults.GroupBy(r => r.ScenarioId))
             {
-                double medianBase = Median(group.Select(r => r.Score.Base).OrderBy(v => v).ToArray());
-                double medianBonus = Median(group.Select(r => r.Score.Bonus).OrderBy(v => v).ToArray());
+                double meanBase = group.Average(r => r.Score.Base);
+                double meanBonus = group.Average(r => r.Score.Bonus);
                 ScenarioResult any = group.First();
                 summaries.Add(new ScenarioSummary
                 {
@@ -70,45 +70,45 @@ namespace CoreAI.Benchmarking
                     Name = any.ScenarioName,
                     Group = any.Group,
                     Repetitions = group.Count(),
-                    MedianBase = medianBase,
-                    MedianBonus = medianBonus,
+                    MeanBase = meanBase,
+                    MeanBonus = meanBonus,
                     Spread = group.Max(r => r.Score.Base) - group.Min(r => r.Score.Base),
-                    Classification = Classify(medianBase)
+                    Classification = Classify(meanBase)
                 });
             }
 
             return summaries;
         }
 
-        private static BenchmarkClassification Classify(double medianBase)
+        private static BenchmarkClassification Classify(double meanBase)
         {
-            if (medianBase >= GoalScore.PassBase)
+            if (meanBase >= GoalScore.PassBase)
             {
                 return BenchmarkClassification.Pass;
             }
 
-            return medianBase >= GoalScore.PartialBase
+            return meanBase >= GoalScore.PartialBase
                 ? BenchmarkClassification.Partial
                 : BenchmarkClassification.Fail;
         }
 
-        /// <summary>Suite score: mean of the per-scenario median base scores.</summary>
+        /// <summary>Suite score: mean of the per-scenario mean (average) base scores.</summary>
         public double SuiteBaseScore
         {
             get
             {
                 IReadOnlyList<ScenarioSummary> s = Scenarios();
-                return s.Count == 0 ? 0 : s.Average(x => x.MedianBase);
+                return s.Count == 0 ? 0 : s.Average(x => x.MeanBase);
             }
         }
 
-        /// <summary>Mean of per-scenario median bonus, reported separately from the suite base score.</summary>
+        /// <summary>Mean of per-scenario mean bonus, reported separately from the suite base score.</summary>
         public double MeanBonus
         {
             get
             {
                 IReadOnlyList<ScenarioSummary> s = Scenarios();
-                return s.Count == 0 ? 0 : s.Average(x => x.MedianBonus);
+                return s.Count == 0 ? 0 : s.Average(x => x.MeanBonus);
             }
         }
 
@@ -264,7 +264,7 @@ namespace CoreAI.Benchmarking
         public ScenarioResult Worst =>
             GradedResults.OrderBy(r => r.Score.Base).FirstOrDefault();
 
-        /// <summary>Mean of per-scenario median base score per benchmark group (e.g. G1, G2).</summary>
+        /// <summary>Mean of per-scenario mean (average) base score per benchmark group (e.g. G1, G2).</summary>
         public IReadOnlyList<GroupScore> GroupBreakdown()
         {
             return Scenarios()
@@ -272,7 +272,7 @@ namespace CoreAI.Benchmarking
                 .Select(g => new GroupScore
                 {
                     Group = g.Key,
-                    MeanBase = g.Average(s => s.MedianBase),
+                    MeanBase = g.Average(s => s.MeanBase),
                     PassCount = g.Count(s => s.Classification == BenchmarkClassification.Pass),
                     Count = g.Count()
                 })
@@ -280,30 +280,16 @@ namespace CoreAI.Benchmarking
                 .ToList();
         }
 
-        /// <summary>Median base score per scenario id (robust to single bad runs on small local models).</summary>
-        public IReadOnlyDictionary<string, double> MedianBaseByScenario()
+        /// <summary>Mean (average) base score per scenario id, averaged over its repetitions.</summary>
+        public IReadOnlyDictionary<string, double> MeanBaseByScenario()
         {
-            Dictionary<string, double> medians = new();
+            Dictionary<string, double> means = new();
             foreach (IGrouping<string, ScenarioResult> group in Results.GroupBy(r => r.ScenarioId))
             {
-                double[] sorted = group.Select(r => r.Score.Base).OrderBy(v => v).ToArray();
-                medians[group.Key] = Median(sorted);
+                means[group.Key] = group.Average(r => r.Score.Base);
             }
 
-            return medians;
-        }
-
-        private static double Median(double[] sorted)
-        {
-            if (sorted.Length == 0)
-            {
-                return 0;
-            }
-
-            int mid = sorted.Length / 2;
-            return sorted.Length % 2 == 1
-                ? sorted[mid]
-                : (sorted[mid - 1] + sorted[mid]) / 2.0;
+            return means;
         }
     }
 
@@ -324,15 +310,15 @@ namespace CoreAI.Benchmarking
         public int Checkpoints { get; set; }
     }
 
-    /// <summary>A distinct scenario aggregated across its repetitions (median base + spread).</summary>
+    /// <summary>A distinct scenario aggregated across its repetitions (mean base + spread).</summary>
     public sealed class ScenarioSummary
     {
         public string ScenarioId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string Group { get; set; } = string.Empty;
         public int Repetitions { get; set; }
-        public double MedianBase { get; set; }
-        public double MedianBonus { get; set; }
+        public double MeanBase { get; set; }
+        public double MeanBonus { get; set; }
 
         /// <summary>max(base) − min(base) across repetitions — a stability indicator for noisy models.</summary>
         public double Spread { get; set; }
