@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## 4.15.0 - 2026-06-30
+
+- **feat(benchmarking): Game-Creation Benchmark reporting polish.** The portable reporting core now supports
+  the G6 castle free-build hero scene, per-model model-card radar/role summaries, role-shaped scene result
+  images with ghost markers for missing expected objects, decode-vs-effective tok/s reporting, and
+  cross-model comparison data for the TerminalBench-style bar chart with ranked or pinned-first ordering.
+- **Benchmark sweep and stability metadata.** Reports preserve repetition counts for median-stability
+  comparisons, expose the fields used by LM Studio multi-model sweeps, and keep decode throughput
+  comparable to LM Studio while also showing end-to-end effective throughput for the whole agentic session.
+- **Audit fixes.** Benchmark rendering and serialization paths were tightened to avoid material/mesh leaks
+  and to persist generation-time fields needed by Markdown, JSON, model-card, scene-image, and comparison
+  reports.
+
+## 4.14.0 - 2026-06-29
+
+- **feat(benchmarking): portable Game-Creation Benchmark scoring core.** New unit-tested benchmark
+  primitives live under `Assets/CoreAI/Runtime/Core/Features/Benchmarking`, with 0..100 scoring across
+  Tool correctness, Intent & sequence, Task completion, Determinism, Reasoning, and Instruction adherence.
+- **Subtractive instruction-following.** Constraint scenarios score from 100 down — each violation costs
+  its compliance checkpoint plus a per-occurrence penalty, with a mandatory core task so "do nothing"
+  can never score 100.
+- **Game-fitness by role.** A new `RoleFitness` core type turns the dimension scores into a 0..10 fit
+  rating per game-dev role (NPC, Mechanic/GameMaster, Scene/Tool Operator, Programmer, Orchestrator/Director,
+  QA) with gates and an overall rating, so a tiny 2B/0.8B model reads clearly as 'Not suitable for agentic
+  roles' instead of a misleading mid score. A role is only rated when the run actually measured every
+  dimension it depends on — a partial (single-group) run marks the affected roles 'Not assessed' instead
+  of over-claiming — and the headline overall reflects agentic roles only, so a chatty model cannot inflate
+  it through the NPC score.
+- **Efficiency scoring.** The benchmark adds a gated efficiency bonus for fewer tokens and less time
+  (split token/time, base score must be >=90, capped at 20), reports honest generation tokens/sec from
+  completion tokens only, uses per-scenario timeouts and per-scenario medians over repetitions, retries
+  transient/crash failures, and excludes environment failures from the model score.
+- **Self-explanatory scene screenshots.** World scenarios render a real Unity screenshot with a baked
+  header (scenario, score and PASS/PARTIAL/FAIL verdict, tinted by outcome) and a "what it checks" caption.
+  Objects are drawn by role (capsule/sphere/coin/post) with a ✓/✗ status, and expected objects the model
+  never built appear as ghosts — so the picture alone shows how the model did. A per-model "model card"
+  (dimension radar + role bars) makes two models comparable at a glance. `ScenarioResult` carries the PNG
+  plus the description for the report.
+
 ## 4.13.0 - 2026-06-28
 
 - **feat(tools): parallel tool-call execution.** `ToolExecutionPolicy.ExecuteBatchAsync` now runs a turn's

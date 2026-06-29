@@ -860,11 +860,18 @@ namespace CoreAI.Tests.EditMode
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 4 },
                 new List<ILlmTool>(), false, "test", 3);
 
-            MEAI.ChatOptions opts = MakeAsyncTools(("a", 150, "A"), ("b", 150, "B"));
+            // Four independent 150ms tools with MaxParallelToolCalls=4: sequentially this is ~600ms, but
+            // concurrently it is ~150ms. Using four tools (rather than two) widens the gap between the
+            // concurrent and sequential times so editor thread-pool scheduling jitter cannot flip the
+            // verdict — the assertion only needs to separate "clearly concurrent" from "sequential".
+            MEAI.ChatOptions opts = MakeAsyncTools(
+                ("a", 150, "A"), ("b", 150, "B"), ("c", 150, "C"), ("d", 150, "D"));
             List<MEAI.FunctionCallContent> calls = new()
             {
                 MakeToolCall("a", new() { { "n", 1 } }),
                 MakeToolCall("b", new() { { "n", 2 } }),
+                MakeToolCall("c", new() { { "n", 3 } }),
+                MakeToolCall("d", new() { { "n", 4 } }),
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -873,8 +880,11 @@ namespace CoreAI.Tests.EditMode
             sw.Stop();
 
             Assert.IsFalse(batch.AnyFailed);
-            Assert.Less(sw.ElapsedMilliseconds, 280,
-                "Two 150ms independent tools run in parallel should finish well under the 300ms sequential sum.");
+            Assert.AreEqual(4, batch.Results.Count);
+            Assert.Less(sw.ElapsedMilliseconds, 450,
+                "Four 150ms independent tools run in parallel (~150ms) must finish far under the ~600ms " +
+                "sequential sum; the generous 450ms bound tolerates scheduler jitter while still failing " +
+                "if execution were sequential.");
         }
 
         [Test]

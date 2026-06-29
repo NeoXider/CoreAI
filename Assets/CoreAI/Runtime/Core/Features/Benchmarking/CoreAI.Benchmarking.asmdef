@@ -1,0 +1,16 @@
+{
+  "name": "CoreAI.Benchmarking",
+  "rootNamespace": "CoreAI.Benchmarking",
+  "references": [],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

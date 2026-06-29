@@ -2,6 +2,7 @@
   "name": "CoreAI.Tests",
   "rootNamespace": "CoreAI.Tests",
   "references": [
+    "CoreAI.Benchmarking",
     "CoreAI.Core",
     "CoreAI.Editor",
     "CoreAI.ExampleGame",

@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Tests.PlayMode.Shared",
     "CoreAI.Tests.PlayMode.LlmInfra",
+    "CoreAI.Benchmarking",
     "CoreAI.Core",
     "CoreAI.Source",
     "MessagePipe",

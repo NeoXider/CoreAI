@@ -65,6 +65,7 @@ LLM-in-a-game demos are everywhere; **shipping** one is the hard part. CoreAI is
 | | Section |
 |---|---------|
 | [Changelog](#changelog) | Unity + core release notes (single source of truth) |
+| [Game-Creation Benchmark](#game-creation-benchmark) | Local LLM game-building benchmark and model ranking |
 | [Three ways to call the LLM](#-three-ways-in-ui--coreai--agents) | Chat UI · `CoreAi` · agents / orchestrator |
 | [What CoreAI can do](#-what-coreai-can-do) | Agents, tools, Lua, memory · long-chat budget & optional smart compaction (`v1.5+`) |
 | [Architecture](#%EF%B8%8F-architecture) | Two packages, diagram |
@@ -82,6 +83,27 @@ Per-release notes, migration hints, and **version numbers** are maintained only 
 - **[`com.neoxider.coreai` CHANGELOG](Assets/CoreAI/CHANGELOG.md)** — portable core and release-sync lines.
 
 The **`version`** field in each package’s `package.json` is the authoritative semver for that package.
+
+---
+
+## Game-Creation Benchmark
+
+CoreAI includes a local game-creation benchmark that measures how well an LLM builds a game by driving real `execute_lua` and `world_command` tools. It scores 0-100 across six dimensions, adds 0-10 game-fitness ratings per role, and can run locally, including an LMStudio multi-model sweep.
+
+<img src="Docs/Images/example_comparison.svg" alt="Model comparison" width="640">
+
+| # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
+|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | `qwen3.6-27b-heretic-uncensored-finetune-neo-code-di-imatrix-max` | **94.8** | 87.5% | 21/2/1 | 91.7 | 96.3 | 100 | 100 | 100 | 88.9 | 2.2 | 10.3% | 38219 | `20260629_220051` |
+| 2 | `qwen3.5-4b-mtp` | **88.8** | 75% | 18/3/3 | 88.9 | 100 | 89.9 | 100 | 88.9 | 72.2 | 4.6 | 20.6% | 38833 | `20260629_212832` |
+| 3 | `deepreinforce-ai_ornith-1.0-9b` | **84.4** | 70.8% | 17/3/4 | 75 | 94.1 | 89.6 | 100 | 66.7 | 88.9 | 3.6 | 43.3% | 35436 | `20260629_213245` |
+| 4 | `qwen3.6-27b-fable-5-experimental` | **82.2** | 66.7% | 16/3/5 | 76.9 | 94.1 | 80.4 | 100 | 88.9 | 100 | 2.3 | 46.4% | 38785 | `20260629_214659` |
+| 5 | `qwen3.5-2b` | **82.1** | 75% | 18/2/4 | 83.3 | 82.4 | 81.3 | 0 | 63 | 100 | 5.2 | 26.5% | 29793 | `20260629_212524` |
+| 6 | `qwythos-9b-claude-mythos-5-1m` | **79.1** | 75% | 18/1/5 | 72.2 | 82.4 | 83.3 | 100 | 66.7 | 88.9 | 4.6 | 39.7% | 39010 | `20260629_214115` |
+| 7 | `qwen3.5-0.8b` | **53.7** | 37.5% | 9/4/11 | 86.1 | 66.9 | 74.1 | 50 | 35.6 | 55.6 | 3.1 | 10.2% | 20084 | `20260629_212253` |
+| 8 | `lfm2-8b-a1b` | **12.3** | 0% | 0/0/24 | 50 | 2.2 | 0 | 0 | 0 | 72.2 | 0 | 0% | 31140 | `20260629_212725` |
+
+[Full benchmark guide → Docs/BENCHMARK.md](Docs/BENCHMARK.md)
 
 ---
 
@@ -549,6 +571,9 @@ var storyteller = new AgentBuilder("Storyteller")
 **Language:** All documentation is maintained in **English** — in-depth Markdown lives under [`Assets/CoreAiUnity/Docs/`](Assets/CoreAiUnity/Docs/) and [`Assets/CoreAI/Docs/`](Assets/CoreAI/Docs/). Follow the linked guides for detail.
 
 Start from the index and pick the level that matches your goal:
+
+- **Game-Creation Benchmark:** live PlayMode benchmark design for scored model-driven game creation:
+  [BENCHMARK_DESIGN.md](Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/Benchmarks/BENCHMARK_DESIGN.md).
 
 > 🧭 **[Docs/README.md](Docs/README.md)** — repository documentation entry point.
 > 🧭 **[DOCS_INDEX.md](Assets/CoreAiUnity/Docs/DOCS_INDEX.md)** — CoreAI Unity map (Beginner → Intermediate → Architecture).

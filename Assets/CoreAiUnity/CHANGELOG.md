@@ -4,6 +4,63 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.15.0 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.15.0** (Game-Creation Benchmark reporting polish and audit fixes).
+
+- **feat(benchmarks): G6 castle free-build hero.** The live benchmark now includes a free-form castle
+  showcase scenario and embeds the resulting hero screenshot while preserving the model-authored layout.
+- **Visual model reports.** Per-model cards show the dimension radar and role fitness bars; role-shaped
+  scene screenshots now include ghost markers for expected objects the model missed.
+- **Speed clarity.** Reports distinguish decode tok/s (time inside LLM calls, comparable to LM Studio) from
+  effective tok/s for the whole agentic session, and show repetitions so median stability is visible.
+- **Cross-model comparison.** The UITK benchmark window adds Run, History, **Models** (a sortable
+  leaderboard ranked by score / speed / pass-rate / game-fit) and Compare tabs; the comparison flow builds a
+  TerminalBench-style bar chart from per-model JSON, with default ranked ordering or a pinned-first mode for
+  baseline-vs-candidate reviews.
+- **LM Studio sweep workflow.** Multi-model sweeps can load/unload models with `lms`, run each benchmark
+  model, and rebuild the comparison from the newest JSON reports.
+- **Audit fixes.** Benchmark rendering and report generation fixed material/mesh leak risks and
+  generation-time serialization gaps used by screenshots, model cards, and comparison output.
+
+## 4.14.0 - 2026-06-29
+
+Depends on **`com.neoxider.coreai` 4.14.0** (portable Game-Creation Benchmark scoring core).
+
+- **feat(benchmarks): Game-Creation Benchmark.** New live PlayMode suite where a model builds a game by
+  driving the real `execute_lua` and `world_command` tools, scored 0..100.
+- **Scenario groups:** G1 build-a-game (world + Lua), G2 runtime mechanic authoring (pure Lua), G3
+  reasoning and design (harder, no spoon-fed code), G4 playable game (the harness simulates a full
+  playthrough through the model's rule slots and verifies the trajectory), and G5 strict
+  instruction-following (subtractive scoring — prohibitions, exact counts, forbidden tools, tool budgets,
+  ordering; violations detected deterministically from the tool-call trace and world commands).
+- **Summary dimensions:** Tool correctness, Intent & sequence, Task completion, Determinism, Reasoning,
+  and Instruction adherence.
+- **Efficiency and reliability accounting:** token/time efficiency bonus for fewer tokens and less time
+  (base score >=90, capped at 20), honest generation tokens/sec from completion tokens only,
+  transient/crash retries, environment failures excluded from the model score, per-scenario timeouts, and
+  per-scenario medians over repetitions.
+- **Visual results:** world-building scenarios spawn real GameObjects and a screenshot of the built scene
+  is captured and embedded in the report (and shown inline in the History window); skipped headlessly.
+  Screenshots are limited to G1 build-a-game scenarios (where the scene is the deliverable). Each object is
+  rendered by its ROLE (capsule = player, sphere = enemy, puck = coin, post = goal, etc.) so the scene reads
+  like a real prototype, and status is shown per object: expected = role colour + ✓, unexpected/extra = red
+  ✗, and objects the model never built appear as faint grey ghosts marked ✗ — so a weaker model's picture
+  literally looks incomplete. Each image bakes a header (scenario, score and PASS/PARTIAL/FAIL verdict,
+  tinted by outcome) and a 'what it checks' caption.
+- **Model card (per-model comparison image):** after a run, a 1280×720 card is rendered — a 6-axis radar of
+  the benchmark dimensions plus a game-fitness bar per role and the headline score. A strong model fills the
+  hexagon; a weak one is small and dented on its weak axis, so two models' cards compare at a glance. Leads
+  the Markdown report.
+- **Game-fitness by role:** the report and the History window rate the model 0..10 for each game-dev role
+  (NPC, Mechanic, Tool Operator, Programmer, Orchestrator, QA) with a verdict and a reason — the headline
+  'usable for my game, and for which role' answer. Roles whose dimensions a partial run did not measure are
+  shown as 'Not assessed' rather than over-rated, and the overall reflects agentic roles only.
+- **Reports:** Markdown with an embedded SVG results card, scene screenshots, and full model session
+  transcript, machine-readable JSON, rolling `INDEX.md`, and a cross-model comparison report.
+- **Editor window:** **CoreAI > Benchmarks** adds Run and History tabs, live progress, per-run dimension
+  breakdown, inline scene-screenshot thumbnails, open/delete actions, and model comparison.
+
 ## 4.13.0 - 2026-06-28
 
 Depends on **`com.neoxider.coreai` 4.13.0** (parallel tool calls, XML tool-call parsing, real BPE tokens,
