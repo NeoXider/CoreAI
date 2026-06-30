@@ -18,6 +18,7 @@ MonoBehaviour:
   apiBaseUrl: http://127.0.0.1:1234/v1
   apiKey: 
   modelName: qwen3.5-4b
+  visionSupport: 0
   enableTemperatureOverriding: 0
   temperature: 0.1
   maxTokens: 20000
@@ -49,19 +50,26 @@ MonoBehaviour:
   maxToolCallRetries: 3
   allowDuplicateToolCalls: 0
   maxLlmRequestRetries: 2
+  maxContextOverflowRetries: 3
   contextWindowTokens: 128000
   maxToolResultChars: 8000
   defaultToolTimeoutMs: 30000
   maxResponseChars: 0
   maxToolCallRoundtrips: 10
   maxToolCallHistoryMessages: 20
+  maxParallelToolCalls: 4
   enableStreaming: 1
   webGlNativeStreaming: 1
+  enableLuaOnWebGl: 1
   sameOriginCredentials: 0
   enableConversationHistorySummarization: 1
   conversationHistoryRecentTokenBudgetOverride: 0
   conversationRolledSummaryMaxTokens: 0
+  conversationCompactionTriggerRatio: 0.8
+  enableContextPruning: 1
+  maxRetainedToolResultMessages: 3
   enableLlmContextCompaction: 0
+  enableTokenCalibration: 1
   offlineUseCustomResponse: 0
   offlineCustomResponse: 'Offline mode: LLM unavailable'
   offlineCustomResponseRoles: '*'
