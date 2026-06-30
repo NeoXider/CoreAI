@@ -1349,6 +1349,26 @@ namespace CoreAI.Ai
             return null;
         }
 
+        /// <summary>
+        /// Resolves the effective tool-call roundtrip override with priority per-call &gt; per-agent.
+        /// Unlike <see cref="ResolveMaxOutputTokens"/>, a value of <c>0</c> is MEANINGFUL here (unlimited),
+        /// so only <c>null</c> defers to the next source; <c>null</c> from both = inherit the global setting.
+        /// </summary>
+        private static int? ResolveMaxToolCallRoundtrips(int? perCall, int? perAgent)
+        {
+            if (perCall.HasValue)
+            {
+                return perCall.Value;
+            }
+
+            if (perAgent.HasValue)
+            {
+                return perAgent.Value;
+            }
+
+            return null;
+        }
+
         private static AgentMemoryPolicy.RoleMemoryConfig ResolveRoleConfigForRequest(
             AgentMemoryPolicy.RoleMemoryConfig roleConfig,
             AiTaskRequest task)
@@ -1486,6 +1506,8 @@ namespace CoreAI.Ai
                 ForcedToolMode = task.ForcedToolMode,
                 RequiredToolName = task.RequiredToolName ?? "",
                 MaxOutputTokens = maxOutputTokens,
+                MaxToolCallRoundtrips = ResolveMaxToolCallRoundtrips(
+                    task.MaxToolCallRoundtrips, bundle.RoleConfig.MaxToolCallRoundtrips),
                 ContextWindowTokens = bundle.ContextWindowTokens,
                 SendTemperature = bundle.RoleConfig.Temperature.HasValue || _settings.OverrideTemperature,
                 Temperature = bundle.RoleConfig.Temperature ?? _settings.Temperature

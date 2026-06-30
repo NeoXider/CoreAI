@@ -212,9 +212,11 @@ namespace CoreAI
         /// <summary>
         /// Maximum tool-call roundtrips (iterations) within a single request.
         /// Each iteration = one LLM call + tool execution batch. Prevents infinite tool-calling loops.
-        /// Default 10. Must be at least 1.
+        /// Default 20. Set to 0 to DISABLE the cap entirely (unlimited). Per-agent and per-call overrides
+        /// (<see cref="AgentBuilder.WithMaxToolCallRoundtrips"/> / <c>AiTaskRequest.MaxToolCallRoundtrips</c>)
+        /// take priority over this global value.
         /// </summary>
-        int MaxToolCallRoundtrips => 10;
+        int MaxToolCallRoundtrips => 20;
 
         /// <summary>
         /// USD price per 1K prompt/input tokens for the token-budget overlay cost estimate.

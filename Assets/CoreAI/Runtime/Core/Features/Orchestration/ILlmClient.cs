@@ -128,6 +128,14 @@ namespace CoreAI.Ai
         public int? MaxOutputTokens { get; set; }
 
         /// <summary>
+        /// Optional per-request cap on tool-call roundtrips (iterations of LLM call + tool batch).
+        /// <c>null</c> = inherit the global <see cref="ICoreAISettings.MaxToolCallRoundtrips"/>;
+        /// <c>0</c> = UNLIMITED (no safety valve — e.g. a free-build visual scene that emits many spawns);
+        /// any positive value caps the loop at that many roundtrips.
+        /// </summary>
+        public int? MaxToolCallRoundtrips { get; set; }
+
+        /// <summary>
         /// Temperature.
         /// </summary>
         public float Temperature { get; set; } = 0.1f;

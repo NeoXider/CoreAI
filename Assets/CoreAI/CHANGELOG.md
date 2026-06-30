@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Per-agent / per-task tool-call roundtrip cap.** `MaxToolCallRoundtrips` can now be overridden per
+  agent (`AgentBuilder.WithMaxToolCallRoundtrips(int?)`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`),
+  in addition to the global `ICoreAISettings.MaxToolCallRoundtrips`. Priority: per-call &gt; per-agent &gt;
+  global. A value of **`0` means UNLIMITED** (no safety valve), `null` inherits the next level, positive
+  caps the loop. Wired end-to-end through `LlmCompletionRequest` → `SmartToolCallingChatClient`.
+- **Default cap raised 10 → 20**, and the built-in **Programmer** and **Creator** roles now default to
+  `0` (unlimited) since they routinely need many tool roundtrips per turn (code iterate / full build).
+- **Clearer stop message.** When the cap is hit, the warning now names the role, the cap, its source
+  (global vs per-agent/per-call), and exactly how to raise or disable it.
+
 ## 4.16.0 - 2026-06-30
 
 - **`AllowWorldPrimitives` setting** (`ICoreAISettings`, default `true`) gates the `world_command` spawn

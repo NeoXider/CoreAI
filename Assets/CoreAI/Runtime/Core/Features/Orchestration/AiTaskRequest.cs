@@ -75,5 +75,13 @@ namespace CoreAI.Ai
         /// by HTTP and LLMUnity backends.
         /// </summary>
         public int? MaxOutputTokens { get; set; }
+
+        /// <summary>
+        /// Per-call override of the tool-call roundtrip cap. <c>null</c> = use the per-agent/global
+        /// fallback chain; <c>0</c> = UNLIMITED (no safety valve); positive = that many roundtrips.
+        /// Unlike <see cref="MaxOutputTokens"/>, <c>0</c> is meaningful here (it means "no limit").
+        /// Propagated to <see cref="LlmCompletionRequest.MaxToolCallRoundtrips"/> by the orchestrator.
+        /// </summary>
+        public int? MaxToolCallRoundtrips { get; set; }
     }
 }

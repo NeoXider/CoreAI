@@ -124,6 +124,21 @@ For mutating tools, duplicates should usually return a structured no-op result:
 - Do not return stack traces, secrets, local file paths, or provider responses.
 - Do not hide domain failures as successful prose.
 
+## Roundtrip Limits
+
+One **roundtrip** = one LLM call + one tool-execution batch. The cap (`MaxToolCallRoundtrips`,
+default 20) stops runaway loops, but the right value depends on the agent:
+
+- **Tight for conversational NPCs** — a guard or merchant rarely needs more than a few tool rounds;
+  `WithMaxToolCallRoundtrips(5)` keeps a misbehaving model from burning tokens.
+- **Unlimited for builders and code agents** — a world builder that emits dozens of `spawn` calls, or a
+  Programmer that iterates Lua (generate → run → read error → fix), should set
+  `WithMaxToolCallRoundtrips(0)` so it is never cut off mid-task. The built-in **Programmer** and
+  **Creator** roles already default to unlimited.
+
+Set it per agent (`AgentBuilder.WithMaxToolCallRoundtrips`), per call (`AiTaskRequest.MaxToolCallRoundtrips`),
+or globally (`CoreAISettings.MaxToolCallRoundtrips`); priority is per-call → per-agent → global.
+
 ## SkillSet Organization
 
 When a role has many tools, group them into `SkillSet`s:

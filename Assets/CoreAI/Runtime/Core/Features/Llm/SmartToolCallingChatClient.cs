@@ -29,12 +29,18 @@ namespace CoreAI.Infrastructure.Llm
         private readonly string _traceId;
         private readonly IToolCallEventPublisher _eventPublisher;
         private readonly IToolExecutionNotifier _notifier;
+        private readonly int? _maxRoundtripsOverride;
 
         /// <param name="maxConsecutiveErrors">How many failures in a row are allowed before aborting.</param>
+        /// <param name="maxRoundtripsOverride">
+        /// Per-request override for the tool-call roundtrip cap. <c>null</c> = inherit
+        /// <see cref="ICoreAISettings.MaxToolCallRoundtrips"/>; <c>0</c> = UNLIMITED; positive = that cap.
+        /// </param>
         public SmartToolCallingChatClient(MEAI.IChatClient innerClient, ILog logger, ICoreAISettings settings,
             bool allowDuplicateToolCalls, IReadOnlyList<ILlmTool> tools, string roleId, int maxConsecutiveErrors = 3,
             string traceId = "",
-            IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null)
+            IToolCallEventPublisher eventPublisher = null, IToolExecutionNotifier notifier = null,
+            int? maxRoundtripsOverride = null)
         {
             _innerClient = innerClient ?? throw new ArgumentNullException(nameof(innerClient));
             _logger = logger ?? NullLog.Instance;
@@ -46,6 +52,7 @@ namespace CoreAI.Infrastructure.Llm
             _maxConsecutiveErrors = maxConsecutiveErrors;
             _eventPublisher = eventPublisher ?? NullToolCallEventPublisher.Instance;
             _notifier = notifier ?? NullToolExecutionNotifier.Instance;
+            _maxRoundtripsOverride = maxRoundtripsOverride;
         }
 
         /// <summary>
@@ -83,14 +90,25 @@ namespace CoreAI.Infrastructure.Llm
                     iteration++;
 
                     // === Max roundtrip safety valve ===
-                    int maxRoundtrips = _settings.MaxToolCallRoundtrips;
+                    // Per-request override wins when supplied (null = inherit global; 0 = unlimited).
+                    int maxRoundtrips = _maxRoundtripsOverride ?? _settings.MaxToolCallRoundtrips;
                     if (maxRoundtrips > 0 && iteration > maxRoundtrips)
                     {
+                        // Explain WHY it stopped and exactly how to raise/remove the cap, so a developer
+                        // hitting this on a legitimately long task (e.g. a big build) knows the lever.
+                        string source = _maxRoundtripsOverride.HasValue
+                            ? "per-agent/per-call override"
+                            : "global ICoreAISettings.MaxToolCallRoundtrips";
                         _logger.Warn(
-                            $"[SmartToolCall] Warning: Max tool-call roundtrips ({maxRoundtrips}) reached. Stopping.",
+                            $"[SmartToolCall] Role '{_roleId}' hit the tool-call roundtrip cap ({maxRoundtrips}, " +
+                            $"from {source}) and was stopped to prevent an infinite tool-calling loop. " +
+                            "If this task legitimately needs more tool calls, raise the limit or set it to 0 " +
+                            "(unlimited) via AgentBuilder.WithMaxToolCallRoundtrips(0), " +
+                            "AiTaskRequest.MaxToolCallRoundtrips, or the global CoreAI settings.",
                             LogTag.Llm);
                         return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
-                            $"Agent stopped: exceeded maximum of {maxRoundtrips} tool-call roundtrips."))
+                            $"Agent stopped: exceeded maximum of {maxRoundtrips} tool-call roundtrips " +
+                            "(raise or disable via WithMaxToolCallRoundtrips / settings)."))
                         {
                             FinishReason = MEAI.ChatFinishReason.Stop
                         };

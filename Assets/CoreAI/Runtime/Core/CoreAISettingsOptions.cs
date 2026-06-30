@@ -46,7 +46,7 @@ namespace CoreAI
         public int MaxToolResultChars { get; set; } = 8000;
         public int DefaultToolTimeoutMs { get; set; } = 30000;
         public int MaxResponseChars { get; set; }
-        public int MaxToolCallRoundtrips { get; set; } = 10;
+        public int MaxToolCallRoundtrips { get; set; } = 20;
         public int MaxToolCallHistoryMessages { get; set; } = 20;
         public int MaxParallelToolCalls { get; set; } = 4;
 

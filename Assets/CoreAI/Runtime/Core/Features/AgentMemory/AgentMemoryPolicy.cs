@@ -139,6 +139,13 @@ namespace CoreAI.Ai
             /// <summary>Per-role LLM response token cap; null = use per-call/global/provider fallback.</summary>
             public int? MaxOutputTokens;
 
+            /// <summary>
+            /// Per-role tool-call roundtrip cap. <c>null</c> = inherit per-call/global
+            /// <see cref="ICoreAISettings.MaxToolCallRoundtrips"/>; <c>0</c> = UNLIMITED (no safety valve);
+            /// positive = that cap. Set via <see cref="AgentBuilder.WithMaxToolCallRoundtrips"/>.
+            /// </summary>
+            public int? MaxToolCallRoundtrips;
+
             /// <summary>Controls how observed tool results are persisted into chat history.</summary>
             public ToolResultMemoryPolicy ToolResultMemory;
 
@@ -179,6 +186,7 @@ namespace CoreAI.Ai
                 Temperature = temperature;
                 ToolResultMemory = toolResultMemory;
                 CompactionTriggerRatio = NormalizeCompactionTriggerRatio(compactionTriggerRatio);
+                MaxToolCallRoundtrips = null;
             }
         }
 
@@ -232,7 +240,7 @@ namespace CoreAI.Ai
                 // Programmer keeps history off by default; chat-source runs enable it per-run
                 // without mutating global policy (see AiOrchestratorHistoryEditModeTests).
                 // Code/mechanics agents need exact tool output across turns for iterative correctness.
-                _roleConfigs[roleId] = new RoleMemoryConfig(
+                RoleMemoryConfig builtIn = new(
                     true,
                     MemoryToolAction.Append,
                     withChatHistory: !isProgrammer,
@@ -240,6 +248,17 @@ namespace CoreAI.Ai
                         ? ToolResultMemoryPolicy.Full
                         : ToolResultMemoryPolicy.CompactSummary,
                     useLlmContextCompaction: smartCompaction);
+
+                // The Programmer writes/iterates Lua and routinely needs many tool roundtrips in one turn
+                // (generate → run → read error → fix → re-run …), and the Creator orchestrates a whole
+                // build across many tool calls. Cap both at 0 = unlimited so they are never cut off
+                // mid-task. Other built-in roles inherit the global default (null = 20).
+                if (isProgrammer || roleId == BuiltInAgentRoleIds.Creator)
+                {
+                    builtIn.MaxToolCallRoundtrips = 0;
+                }
+
+                _roleConfigs[roleId] = builtIn;
             }
 
             // Built-in chat roles:
@@ -373,6 +392,7 @@ namespace CoreAI.Ai
                     ContextTokens = existing.ContextTokens,
                     MaxChatHistoryMessages = existing.MaxChatHistoryMessages,
                     MaxOutputTokens = existing.MaxOutputTokens,
+                    MaxToolCallRoundtrips = existing.MaxToolCallRoundtrips,
                     ToolResultMemory = existing.ToolResultMemory,
                     Temperature = existing.Temperature,
                     UseLlmContextCompaction = existing.UseLlmContextCompaction,
@@ -397,6 +417,28 @@ namespace CoreAI.Ai
                 RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
                 existing.MaxOutputTokens = maxOutputTokens.HasValue && maxOutputTokens.Value > 0
                     ? maxOutputTokens.Value
+                    : null;
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        /// <summary>
+        /// Set a per-role tool-call roundtrip cap. <c>null</c> clears the override (inherit per-call/global);
+        /// <c>0</c> means UNLIMITED; a positive value caps the loop. Negative values are treated as cleared.
+        /// </summary>
+        public void SetMaxToolCallRoundtrips(string roleId, int? maxRoundtrips)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.MaxToolCallRoundtrips = maxRoundtrips.HasValue && maxRoundtrips.Value >= 0
+                    ? maxRoundtrips.Value
                     : null;
                 _roleConfigs[roleId] = existing;
             }

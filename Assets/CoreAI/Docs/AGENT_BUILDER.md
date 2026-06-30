@@ -795,6 +795,26 @@ var planner = new AgentBuilder("QuestPlanner")
 
 Priority through the orchestrator is: `AiTaskRequest.MaxOutputTokens` (per-call) → `AgentBuilder.WithMaxOutputTokens` (per-agent) → `CoreAISettings.MaxTokens` (global) → provider default. Direct `LlmCompletionRequest.MaxOutputTokens` still wins when you call an `ILlmClient` yourself.
 
+#### Per-agent tool-call roundtrip cap
+
+One **roundtrip** = one LLM call + one tool-execution batch. The cap stops runaway tool-calling loops. Use `WithMaxToolCallRoundtrips(int? roundtrips)` to tune it per role: `null` inherits the global default (20), `0` means **unlimited** (no cap), and a positive value caps the loop.
+
+```csharp
+var quietNpc = new AgentBuilder("Guard")
+    .WithSystemPrompt("You are a city guard. Answer briefly.")
+    .WithMaxToolCallRoundtrips(5)    // at most 5 tool rounds per turn
+    .Build();
+
+var builder = new AgentBuilder("WorldBuilder")
+    .WithSystemPrompt("Build whole scenes from primitives.")
+    .WithMaxToolCallRoundtrips(0)    // unlimited: a big build emits dozens of spawns
+    .Build();
+```
+
+Priority mirrors the token budget: `AiTaskRequest.MaxToolCallRoundtrips` (per-call) → `AgentBuilder.WithMaxToolCallRoundtrips` (per-agent) → `CoreAISettings.MaxToolCallRoundtrips` (global, default 20). The built-in **Programmer** and **Creator** roles default to `0` (unlimited) because they routinely need many tool rounds per turn. When the cap is hit, the agent stops and logs a warning that names the role, the cap, its source, and how to raise or disable it.
+
+A free-build or visual agent that may emit 24+ spawns should use `.WithMaxToolCallRoundtrips(0)`.
+
 **Step 3: The model calls the tool when needed**
 
 When the model decides your tool is needed, it returns:
@@ -976,6 +996,7 @@ async Task AskMerchant(string playerMessage)
 | `WithChatHistory()` | Enable chat history | `.WithChatHistory()` |
 | `WithTemperature(float)` | Override temperature | `.WithTemperature(0.0f)` |
 | `WithMaxOutputTokens(int?)` | Override response token budget | `.WithMaxOutputTokens(256)` |
+| `WithMaxToolCallRoundtrips(int?)` | Override tool-call roundtrip budget (`0` = unlimited) | `.WithMaxToolCallRoundtrips(0)` |
 | `WithMode(AgentMode)` | Set mode | `.WithMode(AgentMode.ToolsAndChat)` |
 | `WithAllowDuplicateToolCalls(bool)` | Allow repeated identical tool calls | `.WithAllowDuplicateToolCalls(true)` |
 | `Build()` | Build `AgentConfig` | `.Build()` |
@@ -990,6 +1011,7 @@ async Task AskMerchant(string playerMessage)
 | `Mode` | AgentMode | Operating mode |
 | `Temperature` | float | Generation temperature |
 | `MaxOutputTokens` | int? | Per-agent response token cap; null = fallback |
+| `MaxToolCallRoundtrips` | int? | Per-agent tool-call roundtrip cap; null = fallback, 0 = unlimited |
 
 | Method | Description | Example |
 |-------|----------|--------|
@@ -1132,7 +1154,7 @@ CoreAISettings.LlmRequestTimeoutSeconds = 600; // LLM timeout (default 300)
 CoreAISettings.MaxToolResultChars = 4000;     // Truncate large tool results (default 8000)
 CoreAISettings.DefaultToolTimeoutMs = 15000;  // Per-tool timeout in ms (default 30000)
 CoreAISettings.MaxResponseChars = 50000;      // Max response chars (default 0 = disabled)
-CoreAISettings.MaxToolCallRoundtrips = 15;    // Max tool-call iterations (default 10)
+CoreAISettings.MaxToolCallRoundtrips = 30;    // Max tool-call roundtrips (default 20; 0 = unlimited)
 ```
 
 ### 🛡️ Resilience & Safety
@@ -1144,7 +1166,7 @@ Production agents face three classes of risk: tool result overflow, tool hangs, 
 | `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `…[truncated: N chars → M shown]`. Prevents a single tool from overflowing the context window. |
 | `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. |
 | `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
-| `MaxToolCallRoundtrips` | **10** | Maximum tool-call loop iterations per request. Prevents infinite tool-calling loops (model calls tools → gets results → calls again → …). |
+| `MaxToolCallRoundtrips` | **20** | Maximum tool-call roundtrips per request. One roundtrip is one LLM call plus one tool-execution batch. Prevents infinite tool-calling loops. `0` = unlimited. Overridable per agent (`WithMaxToolCallRoundtrips`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`); built-in Programmer/Creator roles default to unlimited. |
 | `MaxToolCallHistoryMessages` | **20** | Max tool call messages retained in the MEAI list during a single request's tool-calling loop. Prevents unbounded context growth. 0 = no limit. |
 
 **All five** are configurable via:
@@ -1170,7 +1192,7 @@ CoreAISettings.MaxResponseChars = 2000;
 ```
 [ToolPolicy] ✂ Tool 'get_inventory' result truncated: 45230 → 4000 chars
 [ToolPolicy] ⏱ Error: Tool 'fetch_weather' timed out after 5000ms
-[SmartToolCall] ⚠ Max tool-call roundtrips (10) reached. Stopping.
+[SmartToolCall] Role 'Guard' hit the tool-call roundtrip cap (20, from global ICoreAISettings.MaxToolCallRoundtrips) and was stopped … set it to 0 (unlimited) via WithMaxToolCallRoundtrips(0).
 [SmartToolCall] ✂ Response truncated at 2000 chars
 [SmartToolCall] Trimmed 4 old tool call message(s), keeping 12 total.
 ```

@@ -49,6 +49,7 @@ namespace CoreAI.Ai
         private int _maxChatHistoryMessages = 30;
         private float? _temperature;
         private int? _maxOutputTokens;
+        private int? _maxToolCallRoundtrips;
         private ToolResultMemoryPolicy _toolResultMemory = ToolResultMemoryPolicy.CompactSummary;
         private float? _compactionTriggerRatio;
         private bool? _allowDuplicateToolCalls;
@@ -345,6 +346,22 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// Set the tool-call roundtrip cap for this agent (one roundtrip = one LLM call + tool batch).
+        /// <c>null</c> = inherit the global <see cref="ICoreAISettings.MaxToolCallRoundtrips"/>;
+        /// <c>0</c> = UNLIMITED (no safety valve — e.g. a free-build scene that emits dozens of spawns);
+        /// a positive value caps the loop. Per-call <see cref="AiTaskRequest.MaxToolCallRoundtrips"/> wins.
+        /// </summary>
+        /// <example>
+        /// .WithMaxToolCallRoundtrips(0)    // visual free-build: never stop early
+        /// .WithMaxToolCallRoundtrips(5)    // tight NPC: at most 5 tool rounds
+        /// </example>
+        public AgentBuilder WithMaxToolCallRoundtrips(int? roundtrips)
+        {
+            _maxToolCallRoundtrips = roundtrips.HasValue && roundtrips.Value >= 0 ? roundtrips.Value : null;
+            return this;
+        }
+
+        /// <summary>
         /// Sets how this agent persists observed tool results into chat history.
         /// </summary>
         public AgentBuilder WithToolResultMemoryPolicy(ToolResultMemoryPolicy policy)
@@ -487,6 +504,7 @@ namespace CoreAI.Ai
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = _temperature,
                 MaxOutputTokens = _maxOutputTokens,
+                MaxToolCallRoundtrips = _maxToolCallRoundtrips,
                 ToolResultMemory = _toolResultMemory,
                 CompactionTriggerRatio = _compactionTriggerRatio,
                 AllowDuplicateToolCalls = _allowDuplicateToolCalls,
@@ -626,6 +644,12 @@ namespace CoreAI.Ai
         public int MaxChatHistoryMessages { get; internal set; }
         public float? Temperature { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
+
+        /// <summary>
+        /// Per-agent tool-call roundtrip cap. <c>null</c> = inherit per-call/global; <c>0</c> = UNLIMITED;
+        /// positive = that cap. Set via <see cref="AgentBuilder.WithMaxToolCallRoundtrips"/>.
+        /// </summary>
+        public int? MaxToolCallRoundtrips { get; internal set; }
         public ToolResultMemoryPolicy ToolResultMemory { get; internal set; } = ToolResultMemoryPolicy.CompactSummary;
         public float? CompactionTriggerRatio { get; internal set; }
         public bool? AllowDuplicateToolCalls { get; internal set; }
@@ -676,6 +700,7 @@ namespace CoreAI.Ai
                 PersistChatHistoryBetweenSessions, MaxChatHistoryMessages);
             policy.ConfigureLlmContextCompaction(RoleId, UseLlmContextCompaction);
             policy.SetMaxOutputTokens(RoleId, MaxOutputTokens);
+            policy.SetMaxToolCallRoundtrips(RoleId, MaxToolCallRoundtrips);
             policy.SetTemperature(RoleId, Temperature);
             policy.SetToolResultMemoryPolicy(RoleId, ToolResultMemory);
             policy.SetCompactionTriggerRatio(RoleId, CompactionTriggerRatio);
