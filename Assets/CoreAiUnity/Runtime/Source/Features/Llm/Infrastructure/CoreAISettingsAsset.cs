@@ -307,6 +307,15 @@ namespace CoreAI.Infrastructure.Llm
         [Range(1, 16)]
         private int maxParallelToolCalls = 4;
 
+        [Header("World Commands")]
+        [Tooltip(
+            "When on, the world_command 'spawn' action can create built-in Unity primitives " +
+            "(cube, sphere, cylinder, capsule, plane, quad, empty) directly when the prefabKey is not a " +
+            "registered prefab — so the world tool works out of the box with no prefab registry. " +
+            "When off, spawn is restricted to registered prefab keys. Default: on.")]
+        [SerializeField]
+        private bool allowWorldPrimitives = true;
+
         [Header("Streaming")]
         [Tooltip(
             "Global streaming preference (SSE/LLMUnity). Override per-role via AgentBuilder/policy or CoreAiChatConfig in UI. " +
@@ -681,6 +690,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Duplicate invocation guardrail.</summary>
         public bool AllowDuplicateToolCalls => allowDuplicateToolCalls;
 
+        /// <inheritdoc cref="ICoreAISettings.AllowWorldPrimitives"/>
+        public bool AllowWorldPrimitives => allowWorldPrimitives;
+
         /// <summary>Clamp for decorator-level HTTP retries.</summary>
         public int MaxLlmRequestRetries => maxLlmRequestRetries < 1 ? 1 : maxLlmRequestRetries;
 
@@ -1008,6 +1020,12 @@ namespace CoreAI.Infrastructure.Llm
         public void SetOrchestratorTimeoutSeconds(float seconds)
         {
             llmRequestTimeoutSeconds = seconds;
+        }
+
+        /// <summary>Programmatic override for the per-request tool-call roundtrip cap (tests/bootstrap).</summary>
+        public void SetMaxToolCallRoundtrips(int value)
+        {
+            maxToolCallRoundtrips = value < 1 ? 10 : value;
         }
 
         /// <summary>Sets the OpenAI-compatible base URL without normalization (callers may pass raw values).</summary>

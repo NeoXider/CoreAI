@@ -106,6 +106,14 @@ namespace CoreAI
         bool AllowDuplicateToolCalls { get; }
 
         /// <summary>
+        /// When <c>true</c>, the native <c>world_command</c> <c>spawn</c> action may create built-in Unity
+        /// primitives (cube, sphere, cylinder, capsule, plane, quad, empty) directly when the requested
+        /// <c>prefabKey</c> is not a registered prefab — so the world tool is usable out of the box without a
+        /// prefab registry. When <c>false</c>, spawn is restricted to registered prefab keys (legacy). Default <c>true</c>.
+        /// </summary>
+        bool AllowWorldPrimitives => true;
+
+        /// <summary>
         /// Global streaming toggle for LLM completions (SSE on HTTP APIs, callbacks on LLMUnity).
         /// Per-role override: <c>AgentBuilder.WithStreaming()</c> / <c>AgentMemoryPolicy.SetStreamingEnabled()</c>.
         /// UI layer may further override via <c>CoreAiChatConfig.EnableStreaming</c>. Default host implementations typically return <c>true</c>.
