@@ -164,7 +164,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 CoreAiWorldCommandEnvelope envelope = action switch
                 {
-                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z),
+                    "spawn" => CreateSpawnCommand(prefabKey, targetName, x, y, z, fx, fy, fz, scale),
                     "move" => CreateMoveCommand(targetName, x, y, z),
                     "rotate" => CreateRotateCommand(targetName, fx, fy, fz),
                     "set_scale" => CreateSetScaleCommand(targetName, scale),
@@ -248,15 +248,26 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private static CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float x,
-            float y, float z)
+            float y, float z, float fx, float fy, float fz, float scale)
         {
             if (string.IsNullOrEmpty(prefabKey))
             {
                 return null;
             }
 
-            return CoreAiWorldCommandEnvelope.Spawn(prefabKey, targetName ?? Guid.NewGuid().ToString("N"),
-                new Vector3(x, y, z));
+            string name = targetName ?? Guid.NewGuid().ToString("N");
+            Vector3 pos = new(x, y, z);
+
+            // Only take the rotation+scale overload when the model actually asked for orientation or sizing,
+            // so a plain spawn keeps the default rotation/scale (uniformScale <= 0 = leave at default).
+            bool hasRotation = fx != 0f || fy != 0f || fz != 0f;
+            bool hasScale = scale > 0f;
+            if (hasRotation || hasScale)
+            {
+                return CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos, new Vector3(fx, fy, fz), scale);
+            }
+
+            return CoreAiWorldCommandEnvelope.Spawn(prefabKey, name, pos);
         }
 
         private static CoreAiWorldCommandEnvelope CreateMoveCommand(string? targetName, float x, float y, float z)

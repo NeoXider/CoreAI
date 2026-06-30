@@ -43,6 +43,30 @@ namespace CoreAI.Infrastructure.World
             };
         }
 
+        /// <summary>
+        /// Spawn carrying an optional initial rotation (Euler degrees in fx/fy/fz) and uniform scale
+        /// (floatValue). A scale &lt;= 0 means "leave at the prefab/primitive default" (1). The executor
+        /// applies rotation and scale during instantiation so a model can place a fully-oriented, sized
+        /// object in a single tool call.
+        /// </summary>
+        public static CoreAiWorldCommandEnvelope Spawn(
+            string prefabKeyOrName, string targetName, Vector3 pos, Vector3 eulerAngles, float uniformScale)
+        {
+            return new CoreAiWorldCommandEnvelope
+            {
+                action = "spawn",
+                prefabKeyOrName = prefabKeyOrName ?? "",
+                targetName = targetName ?? "",
+                x = pos.x,
+                y = pos.y,
+                z = pos.z,
+                fx = eulerAngles.x,
+                fy = eulerAngles.y,
+                fz = eulerAngles.z,
+                floatValue = uniformScale
+            };
+        }
+
         public static CoreAiWorldCommandEnvelope Move(string targetName, Vector3 pos)
         {
             return new CoreAiWorldCommandEnvelope
