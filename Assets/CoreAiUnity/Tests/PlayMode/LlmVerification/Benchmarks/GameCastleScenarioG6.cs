@@ -129,8 +129,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
                 "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
                 "detailed — quantity and structure come first.\n\n" +
-                "For natural variety you may resize parts with action='set_scale' (a uniform 'scale') and turn pieces " +
-                "with action='rotate' (fx/fy/fz degrees), only after you have spawned plenty of objects.";
+                "Give it natural variety — varied sizes and angles — so it does not read as a grid of identical " +
+                "cubes. Use whatever the tool offers to achieve that.";
 
             private const string CastleGoal =
                 "Build the most impressive castle you can. This is a showcase of your 3D spatial reasoning: the more " +
@@ -155,9 +155,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Aim for AT LEAST 24 objects — ideally 30+. Place walls so the towers actually connect into a " +
                 "perimeter and keep every targetName distinct. Do not stop early: keep emitting spawn calls until the " +
                 "castle is full and detailed — quantity and structure come first.\n\n" +
-                "For natural variety you may resize parts with action='set_scale' (a uniform 'scale', e.g. taller " +
-                "towers, a bigger keep) and turn pieces with action='rotate' (fx/fy/fz degrees). Only do this after " +
-                "you have spawned plenty of objects — never let it reduce how many objects you build.";
+                "Give it natural variety — varied tower heights, differently sized pieces, angled roofs — so it " +
+                "does not read as a grid of identical cubes. Use whatever the tool offers to achieve that.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
