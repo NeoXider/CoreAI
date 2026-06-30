@@ -814,8 +814,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public RecordingWorldExecutor World { get; }
             public RecordingMemoryStore Memory { get; } = new();
 
+            /// <summary>
+            /// When set, the wall-clock instant the current scenario should finish by. The world tool feeds a
+            /// live "time remaining" note to the model after each spawn so it can pace itself. Null = no clock.
+            /// </summary>
+            public System.DateTime? DeadlineUtc { get; set; }
+
+            /// <summary>Live "X s left" note for tool results, or "" when no deadline is set or it has passed.</summary>
+            public string TimeRemainingNote()
+            {
+                if (DeadlineUtc == null)
+                {
+                    return "";
+                }
+
+                double secsLeft = (DeadlineUtc.Value - System.DateTime.UtcNow).TotalSeconds;
+                if (secsLeft <= 0)
+                {
+                    return "TIME IS UP — stop building now and finish.";
+                }
+
+                return $"~{secsLeft:0}s left to build — keep going, then stop when done.";
+            }
+
             public LuaLlmTool LuaTool() => new(Lua, Settings, CoreAI.Logging.NullLog.Instance);
-            public WorldLlmTool WorldTool() => new(World, Settings, new NullGameLogger());
+            public WorldLlmTool WorldTool() => new(World, Settings, new NullGameLogger(), TimeRemainingNote);
         }
 
         public sealed class RunObservation
@@ -1043,7 +1066,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Action<ScenarioResult> onResult)
         {
             // Scenario setup is harness territory: a throw here is a Framework failure, not a model one.
-            BenchmarkEnvironment env = new(settings, scenario.CaptureScene);
+            BenchmarkEnvironment env = new(settings, scenario.CaptureScene)
+            {
+                // Tell the world tool when this scenario should finish, so it can feed the model a live
+                // countdown after each spawn (free-build mainly — lets the model pace and stop in time).
+                DeadlineUtc = System.DateTime.UtcNow.AddSeconds(timeoutSeconds)
+            };
             AgentConfig config = null;
             string setupError = null;
             try
@@ -1284,9 +1312,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     {
                         int spawns = env.World.Count("spawn");
                         double genSec = obs.GenerationMs / 1000.0;
+                        double tokPerSec = genSec > 0.001 ? completionTokens / genSec : 0.0;
                         heroStats = $"{obs.ToolCalls} tool-calls · {spawns} spawns · " +
                                     $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
-                                    $"{(fromProvider ? "" : "~")} ({totalTokens:0} total)";
+                                    $"{(fromProvider ? "" : "~")} · {tokPerSec:0.#} tok/s ({totalTokens:0} total)";
                     }
 
                     yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,

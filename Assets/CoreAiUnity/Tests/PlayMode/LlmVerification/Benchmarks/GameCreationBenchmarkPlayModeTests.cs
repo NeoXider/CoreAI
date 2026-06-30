@@ -41,6 +41,27 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <summary>Env var (int) for the per-request tool-call roundtrip cap. 0/unset = default 40.</summary>
         public const string EnvRoundtrips = "COREAI_BENCHMARK_ROUNDTRIPS";
 
+        /// <summary>
+        /// Env var (seconds) for the SOFT whole-suite time budget. When the elapsed wall-clock crosses this,
+        /// the suite stops starting new scenarios, then writes the report/screenshots for everything finished
+        /// so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts. Default 300s
+        /// (5 min). The NUnit [Timeout] is set well above this as a last-resort backstop.
+        /// </summary>
+        public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
+
+        private static double ResolveSuiteBudgetSeconds()
+        {
+            string raw = Environment.GetEnvironmentVariable(EnvSuiteBudget);
+            if (!string.IsNullOrWhiteSpace(raw)
+                && double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double s) && s >= 30)
+            {
+                return s;
+            }
+
+            return 300; // 5 minutes
+        }
+
         private static int ResolveBenchmarkRoundtrips()
         {
             string raw = Environment.GetEnvironmentVariable(EnvRoundtrips);
@@ -131,7 +152,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest]
-        [Timeout(5400000)] // 90 min — a full multi-repetition suite on a slow 27B local model
+        [Timeout(600000)] // 10 min — last-resort NUnit backstop; the SOFT 5-min suite budget (which still
+                          // writes artifacts) is the real terminator. NUnit's hard abort writes nothing.
         [Category("Benchmark")]
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]
         public IEnumerator GameCreationBenchmark_Suite()
@@ -143,9 +165,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            // Free-build scenes (the castle) spawn AND colour 24+ objects, which needs more tool-call
-            // roundtrips than the default 10 (each object = a spawn + a set_color). Overridable via env.
+            // Free-build scenes (the castle) spawn 24+ objects, which needs more tool-call roundtrips than the
+            // default. Overridable via env.
             settings.SetMaxToolCallRoundtrips(ResolveBenchmarkRoundtrips());
+            // CRITICAL for free-build: do NOT truncate tool-call history (0 = unlimited). With the default cap
+            // of 20, a 30+ spawn build forgets the first ~15 objects it placed and re-spawns duplicates. The
+            // model must see everything it has already built to avoid repeating itself.
+            settings.SetMaxToolCallHistoryMessages(0);
             BenchmarkReport report = new();
 
             try
@@ -195,8 +221,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 GameBenchmarkScenario[] scenarios = AllScenarios();
                 BenchmarkProgress.Begin(scenarios.Length * repetitions, modelId);
 
+                // Soft whole-suite time budget: when crossed, stop starting NEW scenarios and fall through to
+                // writing the report/screenshots for whatever finished. This is graceful — unlike the NUnit
+                // [Timeout] which hard-aborts mid-scenario and writes nothing.
+                double suiteBudgetSeconds = ResolveSuiteBudgetSeconds();
+                System.Diagnostics.Stopwatch suiteClock = System.Diagnostics.Stopwatch.StartNew();
+                bool budgetHit = false;
+
                 foreach (GameBenchmarkScenario scenario in scenarios)
                 {
+                    if (suiteClock.Elapsed.TotalSeconds >= suiteBudgetSeconds)
+                    {
+                        budgetHit = true;
+                        Debug.LogWarning(
+                            $"[Benchmark] Suite time budget ({suiteBudgetSeconds:0}s) reached after " +
+                            $"{report.Results.Count} scenario result(s); stopping early and writing the report " +
+                            "for everything finished so far.");
+                        break;
+                    }
+
                     float timeout = ResolveTimeoutSeconds(scenario);
                     // Non-repeatable scenarios (e.g. the G6 castle hero — a one-off visual) always run once,
                     // even when the suite repeats every other scenario for an averaged score.

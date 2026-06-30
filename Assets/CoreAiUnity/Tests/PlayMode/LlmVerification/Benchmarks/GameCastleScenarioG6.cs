@@ -47,10 +47,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int TokenBudget => 6000;
             public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
-            // A slow model may spawn dozens of objects one call at a time, so give the visual build a generous
-            // wall-clock budget (12 min) — it is a one-off hero, not a timed gate. The roundtrip cap (above)
-            // is the primary terminator; the timeout is the backstop.
-            public override float TimeoutSeconds => 720f;
+            // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
+            // and counted down to after each spawn, so it can pace itself. 300s (5 min) matches the default
+            // suite budget; override via COREAI_BENCHMARK_TIMEOUT. The roundtrip cap stays the hard backstop.
+            public override float TimeoutSeconds => 300f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
             {
@@ -109,13 +109,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 get
                 {
                     string full = Env("COREAI_BENCHMARK_FREEBUILD_PROMPT");
-                    if (full != null)
-                    {
-                        return full;
-                    }
+                    string baseGoal = full
+                        ?? (FreeBuildSubject() is string subject ? GenericGoal(subject) : CastleGoal);
 
-                    string subject = FreeBuildSubject();
-                    return subject != null ? GenericGoal(subject) : CastleGoal;
+                    // Tell the model it is on a clock and that every spawn result reports the time left, so it
+                    // can pace itself and stop cleanly before the deadline rather than being cut off.
+                    return baseGoal +
+                        "\n\nYou are on a time budget. After every spawn, the tool result tells you how many " +
+                        "seconds remain. Pace yourself: keep building steadily, and when the time is nearly up, " +
+                        "stop spawning and finish — a complete smaller scene beats a half-built large one.";
                 }
             }
 

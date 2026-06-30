@@ -21,16 +21,23 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAiWorldCommandExecutor _executor;
         private readonly ICoreAISettings _settings;
         private readonly IGameLogger _logger;
+        private readonly Func<string> _liveResultNote;
 
         // Monotonic counter for auto-naming unnamed spawns with a readable name (e.g. "cube_1") instead of
         // a GUID hash, so the hierarchy stays human-readable when the model omits targetName.
         private int _autoNameCounter;
 
-        public WorldLlmTool(ICoreAiWorldCommandExecutor executor, ICoreAISettings settings, IGameLogger logger)
+        /// <param name="liveResultNote">
+        /// Optional callback returning a short note appended to EVERY successful result message (e.g. a live
+        /// "time remaining" countdown the benchmark feeds the model after each spawn). Null = no note.
+        /// </param>
+        public WorldLlmTool(ICoreAiWorldCommandExecutor executor, ICoreAISettings settings, IGameLogger logger,
+            Func<string> liveResultNote = null)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _liveResultNote = liveResultNote;
         }
 
         public override string Name => "world_command";
@@ -236,6 +243,20 @@ namespace CoreAI.Infrastructure.Llm
                                                             new List<Dictionary<string, object>>();
                     return SerializeResult(true, $"Found {objs.Count} matching objects.\n" +
                                                  Newtonsoft.Json.JsonConvert.SerializeObject(objs), action);
+                }
+
+                // For spawn, echo the actually-applied transform (incl. rotation/scale when the model passed
+                // them) into the result message, so the benchmark transcript records WHAT the model requested
+                // — this is how we verify whether models use inline rotation/scale, not just that spawn ran.
+                if (success && action == "spawn")
+                {
+                    bool hasRot = fx != 0f || fy != 0f || fz != 0f;
+                    bool hasScale = scale > 0f;
+                    string extra = $" at ({x:0.##},{y:0.##},{z:0.##})"
+                                   + (hasRot ? $" rot=({fx:0.#},{fy:0.#},{fz:0.#})" : "")
+                                   + (hasScale ? $" scale={scale:0.##}" : "");
+                    return SerializeResult(true,
+                        $"World command 'spawn' executed successfully{extra}{LiveNote()}", action);
                 }
 
                 return SerializeResult(success,
@@ -545,6 +566,25 @@ namespace CoreAI.Infrastructure.Llm
                 "list_objects" => "Missing required parameters for action 'list_objects'.",
                 _ => $"Missing required parameters for action '{action}'."
             };
+        }
+
+        /// <summary>Live note (e.g. time-remaining) appended to a successful result, or "" when none set.</summary>
+        private string LiveNote()
+        {
+            if (_liveResultNote == null)
+            {
+                return "";
+            }
+
+            try
+            {
+                string note = _liveResultNote();
+                return string.IsNullOrWhiteSpace(note) ? "" : " — " + note.Trim();
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private static string SerializeResult(bool success, string message, string? action = null)
