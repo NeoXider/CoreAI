@@ -116,7 +116,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest]
-        [Timeout(1800000)]
+        [Timeout(5400000)] // 90 min — a full multi-repetition suite on a slow 27B local model
         [Category("Benchmark")]
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]
         public IEnumerator GameCreationBenchmark_Suite()
