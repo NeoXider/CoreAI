@@ -22,6 +22,10 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private readonly IGameLogger _logger;
 
+        // Monotonic counter for auto-naming unnamed spawns with a readable name (e.g. "cube_1") instead of
+        // a GUID hash, so the hierarchy stays human-readable when the model omits targetName.
+        private int _autoNameCounter;
+
         public WorldLlmTool(ICoreAiWorldCommandExecutor executor, ICoreAISettings settings, IGameLogger logger)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
@@ -247,7 +251,7 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float x,
+        private CoreAiWorldCommandEnvelope CreateSpawnCommand(string? prefabKey, string? targetName, float x,
             float y, float z, float fx, float fy, float fz, float scale)
         {
             if (string.IsNullOrEmpty(prefabKey))
@@ -255,7 +259,17 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
-            string name = targetName ?? Guid.NewGuid().ToString("N");
+            // Prefer the model-supplied name. When it is omitted, generate a READABLE name from the prefab
+            // key plus a counter (e.g. "cube_1", "Enemy_2") rather than a GUID hash, so the scene hierarchy
+            // stays legible. A leading digit or empty fallback is guarded with a generic "object_N".
+            string name = targetName;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                int n = ++_autoNameCounter;
+                string stem = string.IsNullOrWhiteSpace(prefabKey) ? "object" : prefabKey.Trim();
+                name = $"{stem}_{n}";
+            }
+
             Vector3 pos = new(x, y, z);
 
             // Only take the rotation+scale overload when the model actually asked for orientation or sizing,
