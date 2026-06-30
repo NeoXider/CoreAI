@@ -802,12 +802,12 @@ One **roundtrip** = one LLM call + one tool-execution batch. The cap stops runaw
 ```csharp
 var quietNpc = new AgentBuilder("Guard")
     .WithSystemPrompt("You are a city guard. Answer briefly.")
-    .WithMaxToolCallRoundtrips(5)    // at most 5 tool rounds per turn
+    .WithMaxToolCallRoundtrips(5)    // at most 5 tool roundtrips per turn
     .Build();
 
 var builder = new AgentBuilder("WorldBuilder")
     .WithSystemPrompt("Build whole scenes from primitives.")
-    .WithMaxToolCallRoundtrips(0)    // unlimited: a big build emits dozens of spawns
+    .WithMaxToolCallRoundtrips(0)    // unlimited: a big visual build can emit 24+ spawns
     .Build();
 ```
 
