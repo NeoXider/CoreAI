@@ -377,7 +377,7 @@ var agent = new AgentBuilder("MyAgent")
 Agent stopped: exceeded maximum of 20 tool-call roundtrips
 ```
 
-**Cause:** The task needed **more** tool roundtrips than the cap allows. One roundtrip is one LLM call plus one tool-execution batch. Common for builders that emit many `spawn` calls, or a Programmer iterating Lua.
+**Cause:** The task needed **more** tool roundtrips than the cap allows. One roundtrip is one LLM call plus one tool-execution batch. Common for free-build visual agents that emit 24+ `spawn` calls, or a Programmer iterating Lua.
 
 **Fix:** raise or remove the cap at the right scope:
 - Per agent: `new AgentBuilder("Builder").WithMaxToolCallRoundtrips(0)`; `0` = unlimited.
