@@ -17,6 +17,11 @@ namespace CoreAI.Messaging
         /// </summary>
         public const string WorldCommand = "WorldCommand";
 
+        /// <summary>
+        /// Command type id for Unity component commands.
+        /// </summary>
+        public const string ComponentCommand = "ComponentCommand";
+
         /// <summary>Data overlay applied.</summary>
         public const string DataOverlayApplied = "DataOverlayApplied";
     }

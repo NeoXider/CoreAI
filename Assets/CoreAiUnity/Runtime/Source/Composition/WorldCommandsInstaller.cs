@@ -76,6 +76,9 @@ namespace CoreAI.Composition
                     c.Resolve<Messaging.IAiGameCommandSink>(),
                     allowedLuaScenes),
                 Lifetime.Singleton);
+            builder.Register(c => new CoreAiComponentLuaRuntimeBindings(
+                    c.Resolve<Messaging.IAiGameCommandSink>()),
+                Lifetime.Singleton);
             builder.Register<LuaTimeBindings>(Lifetime.Singleton);
             builder.Register<CoreAiWorldQueryLuaBindings>(Lifetime.Singleton);
             builder.Register(c => new CoreAiFullUnityLuaRuntimeBindings(
@@ -96,6 +99,7 @@ namespace CoreAI.Composition
                     c.Resolve<IGameLogger>(),
                     c.Resolve<CoreAiVersioningLuaRuntimeBindings>(),
                     c.Resolve<CoreAiWorldLuaRuntimeBindings>(),
+                    c.Resolve<CoreAiComponentLuaRuntimeBindings>(),
                     c.Resolve<LuaTimeBindings>(),
                     c.Resolve<CoreAiWorldQueryLuaBindings>(),
                     c.Resolve<LuaLogicSlots>(),
@@ -187,9 +191,13 @@ namespace CoreAI.Composition
             builder.Register(c => new CoreAiWorldCommandExecutor(
                     c.Resolve<IGameLogger>(),
                     c.Resolve<ICoreAiPrefabRegistry>(),
-                    allowedLuaScenes),
+                    allowedLuaScenes,
+                    c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
                 Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
+
+            builder.Register(c => new CoreAiComponentCommandExecutor(c.Resolve<IGameLogger>()), Lifetime.Singleton)
+                .As<ICoreAiComponentCommandExecutor>();
 
             // Game Config: Unity SO-based config store
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
