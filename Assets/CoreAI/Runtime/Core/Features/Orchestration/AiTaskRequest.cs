@@ -8,6 +8,13 @@ namespace CoreAI.Ai
         /// <summary>Target agent role id.</summary>
         public string RoleId { get; set; } = BuiltInAgentRoleIds.Creator;
 
+        /// <summary>
+        /// Optional per-request system-prompt override. When non-empty, the composer uses it as the role base
+        /// prompt (the UniversalSystemPromptPrefix is still prepended). Empty = use the registered role prompt
+        /// (default).
+        /// </summary>
+        public string SystemPrompt { get; set; } = "";
+
         /// <summary>User or system hint that describes the requested task.</summary>
         public string Hint { get; set; } = "";
 

@@ -87,7 +87,7 @@ namespace CoreAI.Ai
                 ? Guid.NewGuid().ToString("N")
                 : task.TraceId.Trim();
             GameSessionSnapshot snap = _telemetry.BuildSnapshot();
-            string systemBase = _promptComposer.GetSystemPrompt(roleId);
+            string systemBase = _promptComposer.GetSystemPrompt(roleId, task?.SystemPrompt);
             string worldState = _promptComposer.BuildRuntimeContext(task, roleId, traceId);
 
             string system = systemBase;
