@@ -20,13 +20,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private abstract class G6Scenario : GameBenchmarkScenario
         {
             public sealed override string Group => "G6";
+
+            // Build-appropriate system prompt: the base GameMaster prompt ("smallest correct set of tool
+            // calls") is wrong for a free build, where the model must place every object itself.
+            public override string SystemPrompt =>
+                "You are a 3D scene builder. Use the world_command tool to place each object yourself, " +
+                "one tool call per object, with explicit coordinates. Keep building a rich, structured scene " +
+                "until it is complete — do not stop early and do not ask questions. " +
+                "Vary positions, sizes and angles.";
+
             public override int Difficulty => 5;
             public override bool CaptureScene => true;
             public override bool FreeBuildLayout => true;
             public override bool Repeatable => false; // visual hero, never repeated/averaged
             // Tool-call cap for the visual build. Default 1000 — effectively "build as much as you want" for
-            // any real model, while still a HARD safety valve so a small model that spams duplicate spawns
-            // (with AllowDuplicateToolCalls on) can never loop forever and hang the run. When the cap is hit
+            // any real model, while still a HARD safety valve so a weak model that spams identical spawns
+            // can never loop forever and hang the run. When the cap is hit
             // the client returns FinishReason.Stop, the scenario completes normally, and the hero screenshot
             // is still captured. Override with COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS (e.g. set 200 for a quick
             // pass, or higher for an enormous scene).
@@ -48,16 +57,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override int MaxOutputTokens => 4800; // headroom per turn for many spawn tool-calls
             public override double TimeBudgetMs => 45000;
             // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
-            // and counted down to after each spawn, so it can pace itself. 300s (5 min) matches the default
+            // and counted down to after each spawn, so it can pace itself. 600s (10 min) matches the default
             // suite budget; override via COREAI_BENCHMARK_TIMEOUT. The roundtrip cap stays the hard backstop.
-            public override float TimeoutSeconds => 300f;
+            public override float TimeoutSeconds => 600f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
             {
                 return new AgentBuilder(RoleId)
                     .WithSystemPrompt(SystemPrompt)
                     .WithTool(env.WorldTool())
-                    .WithAllowDuplicateToolCalls(true)
                     .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     // High but finite cap (default 1000) — the model builds freely, yet can never loop
@@ -127,7 +135,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "action='spawn', a DISTINCT targetName for every object, and explicit x,y,z coordinates within the " +
                 "-9..9 range so the whole scene fits in one screenshot (y is height, larger y = higher; ground at y=0).\n\n" +
                 "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
-                "plane, quad (a plane makes a good ground).\n\n" +
+                "quad. For the ground, use a wide, flat, low cube (a cube scaled large in X/Z, e.g. scale a cube at " +
+                "y=0) or a quad.\n\n" +
                 $"Aim for AT LEAST 24 objects — ideally 30+, arranged so the result clearly reads as {subject}. " +
                 "Keep every targetName distinct. Do not stop early: keep emitting spawn calls until it is full and " +
                 "detailed — quantity and structure come first.\n\n" +
@@ -141,13 +150,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "-9..9 range so the whole castle fits in one screenshot (y is height, larger y = higher; the ground is " +
                 "at y=0).\n\n" +
                 "Pick the primitive that best fits each part via prefabKey — one of: cube, sphere, cylinder, capsule, " +
-                "plane, quad. For example cylinders for round towers and flag poles, cubes for walls/keep/battlements, " +
-                "spheres for domes/treetops, a plane for the ground.\n\n" +
+                "quad. For example cylinders for round towers and flag poles, cubes for walls/keep/battlements, " +
+                "spheres for domes/treetops, and a wide flat low cube (or a quad) for the ground.\n\n" +
                 "A castle MUST have, at minimum: four corner towers, walls connecting them into a closed perimeter, a " +
                 "gate gap at the front, and a central keep. Then add grandeur: battlements along the walls, flags on " +
                 "top of the towers, roofs, a bridge, a moat ring, trees and torches outside.\n\n" +
                 "If you are unsure how to lay it out, follow this proven skeleton and then EXTEND it with more detail:\n" +
-                "- Ground: prefabKey='plane' at (0,0,0).\n" +
+                "- Ground: prefabKey='cube' at (0,0,0) scaled large in X/Z (a wide flat low slab), or prefabKey='quad'.\n" +
                 "- Four corner towers: prefabKey='cylinder' at (-6,1.5,-6), (6,1.5,-6), (-6,1.5,6), (6,1.5,6).\n" +
                 "- Walls (cubes) spaced every ~2 units along each of the four edges connecting the towers, e.g. the " +
                 "back wall at z=-6 with x = -4,-2,0,2,4 (leave the front edge z=6 open in the middle for the gate).\n" +

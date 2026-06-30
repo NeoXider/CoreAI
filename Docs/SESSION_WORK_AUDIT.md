@@ -101,6 +101,51 @@ direct `curl`), the cause was **not** the model or the prompt:
 weak `qwen3.5-2b` no longer fails but false-passes via duplicate-spam (273 spawn *commands* ≈ 2 distinct
 objects) — expected for a free build that counts commands, not distinct objects.
 
+## Prompt composition + duplicate policy — nuances (and fixes)
+
+Inspecting *what the model actually receives* on the castle run (LM Studio server log, verified live)
+surfaced two real disconnects, now fixed. The message the model gets is `system` (UniversalSystemPromptPrefix
++ role/override base) + `user` (the scenario `Goal` carried as `Hint`).
+
+1. **Per-scenario system prompts were dead code.** The orchestrator request `AiTaskRequest` had no
+   system-prompt field, and the role id `GameMaster` is not registered in
+   `BuiltInDefaultAgentSystemPromptProvider`, so every scenario's `.WithSystemPrompt(...)` was silently
+   dropped and the model got the generic fallback `You are agent "GameMaster" in CoreAI…`. **Fix:** added
+   an optional `AiTaskRequest.SystemPrompt` override; `AiPromptComposer.GetSystemPrompt(roleId,
+   overrideBasePrompt)` uses it as the base prompt (the Universal prefix is still prepended). The harness
+   now passes `SystemPrompt = scenario.SystemPrompt`, and G6 overrides it with a build-appropriate prompt
+   ("You are a 3D scene builder… keep building until complete, do not stop early"). This is a general
+   capability — the **game** can now pass a per-task system prompt on the same role, so game and benchmark
+   share one path. Backward-compatible: empty override ⇒ unchanged (registered role prompt).
+
+2. **System prompt and tool config contradicted each other on duplicates.** The Universal prefix says
+   *"Do not call the same tool again with the same arguments"*, but every benchmark scenario forced
+   `.WithAllowDuplicateToolCalls(true)` AND `WorldLlmTool`/`ComponentLlmTool` declared `AllowDuplicates =>
+   true`, which together disable the dedup guard entirely. A weak model (2b) then spam-loops the *identical*
+   spawn — the real driver of the runaway. **Fix:** removed the `WithAllowDuplicateToolCalls(true)` override
+   from all six scenarios (the global default is already `false`) and set the world/component tools to
+   `AllowDuplicates => false`. The dedup key is **tool name + canonicalized arguments**, so distinct spawns
+   (different positions/names) are still fully allowed — only an *exact* identical call is skipped with a
+   "duplicate … with same arguments" result. Because the dedup lives in core `ToolExecutionPolicy`, the same
+   protection holds **in-game**: nothing can spam-loop the world tool in a single task.
+
+3. **Reasoning enum trap.** `LlmReasoningMode` = `ProviderDefault(0) / Disabled(1) / Enabled(2)`. The value
+   `1` reads like "on" but means **Disabled** (sends `enable_thinking:false`). The committed asset had `1`,
+   which is why thinking was off. Set to `Enabled(2)`.
+
+4. **The benchmark builds its own `ICoreAISettings`, not the `Resources` asset.** So its
+   UniversalSystemPromptPrefix is the code default (`CRITICAL RULES FOR ALL AGENTS: …`, which usefully
+   carries the tool-calling rules), while the in-game asset prefix is `Respond concisely…`. Worth knowing
+   when comparing a benchmark transcript to an in-game session — they share the composition logic but not
+   the settings instance.
+
+**Castle timeout** is back to **10 minutes** (G6 `TimeoutSeconds=600`, soft suite-budget default 600,
+NUnit `[Timeout]` backstop 15 min so the soft budget can still write the report).
+
+**Verified live (fable-27b, G6, post-fix):** request `system` = `CRITICAL RULES…` prefix + the 3D-builder
+override; `user` = the castle goal; `reasoning_tokens` > 0; conversation stayed at ~12 messages / ~2.5k
+prompt tokens (no runaway); spawns carried distinct `targetName`s (no duplicate-spam).
+
 ## Follow-ups (tracked, not blocking)
 
 - Make the benchmark's manually-built orchestrator turn-trace visible in the Agent Session Inspector
@@ -108,10 +153,5 @@ objects) — expected for a free build that counts commands, not distinct object
 - The free-build capture reports `toolCalls=0` when a run ends via the empty/timeout clean-stop path (the
   inner tool loop's calls aren't surfaced to `capture`); the spawn count from `env.World` is correct and
   is what grading uses. Cosmetic only.
-
-## Follow-ups (tracked, not blocking)
-
-- Make the benchmark's manually-built orchestrator turn-trace visible in the Agent Session Inspector
-  (today it only resolves a trace reader from a scene DI scope).
 - Optional: a subagent pass to confirm, once a model emits tool calls, whether it uses inline
   rotation/scale now that the schema documents it.

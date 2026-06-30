@@ -1131,6 +1131,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Task task = orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = scenario.RoleId,
+                SystemPrompt = scenario.SystemPrompt,
                 Hint = scenario.Goal,
                 // Per-call override always wins over agent/global settings — this is the reliable channel
                 // for the visual free-build to run with NO roundtrip cap (0 = unlimited), independent of

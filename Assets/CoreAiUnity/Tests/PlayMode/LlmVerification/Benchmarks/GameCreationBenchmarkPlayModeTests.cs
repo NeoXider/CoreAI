@@ -44,8 +44,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <summary>
         /// Env var (seconds) for the SOFT whole-suite time budget. When the elapsed wall-clock crosses this,
         /// the suite stops starting new scenarios, then writes the report/screenshots for everything finished
-        /// so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts. Default 300s
-        /// (5 min). The NUnit [Timeout] is set well above this as a last-resort backstop.
+        /// so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts. Default 600s
+        /// (10 min). The NUnit [Timeout] is set well above this as a last-resort backstop.
         /// </summary>
         public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
 
@@ -59,7 +59,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return s;
             }
 
-            return 300; // 5 minutes
+            return 600; // 10 minutes
         }
 
         private static int ResolveBenchmarkRoundtrips()
@@ -152,7 +152,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest]
-        [Timeout(600000)] // 10 min — last-resort NUnit backstop; the SOFT 5-min suite budget (which still
+        [Timeout(900000)] // 15 min — last-resort NUnit backstop; the SOFT 10-min suite budget (which still
                           // writes artifacts) is the real terminator. NUnit's hard abort writes nothing.
         [Category("Benchmark")]
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]

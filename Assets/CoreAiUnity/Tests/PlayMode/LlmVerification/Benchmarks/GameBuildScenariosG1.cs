@@ -42,7 +42,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 return b
-                    .WithAllowDuplicateToolCalls(true)
                     .WithStreaming(false)
                     .WithMaxOutputTokens(MaxOutputTokens)
                     .WithMode(AgentMode.ToolsOnly)
