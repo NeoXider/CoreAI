@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## 4.16.0 - 2026-06-30
+
+- **`AllowWorldPrimitives` setting** (`ICoreAISettings`, default `true`) gates the `world_command` spawn
+  primitive fallback; `SetMaxToolCallRoundtrips` override added for benchmark/bootstrap.
+- **`component_command` curated catalog** — `ComponentLlmTool` + `ICoreAiComponentCommandExecutor`: add /
+  remove / set / list supported Unity components with no reflection. Mirrored by `coreai_component_*` Lua
+  bindings.
+- **`BenchmarkInfo`** suite identity (name + `v1`), `BenchmarkReportFormatter` / `ModelComparison` tweaks.
+- **Decode tok/s fix** — report `max(provider, tokenizer-estimate)` including tool-call JSON so tool-only
+  runs no longer undercount throughput to ~0.3 tok/s.
+
 ## 4.15.3 - 2026-06-30
 
 - **Free, ambitious castles.** The G6 prompt swaps the rigid coordinate blueprint for full creative freedom

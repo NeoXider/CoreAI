@@ -4,6 +4,28 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.16.0 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.16.0**.
+
+- **Spawn with rotation + scale in one call.** The `world_command` `spawn` action now accepts optional
+  rotation (`fx/fy/fz` degrees) and uniform `scale`, so a model can place an object with the right
+  orientation and size in a single tool call instead of three.
+- **`component_command` tool** — add / remove / set / list Unity components through a curated, reflection-free
+  catalog (rigidbody, colliders, light, audiosource, camera, renderers, particlesystem, …). Matching Lua
+  bindings: `coreai_component_add/remove/set_number/set_bool/set_text/set_vector`.
+- **Full-tier Lua UX** — `unity_list_members` discovery, rich Color/Vector/Quaternion coercion from Lua
+  tables, and did-you-mean errors that list valid members, making Full reflection as convenient as the
+  curated path.
+- **G6 free-build is overridable** — ask for a city, a character, a spaceship, … via the benchmark window
+  field or `COREAI_BENCHMARK_FREEBUILD_SUBJECT` / `COREAI_BENCHMARK_FREEBUILD_PROMPT`. Default stays the
+  detailed castle.
+- **Benchmark fixes** — decode tok/s now reports real throughput (`max(provider, tokenizer-estimate)` incl.
+  tool-call JSON; was undercounting to ~0.3), RunId uses local time, a live preview camera shows the scene
+  building in real time, and the tool-call roundtrip cap is configurable (`COREAI_BENCHMARK_ROUNDTRIPS`,
+  default 40) so free-build scenes can emit 24+ spawns.
+- **8-model G6 castle gallery** in the README, plus `AllowWorldPrimitives` settings toggle.
+
 ## 4.15.3 - 2026-06-30
 
 Depends on **`com.neoxider.coreai` 4.15.3**.
