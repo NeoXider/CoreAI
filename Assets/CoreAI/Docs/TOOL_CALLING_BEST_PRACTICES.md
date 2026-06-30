@@ -127,7 +127,7 @@ For mutating tools, duplicates should usually return a structured no-op result:
 ## Roundtrip Limits
 
 One **roundtrip** = one LLM call + one tool-execution batch. The cap (`MaxToolCallRoundtrips`,
-default 20) stops runaway loops, but the right value depends on the agent:
+default 20) stops runaway loops, but the right value depends on the agent role:
 
 - **Tight caps for conversational NPCs** — a guard or merchant rarely needs more than a few tool rounds;
   `WithMaxToolCallRoundtrips(5)` keeps a misbehaving model from burning tokens.
