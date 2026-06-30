@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace CoreAI.Benchmarking
 {
     /// <summary>
@@ -15,5 +17,27 @@ namespace CoreAI.Benchmarking
 
         /// <summary>"CoreAI Game-Creation Benchmark v1" — name and version combined.</summary>
         public const string TitleWithVersion = SuiteName + " " + Version;
+
+        /// <summary>
+        /// Canonical per-group difficulty on a single 1–10 scale, the ONE source both the editor window
+        /// (RUN tab toggles) and the PlayMode scenarios/progress read from, so the number never disagrees
+        /// between UI and history. Each scenario maps its own <c>Difficulty</c> to this via
+        /// <see cref="GroupDifficulty10"/>. Keep these in sync with the per-group scenario design.
+        /// </summary>
+        public static readonly IReadOnlyDictionary<string, int> GroupDifficulty10 = new Dictionary<string, int>
+        {
+            { "G2", 2 }, // runtime mechanic authoring (pure Lua)
+            { "G1", 3 }, // build a game (world + Lua)
+            { "G5", 5 }, // strict instruction-following (subtractive)
+            { "G6", 6 }, // free-build visual (bonus; default castle)
+            { "G3", 7 }, // reasoning & design
+            { "G4", 8 }, // playable game (simulated playthrough)
+        };
+
+        /// <summary>Difficulty (1–10) for a group id; 5 (mid) when the group is unknown.</summary>
+        public static int DifficultyFor(string group)
+        {
+            return group != null && GroupDifficulty10.TryGetValue(group, out int d) ? d : 5;
+        }
     }
 }

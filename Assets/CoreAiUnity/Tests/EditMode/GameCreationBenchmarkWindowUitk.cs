@@ -233,18 +233,20 @@ namespace CoreAI.Tests.EditMode
             head.Add(hd);
             section.Add(head);
 
+            // Difficulty values come from the single source BenchmarkInfo.GroupDifficulty10, so the RUN-tab
+            // rating can never disagree with the scenario/history rating.
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG2,
-                "G2 - runtime mechanic authoring (pure Lua)", 2, _runG2, v => _runG2 = v));
+                "G2 - runtime mechanic authoring (pure Lua)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G2"), _runG2, v => _runG2 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG1,
-                "G1 - build a game (world + Lua)", 3, _runG1, v => _runG1 = v));
+                "G1 - build a game (world + Lua)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G1"), _runG1, v => _runG1 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG5,
-                "G5 - strict instruction-following (subtractive)", 5, _runG5, v => _runG5 = v));
+                "G5 - strict instruction-following (subtractive)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G5"), _runG5, v => _runG5 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG3,
-                "G3 - reasoning & design (harder, intelligence)", 7, _runG3, v => _runG3 = v));
+                "G3 - reasoning & design (harder, intelligence)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G3"), _runG3, v => _runG3 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG4,
-                "G4 - playable game (simulated playthrough)", 8, _runG4, v => _runG4 = v));
+                "G4 - playable game (simulated playthrough)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G4"), _runG4, v => _runG4 = v));
             section.Add(GroupToggle(GameCreationBenchmarkLauncher.PrefG6,
-                "G6 - free-build visual (bonus; default: castle)", 6, _runG6, v =>
+                "G6 - free-build visual (bonus; default: castle)", CoreAI.Benchmarking.BenchmarkInfo.DifficultyFor("G6"), _runG6, v =>
                 {
                     _runG6 = v;
                     UpdateFreeBuildBoxVisibility();

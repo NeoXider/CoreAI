@@ -81,10 +81,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 all.RemoveAll(s => !wanted.Contains(s.Group));
             }
 
-            // Run (and display) from easiest to hardest.
+            // Run (and display) from easiest to hardest, using the SAME canonical group difficulty the editor
+            // RUN tab shows, so ordering and the rating indicator agree everywhere.
             all.Sort((a, b) =>
             {
-                int d = a.Difficulty.CompareTo(b.Difficulty);
+                int d = BenchmarkInfo.DifficultyFor(a.Group).CompareTo(BenchmarkInfo.DifficultyFor(b.Group));
                 if (d != 0)
                 {
                     return d;
@@ -203,7 +204,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     for (int rep = 1; rep <= scenarioReps; rep++)
                     {
                         BenchmarkProgress.StartScenario(
-                            $"{scenario.Group} · {scenario.Name}  {Stars(scenario.Difficulty)}" +
+                            $"{scenario.Group} · {scenario.Name}  {Stars(BenchmarkInfo.DifficultyFor(scenario.Group))}" +
                             (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""));
                         ScenarioResult captured = null;
                         // Retry on ANY hard failure that produced no measurement — provider/model crash,
@@ -233,12 +234,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         {
                             captured.Repetition = rep;
                             report.Add(captured);
-                            BenchmarkProgress.CompleteScenario(ProgressLine(captured), Stars(scenario.Difficulty));
+                            BenchmarkProgress.CompleteScenario(ProgressLine(captured), Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
                         }
                         else
                         {
                             BenchmarkProgress.CompleteScenario($"⚠ {scenario.Name} — no result",
-                                Stars(scenario.Difficulty));
+                                Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
                         }
                     }
                 }
@@ -276,11 +277,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "A scenario failed inside the harness (not the model). See artifact for details.");
         }
 
-        /// <summary>Difficulty 1..5 as filled/empty dots for the progress list (e.g. "●●●○○").</summary>
-        private static string Stars(int difficulty)
+        /// <summary>
+        /// Difficulty on the single 1–10 scale (from <see cref="BenchmarkInfo.GroupDifficulty10"/>) rendered
+        /// as 5 half-dots plus "d/10", matching the editor RUN-tab indicator exactly so the two never differ.
+        /// </summary>
+        private static string Stars(int difficulty10)
         {
-            int d = difficulty < 1 ? 1 : (difficulty > 5 ? 5 : difficulty);
-            return new string('●', d) + new string('○', 5 - d);
+            int d = difficulty10 < 1 ? 1 : (difficulty10 > 10 ? 10 : difficulty10);
+            int half = d / 2;
+            return $"{new string('●', half)}{new string('○', 5 - half)} {d}/10";
         }
 
         private static string ProgressLine(ScenarioResult r)
