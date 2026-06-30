@@ -13,7 +13,9 @@ Yes — across two cooperating layers:
 | List components on an object | Full tier | `unity_list_components(id)` | ✅ |
 | Find / describe / hierarchy | Full tier | `unity_find`, `unity_find_all`, `unity_find_by_tag`, `unity_find_by_component`, `unity_describe_object`, `unity_get_children` | ✅ |
 | Transform edits | Full tier | `unity_set_position/rotation_euler/scale`, `unity_parent` | ✅ |
-| **Add / remove a component** | Component tier (`CoreAiComponentLuaRuntimeBindings`) | `coreai_component_add(name,type)` / `coreai_component_remove(name,type)` | ✅ curated catalog (no reflection) |
+| **Add a component (reflection)** | Full tier | `unity_add_component(id, type)` | ✅ resolves any Component type (Rigidbody, Light, …), honors blacklist |
+| **Destroy an object (reflection)** | Full tier | `unity_destroy(id)` | ✅ DestroyImmediate in edit mode, Destroy at runtime |
+| **Add / remove a component (curated)** | Component tier (`CoreAiComponentLuaRuntimeBindings`) | `coreai_component_add(name,type)` / `coreai_component_remove(name,type)` | ✅ curated catalog (no reflection), WebGL-safe |
 | Set curated component props | Component tier | `coreai_component_set_number/bool/text/vector` | ✅ |
 | **Spawn / create objects** | World tier (`CoreAiWorldLuaRuntimeBindings`) | `coreai_world_spawn(key,name,x,y,z,[rx,ry,rz,scale])` | ✅ primitives + prefabs, now with readable auto-names |
 | Destroy / activate | World tier | `coreai_world_destroy`, `coreai_world_set_active` | ✅ |
@@ -39,16 +41,28 @@ Yes — across two cooperating layers:
 
 ## So: "can Lua Full create components, call them, set up timers?"
 
-- **Create/add components** — yes, via `coreai_component_add` (curated) — and `unity_call` can invoke
-  `GameObject.AddComponent`-style methods through reflection when Full is granted.
-- **Work with components** — yes, fully: read/write members with type coercion, call methods, list.
+- **Create/add components** — yes, two ways: `unity_add_component(id, type)` (Full-tier reflection, any
+  Component type) or `coreai_component_add` (curated, WebGL-safe). `unity_call` can also invoke methods.
+- **Work with components** — yes, fully: read/write members with rich type coercion (Color hex/table,
+  Vector2/3/4, Quaternion, Rect, Bounds, Color32, enums by name OR number, numeric widths, and Unity
+  object references by instance id), call methods, list, discover members with `unity_list_members`.
+- **Destroy objects** — yes, `unity_destroy(id)` (Full tier) or `coreai_world_destroy` (world tier).
 - **Timers** — yes, via the mod runtime's `hooks_every` (verified by `LuaModRuntimeEditModeTests`:
   `hooks_every(0.1, ...)` ticks repeatedly).
+
+This is a complete game-authoring surface: a Lua mod can create objects, add/configure/wire components
+(including assigning object references), call methods, run repeating timers, react to events, persist
+state, and talk to other mods. The demos `ModdableUnits`, `WaveAutoBattlerMods`, and `LiveMechanicsMods`
+are games built entirely this way.
+
+## Verified by tests
+
+`CoreAiFullUnityLuaRuntimeEditModeTests` (16 cases, all green) covers: member discovery, every coercion
+type above, object-reference-by-id assignment, did-you-mean errors, `unity_add_component`, and
+`unity_destroy`.
 
 ## Gaps / notes
 
 - `unity_call` supports only **non-ambiguous** methods; overloaded methods are rejected by design.
-- There is **no** Full-tier `unity_add_component` / `unity_destroy` yet — add/remove goes through the
-  curated component tier, or `unity_call` of a reflected method. A thin `unity_add_component(id, type)`
-  could be added for symmetry (follow-up).
-- WebGL: Full tier is intentionally disabled; component + world + timers tiers work on WebGL.
+- WebGL: Full tier is intentionally disabled (`CoreAILifetimeScope` forces it off, `link.xml` aligned);
+  the curated component + world + timers tiers work on WebGL.

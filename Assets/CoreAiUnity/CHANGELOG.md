@@ -4,15 +4,38 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## 4.17.0 - 2026-06-30
+
+Depends on **`com.neoxider.coreai` 4.17.0**.
+
+- **Tool-call history is unlimited by default (0).** `maxToolCallHistoryMessages` defaulted to 20, so a
+  long tool-calling turn silently dropped the model's earliest steps — a 30+ step build (e.g. the
+  benchmark castle, or a multi-file refactor) would forget the first ~15 things it did and repeat them.
+  The default is now **0 = unlimited**: the **Programmer** role and the orchestrator keep full sight of
+  everything they did in a turn. Conversation summarization + context-overflow retry still bound truly
+  long sessions. Set a positive cap only to deliberately bound context growth.
 - **Flexible tool-call roundtrip limits.** The roundtrip cap (LLM call + tool batch per iteration) is now
   configurable per agent and per task, not just globally:
   `new AgentBuilder("Builder").WithMaxToolCallRoundtrips(0)` removes the cap for a free-build agent;
   `WithMaxToolCallRoundtrips(5)` tightens a quiet NPC; `AiTaskRequest.MaxToolCallRoundtrips` overrides a
   single call. `0` = unlimited, `null` = inherit. Default raised **10 → 20**; built-in **Programmer** and
-  **Creator** roles default to unlimited. The G6 free-build (castle) scenario now runs unlimited so it is
-  never cut off mid-build. When the cap is hit the warning explains how to raise or disable it. The global
-  `CoreAISettingsAsset` value now also accepts **0 = unlimited** in the inspector (previously clamped to a
-  minimum of 1), so the meaning of `0` is identical at every level.
+  **Creator** roles default to unlimited. When the cap is hit the warning explains how to raise or disable
+  it. The global `CoreAISettingsAsset` value now also accepts **0 = unlimited** in the inspector.
+- **Full-tier Lua: create & wire game objects.** Added `unity_add_component(id, type)` (reflection
+  AddComponent for any Component type) and `unity_destroy(id)`. Coercion now also handles Rect, Bounds,
+  Color32, all numeric widths, enum-by-number, and — most importantly — **Unity object references by
+  instance id**, so a mod can assign a Material/Texture/Transform, not just set value types. Full Lua is
+  now a complete game-authoring surface (create objects, add/configure/wire components, call methods, run
+  `hooks_every` timers, react to events). 16 EditMode cases cover it.
+- **`world_command` spawn accepts rotation + scale inline**, and the tool schema now documents it so the
+  model can discover it. Unnamed spawns get a readable name (`cube_1`) instead of a GUID hash.
+- **Benchmark.** Fixed the silent 10-roundtrip throttle that zeroed the castle score; soft 5-min suite
+  budget that still writes the report on timeout (vs NUnit's hard abort); the model is told its time
+  budget with a live countdown per spawn; hero image bakes tool-calls/spawns/gen-seconds/tokens/tok/s;
+  a single source of difficulty (1–10) so the editor and history agree; honest throughput labeling
+  (provider-call vs decode); a live TTFT-based decode tok/s test comparable to LM Studio.
+- **Demos** reorganized: each demo's scripts moved into a `Scripts/` subfolder (GUIDs preserved). The
+  FullAccess demo showcases `unity_list_members` + member coercion.
 
 ## 4.16.0 - 2026-06-30
 

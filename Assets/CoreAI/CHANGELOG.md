@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## 4.17.0 - 2026-06-30
+
+- **Tool-call history defaults to unlimited (`MaxToolCallHistoryMessages = 0`).** It was 20, which silently
+  trimmed the oldest assistant+tool pairs during a long tool-calling turn — so a 30+ step build forgot its
+  earliest steps and repeated them. `0` = keep the full history; conversation summarization + overflow
+  retry still bound very long sessions. Changed across `ICoreAISettings`, the `CoreAISettings` const, and
+  `CoreAISettingsOptions`.
 - **Per-agent / per-task tool-call roundtrip cap.** `MaxToolCallRoundtrips` can now be overridden per
   agent (`AgentBuilder.WithMaxToolCallRoundtrips(int?)`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`),
   in addition to the global `ICoreAISettings.MaxToolCallRoundtrips`. Priority: per-call &gt; per-agent &gt;
@@ -11,6 +18,11 @@
   `0` (unlimited) since they routinely need many tool roundtrips per turn (code iterate / full build).
 - **Clearer stop message.** When the cap is hit, the warning now names the role, the cap, its source
   (global vs per-agent/per-call), and exactly how to raise or disable it.
+- **Honest throughput metric.** `GenerationTokensPerSecond` is documented and labeled as **provider-call**
+  tok/s (prefill + decode), not decode-only — it reads lower than LM Studio, which excludes prefill. True
+  decode-only timing needs TTFT (streaming-only); see the new test and `TOKENS_PER_SEC_FIX_PLAN.md`.
+- **`BenchmarkInfo.GroupDifficulty10`** — one canonical 1–10 difficulty per group, the single source the
+  editor RUN tab and the scenario/progress now both read.
 
 ## 4.16.0 - 2026-06-30
 
